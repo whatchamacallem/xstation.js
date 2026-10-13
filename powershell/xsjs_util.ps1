@@ -62,6 +62,11 @@ function xsjs_util_get_local_url {
     "http://localhost:$port_/"
 }
 
+function xsjs_util_get_markdown_text ([string]$text_) {
+    # mdformat writes every backslash in plain text as two.
+    $text_.Replace('\', '\\')
+}
+
 function xsjs_util_get_servers {
     Get-CimInstance Win32_Process -Filter "Name = 'ttyd.exe'" |
         Where-Object { $_.CommandLine -match "--port $port_(\s|$)" }
@@ -79,7 +84,7 @@ function xsjs_util_open_log ([string]$script_path_) {
     $log_path_ = "$script_path_.md"
     try {
         $log_title_ = $i18n_.log_title -f (Split-Path -Leaf $script_path_)
-        [IO.File]::WriteAllText($log_path_, "# $log_title_`r`n`r`n")
+        [IO.File]::WriteAllText($log_path_, "# $log_title_`n")
         Write-Host ($i18n_.log_path -f $log_path_)
     } catch {
         Write-Host ($i18n_.no_log -f $log_path_)
@@ -152,17 +157,24 @@ function xsjs_util_write_failure {
     $message_ = $i18n_.failed_message -f $record_.Exception.Message
     Write-Host $message_ -ForegroundColor Red
     xsjs_util_write_log_section $i18n_.failed
-    xsjs_util_write_log_alert CAUTION $record_.Exception.Message
+    # The first line is the message; any more is output, so it gets a block.
+    $lines_ = $record_.Exception.Message.Trim() -split "`r?`n", 2
+    $text_ = xsjs_util_get_markdown_text $lines_[0]
+    xsjs_util_write_log_alert CAUTION $text_
+    if ($lines_.Count -gt 1) { $lines_[1] | xsjs_util_write_log_output }
     $record_.InvocationInfo.PositionMessage | xsjs_util_write_log_output
 }
 
 function xsjs_util_write_log ([string]$text_) {
-    if ($log_path_) { [IO.File]::AppendAllText($log_path_, "$text_`r`n`r`n") }
+    # Each block starts with a blank line, so the file ends after one line
+    # feed, as mdformat leaves it.
+    if ($log_path_) { [IO.File]::AppendAllText($log_path_, "`n$text_`n") }
 }
 
 function xsjs_util_write_log_alert ([string]$kind_, [string]$text_) {
     $lines_ = @("[!$kind_]") + ($text_.Trim() -split "`r?`n")
-    xsjs_util_write_log (($lines_ | ForEach-Object { "> $_" }) -join "`r`n")
+    $quoted_ = $lines_ | ForEach-Object { "> $_".TrimEnd() }
+    xsjs_util_write_log ($quoted_ -join "`n")
 }
 
 function xsjs_util_write_log_output {
@@ -177,8 +189,9 @@ function xsjs_util_write_log_output {
             ($item_ | Out-String -Width 200).Trim()
         }
     }
-    $text_ = ($lines_ -join "`r`n").Replace("`0", '').Trim()
-    if ($text_) { xsjs_util_write_log ('```text', $text_, '```' -join "`r`n") }
+    $text_ = ($lines_ -join "`n").Replace("`0", '').Trim()
+    $text_ = $text_.Replace("`r`n", "`n")
+    if ($text_) { xsjs_util_write_log ('```text', $text_, '```' -join "`n") }
 }
 
 function xsjs_util_write_log_section ([string]$text_) {
@@ -192,5 +205,5 @@ function xsjs_util_write_notice ([string]$text_) {
 
 function xsjs_util_write_problem ([string]$text_) {
     Write-Warning $text_
-    xsjs_util_write_log_alert WARNING $text_
+    xsjs_util_write_log_alert WARNING (xsjs_util_get_markdown_text $text_)
 }

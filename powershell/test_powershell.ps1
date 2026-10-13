@@ -55,7 +55,7 @@ function _test_powershell_get_log_text ([string]$path_) {
         if (-not $fenced_ -and $line_.StartsWith('#')) { $line_ = "#$line_" }
         $line_
     }
-    ($lines_ -join "`r`n").Trim()
+    ($lines_ -join "`n").Trim()
 }
 
 function _test_powershell_test_step ([int]$number_, [hashtable]$step_) {
@@ -71,7 +71,7 @@ function _test_powershell_test_step ([int]$number_, [hashtable]$step_) {
     )
     $command_ = $shown_ -join ' '
     Write-Host "`n> $command_" -ForegroundColor Cyan
-    xsjs_util_write_log_section ('{0}. {1}' -f $number_, $command_)
+    xsjs_util_write_log_section ('{0}. `{1}`' -f $number_, $command_)
 
     $path_ = Join-Path $root_path_ $step_.Script
     Remove-Item "$path_.md" -ErrorAction SilentlyContinue

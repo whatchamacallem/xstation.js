@@ -5,6 +5,9 @@
 The Project Rules section is set by the project maintainer and must not be
 modified without request. The maintainer is the final authority and decides
 correctness and requirements, however discrepancies are worth fixing.
+Authorship is a legal issue and ascribing authorship to a non-person is a
+violation of project rules. Human attribution is required for all
+contributions. Do not add contributors to a commit without request.
 
 Do not use the AskUserQuestion tool and use numbered number sub-lists per ISO
 2145. Maintain an engineering log for each session in `tmp/` following this
@@ -69,6 +72,9 @@ manager without request.
   imports, named like `_VALUE_NAME`. Code ordering requirements come before
   code style rules.
 - Don't add whitelist entries for new `.md` files.
+- Authorship is a legal issue. Ascribing authorship to a non-person, such as
+  a `Co-Authored-By` trailer or a generated-by line in a commit or pull
+  request, is a violation of the project rules.
 
 ## Project Direction
 
@@ -118,6 +124,11 @@ discrepancies as this is a low priority self healing mechanism.
   `xsjs_status.ps1`, `test_lint.ps1` and `test_terminal.ps1` run; the user
   runs the rest. All but `xsjs_status.ps1` and `test_lint.ps1` write
   `<script>.ps1.md` beside themselves (gitignored): read it, don't ask.
+  The logs are LF Markdown that `mdformat --check` accepts, which
+  `test_posix.py` checks through the whitelist's `*.ps1.md` globs, so a log
+  written before a writer change fails until its script reruns. mdformat
+  doubles backslashes in plain text, so i18n strings put paths in code
+  spans.
 - `_<file>_main` holds a `trap` that logs and exits 1, then calls
   `_<file>_step_*`; shared code is `xsjs_util_*`. Script state
   (`$log_path_`, `$credential_`, `$stream_`...) is `_main` locals that
@@ -153,7 +164,8 @@ discrepancies as this is a low priority self healing mechanism.
   modules it loads locked until exit.
 - Python runs in WSL. `python3 python/test_posix.py` fails on non-UTF-8 or
   non-ASCII outside its `_NON_ASCII_ALLOWED`, formats in place (ruff;
-  shfmt with defaults), then runs `ruff check`. Files are the globs in
+  shfmt with defaults; Markdown is only checked with `mdformat --check`),
+  then runs `ruff check`. Files are the globs in
   `python/reformat_whitelist.txt`, which leaves out PowerShell; a glob
   matching nothing fails. `python/pyproject.toml` sets ruff's 79 columns
   (its default 88 rewraps every file) and pyright strict. test_posix.py
@@ -173,5 +185,10 @@ discrepancies as this is a low priority self healing mechanism.
   Chrome on that profile hands off to it and exits silently.
 - ttyd launched straight from WSL fails with `pty_spawn: 0 (No error)`;
   start it with `Start-Process -NoNewWindow` as `serve.ps1` does.
+- Linux ttyd (`../ttyd/build/ttyd`) run from WSL: Windows reaches it on
+  `localhost` but not on the PC's LAN address (NAT mode). It pings every 5
+  s and closes a WebSocket client that doesn't pong by 10 s. PAUSE (`2`)
+  does nothing, as `pty_pause` returns early. Output frames split inside
+  UTF-8 characters.
 - `ROADMAP.md` holds every barrier met so far, with what was measured
   and the potential solutions; read it before retrying a failed approach.

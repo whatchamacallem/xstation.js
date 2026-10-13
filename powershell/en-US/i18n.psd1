@@ -3,12 +3,12 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 @{
-    administrator_ok        = 'Administrator: {0}.'
+    administrator_ok        = 'Administrator: `{0}`.'
     bootstrap_missing       = '{0} is missing.'
     certificate_failed      = 'Making the TLS certificate failed.'
     certificate_fingerprint = 'TLS fingerprint (SHA-256): {0}'
-    certificate_kept        = 'Kept the TLS certificate in {0}.'
-    certificate_made        = 'Made a self-signed TLS certificate in {0}.'
+    certificate_kept        = 'Kept the TLS certificate in `{0}`.'
+    certificate_made        = 'Made a self-signed TLS certificate in `{0}`.'
     check_administrator     = 'Checking for administrator'
     check_installed         = 'Checking installation'
     check_linux             = 'Checking Linux in WSL'
@@ -69,11 +69,13 @@
         'From xsjs_start.ps1; task {0} runs it at sign-in. ' +
         'May hold the ttyd password: keep private.'
     )
-    runner_removed          = 'Deleted {0}.'
-    runner_written          = 'Wrote {0}.'
-    server_listening        = 'ttyd (PID {1}) listening on port {0}. Log: {2}'
+    runner_removed          = 'Deleted `{0}`.'
+    runner_written          = 'Wrote `{0}`.'
+    server_listening        = (
+        'ttyd (PID {1}) listening on port {0}. Log: `{2}`'
+    )
     server_not_listening    = (
-        'ttyd not listening on port {0}. Task result: {1}. Log ({2}):'
+        'ttyd not listening on port {0}. Task result: {1}. Log (`{2}`):'
     )
     server_not_running      = 'ttyd was not running.'
     soft_stop_mode          = 'Stopping ttyd until next sign-in (--softly).'
@@ -126,7 +128,9 @@
         'Serves bootstrap.py with ttyd on port {0}. ' +
         'Remove with xsjs_stop.ps1.'
     )
-    task_registered         = 'Scheduled task {0} runs {1} when {2} signs in.'
+    task_registered         = (
+        'Scheduled task {0} runs `{1}` when `{2}` signs in.'
+    )
     task_removed            = 'Removed scheduled task {0}.'
     task_stopped            = 'Stopped scheduled task {0}.'
     test_answer             = 'Answering {0}'
@@ -134,7 +138,7 @@
     test_closed             = 'ttyd closed the connection'
     test_connect            = 'Connecting to {0}'
     test_expected           = 'Expected "{0}", got "{1}".'
-    test_failed_steps       = 'Failed steps: {0}. Log: {1}'
+    test_failed_steps       = 'Failed steps: {0}. Log: `{1}`'
     test_lint_failed        = 'Fix what test_lint.ps1 found, then rerun.'
     test_no_response        = (
         'No "RESPONSE: {0}" from {1} within {2} seconds ({3}). ' +

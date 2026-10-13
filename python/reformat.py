@@ -5,7 +5,8 @@
 #
 # Formats the files reformat_whitelist.txt's shell globs match, from the
 # project's top directory: Python with ruff, at the 79 columns
-# pyproject.toml sets, and shell with shfmt.
+# pyproject.toml sets, and shell with shfmt. Markdown is checked with
+# mdformat, not rewritten.
 
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
 
 # The formatter command for each extension. Other files have none.
 _FORMATTERS: dict[str, list[str]] = {
+    ".md": ["mdformat", "--check"],
     ".py": ["ruff", "format"],
     ".sh": ["shfmt", "--list", "--write"],
 }

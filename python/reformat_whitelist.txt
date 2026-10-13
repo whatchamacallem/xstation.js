@@ -2,3 +2,5 @@
 python/*.py
 LICENSE.md
 README.md
+*.ps1.md
+powershell/*.ps1.md

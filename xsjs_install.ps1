@@ -62,8 +62,8 @@ function _xsjs_install_step_check_winget {
         Assert-WinGetPackageManager -Latest
         xsjs_util_write_log $i18n_.winget_ok
     } catch {
-        xsjs_util_write_log (
-            $i18n_.winget_needs_fixing -f $_.Exception.Message)
+        $message_ = xsjs_util_get_markdown_text $_.Exception.Message
+        xsjs_util_write_log ($i18n_.winget_needs_fixing -f $message_)
         Repair-WinGetPackageManager -Latest -Force 3>&1 |
             xsjs_util_write_log_output
         Assert-WinGetPackageManager -Latest
