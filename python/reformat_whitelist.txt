@@ -1,0 +1,4 @@
+*.sh
+python/*.py
+LICENSE.md
+README.md
