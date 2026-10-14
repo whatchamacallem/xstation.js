@@ -229,7 +229,7 @@ class Session:
             {"type": "started", "id": say_id, "pid": pid, "argv": argv},
         )
 
-    # Answers the figures count reports, of what came before it.
+    # Returns the figures count reports, of what came before it.
     def counts(self) -> dict[str, int]:
         return {
             "received_messages": self.received_messages,
@@ -266,7 +266,7 @@ class Session:
             self.received_bytes += len(line)
             self.message_answer(line)
 
-    # Answers the line message for a line of the command's output.
+    # Returns the line message for a line of the command's output.
     def line_message(
         self, command: Command, line: bytearray
     ) -> dict[str, Any]:
@@ -278,7 +278,7 @@ class Session:
             "text": line.decode(errors="backslashreplace"),
         }
 
-    # Answers the line that carries the message, counted as sent.
+    # Returns the line that carries the message, counted as sent.
     def line_encode(self, message: dict[str, Any]) -> bytes:
         line = json.dumps(message).encode("ascii")
         self.sent_messages += 1
@@ -473,7 +473,7 @@ def calc_text(expression: str) -> str:
         return f"calc: {error}"
 
 
-# Answers the directory's entries, sorted, each with its size in bytes and
+# Returns the directory's entries, sorted, each with its size in bytes and
 # a trailing / for a directory. A symbolic link is listed as itself.
 def ls_text(path: str) -> str:
     lines: list[str] = []
@@ -501,7 +501,7 @@ def signal_wake(signal_number: int, frame: FrameType | None) -> None:
     pass
 
 
-# Answers the host's figures, read from the kernel.
+# Returns the host's figures, read from the kernel.
 def stat_measure() -> dict[str, Any]:
     uname = os.uname()
     with open(_UPTIME_PATH) as file:
@@ -522,7 +522,7 @@ def stat_measure() -> dict[str, Any]:
     }
 
 
-# Answers the time now, local with its offset and in UTC, in ISO 8601.
+# Returns the time now, local with its offset and in UTC, in ISO 8601.
 def time_text() -> str:
     now = datetime.datetime.now(datetime.UTC)
     return f"local: {now.astimezone().isoformat()}\nUTC: {now.isoformat()}"

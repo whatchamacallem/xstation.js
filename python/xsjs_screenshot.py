@@ -55,7 +55,7 @@ _BOOTSTRAP_PAGE_NAME = "bootstrap.html"
 _CALC_EXPRESSION = "(2**10 + 6*7) / 2"
 _CALC_VALUE = (2**10 + 6 * 7) / 2
 
-# Answers the middle of the element with the id, where a person clicks.
+# Returns the middle of the element with the id, where a person clicks.
 _CENTER_SCRIPT = """id => {
     const box = document.getElementById(id).getBoundingClientRect();
     return [box.x + box.width / 2, box.y + box.height / 2];
@@ -81,7 +81,7 @@ _FRAMES_DRAWN_SCRIPT = (
 
 _IMAGE_NAME = "xsjs_screenshot.png"
 
-# Answers the viewport's size and how far the page's scrolling parts reach
+# Returns the viewport's size and how far the page's scrolling parts reach
 # past it.
 _PAGE_OVERFLOW_SCRIPT = """(() => {
     const overflow = [0, 0];
@@ -165,7 +165,7 @@ class BootstrapPage:
                 },
             )
 
-    # Answers the index of the first entry from start on that matches, once
+    # Returns the index of the first entry from start on that matches, once
     # one has come.
     def entry_wait(
         self, start: int, match: Callable[[dict[str, str]], bool]
@@ -195,7 +195,7 @@ class BootstrapPage:
             message += f" ({ttyd_version(_TTYD_PATH)})"
         raise RuntimeError(message)
 
-    # Answers the text of the entry after the person's line at the index,
+    # Returns the text of the entry after the person's line at the index,
     # which is the program's reply while no command runs.
     def reply(self, index: int) -> str:
         index = self.entry_wait(index + 1, lambda entry: True)
@@ -222,7 +222,7 @@ class BootstrapPage:
             )
         return index
 
-    # Answers the page's results once the condition holds for them,
+    # Returns the page's results once the condition holds for them,
     # printing the conversation as it grows.
     def wait(
         self, condition: Callable[[dict[str, Any]], bool]
@@ -262,7 +262,7 @@ class DevTools:
         with contextlib.suppress(OSError, RuntimeError):
             self.call("Browser.close")
 
-    # Answers the result of a DevTools method, on the page once attached.
+    # Returns the result of a DevTools method, on the page once attached.
     def call(
         self, method: str, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:
@@ -345,7 +345,7 @@ class DevTools:
         if headers.get("sec-websocket-accept") != accept:
             raise ConnectionError("DevTools answered a WebSocket key wrongly")
 
-    # Answers the next WebSocket message, answering pings on the way.
+    # Returns the next WebSocket message, answering pings on the way.
     def message_read(self) -> bytes:
         message = bytearray()
         while True:
@@ -383,7 +383,7 @@ class DevTools:
         )["sessionId"]
 
 
-# Answers the module that starts a browser on this platform.
+# Returns the module that starts a browser on this platform.
 def browser_module() -> ModuleType | None:
     if "microsoft" in platform.uname().release.lower():
         import xsjs_screenshot_wsl
@@ -414,7 +414,7 @@ def command_run(arguments: list[str], cwd: str) -> None:
 
 # Says each line to bootstrap.py in turn, waiting for its reply,
 # and checks the reply against what this script computes where it can.
-# Answers the program's pid from its stat.
+# Returns the program's pid from its stat.
 def conversation_hold(page: BootstrapPage, typing: str) -> int:
     page.reply(page.say("help"))
     before = datetime.datetime.now(datetime.UTC)
@@ -528,7 +528,7 @@ def image_save(image_path: str, data: str) -> None:
         image_file.write(base64.b64decode(data))
 
 
-# Answers the directory's entries as bootstrap.py's ls gives them: sorted,
+# Returns the directory's entries as bootstrap.py's ls gives them: sorted,
 # each with its size in bytes and a trailing / for a directory.
 def listing_text(path: str) -> str:
     lines: list[str] = []
@@ -689,7 +689,7 @@ def reply_check(line: str, reply: str, expected: str) -> None:
         )
 
 
-# Answers the pids of ttyd's children that run bootstrap.py.
+# Returns the pids of ttyd's children that run bootstrap.py.
 def session_pids(ttyd_pid: int) -> list[int]:
     pids: list[int] = []
     for name in os.listdir("/proc"):
@@ -719,7 +719,7 @@ def signal_time_out(signal_number: int, frame: FrameType | None) -> None:
     raise TimeoutError(f"gave up after {_RUN_TIMEOUT_SECONDS} s")
 
 
-# Answers the pid of the command the say at the index started, from the
+# Returns the pid of the command the say at the index started, from the
 # program's reply.
 def started_pid(page: BootstrapPage, index: int, words: str) -> int:
     reply = page.reply(index)

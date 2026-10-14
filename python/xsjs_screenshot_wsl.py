@@ -155,7 +155,7 @@ class Browser:
     ) -> None:
         self.close()
 
-    # Answers the WSL path of the first browser installed.
+    # Returns the WSL path of the first browser installed.
     def browser_find(self, environment: dict[str, str | None]) -> str:
         tried: list[str] = []
         for variable_name, relative_path in _BROWSER_LOCATIONS:
@@ -192,7 +192,7 @@ class Browser:
         if self.profile_path:
             self.profile_remove()
 
-    # Answers the DevTools port and path once the browser has written them.
+    # Returns the DevTools port and path once the browser has written them.
     def devtools_wait(self) -> DevToolsAddress:
         assert self.browser_process is not None, "the browser never started"
         port_path = os.path.join(self.profile_path, _DEVTOOLS_PORT_FILE_NAME)

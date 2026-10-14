@@ -187,7 +187,7 @@ class Ttyd:
             sys.stderr.write(f"{text}\n")
         sys.stderr.flush()
 
-    # Answers the match of the first line from the start'th on that the
+    # Returns the match of the first line from the start'th on that the
     # pattern finds, reading ttyd's stderr until one comes.
     def line_wait(
         self, pattern: re.Pattern[str], start: int, what: str
@@ -660,7 +660,7 @@ def http_get(
         connection.close()
 
 
-# Answers the line's JSON object, failing unless it is of a known type with
+# Returns the line's JSON object, failing unless it is of a known type with
 # exactly that type's fields, each of its type.
 def message_parse(line: bytes) -> dict[str, Any]:
     if not line.isascii() or b"\r" in line or b"\n" in line:
@@ -691,7 +691,7 @@ def message_parse(line: bytes) -> dict[str, Any]:
     return message
 
 
-# Answers the pids here that are watched, in the session or children of
+# Returns the pids here that are watched, in the session or children of
 # the parent, sorted.
 def processes_left(watched: set[int], session: int, parent: int) -> list[int]:
     left: list[int] = []
@@ -716,7 +716,7 @@ def processes_left(watched: set[int], session: int, parent: int) -> list[int]:
     return sorted(left)
 
 
-# Answers the seconds left before the overall timeout, failing once past.
+# Returns the seconds left before the overall timeout, failing once past.
 def remaining(deadline: float, what: str) -> float:
     left = deadline - time.monotonic()
     if left <= 0:
@@ -1147,7 +1147,7 @@ def rung_two_clients(ttyd: Ttyd) -> str:
 # Closes the wire with 1000, serving the others meanwhile, then waits for
 # ttyd's log of its program killed with SIGHUP, and for the program, its
 # session, the commands it ran and the parent's children to be gone.
-# Answers the seconds from the close until then.
+# Returns the seconds from the close until then.
 def session_close(wire: Wire, others: list[Wire], parent: int) -> float:
     pid = wire.hello["pid"]
     wire.close_send()
