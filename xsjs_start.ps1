@@ -85,11 +85,14 @@ function _xsjs_start_step_make_certificate {
         xsjs_util_write_log ($i18n_.certificate_kept -f $state_path_)
     } else {
         $name_ = $env:COMPUTERNAME
+        $names_ = @("DNS:$name_", 'DNS:localhost', 'IP:127.0.0.1') + @(
+            _xsjs_start_get_addresses | ForEach-Object { "IP:$_" }
+        )
         $request_ = @(
             'req', '-x509', '-newkey', 'rsa:2048', '-nodes'
             '-days', $certificate_days_
             '-subj', "/CN=$name_"
-            '-addext', "subjectAltName=DNS:$name_,DNS:localhost,IP:127.0.0.1"
+            '-addext', ('subjectAltName=' + ($names_ -join ','))
             '-keyout', $key_, '-out', $certificate_
         )
         xsjs_util_invoke_native { wsl --cd $state_path_ -e openssl @request_ }
@@ -102,6 +105,12 @@ function _xsjs_start_step_make_certificate {
     $fingerprint_ = "$fingerprint_".Trim() -replace '^.*=', ''
     xsjs_util_write_log ($i18n_.certificate_fingerprint -f $fingerprint_)
     $fingerprint_
+}
+
+function _xsjs_start_get_addresses {
+    # This PC's IPv4 addresses on networks with a default gateway.
+    Get-NetIPConfiguration | Where-Object IPv4DefaultGateway |
+        ForEach-Object { $_.IPv4Address.IPAddress }
 }
 
 function _xsjs_start_step_open_firewall {
@@ -265,9 +274,7 @@ function _xsjs_start_step_start_task {
 function _xsjs_start_get_urls {
     if (-not $credential_) { return xsjs_util_get_local_url }
     "https://$($env:COMPUTERNAME.ToLower()):$port_/"
-    Get-NetIPConfiguration | Where-Object IPv4DefaultGateway |
-        ForEach-Object { $_.IPv4Address.IPAddress } |
-        ForEach-Object { "https://${_}:$port_/" }
+    _xsjs_start_get_addresses | ForEach-Object { "https://${_}:$port_/" }
 }
 
 function _xsjs_start_main {

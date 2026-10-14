@@ -1,5 +1,6 @@
 *.sh
 python/*.py
+python/*.html
 LICENSE.md
 README.md
 *.ps1.md

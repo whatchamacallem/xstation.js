@@ -17,14 +17,16 @@ import subprocess
 
 _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
 
+_ROOT_PATH = os.path.dirname(_PYTHON_PATH)
+
+_RUFF_CACHE_PATH = os.path.join(_ROOT_PATH, "build", "ruff_cache")
+
 # The formatter command for each extension. Other files have none.
 _FORMATTERS: dict[str, list[str]] = {
     ".md": ["mdformat", "--check"],
-    ".py": ["ruff", "format"],
+    ".py": ["ruff", "format", "--cache-dir", _RUFF_CACHE_PATH],
     ".sh": ["shfmt", "--list", "--write"],
 }
-
-_ROOT_PATH = os.path.dirname(_PYTHON_PATH)
 
 _WHITELIST_PATH = os.path.join(_PYTHON_PATH, "reformat_whitelist.txt")
 

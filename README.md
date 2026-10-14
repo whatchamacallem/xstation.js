@@ -3,6 +3,9 @@
 These are the user facing scripts. The remaining scripts are for interested
 developers.
 
+The supported checkout for Windows users is `C:\src`. Windows' RemoteSigned
+execution policy refuses the scripts from a `\\wsl.localhost` path.
+
 ## xsjs_install.ps1
 
 `.\xsjs_install.ps1` (admin)

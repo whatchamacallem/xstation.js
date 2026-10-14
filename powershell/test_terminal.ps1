@@ -101,6 +101,16 @@ function _test_terminal_get_plain_text ([string]$text_) {
     $text_ -replace $title_, '' -replace $control_, '' -replace '\x1b.', ''
 }
 
+function _test_terminal_get_ttyd_version {
+    # The installed ttyd, found on the Path as xsjs_start.ps1 finds it.
+    xsjs_util_update_path
+    $version_ = ttyd --version
+    if ($LASTEXITCODE -ne 0) {
+        throw ($i18n_.exit_code -f 'ttyd --version', $LASTEXITCODE)
+    }
+    "$version_".Trim()
+}
+
 function _test_terminal_step_check_page {
     # Asks for the page, over TLS and with the password when there is one.
     $url_ = xsjs_util_get_local_url
@@ -173,6 +183,13 @@ function _test_terminal_step_answer_challenge {
         }
         if ($null -eq $message_) {
             $reason_ = $i18n_.test_closed
+            # bootstrap.py exits right after RESPONSE, so a close before it
+            # is a ttyd fault, not this repo's (ttyd issue #1429): give
+            # ttyd's version and don't retry.
+            if ($asked_) {
+                $version_ = _test_terminal_get_ttyd_version
+                $reason_ = $i18n_.test_closed_ttyd -f $version_
+            }
             break
         }
         if ($message_.Length -eq 0 -or $message_[0] -ne $output_type_) {

@@ -11,6 +11,13 @@
 #     python3 python/xsjs_screenshot.py
 #     python3 python/xsjs_screenshot.py --typing 'héllo' --out shot.png
 #
+# With --page, ttyd alone serves bootstrap.html talking to bootstrap.py
+# --session; Chrome holds a conversation with the program through the page
+# as a person would, resizes it, closes it once all the page's checks pass,
+# and saves a screenshot of the whole page:
+#
+#     python3 python/xsjs_screenshot.py --page
+#
 # It drives Chrome through Chrome's DevTools protocol. How to start Chrome
 # and reach its DevTools differs by platform, so each platform has a module,
 # xsjs_screenshot_<platform>.py, with a Browser class: a context manager
@@ -22,17 +29,19 @@ from __future__ import annotations
 import argparse
 import base64
 import contextlib
+import datetime
 import hashlib
 import json
 import os
 import platform
+import pwd
 import re
 import signal
 import socket
 import subprocess
 import sys
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from types import FrameType, ModuleType
 from typing import Any
 
@@ -40,9 +49,29 @@ _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
 
 sys.path.insert(0, _PYTHON_PATH)
 
+# Bytecode of the modules imported from there goes in build/.
+sys.pycache_prefix = os.path.join(
+    os.path.dirname(_PYTHON_PATH), "build", "pycache"
+)
+
 _BOOTSTRAP_NAME = "bootstrap.py"
+# The page and the program ttyd serves with --page, from _PYTHON_PATH.
+_BOOTSTRAP_PAGE_NAME = "bootstrap.html"
+_BOOTSTRAP_SESSION_ARGUMENTS = ["python3", _BOOTSTRAP_NAME, "--session"]
+
+# What --page asks calc, and the answer as this script computes it.
+_CALC_EXPRESSION = "(2**10 + 6*7) / 2"
+_CALC_VALUE = (2**10 + 6 * 7) / 2
+
+# Answers the middle of the element with the id, where a person clicks.
+_CENTER_SCRIPT = """id => {
+    const box = document.getElementById(id).getBoundingClientRect();
+    return [box.x + box.width / 2, box.y + box.height / 2];
+}"""
 
 _CHALLENGE_PATTERN = re.compile(r"^CHALLENGE:", re.MULTILINE)
+
+_CLOSE_CODE_NORMAL = 1000
 
 # How long the page has to show what came before ttyd closed.
 _CLOSED_GRACE_SECONDS = 0.5
@@ -59,6 +88,9 @@ _ENTER_KEY: dict[str, str | int] = {
     "windowsVirtualKeyCode": 13,
 }
 
+# How bootstrap.html shows a command's exit in its conversation.
+_EXIT_PATTERN = re.compile(r"exit code -?\d+, \d+ lines(, cancelled)?")
+
 # Waits until the page has drawn what the terminal holds.
 _FRAMES_DRAWN_SCRIPT = (
     "new Promise(done => requestAnimationFrame("
@@ -67,12 +99,37 @@ _FRAMES_DRAWN_SCRIPT = (
 
 _IMAGE_NAME = "xsjs_screenshot.png"
 
+_PAGE_IMAGE_NAME = "xsjs_screenshot_page.png"
+
+# Answers the viewport's size and how far the page's scrolling parts reach
+# past it.
+_PAGE_OVERFLOW_SCRIPT = """(() => {
+    const overflow = [0, 0];
+    for (const element of document.querySelectorAll("*")) {
+        const style = getComputedStyle(element);
+        if (["auto", "scroll"].includes(style.overflowX)) {
+            overflow[0] = Math.max(overflow[0],
+                element.scrollWidth - element.clientWidth);
+        }
+        if (["auto", "scroll"].includes(style.overflowY)) {
+            overflow[1] = Math.max(overflow[1],
+                element.scrollHeight - element.clientHeight);
+        }
+    }
+    return [window.innerWidth, window.innerHeight, ...overflow];
+})()"""
+
+_PAGE_TYPING_DEFAULT = "h\u00e9llo w\u00f6rld \u00a9 2026"
+
 _POLL_SECONDS = 0.1
 
 _REFUSED_ERROR_TEXT = "net::ERR_CONNECTION_REFUSED"
 
+# vmstat's two header lines, then three samples a second apart.
+_RUN_LINES_BEFORE_CANCEL = 5
+
 # Covers Chrome's slow first start on a new profile, and the wait for each
-# line of the terminal.
+# line of the terminal or for all the page's checks.
 _RUN_TIMEOUT_SECONDS = 180
 
 _SERVER_WAIT_SECONDS = 60
@@ -97,20 +154,132 @@ _TERMINAL_WAIT_SECONDS = 30
 _TTYD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(_PYTHON_PATH)), "ttyd"
 )
-# The dev server forwards /token and /ws to ttyd on this port.
+# The dev server forwards /token and /ws to ttyd on this port; with --page,
+# ttyd serves the page there itself.
 _TTYD_PORT = 7681
+_TTYD_PAGE_URL = f"http://localhost:{_TTYD_PORT}/"
 _TTYD_REPOSITORY_URL = "https://github.com/tsl0922/ttyd.git"
 
 _TYPING_DEFAULT = "ACCEPTED"
 
 _VIEWPORT_HEIGHT_PX = 720
 _VIEWPORT_WIDTH_PX = 1280
+# The size --page resizes the viewport to.
+_VIEWPORT_RESIZED_HEIGHT_PX = 1080
+_VIEWPORT_RESIZED_WIDTH_PX = 1920
 
 _WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 _WEBSOCKET_OPCODE_CLOSE = 0x8
 _WEBSOCKET_OPCODE_PING = 0x9
 _WEBSOCKET_OPCODE_PONG = 0xA
 _WEBSOCKET_OPCODE_TEXT = 0x1
+
+
+# bootstrap.html in the browser, read through its window.xsjs.
+class BootstrapPage:
+    def __init__(self, devtools: DevTools) -> None:
+        self.devtools = devtools
+        self.conversation: list[dict[str, str]] = []
+        # How many of the conversation's entries are printed.
+        self.printed = 0
+
+    # Clicks the element with the id at its middle, as a mouse would.
+    def click(self, element_id: str) -> None:
+        x, y = self.devtools.evaluate(
+            f"({_CENTER_SCRIPT})({json.dumps(element_id)})"
+        )
+        self.devtools.call(
+            "Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y}
+        )
+        for event_type in ("mousePressed", "mouseReleased"):
+            self.devtools.call(
+                "Input.dispatchMouseEvent",
+                {
+                    "type": event_type,
+                    "x": x,
+                    "y": y,
+                    "button": "left",
+                    "clickCount": 1,
+                },
+            )
+
+    # Answers the index of the first entry from start on that matches, once
+    # one has come.
+    def entry_wait(
+        self, start: int, match: Callable[[dict[str, str]], bool]
+    ) -> int:
+        self.wait(
+            lambda results: any(
+                match(entry) for entry in results["conversation"][start:]
+            )
+        )
+        return next(
+            index
+            for index in range(start, len(self.conversation))
+            if match(self.conversation[index])
+        )
+
+    # Fails on the page's failure, with ttyd's version for a close code the
+    # page never sends, as that is ttyd's fault.
+    def failure_check(self, results: dict[str, Any]) -> None:
+        failure = results["failure"]
+        if failure is None:
+            return
+        message = (
+            f"the page's {failure['check']} check failed: {failure['detail']}"
+        )
+        closed = results["closed"]
+        if closed is not None and closed["code"] != _CLOSE_CODE_NORMAL:
+            message += f" ({ttyd_version(_TTYD_PATH)})"
+        raise RuntimeError(message)
+
+    # Answers the text of the entry after the person's line at the index,
+    # which is the program's reply while no command runs.
+    def reply(self, index: int) -> str:
+        index = self.entry_wait(index + 1, lambda entry: True)
+        return self.conversation[index]["text"]
+
+    # Types the line into the page and presses Enter. Answers the index of
+    # the person's line in the conversation.
+    def say(self, text: str) -> int:
+        start = len(self.conversation)
+        self.devtools.call("Input.insertText", {"text": text})
+        self.devtools.call(
+            "Input.dispatchKeyEvent",
+            {"type": "keyDown", "text": "\r", "unmodifiedText": "\r"}
+            | _ENTER_KEY,
+        )
+        self.devtools.call(
+            "Input.dispatchKeyEvent", {"type": "keyUp"} | _ENTER_KEY
+        )
+        index = self.entry_wait(start, lambda entry: entry["who"] == "person")
+        if self.conversation[index]["text"] != text:
+            raise RuntimeError(
+                f"typed {text!r}, the page sent"
+                f" {self.conversation[index]['text']!r}"
+            )
+        return index
+
+    # Answers the page's results once the condition holds for them,
+    # printing the conversation as it grows.
+    def wait(
+        self, condition: Callable[[dict[str, Any]], bool]
+    ) -> dict[str, Any]:
+        while True:
+            results: dict[str, Any] | None = self.devtools.evaluate(
+                "window.xsjs"
+            )
+            # None until the page's script has run.
+            if results is not None:
+                self.conversation = results["conversation"]
+                for entry in self.conversation[self.printed :]:
+                    prefix = "> " if entry["who"] == "person" else ""
+                    print(prefix + entry["text"], flush=True)
+                self.printed = len(self.conversation)
+                self.failure_check(results)
+                if condition(results):
+                    return results
+            time.sleep(_POLL_SECONDS)
 
 
 class DevTools:
@@ -271,15 +440,7 @@ def challenge_meet(
     devtools: DevTools, url: str, answer: str, image_path: str
 ) -> str:
     devtools.page_attach()
-    devtools.call(
-        "Emulation.setDeviceMetricsOverride",
-        {
-            "width": _VIEWPORT_WIDTH_PX,
-            "height": _VIEWPORT_HEIGHT_PX,
-            "deviceScaleFactor": 1,
-            "mobile": False,
-        },
-    )
+    viewport_set(devtools, _VIEWPORT_WIDTH_PX, _VIEWPORT_HEIGHT_PX)
     # A headless page has no focus to type into unless it pretends to.
     devtools.call("Emulation.setFocusEmulationEnabled", {"enabled": True})
     # Reports, among others, when ttyd closes the terminal's WebSocket.
@@ -292,32 +453,18 @@ def challenge_meet(
     text = devtools.evaluate(_TERMINAL_TEXT_SCRIPT) or ""
     if response not in text.split("\n"):
         raise RuntimeError(
-            "ttyd's page cleared the terminal before the screenshot. The"
-            f" terminal shows:\n{text.rstrip() or '(nothing)'}"
+            "ttyd's page cleared the terminal before the screenshot"
+            f" ({ttyd_version(_TTYD_PATH)}). The terminal shows:\n"
+            f"{text.rstrip() or '(nothing)'}"
         )
-    image_dir = os.path.dirname(image_path)
-    if image_dir:
-        os.makedirs(image_dir, exist_ok=True)
-    with open(image_path, "wb") as image_file:
-        image_file.write(base64.b64decode(image["data"]))
+    image_save(image_path, image["data"])
     return response
 
 
 # Loads the page, so ttyd starts a bootstrap.py, and answers it. Answers
 # the echoed line.
 def challenge_try(devtools: DevTools, url: str, answer: str) -> str:
-    # WSL forwards Windows' localhost to a port some time after the port
-    # opens, so the browser can be refused at first.
-    deadline = time.monotonic() + _SERVER_WAIT_SECONDS
-    while True:
-        devtools.event_names.clear()
-        navigated = devtools.call("Page.navigate", {"url": url})
-        error_text = navigated.get("errorText")
-        if not error_text:
-            break
-        if error_text != _REFUSED_ERROR_TEXT or time.monotonic() > deadline:
-            raise RuntimeError(f"{url}: {error_text}")
-        time.sleep(_POLL_SECONDS)
+    page_navigate(devtools, url)
     terminal_wait(devtools, _CHALLENGE_PATTERN, "CHALLENGE")
     devtools.evaluate("window.term.focus()")
     # Arrives as typed text, as from a keyboard's input method, so it may
@@ -331,7 +478,14 @@ def challenge_try(devtools: DevTools, url: str, answer: str) -> str:
     response_pattern = re.compile(
         rf"^RESPONSE: {re.escape(answer)}$", re.MULTILINE
     )
+    # A RESPONSE lost as bootstrap.py exits is a ttyd fault, not a fault of
+    # this repo (ROADMAP 1 to 3), so it is reported with ttyd's version.
     return terminal_wait(devtools, response_pattern, "RESPONSE")
+
+
+# Answers a condition that holds once the page's check of the name passes.
+def check_passed(name: str) -> Callable[[dict[str, Any]], bool]:
+    return lambda results: results["checks"][name]["state"] == "pass"
 
 
 # Runs a command to its end, its output going to stderr.
@@ -347,6 +501,222 @@ def command_run(arguments: list[str], cwd: str) -> None:
         raise RuntimeError(
             f"{' '.join(arguments)} exited with {completed.returncode}"
         )
+
+
+# Says each line to bootstrap.py --session in turn, waiting for its reply,
+# and checks the reply against what this script computes where it can.
+# Answers the program's pid from its stat.
+def conversation_hold(page: BootstrapPage, typing: str) -> int:
+    page.reply(page.say("help"))
+    before = datetime.datetime.now(datetime.UTC)
+    reply = page.reply(page.say("time"))
+    after = datetime.datetime.now(datetime.UTC)
+    found = re.fullmatch(r"local: (\S+)\nUTC: (\S+)", reply)
+    if found is None:
+        raise RuntimeError(f"time: the program replied {reply!r}")
+    local, utc = map(datetime.datetime.fromisoformat, found.groups())
+    if not (
+        local == utc
+        and utc.utcoffset() == datetime.timedelta()
+        and before <= utc <= after
+    ):
+        raise RuntimeError(
+            f"time: the program replied {reply!r}, not one instant from"
+            f" {before.isoformat()} to {after.isoformat()}"
+        )
+    reply_check(
+        "whoami",
+        page.reply(page.say("whoami")),
+        f"user: {pwd.getpwuid(os.getuid()).pw_name}\nuid: {os.getuid()}\n"
+        f"cwd: {os.path.realpath(_PYTHON_PATH)}",
+    )
+    reply = page.reply(page.say("stat"))
+    figures = {
+        name: value
+        for name, _, value in (
+            line.partition(": ") for line in reply.split("\n")
+        )
+    }
+    uname = os.uname()
+    if (figures.get("hostname"), figures.get("kernel")) != (
+        uname.nodename,
+        uname.release,
+    ):
+        raise RuntimeError(
+            f"stat: the program replied {reply!r} where hostname"
+            f" {uname.nodename} and kernel {uname.release} were due"
+        )
+    session_pid = int(figures["pid"])
+    reply_check(
+        "ls",
+        page.reply(page.say("ls")),
+        listing_text(os.path.realpath(_PYTHON_PATH)),
+    )
+    line = f"calc {_CALC_EXPRESSION}"
+    reply_check(line, page.reply(page.say(line)), str(_CALC_VALUE))
+    line = f"sha256 {typing}"
+    reply_check(
+        line,
+        page.reply(page.say(line)),
+        hashlib.sha256(typing.encode()).hexdigest(),
+    )
+    line = f"echo {typing}"
+    reply_check(
+        line,
+        page.reply(page.say(line)),
+        f"{typing}\n{len(typing)} characters,"
+        f" {len(typing.encode())} bytes in UTF-8",
+    )
+    run_index = page.say("run vmstat 1")
+    run_pid = started_pid(page, run_index, "vmstat 1")
+    # Its lines follow the person's run and its reply.
+    page.wait(
+        lambda results: (
+            len(results["conversation"])
+            >= run_index + 2 + _RUN_LINES_BEFORE_CANCEL
+        )
+    )
+    cancel_index = page.say("cancel")
+    reply_index = page.entry_wait(
+        cancel_index + 1, lambda entry: entry["text"].startswith("cancel")
+    )
+    reply_check(
+        "cancel",
+        page.conversation[reply_index]["text"],
+        f"cancelled pid {run_pid}",
+    )
+    exit_index = page.entry_wait(reply_index + 1, entry_exit)
+    # Less the person's cancel and its reply.
+    lines = exit_index - (run_index + 2) - 2
+    reply_check(
+        "cancel",
+        page.conversation[exit_index]["text"],
+        f"exit code {-signal.SIGTERM}, {lines} lines, cancelled",
+    )
+    page.wait(check_passed("cancel"))
+    run_index = page.say("run ls -l /")
+    started_pid(page, run_index, "ls -l /")
+    exit_index = page.entry_wait(run_index + 2, entry_exit)
+    reply_check(
+        "run ls -l /",
+        page.conversation[exit_index]["text"],
+        f"exit code 0, {exit_index - run_index - 2} lines",
+    )
+    page.reply(page.say("count"))
+    return session_pid
+
+
+# Answers whether the conversation's entry is a command's exit.
+def entry_exit(entry: dict[str, str]) -> bool:
+    return _EXIT_PATTERN.fullmatch(entry["text"]) is not None
+
+
+def image_save(image_path: str, data: str) -> None:
+    image_dir = os.path.dirname(image_path)
+    if image_dir:
+        os.makedirs(image_dir, exist_ok=True)
+    with open(image_path, "wb") as image_file:
+        image_file.write(base64.b64decode(data))
+
+
+# Answers the directory's entries as bootstrap.py's ls gives them: sorted,
+# each with its size in bytes and a trailing / for a directory.
+def listing_text(path: str) -> str:
+    lines: list[str] = []
+    with os.scandir(path) as iterator:
+        for entry in sorted(iterator, key=lambda entry: entry.name):
+            size = entry.stat(follow_symlinks=False).st_size
+            slash = "/" if entry.is_dir(follow_symlinks=False) else ""
+            lines.append(f"{size} {entry.name}{slash}")
+    return "\n".join(lines)
+
+
+# Grows the viewport until no part of the page scrolls, so a screenshot
+# holds all of it.
+def page_fit(devtools: DevTools) -> None:
+    while True:
+        devtools.evaluate(_FRAMES_DRAWN_SCRIPT)
+        width_px, height_px, *overflow = devtools.evaluate(
+            _PAGE_OVERFLOW_SCRIPT
+        )
+        if overflow == [0, 0]:
+            return
+        viewport_set(devtools, width_px + overflow[0], height_px + overflow[1])
+
+
+# Drives bootstrap.html as a person would: a conversation, a resize, and
+# Close once all its other checks pass. Then checks ttyd's program is gone
+# and saves the whole page as a PNG. Answers the close check's detail.
+def page_meet(
+    devtools: DevTools, url: str, typing: str, image_path: str, ttyd_pid: int
+) -> str:
+    devtools.page_attach()
+    viewport_set(devtools, _VIEWPORT_WIDTH_PX, _VIEWPORT_HEIGHT_PX)
+    # A headless page has no focus to type into unless it pretends to.
+    devtools.call("Emulation.setFocusEmulationEnabled", {"enabled": True})
+    page_navigate(devtools, url)
+    page = BootstrapPage(devtools)
+    page.wait(check_passed("hello"))
+    page.click("say")
+    if devtools.evaluate("document.activeElement.id") != "say":
+        raise RuntimeError("clicking the page's input didn't focus it")
+    session_pid = conversation_hold(page, typing)
+    viewport_set(
+        devtools, _VIEWPORT_RESIZED_WIDTH_PX, _VIEWPORT_RESIZED_HEIGHT_PX
+    )
+    page.wait(check_passed("size"))
+    page.wait(
+        lambda results: all(
+            check["state"] == "pass"
+            for name, check in results["checks"].items()
+            if name != "close"
+        )
+    )
+    pids = session_pids(ttyd_pid)
+    if pids != [session_pid]:
+        raise RuntimeError(
+            f"ttyd runs bootstrap.py --session as pids {pids}, where the"
+            f" page's program is pid {session_pid}"
+        )
+    page.click("close")
+    results = page.wait(
+        lambda results: (
+            results["closed"] is not None
+            and results["closed"]["code"] == _CLOSE_CODE_NORMAL
+            and results["checks"]["close"]["state"] == "pass"
+        )
+    )
+    deadline = time.monotonic() + _STOP_WAIT_SECONDS
+    while pids := session_pids(ttyd_pid):
+        if time.monotonic() > deadline:
+            raise RuntimeError(
+                f"bootstrap.py --session still runs as pids {pids}"
+                f" {_STOP_WAIT_SECONDS} s after the page closed"
+            )
+        time.sleep(_POLL_SECONDS)
+    for name, check in results["checks"].items():
+        print(f"{name} {check['state']} {check['detail']}", flush=True)
+    page_fit(devtools)
+    image = devtools.call("Page.captureScreenshot", {"format": "png"})
+    image_save(image_path, image["data"])
+    return results["checks"]["close"]["detail"]
+
+
+# Opens the URL. WSL forwards Windows' localhost to a port some time after
+# the port opens, so the browser can be refused at first.
+def page_navigate(devtools: DevTools, url: str) -> None:
+    deadline = time.monotonic() + _SERVER_WAIT_SECONDS
+    while True:
+        devtools.event_names.clear()
+        navigated = devtools.call("Page.navigate", {"url": url})
+        error_text = navigated.get("errorText")
+        if not error_text:
+            return
+        if error_text != _REFUSED_ERROR_TEXT or time.monotonic() > deadline:
+            raise RuntimeError(f"{url}: {error_text}")
+        # The one retry, before any page exists, so it shows.
+        print(f"{url}: {error_text}, navigating again", file=sys.stderr)
+        time.sleep(_POLL_SECONDS)
 
 
 # Fails if something already listens on the port, as it would be served in
@@ -403,12 +773,54 @@ def process_stop(process: subprocess.Popen[bytes]) -> None:
         process.wait()
 
 
+# Fails unless the program's reply to the line is the one due.
+def reply_check(line: str, reply: str, expected: str) -> None:
+    if reply != expected:
+        raise RuntimeError(
+            f"{line}: the program replied {reply!r} where {expected!r} was due"
+        )
+
+
+# Answers the pids of ttyd's children that run bootstrap.py --session.
+def session_pids(ttyd_pid: int) -> list[int]:
+    pids: list[int] = []
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        # A process can end between the listing and the reads.
+        with contextlib.suppress(FileNotFoundError, ProcessLookupError):
+            with open(f"/proc/{name}/status") as status_file:
+                parent = next(
+                    line for line in status_file if line.startswith("PPid:")
+                )
+            with open(f"/proc/{name}/cmdline", "rb") as cmdline_file:
+                arguments = cmdline_file.read().decode().split("\0")[:-1]
+            if (
+                int(parent.split()[1]) == ttyd_pid
+                and arguments == _BOOTSTRAP_SESSION_ARGUMENTS
+            ):
+                pids.append(int(name))
+    return sorted(pids)
+
+
 def signal_exit(signal_number: int, frame: FrameType | None) -> None:
     sys.exit(128 + signal_number)
 
 
 def signal_time_out(signal_number: int, frame: FrameType | None) -> None:
     raise TimeoutError(f"gave up after {_RUN_TIMEOUT_SECONDS} s")
+
+
+# Answers the pid of the command the say at the index started, from the
+# program's reply.
+def started_pid(page: BootstrapPage, index: int, words: str) -> int:
+    reply = page.reply(index)
+    found = re.fullmatch(
+        re.escape(f"started {words} as pid ") + r"(\d+)", reply
+    )
+    if found is None:
+        raise RuntimeError(f"run {words}: the program replied {reply!r}")
+    return int(found.group(1))
 
 
 # Answers the line of the terminal the pattern finds, once it's there.
@@ -426,8 +838,9 @@ def terminal_wait(
             closed_deadline = time.monotonic() + _CLOSED_GRACE_SECONDS
         if closed_deadline is not None and time.monotonic() > closed_deadline:
             raise RuntimeError(
-                f"ttyd closed the connection before {waited_for} came. The"
-                f" terminal shows:\n{text.rstrip() or '(nothing)'}"
+                f"ttyd closed the connection before {waited_for} came"
+                f" ({ttyd_version(_TTYD_PATH)}). The terminal shows:\n"
+                f"{text.rstrip() or '(nothing)'}"
             )
         if time.monotonic() > deadline:
             raise TimeoutError(
@@ -438,8 +851,9 @@ def terminal_wait(
 
 
 # Clones ttyd, builds it and installs its page's packages as its README
-# says, each only when missing. Updating them is the maintainer's to do.
-def ttyd_prepare(ttyd_path: str) -> None:
+# says, each only when missing; the packages only for its dev server.
+# Updating them is the maintainer's to do.
+def ttyd_prepare(ttyd_path: str, page: bool) -> None:
     if not os.path.isdir(ttyd_path):
         command_run(
             ["git", "clone", _TTYD_REPOSITORY_URL, ttyd_path],
@@ -451,68 +865,123 @@ def ttyd_prepare(ttyd_path: str) -> None:
         command_run(["cmake", ".."], build_path)
         command_run(["make"], build_path)
     html_path = os.path.join(ttyd_path, "html")
-    if not os.path.isdir(os.path.join(html_path, "node_modules")):
+    if not page and not os.path.isdir(os.path.join(html_path, "node_modules")):
         command_run(["corepack", "yarn", "install"], html_path)
 
 
 # Serves bootstrap.py as ttyd's html/README.md serves bash for development:
 # ttyd, with the flags xsjs_start.ps1 gives it without a password, behind
-# the page's dev server.
+# the page's dev server. With page, ttyd alone serves bootstrap.html and
+# runs bootstrap.py --session. Yields ttyd's process.
 @contextlib.contextmanager
-def ttyd_serve(ttyd_path: str) -> Generator[None]:
-    for port in (_TTYD_PORT, _DEV_SERVER_PORT):
+def ttyd_serve(
+    ttyd_path: str, page: bool
+) -> Generator[subprocess.Popen[bytes]]:
+    ports = (_TTYD_PORT,) if page else (_TTYD_PORT, _DEV_SERVER_PORT)
+    for port in ports:
         port_check(port)
+    arguments = [
+        os.path.join(ttyd_path, "build", "ttyd"),
+        "--port",
+        str(_TTYD_PORT),
+        "--cwd",
+        _PYTHON_PATH,
+        "--writable",
+        "--check-origin",
+        "--interface",
+        "127.0.0.1",
+    ]
+    if page:
+        arguments += [
+            "--index",
+            os.path.join(_PYTHON_PATH, _BOOTSTRAP_PAGE_NAME),
+            *_BOOTSTRAP_SESSION_ARGUMENTS,
+        ]
+    else:
+        arguments += ["python3", _BOOTSTRAP_NAME]
     processes: list[subprocess.Popen[bytes]] = []
     try:
-        ttyd = process_start(
-            [
-                os.path.join(ttyd_path, "build", "ttyd"),
-                "--port",
-                str(_TTYD_PORT),
-                "--cwd",
-                _PYTHON_PATH,
-                "--writable",
-                "--check-origin",
-                "--interface",
-                "127.0.0.1",
-                "python3",
-                _BOOTSTRAP_NAME,
-            ],
-            _PYTHON_PATH,
-        )
+        ttyd = process_start(arguments, _PYTHON_PATH)
         processes.append(ttyd)
         port_wait(ttyd, "ttyd", _TTYD_PORT)
-        dev_server = process_start(
-            ["corepack", "yarn", "run", "start"],
-            os.path.join(ttyd_path, "html"),
-        )
-        processes.append(dev_server)
-        port_wait(dev_server, "yarn run start", _DEV_SERVER_PORT)
-        yield
+        if not page:
+            dev_server = process_start(
+                ["corepack", "yarn", "run", "start"],
+                os.path.join(ttyd_path, "html"),
+            )
+            processes.append(dev_server)
+            port_wait(dev_server, "yarn run start", _DEV_SERVER_PORT)
+        yield ttyd
     finally:
         for process in reversed(processes):
             process_stop(process)
 
 
+# Answers what ttyd says its version is, for reports of its faults.
+def ttyd_version(ttyd_path: str) -> str:
+    completed = subprocess.run(
+        [os.path.join(ttyd_path, "build", "ttyd"), "--version"],
+        check=False,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"ttyd --version exited with {completed.returncode}"
+        )
+    return completed.stdout.strip()
+
+
+def viewport_set(devtools: DevTools, width_px: int, height_px: int) -> None:
+    devtools.call(
+        "Emulation.setDeviceMetricsOverride",
+        {
+            "width": width_px,
+            "height": height_px,
+            "deviceScaleFactor": 1,
+            "mobile": False,
+        },
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Answer bootstrap.py's CHALLENGE from Chrome and save"
-        " a screenshot of the echo."
+        " a screenshot of the echo, or with --page hold a conversation"
+        " through bootstrap.html and save a screenshot of the page."
     )
     parser.add_argument(
         "--out",
-        default=os.path.join(_PYTHON_PATH, _IMAGE_NAME),
-        help="where the PNG goes (default %(default)s)",
+        help="where the PNG goes (default"
+        f" {os.path.join(_PYTHON_PATH, _IMAGE_NAME)}, or"
+        f" {os.path.join(_PYTHON_PATH, _PAGE_IMAGE_NAME)} with --page)",
+    )
+    parser.add_argument(
+        "--page",
+        action="store_true",
+        help="serve bootstrap.html with bootstrap.py --session and drive"
+        " the page until all its checks pass",
     )
     parser.add_argument(
         "--typing",
-        default=_TYPING_DEFAULT,
-        help="what Chrome types at the CHALLENGE (default %(default)s)",
+        help=f"what Chrome types at the CHALLENGE (default {_TYPING_DEFAULT}),"
+        " or after sha256 and echo with --page (default"
+        f" {_PAGE_TYPING_DEFAULT})",
     )
     namespace = parser.parse_args()
-    if any(character < " " for character in namespace.typing):
+    page: bool = namespace.page
+    typing: str | None = namespace.typing
+    if typing is None:
+        typing = _PAGE_TYPING_DEFAULT if page else _TYPING_DEFAULT
+    if any(character < " " for character in typing):
         print("error: --typing can't hold control characters", file=sys.stderr)
         return 2
+    out: str | None = namespace.out
+    if out is None:
+        out = os.path.join(
+            _PYTHON_PATH, _PAGE_IMAGE_NAME if page else _IMAGE_NAME
+        )
 
     module = browser_module()
     if module is None:
@@ -525,20 +994,29 @@ def main() -> int:
 
     for signal_number in (signal.SIGHUP, signal.SIGTERM):
         signal.signal(signal_number, signal_exit)
-    image_path = os.path.abspath(namespace.out)
+    image_path = os.path.abspath(out)
     try:
-        ttyd_prepare(_TTYD_PATH)
+        ttyd_prepare(_TTYD_PATH, page)
         # A first build and install can take longer than this allows.
         signal.signal(signal.SIGALRM, signal_time_out)
         signal.alarm(_RUN_TIMEOUT_SECONDS)
-        with ttyd_serve(_TTYD_PATH):
+        with ttyd_serve(_TTYD_PATH, page) as ttyd:
             browser = module.Browser(_VIEWPORT_WIDTH_PX, _VIEWPORT_HEIGHT_PX)
             with browser:
                 devtools = DevTools(browser)
                 try:
-                    response = challenge_meet(
-                        devtools, _DEV_SERVER_URL, namespace.typing, image_path
-                    )
+                    if page:
+                        response = page_meet(
+                            devtools,
+                            _TTYD_PAGE_URL,
+                            typing,
+                            image_path,
+                            ttyd.pid,
+                        )
+                    else:
+                        response = challenge_meet(
+                            devtools, _DEV_SERVER_URL, typing, image_path
+                        )
                 finally:
                     devtools.browser_close()
     except (OSError, RuntimeError) as error:

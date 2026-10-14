@@ -136,6 +136,10 @@
     test_answer             = 'Answering {0}'
     test_answered           = 'Answered CHALLENGE with {0}.'
     test_closed             = 'ttyd closed the connection'
+    test_closed_ttyd        = (
+        '{0} closed the connection after CHALLENGE: a ttyd fault, ' +
+        'as in ttyd issue #1429'
+    )
     test_connect            = 'Connecting to {0}'
     test_expected           = 'Expected "{0}", got "{1}".'
     test_failed_steps       = 'Failed steps: {0}. Log: `{1}`'

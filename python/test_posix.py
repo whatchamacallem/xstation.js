@@ -10,15 +10,24 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
+import sys
 
-import reformat
+_BUILD_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
+)
+
+# Bytecode of the modules main imports goes in build/.
+sys.pycache_prefix = os.path.join(_BUILD_PATH, "pycache")
 
 # The non-ASCII characters the whitelisted files may hold.
 _NON_ASCII_ALLOWED = {
     "\N{COPYRIGHT SIGN}",
     "\N{LATIN SMALL LETTER E WITH ACUTE}",
 }
+
+_RUFF_CACHE_PATH = os.path.join(_BUILD_PATH, "ruff_cache")
 
 
 # Fails on the first non-ASCII character not in _NON_ASCII_ALLOWED.
@@ -40,6 +49,8 @@ def non_ascii_check(path: str) -> None:
 
 
 def main() -> None:
+    import reformat
+
     argparse.ArgumentParser(
         description="Check, format and lint the files"
         " reformat_whitelist.txt lists."
@@ -51,7 +62,10 @@ def main() -> None:
     python_paths = [path for path in paths if path.endswith(".py")]
     # With no files, ruff checks the directory.
     if python_paths:
-        subprocess.run(["ruff", "check", *python_paths], check=True)
+        subprocess.run(
+            ["ruff", "check", "--cache-dir", _RUFF_CACHE_PATH, *python_paths],
+            check=True,
+        )
 
 
 if __name__ == "__main__":

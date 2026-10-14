@@ -75,6 +75,9 @@ manager without request.
 - Authorship is a legal issue. Ascribing authorship to a non-person, such as
   a `Co-Authored-By` trailer or a generated-by line in a commit or pull
   request, is a violation of the project rules.
+- Intermediates, such as tool caches and Python bytecode, go in `build/`,
+  which is gitignored. Point each tool there instead of ignoring what it
+  writes beside the sources.
 
 ## Project Direction
 
@@ -141,8 +144,20 @@ discrepancies as this is a low priority self healing mechanism.
   256 bytes. That folder also holds the TLS cert and `ttyd.log` (ttyd's
   stderr, first place to look when start fails); `serve.ps1` holds the
   password in plain text.
-- `bootstrap.py` is a placeholder; the tests key on its exact `CHALLENGE:`
-  and `RESPONSE: <answer>` lines.
+- `bootstrap.py` with no argument is the exit-at-once placeholder the live
+  server runs; the tests key on its exact `CHALLENGE:` and
+  `RESPONSE: <answer>` lines. That path runs before the session's imports:
+  with them first, RESPONSE to exit rose from about 1.5 ms to 3.9 ms.
+  `bootstrap.py --session` is the long-lived program, one ASCII JSON
+  object per line each way, and `python/bootstrap.html` its page, served
+  by Linux ttyd with `--index`; `_INPUT_FIELDS` and the page's `FIELDS`
+  hold the messages.
+- The page sends nothing before `hello`: until the program sets raw mode
+  the terminal echoes input, and setting it discards what waits. It sends
+  a resize only for a changed size, as the kernel sends no SIGWINCH for an
+  equal one.
+- ttyd with `--credential` answers `/` with 401 but drops `/ws` without
+  the Basic header with no HTTP status.
 - When bootstrap.py exits, the Linux ttyd built from `../ttyd` sends all
   its output but ends the connection with no WebSocket close frame. The
   browser reports that as 1006, and ttyd's page then reconnects at once,
@@ -171,6 +186,11 @@ discrepancies as this is a low priority self healing mechanism.
   (its default 88 rewraps every file) and pyright strict. test_posix.py
   doesn't run pyright: use `pyright --project python`, as pyright finds no
   config from the top directory.
+- The scripts pass ruff an absolute `--cache-dir` under `build/`. A
+  `cache-dir` in `pyproject.toml` still leaves an empty `.ruff_cache` in
+  the current directory, and under `--config` its relative path resolves
+  from the current directory. Scripts set `sys.pycache_prefix` to
+  `build/pycache` before importing a sibling module.
 - Screenshots: `python3 python/xsjs_screenshot.py` writes
   `python/xsjs_screenshot.png` (gitignored). It clones `../ttyd`, builds
   it and installs `html/`'s packages, each only when missing, and never
@@ -180,7 +200,12 @@ discrepancies as this is a low priority self healing mechanism.
   through a C# relay in `powershell.exe`, as WSL's NAT can't reach
   Windows' 127.0.0.1. Chrome reaches WSL's 9000 by localhost forwarding,
   which lags a new listener by about a second. Only the WSL `Browser`
-  module exists.
+  module exists. With `--page` it serves `bootstrap.html` from ttyd alone
+  on 7681, needs no `html/` packages, holds a conversation, resizes, closes
+  and writes `python/xsjs_screenshot_page.png` in about 14 s;
+  `Emulation.setDeviceMetricsOverride` fires `resize` in headless Chrome.
+- `python3 python/test_wire.py` is the wire test, about 35 s: Linux ttyd
+  on `--port 0`, the port read from ttyd's log line.
 - Windows Chrome outlives its WSL-side process and keeps its profile; a new
   Chrome on that profile hands off to it and exits silently.
 - ttyd launched straight from WSL fails with `pty_spawn: 0 (No error)`;
