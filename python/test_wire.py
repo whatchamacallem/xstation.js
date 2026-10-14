@@ -4,7 +4,7 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # The wire test: starts Linux ttyd, from a checkout of ttyd beside this
-# project, serving bootstrap.html and running bootstrap.py --session, then
+# project, serving bootstrap.html and running bootstrap.py, then
 # speaks ttyd's protocol to the program as the page does, rung by rung:
 # over one WebSocket, then over two at once, and last over one while ttyd
 # is killed. It stops at the first failed check with the
@@ -37,7 +37,7 @@ from typing import Any, cast
 _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
 
 # What ttyd runs for each connection, from _PYTHON_PATH.
-_BOOTSTRAP_ARGUMENTS = ["python3", "bootstrap.py", "--session"]
+_BOOTSTRAP_ARGUMENTS = ["python3", "bootstrap.py"]
 
 # vmstat's lines to receive before cancelling it.
 _CANCEL_AFTER_LINES = 5
@@ -632,7 +632,7 @@ def echo_check(wire: Wire, say_id: int, text: str) -> None:
 
 
 # Fails unless hello gives the size the first message sent and its pid runs
-# bootstrap.py --session.
+# bootstrap.py.
 def hello_check(wire: Wire) -> None:
     hello = wire.hello
     if (hello["columns"], hello["rows"]) != (_COLUMNS, _ROWS):
@@ -1288,7 +1288,7 @@ def wires_wait(wires: list[Wire], done: Callable[[], bool], what: str) -> None:
 
 def main() -> int:
     argparse.ArgumentParser(
-        description="Run the wire test: bootstrap.py --session through"
+        description="Run the wire test: bootstrap.py through"
         " Linux ttyd, from a standard library WebSocket client."
     ).parse_args()
     for signal_number in (signal.SIGHUP, signal.SIGTERM):

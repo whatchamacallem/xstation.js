@@ -2,21 +2,12 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# With no argument, asks for a CHALLENGE, prints the RESPONSE and exits.
-# With --session it runs until a signal ends it, speaking one JSON object
-# per line each way over its terminal, as ttyd runs it for the page:
+# Runs until a signal ends it, speaking one JSON object per line each way
+# over its terminal, as ttyd runs it for the page:
 #
-#     ttyd --writable --index bootstrap.html python3 bootstrap.py --session
+#     ttyd --writable --index bootstrap.html python3 bootstrap.py
 
 from __future__ import annotations
-
-import sys
-
-# Runs before the imports below, so it starts and exits as fast as ever.
-if __name__ == "__main__" and not sys.argv[1:]:
-    _x = input("CHALLENGE: ")
-    print(f"RESPONSE: {_x}")
-    sys.exit()
 
 import ast
 import contextlib
@@ -30,6 +21,7 @@ import selectors
 import shlex
 import signal
 import subprocess
+import sys
 import time
 import tty
 from collections.abc import Callable, Generator
@@ -537,7 +529,7 @@ def time_text() -> str:
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] != ["--session"]:
-        print(f"usage: {sys.argv[0]} [--session]", file=sys.stderr)
+    if sys.argv[1:]:
+        print(f"usage: {sys.argv[0]}", file=sys.stderr)
         sys.exit(2)
     session_run()

@@ -23,7 +23,8 @@ end of a run must include all unfinished tasks and lost subagents. Provide the
 user with the postmortem text directly in the conversation as well as
 providing a link to the task doc. Provide a single sentence bug, task or other
 description alongside every in-conversation postmortem reference to a numbered
-item that is not itself in the postmortem.
+item that is not itself in the postmortem. Referenced items require enough
+context so that no further lookup is required.
 
 - Lock files by appending a per-task suffix to the filename for the duration.
 - The Lookup Accelerator may only contain information that an AI agent wouldn't
@@ -124,14 +125,14 @@ discrepancies as this is a low priority self healing mechanism.
   `.ps1`/`.psd1` must be UTF-8 with BOM and LF, or 5.1 misreads non-ASCII.
 - From WSL: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File
   "$(wslpath -w <script>)"`. The agent shell isn't elevated, so only
-  `xsjs_status.ps1`, `test_lint.ps1` and `test_terminal.ps1` run; the user
-  runs the rest. All but `xsjs_status.ps1` and `test_lint.ps1` write
-  `<script>.ps1.md` beside themselves (gitignored): read it, don't ask.
-  The logs are LF Markdown that `mdformat --check` accepts, which
-  `test_posix.py` checks through the whitelist's `*.ps1.md` globs, so a log
-  written before a writer change fails until its script reruns. mdformat
-  doubles backslashes in plain text, so i18n strings put paths in code
-  spans.
+  `xsjs_status.ps1` and `test_lint.ps1` run; the user runs the rest. All
+  but those two write `<script>.ps1.md` beside themselves (gitignored):
+  read it, don't ask. The logs are LF Markdown that `mdformat --check`
+  accepts, which `test_posix.py` checks through the whitelist's `*.ps1.md`
+  globs, so a log written before a writer change fails until its script
+  reruns. `powershell/*.ps1.md` matches only `test_powershell.ps1.md`, so
+  `test_posix.py` fails until that suite has run once. mdformat doubles
+  backslashes in plain text, so i18n strings put paths in code spans.
 - `_<file>_main` holds a `trap` that logs and exits 1, then calls
   `_<file>_step_*`; shared code is `xsjs_util_*`. Script state
   (`$log_path_`, `$credential_`, `$stream_`...) is `_main` locals that
@@ -144,32 +145,27 @@ discrepancies as this is a low priority self healing mechanism.
   256 bytes. That folder also holds the TLS cert and `ttyd.log` (ttyd's
   stderr, first place to look when start fails); `serve.ps1` holds the
   password in plain text.
-- `bootstrap.py` with no argument is the exit-at-once placeholder the live
-  server runs; the tests key on its exact `CHALLENGE:` and
-  `RESPONSE: <answer>` lines. That path runs before the session's imports:
-  with them first, RESPONSE to exit rose from about 1.5 ms to 3.9 ms.
-  `bootstrap.py --session` is the long-lived program, one ASCII JSON
-  object per line each way, and `python/bootstrap.html` its page, served
-  by Linux ttyd with `--index`; `_INPUT_FIELDS` and the page's `FIELDS`
-  hold the messages.
+- `bootstrap.py` takes no argument and runs until a signal ends it, one
+  ASCII JSON object per line each way; `python/bootstrap.html` is its
+  page, served by Linux ttyd with `--index`; `_INPUT_FIELDS` and the
+  page's `FIELDS` hold the messages; `DESIGN.md` describes the protocol.
+  The live server's Windows ttyd still runs it in ttyd's stock page, which
+  only shows its JSON lines.
 - The page sends nothing before `hello`: until the program sets raw mode
   the terminal echoes input, and setting it discards what waits. It sends
   a resize only for a changed size, as the kernel sends no SIGWINCH for an
   equal one.
 - ttyd with `--credential` answers `/` with 401 but drops `/ws` without
   the Basic header with no HTTP status.
-- When bootstrap.py exits, the Linux ttyd built from `../ttyd` sends all
-  its output but ends the connection with no WebSocket close frame. The
-  browser reports that as 1006, and ttyd's page then reconnects at once,
-  clearing the screen and starting a new bootstrap.py, unless ttyd runs
-  with `-t disableReconnect=true`. Ubuntu's libwebsockets 4.3.5 causes
-  this, and ttyd 1.7.7 on it does the same. With 4.3.3, the version the
-  1.7.7 release was built with, about 1 close in 10 is still 1006, from a
-  ttyd race between the end of output and the exit code. The Windows
-  ttyd closes with 1000 but loses `RESPONSE` in about half of tries, as
-  in ttyd issue #1429 (open); a lone `test_terminal.ps1` failure may be
-  this. ttyd's last release, 1.7.7, the one WinGet installs, dates from
-  2024-03-30. Windows builds start at 1.7.0.
+- When its program exits, Linux ttyd on Ubuntu's libwebsockets 4.3.5 (as
+  `../ttyd` builds) sends all the output but ends the connection with no
+  WebSocket close frame, which the browser reports as 1006; ttyd's stock
+  page then reconnects at once unless ttyd runs with
+  `-t disableReconnect=true`. Windows ttyd closes with 1000 but loses a
+  program's last output in about half of tries, as in ttyd issue #1429
+  (open). ttyd's last release, 1.7.7, the one WinGet installs, dates from
+  2024-03-30; Ubuntu 26.04 packages it as 1.7.7-4build1. Windows builds
+  start at 1.7.0.
 - `test_powershell.ps1` (admin) is the whole suite and drives the real
   machine: lint, then stop/install/start/stop, each script in its own
   `powershell.exe`. It ends with a full stop, removing the sign-in task.
@@ -192,28 +188,25 @@ discrepancies as this is a low priority self healing mechanism.
   from the current directory. Scripts set `sys.pycache_prefix` to
   `build/pycache` before importing a sibling module.
 - Screenshots: `python3 python/xsjs_screenshot.py` writes
-  `python/xsjs_screenshot.png` (gitignored). It clones `../ttyd`, builds
-  it and installs `html/`'s packages, each only when missing, and never
-  updates them. It serves `bootstrap.py` from `../ttyd/build/ttyd` on 7681
-  behind `corepack yarn run start`, ttyd's dev server on 9000; both ports
-  must be free. It drives headless Windows Chrome or Edge over DevTools
-  through a C# relay in `powershell.exe`, as WSL's NAT can't reach
-  Windows' 127.0.0.1. Chrome reaches WSL's 9000 by localhost forwarding,
-  which lags a new listener by about a second. Only the WSL `Browser`
-  module exists. With `--page` it serves `bootstrap.html` from ttyd alone
-  on 7681, needs no `html/` packages, holds a conversation, resizes, closes
-  and writes `python/xsjs_screenshot_page.png` in about 14 s;
+  `python/xsjs_screenshot.png` (gitignored) in about 14 s. It clones
+  `../ttyd` and builds it, each only when missing, and never updates them.
+  `../ttyd/build/ttyd` alone serves `bootstrap.html` and `bootstrap.py` on
+  7681, which must be free; Chrome holds a conversation, resizes and
+  closes. It drives headless Windows Chrome or Edge over DevTools through a
+  C# relay in `powershell.exe`, as WSL's NAT can't reach Windows'
+  127.0.0.1. Chrome reaches WSL's 7681 by localhost forwarding, which lags
+  a new listener by about a second. Only the WSL `Browser` module exists.
   `Emulation.setDeviceMetricsOverride` fires `resize` in headless Chrome.
-- `python3 python/test_wire.py` is the wire test, about 35 s: Linux ttyd
+- `python3 python/test_wire.py` is the wire test, about 40 s: Linux ttyd
   on `--port 0`, the port read from ttyd's log line.
 - Windows Chrome outlives its WSL-side process and keeps its profile; a new
   Chrome on that profile hands off to it and exits silently.
 - ttyd launched straight from WSL fails with `pty_spawn: 0 (No error)`;
   start it with `Start-Process -NoNewWindow` as `serve.ps1` does.
 - Linux ttyd (`../ttyd/build/ttyd`) run from WSL: Windows reaches it on
-  `localhost` but not on the PC's LAN address (NAT mode). It pings every 5
-  s and closes a WebSocket client that doesn't pong by 10 s. PAUSE (`2`)
-  does nothing, as `pty_pause` returns early. Output frames split inside
-  UTF-8 characters.
-- `ROADMAP.md` holds every barrier met so far, with what was measured
-  and the potential solutions; read it before retrying a failed approach.
+  `localhost` but not on the PC's LAN address (NAT mode). Bound to WSL's
+  127.0.0.1, Windows' 127.0.0.1 reaches it through `wslrelay`, and
+  `[::1]` doesn't. `--interface lo` binds WSL's 10.255.255.254, not
+  127.0.0.1. It pings every 5 s and closes a WebSocket client that
+  doesn't pong by 10 s. PAUSE (`2`) does nothing, as `pty_pause` returns
+  early. Output frames split inside UTF-8 characters.

@@ -13,7 +13,6 @@
     check_installed         = 'Checking installation'
     check_linux             = 'Checking Linux in WSL'
     check_openssl           = 'Checking OpenSSL'
-    check_page              = 'Checking {0}'
     check_port              = 'Checking port {0}'
     check_python            = 'Checking Python 3'
     check_ttyd_installed    = 'Checking ttyd'
@@ -47,7 +46,6 @@
     log_path                = 'Log: {0}'
     log_title               = '{0} log'
     make_certificate        = 'Checking the TLS certificate'
-    no_answer               = 'nothing'
     no_log                  = "No log: can't write {0}"
     not_administrator       = 'Run {0} as administrator.'
     not_installed           = '{0} missing. Run xsjs_install.ps1 first.'
@@ -55,7 +53,6 @@
     open_urls               = 'Open {0} to use `{1}`.'
     openssl_install_failed  = 'Installing OpenSSL failed.'
     openssl_missing         = 'Installing OpenSSL with apt-get...'
-    page_answered           = '{0} answered {1}.'
     port_free               = 'Port {0} is free.'
     port_in_use             = (
         'Port {0} is used by {1} (PID {2}). Stop it and retry.'
@@ -133,26 +130,11 @@
     )
     task_removed            = 'Removed scheduled task {0}.'
     task_stopped            = 'Stopped scheduled task {0}.'
-    test_answer             = 'Answering {0}'
-    test_answered           = 'Answered CHALLENGE with {0}.'
-    test_closed             = 'ttyd closed the connection'
-    test_closed_ttyd        = (
-        '{0} closed the connection after CHALLENGE: a ttyd fault, ' +
-        'as in ttyd issue #1429'
-    )
-    test_connect            = 'Connecting to {0}'
     test_expected           = 'Expected "{0}", got "{1}".'
     test_failed_steps       = 'Failed steps: {0}. Log: `{1}`'
     test_lint_failed        = 'Fix what test_lint.ps1 found, then rerun.'
-    test_no_response        = (
-        'No "RESPONSE: {0}" from {1} within {2} seconds ({3}). ' +
-        'Terminal output:'
-    )
     test_passed             = 'The lifecycle ran without failures.'
-    test_response           = '{0} echoed it: RESPONSE: {1}'
     test_step_failed        = 'Step {0} failed.'
-    test_terminal_ok        = 'OK: {0} runs {1}.'
-    test_timed_out          = 'timed out'
     ttyd_broken             = 'ttyd is broken. Reinstalling with WinGet...'
     ttyd_install_failed     = 'Installing ttyd failed: {0}'
     ttyd_missing            = 'Installing ttyd with WinGet...'
@@ -164,7 +146,6 @@
     ttyd_up_to_date         = 'ttyd {0} is up to date.'
     ttyd_update_failed      = 'Updating ttyd failed: {0}'
     ubuntu_not_working      = 'Ubuntu not ready. Restart Windows, rerun {0}.'
-    unexpected_answer       = '{0} answered {1}, not {2}.'
     winget_module_missing   = (
         'Installing the WinGet PowerShell module from PSGallery...'
     )

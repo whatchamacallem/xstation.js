@@ -6,8 +6,8 @@
 # lifecycle, each script in its own PowerShell as a person would: serving
 # localhost, starting again while running, stopping softly, then serving
 # HTTPS with a throwaway password, which opens port 5768 in Windows Firewall
-# until the last stop. test_terminal.ps1 checks bootstrap.py answers after
-# each start. Each step's output and log go to test_powershell.ps1.md.
+# until the last stop. Each step's output and log go to
+# test_powershell.ps1.md.
 #
 # The test command has to be run as admin:
 #
@@ -33,14 +33,11 @@ $lifecycle_ = @(
     @{ Script = 'xsjs_status.ps1'; Expect = $i18n_.status_stopped }
     @{ Script = 'xsjs_start.ps1' }
     @{ Script = 'xsjs_status.ps1'; Expect = $i18n_.status_running_signin }
-    @{ Script = 'powershell\test_terminal.ps1' }
     @{ Script = 'xsjs_start.ps1' }
-    @{ Script = 'powershell\test_terminal.ps1' }
     @{ Script = 'xsjs_stop.ps1'; Arguments = '--softly' }
     @{ Script = 'xsjs_status.ps1'; Expect = $i18n_.status_stopped_signin }
     @{ Script = 'xsjs_start.ps1'; Arguments = $test_credential_ }
     @{ Script = 'xsjs_status.ps1'; Expect = $i18n_.status_running_signin }
-    @{ Script = 'powershell\test_terminal.ps1'; Arguments = $test_credential_ }
     @{ Script = 'xsjs_stop.ps1' }
     @{ Script = 'xsjs_status.ps1'; Expect = $i18n_.status_stopped }
 )
