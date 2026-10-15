@@ -4,6 +4,3 @@ python/*.py
 python/*.html
 LICENSE.md
 README.md
-xsjs_install.ps1.md
-xsjs_start.ps1.md
-xsjs_stop.ps1.md
