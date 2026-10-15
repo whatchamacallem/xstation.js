@@ -3,8 +3,11 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 @{
+    add_proxy               = 'Forwarding port {0} to port {1}'
     administrator_ok        = 'Administrator: `{0}`.'
+    bootstrap_installed     = 'Copied {0} and {1} into `{2}`.'
     bootstrap_missing       = '{0} is missing.'
+    bootstrap_not_installed = 'Copying into `{0}` failed.'
     certificate_failed      = 'Making the TLS certificate failed.'
     certificate_fingerprint = 'TLS fingerprint (SHA-256): {0}'
     certificate_kept        = 'Kept the TLS certificate in `{0}`.'
@@ -13,12 +16,10 @@
     check_installed         = 'Checking installation'
     check_linux             = 'Checking Linux in WSL'
     check_openssl           = 'Checking OpenSSL'
-    check_port              = 'Checking port {0}'
+    check_port              = 'Checking ports {0} and {1}'
     check_python            = 'Checking Python 3'
-    check_ttyd_installed    = 'Checking ttyd'
-    check_ttyd_works        = 'Testing ttyd'
-    check_winget            = 'Checking WinGet'
-    check_winget_module     = 'Checking the WinGet PowerShell module'
+    check_ttyd              = 'Checking ttyd'
+    check_windows_ttyd      = 'Checking for ttyd for Windows'
     check_wsl               = 'Checking WSL'
     close_firewall          = 'Closing port {0} (localhost only)'
     credential_hidden       = 'USERNAME:PASSWORD'
@@ -35,6 +36,7 @@
     firewall_opened         = 'Opened TCP port {0} in Windows Firewall.'
     full_stop_mode          = 'Stopping ttyd and its sign-in start.'
     https_mode              = 'Serving HTTPS to other computers. User: {0}'
+    install_bootstrap       = 'Installing the bootstrapper in Linux'
     installed               = (
         'Installed. Next, run xsjs_start.ps1 as administrator.'
     )
@@ -57,6 +59,22 @@
     port_in_use             = (
         'Port {0} is used by {1} (PID {2}). Stop it and retry.'
     )
+    proxy_added             = (
+        'Port {1} on `{0}` now forwards to port {2} on `127.0.0.1`.'
+    )
+    proxy_failed            = 'Adding the port proxy failed.'
+    proxy_listening         = (
+        '{1} (PID {2}) listens on port {0} for the port proxy.'
+    )
+    proxy_none              = 'No port proxy from port {0} to ttyd.'
+    proxy_not_listening     = (
+        'Nothing listens on port {0}: the port proxy needs the IP Helper ' +
+        'service.'
+    )
+    proxy_remove_failed     = (
+        'Removing the port proxy from port {1} on `{0}` failed.'
+    )
+    proxy_removed           = 'Removed the port proxy from port {1} on `{0}`.'
     python_install_failed   = 'Installing Python 3 failed.'
     python_missing          = 'Installing Python 3 with apt-get...'
     register_task           = 'Setting ttyd to start at sign-in'
@@ -69,7 +87,8 @@
     runner_removed          = 'Deleted `{0}`.'
     runner_written          = 'Wrote `{0}`.'
     server_listening        = (
-        'ttyd (PID {1}) listening on port {0}. Log: `{2}`'
+        'ttyd (Linux PID {1}) listening on port {0}, relayed by {2} ' +
+        '(PID {3}). Log: `{4}`'
     )
     server_not_listening    = (
         'ttyd not listening on port {0}. Task result: {1}. Log (`{2}`):'
@@ -92,12 +111,14 @@
     status_firewall_none    = 'No firewall rule {0}.'
     status_https            = 'HTTPS, user {0}'
     status_linux            = 'Linux: {0}'
+    status_linux_closed     = 'Linux port {0}: not listening.'
+    status_linux_listening  = 'Linux port {0}: listening on {1} {2}'
     status_linux_none       = '{0} not running in Linux.'
     status_listening        = 'Port {0}: {1} (PID {2}) listens on {3}.'
     status_no_runner        = 'nothing ({0} missing)'
     status_port_closed      = 'Port {0}: not listening.'
-    status_processes        = 'Processes:'
-    status_processes_none   = 'No ttyd processes.'
+    status_processes        = 'Task processes:'
+    status_processes_none   = 'No task processes.'
     status_proxy            = 'Port proxy ({0}): {1} -> {2}'
     status_proxy_none       = 'No port proxies.'
     status_running          = '{0}: running on port {1}; no sign-in start.'
@@ -109,9 +130,7 @@
         'last result 0x{4:X}.'
     )
     status_task_none        = 'No scheduled task {0}.'
-    status_ttyd             = (
-        'ttyd (PID {0}): {1} on port {2} since {3:yyyy-MM-dd HH:mm:ss}.'
-    )
+    status_ttyd             = 'ttyd in Linux (PID {0}): {1} on port {2}.'
     status_ttyd_none        = 'ttyd not running.'
     status_wsl              = 'WSL: {0} (default) is {1}.'
     status_wsl_none         = 'WSL: no default distribution.'
@@ -135,26 +154,18 @@
     test_lint_failed        = 'Fix what test_lint.ps1 found, then rerun.'
     test_passed             = 'The lifecycle ran without failures.'
     test_step_failed        = 'Step {0} failed.'
-    ttyd_broken             = 'ttyd is broken. Reinstalling with WinGet...'
-    ttyd_install_failed     = 'Installing ttyd failed: {0}'
-    ttyd_missing            = 'Installing ttyd with WinGet...'
-    ttyd_not_on_path        = 'ttyd not on PATH.'
-    ttyd_out_of_date        = 'Updating ttyd {0} with WinGet...'
-    ttyd_reinstall_failed   = 'Reinstalling ttyd failed: {0}'
-    ttyd_still_broken       = 'ttyd still broken after reinstall.'
-    ttyd_stopped            = 'Stopped ttyd (PID {0}).'
-    ttyd_up_to_date         = 'ttyd {0} is up to date.'
-    ttyd_update_failed      = 'Updating ttyd failed: {0}'
+    ttyd_install_failed     = 'Installing ttyd failed.'
+    ttyd_missing            = 'Installing ttyd with apt-get...'
+    ttyd_not_stopped        = (
+        'ttyd (Linux PID {0}) still runs 15 s after SIGTERM.'
+    )
+    ttyd_stop_failed        = 'Stopping ttyd (Linux PID {0}) failed.'
+    ttyd_stopped            = 'Stopped ttyd (Linux PID {0}).'
     ubuntu_not_working      = 'Ubuntu not ready. Restart Windows, rerun {0}.'
-    winget_module_missing   = (
-        'Installing the WinGet PowerShell module from PSGallery...'
+    windows_ttyd_left       = (
+        'ttyd for Windows is no longer used and stays installed: `{0}`'
     )
-    winget_module_ok        = 'WinGet PowerShell module {0} is installed.'
-    winget_needs_fixing     = (
-        'WinGet needs repair ({0}). Running Repair-WinGetPackageManager...'
-    )
-    winget_ok               = 'WinGet OK.'
-    winget_ok_now           = 'WinGet repaired.'
+    windows_ttyd_none       = 'No ttyd for Windows.'
     write_runner            = 'Writing the task script'
     wsl_install_failed      = 'Installing WSL failed (exit code {0}).'
     wsl_missing             = 'Installing WSL; approve the Windows prompt.'

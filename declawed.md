@@ -69,6 +69,8 @@ already know. No line numbers are allowed as they are fragile.
 - Provide links to screenshots showing changes in all postmortems.
 - Always ask to have required apt packages installed and do not use any package
 manager without request.
+- Python must not run command line utilities without the maintainer's
+  approval. Use the standard library instead.
 - Python follows PEP 8. Constants go at the top of each `.py` file, after the
   imports, named like `_VALUE_NAME`. Code ordering requirements come before
   code style rules.
@@ -139,22 +141,30 @@ discrepancies as this is a low priority self healing mechanism.
   callees read by dynamic scope. Text lives in `powershell/en-US/i18n.psd1`.
 - `xsjs_util_invoke_native { ... }` logs output and exit code but never
   throws: check `$LASTEXITCODE` after it.
-- Runtime: task `xstation.js` → `conhost.exe --headless` → `powershell.exe
-  -File %LOCALAPPDATA%\xstation.js\serve.ps1` → Windows `ttyd.exe` on 5768
-  → `wsl.exe -e python3 bootstrap.py`. ttyd for Windows cuts its command at
-  256 bytes. That folder also holds the TLS cert and `ttyd.log` (ttyd's
-  stderr, first place to look when start fails); `serve.ps1` holds the
-  password in plain text.
-- `bootstrap.py` takes no argument and runs until a signal ends it, one
-  ASCII JSON object per line each way; `python/bootstrap.html` is its
-  page, served by Linux ttyd with `--index`; `_INPUT_FIELDS` and the
-  page's `FIELDS` hold the messages; `DESIGN.md` describes the protocol.
-  The live server's Windows ttyd still runs it in ttyd's stock page, which
-  only shows its JSON lines.
+- Runtime, as the scripts set it up (not yet run as administrator on
+  2026-10-15): task `xstation.js` → `conhost.exe --headless` →
+  `powershell.exe -File %LOCALAPPDATA%\xstation.js\serve.ps1` →
+  `wsl.exe -e ttyd -p 5769 -i 127.0.0.1` → `python3
+  ~/.cache/xsjs/bootstrap.py ~/.cache/xsjs/modules`, a copy start makes
+  from `python/` on each run. A `netsh` port proxy forwards 5768 (on
+  `127.0.0.1`, or `0.0.0.0` with a password) to Windows' 127.0.0.1:5769,
+  which `wslrelay` carries into WSL. Stop finds that ttyd with `pgrep` by
+  its command line and sends SIGTERM, as ending `wsl.exe` need not end it.
+  That folder also holds the TLS cert and `ttyd.log` (ttyd's stderr, first
+  place to look when start fails); `serve.ps1` holds the password in plain
+  text.
+- `bootstrap.py` takes one argument, the modules directory, and runs
+  until a signal ends it, one ASCII JSON object per line each way;
+  `python/bootstrap.html` is its page, served by Linux ttyd with
+  `--index`; `_INPUT_FIELDS` and the page's `FIELDS` hold the messages.
+  A module runs in an `os.fork` child through `runpy`, never an exec of
+  `python3`, so its pid shows the bootstrapper's command line, and a
+  module named like a standard module the bootstrapper imported gets that
+  one. `restart` execs `sys.orig_argv`. The page keeps ttyd's title and
+  preferences in `window.boot.ttyd`.
 - The page sends nothing before `hello`: until the program sets raw mode
   the terminal echoes input, and setting it discards what waits. It sends
-  a resize only for a changed size, as the kernel sends no SIGWINCH for an
-  equal one.
+  no resize; the bootstrapper reads no size.
 - ttyd with `--credential` answers `/` with 401 but drops `/ws` without
   the Basic header with no HTTP status.
 - When its program exits, Linux ttyd on Ubuntu's libwebsockets 4.3.5 (as
@@ -165,7 +175,10 @@ discrepancies as this is a low priority self healing mechanism.
   program's last output in about half of tries, as in ttyd issue #1429
   (open). ttyd's last release, 1.7.7, the one WinGet installs, dates from
   2024-03-30; Ubuntu 26.04 packages it as 1.7.7-4build1. Windows builds
-  start at 1.7.0.
+  start at 1.7.0 and cut their command at 256 bytes.
+- Ubuntu's `ttyd` package enables `ttyd.service`, which runs
+  `ttyd -W -i lo -p 7681 -O login` as root, set in `/etc/default/ttyd`, on
+  WSL's 10.255.255.254:7681; installing the package starts it.
 - `test_powershell.ps1` (admin) is the whole suite and drives the real
   machine: lint, then stop/install/start/stop, each script in its own
   `powershell.exe`. It ends with a full stop, removing the sign-in task.
@@ -196,21 +209,23 @@ discrepancies as this is a low priority self healing mechanism.
   from the current directory. Scripts set `sys.pycache_prefix` to
   `build/pycache` before importing a sibling module.
 - Screenshots: `python3 python/xsjs_screenshot.py` writes
-  `python/xsjs_screenshot.png` (gitignored) in about 14 s. It clones
+  `python/xsjs_screenshot.png` (gitignored) in about 5 s. It clones
   `../ttyd` and builds it, each only when missing, and never updates them.
-  `../ttyd/build/ttyd` alone serves `bootstrap.html` and `bootstrap.py` on
-  7681, which must be free; Chrome holds a conversation, resizes and
-  closes. It drives headless Windows Chrome or Edge over DevTools through a
+  `../ttyd/build/ttyd` alone serves `bootstrap.html` and `bootstrap.py`,
+  with a modules directory made under `build/`, on 7681, which must be
+  free; Chrome puts and runs a module, types its stdin and closes. It
+  drives headless Windows Chrome or Edge over DevTools through a
   C# relay in `powershell.exe`, as WSL's NAT can't reach Windows'
   127.0.0.1. Chrome reaches WSL's 7681 by localhost forwarding, which lags
   a new listener by about a second. Only the WSL `Browser` module exists.
   `Emulation.setDeviceMetricsOverride` fires `resize` in headless Chrome.
-- `python3 python/test_wire.py` is the wire test, about 40 s: Linux ttyd
-  on `--port 0`, the port read from ttyd's log line.
+- `python3 python/test_wire.py` is the wire test, about 1 s: Linux ttyd
+  on `--port 0`, its port and version read from its log, running a copy
+  of `bootstrap.py` made under `build/`, which the update rung rewrites.
 - Windows Chrome outlives its WSL-side process and keeps its profile; a new
   Chrome on that profile hands off to it and exits silently.
-- ttyd launched straight from WSL fails with `pty_spawn: 0 (No error)`;
-  start it with `Start-Process -NoNewWindow` as `serve.ps1` does.
+- Windows `ttyd.exe` launched straight from WSL fails with
+  `pty_spawn: 0 (No error)`; `Start-Process -NoNewWindow` starts it.
 - Linux ttyd (`../ttyd/build/ttyd`) run from WSL: Windows reaches it on
   `localhost` but not on the PC's LAN address (NAT mode). Bound to WSL's
   127.0.0.1, Windows' 127.0.0.1 reaches it through `wslrelay`, and

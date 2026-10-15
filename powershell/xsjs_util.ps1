@@ -30,7 +30,12 @@ try {
 }
 
 $port_ = 5768
+# Linux ttyd's port on WSL's 127.0.0.1, which a port proxy forwards to.
+$linux_port_ = 5769
 $bootstrap_script_ = 'bootstrap.py'
+$bootstrap_page_ = 'bootstrap.html'
+# Where start installs the bootstrapper, below the Linux user's home.
+$linux_folder_ = '.cache/xsjs'
 $task_name_ = 'xstation.js'
 $firewall_rule_name_ = 'xstation.js'
 # The TLS key and ttyd password live outside the repo, for this user only.
@@ -51,11 +56,51 @@ function xsjs_util_get_credential ([object[]]$arguments_) {
     throw ($i18n_.start_usage -f $script_name_)
 }
 
+# Returns WSL's default distribution's name and state, or nothing if none.
+function xsjs_util_get_distribution {
+    foreach ($line_ in xsjs_util_get_wsl_lines '--list', '--verbose') {
+        if ($line_ -match '^\*\s*(\S+)\s+(\S+)') {
+            $name_ = $Matches[1]
+            $state_ = $Matches[2]
+            # The state is in the display language, so ask which ones run.
+            $list_ = '--list', '--running', '--quiet'
+            return [pscustomobject]@{
+                Name    = $name_
+                State   = $state_
+                Running = $name_ -in @(xsjs_util_get_wsl_lines $list_)
+            }
+        }
+    }
+}
+
 # Returns the SHA256 fingerprint of the certificate's bytes, colon separated.
 function xsjs_util_get_fingerprint ([byte[]]$certificate_) {
     $sha256_ = [Security.Cryptography.SHA256]::Create()
     [BitConverter]::ToString($sha256_.ComputeHash($certificate_)).Replace(
         '-', ':')
+}
+
+# Returns the folder in Linux for the bootstrapper, its page and modules.
+function xsjs_util_get_linux_path {
+    $home_ = xsjs_util_get_wsl 0 '-e', 'printenv', 'HOME'
+    "$home_/$linux_folder_"
+}
+
+# Returns the PID and command line of each ttyd that start runs in Linux.
+function xsjs_util_get_linux_servers ([string]$linux_path_) {
+    # `pgrep` exits 1 when no process matches.
+    $lines_ = xsjs_util_get_wsl 0, 1 '-e', 'pgrep', '-a', '-x', 'ttyd'
+    # Only ttyd with start's options and command, whatever TLS options between.
+    $options_ = (xsjs_util_get_ttyd_options $linux_path_) -join ' '
+    $command_ = (xsjs_util_get_ttyd_command $linux_path_) -join ' '
+    $ordinal_ = [StringComparison]::Ordinal
+    foreach ($line_ in $lines_) {
+        $id_, $command_line_ = $line_ -split ' ', 2
+        if ($command_line_.StartsWith("$options_ ", $ordinal_) -and
+            $command_line_.EndsWith(" $command_", $ordinal_)) {
+            [pscustomobject]@{ Id = [int]$id_; CommandLine = $command_line_ }
+        }
+    }
 }
 
 # Returns the localhost address, HTTPS when there is a credential.
@@ -70,10 +115,35 @@ function xsjs_util_get_markdown_text ([string]$text_) {
     $text_.Replace('\', '\\')
 }
 
-# Returns the ttyd processes serving this port.
-function xsjs_util_get_servers {
-    Get-CimInstance Win32_Process -Filter "Name = 'ttyd.exe'" |
-        Where-Object { $_.CommandLine -match "--port $port_(\s|$)" }
+# Returns the command ttyd runs for each connection, after its options.
+function xsjs_util_get_ttyd_command ([string]$linux_path_) {
+    'python3', "$linux_path_/$bootstrap_script_", "$linux_path_/modules"
+}
+
+# Returns ttyd and its options in Linux, before any for TLS.
+function xsjs_util_get_ttyd_options ([string]$linux_path_) {
+    # `-W` lets input in, `-O` checks Origin. `-i lo` binds 10.255.255.254.
+    'ttyd', '-p', "$linux_port_", '-i', '127.0.0.1', '-W', '-O'
+    '--index', "$linux_path_/$bootstrap_page_"
+}
+
+# Returns the lines WSL prints, throwing unless it exits with one of the codes.
+function xsjs_util_get_wsl ([int[]]$exit_codes_, [string[]]$wsl_arguments_) {
+    $lines_ = @(xsjs_util_get_wsl_lines $wsl_arguments_)
+    if ($LASTEXITCODE -notin $exit_codes_) {
+        $command_ = 'wsl ' + ($wsl_arguments_ -join ' ')
+        $message_ = $i18n_.exit_code -f $command_, $LASTEXITCODE
+        throw ((@($message_) + $lines_) -join "`n")
+    }
+    $lines_
+}
+
+# Returns the lines WSL prints for the arguments, cleaned and without blanks.
+function xsjs_util_get_wsl_lines ([string[]]$wsl_arguments_) {
+    $ErrorActionPreference = 'Continue'
+    & wsl.exe @wsl_arguments_ 2>&1 |
+        ForEach-Object { "$_".Replace("`0", '').Trim() } |
+        Where-Object { $_ }
 }
 
 # Runs a native command and logs its exit code and output, never throwing.
@@ -120,6 +190,35 @@ function xsjs_util_remove_firewall_rule {
     }
 }
 
+# Removes each port proxy from the port to Linux ttyd, logging either way.
+function xsjs_util_remove_proxy {
+    $path_ = 'HKLM:\SYSTEM\CurrentControlSet\Services\PortProxy\v4tov4\tcp'
+    $names_ = @()
+    if (Test-Path $path_) {
+        $key_ = Get-Item $path_
+        # A value's name is where it listens, its data where it connects.
+        $names_ = @(
+            $key_.GetValueNames() | Where-Object {
+                $_ -like "*/$port_" -and
+                $key_.GetValue($_) -eq "127.0.0.1/$linux_port_"
+            }
+        )
+    }
+    foreach ($name_ in $names_) {
+        $address_ = ($name_ -split '/')[0]
+        $delete_ = @(
+            'interface', 'portproxy', 'delete', 'v4tov4'
+            "listenaddress=$address_", "listenport=$port_"
+        )
+        xsjs_util_invoke_native { netsh @delete_ }
+        if ($LASTEXITCODE -ne 0) {
+            throw ($i18n_.proxy_remove_failed -f $address_, $port_)
+        }
+        xsjs_util_write_log ($i18n_.proxy_removed -f $address_, $port_)
+    }
+    if (-not $names_) { xsjs_util_write_log ($i18n_.proxy_none -f $port_) }
+}
+
 # Throws unless this PowerShell runs as administrator.
 function xsjs_util_step_check_administrator {
     xsjs_util_write_log_section $i18n_.check_administrator
@@ -132,24 +231,37 @@ function xsjs_util_step_check_administrator {
     xsjs_util_write_log ($i18n_.administrator_ok -f $identity_.Name)
 }
 
-# Stops the scheduled task and any ttyd serving this port.
+# Stops the ttyd that the task runs in Linux, then the task.
 function xsjs_util_step_stop_server {
     xsjs_util_write_log_section ($i18n_.stop_server -f $port_)
+    $ids_ = @()
+    $distribution_ = xsjs_util_get_distribution
+    # Linux runs no ttyd while its default distribution is stopped.
+    if ($distribution_ -and $distribution_.Running) {
+        $path_ = xsjs_util_get_linux_path
+        $ids_ = @(xsjs_util_get_linux_servers $path_ | ForEach-Object Id)
+    }
+    if ($ids_) {
+        # Ending `wsl.exe` need not end ttyd in Linux, so signal ttyd itself.
+        xsjs_util_invoke_native { wsl -e kill -TERM @ids_ }
+        if ($LASTEXITCODE -ne 0) {
+            throw ($i18n_.ttyd_stop_failed -f ($ids_ -join ', '))
+        }
+        $left_ = $ids_
+        for ($try_ = 0; $left_ -and $try_ -lt 30; $try_++) {
+            Start-Sleep -Milliseconds 500
+            $left_ = @(xsjs_util_get_linux_servers $path_)
+        }
+        if ($left_) { throw ($i18n_.ttyd_not_stopped -f ($ids_ -join ', ')) }
+        xsjs_util_write_log ($i18n_.ttyd_stopped -f ($ids_ -join ', '))
+    }
     $task_ = @{ TaskName = $task_name_; ErrorAction = 'SilentlyContinue' }
     $running_ = (Get-ScheduledTask @task_).State -eq 'Running'
     if ($running_) {
         Stop-ScheduledTask -TaskName $task_name_
         xsjs_util_write_log ($i18n_.task_stopped -f $task_name_)
     }
-    # Also stop any ttyd on this port, as one may outlive or bypass the task.
-    $servers_ = @(xsjs_util_get_servers)
-    foreach ($server_ in $servers_) {
-        Stop-Process -Id $server_.ProcessId -Force
-        xsjs_util_write_log ($i18n_.ttyd_stopped -f $server_.ProcessId)
-    }
-    if ($servers_) {
-        Start-Sleep -Seconds 1
-    } elseif (-not $running_) {
+    if (-not $ids_ -and -not $running_) {
         xsjs_util_write_log $i18n_.server_not_running
     }
 }

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Serves bootstrap.py in a web terminal (ttyd, which serves xterm.js) on
+# Serves bootstrap.py with its page, bootstrap.html, through ttyd in WSL on
 # port 5768, now and whenever you sign in to Windows. Run
 # xsjs_install.ps1 once first, then run this from an administrator
 # PowerShell:
@@ -10,11 +10,16 @@
 #     .\xsjs_start.ps1                    http://localhost:5768/
 #     .\xsjs_start.ps1 username:password  https://<this PC>:5768/
 #
-# With a username and password, ttyd serves HTTPS on every network
-# interface and asks for them, and a Windows Firewall rule lets other
-# computers in. The TLS certificate is self-signed, so browsers warn about
-# it the first time: check the fingerprint they show against the one this
-# script prints.
+# Each run copies both files from python\ into ~/.cache/xsjs in Linux,
+# which also holds the modules folder, and ttyd runs that copy on port 5769
+# of WSL's 127.0.0.1. A Windows port proxy forwards port 5768 to it.
+#
+# With a username and password, ttyd serves HTTPS and asks for them, the
+# port proxy listens on every network interface, and a Windows Firewall
+# rule lets other computers in. Without, the port proxy listens on
+# 127.0.0.1 only. The TLS certificate is self-signed, so browsers warn
+# about it the first time: check the fingerprint they show against the one
+# this script prints.
 #
 # Run it again to change the settings. Stop it with xsjs_stop.ps1.
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
@@ -26,21 +31,20 @@ param()
 
 # Read `$args`, not `param()`, so a password may start with `-`.
 $arguments_ = $args
-# Where bootstrap.py is, and where ttyd runs it.
+# Where bootstrap.py and bootstrap.html are copied from.
 $python_path_ = Join-Path $PSScriptRoot 'python'
 
-# Throws unless the script, ttyd, Python 3 and, for HTTPS, OpenSSL are present.
+# Throws unless the files, ttyd, Python 3 and, for HTTPS, OpenSSL are present.
 function _xsjs_start_step_check_installed {
     xsjs_util_write_log_section $i18n_.check_installed
-    $script_path_ = Join-Path $python_path_ $bootstrap_script_
-    if (-not (Test-Path $script_path_)) {
-        throw ($i18n_.bootstrap_missing -f $script_path_)
+    foreach ($name_ in $bootstrap_script_, $bootstrap_page_) {
+        $path_ = Join-Path $python_path_ $name_
+        if (-not (Test-Path $path_)) {
+            throw ($i18n_.bootstrap_missing -f $path_)
+        }
     }
-    xsjs_util_update_path
-    if (-not (Get-Command ttyd -ErrorAction SilentlyContinue)) {
-        throw ($i18n_.not_installed -f 'ttyd')
-    }
-    xsjs_util_invoke_native { ttyd --version }
+    xsjs_util_invoke_native { wsl -e ttyd --version }
+    if ($LASTEXITCODE -ne 0) { throw ($i18n_.not_installed -f 'ttyd') }
     xsjs_util_invoke_native { wsl -e python3 --version }
     if ($LASTEXITCODE -ne 0) { throw ($i18n_.not_installed -f 'Python 3') }
     if ($credential_) {
@@ -49,25 +53,53 @@ function _xsjs_start_step_check_installed {
     }
 }
 
-# Throws if any process listens on the port.
+# Removes the port proxy, then throws if a process keeps either port.
 function _xsjs_start_step_check_port {
-    xsjs_util_write_log_section ($i18n_.check_port -f $port_)
-    $owner_ = _xsjs_start_get_listener
-    if ($owner_) {
-        throw ($i18n_.port_in_use -f $port_, $owner_.ProcessName, $owner_.Id)
+    xsjs_util_write_log_section ($i18n_.check_port -f $port_, $linux_port_)
+    xsjs_util_remove_proxy
+    foreach ($port_number_ in $port_, $linux_port_) {
+        # A closed port proxy or `wslrelay` frees its port a moment later.
+        $owner_ = _xsjs_start_get_listener $port_number_
+        for ($try_ = 0; $owner_ -and $try_ -lt 30; $try_++) {
+            Start-Sleep -Milliseconds 500
+            $owner_ = _xsjs_start_get_listener $port_number_
+        }
+        if ($owner_) {
+            $in_use_ = $i18n_.port_in_use -f (
+                $port_number_, $owner_.ProcessName, $owner_.Id)
+            throw $in_use_
+        }
+        xsjs_util_write_log ($i18n_.port_free -f $port_number_)
     }
-    xsjs_util_write_log ($i18n_.port_free -f $port_)
 }
 
-# Returns the process listening on the port, if any.
-function _xsjs_start_get_listener {
+# Returns the process listening on the port in Windows, if any.
+function _xsjs_start_get_listener ([int]$port_number_) {
     $connection_ = @{
-        LocalPort   = $port_
+        LocalPort   = $port_number_
         State       = 'Listen'
         ErrorAction = 'SilentlyContinue'
     }
     $listener_ = Get-NetTCPConnection @connection_ | Select-Object -First 1
     if ($listener_) { Get-Process -Id $listener_.OwningProcess }
+}
+
+# Copies the bootstrapper and its page from the checkout into Linux.
+function _xsjs_start_step_install_bootstrap {
+    xsjs_util_write_log_section $i18n_.install_bootstrap
+    $modules_ = "$linux_path_/modules"
+    xsjs_util_invoke_native { wsl -e mkdir -p $modules_ }
+    if ($LASTEXITCODE -ne 0) {
+        throw ($i18n_.bootstrap_not_installed -f $linux_path_)
+    }
+    $copy_ = 'cp', $bootstrap_script_, $bootstrap_page_, $linux_path_
+    xsjs_util_invoke_native { wsl --cd $python_path_ -e @copy_ }
+    if ($LASTEXITCODE -ne 0) {
+        throw ($i18n_.bootstrap_not_installed -f $linux_path_)
+    }
+    $installed_ = $i18n_.bootstrap_installed -f (
+        $bootstrap_script_, $bootstrap_page_, $linux_path_)
+    xsjs_util_write_log $installed_
 }
 
 # Keeps or makes the TLS certificate and returns its fingerprint.
@@ -140,33 +172,49 @@ function _xsjs_start_step_close_firewall {
     xsjs_util_remove_firewall_rule
 }
 
+# Forwards the port to Linux ttyd, from other computers only for HTTPS.
+function _xsjs_start_step_add_proxy {
+    xsjs_util_write_log_section ($i18n_.add_proxy -f $port_, $linux_port_)
+    $address_ = '127.0.0.1'
+    if ($credential_) { $address_ = '0.0.0.0' }
+    # Windows' 127.0.0.1 reaches WSL's through `wslrelay`.
+    $add_ = @(
+        'interface', 'portproxy', 'add', 'v4tov4'
+        "listenaddress=$address_", "listenport=$port_"
+        'connectaddress=127.0.0.1', "connectport=$linux_port_"
+    )
+    xsjs_util_invoke_native { netsh @add_ }
+    if ($LASTEXITCODE -ne 0) { throw $i18n_.proxy_failed }
+    $added_ = $i18n_.proxy_added -f $address_, $port_, $linux_port_
+    xsjs_util_write_log $added_
+}
+
 # Writes the runner, the script the task runs to start ttyd with the settings.
 function _xsjs_start_step_write_runner {
     xsjs_util_write_log_section $i18n_.write_runner
-    $ttyd_path_ = (Get-Command ttyd).Source
-    $ttyd_arguments_ = @(
-        '--port', $port_
-        '--cwd', $python_path_
-        '--writable'
-        '--check-origin'
-    )
+    $wsl_path_ = (Get-Command wsl.exe).Source
+    $tls_ = @()
     if ($credential_) {
-        $ttyd_arguments_ += @(
+        # ttyd in Linux reads the certificate and key from Windows' drive.
+        $state_ = xsjs_util_get_wsl 0 '-e', 'wslpath', '-u', $state_path_
+        $tls_ = @(
             '--ssl'
-            '--ssl-cert', $certificate_path_
-            '--ssl-key', $key_path_
-            '--credential', $credential_
+            '--ssl-cert', "$state_/$(Split-Path -Leaf $certificate_path_)"
+            '--ssl-key', "$state_/$(Split-Path -Leaf $key_path_)"
+            '-c', $credential_
         )
-    } else {
-        $ttyd_arguments_ += '--interface', '127.0.0.1'
     }
-    # Windows ttyd cuts commands at 256 bytes, so `--cwd` gives the directory.
-    $ttyd_arguments_ += 'wsl.exe', '-e', 'python3', $bootstrap_script_
+    $wsl_arguments_ = @(
+        '-e'
+        xsjs_util_get_ttyd_options $linux_path_
+        $tls_
+        xsjs_util_get_ttyd_command $linux_path_
+    )
     $command_line_ = @(
-        $ttyd_arguments_ | ForEach-Object { _xsjs_start_quote_argument $_ }
+        $wsl_arguments_ | ForEach-Object { _xsjs_start_quote_argument $_ }
     ) -join ' '
     $shown_ = @(
-        $ttyd_arguments_ | ForEach-Object {
+        $wsl_arguments_ | ForEach-Object {
             if ($credential_ -and $_ -ceq $credential_) {
                 $i18n_.credential_hidden
             } else {
@@ -174,13 +222,13 @@ function _xsjs_start_step_write_runner {
             }
         }
     ) -join ' '
-    xsjs_util_write_log ('`{0} {1}`' -f $ttyd_path_, $shown_)
+    xsjs_util_write_log ('`{0} {1}`' -f $wsl_path_, $shown_)
 
     $runner_ = @(
         '# ' + ($i18n_.runner_comment -f $task_name_)
         '$server_ = @{'
         '    FilePath              = ' +
-        (_xsjs_start_quote_literal $ttyd_path_)
+        (_xsjs_start_quote_literal $wsl_path_)
         '    ArgumentList          = ' +
         (_xsjs_start_quote_literal $command_line_)
         '    WorkingDirectory      = ' +
@@ -219,7 +267,7 @@ function _xsjs_start_step_register_task {
     $user_ = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     $system_ = Join-Path $env:SystemRoot 'System32'
     $powershell_ = Join-Path $system_ 'WindowsPowerShell\v1.0\powershell.exe'
-    # `conhost --headless` runs PowerShell, and so ttyd, without a window.
+    # `conhost --headless` runs PowerShell, and so `wsl.exe`, without a window.
     $action_ = @{
         Execute  = Join-Path $system_ 'conhost.exe'
         Argument = (
@@ -259,24 +307,32 @@ function _xsjs_start_step_start_task {
     xsjs_util_write_log_section ($i18n_.start_server -f $port_)
     Remove-Item $ttyd_log_path_ -ErrorAction SilentlyContinue
     Start-ScheduledTask -TaskName $task_name_
-    $listener_ = $null
-    for ($try_ = 0; -not $listener_ -and $try_ -lt 30; $try_++) {
+    # `wslrelay` listens in Windows once ttyd listens in Linux.
+    $relay_ = $null
+    for ($try_ = 0; -not $relay_ -and $try_ -lt 30; $try_++) {
         Start-Sleep -Milliseconds 500
-        $listener_ = _xsjs_start_get_listener
+        $relay_ = _xsjs_start_get_listener $linux_port_
     }
-    if (-not $listener_) {
+    if (-not $relay_) {
         $result_ = (Get-ScheduledTaskInfo -TaskName $task_name_).LastTaskResult
         $log_text_ = ''
         if (Test-Path $ttyd_log_path_) {
             $log_text_ = Get-Content $ttyd_log_path_ -Raw
         }
         $message_ = $i18n_.server_not_listening -f (
-            $port_, $result_, $ttyd_log_path_)
+            $linux_port_, $result_, $ttyd_log_path_)
         throw "$message_`r`n$log_text_"
     }
+    $ids_ = @(xsjs_util_get_linux_servers $linux_path_ | ForEach-Object Id)
     $listening_ = $i18n_.server_listening -f (
-        $port_, $listener_.Id, $ttyd_log_path_)
+        $linux_port_, ($ids_ -join ', '), $relay_.ProcessName, $relay_.Id,
+        $ttyd_log_path_)
     xsjs_util_write_log $listening_
+    $proxy_ = _xsjs_start_get_listener $port_
+    if (-not $proxy_) { throw ($i18n_.proxy_not_listening -f $port_) }
+    $forwarding_ = $i18n_.proxy_listening -f (
+        $port_, $proxy_.ProcessName, $proxy_.Id)
+    xsjs_util_write_log $forwarding_
 }
 
 # Returns the addresses to open: localhost, or this PC's name and addresses.
@@ -305,8 +361,10 @@ function _xsjs_start_main {
 
     xsjs_util_step_check_administrator
     _xsjs_start_step_check_installed
+    $linux_path_ = xsjs_util_get_linux_path
     xsjs_util_step_stop_server
     _xsjs_start_step_check_port
+    _xsjs_start_step_install_bootstrap
     $fingerprint_ = $null
     if ($credential_) {
         $fingerprint_ = _xsjs_start_step_make_certificate
@@ -314,6 +372,7 @@ function _xsjs_start_main {
     } else {
         _xsjs_start_step_close_firewall
     }
+    _xsjs_start_step_add_proxy
     _xsjs_start_step_write_runner
     _xsjs_start_step_register_task
     _xsjs_start_step_start_task

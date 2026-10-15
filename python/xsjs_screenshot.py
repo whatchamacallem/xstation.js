@@ -3,10 +3,14 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Holds a conversation with bootstrap.py from Chrome through bootstrap.html,
-# typing and clicking as a person would, resizes the page, closes it once
-# all the page's checks pass, then saves a screenshot of the whole page.
-# ttyd, from a checkout of ttyd beside this project, serves them:
+# Drives bootstrap.html in Chrome as a person would: types update.py with
+# the time of day in it, puts it, runs it with arguments, types a line to
+# its stdin, checks what it printed against this script's own
+# measurements, closes the page once it exits, checks the program is gone,
+# then saves a screenshot of the whole page. ttyd, from a checkout of ttyd
+# beside this project, serves the page and runs bootstrap.py on a modules
+# directory made under build/ for the run; its log goes to stderr as it
+# comes:
 #
 #     python3 python/xsjs_screenshot.py
 #     python3 python/xsjs_screenshot.py --typing 'héllo' --out shot.png
@@ -27,12 +31,11 @@ import hashlib
 import json
 import os
 import platform
-import pwd
-import re
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Generator
 from types import FrameType, ModuleType
@@ -47,13 +50,12 @@ sys.pycache_prefix = os.path.join(
     os.path.dirname(_PYTHON_PATH), "build", "pycache"
 )
 
-# The program and the page ttyd serves, from `_PYTHON_PATH`.
-_BOOTSTRAP_ARGUMENTS = ["python3", "bootstrap.py"]
-_BOOTSTRAP_PAGE_NAME = "bootstrap.html"
+# The program and the page ttyd serves.
+_BOOTSTRAP_PATH = os.path.join(_PYTHON_PATH, "bootstrap.py")
+_BOOTSTRAP_PAGE_PATH = os.path.join(_PYTHON_PATH, "bootstrap.html")
 
-# What it asks calc, and the answer as this script computes it.
-_CALC_EXPRESSION = "(2**10 + 6*7) / 2"
-_CALC_VALUE = (2**10 + 6 * 7) / 2
+# Where the modules directory of each run goes.
+_BUILD_PATH = os.path.join(os.path.dirname(_PYTHON_PATH), "build")
 
 # Returns the middle of the element with the id, where a person clicks.
 _CENTER_SCRIPT = """id => {
@@ -70,9 +72,6 @@ _ENTER_KEY: dict[str, str | int] = {
     "windowsVirtualKeyCode": 13,
 }
 
-# How bootstrap.html shows a command's exit in its conversation.
-_EXIT_PATTERN = re.compile(r"exit code -?\d+, \d+ lines(, cancelled)?")
-
 # Waits until the page has drawn what it holds.
 _FRAMES_DRAWN_SCRIPT = (
     "new Promise(done => requestAnimationFrame("
@@ -80,6 +79,32 @@ _FRAMES_DRAWN_SCRIPT = (
 )
 
 _IMAGE_NAME = "xsjs_screenshot.png"
+
+# The module typed into the page, its arguments, and its text with a stamp.
+_MODULE_ARGS = ["--who", "demo", "42"]
+_MODULE_NAME = "update.py"
+_MODULE_SOURCE = """\
+import os
+import sys
+
+STAMP = "{stamp}"
+
+
+def main(args):
+    print("stamp", STAMP)
+    print("argv", args)
+    print("bootstrap", os.environ["XSJS_BOOTSTRAP"])
+    print("modules", os.environ["XSJS_MODULES"])
+    here = os.path.dirname(os.path.abspath(__file__))
+    print("dir", here)
+    for name in sorted(os.listdir(here)):
+        print(os.path.getsize(os.path.join(here, name)), name)
+    print("stdin", sys.stdin.readline(), end="")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
+"""
 
 # Returns the viewport's size and how far the page's scrolling parts overflow.
 _PAGE_OVERFLOW_SCRIPT = """(() => {
@@ -102,10 +127,7 @@ _POLL_SECONDS = 0.1
 
 _REFUSED_ERROR_TEXT = "net::ERR_CONNECTION_REFUSED"
 
-# vmstat's two header lines, then three samples a second apart.
-_RUN_LINES_BEFORE_CANCEL = 5
-
-# Covers Chrome's slow first start on a new profile and all the page's checks.
+# Covers Chrome's slow first start on a new profile and the whole drive.
 _RUN_TIMEOUT_SECONDS = 180
 
 _SERVER_WAIT_SECONDS = 60
@@ -124,118 +146,12 @@ _TYPING_DEFAULT = "h\u00e9llo w\u00f6rld \u00a9 2026"
 
 _VIEWPORT_HEIGHT_PX = 720
 _VIEWPORT_WIDTH_PX = 1280
-# The size the viewport is resized to.
-_VIEWPORT_RESIZED_HEIGHT_PX = 1080
-_VIEWPORT_RESIZED_WIDTH_PX = 1920
 
 _WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 _WEBSOCKET_OPCODE_CLOSE = 0x8
 _WEBSOCKET_OPCODE_PING = 0x9
 _WEBSOCKET_OPCODE_PONG = 0xA
 _WEBSOCKET_OPCODE_TEXT = 0x1
-
-
-# bootstrap.html in the browser, read through its `window.xsjs`.
-class BootstrapPage:
-    # Holds the DevTools connection and the conversation read so far.
-    def __init__(self, devtools: DevTools) -> None:
-        self.devtools = devtools
-        self.conversation: list[dict[str, str]] = []
-        # How many of the conversation's entries are printed.
-        self.printed = 0
-
-    # Clicks the element with the id at its middle, as a mouse would.
-    def click(self, element_id: str) -> None:
-        x, y = self.devtools.evaluate(
-            f"({_CENTER_SCRIPT})({json.dumps(element_id)})"
-        )
-        self.devtools.call(
-            "Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y}
-        )
-        for event_type in ("mousePressed", "mouseReleased"):
-            self.devtools.call(
-                "Input.dispatchMouseEvent",
-                {
-                    "type": event_type,
-                    "x": x,
-                    "y": y,
-                    "button": "left",
-                    "clickCount": 1,
-                },
-            )
-
-    # Returns the index of the first matching entry from start, once it comes.
-    def entry_wait(
-        self, start: int, match: Callable[[dict[str, str]], bool]
-    ) -> int:
-        self.wait(
-            lambda results: any(
-                match(entry) for entry in results["conversation"][start:]
-            )
-        )
-        return next(
-            index
-            for index in range(start, len(self.conversation))
-            if match(self.conversation[index])
-        )
-
-    # Fails on the page's failure, adding ttyd's version when ttyd is at fault.
-    def failure_check(self, results: dict[str, Any]) -> None:
-        failure = results["failure"]
-        if failure is None:
-            return
-        message = (
-            f"the page's {failure['check']} check failed: {failure['detail']}"
-        )
-        closed = results["closed"]
-        if closed is not None and closed["code"] != _CLOSE_CODE_NORMAL:
-            message += f" ({ttyd_version(_TTYD_PATH)})"
-        raise RuntimeError(message)
-
-    # Returns the next entry's text, the program's reply while no command runs.
-    def reply(self, index: int) -> str:
-        index = self.entry_wait(index + 1, lambda entry: True)
-        return self.conversation[index]["text"]
-
-    # Types the line and presses Enter. Returns the index of the person's line.
-    def say(self, text: str) -> int:
-        start = len(self.conversation)
-        self.devtools.call("Input.insertText", {"text": text})
-        self.devtools.call(
-            "Input.dispatchKeyEvent",
-            {"type": "keyDown", "text": "\r", "unmodifiedText": "\r"}
-            | _ENTER_KEY,
-        )
-        self.devtools.call(
-            "Input.dispatchKeyEvent", {"type": "keyUp"} | _ENTER_KEY
-        )
-        index = self.entry_wait(start, lambda entry: entry["who"] == "person")
-        if self.conversation[index]["text"] != text:
-            raise RuntimeError(
-                f"typed {text!r}, the page sent"
-                f" {self.conversation[index]['text']!r}"
-            )
-        return index
-
-    # Returns the results once the condition holds, printing the conversation.
-    def wait(
-        self, condition: Callable[[dict[str, Any]], bool]
-    ) -> dict[str, Any]:
-        while True:
-            results: dict[str, Any] | None = self.devtools.evaluate(
-                "window.xsjs"
-            )
-            # None until the page's script has run.
-            if results is not None:
-                self.conversation = results["conversation"]
-                for entry in self.conversation[self.printed :]:
-                    prefix = "> " if entry["who"] == "person" else ""
-                    print(prefix + entry["text"], flush=True)
-                self.printed = len(self.conversation)
-                self.failure_check(results)
-                if condition(results):
-                    return results
-            time.sleep(_POLL_SECONDS)
 
 
 class DevTools:
@@ -389,9 +305,23 @@ def browser_module() -> ModuleType | None:
     return None
 
 
-# Returns a condition that holds once the page's check of the name passes.
-def check_passed(name: str) -> Callable[[dict[str, Any]], bool]:
-    return lambda results: results["checks"][name]["state"] == "pass"
+# Clicks the element with the id at its middle, as a mouse would.
+def click(devtools: DevTools, element_id: str) -> None:
+    x, y = devtools.evaluate(f"({_CENTER_SCRIPT})({json.dumps(element_id)})")
+    devtools.call(
+        "Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y}
+    )
+    for event_type in ("mousePressed", "mouseReleased"):
+        devtools.call(
+            "Input.dispatchMouseEvent",
+            {
+                "type": event_type,
+                "x": x,
+                "y": y,
+                "button": "left",
+                "clickCount": 1,
+            },
+        )
 
 
 # Runs a command to its end, its output going to stderr.
@@ -409,112 +339,6 @@ def command_run(arguments: list[str], cwd: str) -> None:
         )
 
 
-# Says each line to bootstrap.py, checking replies. Returns the pid from stat.
-def conversation_hold(page: BootstrapPage, typing: str) -> int:
-    page.reply(page.say("help"))
-    before = datetime.datetime.now(datetime.UTC)
-    reply = page.reply(page.say("time"))
-    after = datetime.datetime.now(datetime.UTC)
-    found = re.fullmatch(r"local: (\S+)\nUTC: (\S+)", reply)
-    if found is None:
-        raise RuntimeError(f"time: the program replied {reply!r}")
-    local, utc = map(datetime.datetime.fromisoformat, found.groups())
-    if not (
-        local == utc
-        and utc.utcoffset() == datetime.timedelta()
-        and before <= utc <= after
-    ):
-        raise RuntimeError(
-            f"time: the program replied {reply!r}, not one instant from"
-            f" {before.isoformat()} to {after.isoformat()}"
-        )
-    reply_check(
-        "whoami",
-        page.reply(page.say("whoami")),
-        f"user: {pwd.getpwuid(os.getuid()).pw_name}\nuid: {os.getuid()}\n"
-        f"cwd: {os.path.realpath(_PYTHON_PATH)}",
-    )
-    reply = page.reply(page.say("stat"))
-    figures = {
-        name: value
-        for name, _, value in (
-            line.partition(": ") for line in reply.split("\n")
-        )
-    }
-    uname = os.uname()
-    if (figures.get("hostname"), figures.get("kernel")) != (
-        uname.nodename,
-        uname.release,
-    ):
-        raise RuntimeError(
-            f"stat: the program replied {reply!r} where hostname"
-            f" {uname.nodename} and kernel {uname.release} were due"
-        )
-    session_pid = int(figures["pid"])
-    reply_check(
-        "ls",
-        page.reply(page.say("ls")),
-        listing_text(os.path.realpath(_PYTHON_PATH)),
-    )
-    line = f"calc {_CALC_EXPRESSION}"
-    reply_check(line, page.reply(page.say(line)), str(_CALC_VALUE))
-    line = f"sha256 {typing}"
-    reply_check(
-        line,
-        page.reply(page.say(line)),
-        hashlib.sha256(typing.encode()).hexdigest(),
-    )
-    line = f"echo {typing}"
-    reply_check(
-        line,
-        page.reply(page.say(line)),
-        f"{typing}\n{len(typing)} characters,"
-        f" {len(typing.encode())} bytes in UTF-8",
-    )
-    run_index = page.say("run vmstat 1")
-    run_pid = started_pid(page, run_index, "vmstat 1")
-    # Its lines follow the person's run and its reply.
-    page.wait(
-        lambda results: (
-            len(results["conversation"])
-            >= run_index + 2 + _RUN_LINES_BEFORE_CANCEL
-        )
-    )
-    cancel_index = page.say("cancel")
-    reply_index = page.entry_wait(
-        cancel_index + 1, lambda entry: entry["text"].startswith("cancel")
-    )
-    reply_check(
-        "cancel",
-        page.conversation[reply_index]["text"],
-        f"cancelled pid {run_pid}",
-    )
-    exit_index = page.entry_wait(reply_index + 1, entry_exit)
-    # Less the person's cancel and its reply.
-    lines = exit_index - (run_index + 2) - 2
-    reply_check(
-        "cancel",
-        page.conversation[exit_index]["text"],
-        f"exit code {-signal.SIGTERM}, {lines} lines, cancelled",
-    )
-    page.wait(check_passed("cancel"))
-    run_index = page.say("run ls -l /")
-    started_pid(page, run_index, "ls -l /")
-    exit_index = page.entry_wait(run_index + 2, entry_exit)
-    reply_check(
-        "run ls -l /",
-        page.conversation[exit_index]["text"],
-        f"exit code 0, {exit_index - run_index - 2} lines",
-    )
-    page.reply(page.say("count"))
-    return session_pid
-
-
-# Returns whether the conversation's entry is a command's exit.
-def entry_exit(entry: dict[str, str]) -> bool:
-    return _EXIT_PATTERN.fullmatch(entry["text"]) is not None
-
-
 # Decodes the base64 image into the path, making its directory as needed.
 def image_save(image_path: str, data: str) -> None:
     image_dir = os.path.dirname(image_path)
@@ -524,15 +348,20 @@ def image_save(image_path: str, data: str) -> None:
         image_file.write(base64.b64decode(data))
 
 
-# Returns the directory's entries as bootstrap.py's ls gives them, sorted.
-def listing_text(path: str) -> str:
-    lines: list[str] = []
-    with os.scandir(path) as iterator:
-        for entry in sorted(iterator, key=lambda entry: entry.name):
-            size = entry.stat(follow_symlinks=False).st_size
-            slash = "/" if entry.is_dir(follow_symlinks=False) else ""
-            lines.append(f"{size} {entry.name}{slash}")
-    return "\n".join(lines)
+# Returns the directory's entries with their sizes, as update.py prints them.
+def listing_lines(path: str) -> list[str]:
+    return [
+        f"{os.path.getsize(os.path.join(path, name))} {name}"
+        for name in sorted(os.listdir(path))
+    ]
+
+
+# Clicks the element with the id and types the text into it.
+def field_type(devtools: DevTools, element_id: str, text: str) -> None:
+    click(devtools, element_id)
+    if devtools.evaluate("document.activeElement.id") != element_id:
+        raise RuntimeError(f"clicking the page's {element_id} didn't focus it")
+    devtools.call("Input.insertText", {"text": text})
 
 
 # Grows the viewport until no part scrolls, so a screenshot holds the page.
@@ -549,58 +378,153 @@ def page_fit(devtools: DevTools) -> None:
 
 # Drives the page as a person would and saves a PNG. Returns the close detail.
 def page_meet(
-    devtools: DevTools, url: str, typing: str, image_path: str, ttyd_pid: int
+    devtools: DevTools,
+    typing: str,
+    image_path: str,
+    ttyd_pid: int,
+    modules_path: str,
 ) -> str:
     devtools.page_attach()
     viewport_set(devtools, _VIEWPORT_WIDTH_PX, _VIEWPORT_HEIGHT_PX)
     # A headless page has no focus to type into unless it pretends to.
     devtools.call("Emulation.setFocusEmulationEnabled", {"enabled": True})
-    page_navigate(devtools, url)
-    page = BootstrapPage(devtools)
-    page.wait(check_passed("hello"))
-    page.click("say")
-    if devtools.evaluate("document.activeElement.id") != "say":
-        raise RuntimeError("clicking the page's input didn't focus it")
-    session_pid = conversation_hold(page, typing)
-    viewport_set(
-        devtools, _VIEWPORT_RESIZED_WIDTH_PX, _VIEWPORT_RESIZED_HEIGHT_PX
+    page_navigate(devtools, _TTYD_PAGE_URL)
+    results = page_wait(devtools, lambda results: results["modules"] == [])
+    ttyd = results["ttyd"]
+    print(f"ttyd title {ttyd['title']}", flush=True)
+    print(f"ttyd preferences {json.dumps(ttyd['preferences'])}", flush=True)
+    hello = results["hellos"][0]
+    print(
+        f"hello pid {hello['pid']} python {hello['python']} bootstrap"
+        f" {hello['bootstrap']} sha256 {hello['sha256']} modules"
+        f" {hello['modules']}",
+        flush=True,
     )
-    page.wait(check_passed("size"))
-    page.wait(
-        lambda results: all(
-            check["state"] == "pass"
-            for name, check in results["checks"].items()
-            if name != "close"
-        )
-    )
-    pids = session_pids(ttyd_pid)
-    if pids != [session_pid]:
+    with open(_BOOTSTRAP_PATH, "rb") as bootstrap_file:
+        digest = hashlib.sha256(bootstrap_file.read()).hexdigest()
+    expected_hello = {
+        "bootstrap": _BOOTSTRAP_PATH,
+        "sha256": digest,
+        "modules": modules_path,
+    }
+    for name, value in expected_hello.items():
+        if hello[name] != value:
+            raise RuntimeError(f"hello's {name} is {hello[name]}, not {value}")
+    command = ttyd_command(modules_path)
+    pids = program_pids(ttyd_pid, command)
+    if pids != [hello["pid"]]:
         raise RuntimeError(
-            f"ttyd runs bootstrap.py as pids {pids}, where the"
-            f" page's program is pid {session_pid}"
+            f"ttyd runs {' '.join(command)} as pids {pids}, where the page's"
+            f" program is pid {hello['pid']}"
         )
-    page.click("close")
-    results = page.wait(
+    stamp = datetime.datetime.now(datetime.UTC).isoformat()
+    source = _MODULE_SOURCE.format(stamp=stamp)
+    field_type(devtools, "name", _MODULE_NAME)
+    field_type(devtools, "args", " ".join(_MODULE_ARGS))
+    field_type(devtools, "source", source)
+    typed = devtools.evaluate("document.getElementById('source').value")
+    if typed != source:
+        raise RuntimeError(
+            f"the page holds {len(typed)} characters of source where"
+            f" {len(source)} were typed"
+        )
+    click(devtools, "put")
+    results = page_wait(
+        devtools,
         lambda results: (
-            results["closed"] is not None
-            and results["closed"]["code"] == _CLOSE_CODE_NORMAL
-            and results["checks"]["close"]["state"] == "pass"
+            len(results["saves"]) == 1 and len(results["modules"]) == 1
+        ),
+    )
+    saved = results["saves"][0]
+    data = source.encode()
+    expected_saved = {
+        "type": "saved",
+        "name": _MODULE_NAME,
+        "bytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
+    if saved != expected_saved:
+        raise RuntimeError(f"saved {saved} where {expected_saved} was due")
+    with open(os.path.join(modules_path, _MODULE_NAME), "rb") as module_file:
+        if module_file.read() != data:
+            raise RuntimeError(
+                f"{_MODULE_NAME} on disk differs from what was put"
+            )
+    print(
+        f"saved {_MODULE_NAME} {saved['bytes']} bytes sha256"
+        f" {saved['sha256']}",
+        flush=True,
+    )
+    click(devtools, "run")
+    printed = "".join(
+        f"{line}\n"
+        for line in (
+            f"stamp {stamp}",
+            f"argv {_MODULE_ARGS!r}",
+            f"bootstrap {_BOOTSTRAP_PATH}",
+            f"modules {modules_path}",
+            f"dir {modules_path}",
+            *listing_lines(modules_path),
         )
     )
+    # The module waits on stdin after its listing, unless it failed first.
+    results = page_wait(
+        devtools,
+        lambda results: (
+            results["exit"] is not None or results["stdout"] == printed
+        ),
+    )
+    if results["exit"] is not None:
+        raise RuntimeError(
+            f"{_MODULE_NAME} exited before reading stdin: {results['exit']},"
+            f" stdout {results['stdout']!r}, stderr {results['stderr']!r}"
+        )
+    field_type(devtools, "stdin", typing)
+    devtools.call(
+        "Input.dispatchKeyEvent",
+        {"type": "keyDown", "text": "\r", "unmodifiedText": "\r"} | _ENTER_KEY,
+    )
+    devtools.call("Input.dispatchKeyEvent", {"type": "keyUp"} | _ENTER_KEY)
+    results = page_wait(devtools, lambda results: results["exit"] is not None)
+    print(results["stdout"], end="", flush=True)
+    expected = printed + f"stdin {typing}\n"
+    if results["stdout"] != expected or results["stderr"]:
+        raise RuntimeError(
+            f"{_MODULE_NAME} printed {results['stdout']!r} and"
+            f" {results['stderr']!r} on stderr where {expected!r} was due"
+        )
+    started = results["started"]
+    exit_code = results["exit"]["code"]
+    if exit_code != 0:
+        raise RuntimeError(f"{_MODULE_NAME} exited with {exit_code}")
+    print(
+        f"run {started['name']} pid {started['pid']} args {started['args']}"
+        f" exit code {exit_code}, {len(expected.splitlines())} lines as"
+        " measured here",
+        flush=True,
+    )
+    click(devtools, "close")
+    results = page_wait(
+        devtools, lambda results: results["closed"] is not None
+    )
+    closed = results["closed"]
+    if closed["code"] != _CLOSE_CODE_NORMAL:
+        raise RuntimeError(f"the page closed with {closed}")
     deadline = time.monotonic() + _STOP_WAIT_SECONDS
-    while pids := session_pids(ttyd_pid):
+    while pids := program_pids(ttyd_pid, command):
         if time.monotonic() > deadline:
             raise RuntimeError(
-                f"bootstrap.py still runs as pids {pids}"
+                f"{' '.join(command)} still runs as pids {pids}"
                 f" {_STOP_WAIT_SECONDS} s after the page closed"
             )
         time.sleep(_POLL_SECONDS)
-    for name, check in results["checks"].items():
-        print(f"{name} {check['state']} {check['detail']}", flush=True)
     page_fit(devtools)
     image = devtools.call("Page.captureScreenshot", {"format": "png"})
     image_save(image_path, image["data"])
-    return results["checks"]["close"]["detail"]
+    return (
+        f"{results['lines']} program lines, closed {closed['code']} after"
+        f" Close, pid {hello['pid']} gone"
+    )
 
 
 # Opens the URL, retrying refusals, since WSL forwards a new port with a lag.
@@ -615,6 +539,27 @@ def page_navigate(devtools: DevTools, url: str) -> None:
             raise RuntimeError(f"{url}: {error_text}")
         # The one retry, before any page exists, so it shows.
         print(f"{url}: {error_text}, navigating again", file=sys.stderr)
+        time.sleep(_POLL_SECONDS)
+
+
+# Returns the page's state once the condition holds, failing on its failure.
+def page_wait(
+    devtools: DevTools, condition: Callable[[dict[str, Any]], bool]
+) -> dict[str, Any]:
+    while True:
+        results: dict[str, Any] | None = devtools.evaluate("window.boot")
+        # None until the page's script has run.
+        if results is not None:
+            failure = results["failure"]
+            if failure is not None:
+                message = f"the page failed: {failure}"
+                # A close other than Close's is ttyd's fault, not this repo's.
+                closed = results["closed"]
+                if closed is not None and closed["code"] != _CLOSE_CODE_NORMAL:
+                    message += f" ({ttyd_version(_TTYD_PATH)})"
+                raise RuntimeError(message)
+            if condition(results):
+                return results
         time.sleep(_POLL_SECONDS)
 
 
@@ -671,16 +616,8 @@ def process_stop(process: subprocess.Popen[bytes]) -> None:
         process.wait()
 
 
-# Fails unless the program's reply to the line is the one due.
-def reply_check(line: str, reply: str, expected: str) -> None:
-    if reply != expected:
-        raise RuntimeError(
-            f"{line}: the program replied {reply!r} where {expected!r} was due"
-        )
-
-
-# Returns the pids of ttyd's children that run bootstrap.py.
-def session_pids(ttyd_pid: int) -> list[int]:
+# Returns the pids of ttyd's children that run the command.
+def program_pids(ttyd_pid: int, command: list[str]) -> list[int]:
     pids: list[int] = []
     for name in os.listdir("/proc"):
         if not name.isdigit():
@@ -693,10 +630,7 @@ def session_pids(ttyd_pid: int) -> list[int]:
                 )
             with open(f"/proc/{name}/cmdline", "rb") as cmdline_file:
                 arguments = cmdline_file.read().decode().split("\0")[:-1]
-            if (
-                int(parent.split()[1]) == ttyd_pid
-                and arguments == _BOOTSTRAP_ARGUMENTS
-            ):
+            if int(parent.split()[1]) == ttyd_pid and arguments == command:
                 pids.append(int(name))
     return sorted(pids)
 
@@ -711,15 +645,9 @@ def signal_time_out(signal_number: int, frame: FrameType | None) -> None:
     raise TimeoutError(f"gave up after {_RUN_TIMEOUT_SECONDS} s")
 
 
-# Returns the pid of the command the say at the index started, from its reply.
-def started_pid(page: BootstrapPage, index: int, words: str) -> int:
-    reply = page.reply(index)
-    found = re.fullmatch(
-        re.escape(f"started {words} as pid ") + r"(\d+)", reply
-    )
-    if found is None:
-        raise RuntimeError(f"run {words}: the program replied {reply!r}")
-    return int(found.group(1))
+# Returns the command ttyd runs: bootstrap.py on the modules directory.
+def ttyd_command(modules_path: str) -> list[str]:
+    return ["python3", _BOOTSTRAP_PATH, modules_path]
 
 
 # Clones ttyd and builds it, each only when missing: the maintainer updates it.
@@ -738,21 +666,21 @@ def ttyd_prepare(ttyd_path: str) -> None:
 
 # Yields ttyd serving the page with `xsjs_start.ps1`'s flags but no password.
 @contextlib.contextmanager
-def ttyd_serve(ttyd_path: str) -> Generator[subprocess.Popen[bytes]]:
+def ttyd_serve(
+    ttyd_path: str, modules_path: str
+) -> Generator[subprocess.Popen[bytes]]:
     port_check(_TTYD_PORT)
     arguments = [
         os.path.join(ttyd_path, "build", "ttyd"),
         "--port",
         str(_TTYD_PORT),
-        "--cwd",
-        _PYTHON_PATH,
         "--writable",
         "--check-origin",
         "--interface",
         "127.0.0.1",
         "--index",
-        os.path.join(_PYTHON_PATH, _BOOTSTRAP_PAGE_NAME),
-        *_BOOTSTRAP_ARGUMENTS,
+        _BOOTSTRAP_PAGE_PATH,
+        *ttyd_command(modules_path),
     ]
     ttyd = process_start(arguments, _PYTHON_PATH)
     try:
@@ -794,8 +722,8 @@ def viewport_set(devtools: DevTools, width_px: int, height_px: int) -> None:
 # Parses the options, runs ttyd and the browser, and returns the exit code.
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Hold a conversation with bootstrap.py through"
-        " bootstrap.html from Chrome and save a screenshot of the page."
+        description="Put and run a module through bootstrap.html from Chrome"
+        " and save a screenshot of the page."
     )
     parser.add_argument(
         "--out",
@@ -805,7 +733,8 @@ def main() -> int:
     parser.add_argument(
         "--typing",
         default=_TYPING_DEFAULT,
-        help="what Chrome types after sha256 and echo (default %(default)s)",
+        help="the line Chrome types to the module's stdin (default"
+        " %(default)s)",
     )
     namespace = parser.parse_args()
     typing: str = namespace.typing
@@ -826,27 +755,39 @@ def main() -> int:
     for signal_number in (signal.SIGHUP, signal.SIGTERM):
         signal.signal(signal_number, signal_exit)
     image_path = os.path.abspath(out)
+    started = time.monotonic()
     try:
         ttyd_prepare(_TTYD_PATH)
         # A first build and install can take longer than this allows.
         signal.signal(signal.SIGALRM, signal_time_out)
         signal.alarm(_RUN_TIMEOUT_SECONDS)
-        with ttyd_serve(_TTYD_PATH) as ttyd:
-            browser = module.Browser(_VIEWPORT_WIDTH_PX, _VIEWPORT_HEIGHT_PX)
-            with browser:
-                devtools = DevTools(browser)
-                try:
-                    response = page_meet(
-                        devtools, _TTYD_PAGE_URL, typing, image_path, ttyd.pid
-                    )
-                finally:
-                    devtools.browser_close()
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+        with tempfile.TemporaryDirectory(
+            prefix="xsjs_screenshot-", dir=_BUILD_PATH
+        ) as work_path:
+            modules_path = os.path.join(work_path, "modules")
+            with ttyd_serve(_TTYD_PATH, modules_path) as ttyd:
+                browser = module.Browser(
+                    _VIEWPORT_WIDTH_PX, _VIEWPORT_HEIGHT_PX
+                )
+                with browser:
+                    devtools = DevTools(browser)
+                    try:
+                        detail = page_meet(
+                            devtools,
+                            typing,
+                            image_path,
+                            ttyd.pid,
+                            modules_path,
+                        )
+                    finally:
+                        devtools.browser_close()
     except (OSError, RuntimeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
         return 130
-    print(f"{image_path}: {response}")
+    print(f"{image_path}: {detail}, {time.monotonic() - started:.1f} s")
     return 0
 
 

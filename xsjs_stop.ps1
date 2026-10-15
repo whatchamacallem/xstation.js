@@ -2,15 +2,18 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Stops the web terminal that xsjs_start.ps1 started. Run it from an
-# administrator PowerShell:
+# Stops the web terminal that xsjs_start.ps1 started: the ttyd it runs in
+# Linux, found by its command line, and the scheduled task. Other ttyd
+# processes are left alone. Run it from an administrator PowerShell:
 #
 #     .\xsjs_stop.ps1            stop it, and don't start it at sign-in
 #     .\xsjs_stop.ps1 --softly   stop it until you next sign in
 #
-# Without --softly it also removes the scheduled task, the Windows Firewall
-# rule and the task's runner script (which holds the ttyd password). The
-# TLS certificate stays, so browsers that accepted it don't warn again.
+# Without --softly it also removes the scheduled task, the port proxy, the
+# Windows Firewall rule and the task's runner script (which holds the ttyd
+# password). The TLS certificate stays, so browsers that accepted it don't
+# warn again, and so does the copy of bootstrap.py in Linux with its
+# modules.
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
     'PSAvoidUsingWriteHost', '',
     Justification = 'Coloured status for the person running it.')]
@@ -29,7 +32,7 @@ function _xsjs_stop_get_softly {
     throw ($i18n_.stop_usage -f $script_name_)
 }
 
-# Removes the task, the firewall rule and the runner with its password.
+# Removes the task, port proxy, firewall rule and the runner with its password.
 function _xsjs_stop_step_remove_autostart {
     xsjs_util_write_log_section $i18n_.remove_autostart
     $task_ = @{ TaskName = $task_name_; ErrorAction = 'SilentlyContinue' }
@@ -39,6 +42,7 @@ function _xsjs_stop_step_remove_autostart {
     } else {
         xsjs_util_write_log ($i18n_.status_task_none -f $task_name_)
     }
+    xsjs_util_remove_proxy
     xsjs_util_remove_firewall_rule
     if (Test-Path $runner_path_) {
         Remove-Item $runner_path_

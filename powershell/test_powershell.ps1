@@ -5,9 +5,9 @@
 # Formats and checks the scripts (test_lint.ps1), then runs the whole
 # lifecycle, each script in its own PowerShell as a person would: serving
 # localhost, starting again while running, stopping softly, then serving
-# HTTPS with a throwaway password, which opens port 5768 in Windows Firewall
-# until the last stop. Each step's output and log go to
-# test_powershell.ps1.md.
+# HTTPS with a throwaway password, which opens port 5768 to the network
+# with a port proxy and a Windows Firewall rule until the last stop. Each
+# step's output and log go to test_powershell.ps1.md.
 #
 # The test command has to be run as admin:
 #

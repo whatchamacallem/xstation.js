@@ -8,9 +8,9 @@
 # comments.
 #
 # Run it in a PowerShell of its own, as test_powershell.ps1 does:
-# PSScriptAnalyzer loads the modules whose commands the scripts call, such
-# as Microsoft.WinGet.Client, and Windows keeps their files locked until
-# that PowerShell exits, so updating them fails until then.
+# PSScriptAnalyzer loads the modules whose commands the scripts call, and
+# Windows keeps their files locked until that PowerShell exits, so updating
+# them fails until then.
 #
 #     powershell.exe -ExecutionPolicy Bypass -File .\powershell\test_lint.ps1
 param()

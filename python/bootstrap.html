@@ -11,262 +11,138 @@ This file is licensed under the terms of the LICENSE.md file.
 <style>
 html, body { height: 100%; margin: 0; }
 body { font: 12px monospace; }
-pre, table, input, button { font: inherit; }
+pre, input, textarea, button { font: inherit; }
 main {
   display: grid;
-  grid-template-columns: 2fr 3fr;
+  grid-template-columns: 1fr 1fr;
   grid-template-rows: 100%;
   height: 100%;
 }
-#conversation {
+section {
   display: flex;
   flex-direction: column;
   min-height: 0;
   padding: 0 8px;
 }
-#log { flex: 1; min-height: 0; overflow-y: auto; overflow-wrap: anywhere; }
-#entry { display: flex; margin-bottom: 8px; }
-#say { flex: 1; }
-#protocol { overflow: auto; padding: 0 8px; }
-pre { margin: 8px 0; white-space: pre-wrap; }
-table { border-spacing: 0; }
-th, td { padding: 0 2ch 0 0; text-align: left; white-space: pre; }
-#cell { position: absolute; visibility: hidden; }
+.row { display: flex; gap: 8px; margin: 8px 0; align-items: baseline; }
+.row input { flex: 1; }
+#source { flex: 1; min-height: 0; resize: none; }
+#output { flex: 1; min-height: 0; overflow-y: auto; }
+pre { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 </style>
 </head>
 <body>
 <main>
-<section id="conversation">
-<pre id="log"></pre>
-<div id="entry">
-<input id="say" disabled>
+<section>
+<div class="row">
+<label for="name">name</label><input id="name">
+<label for="args">args</label><input id="args">
+</div>
+<textarea id="source" spellcheck="false"></textarea>
+<div class="row">
+<button id="put" disabled>Put</button>
+<button id="run" disabled>Run</button>
+<button id="kill" disabled>Kill</button>
+<button id="eof" disabled>EOF</button>
+<button id="restart" disabled>Restart</button>
 <button id="close" disabled>Close</button>
 </div>
+<div class="row">
+<label for="stdin">stdin</label><input id="stdin" disabled>
+</div>
 </section>
-<section id="protocol">
+<section>
 <pre id="status"></pre>
-<pre id="panels"></pre>
-<pre id="checks"></pre>
-<table>
-<thead>
-<tr>
-<th>ms</th><th>dir</th><th>type</th><th>length</th><th>first 60 bytes</th>
-</tr>
-</thead>
-<tbody id="frames"></tbody>
-</table>
-<pre id="totals"></pre>
+<pre id="modules"></pre>
+<pre id="output"></pre>
 </section>
 </main>
-<span id="cell">0</span>
 <script>
 'use strict';
 
-const CHECK_NAMES = [
-  'connect', 'title', 'preferences', 'hello', 'ticks', 'pings', 'stat',
-  'size', 'count', 'conversation', 'run', 'cancel', 'close',
-];
-const COUNT_KEYS = [
-  'received_messages', 'received_bytes', 'sent_messages', 'sent_bytes',
-];
-const COUNT_MS = 5000;
 const ELEMENT_IDS = [
-  'cell', 'checks', 'close', 'frames', 'log', 'panels', 'say', 'status',
-  'totals',
+  'args', 'close', 'eof', 'kill', 'modules', 'name', 'output', 'put',
+  'restart', 'run', 'source', 'status', 'stdin',
 ];
-// The fields of each program message the page handles, by type.
+// The fields of each program message, by type.
 const FIELDS = {
-  hello: {pid: 'int', python: 'string', columns: 'int', rows: 'int'},
-  tick: {n: 'int', time: 'number'},
-  pong: {id: 'int'},
-  stat: {
-    hostname: 'string', kernel: 'string', uptime: 'number',
-    loadavg: 'loadavg', mem_available_kib: 'int', pid: 'int',
-  },
-  size: {columns: 'int', rows: 'int'},
-  count: {
-    received_messages: 'int', received_bytes: 'int', sent_messages: 'int',
-    sent_bytes: 'int',
-  },
-  reply: {id: 'int', text: 'string'},
-  started: {id: 'int', pid: 'int', argv: 'strings'},
-  line: {id: 'int', n: 'int', text: 'string'},
-  exit: {id: 'int', code: 'int', lines: 'int', cancelled: 'boolean'},
+  hello: ['pid', 'python', 'bootstrap', 'sha256', 'modules', 'started'],
+  modules: ['entries'],
+  saved: ['name', 'bytes', 'sha256'],
+  started: ['name', 'pid', 'args'],
+  out: ['stream', 'data'],
+  exit: ['name', 'code'],
 };
-const FRAME_ROWS = 12;
-const FRAME_TEXT_BYTES = 60;
-const KINDS = {
-  boolean: value => typeof value === 'boolean',
-  int: value => Number.isInteger(value),
-  loadavg: value => Array.isArray(value) && value.length === 3 &&
-    value.every(item => typeof item === 'number'),
-  number: value => typeof value === 'number',
-  string: value => typeof value === 'string',
-  strings: value => Array.isArray(value) &&
-    value.every(item => typeof item === 'string'),
-};
-const PING_MS = 1000;
-const PINGS_TO_PASS = 10;
+// The controls enabled while no module runs, and while one does.
+const IDLE_CONTROLS = ['put', 'run', 'restart'];
+const RUNNING_CONTROLS = ['kill', 'eof', 'stdin'];
 const READY_STATES = ['connecting', 'open', 'closing', 'closed'];
-const RECEIVED_NAMES = {0x30: 'output', 0x31: 'title', 0x32: 'preferences'};
-const REPLIES_TO_PASS = 3;
-const SENT_NAMES = {0x30: 'input', 0x31: 'resize', 0x7b: 'json'};
-const STAT_APART_MS = 5000;
-const STAT_MS = 5000;
-const STATE_LABELS = {pending: 'pending', pass: 'PASS', fail: 'FAIL'};
-const TICKS_TO_PASS = 10;
+const STREAM_NAMES = ['stdout', 'stderr'];
+// ttyd's first two messages, by type: the title, then the preferences.
+const TTYD_FIRST_TYPES = [0x31, 0x32];
+const TTYD_OUTPUT_TYPE = 0x30;
 
-const xsjs = {
-  checks: {},
-  failure: null,
-  closed: null,
-  conversation: [],
-  frames: {sent: 0, received: 0, sent_bytes: 0, received_bytes: 0},
+// What the automated driver reads.
+const boot = {
+  ttyd: {title: null, preferences: null},
+  hellos: [], modules: null, saves: [], started: null, exit: null,
+  stdout: '', stderr: '', lines: 0, closed: null, failure: null,
 };
-for (const name of CHECK_NAMES) {
-  xsjs.checks[name] = {state: 'pending', detail: ''};
-}
-window.xsjs = xsjs;
+window.boot = boot;
 
 const encoder = new TextEncoder();
 const elements = Object.fromEntries(
   ELEMENT_IDS.map(id => [id, document.getElementById(id)]));
 const state = {
   token: null,
-  url: null,
   socket: null,
-  openedAt: null,
   closePressed: false,
-  intervals: [],
   ttydMessages: 0,
   // One stream decoder, as ttyd splits output frames inside characters.
   decoder: new TextDecoder('utf-8', {fatal: true}),
   partial: '',
-  hello: null,
-  cell: null,
-  window: null,
-  sizes: [],
-  lastSize: null,
-  resizes: 0,
-  programSize: null,
-  sizeMessages: 0,
-  sent: {messages: 0, bytes: 0},
-  received: {messages: 0, bytes: 0},
-  ticks: {count: 0, last: null},
-  cancelledExit: null,
-  pings: {
-    nextId: 1, sent: 0, received: 0, outstanding: [], last: null, min: null,
-    max: null,
-  },
-  stats: {requests: [], first: null, last: null, count: 0},
-  counts: {snapshots: [], last: null},
-  says: {nextId: 1, outstanding: [], replies: 0},
-  run: null,
-  frameRows: [],
-  rendered: 0,
-  renderPending: false,
+  // A decoder per module stream, as a chunk can end inside a character.
+  decoders: {},
 };
 
-class CheckFailure extends Error {}
-
-// Records the first failure only, and stops the page on it.
-function record(name, detail) {
-  if (xsjs.failure !== null) {
+// Records the first failure only, and closes the socket on it.
+function record(detail) {
+  if (boot.failure !== null) {
     return;
   }
-  if (Object.hasOwn(xsjs.checks, name)) {
-    xsjs.checks[name].state = 'fail';
-    xsjs.checks[name].detail = detail;
-  }
-  xsjs.failure = {check: name, detail};
-  teardown();
+  boot.failure = detail;
+  controlsSet([]);
   if (state.socket !== null) {
-    state.socket.close(1000, 'check failed');
+    state.socket.close(1000, 'failure');
   }
-  scheduleRender();
+  render();
 }
 
 // Records the failure and throws, ending the handler that found it.
-function fail(name, detail) {
-  record(name, detail);
-  throw new CheckFailure(`${name}: ${detail}`);
+function fail(detail) {
+  record(detail);
+  throw new Error(detail);
 }
 
-// Passes a check that is still pending, with its detail.
-function pass(name, detail) {
-  const check = xsjs.checks[name];
-  if (check.state !== 'pending') {
-    return;
+// Enables the controls named and no other, besides Close.
+function controlsSet(ids) {
+  for (const id of [...IDLE_CONTROLS, ...RUNNING_CONTROLS]) {
+    elements[id].disabled = !ids.includes(id);
   }
-  check.state = 'pass';
-  check.detail = detail;
 }
 
-// Stops the timers and the resize listener, and disables the controls.
-function teardown() {
-  for (const interval of state.intervals) {
-    clearInterval(interval);
-  }
-  state.intervals = [];
-  window.removeEventListener('resize', sendResize);
-  elements.say.disabled = true;
-  elements.close.disabled = true;
-}
-
-// Returns bytes as ASCII text, escaping CR, LF and any byte not printable.
-function bytesText(bytes) {
+// Returns the bytes as base64.
+function base64Of(bytes) {
   let text = '';
   for (const byte of bytes) {
-    if (byte >= 0x20 && byte < 0x7f) {
-      text += String.fromCharCode(byte);
-    } else if (byte === 0x0d) {
-      text += '\\r';
-    } else if (byte === 0x0a) {
-      text += '\\n';
-    } else {
-      text += `\\x${byte.toString(16).padStart(2, '0')}`;
-    }
+    text += String.fromCharCode(byte);
   }
-  return text;
+  return btoa(text);
 }
 
-// Returns a size as columns by rows, or `-` when there is none.
-function sizeText(size) {
-  return size === null ? '-' : `${size.columns}x${size.rows}`;
-}
-
-// Returns milliseconds to a tenth, or `-` when there are none.
-function msText(ms) {
-  return ms === null ? '-' : ms.toFixed(1);
-}
-
-// Counts a frame and adds its row to the table, keeping only the latest.
-function recordFrame(direction, bytes) {
-  const frames = xsjs.frames;
-  if (direction === 'sent') {
-    frames.sent += 1;
-    frames.sent_bytes += bytes.length;
-  } else {
-    frames.received += 1;
-    frames.received_bytes += bytes.length;
-  }
-  state.frameRows.push({
-    ms: performance.now() - state.openedAt,
-    direction,
-    type: bytes[0],
-    length: bytes.length,
-    text: bytesText(bytes.subarray(1, 1 + FRAME_TEXT_BYTES)),
-  });
-  if (state.frameRows.length > FRAME_ROWS) {
-    state.frameRows.shift();
-  }
-  scheduleRender();
-}
-
-// Sends a frame to ttyd and records it.
-function sendFrame(bytes) {
-  state.socket.send(bytes);
-  recordFrame('sent', bytes);
+// Returns the base64's bytes.
+function bytesOf(base64) {
+  return Uint8Array.from(atob(base64), character => character.charCodeAt(0));
 }
 
 // Sends one JSON line to the program as ttyd input, type 0.
@@ -276,124 +152,61 @@ function sendMessage(message) {
   frame[0] = 0x30;
   frame.set(line, 1);
   frame[line.length + 1] = 0x0a;
-  state.sent.messages += 1;
-  state.sent.bytes += line.length;
-  sendFrame(frame);
+  state.socket.send(frame);
 }
 
-// Returns the window's inner size in cells of the hidden span.
-function measureSize() {
-  const cell = elements.cell.getBoundingClientRect();
-  state.cell = {width: cell.width, height: cell.height};
-  state.window = {width: window.innerWidth, height: window.innerHeight};
-  const size = {
-    columns: Math.floor(window.innerWidth / cell.width),
-    rows: Math.floor(window.innerHeight / cell.height),
-  };
-  // ttyd ignores a size below 1.
-  if (!(Number.isInteger(size.columns) && size.columns >= 1 &&
-      Number.isInteger(size.rows) && size.rows >= 1)) {
-    fail('size', `${sizeText(size)} from window ${window.innerWidth}x` +
-      `${window.innerHeight} and cell ${cell.width}x${cell.height}`);
-  }
-  return size;
-}
-
-// Sends a resize only for a new size, as an equal one gets no SIGWINCH.
-function sendResize() {
-  const size = measureSize();
-  if (size.columns === state.lastSize.columns &&
-      size.rows === state.lastSize.rows) {
-    return;
-  }
-  state.lastSize = size;
-  state.sizes.push(size);
-  state.resizes += 1;
-  sendFrame(encoder.encode(`1${JSON.stringify(size)}`));
-}
-
-// Sends a ping with the next id, noting when it went.
-function sendPing() {
-  const id = state.pings.nextId;
-  state.pings.nextId += 1;
-  state.pings.sent += 1;
-  state.pings.outstanding.push({id, time: performance.now()});
-  sendMessage({type: 'ping', id});
-}
-
-// Sends a stat request, noting when it went.
-function sendStat() {
-  state.stats.requests.push(performance.now());
-  sendMessage({type: 'stat'});
-}
-
-// Snapshots the page's sent figures, including the request itself.
-function sendCount() {
-  sendMessage({type: 'count'});
-  state.counts.snapshots.push(
-    {messages: state.sent.messages, bytes: state.sent.bytes});
-}
-
-// Checks the protocol, then sends ttyd the token and the size in cells.
+// Sends ttyd the token and a size, starting the program, which reads no size.
 function onOpen() {
-  state.openedAt = performance.now();
-  if (state.socket.protocol !== 'tty') {
-    fail('connect', `protocol '${state.socket.protocol}'`);
-  }
-  pass('connect', `open, protocol ${state.socket.protocol}`);
-  const size = measureSize();
-  state.lastSize = size;
-  state.sizes.push(size);
-  sendFrame(encoder.encode(JSON.stringify(
-    {AuthToken: state.token, columns: size.columns, rows: size.rows})));
+  state.socket.send(encoder.encode(JSON.stringify(
+    {AuthToken: state.token, columns: 80, rows: 24})));
   elements.close.disabled = false;
+  render();
 }
 
-// Checks ttyd's title and preferences messages, then hands on its output.
+// Stores ttyd's title and preferences, then hands on the program's output.
 function onMessage(event) {
   const bytes = new Uint8Array(event.data);
-  recordFrame('recv', bytes);
   state.ttydMessages += 1;
-  const typeText = bytesText(bytes.subarray(0, 1));
-  if (state.ttydMessages === 1) {
-    if (bytes[0] !== 0x31) {
-      fail('title', `first ttyd message has type '${typeText}'`);
-    }
-    const title = new TextDecoder('utf-8', {fatal: true})
-      .decode(bytes.subarray(1));
-    pass('title', `type 1: ${title}`);
-  } else if (state.ttydMessages === 2) {
-    if (bytes[0] !== 0x32) {
-      fail('preferences', `second ttyd message has type '${typeText}'`);
-    }
-    const text = new TextDecoder('utf-8', {fatal: true})
-      .decode(bytes.subarray(1));
-    try {
-      JSON.parse(text);
-    } catch (error) {
-      fail('preferences', `${error.message}: ${text}`);
-    }
-    pass('preferences', `type 2: ${text}`);
-  } else if (bytes[0] === 0x30) {
-    onOutput(bytes.subarray(1));
-  } else {
-    fail('frame', `ttyd message ${state.ttydMessages} has type ` +
-      `'${typeText}'`);
+  const due = state.ttydMessages <= TTYD_FIRST_TYPES.length ?
+    TTYD_FIRST_TYPES[state.ttydMessages - 1] : TTYD_OUTPUT_TYPE;
+  if (bytes[0] !== due) {
+    fail(`ttyd message ${state.ttydMessages} has type ${bytes[0]} where ` +
+      `${due} was due`);
   }
-}
-
-// Decodes output and handles its whole lines, keeping the rest for later.
-function onOutput(payload) {
+  if (due !== TTYD_OUTPUT_TYPE) {
+    onTtyd(bytes);
+    render();
+    return;
+  }
   let text;
   try {
-    text = state.decoder.decode(payload, {stream: true});
+    text = state.decoder.decode(bytes.subarray(1), {stream: true});
   } catch (error) {
-    fail('output', `not UTF-8: ${error.message}`);
+    fail(`not UTF-8: ${error.message}`);
   }
   const lines = (state.partial + text).split('\n');
   state.partial = lines.pop();
   for (const line of lines) {
-    onLine(line.endsWith('\r') ? line.slice(0, -1) : line);
+    onLine(line);
+  }
+}
+
+// Stores ttyd's title as text, or its preferences as the JSON they are.
+function onTtyd(bytes) {
+  let text;
+  try {
+    text = new TextDecoder('utf-8', {fatal: true}).decode(bytes.subarray(1));
+  } catch (error) {
+    fail(`ttyd message type ${bytes[0]} is not UTF-8: ${error.message}`);
+  }
+  if (bytes[0] === TTYD_FIRST_TYPES[0]) {
+    boot.ttyd.title = text;
+    return;
+  }
+  try {
+    boot.ttyd.preferences = JSON.parse(text);
+  } catch (error) {
+    fail(`ttyd preferences are not JSON: ${text.slice(0, 200)}`);
   }
 }
 
@@ -403,392 +216,172 @@ function onLine(line) {
   try {
     message = JSON.parse(line);
   } catch (error) {
-    fail('output', `not JSON: ${line}`);
+    fail(`not JSON: ${line.slice(0, 200)}`);
   }
   if (typeof message !== 'object' || message === null ||
-      Array.isArray(message) || typeof message.type !== 'string' ||
-      !Object.hasOwn(FIELDS, message.type)) {
-    fail('output', `not a message the page handles: ${line}`);
+      Array.isArray(message) || !Object.hasOwn(FIELDS, message.type)) {
+    fail(`not a message the page handles: ${line.slice(0, 200)}`);
   }
-  const fields = FIELDS[message.type];
   const keys = Object.keys(message).filter(key => key !== 'type').sort();
-  const expected = Object.keys(fields).sort();
+  const expected = [...FIELDS[message.type]].sort();
   if (keys.join() !== expected.join()) {
-    fail('output', `fields ${keys.join()} where ${expected.join()} were` +
-      ` due: ${line}`);
+    fail(`fields ${keys.join()} where ${expected.join()} were due: ` +
+      line.slice(0, 200));
   }
-  for (const [key, kind] of Object.entries(fields)) {
-    if (!KINDS[kind](message[key])) {
-      fail('output', `${key} is not ${kind}: ${line}`);
-    }
-  }
-  if (state.hello === null && message.type !== 'hello') {
-    fail('hello', `first program line is ${message.type}`);
-  }
+  boot.lines += 1;
   HANDLERS[message.type](message);
-  // Counted after the handler, so a count reply compares without itself.
-  state.received.messages += 1;
-  state.received.bytes += encoder.encode(line).length;
+  render();
 }
 
-// Checks the hello against the size sent, then starts the periodic requests.
+// Records a hello, which a restart repeats, and enables the idle controls.
 function onHello(message) {
-  if (state.hello !== null) {
-    fail('hello', `a second hello, pid ${message.pid}`);
-  }
-  state.hello = message;
-  const sent = state.sizes[0];
-  if (message.columns !== sent.columns || message.rows !== sent.rows) {
-    fail('hello', `program ${sizeText(message)}, page sent ` +
-      `${sizeText(sent)}`);
-  }
-  pass('hello', `pid ${message.pid}, python ${message.python}, ` +
-    `${sizeText(message)}`);
-  elements.say.disabled = false;
-  elements.say.focus();
-  state.intervals.push(
-    setInterval(sendPing, PING_MS),
-    setInterval(sendStat, STAT_MS),
-    setInterval(sendCount, COUNT_MS));
-  window.addEventListener('resize', sendResize);
-  sendPing();
-  sendStat();
-  sendCount();
-  sendResize();
+  boot.hellos.push(message);
+  boot.started = null;
+  boot.exit = null;
+  controlsSet(IDLE_CONTROLS);
 }
 
-// Checks the ticks come in order, and that one follows a cancelled exit.
-function onTick(message) {
-  state.ticks.count += 1;
-  if (message.n !== state.ticks.count) {
-    fail('ticks', `tick n ${message.n} where n ${state.ticks.count} was due`);
-  }
-  state.ticks.last = message;
-  if (state.ticks.count === TICKS_TO_PASS) {
-    pass('ticks', `n 1 to ${TICKS_TO_PASS} in order`);
-  }
-  if (state.cancelledExit !== null) {
-    pass('cancel', `tick ${message.n} after the cancelled exit of id ` +
-      `${state.cancelledExit}`);
-  }
+// Records the module list.
+function onModules(message) {
+  boot.modules = message.entries;
 }
 
-// Matches a pong to the oldest outstanding ping and times its round trip.
-function onPong(message) {
-  const pings = state.pings;
-  const ping = pings.outstanding.shift();
-  if (ping === undefined) {
-    fail('pings', `pong ${message.id} with no ping outstanding`);
-  }
-  if (ping.id !== message.id) {
-    fail('pings', `pong ${message.id} where ping ${ping.id} was the oldest` +
-      ' outstanding');
-  }
-  const ms = performance.now() - ping.time;
-  pings.last = ms;
-  pings.min = pings.min === null ? ms : Math.min(pings.min, ms);
-  pings.max = pings.max === null ? ms : Math.max(pings.max, ms);
-  pings.received += 1;
-  if (pings.received === PINGS_TO_PASS) {
-    pass('pings', `${PINGS_TO_PASS} pongs, each for the oldest outstanding` +
-      ' ping');
-  }
+// Records a put's answer.
+function onSaved(message) {
+  boot.saves.push(message);
 }
 
-// Matches a stat to its request, checking its pid and that uptime rises.
-function onStat(message) {
-  const stats = state.stats;
-  const sentAt = stats.requests.shift();
-  if (sentAt === undefined) {
-    fail('stat', 'a stat reply with no stat request outstanding');
-  }
-  if (message.pid !== state.hello.pid) {
-    fail('stat', `pid ${message.pid}, hello said ${state.hello.pid}`);
-  }
-  stats.count += 1;
-  stats.last = message;
-  if (stats.first === null) {
-    stats.first = {sentAt, uptime: message.uptime};
-    return;
-  }
-  const apart = sentAt - stats.first.sentAt;
-  if (apart < STAT_APART_MS) {
-    return;
-  }
-  if (message.uptime <= stats.first.uptime) {
-    fail('stat', `uptime ${message.uptime} s did not rise from ` +
-      `${stats.first.uptime} s over ${apart.toFixed(1)} ms`);
-  }
-  pass('stat', `uptime ${stats.first.uptime} s to ${message.uptime} s over` +
-    ` ${apart.toFixed(1)} ms, pid ${message.pid}`);
-}
-
-// Checks each reported size was sent, passing once the latest resize is seen.
-function onSize(message) {
-  state.sizeMessages += 1;
-  state.programSize = {columns: message.columns, rows: message.rows};
-  const sent = state.sizes.some(size =>
-    size.columns === message.columns && size.rows === message.rows);
-  if (!sent) {
-    fail('size', `program reports ${sizeText(message)}, a size the page` +
-      ' never sent');
-  }
-  if (state.resizes > 0 && message.columns === state.lastSize.columns &&
-      message.rows === state.lastSize.rows) {
-    pass('size', `program reports ${sizeText(message)} after ` +
-      `${state.resizes} resizes`);
-  }
-}
-
-// Checks the program's counts against the page's figures at the request.
-function onCount(message) {
-  const snapshot = state.counts.snapshots.shift();
-  if (snapshot === undefined) {
-    fail('count', 'a count reply with no count request outstanding');
-  }
-  const expected = {
-    received_messages: snapshot.messages,
-    received_bytes: snapshot.bytes,
-    sent_messages: state.received.messages,
-    sent_bytes: state.received.bytes,
-  };
-  state.counts.last = {expected, message};
-  for (const key of COUNT_KEYS) {
-    if (message[key] !== expected[key]) {
-      fail('count', `program ${key} ${message[key]}, page ${expected[key]}`);
-    }
-  }
-  pass('count', COUNT_KEYS.map(key => `${key} ${expected[key]}`).join(', '));
-}
-
-// Logs a reply and checks it answers the oldest unanswered say.
-function onReply(message) {
-  xsjs.conversation.push({who: 'program', text: message.text});
-  const says = state.says;
-  const id = says.outstanding.shift();
-  if (id === undefined) {
-    fail('conversation', `reply ${message.id} with no say unanswered`);
-  }
-  if (id !== message.id) {
-    fail('conversation', `reply ${message.id} where say ${id} was the` +
-      ' oldest unanswered');
-  }
-  says.replies += 1;
-  if (says.replies === REPLIES_TO_PASS) {
-    pass('conversation', `${REPLIES_TO_PASS} replies, each for the oldest` +
-      ' unanswered say');
-  }
-}
-
-// Records a run after checking its say exists and no other run is going.
+// Records the module's start and enables the running controls.
 function onStarted(message) {
-  if (!(message.id >= 1 && message.id < state.says.nextId)) {
-    fail('run', `started for id ${message.id}, which no say had`);
-  }
-  if (state.run !== null && state.run.exit === null) {
-    fail('run', `started id ${message.id} while id ${state.run.id} runs`);
-  }
-  state.run = {
-    id: message.id, pid: message.pid, argv: message.argv, lines: 0,
-    exit: null,
-  };
+  boot.started = message;
+  boot.exit = null;
+  controlsSet(RUNNING_CONTROLS);
 }
 
-// Logs a run's line and checks it belongs to the running id, in order.
-function onRunLine(message) {
-  xsjs.conversation.push({who: 'program', text: message.text});
-  const run = state.run;
-  if (run === null || run.id !== message.id || run.exit !== null) {
-    fail('run', `line for id ${message.id}, which is not running`);
+// Decodes a chunk of the module's stream and shows it.
+function onOut(message) {
+  if (!STREAM_NAMES.includes(message.stream)) {
+    fail(`out on stream ${message.stream}`);
   }
-  if (message.n !== run.lines + 1) {
-    fail('run', `line n ${message.n} for id ${message.id} where n ` +
-      `${run.lines + 1} was due`);
-  }
-  run.lines += 1;
+  const text = state.decoders[message.stream].decode(
+    bytesOf(message.data), {stream: true});
+  boot[message.stream] += text;
+  elements.output.append(text);
+  elements.output.scrollTop = elements.output.scrollHeight;
 }
 
-// Logs a run's exit, checks its line count and notes whether it was cancelled.
+// Records the module's exit and enables the idle controls.
 function onExit(message) {
-  const cancelled = message.cancelled ? ', cancelled' : '';
-  xsjs.conversation.push({
-    who: 'program',
-    text: `exit code ${message.code}, ${message.lines} lines${cancelled}`,
-  });
-  const run = state.run;
-  if (run === null || run.id !== message.id || run.exit !== null) {
-    fail('run', `exit for id ${message.id}, which is not running`);
-  }
-  if (message.lines !== run.lines) {
-    fail('run', `exit for id ${message.id} counts ${message.lines} lines,` +
-      ` the page received ${run.lines}`);
-  }
-  run.exit = message;
-  if (message.code === 0) {
-    pass('run', `id ${message.id} exited 0 after ${run.lines} lines in order`);
-  }
-  if (message.cancelled) {
-    state.cancelledExit = message.id;
-  }
+  boot.exit = message;
+  controlsSet(IDLE_CONTROLS);
 }
 
 const HANDLERS = {
   hello: onHello,
-  tick: onTick,
-  pong: onPong,
-  stat: onStat,
-  size: onSize,
-  count: onCount,
-  reply: onReply,
+  modules: onModules,
+  saved: onSaved,
   started: onStarted,
-  line: onRunLine,
+  out: onOut,
   exit: onExit,
 };
 
-// Records the close and checks it followed Close and has code 1000.
+// Records the close and disables everything.
 function onClose(event) {
-  xsjs.closed = {
+  boot.closed = {
     code: event.code, reason: event.reason, wasClean: event.wasClean,
   };
-  teardown();
-  scheduleRender();
-  // The page closed it after a failure.
-  if (xsjs.failure !== null) {
-    return;
+  controlsSet([]);
+  elements.close.disabled = true;
+  if (boot.failure === null && !state.closePressed) {
+    boot.failure = `closed ${event.code} '${event.reason}' before Close`;
   }
-  const detail = `code ${event.code} reason '${event.reason}' wasClean ` +
-    `${event.wasClean}`;
-  if (xsjs.checks.connect.state === 'pending') {
-    fail('connect', `closed before open: ${detail}`);
-  }
-  if (!state.closePressed) {
-    fail('close', `${detail} before Close was pressed`);
-  }
-  if (event.code !== 1000) {
-    fail('close', `${detail} after Close was pressed`);
-  }
-  pass('close', `${detail} after Close was pressed`);
+  render();
 }
 
-// Sends the field's text as a say on Enter, and clears the field.
-function onSayKey(event) {
+// Sends the module in the text area under the name given.
+function onPut() {
+  sendMessage(
+    {type: 'put', name: elements.name.value, text: elements.source.value});
+}
+
+// Clears the output and runs the named module with the arguments given.
+function onRun() {
+  boot.stdout = '';
+  boot.stderr = '';
+  boot.started = null;
+  boot.exit = null;
+  for (const name of STREAM_NAMES) {
+    state.decoders[name] = new TextDecoder();
+  }
+  elements.output.textContent = '';
+  const args = elements.args.value.split(/\s+/).filter(word => word !== '');
+  sendMessage({type: 'run', name: elements.name.value, args});
+}
+
+// Sends the stdin field's line to the module on Enter, and clears it.
+function onStdinKey(event) {
   if (event.key !== 'Enter') {
     return;
   }
-  const text = elements.say.value;
-  elements.say.value = '';
-  const id = state.says.nextId;
-  state.says.nextId += 1;
-  state.says.outstanding.push(id);
-  xsjs.conversation.push({who: 'person', text});
-  sendMessage({type: 'say', id, text});
+  const data = base64Of(encoder.encode(elements.stdin.value + '\n'));
+  elements.stdin.value = '';
+  sendMessage({type: 'in', data});
 }
 
-// Stops the timers and closes the socket with code 1000.
+// Closes the module's stdin, after which only Kill stays enabled.
+function onEof() {
+  controlsSet(['kill']);
+  sendMessage({type: 'eof'});
+}
+
+// Asks the program to replace itself, after which a new hello follows.
+function onRestart() {
+  controlsSet([]);
+  sendMessage({type: 'restart'});
+}
+
+// Closes the socket with code 1000, which makes ttyd end the program.
 function onClosePressed() {
   state.closePressed = true;
-  teardown();
+  controlsSet([]);
+  elements.close.disabled = true;
   state.socket.close(1000);
-  scheduleRender();
+  render();
 }
 
-// Asks for a render on the next frame, unless one is already pending.
-function scheduleRender() {
-  if (state.renderPending) {
-    return;
-  }
-  state.renderPending = true;
-  requestAnimationFrame(render);
-}
-
-// Returns the panels' text, one line per function.
-function panelsText() {
-  const lines = [];
-  const hello = state.hello;
-  lines.push(hello === null ? 'hello -' : `hello pid ${hello.pid} python ` +
-    `${hello.python} ${sizeText(hello)}`);
-  const tick = state.ticks.last;
-  lines.push(`ticks ${state.ticks.count}` + (tick === null ? '' :
-    ` last n ${tick.n} at ${new Date(tick.time * 1000).toISOString()}`));
-  const pings = state.pings;
-  lines.push(`pings sent ${pings.sent} received ${pings.received} ms last ` +
-    `${msText(pings.last)} min ${msText(pings.min)} max ` +
-    `${msText(pings.max)}`);
-  const stat = state.stats.last;
-  lines.push(stat === null ? 'stat -' : `stat ${state.stats.count}: host ` +
-    `${stat.hostname} kernel ${stat.kernel} uptime ${stat.uptime} s load ` +
-    `${stat.loadavg.join(' ')} MemAvailable ${stat.mem_available_kib} kiB` +
-    ` pid ${stat.pid}`);
-  const cell = state.cell === null ? '-' :
-    `${state.cell.width}x${state.cell.height}`;
-  const inner = state.window === null ? '-' :
-    `${state.window.width}x${state.window.height}`;
-  lines.push(`size page sent ${sizeText(state.lastSize)} after ` +
-    `${state.resizes} resizes, program ${sizeText(state.programSize)} in ` +
-    `${state.sizeMessages} messages, window ${inner} px, cell ${cell} px`);
-  const run = state.run;
-  lines.push(run === null ? 'run -' : `run id ${run.id} pid ${run.pid} argv` +
-    ` ${JSON.stringify(run.argv)} lines ${run.lines} ` + (run.exit === null ?
-      'running' : `exit code ${run.exit.code} cancelled ` +
-      `${run.exit.cancelled}`));
-  const count = state.counts.last;
-  lines.push(count === null ? 'count -' : 'count page sent ' +
-    `${count.expected.received_messages} lines ` +
-    `${count.expected.received_bytes} bytes, program received ` +
-    `${count.message.received_messages} lines ` +
-    `${count.message.received_bytes} bytes; program sent ` +
-    `${count.message.sent_messages} lines ${count.message.sent_bytes} ` +
-    `bytes, page received ${count.expected.sent_messages} lines ` +
-    `${count.expected.sent_bytes} bytes`);
-  return lines.join('\n');
-}
-
-// Writes the status, panels, checks, frames, totals and new log entries.
+// Writes the status, the module list and the failure, if any.
 function render() {
-  state.renderPending = false;
   const socket = state.socket;
-  const closed = xsjs.closed === null ? '-' : `${xsjs.closed.code} reason ` +
-    `'${xsjs.closed.reason}' wasClean ${xsjs.closed.wasClean}`;
-  let status = `state ${socket === null ? 'fetching token' :
-    READY_STATES[socket.readyState]}  url ${state.url === null ? '-' :
-    state.url}  protocol ${socket === null ? '-' : `'${socket.protocol}'`}` +
-    `  close ${closed}`;
-  if (xsjs.failure !== null) {
-    status += `\nfailure ${xsjs.failure.check}: ${xsjs.failure.detail}`;
+  const hello = boot.hellos.length === 0 ? null : boot.hellos.at(-1);
+  const saved = boot.saves.length === 0 ? null : boot.saves.at(-1);
+  const started = boot.started;
+  const lines = [
+    `socket ${socket === null ? 'fetching token' :
+      READY_STATES[socket.readyState]}` + (boot.closed === null ? '' :
+      ` code ${boot.closed.code} reason '${boot.closed.reason}' wasClean ` +
+      `${boot.closed.wasClean}`),
+    `ttyd title ${boot.ttyd.title === null ? '-' : boot.ttyd.title}`,
+    `ttyd preferences ${boot.ttyd.preferences === null ? '-' :
+      JSON.stringify(boot.ttyd.preferences)}`,
+    hello === null ? 'hello -' : `hello ${boot.hellos.length}: pid ` +
+      `${hello.pid} python ${hello.python} started ` +
+      `${new Date(hello.started * 1000).toISOString()}\nbootstrap ` +
+      `${hello.bootstrap} sha256 ${hello.sha256}\nmodules ${hello.modules}`,
+    saved === null ? 'saved -' : `saved ${saved.name} ${saved.bytes} bytes ` +
+      `sha256 ${saved.sha256}`,
+    started === null ? 'run -' : `run ${started.name} pid ${started.pid} ` +
+      `args ${JSON.stringify(started.args)} ` + (boot.exit === null ?
+      'running' : `exit code ${boot.exit.code}`),
+  ];
+  if (boot.failure !== null) {
+    lines.push(`failure ${boot.failure}`);
   }
-  elements.status.textContent = status;
-  elements.panels.textContent = panelsText();
-  elements.checks.textContent = CHECK_NAMES.map(name => {
-    const check = xsjs.checks[name];
-    return name.padEnd(14) + STATE_LABELS[check.state].padEnd(9) +
-      check.detail;
-  }).join('\n');
-  elements.frames.replaceChildren(...state.frameRows.map(row => {
-    const names = row.direction === 'sent' ? SENT_NAMES : RECEIVED_NAMES;
-    const name = Object.hasOwn(names, row.type) ? names[row.type] :
-      'unknown';
-    const tr = document.createElement('tr');
-    for (const text of [
-      row.ms.toFixed(1), row.direction,
-      `${bytesText([row.type])} ${name}`, String(row.length), row.text,
-    ]) {
-      const td = document.createElement('td');
-      td.textContent = text;
-      tr.append(td);
-    }
-    return tr;
-  }));
-  const frames = xsjs.frames;
-  elements.totals.textContent = `total sent ${frames.sent} frames ` +
-    `${frames.sent_bytes} bytes, received ${frames.received} frames ` +
-    `${frames.received_bytes} bytes`;
-  if (state.rendered < xsjs.conversation.length) {
-    elements.log.append(xsjs.conversation.slice(state.rendered)
-      .map(entry => (entry.who === 'person' ? '> ' : '') + entry.text + '\n')
-      .join(''));
-    state.rendered = xsjs.conversation.length;
-    elements.log.scrollTop = elements.log.scrollHeight;
-  }
+  elements.status.textContent = lines.join('\n');
+  elements.modules.textContent = boot.modules === null ? 'modules -' : [
+    `modules ${boot.modules.length}:`,
+    ...boot.modules.map(entry =>
+      `${entry.bytes} ${entry.sha256.slice(0, 12)} ${entry.name}`),
+  ].join('\n');
 }
 
 // Fetches the token, then opens the WebSocket to ttyd.
@@ -801,20 +394,25 @@ async function start() {
   }
   state.token = (await response.json()).token;
   const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  state.url = `${scheme}//${window.location.host}${path}/ws`;
-  state.socket = new WebSocket(state.url, ['tty']);
+  state.socket = new WebSocket(
+    `${scheme}//${window.location.host}${path}/ws`, ['tty']);
   state.socket.binaryType = 'arraybuffer';
   state.socket.addEventListener('open', onOpen);
   state.socket.addEventListener('message', onMessage);
   state.socket.addEventListener('close', onClose);
-  scheduleRender();
+  render();
 }
 
-window.addEventListener('error', event => record('script', event.message));
-elements.say.addEventListener('keydown', onSayKey);
+window.addEventListener('error', event => record(event.message));
+elements.put.addEventListener('click', onPut);
+elements.run.addEventListener('click', onRun);
+elements.kill.addEventListener('click', () => sendMessage({type: 'kill'}));
+elements.eof.addEventListener('click', onEof);
+elements.restart.addEventListener('click', onRestart);
 elements.close.addEventListener('click', onClosePressed);
-start().catch(error => record('connect', String(error)));
-scheduleRender();
+elements.stdin.addEventListener('keydown', onStdinKey);
+start().catch(error => record(String(error)));
+render();
 </script>
 </body>
 </html>

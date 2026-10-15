@@ -4,12 +4,13 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # The wire test: starts Linux ttyd, from a checkout of ttyd beside this
-# project, serving bootstrap.html and running bootstrap.py, then
-# speaks ttyd's protocol to the program as the page does, rung by rung:
-# over one WebSocket, then over two at once, and last over one while ttyd
-# is killed. It stops at the first failed check with the
-# measurement that failed and exits 1; on success it prints one line per
-# rung and exits 0. Standard library only:
+# project, serving bootstrap.html and running a copy of bootstrap.py made
+# in a directory under build/, then speaks ttyd's protocol to the program
+# as the page does, rung by rung: over one WebSocket, then over two at
+# once, and last over one while ttyd is killed. ttyd's log is copied to
+# stderr whole. It stops at the first failed check with the measurement
+# that failed and exits 1; on success it prints one line per rung and
+# exits 0. Standard library only, and ttyd is the one program it starts:
 #
 #     python3 python/test_wire.py
 
@@ -25,10 +26,12 @@ import json
 import os
 import re
 import select
+import shutil
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Generator
 from types import FrameType
@@ -36,11 +39,15 @@ from typing import Any, cast
 
 _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
 
-# What ttyd runs for each connection, from `_PYTHON_PATH`.
-_BOOTSTRAP_ARGUMENTS = ["python3", "bootstrap.py"]
+_BOOTSTRAP_PATH = os.path.join(_PYTHON_PATH, "bootstrap.py")
 
-# vmstat's lines to receive before cancelling it.
-_CANCEL_AFTER_LINES = 5
+# 1 MiB in 32 byte units: 23 random ASCII characters, then 2, 3 and 4 bytes.
+_BIG_ASCII_PER_UNIT = 23
+_BIG_UNITS = 32768
+_BIG_WIDE_TEXT = "\u00e9\u4e2d\U0001f600"
+
+# Where the copy of bootstrap.py and its modules go, in a directory each run.
+_BUILD_PATH = os.path.join(os.path.dirname(_PYTHON_PATH), "build")
 
 # The terminal size the first message gives.
 _COLUMNS = 80
@@ -48,12 +55,14 @@ _ROWS = 24
 
 _CREDENTIAL = "user:pass"
 
-# 1 MiB in 32 byte units: 23 random ASCII characters, then 2, 3 and 4 bytes.
-_DIGEST_ASCII_PER_UNIT = 23
-_DIGEST_UNITS = 32768
-_DIGEST_WIDE_TEXT = "\u00e9\u4e2d\U0001f600"
+# A module that exits with the code its argument gives.
+_EXIT_SOURCE = "import sys\n\nsys.exit(int(sys.argv[1]))\n"
 
 _INDEX_PATH = os.path.join(_PYTHON_PATH, "bootstrap.html")
+
+# The lines lines.py prints, 1 to this.
+_LINES_COUNT = 100000
+_LINES_SOURCE = f"for n in range(1, {_LINES_COUNT} + 1):\n    print(n)\n"
 
 _LISTENING_PATTERN = re.compile(r" Listening on port: (\d+)$")
 
@@ -61,56 +70,79 @@ _MADE_UP_PATH = "/other.js"
 
 # The fields of each message the program sends, by type.
 _MESSAGE_FIELDS: dict[str, dict[str, type[object]]] = {
-    "count": {
-        "received_messages": int,
-        "received_bytes": int,
-        "sent_messages": int,
-        "sent_bytes": int,
-    },
-    "digest": {"id": int, "bytes": int, "characters": int, "sha256": str},
-    "exit": {"id": int, "code": int, "lines": int, "cancelled": bool},
-    "hello": {"pid": int, "python": str, "columns": int, "rows": int},
-    "line": {"id": int, "n": int, "text": str},
-    "pong": {"id": int},
-    "reply": {"id": int, "text": str},
-    "size": {"columns": int, "rows": int},
-    "started": {"id": int, "pid": int, "argv": list},
-    "stat": {
-        "hostname": str,
-        "kernel": str,
-        "uptime": float,
-        "loadavg": list,
-        "mem_available_kib": int,
+    "exit": {"name": str, "code": int},
+    "hello": {
         "pid": int,
+        "python": str,
+        "bootstrap": str,
+        "sha256": str,
+        "modules": str,
+        "started": float,
     },
-    "tick": {"n": int, "time": float},
+    "modules": {"entries": list},
+    "out": {"stream": str, "data": str},
+    "saved": {"name": str, "bytes": int, "sha256": str},
+    "started": {"name": str, "pid": int, "args": list},
 }
 
 # Holds 2, 3 and 4 byte characters, and the split lands inside the last.
 _NON_ASCII_TEXT = "na\u00efve \u65e5\u672c\u8a9e \U0001f600 \u00e9t\u00e9"
 _NON_ASCII_SPLIT_CHARACTER = "\U0001f600"
 
-# The seq line at which PAUSE goes, and how long until RESUME follows.
-_PAUSE_AT_LINE = 25000
-_RESUME_AFTER_SECONDS = 1
-
-_PING_COUNT = 10
-_PING_SECONDS = 1
-
 _POLL_SECONDS = 0.05
 
-_RESIZE_COLUMNS = 100
-_RESIZE_ROWS = 30
+# A module that raises, so the interpreter's own exit reports it.
+_RAISE_SOURCE = f"raise ValueError({_NON_ASCII_TEXT!r})\n"
+
+# A module that prints what it was given and where it runs.
+_REPORT_SOURCE = f"""\
+import os
+import sys
+
+TEXT = {_NON_ASCII_TEXT!r}
+
+print("argv", sys.argv[1:])
+print("text", TEXT)
+print("cwd", os.getcwd())
+print("path", sys.path[0])
+print("bootstrap", os.environ["XSJS_BOOTSTRAP"])
+print("modules", os.environ["XSJS_MODULES"])
+print("name", __name__)
+print("stderr", TEXT, file=sys.stderr)
+"""
+
+# The arguments report.py runs with.
+_RUN_ARGS = ["--who", "two words", _NON_ASCII_TEXT]
 
 _RUN_TIMEOUT_SECONDS = 120
 
-_SEQ_LINES = 100000
+# A module that forks a second process, and both sleep until killed.
+_SLEEPER_SOURCE = """\
+import os
+import time
 
-_STAT_APART_SECONDS = 5
+child = os.fork()
+if child == 0:
+    time.sleep(600)
+    os._exit(0)
+print("pids", os.getpid(), child)
+time.sleep(600)
+"""
+
+# A module that says its pids, then prints each line of stdin until EOF.
+_STDIN_SOURCE = """\
+import os
+import sys
+
+print("ready", os.getpid(), os.getppid())
+count = 0
+for line in sys.stdin:
+    count += 1
+    print("got", line, end="")
+print("eof", count)
+"""
 
 _STOP_WAIT_SECONDS = 5
-
-_TICK_COUNT = 10
 
 _TTYD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(_PYTHON_PATH)), "ttyd", "build", "ttyd"
@@ -118,14 +150,27 @@ _TTYD_PATH = os.path.join(
 _TTYD_OPTIONS = [
     "--writable",
     "--check-origin",
-    "--cwd",
-    _PYTHON_PATH,
     "--index",
     _INDEX_PATH,
 ]
 
-# The ticks to receive on each of two clients at once.
-_TWO_CLIENTS_TICKS = 3
+# What update.py appends to the bootstrapper it runs under.
+_UPDATE_LINE = b"# updated by update.py\n"
+_UPDATE_SOURCE = f"""\
+import hashlib
+import os
+
+path = os.environ["XSJS_BOOTSTRAP"]
+with open(path, "rb") as old_file:
+    data = old_file.read() + {_UPDATE_LINE!r}
+with open(path + ".new", "wb") as new_file:
+    new_file.write(data)
+os.replace(path + ".new", path)
+print("sha256", hashlib.sha256(data).hexdigest())
+"""
+
+# ttyd's first log line, with its version and that of libwebsockets.
+_VERSION_PATTERN = re.compile(r" N: (ttyd \S+ \(libwebsockets \S+\))$")
 
 _WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 _WEBSOCKET_OPCODE_BINARY = 0x2
@@ -140,10 +185,29 @@ class CheckFailed(Exception):
     pass
 
 
+# A module's run on one wire: its start, what it wrote, and its exit.
+class Run:
+    def __init__(self, started: dict[str, Any]) -> None:
+        self.started = started
+        self.streams = {"stdout": bytearray(), "stderr": bytearray()}
+        self.outs = 0
+        self.exit: dict[str, Any] | None = None
+        # The module list that came after the exit.
+        self.modules: list[dict[str, Any]] | None = None
+
+    # Returns what the module wrote on the stream, decoded as `UTF-8`.
+    def text(self, stream_name: str) -> str:
+        return self.streams[stream_name].decode()
+
+
 class Ttyd:
     # Starts ttyd in a session of its own with its stderr on a pipe.
-    def __init__(self, options: list[str], version: str, deadline: float):
-        self.version = version
+    def __init__(
+        self, options: list[str], command: list[str], deadline: float
+    ) -> None:
+        self.command = command
+        # The path, until ttyd's log names its version.
+        self.version = _TTYD_PATH
         self.deadline = deadline
         # ttyd's stderr lines so far, and what follows the last of them.
         self.lines: list[str] = []
@@ -162,9 +226,8 @@ class Ttyd:
                     "--interface",
                     "127.0.0.1",
                     *options,
-                    *_BOOTSTRAP_ARGUMENTS,
+                    *command,
                 ],
-                cwd=_PYTHON_PATH,
                 stdin=subprocess.DEVNULL,
                 stdout=sys.stderr,
                 stderr=write_fd,
@@ -253,53 +316,29 @@ class Wire:
         self.ttyd_messages = 0
         self.ttyd_pings = 0
         self.title = ""
-        self.preferences: Any = None
+        self.preferences: dict[str, Any] = {}
         # The output after the last whole line.
         self.stream = b""
-        self.hello: dict[str, Any] = {}
-        # The client's figures for count: lines and bytes, less newlines.
-        self.sent_lines = 0
-        self.sent_bytes = 0
         self.received_lines = 0
-        self.received_bytes = 0
-        self.tick_n = 0
-        self.tick_times: list[float] = []
-        self.ping_id = 0
-        self.pings: collections.deque[tuple[int, float]] = collections.deque()
-        self.round_trips: list[float] = []
-        self.say_id = 0
-        self.says: collections.deque[int] = collections.deque()
-        self.replies: dict[int, str] = {}
-        self.started: dict[int, dict[str, Any]] = {}
-        self.lines: dict[int, list[str]] = {}
-        self.exits: dict[int, dict[str, Any]] = {}
-        # Called with the say's id and n of each line message.
-        self.line_watch: Callable[[int, int], None] | None = None
-        self.digest_id = 0
-        self.digests_asked: set[int] = set()
-        self.digests: dict[int, dict[str, Any]] = {}
-        self.stats_asked = 0
-        self.stats: list[dict[str, Any]] = []
-        self.sizes_asked = 0
-        self.sizes: list[dict[str, Any]] = []
-        # The client's sent lines and bytes as each count went.
-        self.counts_asked: collections.deque[tuple[int, int]] = (
+        self.hellos: list[dict[str, Any]] = []
+        # The latest module list, and how many lists have come.
+        self.modules: list[dict[str, Any]] = []
+        self.modules_count = 0
+        # The saved answers due, oldest first, as this client computes them.
+        self.saves_due: collections.deque[dict[str, Any]] = collections.deque()
+        self.saves: list[dict[str, Any]] = []
+        # The runs sent and not yet started, as name and args.
+        self.runs_due: collections.deque[tuple[str, list[str]]] = (
             collections.deque()
         )
-        self.counts: list[dict[str, Any]] = []
-        self.timers: list[tuple[float, Callable[[], None]]] = []
+        self.runs: list[Run] = []
         self.handlers: dict[str, Callable[[dict[str, Any]], None]] = {
-            "count": self.count_take,
-            "digest": self.digest_take,
             "exit": self.exit_take,
             "hello": self.hello_take,
-            "line": self.line_take,
-            "pong": self.pong_take,
-            "reply": self.reply_take,
-            "size": self.size_take,
+            "modules": self.modules_take,
+            "out": self.out_take,
+            "saved": self.saved_take,
             "started": self.started_take,
-            "stat": self.stat_take,
-            "tick": self.tick_take,
         }
         self.frames_handle()
 
@@ -310,53 +349,12 @@ class Wire:
             _WEBSOCKET_OPCODE_CLOSE, _WEBSOCKET_CLOSE_NORMAL.to_bytes(2, "big")
         )
 
-    # Asks for a count, keeping the client's figures as they stand.
-    def count_send(self) -> None:
-        self.line_send({"type": "count"})
-        self.counts_asked.append((self.sent_lines, self.sent_bytes))
-
-    # The program's figures leave out this reply and count the request.
-    def count_take(self, message: dict[str, Any]) -> None:
-        if not self.counts_asked:
-            raise CheckFailed(f"count came unasked: {message}")
-        sent_lines, sent_bytes = self.counts_asked.popleft()
-        figures = {
-            "received_messages": sent_lines,
-            "received_bytes": sent_bytes,
-            "sent_messages": self.received_lines,
-            "sent_bytes": self.received_bytes,
-        }
-        if any(message[name] != value for name, value in figures.items()):
-            raise CheckFailed(
-                f"the program's count {message} differs from the client's"
-                f" {figures}"
-            )
-        self.counts.append(message)
-
-    # Asks for the text's digest and returns the request's id.
-    def digest_send(self, text: str) -> int:
-        self.digest_id += 1
-        self.digests_asked.add(self.digest_id)
-        self.line_send({"type": "digest", "id": self.digest_id, "text": text})
-        return self.digest_id
-
-    # Records a digest, failing unless it was asked for and not yet given.
-    def digest_take(self, message: dict[str, Any]) -> None:
-        if message["id"] not in self.digests_asked - self.digests.keys():
-            raise CheckFailed(f"digest came unasked: {message}")
-        self.digests[message["id"]] = message
-
-    # Records a running command's exit, failing unless its line count agrees.
+    # Records the running module's exit.
     def exit_take(self, message: dict[str, Any]) -> None:
-        say_id = message["id"]
-        if say_id not in self.started or say_id in self.exits:
-            raise CheckFailed(f"exit for no running command: {message}")
-        if message["lines"] != len(self.lines[say_id]):
-            raise CheckFailed(
-                f"exit says {message['lines']} lines where"
-                f" {len(self.lines[say_id])} line messages came: {message}"
-            )
-        self.exits[say_id] = message
+        run = self.run_running(message)
+        if message["name"] != run.started["name"]:
+            raise CheckFailed(f"exit {message} for {run.started}")
+        run.exit = message
 
     # Sends one WebSocket frame, masked as a client's must be.
     def frame_send(
@@ -433,110 +431,100 @@ class Wire:
                 self.fragments = None
                 self.ttyd_message_handle(message)
 
-    # Records hello, failing on a second one.
+    # Records a hello, which only a restart repeats, and never mid run.
     def hello_take(self, message: dict[str, Any]) -> None:
-        if self.hello:
-            raise CheckFailed(f"a second hello came: {message}")
-        self.hello = message
+        if self.runs and self.runs[-1].exit is None:
+            raise CheckFailed(f"hello came while a module ran: {message}")
+        self.hellos.append(message)
+
+    # Sends the bytes to the running module's stdin.
+    def in_send(self, data: bytes) -> None:
+        self.line_send(
+            {"type": "in", "data": base64.b64encode(data).decode("ascii")}
+        )
 
     # Handles one line of the program's output.
     def line_handle(self, line: bytes) -> None:
         message = message_parse(line)
-        if not self.hello and message["type"] != "hello":
+        if not self.hellos and message["type"] != "hello":
             raise CheckFailed(
                 f"the program's first line isn't hello: {line!r}"
             )
         self.handlers[message["type"]](message)
         self.received_lines += 1
-        self.received_bytes += len(line)
 
     # Sends a line of input to the program as one ttyd message.
     def line_send(self, message: dict[str, Any]) -> None:
-        line = self.line_count(message)
-        self.frame_send(_WEBSOCKET_OPCODE_BINARY, b"0" + line)
+        self.frame_send(_WEBSOCKET_OPCODE_BINARY, b"0" + message_line(message))
 
-    # Counts a line of input as sent. Returns it with its newline.
-    def line_count(self, message: dict[str, Any]) -> bytes:
-        line = json.dumps(message, ensure_ascii=False).encode()
-        self.sent_lines += 1
-        self.sent_bytes += len(line)
-        return line + b"\n"
+    # Records a module list, and keeps the first after an exit with the run.
+    def modules_take(self, message: dict[str, Any]) -> None:
+        entries: list[dict[str, Any]] = []
+        for entry in cast(list[object], message["entries"]):
+            if type(entry) is not dict:
+                raise CheckFailed(f"modules has an entry {entry!r}")
+            fields = cast(dict[str, Any], entry)
+            if fields.keys() != {"name", "bytes", "sha256"} or (
+                type(fields["name"]),
+                type(fields["bytes"]),
+                type(fields["sha256"]),
+            ) != (str, int, str):
+                raise CheckFailed(f"modules has an entry {entry!r}")
+            entries.append(fields)
+        self.modules = entries
+        self.modules_count += 1
+        last = self.runs[-1] if self.runs else None
+        if last is not None and last.exit is not None and last.modules is None:
+            last.modules = self.modules
 
-    # Records a running command's next line and calls the line watch.
-    def line_take(self, message: dict[str, Any]) -> None:
-        say_id = message["id"]
-        if say_id not in self.started or say_id in self.exits:
-            raise CheckFailed(f"line for no running command: {message}")
-        lines = self.lines[say_id]
-        if message["n"] != len(lines) + 1:
-            raise CheckFailed(
-                f"line {message['n']} came after line {len(lines)}: {message}"
-            )
-        lines.append(message["text"])
-        if self.line_watch:
-            self.line_watch(say_id, message["n"])
+    # Adds what the running module wrote to its stream.
+    def out_take(self, message: dict[str, Any]) -> None:
+        run = self.run_running(message)
+        if message["stream"] not in run.streams:
+            raise CheckFailed(f"out on no stream of a module: {message}")
+        run.streams[message["stream"]] += base64.b64decode(
+            message["data"], validate=True
+        )
+        run.outs += 1
 
-    # Sends a ping, keeping its id and when it went.
-    def ping_send(self) -> None:
-        self.ping_id += 1
-        self.pings.append((self.ping_id, time.monotonic()))
-        self.line_send({"type": "ping", "id": self.ping_id})
+    # Counts a put as due its saved answer. Returns its line.
+    def put_line(self, name: str, text: str) -> bytes:
+        data = text.encode()
+        self.saves_due.append(
+            {
+                "type": "saved",
+                "name": name,
+                "bytes": len(data),
+                "sha256": hashlib.sha256(data).hexdigest(),
+            }
+        )
+        return message_line({"type": "put", "name": name, "text": text})
 
-    # Records a round trip, failing unless the pong is the oldest ping's.
-    def pong_take(self, message: dict[str, Any]) -> None:
-        if not self.pings:
-            raise CheckFailed(f"pong came with no ping outstanding: {message}")
-        ping_id, sent_at = self.pings.popleft()
-        if message["id"] != ping_id:
-            raise CheckFailed(
-                f"pong {message['id']} came when the oldest outstanding ping"
-                f" was {ping_id}"
-            )
-        self.round_trips.append(time.monotonic() - sent_at)
-
-    # Records a reply, failing unless it answers the oldest unanswered say.
-    def reply_take(self, message: dict[str, Any]) -> None:
-        if not self.says or message["id"] != self.says[0]:
-            raise CheckFailed(
-                f"reply {message['id']} came when the oldest unanswered say"
-                f" was {self.says[0] if self.says else 'none'}: {message}"
-            )
-        self.says.popleft()
-        self.replies[message["id"]] = message["text"]
-
-    # Sends ttyd a resize, counting the size message it should bring.
-    def resize_send(self, columns: int, rows: int) -> None:
-        self.sizes_asked += 1
+    # Sends a put as one ttyd message.
+    def put_send(self, name: str, text: str) -> None:
         self.frame_send(
-            _WEBSOCKET_OPCODE_BINARY,
-            b"1" + json.dumps({"columns": columns, "rows": rows}).encode(),
+            _WEBSOCKET_OPCODE_BINARY, b"0" + self.put_line(name, text)
         )
 
-    # Counts a say as sent and awaiting its reply. Returns its id and line.
-    def say_line(self, text: str) -> tuple[int, bytes]:
-        self.say_id += 1
-        self.says.append(self.say_id)
-        line = self.line_count(
-            {"type": "say", "id": self.say_id, "text": text}
-        )
-        return self.say_id, line
+    # Returns the running module, failing on the message when none runs.
+    def run_running(self, message: dict[str, Any]) -> Run:
+        if not self.runs or self.runs[-1].exit is not None:
+            raise CheckFailed(f"{message['type']} with no module running")
+        return self.runs[-1]
 
-    # Sends a say as one ttyd message and returns its id.
-    def say_send(self, text: str) -> int:
-        say_id, line = self.say_line(text)
-        self.frame_send(_WEBSOCKET_OPCODE_BINARY, b"0" + line)
-        return say_id
+    # Sends a run, due its started answer.
+    def run_send(self, name: str, args: list[str]) -> None:
+        self.runs_due.append((name, args))
+        self.line_send({"type": "run", "name": name, "args": args})
 
-    # Asks the program for its size.
-    def size_send(self) -> None:
-        self.sizes_asked += 1
-        self.line_send({"type": "size"})
-
-    # Records a size, failing unless one was asked for.
-    def size_take(self, message: dict[str, Any]) -> None:
-        if len(self.sizes) == self.sizes_asked:
-            raise CheckFailed(f"size came unasked: {message}")
-        self.sizes.append(message)
+    # Records a saved answer, failing unless it is the oldest put's as due.
+    def saved_take(self, message: dict[str, Any]) -> None:
+        if not self.saves_due:
+            raise CheckFailed(f"saved came unasked: {message}")
+        due = self.saves_due.popleft()
+        if message != due:
+            raise CheckFailed(f"saved {message} where {due} was due")
+        self.saves.append(message)
 
     # Reads from ttyd and handles its frames, failing on an unexpected drop.
     def socket_read(self) -> None:
@@ -565,43 +553,16 @@ class Wire:
             ).encode(),
         )
 
-    # Records a started command, failing unless its say was answered.
+    # Records a module's start, failing unless it is the oldest run's.
     def started_take(self, message: dict[str, Any]) -> None:
-        say_id = message["id"]
-        if say_id not in self.replies or say_id in self.started:
-            raise CheckFailed(f"started for no answered say: {message}")
-        if not all(type(word) is str for word in message["argv"]):
-            raise CheckFailed(f"started's argv isn't all strings: {message}")
-        self.started[say_id] = message
-        self.lines[say_id] = []
-
-    # Asks the program for a stat.
-    def stat_send(self) -> None:
-        self.stats_asked += 1
-        self.line_send({"type": "stat"})
-
-    # Records a stat, failing unless it was asked for and has 3 float loads.
-    def stat_take(self, message: dict[str, Any]) -> None:
-        if len(self.stats) == self.stats_asked:
-            raise CheckFailed(f"stat came unasked: {message}")
-        loadavg = message["loadavg"]
-        if len(loadavg) != 3 or any(
-            type(load) is not float for load in loadavg
-        ):
-            raise CheckFailed(f"stat's loadavg isn't 3 floats: {message}")
-        self.stats.append(message)
-
-    # Records a tick's time, failing unless it is the next one.
-    def tick_take(self, message: dict[str, Any]) -> None:
-        if message["n"] != self.tick_n + 1:
-            raise CheckFailed(f"tick {message['n']} came after {self.tick_n}")
-        self.tick_n = message["n"]
-        self.tick_times.append(time.monotonic())
-
-    # Adds a callback due at the time, keeping the timers in due order.
-    def timer_add(self, due: float, callback: Callable[[], None]) -> None:
-        self.timers.append((due, callback))
-        self.timers.sort(key=lambda timer: timer[0])
+        if self.runs and self.runs[-1].exit is None:
+            raise CheckFailed(f"started while a module ran: {message}")
+        if not self.runs_due:
+            raise CheckFailed(f"started came unasked: {message}")
+        name, args = self.runs_due.popleft()
+        if (message["name"], message["args"]) != (name, args):
+            raise CheckFailed(f"started {message} for run {name} {args}")
+        self.runs.append(Run(message))
 
     # Handles one ttyd message: the title, the preferences, then output.
     def ttyd_message_handle(self, message: bytes) -> None:
@@ -623,44 +584,55 @@ class Wire:
             self.title = message[1:].decode()
         elif kind == b"2":
             try:
-                self.preferences = json.loads(message[1:])
+                preferences: object = json.loads(message[1:])
             except json.JSONDecodeError as error:
                 raise CheckFailed(
                     f"{self.ttyd.version}'s preferences aren't JSON: {error}:"
                     f" {message!r}"
                 ) from error
+            if type(preferences) is not dict:
+                raise CheckFailed(
+                    f"{self.ttyd.version}'s preferences aren't an object:"
+                    f" {message!r}"
+                )
+            self.preferences = cast(dict[str, Any], preferences)
         else:
-            *lines, self.stream = (self.stream + message[1:]).split(b"\r\n")
+            *lines, self.stream = (self.stream + message[1:]).split(b"\n")
             for line in lines:
                 self.line_handle(line)
 
-    # Handles what ttyd sends, firing due timers, until done answers True.
+    # Sends a message of a type with no fields.
+    def type_send(self, kind: str) -> None:
+        self.line_send({"type": kind})
+
+    # Handles what ttyd sends until done answers True.
     def wait(self, done: Callable[[], bool], what: str) -> None:
         wires_wait([self], done, what)
 
 
-# Fails unless the reply to `echo <text>` is what the brief's echo gives.
-def echo_check(wire: Wire, say_id: int, text: str) -> None:
-    expected = (
-        f"{text}\n{len(text)} characters, {len(text.encode())} bytes in UTF-8"
-    )
-    if wire.replies[say_id] != expected:
-        raise CheckFailed(
-            f"echo's reply is {wire.replies[say_id]!r}, not {expected!r}"
-        )
-
-
-# Fails unless hello has the size first sent and its pid runs bootstrap.py.
-def hello_check(wire: Wire) -> None:
-    hello = wire.hello
-    if (hello["columns"], hello["rows"]) != (_COLUMNS, _ROWS):
-        raise CheckFailed(
-            f"hello {hello} after a first message of {_COLUMNS}x{_ROWS}"
-        )
+# Fails unless hello's pid is ttyd's child running its command, as hello says.
+def hello_check(wire: Wire, hello: dict[str, Any]) -> None:
+    command = wire.ttyd.command
     with open(f"/proc/{hello['pid']}/cmdline", "rb") as cmdline_file:
         cmdline = cmdline_file.read().split(b"\0")[:-1]
-    if cmdline != [argument.encode() for argument in _BOOTSTRAP_ARGUMENTS]:
+    if cmdline != [argument.encode() for argument in command]:
         raise CheckFailed(f"hello's pid {hello['pid']} runs {cmdline}")
+    parent = process_parent(hello["pid"])
+    if parent != wire.ttyd.process.pid:
+        raise CheckFailed(
+            f"hello's pid {hello['pid']} is the child of {parent}, not of"
+            f" ttyd's {wire.ttyd.process.pid}"
+        )
+    with open(command[1], "rb") as bootstrap_file:
+        digest = hashlib.sha256(bootstrap_file.read()).hexdigest()
+    expected = {
+        "bootstrap": command[1],
+        "sha256": digest,
+        "modules": command[2],
+    }
+    for name, value in expected.items():
+        if hello[name] != value:
+            raise CheckFailed(f"hello's {name} is {hello[name]}, not {value}")
 
 
 # Returns ttyd's status and body for a GET of the path.
@@ -676,6 +648,11 @@ def http_get(
         return response.status, response.read()
     finally:
         connection.close()
+
+
+# Returns the message as a line of JSON, characters as they are, `UTF-8`.
+def message_line(message: dict[str, Any]) -> bytes:
+    return json.dumps(message, ensure_ascii=False).encode() + b"\n"
 
 
 # Returns the line's JSON object, failing unless its fields match its type.
@@ -708,6 +685,14 @@ def message_parse(line: bytes) -> dict[str, Any]:
     return message
 
 
+# Returns the number of the process's parent.
+def process_parent(pid: int) -> int:
+    with open(f"/proc/{pid}/stat", "rb") as stat_file:
+        stat = stat_file.read()
+    # After the name in brackets: state, ppid.
+    return int(stat[stat.rindex(b")") + 2 :].split()[1])
+
+
 # Returns the sorted pids watched, in the session or children of the parent.
 def processes_left(watched: set[int], session: int, parent: int) -> list[int]:
     left: list[int] = []
@@ -732,6 +717,16 @@ def processes_left(watched: set[int], session: int, parent: int) -> list[int]:
     return sorted(left)
 
 
+# Waits until the processes are gone. Returns the seconds since the start.
+def processes_wait(
+    wire: Wire, watched: set[int], session: int, parent: int, start: float
+) -> float:
+    while left := processes_left(watched, session, parent):
+        remaining(wire.ttyd.deadline, f"processes {left} to end")
+        time.sleep(_POLL_SECONDS)
+    return time.monotonic() - start
+
+
 # Returns the seconds left before the overall timeout, failing once past.
 def remaining(deadline: float, what: str) -> float:
     left = deadline - time.monotonic()
@@ -742,250 +737,197 @@ def remaining(deadline: float, what: str) -> float:
     return left
 
 
-# Checks pings, ticks and a count around a cancelled vmstat. Returns a summary.
-def rung_concurrent(wire: Wire) -> str:
-    pongs_before = len(wire.round_trips)
-    ticks_before = wire.tick_n
-    start = time.monotonic()
-    for index in range(_PING_COUNT):
-        wire.timer_add(start + index * _PING_SECONDS, wire.ping_send)
-    run_id = wire.say_send("run vmstat 1")
-    wire.wait(
-        lambda: (
-            run_id in wire.lines
-            and len(wire.lines[run_id]) >= _CANCEL_AFTER_LINES
-        ),
-        f"{_CANCEL_AFTER_LINES} lines of vmstat",
-    )
-    cancel_id = wire.say_send("cancel")
-    wire.wait(lambda: run_id in wire.exits, "vmstat's exit")
-    if cancel_id not in wire.replies:
-        raise CheckFailed("vmstat's exit came before the cancel's reply")
-    ticks_at_exit = wire.tick_n
-    wire.wait(
-        lambda: (
-            wire.tick_n > ticks_at_exit
-            and len(wire.round_trips) == pongs_before + _PING_COUNT
-        ),
-        f"a tick after vmstat's exit and {_PING_COUNT} pongs",
-    )
-    counts_before = len(wire.counts)
-    wire.count_send()
-    wire.wait(lambda: len(wire.counts) > counts_before, "count")
-    started = wire.started[run_id]
-    run_check(wire, run_id, ["vmstat", "1"])
-    if wire.replies[cancel_id] != f"cancelled pid {started['pid']}":
-        raise CheckFailed(
-            f"cancel's reply is {wire.replies[cancel_id]!r}, not"
-            f" 'cancelled pid {started['pid']}'"
-        )
-    exit_message = wire.exits[run_id]
-    if (
-        exit_message["code"] != -signal.SIGTERM
-        or not exit_message["cancelled"]
-    ):
-        raise CheckFailed(
-            f"vmstat's exit isn't by SIGTERM and cancelled: {exit_message}"
-        )
-    count = wire.counts[-1]
-    trips = wire.round_trips[pongs_before:]
-    return (
-        f"vmstat 1 as pid {started['pid']} streamed"
-        f" {len(wire.lines[run_id])} lines while {_PING_COUNT} pings on the"
-        f" {_PING_SECONDS} s timer got {len(trips)} pongs in order, round"
-        f" trip {min(trips) * 1000:.1f} to {max(trips) * 1000:.1f} ms;"
-        f" cancel: exit code {exit_message['code']} cancelled, lines"
-        f" {exit_message['lines']} equal to the line messages received;"
-        f" ticks {ticks_before + 1} to {wire.tick_n} consecutive,"
-        f" {wire.tick_n - ticks_at_exit} after the exit; count received"
-        f" {count['received_messages']} messages,"
-        f" {count['received_bytes']} bytes, sent {count['sent_messages']}"
-        f" messages, {count['sent_bytes']} bytes, equal to the client's"
-    )
-
-
-# Checks a resize, a size request and two stats apart. Returns a summary.
-def rung_control(wire: Wire) -> str:
-    wire.resize_send(_RESIZE_COLUMNS, _RESIZE_ROWS)
-    wire.wait(lambda: len(wire.sizes) == wire.sizes_asked, "size")
-    wire.size_send()
-    wire.wait(lambda: len(wire.sizes) == wire.sizes_asked, "size's reply")
-    for size in wire.sizes[-2:]:
-        if (size["columns"], size["rows"]) != (_RESIZE_COLUMNS, _RESIZE_ROWS):
-            raise CheckFailed(
-                f"size {size} after a resize to {_RESIZE_COLUMNS}x"
-                f"{_RESIZE_ROWS}"
-            )
-    stats_before = len(wire.stats)
-    wire.stat_send()
-    wire.timer_add(time.monotonic() + _STAT_APART_SECONDS, wire.stat_send)
-    wire.wait(lambda: len(wire.stats) == stats_before + 2, "two stats")
-    first, second = wire.stats[-2:]
-    if second["uptime"] <= first["uptime"]:
-        raise CheckFailed(
-            f"uptime went from {first['uptime']} to {second['uptime']} in"
-            f" {_STAT_APART_SECONDS} s"
-        )
-    if not first["pid"] == second["pid"] == wire.hello["pid"]:
-        raise CheckFailed(
-            f"stat's pid went {first['pid']}, {second['pid']} where hello's"
-            f" was {wire.hello['pid']}"
-        )
-    return (
-        f"resize to {_RESIZE_COLUMNS}x{_RESIZE_ROWS}: size after SIGWINCH and"
-        " on request both"
-        f" {_RESIZE_COLUMNS}x{_RESIZE_ROWS}; stat {_STAT_APART_SECONDS} s"
-        f" apart by the client's timer: uptime {first['uptime']} to"
-        f" {second['uptime']} s, pid {second['pid']} both times as in hello;"
-        f" host {second['hostname']}, kernel {second['kernel']}, loadavg"
-        f" {second['loadavg']}, MemAvailable {second['mem_available_kib']}"
-        " KiB"
-    )
-
-
-# Checks that a close ends the program and its processes. Returns a summary.
-def rung_end(wire: Wire) -> str:
-    seconds = session_close(wire, [], wire.ttyd.process.pid)
-    commands = sorted(started["pid"] for started in wire.started.values())
-    return (
-        f"close {_WEBSOCKET_CLOSE_NORMAL} answered with"
-        f" {wire.close_code}; ttyd logged the program, pid"
-        f" {wire.hello['pid']}, killed with signal {int(signal.SIGHUP)}"
-        " (SIGHUP); it, its session and the commands it ran (pids"
-        f" {commands}) were gone and ttyd had no child {seconds:.3f} s after"
-        f" the close; {wire.ttyd_pings} ttyd pings answered"
-    )
-
-
-# Checks echoes, a 1 MiB digest and a paused seq. Returns a summary.
-def rung_framing(wire: Wire) -> str:
-    wide = "".join(str(index % 10) for index in range(3 * _COLUMNS))
-    wide_id = wire.say_send(f"echo {wide}")
-    plain_id = wire.say_send(f"echo {_NON_ASCII_TEXT}")
-    # The same line split inside a character in two messages, then two frames.
-    two_id, line = wire.say_line(f"echo {_NON_ASCII_TEXT}")
-    split = line.index(_NON_ASCII_SPLIT_CHARACTER.encode()) + 2
-    split_of = len(line)
-    wire.frame_send(_WEBSOCKET_OPCODE_BINARY, b"0" + line[:split])
-    wire.frame_send(_WEBSOCKET_OPCODE_BINARY, b"0" + line[split:])
-    fragmented_id, line = wire.say_line(f"echo {_NON_ASCII_TEXT}")
-    fragment_split = line.index(_NON_ASCII_SPLIT_CHARACTER.encode()) + 2
-    wire.frame_send(
-        _WEBSOCKET_OPCODE_BINARY, b"0" + line[:fragment_split], False
-    )
-    wire.frame_send(_WEBSOCKET_OPCODE_CONTINUATION, line[fragment_split:])
-    wire.wait(lambda: not wire.says, "the echoes' replies")
-    echo_check(wire, wide_id, wide)
-    for say_id in (plain_id, two_id, fragmented_id):
-        echo_check(wire, say_id, _NON_ASCII_TEXT)
-
+# Puts 1 MiB of 1, 2, 3 and 4 byte characters. Returns a summary.
+def rung_big_put(wire: Wire) -> str:
     ascii_text = base64.b64encode(
-        os.urandom(_DIGEST_UNITS * _DIGEST_ASCII_PER_UNIT * 3 // 4)
+        os.urandom(_BIG_UNITS * _BIG_ASCII_PER_UNIT * 3 // 4)
     ).decode()
     text = "".join(
-        ascii_text[index : index + _DIGEST_ASCII_PER_UNIT] + _DIGEST_WIDE_TEXT
+        ascii_text[index : index + _BIG_ASCII_PER_UNIT] + _BIG_WIDE_TEXT
         for index in range(
-            0, _DIGEST_UNITS * _DIGEST_ASCII_PER_UNIT, _DIGEST_ASCII_PER_UNIT
+            0, _BIG_UNITS * _BIG_ASCII_PER_UNIT, _BIG_ASCII_PER_UNIT
         )
     )
-    encoded = text.encode()
-    digest_id = wire.digest_send(text)
-    wire.wait(lambda: digest_id in wire.digests, "digest")
-    digest = wire.digests[digest_id]
-    expected = {
-        "id": digest_id,
-        "bytes": len(encoded),
-        "characters": len(text),
-        "sha256": hashlib.sha256(encoded).hexdigest(),
-    }
-    if any(digest[name] != value for name, value in expected.items()):
-        raise CheckFailed(f"digest {digest} where the client has {expected}")
-
-    seq_start = time.monotonic()
-    seq_id = wire.say_send(f"run seq 1 {_SEQ_LINES}")
-    # Lines received when PAUSE went and when RESUME went.
-    marks: list[int] = []
-
-    # Sends RESUME and marks the lines received by then.
-    def resume() -> None:
-        wire.frame_send(_WEBSOCKET_OPCODE_BINARY, b"3")
-        marks.append(len(wire.lines[seq_id]))
-
-    # Sends PAUSE at its line of seq and sets the timer for RESUME.
-    def line_seen(say_id: int, n: int) -> None:
-        if say_id == seq_id and n == _PAUSE_AT_LINE:
-            wire.frame_send(_WEBSOCKET_OPCODE_BINARY, b"2")
-            marks.append(n)
-            wire.timer_add(time.monotonic() + _RESUME_AFTER_SECONDS, resume)
-
-    wire.line_watch = line_seen
-    wire.wait(
-        lambda: seq_id in wire.exits and len(marks) == 2,
-        "seq's exit and the RESUME",
-    )
-    seq_seconds = time.monotonic() - seq_start
-    wire.line_watch = None
-    run_check(wire, seq_id, ["seq", "1", str(_SEQ_LINES)])
-    lines = wire.lines[seq_id]
-    if len(lines) != _SEQ_LINES:
-        raise CheckFailed(f"seq streamed {len(lines)} lines, not {_SEQ_LINES}")
-    for n, line_text in enumerate(lines, 1):
-        if line_text != str(n):
-            raise CheckFailed(f"seq's line {n} is {line_text!r}")
-    exit_message = wire.exits[seq_id]
-    if exit_message["code"] != 0 or exit_message["cancelled"]:
-        raise CheckFailed(f"seq's exit is {exit_message}")
-    return (
-        f"echo of {len(wide)} characters ({_COLUMNS} columns) came whole;"
-        f" {_NON_ASCII_TEXT.encode('unicode_escape').decode()} echoed equal,"
-        f" also split at byte {split} of {split_of}, inside"
-        f" U+{ord(_NON_ASCII_SPLIT_CHARACTER):04X}, across two ttyd messages"
-        " and across two frames of one WebSocket message; digest of"
-        f" {len(encoded)} bytes ({len(text)} characters) sha256 equal;"
-        f" seq {_SEQ_LINES} lines in {seq_seconds:.2f} s, n and text"
-        f" consecutive, exit code 0 lines {exit_message['lines']}; PAUSE"
-        f" went at line {marks[0]} and RESUME {_RESUME_AFTER_SECONDS} s"
-        f" later at line {marks[1]}, {marks[1] - marks[0]} lines arriving"
-        f" between: PAUSE is inert in {wire.ttyd.version} (its"
-        " pty_pause returns at once), so this shows only that none went"
-        " missing, not that pausing works"
-    )
-
-
-# Checks that timed pings get pongs in order amid ticks. Returns a summary.
-def rung_round_trip(wire: Wire) -> str:
-    pongs_before = len(wire.round_trips)
-    ticks_before = wire.tick_n
     start = time.monotonic()
-    for index in range(_PING_COUNT):
-        wire.timer_add(start + index * _PING_SECONDS, wire.ping_send)
+    modules_before = wire.modules_count
+    wire.put_send("big.py", text)
     wire.wait(
-        lambda: len(wire.round_trips) == pongs_before + _PING_COUNT,
-        f"{_PING_COUNT} pongs",
+        lambda: not wire.saves_due and wire.modules_count > modules_before,
+        "big.py's saved answer and the module list after it",
     )
-    if wire.tick_n == ticks_before:
-        raise CheckFailed(f"no tick came during the {_PING_COUNT} pings")
-    trips = wire.round_trips[pongs_before:]
+    seconds = time.monotonic() - start
+    saved = wire.saves[-1]
+    saved_check(wire, saved)
     return (
-        f"{_PING_COUNT} pings on the client's {_PING_SECONDS} s timer,"
-        f" {len(trips)} pongs with the same ids in order, round trip"
-        f" {min(trips) * 1000:.1f} to {max(trips) * 1000:.1f} ms; ticks"
-        f" {ticks_before + 1} to {wire.tick_n} consecutive meanwhile; all"
-        f" {wire.received_lines} lines so far JSON of a known type, none"
-        " echoed"
+        f"big.py of {saved['bytes']} bytes ({len(text)} characters) saved"
+        f" with sha256 {saved['sha256'][:12]} equal to this client's and to"
+        f" the file's, {seconds:.2f} s from the put"
     )
 
 
-# Fails unless the say started the argv and its reply names that pid.
-def run_check(wire: Wire, say_id: int, argv: list[str]) -> None:
-    started = wire.started[say_id]
-    reply = wire.replies[say_id]
-    if started["argv"] != argv:
-        raise CheckFailed(f"started {started} for argv {argv}")
-    if not reply.startswith("started ") or not reply.endswith(
-        f" as pid {started['pid']}"
+# Closes with a module running and checks all of it ends. Returns a summary.
+def rung_close(wire: Wire) -> str:
+    run, _ = run_ready(wire, "stdin.py")
+    module_pid = run.started["pid"]
+    seconds = session_close(wire, [], wire.ttyd.process.pid)
+    return (
+        f"with stdin.py running as pid {module_pid}: close"
+        f" {_WEBSOCKET_CLOSE_NORMAL} answered with {wire.close_code}; ttyd"
+        f" logged the program, pid {wire.hellos[-1]['pid']}, killed with"
+        f" signal {int(signal.SIGHUP)} (SIGHUP); it, its module and every"
+        f" module it ran (pids {sorted(run_pids(wire))}) were gone and ttyd"
+        f" had no child {seconds:.3f} s after the close; {wire.ttyd_pings}"
+        " ttyd pings answered"
+    )
+
+
+# Starts the program and checks the title, preferences, hello and modules.
+def rung_hello(wire: Wire) -> str:
+    sent_at = time.time()
+    wire.start_send()
+    wire.wait(lambda: wire.modules_count == 1, "hello and the module list")
+    hello = wire.hellos[0]
+    hello_check(wire, hello)
+    received_at = time.time()
+    if not sent_at <= hello["started"] <= received_at:
+        raise CheckFailed(
+            f"hello's started {hello['started']} is outside the first"
+            f" message's {sent_at} to its receipt's {received_at}"
+        )
+    title = f"{' '.join(wire.ttyd.command)} ({socket.gethostname()})"
+    if wire.title != title:
+        raise CheckFailed(f"ttyd's title is {wire.title!r}, not {title!r}")
+    if wire.modules != []:
+        raise CheckFailed(f"a new directory's module list is {wire.modules}")
+    return (
+        f"ttyd title {wire.title!r}, its command and host; ttyd preferences"
+        f" {json.dumps(wire.preferences)}; hello pid {hello['pid']}, ttyd's"
+        f" child running {' '.join(wire.ttyd.command)}, python"
+        f" {hello['python']}, sha256 {hello['sha256'][:12]} equal to"
+        f" bootstrap.py's, started {hello['started'] - sent_at:.3f} s after"
+        " the first message went; module list empty"
+    )
+
+
+# Runs a module that forks, kills it, and checks both end. Returns a summary.
+def rung_kill(wire: Wire) -> str:
+    wire.put_send("sleeper.py", _SLEEPER_SOURCE)
+    run, line = run_ready(wire, "sleeper.py")
+    words = line.split()
+    if words[:2] != ["pids", str(run.started["pid"])]:
+        raise CheckFailed(f"sleeper.py's first line is {line!r}")
+    forked = int(words[2])
+    killed_at = time.monotonic()
+    wire.type_send("kill")
+    wire.wait(lambda: run.modules is not None, "sleeper.py's exit")
+    exit_message = cast(dict[str, Any], run.exit)
+    if exit_message["code"] != -signal.SIGTERM:
+        raise CheckFailed(f"sleeper.py's exit is {exit_message}")
+    pid = run.started["pid"]
+    seconds = processes_wait(wire, {pid, forked}, pid, pid, killed_at)
+    return (
+        f"sleeper.py as pid {run.started['pid']} forked pid {forked}; kill:"
+        f" exit code {exit_message['code']} (SIGTERM), both pids gone"
+        f" {seconds:.3f} s after the kill"
+    )
+
+
+# Runs a module printing many lines, checking none is lost. Returns a summary.
+def rung_lines(wire: Wire) -> str:
+    wire.put_send("lines.py", _LINES_SOURCE)
+    start = time.monotonic()
+    run = run_wait(wire, "lines.py", [])
+    seconds = time.monotonic() - start
+    expected = "".join(f"{n}\n" for n in range(1, _LINES_COUNT + 1))
+    if run.text("stdout") != expected:
+        lines = run.text("stdout").split("\n")
+        unequal = next(
+            (n, line) for n, line in enumerate(lines, 1) if line != str(n)
+        )
+        raise CheckFailed(
+            f"lines.py printed {len(lines) - 1} lines, line {unequal[0]}"
+            f" {unequal[1]!r}"
+        )
+    run_exit_check(run, 0)
+    return (
+        f"lines.py printed {_LINES_COUNT} lines in {run.outs} out messages,"
+        f" {seconds:.2f} s from the run to the module list after the exit,"
+        " all of them in order; exit code 0"
+    )
+
+
+# Puts a module whole and split two ways, checking each. Returns a summary.
+def rung_put(wire: Wire) -> str:
+    wire.put_send("report.py", _REPORT_SOURCE)
+    # The same put split inside a character in two messages, then two frames.
+    line = wire.put_line("report.py", _REPORT_SOURCE)
+    split = line.index(_NON_ASCII_SPLIT_CHARACTER.encode()) + 2
+    wire.frame_send(_WEBSOCKET_OPCODE_BINARY, b"0" + line[:split])
+    wire.frame_send(_WEBSOCKET_OPCODE_BINARY, b"0" + line[split:])
+    line = wire.put_line("report.py", _REPORT_SOURCE)
+    wire.frame_send(_WEBSOCKET_OPCODE_BINARY, b"0" + line[:split], False)
+    wire.frame_send(_WEBSOCKET_OPCODE_CONTINUATION, line[split:])
+    wire.wait(
+        lambda: not wire.saves_due and wire.modules_count == 4,
+        "three saved answers and their module lists",
+    )
+    saved = wire.saves[-1]
+    saved_check(wire, saved)
+    return (
+        f"report.py put whole, then split at byte {split} of {len(line)},"
+        f" inside U+{ord(_NON_ASCII_SPLIT_CHARACTER):04X}, across two ttyd"
+        " messages, then across two frames of one WebSocket message; each"
+        f" saved {saved['bytes']} bytes, sha256 {saved['sha256'][:12]} equal"
+        " to this client's and to the file's; module list"
+        f" {[entry['name'] for entry in wire.modules]}"
+    )
+
+
+# Runs modules that report, exit with a code and raise. Returns a summary.
+def rung_run(wire: Wire) -> str:
+    run = run_wait(wire, "report.py", _RUN_ARGS)
+    modules = wire.hellos[-1]["modules"]
+    expected = "".join(
+        f"{name} {value}\n"
+        for name, value in (
+            ("argv", _RUN_ARGS),
+            ("text", _NON_ASCII_TEXT),
+            ("cwd", modules),
+            ("path", modules),
+            ("bootstrap", wire.ttyd.command[1]),
+            ("modules", modules),
+            ("name", "__main__"),
+        )
+    )
+    if run.text("stdout") != expected:
+        raise CheckFailed(
+            f"report.py printed {run.text('stdout')!r} where {expected!r} was"
+            " due"
+        )
+    if run.text("stderr") != f"stderr {_NON_ASCII_TEXT}\n":
+        raise CheckFailed(f"report.py's stderr is {run.text('stderr')!r}")
+    run_exit_check(run, 0)
+    wire.put_send("exit.py", _EXIT_SOURCE)
+    exited = run_wait(wire, "exit.py", ["3"])
+    run_exit_check(exited, 3)
+    wire.put_send("raise.py", _RAISE_SOURCE)
+    raised = run_wait(wire, "raise.py", [])
+    run_exit_check(raised, 1)
+    traceback = raised.text("stderr").split("\n")
+    last = [f"ValueError: {_NON_ASCII_TEXT}", ""]
+    if traceback[0] != "Traceback (most recent call last):" or (
+        traceback[-2:] != last
     ):
-        raise CheckFailed(f"run's reply {reply!r} for started {started}")
+        raise CheckFailed(f"raise.py's stderr is {raised.text('stderr')!r}")
+    return (
+        f"report.py with args {_RUN_ARGS!r} as pid {run.started['pid']}:"
+        f" {run.outs} out messages, stdout equal to this client's (argv, the"
+        " text, working directory and first path the modules directory,"
+        " XSJS_BOOTSTRAP, XSJS_MODULES, __main__), stderr equal, exit code 0,"
+        " module list after the exit; exit.py 3 exited with 3; raise.py"
+        f" exited with 1 after {len(traceback) - 1} lines of traceback ending"
+        " in its ValueError"
+    )
 
 
 # Checks the page, token, a made up path and credentials. Returns a summary.
@@ -1010,7 +952,7 @@ def rung_serve(ttyd: Ttyd) -> str:
     authorization = {"Authorization": f"Basic {credential}"}
     with ttyd_serve(
         ["--credential", _CREDENTIAL, *_TTYD_OPTIONS],
-        ttyd.version,
+        ttyd.command,
         ttyd.deadline,
     ) as guarded:
         status, _ = http_get(guarded, "/", {})
@@ -1039,7 +981,7 @@ def rung_serve(ttyd: Ttyd) -> str:
                 f" {_WEBSOCKET_CLOSE_NORMAL} with {wire.close_code}"
             )
     return (
-        f"GET / 200, {len(page)} bytes, sha256 equal to"
+        f"{ttyd.version}: GET / 200, {len(page)} bytes, sha256 equal to"
         f" {os.path.basename(_INDEX_PATH)}'s;"
         f" /token {token_body.decode()}; {_MADE_UP_PATH} 404; with"
         " --credential:"
@@ -1048,23 +990,45 @@ def rung_serve(ttyd: Ttyd) -> str:
     )
 
 
-# Starts the program and checks hello and the ticks. Returns a summary.
-def rung_ticks(wire: Wire) -> str:
-    wire.start_send()
-    wire.wait(lambda: bool(wire.hello), "hello")
-    hello_check(wire)
-    hello = wire.hello
-    wire.wait(lambda: wire.tick_n == _TICK_COUNT, f"{_TICK_COUNT} ticks")
-    gaps = [
-        later - earlier
-        for earlier, later in zip(wire.tick_times, wire.tick_times[1:])
-    ]
+# Runs a module reading stdin, sends it lines and EOF. Returns a summary.
+def rung_stdin(wire: Wire) -> str:
+    wire.put_send("stdin.py", _STDIN_SOURCE)
+    run, line = run_ready(wire, "stdin.py")
+    bootstrap_pid = wire.hellos[-1]["pid"]
+    module_pid = run.started["pid"]
+    if line != f"ready {module_pid} {bootstrap_pid}":
+        raise CheckFailed(f"stdin.py's first line is {line!r}")
+    cmdlines: list[bytes] = []
+    for pid in (bootstrap_pid, module_pid):
+        with open(f"/proc/{pid}/cmdline", "rb") as cmdline_file:
+            cmdlines.append(cmdline_file.read())
+    if cmdlines[0] != cmdlines[1]:
+        raise CheckFailed(
+            f"stdin.py's pid runs {cmdlines[1]!r}, not the bootstrapper's"
+            f" {cmdlines[0]!r}"
+        )
+    whole = f"whole {_NON_ASCII_TEXT}\n".encode()
+    wire.in_send(whole)
+    halves = f"halves {_NON_ASCII_TEXT}\n".encode()
+    split = halves.index(_NON_ASCII_SPLIT_CHARACTER.encode()) + 2
+    wire.in_send(halves[:split])
+    wire.in_send(halves[split:])
+    wire.type_send("eof")
+    wire.wait(lambda: run.modules is not None, "stdin.py's exit")
+    expected = f"{line}\ngot {whole.decode()}got {halves.decode()}eof 2\n"
+    if run.text("stdout") != expected:
+        raise CheckFailed(
+            f"stdin.py printed {run.text('stdout')!r} where {expected!r} was"
+            " due"
+        )
+    run_exit_check(run, 0)
     return (
-        f"title {wire.title!r}, preferences"
-        f" {json.dumps(wire.preferences)}, hello pid {hello['pid']} python"
-        f" {hello['python']} {hello['columns']}x{hello['rows']} as sent;"
-        f" ticks 1 to {wire.tick_n} consecutive, {min(gaps):.3f} to"
-        f" {max(gaps):.3f} s apart"
+        f"stdin.py as pid {module_pid}, the child of the bootstrapper's pid"
+        f" {bootstrap_pid} and running its command line, so no program was"
+        f" started for it; in of a line whole, then of a line split at byte"
+        f" {split} of {len(halves)} inside"
+        f" U+{ord(_NON_ASCII_SPLIT_CHARACTER):04X} across two in messages,"
+        " then eof: both lines echoed whole, exit code 0"
     )
 
 
@@ -1072,9 +1036,11 @@ def rung_ticks(wire: Wire) -> str:
 def rung_ttyd_killed(ttyd: Ttyd) -> str:
     wire = websocket_open(ttyd, {})
     wire.start_send()
-    wire.wait(lambda: wire.tick_n > 0, "the first tick")
-    hello_check(wire)
-    pid = wire.hello["pid"]
+    wire.wait(lambda: wire.modules_count == 1, "hello and the module list")
+    hello_check(wire, wire.hellos[0])
+    pid = wire.hellos[0]["pid"]
+    run, _ = run_ready(wire, "stdin.py")
+    module_pid = run.started["pid"]
     wire.end_expected = True
     killed_at = time.monotonic()
     ttyd.kill(signal.SIGKILL)
@@ -1085,9 +1051,10 @@ def rung_ttyd_killed(ttyd: Ttyd) -> str:
     if status != -signal.SIGKILL:
         raise CheckFailed(f"{ttyd.version} exited with {status} on SIGKILL")
     wire.sock.close()
-    while left := processes_left({pid}, pid, pid):
-        remaining(ttyd.deadline, f"processes {left} to end")
-        time.sleep(_POLL_SECONDS)
+    processes_wait(wire, {pid, module_pid}, pid, pid, killed_at)
+    gone_seconds = processes_wait(
+        wire, set(), module_pid, module_pid, killed_at
+    )
     if wire.close_code is None:
         end = (
             "the TCP connection ended with no close frame, which a browser"
@@ -1099,11 +1066,11 @@ def rung_ttyd_killed(ttyd: Ttyd) -> str:
             f" {wire.close_reason!r}, came and the TCP connection ended"
         )
     return (
-        f"SIGKILL to {ttyd.version} after tick {wire.tick_n} from pid {pid}"
-        f" reached its client: {ended_seconds:.4f} s after the kill {end};"
-        f" ttyd exited with {status}; the program, its session"
-        " and its children were gone"
-        f" {time.monotonic() - killed_at:.3f} s after the kill"
+        f"SIGKILL to {ttyd.version} with stdin.py running as pid"
+        f" {module_pid} under pid {pid} reached its client:"
+        f" {ended_seconds:.4f} s after the kill {end}; ttyd exited with"
+        f" {status}; the program, its module and their sessions were gone"
+        f" {gone_seconds:.3f} s after the kill"
     )
 
 
@@ -1116,62 +1083,178 @@ def rung_two_clients(ttyd: Ttyd) -> str:
         wire.start_send()
     wires_wait(
         wires,
-        lambda: all(wire.tick_n >= _TWO_CLIENTS_TICKS for wire in wires),
-        f"{_TWO_CLIENTS_TICKS} ticks on each of two clients",
+        lambda: all(wire.modules_count == 1 for wire in wires),
+        "both clients' hellos and module lists",
     )
     for wire in wires:
-        hello_check(wire)
-    first_pid, second_pid = first.hello["pid"], second.hello["pid"]
+        hello_check(wire, wire.hellos[0])
+    first_pid, second_pid = first.hellos[0]["pid"], second.hellos[0]["pid"]
     if first_pid == second_pid:
         raise CheckFailed(f"both clients' hellos have pid {first_pid}")
-    say_id = first.say_send(f"echo {_NON_ASCII_TEXT}")
-    wires_wait(wires, lambda: not first.says, "the first client's reply")
-    echo_check(first, say_id, _NON_ASCII_TEXT)
     for wire in wires:
-        wire.count_send()
+        wire.run_send("stdin.py", [])
     wires_wait(
         wires,
-        lambda: not any(wire.counts_asked for wire in wires),
-        "both clients' counts",
+        lambda: all(
+            wire.runs and b"\n" in wire.runs[-1].streams["stdout"]
+            for wire in wires
+        ),
+        "stdin.py's first line on both clients",
     )
+    module_pids: list[int] = []
+    for wire, word in ((first, "first"), (second, "second")):
+        run = wire.runs[-1]
+        pid = run.started["pid"]
+        module_pids.append(pid)
+        if process_parent(pid) != wire.hellos[0]["pid"]:
+            raise CheckFailed(
+                f"the {word} client's stdin.py, pid {pid}, isn't its"
+                " program's child"
+            )
+        wire.in_send(f"{word}\n".encode())
+        wire.type_send("eof")
+    wires_wait(
+        wires,
+        lambda: all(wire.runs[-1].modules is not None for wire in wires),
+        "both clients' stdin.py exits",
+    )
+    for wire, word, pid in (
+        (first, "first", first_pid),
+        (second, "second", second_pid),
+    ):
+        run = wire.runs[-1]
+        expected = f"ready {run.started['pid']} {pid}\ngot {word}\neof 1\n"
+        if run.text("stdout") != expected:
+            raise CheckFailed(
+                f"the {word} client's stdin.py printed"
+                f" {run.text('stdout')!r} where {expected!r} was due"
+            )
+        run_exit_check(run, 0)
     first_seconds = session_close(first, [second], first_pid)
-    # A tick after the pong to a ping sent once the first program was gone.
-    pongs_before = len(second.round_trips)
-    second.ping_send()
+    modules_before = second.modules_count
+    second.type_send("list")
     second.wait(
-        lambda: len(second.round_trips) > pongs_before, "the second's pong"
+        lambda: second.modules_count > modules_before, "the second's list"
     )
-    ticks_at_pong = second.tick_n
-    second.wait(
-        lambda: second.tick_n > ticks_at_pong, "a tick after the second's pong"
-    )
-    hello_check(second)
+    hello_check(second, second.hellos[0])
     second_seconds = session_close(second, [], second_pid)
-    first_count, second_count = first.counts[-1], second.counts[-1]
     return (
-        f"hellos with pids {first_pid} and {second_pid}, each running"
-        f" {' '.join(_BOOTSTRAP_ARGUMENTS)}; echo on the first replied"
-        f" there, {len(second.replies)} replies on the second; counts equal"
-        " to each client's: first received"
-        f" {first_count['received_messages']} messages and sent"
-        f" {first_count['sent_messages']}, second received"
-        f" {second_count['received_messages']} and sent"
-        f" {second_count['sent_messages']}; the first closed with"
-        f" {_WEBSOCKET_CLOSE_NORMAL} answered with {first.close_code}, ttyd"
-        f" logged pid {first_pid} killed with signal {int(signal.SIGHUP)}"
-        f" (SIGHUP), gone {first_seconds:.3f} s after the close, its ticks 1"
-        f" to {first.tick_n} consecutive; then the second's pong to a ping"
-        f" and tick {ticks_at_pong + 1} after it, pid {second_pid} still"
-        f" running; the second closed with {_WEBSOCKET_CLOSE_NORMAL}"
-        f" answered with {second.close_code}, pid {second_pid} killed with"
-        f" signal {int(signal.SIGHUP)}, gone {second_seconds:.3f} s after"
-        f" the close, its ticks 1 to {second.tick_n} consecutive"
+        f"hellos with pids {first_pid} and {second_pid}; stdin.py ran on"
+        f" both at once as pids {module_pids[0]} and {module_pids[1]}, each"
+        " its own program's child, and each echoed only its own client's"
+        f" line; the first closed with {_WEBSOCKET_CLOSE_NORMAL} answered"
+        f" with {first.close_code}, pid {first_pid} killed with signal"
+        f" {int(signal.SIGHUP)} (SIGHUP) and gone {first_seconds:.3f} s after"
+        f" the close; then the second answered list with pid {second_pid}"
+        f" still running; the second closed with {_WEBSOCKET_CLOSE_NORMAL}"
+        f" answered with {second.close_code}, gone {second_seconds:.3f} s"
+        " after the close"
     )
+
+
+# Updates the bootstrapper from a module and restarts it. Returns a summary.
+def rung_update(wire: Wire) -> str:
+    bootstrap_path = wire.ttyd.command[1]
+    with open(bootstrap_path, "rb") as bootstrap_file:
+        updated = bootstrap_file.read() + _UPDATE_LINE
+    digest = hashlib.sha256(updated).hexdigest()
+    wire.put_send("update.py", _UPDATE_SOURCE)
+    run = run_wait(wire, "update.py", [])
+    if run.text("stdout") != f"sha256 {digest}\n":
+        raise CheckFailed(f"update.py printed {run.text('stdout')!r}")
+    run_exit_check(run, 0)
+    modules_before = wire.modules_count
+    wire.type_send("restart")
+    wire.wait(
+        lambda: len(wire.hellos) == 2 and wire.modules_count > modules_before,
+        "the second hello and its module list",
+    )
+    first, second = wire.hellos
+    hello_check(wire, second)
+    if second["pid"] != first["pid"] or second["started"] <= first["started"]:
+        raise CheckFailed(f"restart's hello {second} after hello {first}")
+    if second["sha256"] != digest:
+        raise CheckFailed(
+            f"restart's hello has sha256 {second['sha256']}, not the updated"
+            f" file's {digest}"
+        )
+    after = run_wait(wire, "report.py", [])
+    run_exit_check(after, 0)
+    return (
+        f"update.py appended {len(_UPDATE_LINE)} bytes to"
+        f" {os.path.basename(bootstrap_path)} and printed its sha256"
+        f" {digest[:12]}, equal to this client's; restart: hello 2 with the"
+        f" same pid {second['pid']}, started"
+        f" {second['started'] - first['started']:.3f} s after hello 1, sha256"
+        " equal to the updated file's; report.py then ran as pid"
+        f" {after.started['pid']}, exit code 0"
+    )
+
+
+# Fails unless the run exited with the code and a module list followed.
+def run_exit_check(run: Run, code: int) -> None:
+    exit_message = cast(dict[str, Any], run.exit)
+    if exit_message["code"] != code or run.modules is None:
+        raise CheckFailed(
+            f"{run.started['name']}'s exit is {exit_message} where code"
+            f" {code} was due"
+        )
+
+
+# Returns the pids of every module the wire ran.
+def run_pids(wire: Wire) -> set[int]:
+    return {run.started["pid"] for run in wire.runs}
+
+
+# Runs the module and returns its run once its first line has come.
+def run_ready(wire: Wire, name: str) -> tuple[Run, str]:
+    runs_before = len(wire.runs)
+    wire.run_send(name, [])
+    wire.wait(
+        lambda: (
+            len(wire.runs) > runs_before
+            and b"\n" in wire.runs[-1].streams["stdout"]
+        ),
+        f"{name}'s first line",
+    )
+    run = wire.runs[-1]
+    return run, run.text("stdout").split("\n")[0]
+
+
+# Runs the module and returns its run once the list after its exit came.
+def run_wait(wire: Wire, name: str, args: list[str]) -> Run:
+    runs_before = len(wire.runs)
+    wire.run_send(name, args)
+    wire.wait(
+        lambda: (
+            len(wire.runs) > runs_before and wire.runs[-1].modules is not None
+        ),
+        f"{name}'s exit and the module list after it",
+    )
+    return wire.runs[-1]
+
+
+# Fails unless the saved file holds what was put, and the list agrees.
+def saved_check(wire: Wire, saved: dict[str, Any]) -> None:
+    modules: str = wire.hellos[-1]["modules"]
+    path = os.path.join(modules, saved["name"])
+    with open(path, "rb") as module_file:
+        data = module_file.read()
+    on_disk = {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+    listed = [
+        entry for entry in wire.modules if entry["name"] == saved["name"]
+    ]
+    if listed != [{"name": saved["name"], **on_disk}] or any(
+        saved[name] != value for name, value in on_disk.items()
+    ):
+        raise CheckFailed(
+            f"saved {saved}, listed {listed}, where {path} has {on_disk}"
+        )
 
 
 # Closes the wire and returns the seconds until all its processes are gone.
 def session_close(wire: Wire, others: list[Wire], parent: int) -> float:
-    pid = wire.hello["pid"]
+    pid = wire.hellos[-1]["pid"]
     wire.close_send()
     closed_at = time.monotonic()
     wires_wait(
@@ -1193,11 +1276,7 @@ def session_close(wire: Wire, others: list[Wire], parent: int) -> float:
     )
     if found.group(1, 2) != ("killed with signal", str(int(signal.SIGHUP))):
         raise CheckFailed(f"ttyd logged: {found.string}")
-    watched = {pid, *(started["pid"] for started in wire.started.values())}
-    while left := processes_left(watched, pid, parent):
-        remaining(wire.ttyd.deadline, f"processes {left} to end")
-        time.sleep(_POLL_SECONDS)
-    return time.monotonic() - closed_at
+    return processes_wait(wire, {pid, *run_pids(wire)}, pid, parent, closed_at)
 
 
 # Exits with 128 plus the signal's number.
@@ -1208,10 +1287,12 @@ def signal_exit(signal_number: int, frame: FrameType | None) -> None:
 # Starts ttyd on a port of its choosing, read from its log, then stops it.
 @contextlib.contextmanager
 def ttyd_serve(
-    options: list[str], version: str, deadline: float
+    options: list[str], command: list[str], deadline: float
 ) -> Generator[Ttyd]:
-    ttyd = Ttyd(options, version, deadline)
+    ttyd = Ttyd(options, command, deadline)
     try:
+        found = ttyd.line_wait(_VERSION_PATTERN, 0, "ttyd's version")
+        ttyd.version = found.group(1)
         found = ttyd.line_wait(_LISTENING_PATTERN, 0, "ttyd to listen")
         ttyd.port = int(found.group(1))
         yield ttyd
@@ -1277,26 +1358,18 @@ def websocket_open(ttyd: Ttyd, headers: dict[str, str]) -> Wire:
     return Wire(ttyd, sock, rest)
 
 
-# Handles what ttyd sends on each wire, firing due timers, until done is True.
+# Handles what ttyd sends on each wire until done answers True.
 def wires_wait(wires: list[Wire], done: Callable[[], bool], what: str) -> None:
     ttyd = wires[0].ttyd
-    while True:
-        for wire in wires:
-            while wire.timers and wire.timers[0][0] <= time.monotonic():
-                _, callback = wire.timers.pop(0)
-                callback()
-        if done():
-            return
-        timeout = remaining(ttyd.deadline, what)
-        for wire in wires:
-            if wire.timers:
-                timeout = min(timeout, wire.timers[0][0] - time.monotonic())
+    while not done():
         readers: list[socket.socket | int] = [
             wire.sock for wire in wires if not wire.ended
         ]
         if not ttyd.stderr_ended:
             readers.append(ttyd.fd)
-        readable, _, _ = select.select(readers, [], [], max(timeout, 0))
+        readable, _, _ = select.select(
+            readers, [], [], remaining(ttyd.deadline, what)
+        )
         if ttyd.fd in readable:
             ttyd.stderr_read()
         for wire in wires:
@@ -1307,40 +1380,46 @@ def wires_wait(wires: list[Wire], done: Callable[[], bool], what: str) -> None:
 # Runs the rungs in order, printing a line each, and returns the exit code.
 def main() -> int:
     argparse.ArgumentParser(
-        description="Run the wire test: bootstrap.py through"
+        description="Run the wire test: a copy of bootstrap.py through"
         " Linux ttyd, from a standard library WebSocket client."
     ).parse_args()
     for signal_number in (signal.SIGHUP, signal.SIGTERM):
         signal.signal(signal_number, signal_exit)
     deadline = time.monotonic() + _RUN_TIMEOUT_SECONDS
-    version = subprocess.run(
-        [_TTYD_PATH, "--version"],
-        capture_output=True,
-        check=True,
-        stdin=subprocess.DEVNULL,
-        text=True,
-    ).stdout.strip()
-    rung = "5.1.1 serve"
+    os.makedirs(_BUILD_PATH, exist_ok=True)
+    rung = "serve"
     try:
-        with ttyd_serve(_TTYD_OPTIONS, version, deadline) as ttyd:
-            print(f"{rung}: {rung_serve(ttyd)}", flush=True)
-            rung = "5.1.2 ticks"
-            wire = websocket_open(ttyd, {})
-            print(f"{rung}: {rung_ticks(wire)}", flush=True)
-            for rung, check in (
-                ("5.1.3 round trip", rung_round_trip),
-                ("5.1.4 framing", rung_framing),
-                ("5.1.5 control", rung_control),
-                ("5.1.6 concurrent", rung_concurrent),
-                ("end", rung_end),
-            ):
-                print(f"{rung}: {check(wire)}", flush=True)
-            # Last, as it ends ttyd.
-            for rung, ttyd_check in (
-                ("5.4.3 two clients", rung_two_clients),
-                ("5.4.2 ttyd killed", rung_ttyd_killed),
-            ):
-                print(f"{rung}: {ttyd_check(ttyd)}", flush=True)
+        with tempfile.TemporaryDirectory(
+            prefix="test_wire-", dir=_BUILD_PATH
+        ) as work_path:
+            bootstrap_path = os.path.join(work_path, "bootstrap.py")
+            shutil.copyfile(_BOOTSTRAP_PATH, bootstrap_path)
+            command = [
+                "python3",
+                bootstrap_path,
+                os.path.join(work_path, "modules"),
+            ]
+            with ttyd_serve(_TTYD_OPTIONS, command, deadline) as ttyd:
+                print(f"{rung}: {rung_serve(ttyd)}", flush=True)
+                wire = websocket_open(ttyd, {})
+                for rung, check in (
+                    ("hello", rung_hello),
+                    ("put", rung_put),
+                    ("run", rung_run),
+                    ("stdin", rung_stdin),
+                    ("kill", rung_kill),
+                    ("big put", rung_big_put),
+                    ("lines", rung_lines),
+                    ("update", rung_update),
+                    ("close", rung_close),
+                ):
+                    print(f"{rung}: {check(wire)}", flush=True)
+                # Last, as it ends ttyd.
+                for rung, ttyd_check in (
+                    ("two clients", rung_two_clients),
+                    ("ttyd killed", rung_ttyd_killed),
+                ):
+                    print(f"{rung}: {ttyd_check(ttyd)}", flush=True)
     except CheckFailed as failure:
         print(f"error: {rung}: {failure}", file=sys.stderr)
         return 1

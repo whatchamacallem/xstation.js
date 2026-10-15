@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Prints a brief status of the web terminal: ttyd, the scheduled task that
-# starts it when you sign in, its port, Windows Firewall rule and any port
-# proxies, WSL, and the processes serving it. It changes nothing, doesn't
-# start WSL and doesn't write a log, so any PowerShell can run it:
+# Prints a brief status of the web terminal: ttyd in Linux, the scheduled
+# task that starts it when you sign in, ports 5768 and 5769, the Windows
+# Firewall rule and any port proxies, WSL with the port ttyd listens on in
+# Linux, and the processes serving it. It changes nothing, doesn't start
+# WSL and doesn't write a log, so any PowerShell can run it:
 #
 #     .\xsjs_status.ps1
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
@@ -17,7 +18,7 @@ param()
 
 # Prints whether the server is running and whether it starts at sign in.
 function _xsjs_status_show_summary {
-    $running_ = @(xsjs_util_get_servers).Count -gt 0
+    $running_ = $servers_.Count -gt 0
     $signin_ = $task_ -and $task_.State -ne 'Disabled'
     if ($running_ -and $signin_) {
         $text_ = $i18n_.status_running_signin
@@ -61,49 +62,44 @@ function _xsjs_status_get_mode ([string]$command_line_) {
     # The command line holds the password, so only the user name leaves here.
     if ($command_line_ -notmatch '--ssl(\s|$)') { return 'HTTP' }
     $user_ = ''
-    if ($command_line_ -match '--credential\s+"?([^:"]+):') {
-        $user_ = $Matches[1]
+    if ($command_line_ -match '(^|\s)(--credential|-c)\s+"?([^:"]+):') {
+        $user_ = $Matches[3]
     }
     $i18n_.status_https -f $user_
 }
 
-# Shows each ttyd process with its mode, port and start time.
+# Shows each ttyd that start runs in Linux, with its mode and port.
 function _xsjs_status_show_ttyd {
-    $servers_ = @($processes_ | Where-Object Name -EQ 'ttyd.exe')
     foreach ($server_ in $servers_) {
-        # 7681 is ttyd's default port.
-        $server_port_ = 7681
-        if ($server_.CommandLine -match '(--port|-p)\s+(\d+)') {
-            $server_port_ = $Matches[2]
-        }
         $text_ = $i18n_.status_ttyd -f (
-            $server_.ProcessId, (_xsjs_status_get_mode $server_.CommandLine),
-            $server_port_, $server_.CreationDate)
+            $server_.Id, (_xsjs_status_get_mode $server_.CommandLine),
+            $linux_port_)
         _xsjs_status_show_item $text_
     }
     if (-not $servers_) { _xsjs_status_show_item $i18n_.status_ttyd_none }
 }
 
-# Shows what listens on the port and where its connections come from.
-function _xsjs_status_show_port {
-    $query_ = @{ LocalPort = $port_; ErrorAction = 'SilentlyContinue' }
+# Shows what listens on the port in Windows and where connections come from.
+function _xsjs_status_show_port ([int]$port_number_) {
+    $query_ = @{ LocalPort = $port_number_; ErrorAction = 'SilentlyContinue' }
     $listeners_ = @(Get-NetTCPConnection @query_ -State Listen)
     foreach ($group_ in $listeners_ | Group-Object OwningProcess) {
         $owner_ = $processes_ | Where-Object ProcessId -EQ $group_.Name
         $addresses_ = ($group_.Group | ForEach-Object LocalAddress) -join ', '
         $text_ = $i18n_.status_listening -f (
-            $port_, $owner_.Name, $group_.Name, $addresses_)
+            $port_number_, $owner_.Name, $group_.Name, $addresses_)
         _xsjs_status_show_item $text_
     }
     if (-not $listeners_) {
-        _xsjs_status_show_item ($i18n_.status_port_closed -f $port_)
+        _xsjs_status_show_item ($i18n_.status_port_closed -f $port_number_)
     }
     $clients_ = @(
         Get-NetTCPConnection @query_ -State Established |
             ForEach-Object RemoteAddress | Sort-Object -Unique
     )
     if ($clients_) {
-        $text_ = $i18n_.status_connections -f $port_, ($clients_ -join ', ')
+        $text_ = $i18n_.status_connections -f (
+            $port_number_, ($clients_ -join ', '))
         _xsjs_status_show_item $text_
     }
 }
@@ -140,34 +136,32 @@ function _xsjs_status_show_proxies {
     $proxies_ | ForEach-Object { _xsjs_status_show_item $_ }
 }
 
-# Returns the lines WSL prints for the arguments, cleaned and without blanks.
-function _xsjs_status_get_wsl ([string[]]$wsl_arguments_) {
-    $ErrorActionPreference = 'Continue'
-    & wsl.exe @wsl_arguments_ 2>&1 |
-        ForEach-Object { "$_".Replace("`0", '').Trim() } |
-        Where-Object { $_ }
-}
-
-# Shows the default distribution and, if it runs, its bootstrap processes.
+# Shows the default distribution and, if it runs, its port and bootstrappers.
 function _xsjs_status_show_wsl {
-    $name_ = $null
-    foreach ($line_ in _xsjs_status_get_wsl '--list', '--verbose') {
-        if ($line_ -match '^\*\s*(\S+)\s+(\S+)') {
-            $name_ = $Matches[1]
-            $state_ = $Matches[2]
-        }
-    }
-    if (-not $name_) {
+    if (-not $distribution_) {
         _xsjs_status_show_item $i18n_.status_wsl_none
         return
     }
-    _xsjs_status_show_item ($i18n_.status_wsl -f $name_, $state_)
-    # Only look inside Linux when it already runs, so this doesn't start it.
-    $running_ = _xsjs_status_get_wsl '--list', '--running', '--quiet'
-    if ($name_ -notin $running_) { return }
-    $pattern_ = '^python3 ' + [regex]::Escape($bootstrap_script_)
-    $pgrep_ = '-e', 'pgrep', '-a', '-f', $pattern_
-    $found_ = @(_xsjs_status_get_wsl $pgrep_) -match '^\d+ '
+    $text_ = $i18n_.status_wsl -f $distribution_.Name, $distribution_.State
+    _xsjs_status_show_item $text_
+    if (-not $distribution_.Running) { return }
+    $ss_ = '-e', 'ss', '-Hltnp', 'sport', '=', ":$linux_port_"
+    $listeners_ = @(xsjs_util_get_wsl 0 $ss_)
+    foreach ($listener_ in $listeners_) {
+        # `ss` prints the state, queues, local and peer address, then users.
+        $fields_ = $listener_ -split '\s+', 6
+        $text_ = $i18n_.status_linux_listening -f (
+            $linux_port_, $fields_[3], $fields_[5])
+        _xsjs_status_show_item $text_
+    }
+    if (-not $listeners_) {
+        _xsjs_status_show_item ($i18n_.status_linux_closed -f $linux_port_)
+    }
+    $command_ = xsjs_util_get_ttyd_command $linux_path_ |
+        ForEach-Object { [regex]::Escape($_) }
+    $pattern_ = '^' + ($command_ -join ' ') + '$'
+    # `pgrep` exits 1 when no process matches.
+    $found_ = @(xsjs_util_get_wsl 0, 1 '-e', 'pgrep', '-a', '-f', $pattern_)
     foreach ($line_ in $found_) {
         _xsjs_status_show_item ($i18n_.status_linux -f $line_)
     }
@@ -176,13 +170,11 @@ function _xsjs_status_show_wsl {
     }
 }
 
-# Shows the tree of ttyd and runner processes.
+# Shows the tree of the runner's processes.
 function _xsjs_status_show_processes {
     $runner_ = [regex]::Escape($runner_path_)
     $members_ = @(
-        $processes_ | Where-Object {
-            $_.Name -eq 'ttyd.exe' -or $_.CommandLine -match $runner_
-        }
+        $processes_ | Where-Object { $_.CommandLine -match $runner_ }
     )
     if (-not $members_) {
         _xsjs_status_show_item $i18n_.status_processes_none
@@ -233,7 +225,7 @@ function _xsjs_status_show_certificate {
     _xsjs_status_show_item $text_
 }
 
-# Reads the processes and the task once, then shows each part of the status.
+# Reads the processes, task and ttyd once, then shows each part of the status.
 function _xsjs_status_main {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
         'PSUseDeclaredVarsMoreThanAssignments', '',
@@ -244,11 +236,19 @@ function _xsjs_status_main {
     $processes_ = @(Get-CimInstance Win32_Process)
     $query_ = @{ TaskName = $task_name_; ErrorAction = 'SilentlyContinue' }
     $task_ = Get-ScheduledTask @query_
+    $distribution_ = xsjs_util_get_distribution
+    $servers_ = @()
+    # Only look inside Linux when it already runs, so this doesn't start it.
+    if ($distribution_ -and $distribution_.Running) {
+        $linux_path_ = xsjs_util_get_linux_path
+        $servers_ = @(xsjs_util_get_linux_servers $linux_path_)
+    }
 
     _xsjs_status_show_summary
     _xsjs_status_show_task
     _xsjs_status_show_ttyd
-    _xsjs_status_show_port
+    _xsjs_status_show_port $port_
+    _xsjs_status_show_port $linux_port_
     _xsjs_status_show_firewall
     _xsjs_status_show_proxies
     _xsjs_status_show_wsl
