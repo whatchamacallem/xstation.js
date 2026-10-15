@@ -1,7 +1,9 @@
-*.sh
+archive.sh
+clean.sh
 python/*.py
 python/*.html
 LICENSE.md
 README.md
-*.ps1.md
-powershell/*.ps1.md
+xsjs_install.ps1.md
+xsjs_start.ps1.md
+xsjs_stop.ps1.md

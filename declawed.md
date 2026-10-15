@@ -78,7 +78,9 @@ manager without request.
   order on one line, or on the fewest lines that stay within 79 columns.
   `from` is banned, except that `collections.abc` and `typing` always use
   `from`, each on one line with its names in alphabetical order.
-- Don't add whitelist entries for new `.md` files.
+- Adding anything to the reformat whitelist requires the maintainer's
+  permission. `.md` files are never added automatically. Top-level files
+  are named explicitly; globs are used only for files in subdirectories.
 - Authorship is a legal issue. Ascribing authorship to a non-person, such as
   a `Co-Authored-By` trailer or a generated-by line in a commit or pull
   request, is a violation of the project rules.
@@ -134,11 +136,11 @@ discrepancies as this is a low priority self healing mechanism.
   `xsjs_status.ps1` and `test_lint.ps1` run; the user runs the rest. All
   but those two write `<script>.ps1.md` beside themselves (gitignored):
   read it, don't ask. The logs are LF Markdown that `mdformat --check`
-  accepts, which `test_posix.py` checks through the whitelist's `*.ps1.md`
-  globs, so a log written before a writer change fails until its script
-  reruns. `powershell/*.ps1.md` matches only `test_powershell.ps1.md`, so
-  `test_posix.py` fails until that suite has run once. mdformat doubles
-  backslashes in plain text, so i18n strings put paths in code spans.
+  accepts. The whitelist names the three top-level logs, so
+  `test_posix.py` fails until each exists and, after a writer change,
+  until its script reruns; `powershell/` logs are not checked. mdformat
+  doubles backslashes in plain text, so i18n strings put paths in code
+  spans.
 - `_<file>_main` holds a `trap` that logs and exits 1, then calls
   `_<file>_step_*`; shared code is `xsjs_util_*`. Script state
   (`$log_path_`, `$credential_`, `$stream_`...) is `_main` locals that
@@ -193,9 +195,10 @@ discrepancies as this is a low priority self healing mechanism.
 - Python runs in WSL. `python3 python/test_posix.py` fails on non-UTF-8 or
   non-ASCII outside its `_NON_ASCII_ALLOWED`, formats in place (ruff;
   shfmt with defaults; Markdown is only checked with `mdformat --check`),
-  then runs `ruff check`. Files are the globs in
-  `python/reformat_whitelist.txt`, which leaves out PowerShell; a glob
-  matching nothing fails. Before formatting, its own lexers scan the
+  then runs `ruff check`. Files are the entries in
+  `python/reformat_whitelist.txt`, top-level files by name and
+  subdirectory globs, which leave out PowerShell; an entry matching
+  nothing fails. Before formatting, its own lexers scan the
   comments of those files and of every PowerShell file: below the
   header (the file's top comment, after any doctype line) a comment is
   one line, not `<# #>`, and outside its code spans holds only letters,
