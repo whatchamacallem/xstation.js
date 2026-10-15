@@ -36,7 +36,7 @@ from typing import Any, cast
 
 _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
 
-# What ttyd runs for each connection, from _PYTHON_PATH.
+# What ttyd runs for each connection, from `_PYTHON_PATH`.
 _BOOTSTRAP_ARGUMENTS = ["python3", "bootstrap.py"]
 
 # vmstat's lines to receive before cancelling it.
@@ -48,8 +48,7 @@ _ROWS = 24
 
 _CREDENTIAL = "user:pass"
 
-# 1 MiB of UTF-8: units of 23 random ASCII characters and three of 2, 3
-# and 4 bytes, 32 bytes a unit.
+# 1 MiB in 32 byte units: 23 random ASCII characters, then 2, 3 and 4 bytes.
 _DIGEST_ASCII_PER_UNIT = 23
 _DIGEST_UNITS = 32768
 _DIGEST_WIDE_TEXT = "\u00e9\u4e2d\U0001f600"
@@ -87,7 +86,7 @@ _MESSAGE_FIELDS: dict[str, dict[str, type[object]]] = {
     "tick": {"n": int, "time": float},
 }
 
-# Holds 2, 3 and 4 byte characters; the split lands inside the last.
+# Holds 2, 3 and 4 byte characters, and the split lands inside the last.
 _NON_ASCII_TEXT = "na\u00efve \u65e5\u672c\u8a9e \U0001f600 \u00e9t\u00e9"
 _NON_ASCII_SPLIT_CHARACTER = "\U0001f600"
 
@@ -142,6 +141,7 @@ class CheckFailed(Exception):
 
 
 class Ttyd:
+    # Starts ttyd in a session of its own with its stderr on a pipe.
     def __init__(self, options: list[str], version: str, deadline: float):
         self.version = version
         self.deadline = deadline
@@ -153,7 +153,7 @@ class Ttyd:
         self.stderr_ended = False
         self.fd, write_fd = os.pipe()
         try:
-            # In a session of its own, so a ^C reaches only this script.
+            # In a session of its own, so a `^C` reaches only this script.
             self.process = subprocess.Popen(
                 [
                     _TTYD_PATH,
@@ -187,8 +187,7 @@ class Ttyd:
             sys.stderr.write(f"{text}\n")
         sys.stderr.flush()
 
-    # Returns the match of the first line from the start'th on that the
-    # pattern finds, reading ttyd's stderr until one comes.
+    # Returns the first match from the start'th line on, reading stderr for it.
     def line_wait(
         self, pattern: re.Pattern[str], start: int, what: str
     ) -> re.Match[str]:
@@ -205,6 +204,7 @@ class Ttyd:
             if readable:
                 self.stderr_read()
 
+    # Reads ttyd's stderr, failing on its end unless ttyd was killed.
     def stderr_read(self) -> None:
         data = os.read(self.fd, 1 << 16)
         if not data:
@@ -216,9 +216,9 @@ class Ttyd:
             return
         self.lines_take(data)
 
+    # Stops ttyd and its session, then copies out the rest of its stderr.
     def stop(self) -> None:
-        # The session is gone once all of it has exited; until ttyd is
-        # waited for, its pid is its own.
+        # Until ttyd is waited for, its pid names its session and no other.
         if self.process.poll() is None:
             os.killpg(self.process.pid, signal.SIGTERM)
         try:
@@ -235,6 +235,7 @@ class Ttyd:
 
 
 class Wire:
+    # Takes the socket after the upgrade and handles any frames already read.
     def __init__(self, ttyd: Ttyd, sock: socket.socket, rest: bytes) -> None:
         self.ttyd = ttyd
         self.sock = sock
@@ -245,8 +246,7 @@ class Wire:
         self.close_sent = False
         self.close_code: int | None = None
         self.close_reason = b""
-        # Set before ttyd is made to end the connection, which is then
-        # recorded, not failed.
+        # Set before ttyd is made to end the connection, so it is not failed.
         self.end_expected = False
         # Set once ttyd's end of the TCP connection is read.
         self.ended = False
@@ -303,12 +303,14 @@ class Wire:
         }
         self.frames_handle()
 
+    # Sends a close frame with the normal code.
     def close_send(self) -> None:
         self.close_sent = True
         self.frame_send(
             _WEBSOCKET_OPCODE_CLOSE, _WEBSOCKET_CLOSE_NORMAL.to_bytes(2, "big")
         )
 
+    # Asks for a count, keeping the client's figures as they stand.
     def count_send(self) -> None:
         self.line_send({"type": "count"})
         self.counts_asked.append((self.sent_lines, self.sent_bytes))
@@ -331,17 +333,20 @@ class Wire:
             )
         self.counts.append(message)
 
+    # Asks for the text's digest and returns the request's id.
     def digest_send(self, text: str) -> int:
         self.digest_id += 1
         self.digests_asked.add(self.digest_id)
         self.line_send({"type": "digest", "id": self.digest_id, "text": text})
         return self.digest_id
 
+    # Records a digest, failing unless it was asked for and not yet given.
     def digest_take(self, message: dict[str, Any]) -> None:
         if message["id"] not in self.digests_asked - self.digests.keys():
             raise CheckFailed(f"digest came unasked: {message}")
         self.digests[message["id"]] = message
 
+    # Records a running command's exit, failing unless its line count agrees.
     def exit_take(self, message: dict[str, Any]) -> None:
         say_id = message["id"]
         if say_id not in self.started or say_id in self.exits:
@@ -428,6 +433,7 @@ class Wire:
                 self.fragments = None
                 self.ttyd_message_handle(message)
 
+    # Records hello, failing on a second one.
     def hello_take(self, message: dict[str, Any]) -> None:
         if self.hello:
             raise CheckFailed(f"a second hello came: {message}")
@@ -449,13 +455,14 @@ class Wire:
         line = self.line_count(message)
         self.frame_send(_WEBSOCKET_OPCODE_BINARY, b"0" + line)
 
-    # Counts a line of input as sent. Answers it with its newline.
+    # Counts a line of input as sent. Returns it with its newline.
     def line_count(self, message: dict[str, Any]) -> bytes:
         line = json.dumps(message, ensure_ascii=False).encode()
         self.sent_lines += 1
         self.sent_bytes += len(line)
         return line + b"\n"
 
+    # Records a running command's next line and calls the line watch.
     def line_take(self, message: dict[str, Any]) -> None:
         say_id = message["id"]
         if say_id not in self.started or say_id in self.exits:
@@ -469,11 +476,13 @@ class Wire:
         if self.line_watch:
             self.line_watch(say_id, message["n"])
 
+    # Sends a ping, keeping its id and when it went.
     def ping_send(self) -> None:
         self.ping_id += 1
         self.pings.append((self.ping_id, time.monotonic()))
         self.line_send({"type": "ping", "id": self.ping_id})
 
+    # Records a round trip, failing unless the pong is the oldest ping's.
     def pong_take(self, message: dict[str, Any]) -> None:
         if not self.pings:
             raise CheckFailed(f"pong came with no ping outstanding: {message}")
@@ -485,6 +494,7 @@ class Wire:
             )
         self.round_trips.append(time.monotonic() - sent_at)
 
+    # Records a reply, failing unless it answers the oldest unanswered say.
     def reply_take(self, message: dict[str, Any]) -> None:
         if not self.says or message["id"] != self.says[0]:
             raise CheckFailed(
@@ -494,6 +504,7 @@ class Wire:
         self.says.popleft()
         self.replies[message["id"]] = message["text"]
 
+    # Sends ttyd a resize, counting the size message it should bring.
     def resize_send(self, columns: int, rows: int) -> None:
         self.sizes_asked += 1
         self.frame_send(
@@ -501,7 +512,7 @@ class Wire:
             b"1" + json.dumps({"columns": columns, "rows": rows}).encode(),
         )
 
-    # Counts a say as sent and awaiting its reply. Answers its id and line.
+    # Counts a say as sent and awaiting its reply. Returns its id and line.
     def say_line(self, text: str) -> tuple[int, bytes]:
         self.say_id += 1
         self.says.append(self.say_id)
@@ -510,20 +521,24 @@ class Wire:
         )
         return self.say_id, line
 
+    # Sends a say as one ttyd message and returns its id.
     def say_send(self, text: str) -> int:
         say_id, line = self.say_line(text)
         self.frame_send(_WEBSOCKET_OPCODE_BINARY, b"0" + line)
         return say_id
 
+    # Asks the program for its size.
     def size_send(self) -> None:
         self.sizes_asked += 1
         self.line_send({"type": "size"})
 
+    # Records a size, failing unless one was asked for.
     def size_take(self, message: dict[str, Any]) -> None:
         if len(self.sizes) == self.sizes_asked:
             raise CheckFailed(f"size came unasked: {message}")
         self.sizes.append(message)
 
+    # Reads from ttyd and handles its frames, failing on an unexpected drop.
     def socket_read(self) -> None:
         data = self.sock.recv(1 << 20)
         if not data:
@@ -550,6 +565,7 @@ class Wire:
             ).encode(),
         )
 
+    # Records a started command, failing unless its say was answered.
     def started_take(self, message: dict[str, Any]) -> None:
         say_id = message["id"]
         if say_id not in self.replies or say_id in self.started:
@@ -559,10 +575,12 @@ class Wire:
         self.started[say_id] = message
         self.lines[say_id] = []
 
+    # Asks the program for a stat.
     def stat_send(self) -> None:
         self.stats_asked += 1
         self.line_send({"type": "stat"})
 
+    # Records a stat, failing unless it was asked for and has 3 float loads.
     def stat_take(self, message: dict[str, Any]) -> None:
         if len(self.stats) == self.stats_asked:
             raise CheckFailed(f"stat came unasked: {message}")
@@ -573,12 +591,14 @@ class Wire:
             raise CheckFailed(f"stat's loadavg isn't 3 floats: {message}")
         self.stats.append(message)
 
+    # Records a tick's time, failing unless it is the next one.
     def tick_take(self, message: dict[str, Any]) -> None:
         if message["n"] != self.tick_n + 1:
             raise CheckFailed(f"tick {message['n']} came after {self.tick_n}")
         self.tick_n = message["n"]
         self.tick_times.append(time.monotonic())
 
+    # Adds a callback due at the time, keeping the timers in due order.
     def timer_add(self, due: float, callback: Callable[[], None]) -> None:
         self.timers.append((due, callback))
         self.timers.sort(key=lambda timer: timer[0])
@@ -614,8 +634,7 @@ class Wire:
             for line in lines:
                 self.line_handle(line)
 
-    # Reads and handles what ttyd sends, firing the timers that come due,
-    # until done answers True.
+    # Handles what ttyd sends, firing due timers, until done answers True.
     def wait(self, done: Callable[[], bool], what: str) -> None:
         wires_wait([self], done, what)
 
@@ -631,8 +650,7 @@ def echo_check(wire: Wire, say_id: int, text: str) -> None:
         )
 
 
-# Fails unless hello gives the size the first message sent and its pid runs
-# bootstrap.py.
+# Fails unless hello has the size first sent and its pid runs bootstrap.py.
 def hello_check(wire: Wire) -> None:
     hello = wire.hello
     if (hello["columns"], hello["rows"]) != (_COLUMNS, _ROWS):
@@ -645,7 +663,7 @@ def hello_check(wire: Wire) -> None:
         raise CheckFailed(f"hello's pid {hello['pid']} runs {cmdline}")
 
 
-# Answers ttyd's status and body for a GET of the path.
+# Returns ttyd's status and body for a GET of the path.
 def http_get(
     ttyd: Ttyd, path: str, headers: dict[str, str]
 ) -> tuple[int, bytes]:
@@ -660,8 +678,7 @@ def http_get(
         connection.close()
 
 
-# Returns the line's JSON object, failing unless it is of a known type with
-# exactly that type's fields, each of its type.
+# Returns the line's JSON object, failing unless its fields match its type.
 def message_parse(line: bytes) -> dict[str, Any]:
     if not line.isascii() or b"\r" in line or b"\n" in line:
         raise CheckFailed(f"the program sent a line not ASCII JSON: {line!r}")
@@ -691,8 +708,7 @@ def message_parse(line: bytes) -> dict[str, Any]:
     return message
 
 
-# Returns the pids here that are watched, in the session or children of
-# the parent, sorted.
+# Returns the sorted pids watched, in the session or children of the parent.
 def processes_left(watched: set[int], session: int, parent: int) -> list[int]:
     left: list[int] = []
     for name in os.listdir("/proc"):
@@ -726,6 +742,7 @@ def remaining(deadline: float, what: str) -> float:
     return left
 
 
+# Checks pings, ticks and a count around a cancelled vmstat. Returns a summary.
 def rung_concurrent(wire: Wire) -> str:
     pongs_before = len(wire.round_trips)
     ticks_before = wire.tick_n
@@ -787,6 +804,7 @@ def rung_concurrent(wire: Wire) -> str:
     )
 
 
+# Checks a resize, a size request and two stats apart. Returns a summary.
 def rung_control(wire: Wire) -> str:
     wire.resize_send(_RESIZE_COLUMNS, _RESIZE_ROWS)
     wire.wait(lambda: len(wire.sizes) == wire.sizes_asked, "size")
@@ -825,6 +843,7 @@ def rung_control(wire: Wire) -> str:
     )
 
 
+# Checks that a close ends the program and its processes. Returns a summary.
 def rung_end(wire: Wire) -> str:
     seconds = session_close(wire, [], wire.ttyd.process.pid)
     commands = sorted(started["pid"] for started in wire.started.values())
@@ -838,12 +857,12 @@ def rung_end(wire: Wire) -> str:
     )
 
 
+# Checks echoes, a 1 MiB digest and a paused seq. Returns a summary.
 def rung_framing(wire: Wire) -> str:
     wide = "".join(str(index % 10) for index in range(3 * _COLUMNS))
     wide_id = wire.say_send(f"echo {wide}")
     plain_id = wire.say_send(f"echo {_NON_ASCII_TEXT}")
-    # The same line split inside a character, as two ttyd messages, then as
-    # one ttyd message in two WebSocket frames.
+    # The same line split inside a character in two messages, then two frames.
     two_id, line = wire.say_line(f"echo {_NON_ASCII_TEXT}")
     split = line.index(_NON_ASCII_SPLIT_CHARACTER.encode()) + 2
     split_of = len(line)
@@ -887,10 +906,12 @@ def rung_framing(wire: Wire) -> str:
     # Lines received when PAUSE went and when RESUME went.
     marks: list[int] = []
 
+    # Sends RESUME and marks the lines received by then.
     def resume() -> None:
         wire.frame_send(_WEBSOCKET_OPCODE_BINARY, b"3")
         marks.append(len(wire.lines[seq_id]))
 
+    # Sends PAUSE at its line of seq and sets the timer for RESUME.
     def line_seen(say_id: int, n: int) -> None:
         if say_id == seq_id and n == _PAUSE_AT_LINE:
             wire.frame_send(_WEBSOCKET_OPCODE_BINARY, b"2")
@@ -931,6 +952,7 @@ def rung_framing(wire: Wire) -> str:
     )
 
 
+# Checks that timed pings get pongs in order amid ticks. Returns a summary.
 def rung_round_trip(wire: Wire) -> str:
     pongs_before = len(wire.round_trips)
     ticks_before = wire.tick_n
@@ -954,8 +976,7 @@ def rung_round_trip(wire: Wire) -> str:
     )
 
 
-# Fails unless the say ran the command: its reply names the started
-# message's pid, and that message holds the argv.
+# Fails unless the say started the argv and its reply names that pid.
 def run_check(wire: Wire, say_id: int, argv: list[str]) -> None:
     started = wire.started[say_id]
     reply = wire.replies[say_id]
@@ -967,6 +988,7 @@ def run_check(wire: Wire, say_id: int, argv: list[str]) -> None:
         raise CheckFailed(f"run's reply {reply!r} for started {started}")
 
 
+# Checks the page, token, a made up path and credentials. Returns a summary.
 def rung_serve(ttyd: Ttyd) -> str:
     with open(_INDEX_PATH, "rb") as index_file:
         page = index_file.read()
@@ -1026,6 +1048,7 @@ def rung_serve(ttyd: Ttyd) -> str:
     )
 
 
+# Starts the program and checks hello and the ticks. Returns a summary.
 def rung_ticks(wire: Wire) -> str:
     wire.start_send()
     wire.wait(lambda: bool(wire.hello), "hello")
@@ -1045,6 +1068,7 @@ def rung_ticks(wire: Wire) -> str:
     )
 
 
+# Kills ttyd under a client and checks what ends and how. Returns a summary.
 def rung_ttyd_killed(ttyd: Ttyd) -> str:
     wire = websocket_open(ttyd, {})
     wire.start_send()
@@ -1083,6 +1107,7 @@ def rung_ttyd_killed(ttyd: Ttyd) -> str:
     )
 
 
+# Checks two clients at once, each with its own program. Returns a summary.
 def rung_two_clients(ttyd: Ttyd) -> str:
     first = websocket_open(ttyd, {})
     second = websocket_open(ttyd, {})
@@ -1144,10 +1169,7 @@ def rung_two_clients(ttyd: Ttyd) -> str:
     )
 
 
-# Closes the wire with 1000, serving the others meanwhile, then waits for
-# ttyd's log of its program killed with SIGHUP, and for the program, its
-# session, the commands it ran and the parent's children to be gone.
-# Returns the seconds from the close until then.
+# Closes the wire and returns the seconds until all its processes are gone.
 def session_close(wire: Wire, others: list[Wire], parent: int) -> float:
     pid = wire.hello["pid"]
     wire.close_send()
@@ -1178,12 +1200,12 @@ def session_close(wire: Wire, others: list[Wire], parent: int) -> float:
     return time.monotonic() - closed_at
 
 
+# Exits with 128 plus the signal's number.
 def signal_exit(signal_number: int, frame: FrameType | None) -> None:
     sys.exit(128 + signal_number)
 
 
-# Starts ttyd on a port of its choosing, read from its log, and stops it
-# when done.
+# Starts ttyd on a port of its choosing, read from its log, then stops it.
 @contextlib.contextmanager
 def ttyd_serve(
     options: list[str], version: str, deadline: float
@@ -1197,8 +1219,7 @@ def ttyd_serve(
         ttyd.stop()
 
 
-# Answers what ttyd sent up to the end of its headers, or all it sent if
-# it closed the connection first.
+# Returns what ttyd sent up to its headers' end, or all if it closed first.
 def upgrade_read(sock: socket.socket, ttyd: Ttyd) -> bytes:
     data = b""
     while b"\r\n\r\n" not in data:
@@ -1210,8 +1231,7 @@ def upgrade_read(sock: socket.socket, ttyd: Ttyd) -> bytes:
     return data
 
 
-# Asks ttyd for a WebSocket on /ws from its own origin. Answers the socket
-# and the key.
+# Asks ttyd for a WebSocket on /ws from its origin. Returns the socket and key.
 def upgrade_send(
     ttyd: Ttyd, headers: dict[str, str]
 ) -> tuple[socket.socket, str]:
@@ -1235,8 +1255,7 @@ def upgrade_send(
     return sock, key
 
 
-# Answers a Wire on a WebSocket to ttyd, failing unless ttyd accepted it
-# with the tty subprotocol.
+# Returns a Wire on a WebSocket ttyd accepted with the tty subprotocol.
 def websocket_open(ttyd: Ttyd, headers: dict[str, str]) -> Wire:
     sock, key = upgrade_send(ttyd, headers)
     data = upgrade_read(sock, ttyd)
@@ -1258,8 +1277,7 @@ def websocket_open(ttyd: Ttyd, headers: dict[str, str]) -> Wire:
     return Wire(ttyd, sock, rest)
 
 
-# Reads and handles what ttyd sends on each wire, firing the timers that
-# come due, until done answers True.
+# Handles what ttyd sends on each wire, firing due timers, until done is True.
 def wires_wait(wires: list[Wire], done: Callable[[], bool], what: str) -> None:
     ttyd = wires[0].ttyd
     while True:
@@ -1286,6 +1304,7 @@ def wires_wait(wires: list[Wire], done: Callable[[], bool], what: str) -> None:
                 wire.socket_read()
 
 
+# Runs the rungs in order, printing a line each, and returns the exit code.
 def main() -> int:
     argparse.ArgumentParser(
         description="Run the wire test: bootstrap.py through"

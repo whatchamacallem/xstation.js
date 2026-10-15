@@ -38,8 +38,7 @@ _CALC_OPERATORS: dict[type[ast.operator], Callable[[Any, Any], Any]] = {
     ast.Pow: lambda left, right: left**right,
     ast.Sub: lambda left, right: left - right,
 }
-# calc refuses a power of integers whose result would pass this many bits,
-# as computing it could take minutes.
+# calc refuses an integer power past this many bits, as it could take minutes.
 _CALC_POWER_MAX_BITS = 1 << 16
 
 _HELP_TEXT = (
@@ -80,6 +79,7 @@ _UPTIME_PATH = "/proc/uptime"
 
 # A command run for a say, from its start until its exit is sent.
 class Command:
+    # Records the say's command with its process and the pipe it writes to.
     def __init__(
         self,
         say_id: int,
@@ -100,6 +100,7 @@ class Command:
 
 
 class Session:
+    # Watches the terminal and the wake up pipe, and sets the signal handlers.
     def __init__(self) -> None:
         self.command: Command | None = None
         # What the page wrote after its last newline.
@@ -126,7 +127,7 @@ class Session:
         for signal_number in (signal.SIGHUP, signal.SIGTERM):
             signal.signal(signal_number, self.signal_end)
 
-    # Sends SIGTERM to the command's process group. Answers the reply.
+    # Sends SIGTERM to the command's process group. Returns the reply.
     def command_cancel(self) -> str:
         if self.command is None:
             return "cancel: nothing is running"
@@ -154,12 +155,12 @@ class Session:
             }
         )
 
+    # Sends SIGKILL to the command's process group, if one is running.
     def command_kill(self) -> None:
         if self.command is not None:
             os.killpg(self.command.process.pid, signal.SIGKILL)
 
-    # Reads the command's output and sends its whole lines; at EOF, sends
-    # what is left as a line, and its exit once it has exited.
+    # Sends whole output lines, at EOF the rest and, once exited, the exit.
     def command_read(self, command: Command) -> None:
         chunk = os.read(command.output, _READ_SIZE)
         command.partial += chunk
@@ -238,6 +239,7 @@ class Session:
             "sent_bytes": self.sent_bytes,
         }
 
+    # Sends the hello with the terminal's size, and starts the tick clock.
     def hello_send(self) -> None:
         size = os.get_terminal_size(0)
         self.send(
@@ -251,8 +253,7 @@ class Session:
         )
         self.tick_start = time.monotonic()
 
-    # Reads the page's input and answers its whole lines in order, each
-    # counted as received when answered.
+    # Reads input and answers whole lines in order, each counted once answered.
     def input_read(self) -> None:
         chunk = os.read(0, _READ_SIZE)
         if not chunk:
@@ -285,6 +286,7 @@ class Session:
         self.sent_bytes += len(line)
         return line + b"\r\n"
 
+    # Handles descriptors and ticks until an error, then kills the command.
     def loop(self) -> NoReturn:
         try:
             while True:
@@ -296,8 +298,7 @@ class Session:
         finally:
             self.command_kill()
 
-    # Replies to a line from the page, which must hold a message of a known
-    # type with exactly that type's fields.
+    # Replies to a page line, which must hold a known type's exact fields.
     def message_answer(self, line: bytearray) -> None:
         message: dict[str, Any] = json.loads(line.decode())
         if (
@@ -335,11 +336,11 @@ class Session:
         else:
             self.say_answer(message["id"], message["text"])
 
+    # Sends the say a reply holding the text.
     def reply_send(self, say_id: int, text: str) -> None:
         self.send({"type": "reply", "id": say_id, "text": text})
 
-    # Replies to a say with exactly one reply, running or cancelling a
-    # command when it asks.
+    # Replies to a say with exactly one reply, running or cancelling a command.
     def say_answer(self, say_id: int, text: str) -> None:
         word, _, argument = text.partition(" ")
         if word == "run":
@@ -385,8 +386,7 @@ class Session:
         while data:
             data = data[os.write(1, data) :]
 
-    # Kills the command's process group, then dies of the signal, so ttyd
-    # sees how the program ended; while a command starts, waits for it.
+    # Kills the command, then dies of the signal so ttyd sees how it ended.
     def signal_end(self, signal_number: int, frame: FrameType | None) -> None:
         if self.starting:
             self.signal_deferred = signal_number
@@ -395,8 +395,7 @@ class Session:
         signal.signal(signal_number, signal.SIG_DFL)
         signal.raise_signal(signal_number)
 
-    # Holds SIGHUP and SIGTERM back while a command starts, until it is
-    # known and so can be killed.
+    # Defers SIGHUP and SIGTERM while a command starts, until it can be killed.
     @contextlib.contextmanager
     def signals_deferred(self) -> Generator[None]:
         self.starting = True
@@ -407,6 +406,7 @@ class Session:
             if self.signal_deferred is not None:
                 self.signal_end(self.signal_deferred, None)
 
+    # Sends the terminal's size.
     def size_send(self) -> None:
         size = os.get_terminal_size(0)
         self.send(
@@ -425,8 +425,7 @@ class Session:
             self.tick_n += 1
         self.send(*ticks)
 
-    # Acts on the signals the wake-up pipe holds: a size for each SIGWINCH,
-    # and the command's exit after a SIGCHLD.
+    # Acts on the wake up pipe: a size per SIGWINCH, the exit after a SIGCHLD.
     def wake_read(self) -> None:
         answers = {
             signal.SIGCHLD: self.command_end,
@@ -436,8 +435,7 @@ class Session:
             answers[signal.Signals(signal_number)]()
 
 
-# Answers what the tree of an arithmetic expression comes to, refusing all
-# but numbers, unary minus and the operators of _CALC_OPERATORS.
+# Returns a tree's value: numbers, unary minus and `_CALC_OPERATORS` only.
 def calc_evaluate(node: ast.expr) -> Any:
     if isinstance(node, ast.Constant) and type(node.value) in (int, float):
         return node.value
@@ -459,7 +457,7 @@ def calc_evaluate(node: ast.expr) -> Any:
     raise ValueError(f"{type(node).__name__} is not allowed")
 
 
-# Answers what the arithmetic comes to, or why calc refuses it.
+# Returns what the arithmetic comes to, or why calc refuses it.
 def calc_text(expression: str) -> str:
     try:
         return str(calc_evaluate(ast.parse(expression, mode="eval").body))
@@ -473,8 +471,7 @@ def calc_text(expression: str) -> str:
         return f"calc: {error}"
 
 
-# Returns the directory's entries, sorted, each with its size in bytes and
-# a trailing / for a directory. A symbolic link is listed as itself.
+# Returns sorted entries with sizes, a / on directories, links as themselves.
 def ls_text(path: str) -> str:
     lines: list[str] = []
     try:
@@ -496,7 +493,7 @@ def session_run() -> NoReturn:
     session.loop()
 
 
-# Lets the signal reach the wake-up pipe, which the loop reads.
+# Lets the signal reach the wake up pipe, which the loop reads.
 def signal_wake(signal_number: int, frame: FrameType | None) -> None:
     pass
 

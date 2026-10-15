@@ -25,7 +25,7 @@ param()
 $root_path_ = Split-Path -Parent $PSScriptRoot
 $test_user_ = 'xstation-test'
 $test_credential_ = '{0}:{1}' -f $test_user_, [Guid]::NewGuid().ToString('N')
-# Expect is the first line xsjs_status.ps1 should print.
+# Expect is the first line `xsjs_status.ps1` should print.
 $lifecycle_ = @(
     @{ Script = 'xsjs_stop.ps1' }
     @{ Script = 'xsjs_status.ps1'; Expect = $i18n_.status_stopped }
@@ -42,9 +42,9 @@ $lifecycle_ = @(
     @{ Script = 'xsjs_status.ps1'; Expect = $i18n_.status_stopped }
 )
 
+# Returns a script's own log without its title, for the step's section.
 function _test_powershell_get_log_text ([string]$path_) {
-    # A script's own log without its title, its headings one level down so
-    # they sit under the step's.
+    # Its headings go one level down so they sit under the step's.
     $fenced_ = $false
     $all_lines_ = [IO.File]::ReadAllLines($path_)
     $lines_ = foreach ($line_ in $all_lines_ | Select-Object -Skip 1) {
@@ -55,9 +55,9 @@ function _test_powershell_get_log_text ([string]$path_) {
     ($lines_ -join "`n").Trim()
 }
 
+# Runs one script in its own PowerShell and returns whether it passed.
 function _test_powershell_test_step ([int]$number_, [hashtable]$step_) {
-    # Runs one script in its own PowerShell, shows and logs what it prints,
-    # then adds its own log. Returns whether it passed.
+    # Shows and logs what it prints, then adds the script's own log.
     $ErrorActionPreference = 'Continue'
     $arguments_ = @($step_.Arguments | Where-Object { $_ })
     $hidden_ = "${test_user_}:********"
@@ -101,6 +101,7 @@ function _test_powershell_test_step ([int]$number_, [hashtable]$step_) {
     $passed_
 }
 
+# Lints, then runs every lifecycle step and exits 1 if any failed.
 function _test_powershell_main {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
         'PSUseDeclaredVarsMoreThanAssignments', '',
@@ -112,7 +113,7 @@ function _test_powershell_main {
     $log_path_ = xsjs_util_open_log $PSCommandPath
     xsjs_util_step_check_administrator
 
-    # Lint in a PowerShell of its own: see test_lint.ps1.
+    # Lint in a PowerShell of its own: see `test_lint.ps1`.
     $lint_ = @{ Script = 'powershell\test_lint.ps1' }
     if (-not (_test_powershell_test_step 1 $lint_)) {
         throw $i18n_.test_lint_failed

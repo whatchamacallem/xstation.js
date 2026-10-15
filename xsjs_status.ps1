@@ -15,6 +15,7 @@ param()
 
 . (Join-Path $PSScriptRoot 'powershell\xsjs_util.ps1')
 
+# Prints whether the server is running and whether it starts at sign in.
 function _xsjs_status_show_summary {
     $running_ = @(xsjs_util_get_servers).Count -gt 0
     $signin_ = $task_ -and $task_.State -ne 'Disabled'
@@ -32,6 +33,7 @@ function _xsjs_status_show_summary {
     Write-Host ($text_ -f $task_name_, $port_) -ForegroundColor $color_
 }
 
+# Shows the scheduled task's state, mode, user and last result.
 function _xsjs_status_show_task {
     if (-not $task_) {
         _xsjs_status_show_item ($i18n_.status_task_none -f $task_name_)
@@ -49,13 +51,14 @@ function _xsjs_status_show_task {
     _xsjs_status_show_item $text_
 }
 
+# Prints the text as a list item.
 function _xsjs_status_show_item ([string]$text_) {
     Write-Host "- $text_"
 }
 
+# Returns HTTP, or HTTPS with the user name, from a ttyd command line.
 function _xsjs_status_get_mode ([string]$command_line_) {
-    # ttyd's command line holds the password, so only the user name
-    # leaves here.
+    # The command line holds the password, so only the user name leaves here.
     if ($command_line_ -notmatch '--ssl(\s|$)') { return 'HTTP' }
     $user_ = ''
     if ($command_line_ -match '--credential\s+"?([^:"]+):') {
@@ -64,6 +67,7 @@ function _xsjs_status_get_mode ([string]$command_line_) {
     $i18n_.status_https -f $user_
 }
 
+# Shows each ttyd process with its mode, port and start time.
 function _xsjs_status_show_ttyd {
     $servers_ = @($processes_ | Where-Object Name -EQ 'ttyd.exe')
     foreach ($server_ in $servers_) {
@@ -80,6 +84,7 @@ function _xsjs_status_show_ttyd {
     if (-not $servers_) { _xsjs_status_show_item $i18n_.status_ttyd_none }
 }
 
+# Shows what listens on the port and where its connections come from.
 function _xsjs_status_show_port {
     $query_ = @{ LocalPort = $port_; ErrorAction = 'SilentlyContinue' }
     $listeners_ = @(Get-NetTCPConnection @query_ -State Listen)
@@ -103,6 +108,7 @@ function _xsjs_status_show_port {
     }
 }
 
+# Shows the firewall rule, if there is one.
 function _xsjs_status_show_firewall {
     $rule_ = @{ Name = $firewall_rule_name_; ErrorAction = 'SilentlyContinue' }
     $found_ = Get-NetFirewallRule @rule_
@@ -116,6 +122,7 @@ function _xsjs_status_show_firewall {
     _xsjs_status_show_item $text_
 }
 
+# Shows every port proxy set up in Windows.
 function _xsjs_status_show_proxies {
     $path_ = 'HKLM:\SYSTEM\CurrentControlSet\Services\PortProxy'
     $proxies_ = @(
@@ -133,6 +140,7 @@ function _xsjs_status_show_proxies {
     $proxies_ | ForEach-Object { _xsjs_status_show_item $_ }
 }
 
+# Returns the lines WSL prints for the arguments, cleaned and without blanks.
 function _xsjs_status_get_wsl ([string[]]$wsl_arguments_) {
     $ErrorActionPreference = 'Continue'
     & wsl.exe @wsl_arguments_ 2>&1 |
@@ -140,6 +148,7 @@ function _xsjs_status_get_wsl ([string[]]$wsl_arguments_) {
         Where-Object { $_ }
 }
 
+# Shows the default distribution and, if it runs, its bootstrap processes.
 function _xsjs_status_show_wsl {
     $name_ = $null
     foreach ($line_ in _xsjs_status_get_wsl '--list', '--verbose') {
@@ -153,8 +162,7 @@ function _xsjs_status_show_wsl {
         return
     }
     _xsjs_status_show_item ($i18n_.status_wsl -f $name_, $state_)
-    # Only look inside Linux if it is already running, so this doesn't
-    # start it.
+    # Only look inside Linux when it already runs, so this doesn't start it.
     $running_ = _xsjs_status_get_wsl '--list', '--running', '--quiet'
     if ($name_ -notin $running_) { return }
     $pattern_ = '^python3 ' + [regex]::Escape($bootstrap_script_)
@@ -168,6 +176,7 @@ function _xsjs_status_show_wsl {
     }
 }
 
+# Shows the tree of ttyd and runner processes.
 function _xsjs_status_show_processes {
     $runner_ = [regex]::Escape($runner_path_)
     $members_ = @(
@@ -188,6 +197,7 @@ function _xsjs_status_show_processes {
     }
 }
 
+# Prints the process, then the children it started, indented below it.
 function _xsjs_status_show_process_tree ($process_, [string]$indent_) {
     Write-Host ('{0}{1} {2}' -f $indent_, $process_.Name, $process_.ProcessId)
     $children_ = $processes_ | Where-Object {
@@ -199,6 +209,7 @@ function _xsjs_status_show_process_tree ($process_, [string]$indent_) {
     }
 }
 
+# Lists the files in the state folder.
 function _xsjs_status_show_files {
     $names_ = @(
         Get-ChildItem $state_path_ -File -ErrorAction SilentlyContinue |
@@ -212,6 +223,7 @@ function _xsjs_status_show_files {
     }
 }
 
+# Shows the TLS certificate's expiry and fingerprint, if there is one.
 function _xsjs_status_show_certificate {
     if (-not (Test-Path $certificate_path_)) { return }
     $x509_ = [Security.Cryptography.X509Certificates.X509Certificate2]
@@ -221,6 +233,7 @@ function _xsjs_status_show_certificate {
     _xsjs_status_show_item $text_
 }
 
+# Reads the processes and the task once, then shows each part of the status.
 function _xsjs_status_main {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
         'PSUseDeclaredVarsMoreThanAssignments', '',

@@ -66,8 +66,7 @@ _POWERSHELL_PATH = (
 _PROFILE_PREFIX = "xsjs_screenshot-"
 _PROFILE_REMOVE_SECONDS = 10
 
-# C#, a thread each way, as a relay of PowerShell's own CopyToAsync hangs.
-# Reads the port from $port_.
+# `C#` reading `$port_`, a thread each way, as PowerShell's CopyToAsync hangs.
 _RELAY_SCRIPT = r"""
 $ProgressPreference = 'SilentlyContinue'
 Add-Type -TypeDefinition @'
@@ -105,8 +104,7 @@ public static class XsjsScreenshotRelay {
 [XsjsScreenshotRelay]::Run($port_)
 """
 
-# Stops every process whose command line holds $profile_, the browser's
-# helpers too. Reads the executable's name from $name_.
+# Stops every process named `$name_` whose command line holds `$profile_`.
 _STOP_SCRIPT = r"""
 $ProgressPreference = 'SilentlyContinue'
 Get-CimInstance Win32_Process -Filter "Name = '$name_'" |
@@ -125,6 +123,7 @@ class DevToolsAddress(NamedTuple):
 
 
 class Browser:
+    # Keeps the window size and names a profile, starting nothing yet.
     def __init__(self, width_px: int, height_px: int) -> None:
         self.width_px = width_px
         self.height_px = height_px
@@ -139,6 +138,7 @@ class Browser:
         self.devtools_reader: IO[bytes] | None = None
         self.devtools_writer: IO[bytes] | None = None
 
+    # Starts the browser and its relay, cleaning up if starting fails.
     def __enter__(self) -> Self:
         try:
             self.start()
@@ -147,6 +147,7 @@ class Browser:
             raise
         return self
 
+    # Closes the browser whatever ended the block.
     def __exit__(
         self,
         exception_type: type[BaseException] | None,
@@ -180,8 +181,7 @@ class Browser:
             self.process_wait(self.relay_process)
         if self.browser_process is not None:
             self.process_wait(self.browser_process)
-            # Killing chrome.exe's WSL side leaves Windows' running, holding
-            # the profile, so stop whatever on Windows still runs on it.
+            # The Windows browser outlives its WSL side and holds the profile.
             try:
                 self.powershell_run(
                     f"$name_ = '{self.executable_name}'\n"
@@ -218,6 +218,7 @@ class Browser:
                 )
             time.sleep(_POLL_SECONDS)
 
+    # Returns the WSL path of a Windows path, as wslpath maps it.
     def path_wsl(self, windows_path: str) -> str:
         completed = subprocess.run(
             ["wslpath", "-u", windows_path],
@@ -229,6 +230,7 @@ class Browser:
             raise RuntimeError(f"wslpath can't map {windows_path}")
         return completed.stdout.strip()
 
+    # Returns the arguments that run the script in PowerShell, base64 encoded.
     def powershell_command(self, script: str) -> list[str]:
         encoded = base64.b64encode(script.encode("utf-16-le")).decode()
         return [
@@ -239,7 +241,7 @@ class Browser:
             encoded,
         ]
 
-    # Answers what the script printed, as UTF-8.
+    # Returns what the script printed, as `UTF-8`.
     def powershell_run(self, script: str) -> str:
         completed = subprocess.run(
             self.powershell_command(script),
@@ -255,6 +257,7 @@ class Browser:
             )
         return completed.stdout.decode("utf-8")
 
+    # Waits for the process to exit, killing it if it takes too long.
     def process_wait(self, process: subprocess.Popen[bytes]) -> None:
         try:
             process.wait(_STOP_WAIT_SECONDS)
@@ -277,6 +280,7 @@ class Browser:
                     return
             time.sleep(_POLL_SECONDS)
 
+    # Starts the browser on a new profile and a relay to its DevTools.
     def start(self) -> None:
         environment: dict[str, str | None] = json.loads(
             self.powershell_run(_ENVIRONMENT_SCRIPT)

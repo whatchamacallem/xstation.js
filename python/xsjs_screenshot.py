@@ -47,7 +47,7 @@ sys.pycache_prefix = os.path.join(
     os.path.dirname(_PYTHON_PATH), "build", "pycache"
 )
 
-# The program and the page ttyd serves, from _PYTHON_PATH.
+# The program and the page ttyd serves, from `_PYTHON_PATH`.
 _BOOTSTRAP_ARGUMENTS = ["python3", "bootstrap.py"]
 _BOOTSTRAP_PAGE_NAME = "bootstrap.html"
 
@@ -81,8 +81,7 @@ _FRAMES_DRAWN_SCRIPT = (
 
 _IMAGE_NAME = "xsjs_screenshot.png"
 
-# Returns the viewport's size and how far the page's scrolling parts reach
-# past it.
+# Returns the viewport's size and how far the page's scrolling parts overflow.
 _PAGE_OVERFLOW_SCRIPT = """(() => {
     const overflow = [0, 0];
     for (const element of document.querySelectorAll("*")) {
@@ -106,8 +105,7 @@ _REFUSED_ERROR_TEXT = "net::ERR_CONNECTION_REFUSED"
 # vmstat's two header lines, then three samples a second apart.
 _RUN_LINES_BEFORE_CANCEL = 5
 
-# Covers Chrome's slow first start on a new profile, and the wait for all
-# the page's checks.
+# Covers Chrome's slow first start on a new profile and all the page's checks.
 _RUN_TIMEOUT_SECONDS = 180
 
 _SERVER_WAIT_SECONDS = 60
@@ -137,8 +135,9 @@ _WEBSOCKET_OPCODE_PONG = 0xA
 _WEBSOCKET_OPCODE_TEXT = 0x1
 
 
-# bootstrap.html in the browser, read through its window.xsjs.
+# bootstrap.html in the browser, read through its `window.xsjs`.
 class BootstrapPage:
+    # Holds the DevTools connection and the conversation read so far.
     def __init__(self, devtools: DevTools) -> None:
         self.devtools = devtools
         self.conversation: list[dict[str, str]] = []
@@ -165,8 +164,7 @@ class BootstrapPage:
                 },
             )
 
-    # Returns the index of the first entry from start on that matches, once
-    # one has come.
+    # Returns the index of the first matching entry from start, once it comes.
     def entry_wait(
         self, start: int, match: Callable[[dict[str, str]], bool]
     ) -> int:
@@ -181,8 +179,7 @@ class BootstrapPage:
             if match(self.conversation[index])
         )
 
-    # Fails on the page's failure, with ttyd's version for a close code the
-    # page never sends, as that is ttyd's fault.
+    # Fails on the page's failure, adding ttyd's version when ttyd is at fault.
     def failure_check(self, results: dict[str, Any]) -> None:
         failure = results["failure"]
         if failure is None:
@@ -195,14 +192,12 @@ class BootstrapPage:
             message += f" ({ttyd_version(_TTYD_PATH)})"
         raise RuntimeError(message)
 
-    # Returns the text of the entry after the person's line at the index,
-    # which is the program's reply while no command runs.
+    # Returns the next entry's text, the program's reply while no command runs.
     def reply(self, index: int) -> str:
         index = self.entry_wait(index + 1, lambda entry: True)
         return self.conversation[index]["text"]
 
-    # Types the line into the page and presses Enter. Answers the index of
-    # the person's line in the conversation.
+    # Types the line and presses Enter. Returns the index of the person's line.
     def say(self, text: str) -> int:
         start = len(self.conversation)
         self.devtools.call("Input.insertText", {"text": text})
@@ -222,8 +217,7 @@ class BootstrapPage:
             )
         return index
 
-    # Returns the page's results once the condition holds for them,
-    # printing the conversation as it grows.
+    # Returns the results once the condition holds, printing the conversation.
     def wait(
         self, condition: Callable[[dict[str, Any]], bool]
     ) -> dict[str, Any]:
@@ -245,12 +239,14 @@ class BootstrapPage:
 
 
 class DevTools:
+    # Opens a WebSocket over the browser's DevTools connection.
     def __init__(self, browser: Any) -> None:
         self.browser = browser
         self.call_id = 0
         self.session_id = ""
         self.handshake()
 
+    # Returns the next count bytes, failing if DevTools closes first.
     def bytes_read(self, count: int) -> bytes:
         data = self.browser.devtools_reader.read(count)
         if len(data) != count:
@@ -283,7 +279,7 @@ class DevTools:
             raise RuntimeError(f"{method}: {reply['error'].get('message')}")
         return reply.get("result", {})
 
-    # Answers what the page's expression came to, awaiting a promise.
+    # Returns what the page's expression came to, awaiting a promise.
     def evaluate(self, expression: str) -> Any:
         result = self.call(
             "Runtime.evaluate",
@@ -318,6 +314,7 @@ class DevTools:
         self.browser.devtools_writer.write(bytes(head) + masked)
         self.browser.devtools_writer.flush()
 
+    # Sends the WebSocket upgrade and checks that DevTools accepted the key.
     def handshake(self) -> None:
         key = base64.b64encode(os.urandom(16)).decode()
         request = (
@@ -392,7 +389,7 @@ def browser_module() -> ModuleType | None:
     return None
 
 
-# Answers a condition that holds once the page's check of the name passes.
+# Returns a condition that holds once the page's check of the name passes.
 def check_passed(name: str) -> Callable[[dict[str, Any]], bool]:
     return lambda results: results["checks"][name]["state"] == "pass"
 
@@ -412,9 +409,7 @@ def command_run(arguments: list[str], cwd: str) -> None:
         )
 
 
-# Says each line to bootstrap.py in turn, waiting for its reply,
-# and checks the reply against what this script computes where it can.
-# Returns the program's pid from its stat.
+# Says each line to bootstrap.py, checking replies. Returns the pid from stat.
 def conversation_hold(page: BootstrapPage, typing: str) -> int:
     page.reply(page.say("help"))
     before = datetime.datetime.now(datetime.UTC)
@@ -515,11 +510,12 @@ def conversation_hold(page: BootstrapPage, typing: str) -> int:
     return session_pid
 
 
-# Answers whether the conversation's entry is a command's exit.
+# Returns whether the conversation's entry is a command's exit.
 def entry_exit(entry: dict[str, str]) -> bool:
     return _EXIT_PATTERN.fullmatch(entry["text"]) is not None
 
 
+# Decodes the base64 image into the path, making its directory as needed.
 def image_save(image_path: str, data: str) -> None:
     image_dir = os.path.dirname(image_path)
     if image_dir:
@@ -528,8 +524,7 @@ def image_save(image_path: str, data: str) -> None:
         image_file.write(base64.b64decode(data))
 
 
-# Returns the directory's entries as bootstrap.py's ls gives them: sorted,
-# each with its size in bytes and a trailing / for a directory.
+# Returns the directory's entries as bootstrap.py's ls gives them, sorted.
 def listing_text(path: str) -> str:
     lines: list[str] = []
     with os.scandir(path) as iterator:
@@ -540,8 +535,7 @@ def listing_text(path: str) -> str:
     return "\n".join(lines)
 
 
-# Grows the viewport until no part of the page scrolls, so a screenshot
-# holds all of it.
+# Grows the viewport until no part scrolls, so a screenshot holds the page.
 def page_fit(devtools: DevTools) -> None:
     while True:
         devtools.evaluate(_FRAMES_DRAWN_SCRIPT)
@@ -553,9 +547,7 @@ def page_fit(devtools: DevTools) -> None:
         viewport_set(devtools, width_px + overflow[0], height_px + overflow[1])
 
 
-# Drives bootstrap.html as a person would: a conversation, a resize, and
-# Close once all its other checks pass. Then checks ttyd's program is gone
-# and saves the whole page as a PNG. Answers the close check's detail.
+# Drives the page as a person would and saves a PNG. Returns the close detail.
 def page_meet(
     devtools: DevTools, url: str, typing: str, image_path: str, ttyd_pid: int
 ) -> str:
@@ -611,8 +603,7 @@ def page_meet(
     return results["checks"]["close"]["detail"]
 
 
-# Opens the URL. WSL forwards Windows' localhost to a port some time after
-# the port opens, so the browser can be refused at first.
+# Opens the URL, retrying refusals, since WSL forwards a new port with a lag.
 def page_navigate(devtools: DevTools, url: str) -> None:
     deadline = time.monotonic() + _SERVER_WAIT_SECONDS
     while True:
@@ -627,8 +618,7 @@ def page_navigate(devtools: DevTools, url: str) -> None:
         time.sleep(_POLL_SECONDS)
 
 
-# Fails if something already listens on the port, as it would be served in
-# place of what this script starts.
+# Fails if something already listens on the port, as it would answer instead.
 def port_check(port: int) -> None:
     try:
         with socket.create_connection(("localhost", port), timeout=1):
@@ -658,8 +648,7 @@ def port_wait(process: subprocess.Popen[bytes], name: str, port: int) -> None:
         time.sleep(_POLL_SECONDS)
 
 
-# Starts a server in a session of its own, so stopping it stops its
-# children, and a ^C reaches only this script, which stops it.
+# Starts a server in its own session: stops reach its children, `^C` doesn't.
 def process_start(arguments: list[str], cwd: str) -> subprocess.Popen[bytes]:
     return subprocess.Popen(
         arguments,
@@ -670,6 +659,7 @@ def process_start(arguments: list[str], cwd: str) -> subprocess.Popen[bytes]:
     )
 
 
+# Terminates the server's session, killing it if it outlives the wait.
 def process_stop(process: subprocess.Popen[bytes]) -> None:
     # The session is gone once all of it has exited.
     with contextlib.suppress(ProcessLookupError):
@@ -711,16 +701,17 @@ def session_pids(ttyd_pid: int) -> list[int]:
     return sorted(pids)
 
 
+# Exits with 128 plus the signal's number, so cleanups still run.
 def signal_exit(signal_number: int, frame: FrameType | None) -> None:
     sys.exit(128 + signal_number)
 
 
+# Fails the run once its alarm goes off.
 def signal_time_out(signal_number: int, frame: FrameType | None) -> None:
     raise TimeoutError(f"gave up after {_RUN_TIMEOUT_SECONDS} s")
 
 
-# Returns the pid of the command the say at the index started, from the
-# program's reply.
+# Returns the pid of the command the say at the index started, from its reply.
 def started_pid(page: BootstrapPage, index: int, words: str) -> int:
     reply = page.reply(index)
     found = re.fullmatch(
@@ -731,8 +722,7 @@ def started_pid(page: BootstrapPage, index: int, words: str) -> int:
     return int(found.group(1))
 
 
-# Clones ttyd and builds it as its README says, each only when missing.
-# Updating it is the maintainer's to do.
+# Clones ttyd and builds it, each only when missing: the maintainer updates it.
 def ttyd_prepare(ttyd_path: str) -> None:
     if not os.path.isdir(ttyd_path):
         command_run(
@@ -746,9 +736,7 @@ def ttyd_prepare(ttyd_path: str) -> None:
         command_run(["make"], build_path)
 
 
-# Serves bootstrap.html with ttyd alone, with the flags xsjs_start.ps1
-# gives it without a password, running bootstrap.py for each connection.
-# Yields ttyd's process.
+# Yields ttyd serving the page with `xsjs_start.ps1`'s flags but no password.
 @contextlib.contextmanager
 def ttyd_serve(ttyd_path: str) -> Generator[subprocess.Popen[bytes]]:
     port_check(_TTYD_PORT)
@@ -774,7 +762,7 @@ def ttyd_serve(ttyd_path: str) -> Generator[subprocess.Popen[bytes]]:
         process_stop(ttyd)
 
 
-# Answers what ttyd says its version is, for reports of its faults.
+# Returns what ttyd says its version is, for reports of its faults.
 def ttyd_version(ttyd_path: str) -> str:
     completed = subprocess.run(
         [os.path.join(ttyd_path, "build", "ttyd"), "--version"],
@@ -790,6 +778,7 @@ def ttyd_version(ttyd_path: str) -> str:
     return completed.stdout.strip()
 
 
+# Resizes the page's viewport to the width and height, as on a desktop.
 def viewport_set(devtools: DevTools, width_px: int, height_px: int) -> None:
     devtools.call(
         "Emulation.setDeviceMetricsOverride",
@@ -802,6 +791,7 @@ def viewport_set(devtools: DevTools, width_px: int, height_px: int) -> None:
     )
 
 
+# Parses the options, runs ttyd and the browser, and returns the exit code.
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Hold a conversation with bootstrap.py through"

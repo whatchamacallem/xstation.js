@@ -186,11 +186,13 @@ function record(name, detail) {
   scheduleRender();
 }
 
+// Records the failure and throws, ending the handler that found it.
 function fail(name, detail) {
   record(name, detail);
   throw new CheckFailure(`${name}: ${detail}`);
 }
 
+// Passes a check that is still pending, with its detail.
 function pass(name, detail) {
   const check = xsjs.checks[name];
   if (check.state !== 'pending') {
@@ -200,6 +202,7 @@ function pass(name, detail) {
   check.detail = detail;
 }
 
+// Stops the timers and the resize listener, and disables the controls.
 function teardown() {
   for (const interval of state.intervals) {
     clearInterval(interval);
@@ -210,8 +213,7 @@ function teardown() {
   elements.close.disabled = true;
 }
 
-// Answers bytes as ASCII text, escaping CR, LF and other bytes outside
-// printable ASCII.
+// Returns bytes as ASCII text, escaping CR, LF and any byte not printable.
 function bytesText(bytes) {
   let text = '';
   for (const byte of bytes) {
@@ -228,14 +230,17 @@ function bytesText(bytes) {
   return text;
 }
 
+// Returns a size as columns by rows, or `-` when there is none.
 function sizeText(size) {
   return size === null ? '-' : `${size.columns}x${size.rows}`;
 }
 
+// Returns milliseconds to a tenth, or `-` when there are none.
 function msText(ms) {
   return ms === null ? '-' : ms.toFixed(1);
 }
 
+// Counts a frame and adds its row to the table, keeping only the latest.
 function recordFrame(direction, bytes) {
   const frames = xsjs.frames;
   if (direction === 'sent') {
@@ -258,6 +263,7 @@ function recordFrame(direction, bytes) {
   scheduleRender();
 }
 
+// Sends a frame to ttyd and records it.
 function sendFrame(bytes) {
   state.socket.send(bytes);
   recordFrame('sent', bytes);
@@ -275,7 +281,7 @@ function sendMessage(message) {
   sendFrame(frame);
 }
 
-// Answers the window's inner size in cells of the hidden span.
+// Returns the window's inner size in cells of the hidden span.
 function measureSize() {
   const cell = elements.cell.getBoundingClientRect();
   state.cell = {width: cell.width, height: cell.height};
@@ -306,6 +312,7 @@ function sendResize() {
   sendFrame(encoder.encode(`1${JSON.stringify(size)}`));
 }
 
+// Sends a ping with the next id, noting when it went.
 function sendPing() {
   const id = state.pings.nextId;
   state.pings.nextId += 1;
@@ -314,6 +321,7 @@ function sendPing() {
   sendMessage({type: 'ping', id});
 }
 
+// Sends a stat request, noting when it went.
 function sendStat() {
   state.stats.requests.push(performance.now());
   sendMessage({type: 'stat'});
@@ -326,6 +334,7 @@ function sendCount() {
     {messages: state.sent.messages, bytes: state.sent.bytes});
 }
 
+// Checks the protocol, then sends ttyd the token and the size in cells.
 function onOpen() {
   state.openedAt = performance.now();
   if (state.socket.protocol !== 'tty') {
@@ -340,6 +349,7 @@ function onOpen() {
   elements.close.disabled = false;
 }
 
+// Checks ttyd's title and preferences messages, then hands on its output.
 function onMessage(event) {
   const bytes = new Uint8Array(event.data);
   recordFrame('recv', bytes);
@@ -372,6 +382,7 @@ function onMessage(event) {
   }
 }
 
+// Decodes output and handles its whole lines, keeping the rest for later.
 function onOutput(payload) {
   let text;
   try {
@@ -386,6 +397,7 @@ function onOutput(payload) {
   }
 }
 
+// Checks a program line is a known message with its fields, then handles it.
 function onLine(line) {
   let message;
   try {
@@ -419,6 +431,7 @@ function onLine(line) {
   state.received.bytes += encoder.encode(line).length;
 }
 
+// Checks the hello against the size sent, then starts the periodic requests.
 function onHello(message) {
   if (state.hello !== null) {
     fail('hello', `a second hello, pid ${message.pid}`);
@@ -444,6 +457,7 @@ function onHello(message) {
   sendResize();
 }
 
+// Checks the ticks come in order, and that one follows a cancelled exit.
 function onTick(message) {
   state.ticks.count += 1;
   if (message.n !== state.ticks.count) {
@@ -459,6 +473,7 @@ function onTick(message) {
   }
 }
 
+// Matches a pong to the oldest outstanding ping and times its round trip.
 function onPong(message) {
   const pings = state.pings;
   const ping = pings.outstanding.shift();
@@ -480,6 +495,7 @@ function onPong(message) {
   }
 }
 
+// Matches a stat to its request, checking its pid and that uptime rises.
 function onStat(message) {
   const stats = state.stats;
   const sentAt = stats.requests.shift();
@@ -507,6 +523,7 @@ function onStat(message) {
     ` ${apart.toFixed(1)} ms, pid ${message.pid}`);
 }
 
+// Checks each reported size was sent, passing once the latest resize is seen.
 function onSize(message) {
   state.sizeMessages += 1;
   state.programSize = {columns: message.columns, rows: message.rows};
@@ -523,6 +540,7 @@ function onSize(message) {
   }
 }
 
+// Checks the program's counts against the page's figures at the request.
 function onCount(message) {
   const snapshot = state.counts.snapshots.shift();
   if (snapshot === undefined) {
@@ -543,6 +561,7 @@ function onCount(message) {
   pass('count', COUNT_KEYS.map(key => `${key} ${expected[key]}`).join(', '));
 }
 
+// Logs a reply and checks it answers the oldest unanswered say.
 function onReply(message) {
   xsjs.conversation.push({who: 'program', text: message.text});
   const says = state.says;
@@ -561,6 +580,7 @@ function onReply(message) {
   }
 }
 
+// Records a run after checking its say exists and no other run is going.
 function onStarted(message) {
   if (!(message.id >= 1 && message.id < state.says.nextId)) {
     fail('run', `started for id ${message.id}, which no say had`);
@@ -574,6 +594,7 @@ function onStarted(message) {
   };
 }
 
+// Logs a run's line and checks it belongs to the running id, in order.
 function onRunLine(message) {
   xsjs.conversation.push({who: 'program', text: message.text});
   const run = state.run;
@@ -587,6 +608,7 @@ function onRunLine(message) {
   run.lines += 1;
 }
 
+// Logs a run's exit, checks its line count and notes whether it was cancelled.
 function onExit(message) {
   const cancelled = message.cancelled ? ', cancelled' : '';
   xsjs.conversation.push({
@@ -623,6 +645,7 @@ const HANDLERS = {
   exit: onExit,
 };
 
+// Records the close and checks it followed Close and has code 1000.
 function onClose(event) {
   xsjs.closed = {
     code: event.code, reason: event.reason, wasClean: event.wasClean,
@@ -647,6 +670,7 @@ function onClose(event) {
   pass('close', `${detail} after Close was pressed`);
 }
 
+// Sends the field's text as a say on Enter, and clears the field.
 function onSayKey(event) {
   if (event.key !== 'Enter') {
     return;
@@ -660,6 +684,7 @@ function onSayKey(event) {
   sendMessage({type: 'say', id, text});
 }
 
+// Stops the timers and closes the socket with code 1000.
 function onClosePressed() {
   state.closePressed = true;
   teardown();
@@ -667,6 +692,7 @@ function onClosePressed() {
   scheduleRender();
 }
 
+// Asks for a render on the next frame, unless one is already pending.
 function scheduleRender() {
   if (state.renderPending) {
     return;
@@ -675,7 +701,7 @@ function scheduleRender() {
   requestAnimationFrame(render);
 }
 
-// Answers the panels' text, one line per function.
+// Returns the panels' text, one line per function.
 function panelsText() {
   const lines = [];
   const hello = state.hello;
@@ -717,6 +743,7 @@ function panelsText() {
   return lines.join('\n');
 }
 
+// Writes the status, panels, checks, frames, totals and new log entries.
 function render() {
   state.renderPending = false;
   const socket = state.socket;
@@ -764,6 +791,7 @@ function render() {
   }
 }
 
+// Fetches the token, then opens the WebSocket to ttyd.
 async function start() {
   const path = window.location.pathname.replace(/[/]+$/, '');
   const response = await fetch(

@@ -40,8 +40,7 @@ def reformat(paths: list[str]) -> None:
             subprocess.run(command + matched, check=True, cwd=_ROOT_PATH)
 
 
-# Returns the files the whitelist's globs match from the top directory,
-# sorted.
+# Returns the files the whitelist's globs match from the top, sorted.
 def whitelist_paths() -> list[str]:
     with open(_WHITELIST_PATH, encoding="utf-8") as whitelist_file:
         patterns = whitelist_file.read().splitlines()
@@ -56,6 +55,7 @@ def whitelist_paths() -> list[str]:
     return sorted(paths)
 
 
+# Formats the whitelisted files.
 def main() -> None:
     argparse.ArgumentParser(
         description="Format the files reformat_whitelist.txt lists."

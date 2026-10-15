@@ -16,7 +16,7 @@ param()
 
 $ttyd_package_ = @{ Id = 'tsl0922.ttyd'; MatchOption = 'Equals' }
 
-# figlet -f bigmono9 xsjs
+# `figlet -f bigmono9 xsjs`
 $banner_ = @'
                   █
 
@@ -36,6 +36,7 @@ Cross-Station JS, a.k.a. xstation.js. © 2026 Adrian Johnston. Licensed under
 the terms of the MIT license found in the LICENSE.md file.
 '@
 
+# Installs the WinGet module if missing, then repairs WinGet if it needs it.
 function _xsjs_install_step_check_winget {
     xsjs_util_write_log_section $i18n_.check_winget_module
     $module_ = @{
@@ -43,9 +44,7 @@ function _xsjs_install_step_check_winget {
         Repository = 'PSGallery'
         Scope      = 'CurrentUser'
     }
-    # Only install it if it's missing. Reinstalling it every run needs
-    # PSGallery, and is refused while any PowerShell has it loaded, which
-    # PSScriptAnalyzer does when it checks this file.
+    # Install only if missing: a reinstall fails while the lint has it loaded.
     $installed_ = Get-Module -ListAvailable -Name $module_.Name |
         Sort-Object Version -Descending | Select-Object -First 1
     if ($installed_) {
@@ -71,6 +70,7 @@ function _xsjs_install_step_check_winget {
     }
 }
 
+# Stops the scheduled task and every ttyd process.
 function _xsjs_install_stop_ttyd {
     # WinGet can't replace ttyd.exe while any copy of it runs.
     $task_ = @{ TaskName = $task_name_; ErrorAction = 'SilentlyContinue' }
@@ -86,6 +86,7 @@ function _xsjs_install_stop_ttyd {
     if ($processes_) { Start-Sleep -Seconds 1 }
 }
 
+# Installs ttyd with WinGet, or updates it when WinGet has a newer one.
 function _xsjs_install_step_check_ttyd_installed {
     xsjs_util_write_log_section $i18n_.check_ttyd_installed
     $ttyd_ = Get-WinGetPackage @ttyd_package_
@@ -110,6 +111,7 @@ function _xsjs_install_step_check_ttyd_installed {
     }
 }
 
+# Reinstalls ttyd if it doesn't run, and throws if it still doesn't.
 function _xsjs_install_step_check_ttyd_works {
     xsjs_util_write_log_section $i18n_.check_ttyd_works
     if (-not (_xsjs_install_test_ttyd)) {
@@ -126,6 +128,7 @@ function _xsjs_install_step_check_ttyd_works {
     }
 }
 
+# Returns whether ttyd is on the path and runs, logging its version.
 function _xsjs_install_test_ttyd {
     xsjs_util_update_path
     if (-not (Get-Command ttyd -ErrorAction SilentlyContinue)) {
@@ -136,6 +139,7 @@ function _xsjs_install_test_ttyd {
     return $LASTEXITCODE -eq 0
 }
 
+# Installs WSL and asks for a restart if it is missing, or else updates it.
 function _xsjs_install_step_check_wsl {
     xsjs_util_write_log_section $i18n_.check_wsl
     xsjs_util_invoke_native { wsl --version }
@@ -153,6 +157,7 @@ function _xsjs_install_step_check_wsl {
     }
 }
 
+# Installs Ubuntu if WSL runs no Linux, and throws if it still doesn't.
 function _xsjs_install_step_check_linux {
     xsjs_util_write_log_section $i18n_.check_linux
     xsjs_util_invoke_native { wsl -e true }
@@ -166,6 +171,7 @@ function _xsjs_install_step_check_linux {
     }
 }
 
+# Installs Python 3 in Linux with apt if it is missing.
 function _xsjs_install_step_check_python {
     xsjs_util_write_log_section $i18n_.check_python
     xsjs_util_invoke_native { wsl -e python3 --version }
@@ -178,6 +184,7 @@ function _xsjs_install_step_check_python {
     }
 }
 
+# Installs OpenSSL in Linux with apt if it is missing.
 function _xsjs_install_step_check_openssl {
     xsjs_util_write_log_section $i18n_.check_openssl
     xsjs_util_invoke_native { wsl -e openssl version }
@@ -190,6 +197,7 @@ function _xsjs_install_step_check_openssl {
     }
 }
 
+# Shows the banner, then checks and installs each requirement in turn.
 function _xsjs_install_main {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
         'PSUseDeclaredVarsMoreThanAssignments', '',

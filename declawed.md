@@ -169,19 +169,27 @@ discrepancies as this is a low priority self healing mechanism.
 - `test_powershell.ps1` (admin) is the whole suite and drives the real
   machine: lint, then stop/install/start/stop, each script in its own
   `powershell.exe`. It ends with a full stop, removing the sign-in task.
-- `test_lint.ps1` rewrites files in place (OTBS, LF), fails on CRLF or a
-  `<# #>` below the top, and reports but doesn't wrap lines over 79
-  columns. Run it in its own `powershell.exe`: PSScriptAnalyzer keeps the
-  modules it loads locked until exit.
+- `test_lint.ps1` rewrites files in place (OTBS, LF), fails on CRLF, and
+  reports but doesn't wrap lines over 79 columns. Run it in its own
+  `powershell.exe`: PSScriptAnalyzer keeps the modules it loads locked
+  until exit.
 - Python runs in WSL. `python3 python/test_posix.py` fails on non-UTF-8 or
   non-ASCII outside its `_NON_ASCII_ALLOWED`, formats in place (ruff;
   shfmt with defaults; Markdown is only checked with `mdformat --check`),
   then runs `ruff check`. Files are the globs in
   `python/reformat_whitelist.txt`, which leaves out PowerShell; a glob
-  matching nothing fails. `python/pyproject.toml` sets ruff's 79 columns
-  (its default 88 rewraps every file) and pyright strict. test_posix.py
-  doesn't run pyright: use `pyright --project python`, as pyright finds no
-  config from the top directory.
+  matching nothing fails. Before formatting, its own lexers scan the
+  comments of those files and of every PowerShell file: below the
+  header (the file's top comment, after any doctype line) a comment is
+  one line, not `<# #>`, and outside its code spans holds only letters,
+  digits, white space and `_ENGLISH_PUNCT`, so no bare `_`, `-` or `;`.
+  Comments support Doxygen markup: write a name, option, value or symbol
+  literally in a backtick code span (`C#`, `$null`, `--softly`) rather
+  than spelling it out. Comments on consecutive lines are one comment.
+  `python/pyproject.toml` sets ruff's
+  79 columns (its default 88 rewraps every file) and pyright strict.
+  test_posix.py doesn't run pyright: use `pyright --project python`, as
+  pyright finds no config from the top directory.
 - The scripts pass ruff an absolute `--cache-dir` under `build/`. A
   `cache-dir` in `pyproject.toml` still leaves an empty `.ruff_cache` in
   the current directory, and under `--config` its relative path resolves

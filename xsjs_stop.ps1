@@ -18,10 +18,10 @@ param()
 
 . (Join-Path $PSScriptRoot 'powershell\xsjs_util.ps1')
 
-# Read from $args, not param(), because PowerShell would take --softly for
-# an unknown parameter name.
+# Read `$args`, not `param()`, as PowerShell takes `--softly` for a parameter.
 $arguments_ = $args
 
+# Returns whether `--softly` or `-s` was given, and throws on anything else.
 function _xsjs_stop_get_softly {
     if ($arguments_.Count -eq 0) { return $false }
     $softly_ = $arguments_[0] -in '--softly', '-s'
@@ -29,6 +29,7 @@ function _xsjs_stop_get_softly {
     throw ($i18n_.stop_usage -f $script_name_)
 }
 
+# Removes the task, the firewall rule and the runner with its password.
 function _xsjs_stop_step_remove_autostart {
     xsjs_util_write_log_section $i18n_.remove_autostart
     $task_ = @{ TaskName = $task_name_; ErrorAction = 'SilentlyContinue' }
@@ -45,6 +46,7 @@ function _xsjs_stop_step_remove_autostart {
     }
 }
 
+# Stops the server and, unless `--softly`, removes what starts it at sign in.
 function _xsjs_stop_main {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
         'PSUseDeclaredVarsMoreThanAssignments', '',

@@ -33,8 +33,7 @@ $port_ = 5768
 $bootstrap_script_ = 'bootstrap.py'
 $task_name_ = 'xstation.js'
 $firewall_rule_name_ = 'xstation.js'
-# The TLS key and the task's runner (which holds the ttyd password) live
-# here, out of the repository, where only this Windows user can read them.
+# The TLS key and ttyd password live outside the repo, for this user only.
 $state_path_ = Join-Path $env:LOCALAPPDATA 'xstation.js'
 $certificate_path_ = Join-Path $state_path_ '_cached_cert.pem'
 $key_path_ = Join-Path $state_path_ '_cached_key.pem'
@@ -43,6 +42,7 @@ $certificate_days_ = 825
 $runner_path_ = Join-Path $state_path_ 'serve.ps1'
 $ttyd_log_path_ = Join-Path $state_path_ 'ttyd.log'
 
+# Returns the user and password argument, `$null` if none, or throws usage.
 function xsjs_util_get_credential ([object[]]$arguments_) {
     if ($arguments_.Count -eq 0) { return $null }
     if ($arguments_.Count -eq 1 -and "$($arguments_[0])" -match '^[^:]+:.') {
@@ -51,27 +51,32 @@ function xsjs_util_get_credential ([object[]]$arguments_) {
     throw ($i18n_.start_usage -f $script_name_)
 }
 
+# Returns the SHA256 fingerprint of the certificate's bytes, colon separated.
 function xsjs_util_get_fingerprint ([byte[]]$certificate_) {
     $sha256_ = [Security.Cryptography.SHA256]::Create()
     [BitConverter]::ToString($sha256_.ComputeHash($certificate_)).Replace(
         '-', ':')
 }
 
+# Returns the localhost address, HTTPS when there is a credential.
 function xsjs_util_get_local_url {
     if ($credential_) { return "https://localhost:$port_/" }
     "http://localhost:$port_/"
 }
 
+# Returns the text escaped for plain Markdown text in the log.
 function xsjs_util_get_markdown_text ([string]$text_) {
     # mdformat writes every backslash in plain text as two.
     $text_.Replace('\', '\\')
 }
 
+# Returns the ttyd processes serving this port.
 function xsjs_util_get_servers {
     Get-CimInstance Win32_Process -Filter "Name = 'ttyd.exe'" |
         Where-Object { $_.CommandLine -match "--port $port_(\s|$)" }
 }
 
+# Runs a native command and logs its exit code and output, never throwing.
 function xsjs_util_invoke_native ([scriptblock]$command_) {
     $ErrorActionPreference = 'Continue'
     $output_ = & $command_ 2>&1
@@ -80,6 +85,7 @@ function xsjs_util_invoke_native ([scriptblock]$command_) {
     $output_ | xsjs_util_write_log_output
 }
 
+# Starts a log beside the script, returning its path or `$null` if unwritable.
 function xsjs_util_open_log ([string]$script_path_) {
     $log_path_ = "$script_path_.md"
     try {
@@ -102,6 +108,7 @@ function xsjs_util_open_log ([string]$script_path_) {
     $log_path_
 }
 
+# Removes the firewall rule if there is one, logging either way.
 function xsjs_util_remove_firewall_rule {
     $rule_ = @{ Name = $firewall_rule_name_; ErrorAction = 'SilentlyContinue' }
     if (Get-NetFirewallRule @rule_) {
@@ -113,6 +120,7 @@ function xsjs_util_remove_firewall_rule {
     }
 }
 
+# Throws unless this PowerShell runs as administrator.
 function xsjs_util_step_check_administrator {
     xsjs_util_write_log_section $i18n_.check_administrator
     $identity_ = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -124,6 +132,7 @@ function xsjs_util_step_check_administrator {
     xsjs_util_write_log ($i18n_.administrator_ok -f $identity_.Name)
 }
 
+# Stops the scheduled task and any ttyd serving this port.
 function xsjs_util_step_stop_server {
     xsjs_util_write_log_section ($i18n_.stop_server -f $port_)
     $task_ = @{ TaskName = $task_name_; ErrorAction = 'SilentlyContinue' }
@@ -132,8 +141,7 @@ function xsjs_util_step_stop_server {
         Stop-ScheduledTask -TaskName $task_name_
         xsjs_util_write_log ($i18n_.task_stopped -f $task_name_)
     }
-    # Stopping the task may leave ttyd running, and ttyd may have been
-    # started some other way, so stop any ttyd serving this port as well.
+    # Also stop any ttyd on this port, as one may outlive or bypass the task.
     $servers_ = @(xsjs_util_get_servers)
     foreach ($server_ in $servers_) {
         Stop-Process -Id $server_.ProcessId -Force
@@ -146,18 +154,20 @@ function xsjs_util_step_stop_server {
     }
 }
 
+# Reloads `$env:Path` from the machine and user, to find new installs.
 function xsjs_util_update_path {
     $machine_path_ = [Environment]::GetEnvironmentVariable('Path', 'Machine')
     $user_path_ = [Environment]::GetEnvironmentVariable('Path', 'User')
     $env:Path = "$machine_path_;$user_path_"
 }
 
+# Shows the error in red and logs its message, output and position.
 function xsjs_util_write_failure {
     param([Management.Automation.ErrorRecord]$record_)
     $message_ = $i18n_.failed_message -f $record_.Exception.Message
     Write-Host $message_ -ForegroundColor Red
     xsjs_util_write_log_section $i18n_.failed
-    # The first line is the message; any more is output, so it gets a block.
+    # The first line is the message. Any more is output, so it gets a block.
     $lines_ = $record_.Exception.Message.Trim() -split "`r?`n", 2
     $text_ = xsjs_util_get_markdown_text $lines_[0]
     xsjs_util_write_log_alert CAUTION $text_
@@ -165,18 +175,20 @@ function xsjs_util_write_failure {
     $record_.InvocationInfo.PositionMessage | xsjs_util_write_log_output
 }
 
+# Appends the text to the log as a block, when there is a log.
 function xsjs_util_write_log ([string]$text_) {
-    # Each block starts with a blank line, so the file ends after one line
-    # feed, as mdformat leaves it.
+    # Blocks start blank so the file ends in one line feed, as mdformat wants.
     if ($log_path_) { [IO.File]::AppendAllText($log_path_, "`n$text_`n") }
 }
 
+# Logs the text as a Markdown alert of the given kind.
 function xsjs_util_write_log_alert ([string]$kind_, [string]$text_) {
     $lines_ = @("[!$kind_]") + ($text_.Trim() -split "`r?`n")
     $quoted_ = $lines_ | ForEach-Object { "> $_".TrimEnd() }
     xsjs_util_write_log ($quoted_ -join "`n")
 }
 
+# Logs its pipeline input as one fenced text block, and warnings as problems.
 function xsjs_util_write_log_output {
     $lines_ = foreach ($item_ in $input) {
         if ($item_ -is [Management.Automation.WarningRecord]) {
@@ -194,15 +206,18 @@ function xsjs_util_write_log_output {
     if ($text_) { xsjs_util_write_log ('```text', $text_, '```' -join "`n") }
 }
 
+# Logs the text as a section heading.
 function xsjs_util_write_log_section ([string]$text_) {
     xsjs_util_write_log "## $text_"
 }
 
+# Shows the text and logs it as a note.
 function xsjs_util_write_notice ([string]$text_) {
     Write-Host $text_
     xsjs_util_write_log_alert NOTE $text_
 }
 
+# Shows the text as a warning and logs it as one.
 function xsjs_util_write_problem ([string]$text_) {
     Write-Warning $text_
     xsjs_util_write_log_alert WARNING (xsjs_util_get_markdown_text $text_)

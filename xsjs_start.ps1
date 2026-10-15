@@ -24,12 +24,12 @@ param()
 
 . (Join-Path $PSScriptRoot 'powershell\xsjs_util.ps1')
 
-# Read from $args, not param(), so a password that starts with "-" can't
-# be mistaken for a parameter name.
+# Read `$args`, not `param()`, so a password may start with `-`.
 $arguments_ = $args
 # Where bootstrap.py is, and where ttyd runs it.
 $python_path_ = Join-Path $PSScriptRoot 'python'
 
+# Throws unless the script, ttyd, Python 3 and, for HTTPS, OpenSSL are present.
 function _xsjs_start_step_check_installed {
     xsjs_util_write_log_section $i18n_.check_installed
     $script_path_ = Join-Path $python_path_ $bootstrap_script_
@@ -49,6 +49,7 @@ function _xsjs_start_step_check_installed {
     }
 }
 
+# Throws if any process listens on the port.
 function _xsjs_start_step_check_port {
     xsjs_util_write_log_section ($i18n_.check_port -f $port_)
     $owner_ = _xsjs_start_get_listener
@@ -58,6 +59,7 @@ function _xsjs_start_step_check_port {
     xsjs_util_write_log ($i18n_.port_free -f $port_)
 }
 
+# Returns the process listening on the port, if any.
 function _xsjs_start_get_listener {
     $connection_ = @{
         LocalPort   = $port_
@@ -68,6 +70,7 @@ function _xsjs_start_get_listener {
     if ($listener_) { Get-Process -Id $listener_.OwningProcess }
 }
 
+# Keeps or makes the TLS certificate and returns its fingerprint.
 function _xsjs_start_step_make_certificate {
     xsjs_util_write_log_section $i18n_.make_certificate
     $null = New-Item -ItemType Directory -Force $state_path_
@@ -75,8 +78,7 @@ function _xsjs_start_step_make_certificate {
     $key_ = Split-Path -Leaf $key_path_
     $keep_ = $false
     if ((Test-Path $certificate_path_) -and (Test-Path $key_path_)) {
-        # Keep it until it expires, so browsers that accepted it don't warn
-        # again.
+        # Keep it until it expires, so browsers that accepted it don't warn.
         $check_ = 'x509', '-checkend', '0', '-noout', '-in', $certificate_
         xsjs_util_invoke_native { wsl --cd $state_path_ -e openssl @check_ }
         $keep_ = $LASTEXITCODE -eq 0
@@ -107,12 +109,14 @@ function _xsjs_start_step_make_certificate {
     $fingerprint_
 }
 
+# Returns the addresses other computers can reach this PC on.
 function _xsjs_start_get_addresses {
     # This PC's IPv4 addresses on networks with a default gateway.
     Get-NetIPConfiguration | Where-Object IPv4DefaultGateway |
         ForEach-Object { $_.IPv4Address.IPAddress }
 }
 
+# Replaces the firewall rule that lets other computers reach the port.
 function _xsjs_start_step_open_firewall {
     xsjs_util_write_log_section ($i18n_.open_firewall -f $port_)
     xsjs_util_remove_firewall_rule
@@ -130,11 +134,13 @@ function _xsjs_start_step_open_firewall {
     xsjs_util_write_log ($i18n_.firewall_opened -f $port_)
 }
 
+# Removes the firewall rule, as serving localhost needs none.
 function _xsjs_start_step_close_firewall {
     xsjs_util_write_log_section ($i18n_.close_firewall -f $port_)
     xsjs_util_remove_firewall_rule
 }
 
+# Writes the runner, the script the task runs to start ttyd with the settings.
 function _xsjs_start_step_write_runner {
     xsjs_util_write_log_section $i18n_.write_runner
     $ttyd_path_ = (Get-Command ttyd).Source
@@ -154,8 +160,7 @@ function _xsjs_start_step_write_runner {
     } else {
         $ttyd_arguments_ += '--interface', '127.0.0.1'
     }
-    # ttyd for Windows copies the command into a 256-byte buffer, so keep
-    # it short and let --cwd say where bootstrap.py is.
+    # Windows ttyd cuts commands at 256 bytes, so `--cwd` gives the directory.
     $ttyd_arguments_ += 'wsl.exe', '-e', 'python3', $bootstrap_script_
     $command_line_ = @(
         $ttyd_arguments_ | ForEach-Object { _xsjs_start_quote_argument $_ }
@@ -195,23 +200,26 @@ function _xsjs_start_step_write_runner {
     xsjs_util_write_log ($i18n_.runner_written -f $runner_path_)
 }
 
+# Returns the text quoted as one Windows command line argument when needed.
 function _xsjs_start_quote_argument ([string]$text_) {
     if ($text_ -and $text_ -notmatch '[\s"]') { return $text_ }
     $text_ = $text_ -replace '(\\*)"', '$1$1\"'
     '"{0}"' -f ($text_ -replace '(\\+)$', '$1$1')
 }
 
+# Returns the text as a single quoted PowerShell string.
 function _xsjs_start_quote_literal ([string]$text_) {
     $escape_ = [Management.Automation.Language.CodeGeneration]
     "'{0}'" -f $escape_::EscapeSingleQuotedStringContent($text_)
 }
 
+# Registers the task that runs the runner without a window at sign in.
 function _xsjs_start_step_register_task {
     xsjs_util_write_log_section $i18n_.register_task
     $user_ = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     $system_ = Join-Path $env:SystemRoot 'System32'
     $powershell_ = Join-Path $system_ 'WindowsPowerShell\v1.0\powershell.exe'
-    # conhost --headless runs PowerShell, and so ttyd, without a window.
+    # `conhost --headless` runs PowerShell, and so ttyd, without a window.
     $action_ = @{
         Execute  = Join-Path $system_ 'conhost.exe'
         Argument = (
@@ -219,8 +227,7 @@ function _xsjs_start_step_register_task {
             '-ExecutionPolicy Bypass -File "{1}"'
         ) -f $powershell_, $runner_path_
     }
-    # Start at sign-in rather than at boot: WSL is unreliable in a task
-    # that runs while nobody is signed in.
+    # Start at sign in, not boot: WSL is unreliable while nobody is signed in.
     $principal_ = @{
         UserId    = $user_
         LogonType = 'Interactive'
@@ -247,6 +254,7 @@ function _xsjs_start_step_register_task {
     xsjs_util_write_log $registered_
 }
 
+# Starts the task and throws with ttyd's log unless it listens within 15 s.
 function _xsjs_start_step_start_task {
     xsjs_util_write_log_section ($i18n_.start_server -f $port_)
     Remove-Item $ttyd_log_path_ -ErrorAction SilentlyContinue
@@ -271,12 +279,14 @@ function _xsjs_start_step_start_task {
     xsjs_util_write_log $listening_
 }
 
+# Returns the addresses to open: localhost, or this PC's name and addresses.
 function _xsjs_start_get_urls {
     if (-not $credential_) { return xsjs_util_get_local_url }
     "https://$($env:COMPUTERNAME.ToLower()):$port_/"
     _xsjs_start_get_addresses | ForEach-Object { "https://${_}:$port_/" }
 }
 
+# Sets up the server for any given credential, starts it and prints its URLs.
 function _xsjs_start_main {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
         'PSUseDeclaredVarsMoreThanAssignments', '',
