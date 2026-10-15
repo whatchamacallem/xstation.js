@@ -3,23 +3,8 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # This comment intentionally blank. No documentation goes here.
-from __future__ import annotations
-
-import base64
-import contextlib
-import hashlib
-import io
-import json
-import os
-import platform
-import re
-import runpy
-import selectors
-import signal
-import sys
-import time
-import tty
-from types import FrameType
+import base64, contextlib, hashlib, io, json, os, platform, re, runpy
+import selectors, signal, sys, time, tty, types
 from typing import Any, NamedTuple, NoReturn, TextIO
 
 _BOOTSTRAP_PATH = os.path.abspath(__file__)
@@ -318,7 +303,9 @@ class Session:
             data = data[os.write(1, data) :]
 
     # Kills the child's group, then dies of the signal so ttyd sees how.
-    def signal_end(self, signal_number: int, frame: FrameType | None) -> None:
+    def signal_end(
+        self, signal_number: int, frame: types.FrameType | None
+    ) -> None:
         if self.child is not None:
             group_kill(self.child.pid, signal.SIGKILL)
         signal.signal(signal_number, signal.SIG_DFL)
@@ -381,7 +368,7 @@ def session_run(modules: str) -> Module:
 
 
 # Lets SIGCHLD reach the wake up pipe, which the loop reads.
-def signal_wake(signal_number: int, frame: FrameType | None) -> None:
+def signal_wake(signal_number: int, frame: types.FrameType | None) -> None:
     pass
 
 

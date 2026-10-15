@@ -10,16 +10,7 @@
 # must be one line, not be a <# #> comment, and outside its Doxygen `code`
 # spans hold nothing but letters, digits, white space and _ENGLISH_PUNCT.
 
-from __future__ import annotations
-
-import argparse
-import glob
-import io
-import os
-import re
-import subprocess
-import sys
-import tokenize
+import argparse, glob, io, os, re, subprocess, sys, tokenize
 from typing import NamedTuple
 
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

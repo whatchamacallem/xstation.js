@@ -8,18 +8,7 @@
 # so a relay in powershell.exe carries the connection over its stdin and
 # stdout.
 
-from __future__ import annotations
-
-import base64
-import contextlib
-import json
-import os
-import shutil
-import subprocess
-import sys
-import time
-import uuid
-from types import TracebackType
+import base64, contextlib, json, os, shutil, subprocess, sys, time, types, uuid
 from typing import IO, NamedTuple, Self
 
 
@@ -152,7 +141,7 @@ class Browser:
         self,
         exception_type: type[BaseException] | None,
         exception: BaseException | None,
-        traceback: TracebackType | None,
+        traceback: types.TracebackType | None,
     ) -> None:
         self.close()
 

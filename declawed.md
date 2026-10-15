@@ -74,6 +74,10 @@ manager without request.
 - Python follows PEP 8. Constants go at the top of each `.py` file, after the
   imports, named like `_VALUE_NAME`. Code ordering requirements come before
   code style rules.
+- Each `.py` file imports its modules as `import a, b, c` in alphabetical
+  order on one line, or on the fewest lines that stay within 79 columns.
+  `from` is banned, except that `collections.abc` and `typing` always use
+  `from`, each on one line with its names in alphabetical order.
 - Don't add whitelist entries for new `.md` files.
 - Authorship is a legal issue. Ascribing authorship to a non-person, such as
   a `Co-Authored-By` trailer or a generated-by line in a commit or pull
@@ -200,7 +204,9 @@ discrepancies as this is a low priority self healing mechanism.
   literally in a backtick code span (`C#`, `$null`, `--softly`) rather
   than spelling it out. Comments on consecutive lines are one comment.
   `python/pyproject.toml` sets ruff's
-  79 columns (its default 88 rewraps every file) and pyright strict.
+  79 columns (its default 88 rewraps every file) and pyright strict, and
+  ignores E401 and I001: ruff has no option that joins `import a, b`
+  lines, so the import style is kept by hand.
   test_posix.py doesn't run pyright: use `pyright --project python`, as
   pyright finds no config from the top directory.
 - The scripts pass ruff an absolute `--cache-dir` under `build/`. A

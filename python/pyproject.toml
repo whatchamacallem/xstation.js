@@ -3,3 +3,7 @@ typeCheckingMode = "strict"
 
 [tool.ruff]
 line-length = 79
+
+[tool.ruff.lint]
+# E401 and I001 reject the import a, b style.
+ignore = ["E401", "I001"]

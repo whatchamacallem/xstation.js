@@ -8,12 +8,7 @@
 # pyproject.toml sets, and shell with shfmt. Markdown is checked with
 # mdformat, not rewritten.
 
-from __future__ import annotations
-
-import argparse
-import glob
-import os
-import subprocess
+import argparse, glob, os, subprocess
 
 _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
 

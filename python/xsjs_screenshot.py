@@ -21,24 +21,9 @@
 # whose devtools_reader and devtools_writer carry a connection to DevTools
 # at devtools_host and devtools_path. So far there is xsjs_screenshot_wsl.py.
 
-from __future__ import annotations
-
-import argparse
-import base64
-import contextlib
-import datetime
-import hashlib
-import json
-import os
-import platform
-import signal
-import socket
-import subprocess
-import sys
-import tempfile
-import time
+import argparse, base64, contextlib, datetime, hashlib, json, os, platform
+import signal, socket, subprocess, sys, tempfile, time, types
 from collections.abc import Callable, Generator
-from types import FrameType, ModuleType
 from typing import Any
 
 _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -84,8 +69,7 @@ _IMAGE_NAME = "xsjs_screenshot.png"
 _MODULE_ARGS = ["--who", "demo", "42"]
 _MODULE_NAME = "update.py"
 _MODULE_SOURCE = """\
-import os
-import sys
+import os, sys
 
 STAMP = "{stamp}"
 
@@ -297,7 +281,7 @@ class DevTools:
 
 
 # Returns the module that starts a browser on this platform.
-def browser_module() -> ModuleType | None:
+def browser_module() -> types.ModuleType | None:
     if "microsoft" in platform.uname().release.lower():
         import xsjs_screenshot_wsl
 
@@ -636,12 +620,12 @@ def program_pids(ttyd_pid: int, command: list[str]) -> list[int]:
 
 
 # Exits with 128 plus the signal's number, so cleanups still run.
-def signal_exit(signal_number: int, frame: FrameType | None) -> None:
+def signal_exit(signal_number: int, frame: types.FrameType | None) -> None:
     sys.exit(128 + signal_number)
 
 
 # Fails the run once its alarm goes off.
-def signal_time_out(signal_number: int, frame: FrameType | None) -> None:
+def signal_time_out(signal_number: int, frame: types.FrameType | None) -> None:
     raise TimeoutError(f"gave up after {_RUN_TIMEOUT_SECONDS} s")
 
 

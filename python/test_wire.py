@@ -14,27 +14,10 @@
 #
 #     python3 python/test_wire.py
 
-from __future__ import annotations
-
-import argparse
-import base64
-import collections
-import contextlib
-import hashlib
-import http.client
-import json
-import os
-import re
-import select
-import shutil
-import signal
-import socket
-import subprocess
-import sys
-import tempfile
-import time
+import argparse, base64, collections, contextlib, hashlib, http.client, json
+import os, re, select, shutil, signal, socket, subprocess, sys, tempfile, time
+import types
 from collections.abc import Callable, Generator
-from types import FrameType
 from typing import Any, cast
 
 _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -96,8 +79,7 @@ _RAISE_SOURCE = f"raise ValueError({_NON_ASCII_TEXT!r})\n"
 
 # A module that prints what it was given and where it runs.
 _REPORT_SOURCE = f"""\
-import os
-import sys
+import os, sys
 
 TEXT = {_NON_ASCII_TEXT!r}
 
@@ -118,8 +100,7 @@ _RUN_TIMEOUT_SECONDS = 120
 
 # A module that forks a second process, and both sleep until killed.
 _SLEEPER_SOURCE = """\
-import os
-import time
+import os, time
 
 child = os.fork()
 if child == 0:
@@ -131,8 +112,7 @@ time.sleep(600)
 
 # A module that says its pids, then prints each line of stdin until EOF.
 _STDIN_SOURCE = """\
-import os
-import sys
+import os, sys
 
 print("ready", os.getpid(), os.getppid())
 count = 0
@@ -157,8 +137,7 @@ _TTYD_OPTIONS = [
 # What update.py appends to the bootstrapper it runs under.
 _UPDATE_LINE = b"# updated by update.py\n"
 _UPDATE_SOURCE = f"""\
-import hashlib
-import os
+import hashlib, os
 
 path = os.environ["XSJS_BOOTSTRAP"]
 with open(path, "rb") as old_file:
@@ -1280,7 +1259,7 @@ def session_close(wire: Wire, others: list[Wire], parent: int) -> float:
 
 
 # Exits with 128 plus the signal's number.
-def signal_exit(signal_number: int, frame: FrameType | None) -> None:
+def signal_exit(signal_number: int, frame: types.FrameType | None) -> None:
     sys.exit(128 + signal_number)
 
 
