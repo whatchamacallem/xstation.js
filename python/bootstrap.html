@@ -10,83 +10,43 @@ This file is licensed under the terms of the LICENSE.md file.
 <title>xstation.js</title>
 <style>
 html, body { height: 100%; margin: 0; }
-body { font: 12px monospace; }
-pre, input, textarea, button { font: inherit; }
-main {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: 100%;
-  height: 100%;
-}
-section {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  padding: 0 8px;
-}
-.row { display: flex; gap: 8px; margin: 8px 0; align-items: baseline; }
-.row input { flex: 1; }
-#source { flex: 1; min-height: 0; resize: none; }
+body { display: flex; flex-direction: column; font: 12px monospace; }
+pre, textarea, button { font: inherit; }
+pre { margin: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 #output { flex: 1; min-height: 0; overflow-y: auto; }
-pre { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.row { display: flex; gap: 8px; margin: 8px; align-items: flex-end; }
+#input { flex: 1; resize: none; }
 </style>
 </head>
 <body>
-<main>
-<section>
+<pre id="status"></pre>
+<pre id="output"></pre>
 <div class="row">
-<label for="name">name</label><input id="name">
-<label for="args">args</label><input id="args">
-</div>
-<textarea id="source" spellcheck="false"></textarea>
-<div class="row">
-<button id="put" disabled>Put</button>
-<button id="run" disabled>Run</button>
-<button id="kill" disabled>Kill</button>
-<button id="eof" disabled>EOF</button>
-<button id="restart" disabled>Restart</button>
+<textarea id="input" rows="4" spellcheck="false" disabled></textarea>
+<button id="interrupt" disabled>^C</button>
+<button id="eof" disabled>^D</button>
 <button id="close" disabled>Close</button>
 </div>
-<div class="row">
-<label for="stdin">stdin</label><input id="stdin" disabled>
-</div>
-</section>
-<section>
-<pre id="status"></pre>
-<pre id="modules"></pre>
-<pre id="output"></pre>
-</section>
-</main>
 <script>
 'use strict';
 
-const ELEMENT_IDS = [
-  'args', 'close', 'eof', 'kill', 'modules', 'name', 'output', 'put',
-  'restart', 'run', 'source', 'status', 'stdin',
-];
-// The fields of each program message, by type.
-const FIELDS = {
-  hello: ['pid', 'python', 'bootstrap', 'sha256', 'modules', 'started'],
-  modules: ['entries'],
-  saved: ['name', 'bytes', 'sha256'],
-  started: ['name', 'pid', 'args'],
-  out: ['stream', 'data'],
-  exit: ['name', 'code'],
-};
-// The controls enabled while no module runs, and while one does.
-const IDLE_CONTROLS = ['put', 'run', 'restart'];
-const RUNNING_CONTROLS = ['kill', 'eof', 'stdin'];
+const CONTROL_IDS = ['close', 'eof', 'input', 'interrupt'];
+const ELEMENT_IDS = [...CONTROL_IDS, 'output', 'status'];
+// What the terminal reads as `^C` and as `^D`.
+const INTERRUPT_TEXT = '\x03';
+const END_OF_INPUT_TEXT = '\x04';
+// The most bytes a line can hold before its newline in the terminal.
+const LINE_BYTES_MAX = 4095;
 const READY_STATES = ['connecting', 'open', 'closing', 'closed'];
-const STREAM_NAMES = ['stdout', 'stderr'];
 // ttyd's first two messages, by type: the title, then the preferences.
 const TTYD_FIRST_TYPES = [0x31, 0x32];
+const TTYD_INPUT_TYPE = 0x30;
 const TTYD_OUTPUT_TYPE = 0x30;
 
 // What the automated driver reads.
 const boot = {
   ttyd: {title: null, preferences: null},
-  hellos: [], modules: null, saves: [], started: null, exit: null,
-  stdout: '', stderr: '', lines: 0, closed: null, failure: null,
+  output: '', closed: null, failure: null,
 };
 window.boot = boot;
 
@@ -96,13 +56,9 @@ const elements = Object.fromEntries(
 const state = {
   token: null,
   socket: null,
-  closePressed: false,
   ttydMessages: 0,
   // One stream decoder, as ttyd splits output frames inside characters.
   decoder: new TextDecoder('utf-8', {fatal: true}),
-  partial: '',
-  // A decoder per module stream, as a chunk can end inside a character.
-  decoders: {},
 };
 
 // Records the first failure only, and closes the socket on it.
@@ -111,7 +67,7 @@ function record(detail) {
     return;
   }
   boot.failure = detail;
-  controlsSet([]);
+  controlsEnable(false);
   if (state.socket !== null) {
     state.socket.close(1000, 'failure');
   }
@@ -124,46 +80,48 @@ function fail(detail) {
   throw new Error(detail);
 }
 
-// Enables the controls named and no other, besides Close.
-function controlsSet(ids) {
-  for (const id of [...IDLE_CONTROLS, ...RUNNING_CONTROLS]) {
-    elements[id].disabled = !ids.includes(id);
+// Enables the input and its buttons, or disables them.
+function controlsEnable(enabled) {
+  for (const id of CONTROL_IDS) {
+    elements[id].disabled = !enabled;
   }
 }
 
-// Returns the bytes as base64.
-function base64Of(bytes) {
-  let text = '';
-  for (const byte of bytes) {
-    text += String.fromCharCode(byte);
+// Sends the text to the terminal as ttyd input, type 0, in `UTF-8`.
+function sendText(text) {
+  for (const line of text.split('\n')) {
+    const length = encoder.encode(line).length;
+    if (length > LINE_BYTES_MAX) {
+      fail(`a line of ${length} bytes is over the terminal's ` +
+        `${LINE_BYTES_MAX}: ${line.slice(0, 40)}`);
+    }
   }
-  return btoa(text);
-}
-
-// Returns the base64's bytes.
-function bytesOf(base64) {
-  return Uint8Array.from(atob(base64), character => character.charCodeAt(0));
-}
-
-// Sends one JSON line to the program as ttyd input, type 0.
-function sendMessage(message) {
-  const line = encoder.encode(JSON.stringify(message));
-  const frame = new Uint8Array(line.length + 2);
-  frame[0] = 0x30;
-  frame.set(line, 1);
-  frame[line.length + 1] = 0x0a;
+  const bytes = encoder.encode(text);
+  const frame = new Uint8Array(bytes.length + 1);
+  frame[0] = TTYD_INPUT_TYPE;
+  frame.set(bytes, 1);
   state.socket.send(frame);
 }
 
-// Sends ttyd the token and a size, starting the program, which reads no size.
+// Sends ttyd the token and a size, which ttyd's protocol puts in JSON.
 function onOpen() {
   state.socket.send(encoder.encode(JSON.stringify(
     {AuthToken: state.token, columns: 80, rows: 24})));
-  elements.close.disabled = false;
+  controlsEnable(true);
+  elements.input.focus();
   render();
 }
 
-// Stores ttyd's title and preferences, then hands on the program's output.
+// Returns ttyd's message after its type as text, failing unless `UTF-8`.
+function ttydText(bytes) {
+  try {
+    return new TextDecoder('utf-8', {fatal: true}).decode(bytes.subarray(1));
+  } catch (error) {
+    fail(`ttyd message type ${bytes[0]} is not UTF-8: ${error.message}`);
+  }
+}
+
+// Keeps ttyd's title and preferences as text, then shows the output.
 function onMessage(event) {
   const bytes = new Uint8Array(event.data);
   state.ttydMessages += 1;
@@ -173,8 +131,13 @@ function onMessage(event) {
     fail(`ttyd message ${state.ttydMessages} has type ${bytes[0]} where ` +
       `${due} was due`);
   }
-  if (due !== TTYD_OUTPUT_TYPE) {
-    onTtyd(bytes);
+  if (state.ttydMessages === 1) {
+    boot.ttyd.title = ttydText(bytes);
+    render();
+    return;
+  }
+  if (state.ttydMessages === 2) {
+    boot.ttyd.preferences = ttydText(bytes);
     render();
     return;
   }
@@ -184,204 +147,55 @@ function onMessage(event) {
   } catch (error) {
     fail(`not UTF-8: ${error.message}`);
   }
-  const lines = (state.partial + text).split('\n');
-  state.partial = lines.pop();
-  for (const line of lines) {
-    onLine(line);
-  }
-}
-
-// Stores ttyd's title as text, or its preferences as the JSON they are.
-function onTtyd(bytes) {
-  let text;
-  try {
-    text = new TextDecoder('utf-8', {fatal: true}).decode(bytes.subarray(1));
-  } catch (error) {
-    fail(`ttyd message type ${bytes[0]} is not UTF-8: ${error.message}`);
-  }
-  if (bytes[0] === TTYD_FIRST_TYPES[0]) {
-    boot.ttyd.title = text;
-    return;
-  }
-  try {
-    boot.ttyd.preferences = JSON.parse(text);
-  } catch (error) {
-    fail(`ttyd preferences are not JSON: ${text.slice(0, 200)}`);
-  }
-}
-
-// Checks a program line is a known message with its fields, then handles it.
-function onLine(line) {
-  let message;
-  try {
-    message = JSON.parse(line);
-  } catch (error) {
-    fail(`not JSON: ${line.slice(0, 200)}`);
-  }
-  if (typeof message !== 'object' || message === null ||
-      Array.isArray(message) || !Object.hasOwn(FIELDS, message.type)) {
-    fail(`not a message the page handles: ${line.slice(0, 200)}`);
-  }
-  const keys = Object.keys(message).filter(key => key !== 'type').sort();
-  const expected = [...FIELDS[message.type]].sort();
-  if (keys.join() !== expected.join()) {
-    fail(`fields ${keys.join()} where ${expected.join()} were due: ` +
-      line.slice(0, 200));
-  }
-  boot.lines += 1;
-  HANDLERS[message.type](message);
-  render();
-}
-
-// Records a hello, which a restart repeats, and enables the idle controls.
-function onHello(message) {
-  boot.hellos.push(message);
-  boot.started = null;
-  boot.exit = null;
-  controlsSet(IDLE_CONTROLS);
-}
-
-// Records the module list.
-function onModules(message) {
-  boot.modules = message.entries;
-}
-
-// Records a put's answer.
-function onSaved(message) {
-  boot.saves.push(message);
-}
-
-// Records the module's start and enables the running controls.
-function onStarted(message) {
-  boot.started = message;
-  boot.exit = null;
-  controlsSet(RUNNING_CONTROLS);
-}
-
-// Decodes a chunk of the module's stream and shows it.
-function onOut(message) {
-  if (!STREAM_NAMES.includes(message.stream)) {
-    fail(`out on stream ${message.stream}`);
-  }
-  const text = state.decoders[message.stream].decode(
-    bytesOf(message.data), {stream: true});
-  boot[message.stream] += text;
+  // The terminal ends lines with CR LF, and a page of lines needs only LF.
+  text = text.replaceAll('\r', '');
+  boot.output += text;
   elements.output.append(text);
   elements.output.scrollTop = elements.output.scrollHeight;
 }
-
-// Records the module's exit and enables the idle controls.
-function onExit(message) {
-  boot.exit = message;
-  controlsSet(IDLE_CONTROLS);
-}
-
-const HANDLERS = {
-  hello: onHello,
-  modules: onModules,
-  saved: onSaved,
-  started: onStarted,
-  out: onOut,
-  exit: onExit,
-};
 
 // Records the close and disables everything.
 function onClose(event) {
   boot.closed = {
     code: event.code, reason: event.reason, wasClean: event.wasClean,
   };
-  controlsSet([]);
-  elements.close.disabled = true;
-  if (boot.failure === null && !state.closePressed) {
-    boot.failure = `closed ${event.code} '${event.reason}' before Close`;
-  }
+  controlsEnable(false);
   render();
 }
 
-// Sends the module in the text area under the name given.
-function onPut() {
-  sendMessage(
-    {type: 'put', name: elements.name.value, text: elements.source.value});
-}
-
-// Clears the output and runs the named module with the arguments given.
-function onRun() {
-  boot.stdout = '';
-  boot.stderr = '';
-  boot.started = null;
-  boot.exit = null;
-  for (const name of STREAM_NAMES) {
-    state.decoders[name] = new TextDecoder();
-  }
-  elements.output.textContent = '';
-  const args = elements.args.value.split(/\s+/).filter(word => word !== '');
-  sendMessage({type: 'run', name: elements.name.value, args});
-}
-
-// Sends the stdin field's line to the module on Enter, and clears it.
-function onStdinKey(event) {
-  if (event.key !== 'Enter') {
+// Sends the input and a newline on Enter, as Shift Enter adds a line.
+function onInputKey(event) {
+  if (event.key !== 'Enter' || event.shiftKey) {
     return;
   }
-  const data = base64Of(encoder.encode(elements.stdin.value + '\n'));
-  elements.stdin.value = '';
-  sendMessage({type: 'in', data});
-}
-
-// Closes the module's stdin, after which only Kill stays enabled.
-function onEof() {
-  controlsSet(['kill']);
-  sendMessage({type: 'eof'});
-}
-
-// Asks the program to replace itself, after which a new hello follows.
-function onRestart() {
-  controlsSet([]);
-  sendMessage({type: 'restart'});
+  event.preventDefault();
+  sendText(elements.input.value + '\n');
+  elements.input.value = '';
 }
 
 // Closes the socket with code 1000, which makes ttyd end the program.
 function onClosePressed() {
-  state.closePressed = true;
-  controlsSet([]);
-  elements.close.disabled = true;
+  controlsEnable(false);
   state.socket.close(1000);
   render();
 }
 
-// Writes the status, the module list and the failure, if any.
+// Writes the socket's state, ttyd's title and preferences, and any failure.
 function render() {
   const socket = state.socket;
-  const hello = boot.hellos.length === 0 ? null : boot.hellos.at(-1);
-  const saved = boot.saves.length === 0 ? null : boot.saves.at(-1);
-  const started = boot.started;
   const lines = [
     `socket ${socket === null ? 'fetching token' :
       READY_STATES[socket.readyState]}` + (boot.closed === null ? '' :
       ` code ${boot.closed.code} reason '${boot.closed.reason}' wasClean ` +
       `${boot.closed.wasClean}`),
     `ttyd title ${boot.ttyd.title === null ? '-' : boot.ttyd.title}`,
-    `ttyd preferences ${boot.ttyd.preferences === null ? '-' :
-      JSON.stringify(boot.ttyd.preferences)}`,
-    hello === null ? 'hello -' : `hello ${boot.hellos.length}: pid ` +
-      `${hello.pid} python ${hello.python} started ` +
-      `${new Date(hello.started * 1000).toISOString()}\nbootstrap ` +
-      `${hello.bootstrap} sha256 ${hello.sha256}\nmodules ${hello.modules}`,
-    saved === null ? 'saved -' : `saved ${saved.name} ${saved.bytes} bytes ` +
-      `sha256 ${saved.sha256}`,
-    started === null ? 'run -' : `run ${started.name} pid ${started.pid} ` +
-      `args ${JSON.stringify(started.args)} ` + (boot.exit === null ?
-      'running' : `exit code ${boot.exit.code}`),
+    'ttyd preferences ' +
+      (boot.ttyd.preferences === null ? '-' : boot.ttyd.preferences),
   ];
   if (boot.failure !== null) {
     lines.push(`failure ${boot.failure}`);
   }
   elements.status.textContent = lines.join('\n');
-  elements.modules.textContent = boot.modules === null ? 'modules -' : [
-    `modules ${boot.modules.length}:`,
-    ...boot.modules.map(entry =>
-      `${entry.bytes} ${entry.sha256.slice(0, 12)} ${entry.name}`),
-  ].join('\n');
 }
 
 // Fetches the token, then opens the WebSocket to ttyd.
@@ -404,13 +218,11 @@ async function start() {
 }
 
 window.addEventListener('error', event => record(event.message));
-elements.put.addEventListener('click', onPut);
-elements.run.addEventListener('click', onRun);
-elements.kill.addEventListener('click', () => sendMessage({type: 'kill'}));
-elements.eof.addEventListener('click', onEof);
-elements.restart.addEventListener('click', onRestart);
+elements.input.addEventListener('keydown', onInputKey);
+elements.interrupt.addEventListener('click',
+  () => sendText(INTERRUPT_TEXT));
+elements.eof.addEventListener('click', () => sendText(END_OF_INPUT_TEXT));
 elements.close.addEventListener('click', onClosePressed);
-elements.stdin.addEventListener('keydown', onStdinKey);
 start().catch(error => record(String(error)));
 render();
 </script>

@@ -124,7 +124,8 @@ function xsjs_util_get_ttyd_command ([string]$linux_path_) {
 function xsjs_util_get_ttyd_options ([string]$linux_path_) {
     # `-W` lets input in, `-O` checks Origin. `-i lo` binds 10.255.255.254.
     'ttyd', '-p', "$linux_port_", '-i', '127.0.0.1', '-W', '-O'
-    '--index', "$linux_path_/$bootstrap_page_"
+    # `-T dumb` reports a terminal that shows lines, not escape sequences.
+    '-T', 'dumb', '--index', "$linux_path_/$bootstrap_page_"
 }
 
 # Returns the lines WSL prints, throwing unless it exits with one of the codes.

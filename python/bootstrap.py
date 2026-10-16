@@ -3,31 +3,24 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # This comment intentionally blank. No documentation goes here.
-import base64, contextlib, hashlib, io, json, os, platform, re, runpy
-import selectors, signal, sys, time, tty, types
-from typing import Any, NamedTuple, NoReturn, TextIO
+import contextlib, hashlib, io, os, platform, re, runpy, shlex, signal, sys
+import types
+from collections.abc import Callable
+from typing import NamedTuple, NoReturn, TextIO
 
 _BOOTSTRAP_PATH = os.path.abspath(__file__)
 
-# The fields of each type of message from the page, besides type.
-_INPUT_FIELDS: dict[str, dict[str, type[Any]]] = {
-    "eof": {},
-    "in": {"data": str},
-    "kill": {},
-    "list": {},
-    "put": {"name": str, "text": str},
-    "restart": {},
-    "run": {"name": str, "args": list},
-}
+# A module's name is an identifier, so its file stays in the directory.
+_MODULE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
-# A module's name is an identifier and `.py`, so it stays in the directory.
-_MODULE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\.py")
+# What shows that the session waits for a command, as dash's `PS1` does.
+_PROMPT = b"$ "
 
 # The most taken from a descriptor in one read.
 _READ_SIZE = 1 << 16
 
 # The signals handled here, held back while a child forks.
-_SIGNALS = {signal.SIGCHLD, signal.SIGHUP, signal.SIGTERM}
+_SIGNALS = {signal.SIGHUP, signal.SIGINT, signal.SIGTERM}
 
 
 # A module to run and its arguments, as a forked child carries them out.
@@ -43,284 +36,212 @@ class ModuleStart(BaseException):
         self.module = module
 
 
-# A module running in a forked child.
-class Child:
-    def __init__(self, name: str, pid: int, stdin: int) -> None:
-        self.name = name
-        self.pid = pid
-        # None once the page sent eof.
-        self.stdin: int | None = stdin
-        # The output streams not yet at EOF.
-        self.streams_open = 2
-        # None until the child is reaped.
-        self.code: int | None = None
+# A command that can't be carried out, reported to the terminal.
+class CommandError(Exception):
+    pass
+
+
+# Abandons the input being read, as a `^C` does in dash.
+class InputAbandoned(Exception):
+    pass
 
 
 class Session:
-    # Watches the terminal and the wake up pipe, and sets the signal handlers.
+    # Sets the signal handlers.
     def __init__(self, modules: str) -> None:
         self.modules = modules
-        self.child: Child | None = None
-        # What the page wrote after its last newline.
-        self.input_partial = bytearray()
-        self.selector = selectors.DefaultSelector()
-        self.selector.register(0, selectors.EVENT_READ, self.input_read)
-        self.wake_reader, self.wake_writer = os.pipe()
-        os.set_blocking(self.wake_writer, False)
-        self.selector.register(
-            self.wake_reader, selectors.EVENT_READ, self.wake_read
-        )
-        signal.set_wakeup_fd(self.wake_writer)
-        signal.signal(signal.SIGCHLD, signal_wake)
+        # The running module's pid, None while none runs.
+        self.child: int | None = None
+        # Set while input is read, so that a `^C` abandons it.
+        self.reading = False
+        # Set by a `^C` between reads, so that the next read is abandoned.
+        self.interrupted = False
+        self.builtins: dict[str, Callable[[list[str]], None]] = {
+            "ls": self.ls,
+            "put": self.put,
+            "restart": self.restart,
+        }
+        signal.signal(signal.SIGINT, self.signal_interrupt)
         for signal_number in (signal.SIGHUP, signal.SIGTERM):
             signal.signal(signal_number, self.signal_end)
 
-    # Sends the exit once the child is reaped and its streams have ended.
-    def child_end(self) -> None:
-        child = self.child
-        # A wake up can come after the exit was sent.
-        if child is None:
+    # Writes the first line, with this file's digest so an update shows.
+    def banner_write(self) -> None:
+        with open(_BOOTSTRAP_PATH, "rb") as own_file:
+            digest = hashlib.sha256(own_file.read()).hexdigest()
+        line_write(
+            1,
+            f"bootstrap {_BOOTSTRAP_PATH} sha256 {digest} pid {os.getpid()}"
+            f" python {platform.python_version()} modules {self.modules}",
+        )
+
+    # Splits the line into words with the quoting of `sh`, then runs them.
+    def command_run(self, line: bytes) -> None:
+        try:
+            text = line.decode()
+        except UnicodeDecodeError as error:
+            raise CommandError(f"not UTF-8: {error}") from error
+        try:
+            words = shlex.split(text)
+        except ValueError as error:
+            raise CommandError(f"{text}: {error}") from error
+        if not words:
             return
-        if child.code is None:
-            pid, status = os.waitpid(child.pid, os.WNOHANG)
-            if pid == 0:
-                return
-            child.code = os.waitstatus_to_exitcode(status)
-        if child.streams_open:
-            return
-        self.child = None
-        if child.stdin is not None:
-            os.close(child.stdin)
-        self.send({"type": "exit", "name": child.name, "code": child.code})
-        self.modules_send()
+        name, *args = words
+        builtin = self.builtins.get(name)
+        if builtin is None:
+            self.module_start(name, args)
+        else:
+            builtin(args)
 
-    # Closes the child's stdin, so its next read of it gets EOF.
-    def child_eof(self) -> None:
-        os.close(self.child_stdin())
-        self.child_running().stdin = None
+    # Returns the next line without its newline, or None at the end of input.
+    def line_read(self) -> bytes | None:
+        line = bytearray()
+        try:
+            self.read_start()
+            # A byte at a time, so what follows the line is left for a module.
+            while not line.endswith(b"\n"):
+                byte = os.read(0, 1)
+                if not byte:
+                    return bytes(line) if line else None
+                line += byte
+        finally:
+            self.reading = False
+        return bytes(line[:-1])
 
-    # Sends what the child wrote on the stream, or notes the stream's end.
-    def child_read(self, descriptor: int, stream_name: str) -> None:
-        chunk = os.read(descriptor, _READ_SIZE)
-        if chunk:
-            self.send(
-                {
-                    "type": "out",
-                    "stream": stream_name,
-                    "data": base64.b64encode(chunk).decode("ascii"),
-                }
-            )
-            return
-        self.selector.unregister(descriptor)
-        os.close(descriptor)
-        self.child_running().streams_open -= 1
-        self.child_end()
+    # Lists the directory's files with their sizes and digests.
+    def ls(self, args: list[str]) -> None:
+        if args:
+            raise CommandError("usage: ls")
+        with os.scandir(self.modules) as iterator:
+            for entry in sorted(iterator, key=lambda entry: entry.name):
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+                with open(entry.path, "rb") as entry_file:
+                    data = entry_file.read()
+                digest = hashlib.sha256(data).hexdigest()
+                line_write(1, f"{len(data)} {digest} {entry.name}")
 
-    # Returns the running child, failing when there is none.
-    def child_running(self) -> Child:
-        if self.child is None:
-            raise RuntimeError("no module is running")
-        return self.child
+    # Returns the module's path, failing on a name that isn't an identifier.
+    def module_path(self, name: str) -> str:
+        if not _MODULE_NAME.fullmatch(name):
+            raise CommandError(f"{name}: not a module name")
+        return os.path.join(self.modules, f"{name}.py")
 
-    # Forks a child that runs the module with the arguments, on pipes.
-    def child_start(self, name: str, args: list[Any]) -> None:
-        if self.child is not None:
-            raise RuntimeError(
-                f"{self.child.name} is still running as pid {self.child.pid}"
-            )
-        if any(type(argument) is not str for argument in args):
-            raise ValueError(f"run's args aren't all strings: {args!r}")
+    # Runs the module in a forked child and waits, reporting an exit not 0.
+    def module_start(self, name: str, args: list[str]) -> None:
         path = self.module_path(name)
-        stdin_reader, stdin_writer = os.pipe()
-        stdout_reader, stdout_writer = os.pipe()
-        stderr_reader, stderr_writer = os.pipe()
+        if not os.path.isfile(path):
+            raise CommandError(f"{name}: not found")
         signal.pthread_sigmask(signal.SIG_BLOCK, _SIGNALS)
         pid = os.fork()
         if pid == 0:
-            os.dup2(stdin_reader, 0)
-            os.dup2(stdout_writer, 1)
-            os.dup2(stderr_writer, 2)
-            for descriptor in (
-                stdin_reader,
-                stdin_writer,
-                stdout_reader,
-                stdout_writer,
-                stderr_reader,
-                stderr_writer,
-                self.wake_reader,
-                self.wake_writer,
-            ):
-                os.close(descriptor)
-            self.selector.close()
-            signal.set_wakeup_fd(-1)
-            for signal_number in _SIGNALS:
+            for signal_number in (signal.SIGHUP, signal.SIGTERM):
                 signal.signal(signal_number, signal.SIG_DFL)
-            # A session of its own, so kill reaches all it starts.
+            # A `^C` raises KeyboardInterrupt, as under `python3`.
+            signal.signal(signal.SIGINT, signal.default_int_handler)
+            # A session of its own, so a `^C` or a kill reaches all it starts.
             os.setsid()
             signal.pthread_sigmask(signal.SIG_UNBLOCK, _SIGNALS)
             raise ModuleStart(Module(path, args))
-        for descriptor in (stdin_reader, stdout_writer, stderr_writer):
-            os.close(descriptor)
-        self.child = Child(name, pid, stdin_writer)
+        self.child = pid
         signal.pthread_sigmask(signal.SIG_UNBLOCK, _SIGNALS)
-        for descriptor, stream_name in (
-            (stdout_reader, "stdout"),
-            (stderr_reader, "stderr"),
-        ):
-            self.selector.register(
-                descriptor,
-                selectors.EVENT_READ,
-                lambda descriptor=descriptor, stream_name=stream_name: (
-                    self.child_read(descriptor, stream_name)
-                ),
-            )
-        self.send({"type": "started", "name": name, "pid": pid, "args": args})
+        _, status = os.waitpid(pid, 0)
+        self.child = None
+        # What the module left running ends with it.
+        group_kill(pid, signal.SIGKILL)
+        code = os.waitstatus_to_exitcode(status)
+        if code:
+            line_write(2, f"{name}: exit {code}")
 
-    # Returns the running child's stdin, failing once the page sent eof.
-    def child_stdin(self) -> int:
-        child = self.child_running()
-        if child.stdin is None:
-            raise RuntimeError(f"{child.name}'s stdin is already closed")
-        return child.stdin
-
-    # Writes all the bytes to the child's stdin, waiting as the pipe fills.
-    def child_write(self, data: bytes) -> None:
-        stdin = self.child_stdin()
-        view = memoryview(data)
-        while view:
-            view = view[os.write(stdin, view) :]
-
-    # Sends the hello, with this file's digest so an update shows.
-    def hello_send(self) -> None:
-        with open(_BOOTSTRAP_PATH, "rb") as own_file:
-            own = own_file.read()
-        self.send(
-            {
-                "type": "hello",
-                "pid": os.getpid(),
-                "python": platform.python_version(),
-                "bootstrap": _BOOTSTRAP_PATH,
-                "sha256": hashlib.sha256(own).hexdigest(),
-                "modules": self.modules,
-                "started": time.time(),
-            }
-        )
-
-    # Reads input and acts on whole lines in order.
-    def input_read(self) -> None:
-        chunk = os.read(0, _READ_SIZE)
-        if not chunk:
-            raise EOFError("the terminal closed")
-        self.input_partial += chunk
-        if b"\n" not in chunk:
-            return
-        *lines, self.input_partial = self.input_partial.split(b"\n")
-        for line in lines:
-            self.message_answer(line)
-
-    # Handles descriptors until an error, then kills the child's group.
-    def loop(self) -> NoReturn:
-        try:
-            while True:
-                for key, _ in self.selector.select():
-                    key.data()
-        finally:
-            if self.child is not None:
-                group_kill(self.child.pid, signal.SIGKILL)
-
-    # Acts on a page line, which must hold a known type's exact fields.
-    def message_answer(self, line: bytearray) -> None:
-        message: dict[str, Any] = json.loads(line)
-        if (
-            type(message) is not dict
-            or message.get("type") not in _INPUT_FIELDS
-        ):
-            raise ValueError(f"not a message of a known type: {line[:80]!r}")
-        kind: str = message["type"]
-        fields = _INPUT_FIELDS[kind]
-        if message.keys() != {"type", *fields} or any(
-            type(message[name]) is not field_type
-            for name, field_type in fields.items()
-        ):
-            raise ValueError(f"malformed {kind} message: {line[:80]!r}")
-        if kind == "eof":
-            self.child_eof()
-        elif kind == "in":
-            self.child_write(base64.b64decode(message["data"], validate=True))
-        elif kind == "kill":
-            group_kill(self.child_running().pid, signal.SIGTERM)
-        elif kind == "list":
-            self.modules_send()
-        elif kind == "put":
-            self.module_put(message["name"], message["text"])
-        elif kind == "restart":
-            self.restart()
-        else:
-            self.child_start(message["name"], message["args"])
-
-    # Returns the module's path in the directory, failing on any other name.
-    def module_path(self, name: str) -> str:
-        if not _MODULE_NAME.fullmatch(name):
-            raise ValueError(f"not a module name: {name!r}")
-        return os.path.join(self.modules, name)
-
-    # Writes the module's text as `UTF-8` and sends its size and digest.
-    def module_put(self, name: str, text: str) -> None:
-        data = text.encode()
-        with open(self.module_path(name), "wb") as module_file:
+    # Saves what follows, up to the end of input, as the module's file.
+    def put(self, args: list[str]) -> None:
+        if len(args) != 1:
+            raise CommandError("usage: put NAME")
+        path = self.module_path(args[0])
+        data = self.text_read()
+        with open(path, "wb") as module_file:
             module_file.write(data)
-        self.send(
-            {
-                "type": "saved",
-                "name": name,
-                "bytes": len(data),
-                "sha256": hashlib.sha256(data).hexdigest(),
-            }
-        )
-        self.modules_send()
+        name = os.path.basename(path)
+        digest = hashlib.sha256(data).hexdigest()
+        line_write(1, f"saved {name} {len(data)} bytes sha256 {digest}")
 
-    # Sends the directory's modules with their sizes and digests.
-    def modules_send(self) -> None:
-        self.send({"type": "modules", "entries": modules_list(self.modules)})
+    # Starts a read, abandoning it at once if a `^C` came since the last one.
+    def read_start(self) -> None:
+        self.reading = True
+        if self.interrupted:
+            raise InputAbandoned
 
     # Execs this file again with the command line ttyd gave, keeping the pid.
-    def restart(self) -> NoReturn:
-        if self.child is not None:
-            raise RuntimeError(
-                f"{self.child.name} is still running as pid {self.child.pid}"
-            )
+    def restart(self, args: list[str]) -> NoReturn:
+        if args:
+            raise CommandError("usage: restart")
         os.execv(sys.executable, sys.orig_argv)
 
-    # Writes the messages' lines to the terminal in one write, all of it.
-    def send(self, *messages: dict[str, Any]) -> None:
-        data = memoryview(
-            b"".join(
-                json.dumps(message).encode("ascii") + b"\n"
-                for message in messages
-            )
-        )
-        while data:
-            data = data[os.write(1, data) :]
+    # Prompts for commands and runs them until the end of input.
+    def run(self) -> NoReturn:
+        self.banner_write()
+        while True:
+            all_write(1, _PROMPT)
+            try:
+                line = self.line_read()
+                if line is None:
+                    sys.exit(0)
+                self.command_run(line)
+            except InputAbandoned:
+                self.interrupted = False
+                all_write(1, b"\n")
+            except CommandError as error:
+                line_write(2, str(error))
 
     # Kills the child's group, then dies of the signal so ttyd sees how.
     def signal_end(
         self, signal_number: int, frame: types.FrameType | None
     ) -> None:
         if self.child is not None:
-            group_kill(self.child.pid, signal.SIGKILL)
+            group_kill(self.child, signal.SIGKILL)
         signal.signal(signal_number, signal.SIG_DFL)
         signal.raise_signal(signal_number)
 
-    # Drains the wake up pipe and sends the exit of a child that ended.
-    def wake_read(self) -> None:
-        os.read(self.wake_reader, _READ_SIZE)
-        self.child_end()
+    # Passes a `^C` on to the running module's group, or abandons the input.
+    def signal_interrupt(
+        self, signal_number: int, frame: types.FrameType | None
+    ) -> None:
+        if self.child is not None:
+            group_kill(self.child, signal_number)
+        elif self.reading:
+            raise InputAbandoned
+        else:
+            self.interrupted = True
+
+    # Returns what is read up to the end of input.
+    def text_read(self) -> bytes:
+        data = bytearray()
+        try:
+            self.read_start()
+            while chunk := os.read(0, _READ_SIZE):
+                data += chunk
+        finally:
+            self.reading = False
+        return bytes(data)
+
+
+# Writes all the bytes to the descriptor.
+def all_write(descriptor: int, data: bytes) -> None:
+    view = memoryview(data)
+    while view:
+        view = view[os.write(descriptor, view) :]
 
 
 # Sends the signal to the group, which is gone once all of it has exited.
 def group_kill(pid: int, signal_number: int) -> None:
     with contextlib.suppress(ProcessLookupError):
         os.killpg(pid, signal_number)
+
+
+# Writes the text and a newline to the descriptor, as `UTF-8`.
+def line_write(descriptor: int, text: str) -> None:
+    all_write(descriptor, f"{text}\n".encode())
 
 
 # Runs the module in the forked child as `python3 -u` would run it.
@@ -335,41 +256,14 @@ def module_run(module: Module, modules: str) -> None:
     runpy.run_path(module.path, run_name="__main__")
 
 
-# Returns the directory's files, sorted, with their sizes and digests.
-def modules_list(modules: str) -> list[dict[str, Any]]:
-    entries: list[dict[str, Any]] = []
-    with os.scandir(modules) as iterator:
-        for entry in sorted(iterator, key=lambda entry: entry.name):
-            if not entry.is_file(follow_symlinks=False):
-                continue
-            with open(entry.path, "rb") as entry_file:
-                data = entry_file.read()
-            entries.append(
-                {
-                    "name": entry.name,
-                    "bytes": len(data),
-                    "sha256": hashlib.sha256(data).hexdigest(),
-                }
-            )
-    return entries
-
-
-# Runs the session until a signal, returning only in a forked child.
+# Runs the session until the end of input, returning only in a forked child.
 def session_run(modules: str) -> Module:
     os.makedirs(modules, exist_ok=True)
-    tty.setraw(0)
     session = Session(modules)
-    session.hello_send()
-    session.modules_send()
     try:
-        session.loop()
+        session.run()
     except ModuleStart as start:
         return start.module
-
-
-# Lets SIGCHLD reach the wake up pipe, which the loop reads.
-def signal_wake(signal_number: int, frame: types.FrameType | None) -> None:
-    pass
 
 
 # Returns a stream on the descriptor that writes at once, as under `-u`.

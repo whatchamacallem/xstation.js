@@ -136,9 +136,10 @@ discrepancies as this is a low priority self healing mechanism.
   `xsjs_status.ps1` and `test_lint.ps1` run; the user runs the rest. All
   but those two write `<script>.ps1.md` beside themselves (gitignored):
   read it, don't ask. The logs are LF Markdown that `mdformat --check`
-  accepts. The whitelist names the three top-level logs, so
-  `test_posix.py` fails until each exists and, after a writer change,
-  until its script reruns; `powershell/` logs are not checked. mdformat
+  accepts; the whitelist names no log, so `test_posix.py` checks none.
+  WSL here has `appendWindowsPath = false`: `powershell.exe` is on `PATH`,
+  but `wsl.exe`, `net.exe`, `curl.exe` and `explorer.exe` need their
+  `/mnt/c/Windows/` paths. mdformat
   doubles backslashes in plain text, so i18n strings put paths in code
   spans.
 - `_<file>_main` holds a `trap` that logs and exits 1, then calls
@@ -159,18 +160,30 @@ discrepancies as this is a low priority self healing mechanism.
   That folder also holds the TLS cert and `ttyd.log` (ttyd's stderr, first
   place to look when start fails); `serve.ps1` holds the password in plain
   text.
-- `bootstrap.py` takes one argument, the modules directory, and runs
-  until a signal ends it, one ASCII JSON object per line each way;
-  `python/bootstrap.html` is its page, served by Linux ttyd with
-  `--index`; `_INPUT_FIELDS` and the page's `FIELDS` hold the messages.
-  A module runs in an `os.fork` child through `runpy`, never an exec of
+- `bootstrap.py` takes one argument, the modules directory, and is a
+  command processor modelled on dash, on ttyd's terminal left in canonical
+  mode: a banner line, then `$ `; `shlex` words; the first is a builtin
+  (`put NAME` reads to `^D`, `ls`, `restart`) or a module `<name>.py`,
+  the rest its `sys.argv[1:]`; `^C` is relayed to the module's group;
+  `^D` at the prompt exits 0. No JSON beyond ttyd's own. A module runs in
+  an `os.fork` child through `runpy` after `setsid`, never an exec of
   `python3`, so its pid shows the bootstrapper's command line, and a
   module named like a standard module the bootstrapper imported gets that
-  one. `restart` execs `sys.orig_argv`. The page keeps ttyd's title and
-  preferences in `window.boot.ttyd`.
-- The page sends nothing before `hello`: until the program sets raw mode
-  the terminal echoes input, and setting it discards what waits. It sends
-  no resize; the bootstrapper reads no size.
+  one. `restart` execs `sys.orig_argv`. `python/bootstrap.html` is its
+  page (`--index`): a transcript with CR removed, an input sent on Enter,
+  and `^C`, `^D` and Close buttons; the driver reads `window.boot`.
+- The tty echoes input when it arrives, so a driver waits for each
+  expected output before sending more. A canonical line holds 4095 bytes
+  and the tty silently cuts longer ones, so the page fails on them. `^C`
+  flushes the tty's pending input and output. ttyd runs with `-T dumb`
+  so Python doesn't colour tracebacks. The page sends no resize; the
+  bootstrapper reads no size. ttyd's pty has the kernel's termios
+  defaults: `^\` ends the bootstrapper by SIGQUIT, `^Z` is echoed and
+  discarded as its group is orphaned, `^S` holds output until `^Q`, and
+  `IUTF8` is off, so DEL erases one byte.
+- `FORMATS.md` is the registry of every wire, file and URL format and
+  constant, under identifiers of two English words, and holds the plan
+  for one top-level `settings.json`.
 - ttyd with `--credential` answers `/` with 401 but drops `/ws` without
   the Basic header with no HTTP status.
 - When its program exits, Linux ttyd on Ubuntu's libwebsockets 4.3.5 (as

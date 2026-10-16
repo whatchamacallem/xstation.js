@@ -3,14 +3,14 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Drives bootstrap.html in Chrome as a person would: types update.py with
-# the time of day in it, puts it, runs it with arguments, types a line to
-# its stdin, checks what it printed against this script's own
-# measurements, closes the page once it exits, checks the program is gone,
-# then saves a screenshot of the whole page. ttyd, from a checkout of ttyd
-# beside this project, serves the page and runs bootstrap.py on a modules
-# directory made under build/ for the run; its log goes to stderr as it
-# comes:
+# Drives bootstrap.html in Chrome as a person would: puts the module update,
+# typed with the time of day in it and ended with ^D, runs it with
+# arguments, types a line to its stdin, checks the whole transcript against
+# one built from this script's own measurements, closes the page, checks
+# the program is gone, then saves a screenshot of the whole page. ttyd, from
+# a checkout of ttyd beside this project, serves the page on a dumb terminal
+# and runs bootstrap.py on a modules directory made under build/ for the
+# run; its log goes to stderr as it comes:
 #
 #     python3 python/xsjs_screenshot.py
 #     python3 python/xsjs_screenshot.py --typing 'héllo' --out shot.png
@@ -21,8 +21,8 @@
 # whose devtools_reader and devtools_writer carry a connection to DevTools
 # at devtools_host and devtools_path. So far there is xsjs_screenshot_wsl.py.
 
-import argparse, base64, contextlib, datetime, hashlib, json, os, platform
-import signal, socket, subprocess, sys, tempfile, time, types
+import argparse, base64, contextlib, datetime, hashlib, json, os, platform, re
+import shlex, signal, socket, subprocess, sys, tempfile, time, types
 from collections.abc import Callable, Generator
 from typing import Any
 
@@ -33,6 +33,12 @@ sys.path.insert(0, _PYTHON_PATH)
 # Bytecode of the modules imported from there goes in build/.
 sys.pycache_prefix = os.path.join(
     os.path.dirname(_PYTHON_PATH), "build", "pycache"
+)
+
+# The line `bootstrap.py` writes first, its measurements by name.
+_BANNER_PATTERN = re.compile(
+    r"bootstrap (?P<bootstrap>.+) sha256 (?P<sha256>[0-9a-f]{64})"
+    r" pid (?P<pid>[0-9]+) python (?P<python>\S+) modules (?P<modules>.+)"
 )
 
 # The program and the page ttyd serves.
@@ -67,7 +73,7 @@ _IMAGE_NAME = "xsjs_screenshot.png"
 
 # The module typed into the page, its arguments, and its text with a stamp.
 _MODULE_ARGS = ["--who", "demo", "42"]
-_MODULE_NAME = "update.py"
+_MODULE_NAME = "update"
 _MODULE_SOURCE = """\
 import os, sys
 
@@ -108,6 +114,9 @@ _PAGE_OVERFLOW_SCRIPT = """(() => {
 })()"""
 
 _POLL_SECONDS = 0.1
+
+# What `bootstrap.py` writes when it waits for a command.
+_PROMPT = "$ "
 
 _REFUSED_ERROR_TEXT = "net::ERR_CONNECTION_REFUSED"
 
@@ -340,12 +349,22 @@ def listing_lines(path: str) -> list[str]:
     ]
 
 
-# Clicks the element with the id and types the text into it.
-def field_type(devtools: DevTools, element_id: str, text: str) -> None:
-    click(devtools, element_id)
-    if devtools.evaluate("document.activeElement.id") != element_id:
-        raise RuntimeError(f"clicking the page's {element_id} didn't focus it")
+# Types the text into the page's input and sends it with Enter.
+def line_send(devtools: DevTools, text: str) -> None:
+    click(devtools, "input")
+    if devtools.evaluate("document.activeElement.id") != "input":
+        raise RuntimeError("clicking the page's input didn't focus it")
     devtools.call("Input.insertText", {"text": text})
+    typed = devtools.evaluate("document.getElementById('input').value")
+    if typed != text:
+        raise RuntimeError(
+            f"the page's input holds {typed!r} where {text!r} was typed"
+        )
+    devtools.call(
+        "Input.dispatchKeyEvent",
+        {"type": "keyDown", "text": "\r", "unmodifiedText": "\r"} | _ENTER_KEY,
+    )
+    devtools.call("Input.dispatchKeyEvent", {"type": "keyUp"} | _ENTER_KEY)
 
 
 # Grows the viewport until no part scrolls, so a screenshot holds the page.
@@ -373,73 +392,72 @@ def page_meet(
     # A headless page has no focus to type into unless it pretends to.
     devtools.call("Emulation.setFocusEmulationEnabled", {"enabled": True})
     page_navigate(devtools, _TTYD_PAGE_URL)
-    results = page_wait(devtools, lambda results: results["modules"] == [])
+    # The banner is whole once the prompt follows it.
+    results = page_wait(
+        devtools,
+        lambda results: (
+            len(results["output"].partition("\n")[2]) >= len(_PROMPT)
+        ),
+    )
     ttyd = results["ttyd"]
     print(f"ttyd title {ttyd['title']}", flush=True)
-    print(f"ttyd preferences {json.dumps(ttyd['preferences'])}", flush=True)
-    hello = results["hellos"][0]
-    print(
-        f"hello pid {hello['pid']} python {hello['python']} bootstrap"
-        f" {hello['bootstrap']} sha256 {hello['sha256']} modules"
-        f" {hello['modules']}",
-        flush=True,
-    )
+    print(f"ttyd preferences {ttyd['preferences']}", flush=True)
+    banner: str = results["output"].partition("\n")[0]
+    print(banner, flush=True)
+    due = f"{banner}\n{_PROMPT}"
+    transcript_check(results["output"], due)
+    match = _BANNER_PATTERN.fullmatch(banner)
+    if match is None:
+        raise RuntimeError(
+            f"the banner doesn't match {_BANNER_PATTERN.pattern}"
+        )
     with open(_BOOTSTRAP_PATH, "rb") as bootstrap_file:
         digest = hashlib.sha256(bootstrap_file.read()).hexdigest()
-    expected_hello = {
+    expected_banner = {
         "bootstrap": _BOOTSTRAP_PATH,
         "sha256": digest,
         "modules": modules_path,
     }
-    for name, value in expected_hello.items():
-        if hello[name] != value:
-            raise RuntimeError(f"hello's {name} is {hello[name]}, not {value}")
+    for name, value in expected_banner.items():
+        if match[name] != value:
+            raise RuntimeError(
+                f"the banner's {name} is {match[name]}, not {value}"
+            )
+    pid = int(match["pid"])
     command = ttyd_command(modules_path)
     pids = program_pids(ttyd_pid, command)
-    if pids != [hello["pid"]]:
+    if pids != [pid]:
         raise RuntimeError(
-            f"ttyd runs {' '.join(command)} as pids {pids}, where the page's"
-            f" program is pid {hello['pid']}"
+            f"ttyd runs {' '.join(command)} as pids {pids}, where the"
+            f" banner's pid is {pid}"
         )
     stamp = datetime.datetime.now(datetime.UTC).isoformat()
     source = _MODULE_SOURCE.format(stamp=stamp)
-    field_type(devtools, "name", _MODULE_NAME)
-    field_type(devtools, "args", " ".join(_MODULE_ARGS))
-    field_type(devtools, "source", source)
-    typed = devtools.evaluate("document.getElementById('source').value")
-    if typed != source:
-        raise RuntimeError(
-            f"the page holds {len(typed)} characters of source where"
-            f" {len(source)} were typed"
-        )
-    click(devtools, "put")
-    results = page_wait(
-        devtools,
-        lambda results: (
-            len(results["saves"]) == 1 and len(results["modules"]) == 1
-        ),
-    )
-    saved = results["saves"][0]
+    put_line = f"put {_MODULE_NAME}"
+    line_send(devtools, put_line)
+    due += f"{put_line}\n"
+    transcript_wait(devtools, due)
+    # Enter ends the text's last line, then `^D` ends the text.
+    line_send(devtools, source.removesuffix("\n"))
+    due += source
+    transcript_wait(devtools, due)
+    click(devtools, "eof")
     data = source.encode()
-    expected_saved = {
-        "type": "saved",
-        "name": _MODULE_NAME,
-        "bytes": len(data),
-        "sha256": hashlib.sha256(data).hexdigest(),
-    }
-    if saved != expected_saved:
-        raise RuntimeError(f"saved {saved} where {expected_saved} was due")
-    with open(os.path.join(modules_path, _MODULE_NAME), "rb") as module_file:
+    file_name = f"{_MODULE_NAME}.py"
+    saved = (
+        f"saved {file_name} {len(data)} bytes sha256"
+        f" {hashlib.sha256(data).hexdigest()}"
+    )
+    due += f"{saved}\n{_PROMPT}"
+    transcript_wait(devtools, due)
+    with open(os.path.join(modules_path, file_name), "rb") as module_file:
         if module_file.read() != data:
             raise RuntimeError(
-                f"{_MODULE_NAME} on disk differs from what was put"
+                f"{file_name} on disk differs from what was put"
             )
-    print(
-        f"saved {_MODULE_NAME} {saved['bytes']} bytes sha256"
-        f" {saved['sha256']}",
-        flush=True,
-    )
-    click(devtools, "run")
+    print(saved, flush=True)
+    run_line = shlex.join([_MODULE_NAME, *_MODULE_ARGS])
+    line_send(devtools, run_line)
     printed = "".join(
         f"{line}\n"
         for line in (
@@ -451,40 +469,24 @@ def page_meet(
             *listing_lines(modules_path),
         )
     )
-    # The module waits on stdin after its listing, unless it failed first.
-    results = page_wait(
-        devtools,
-        lambda results: (
-            results["exit"] is not None or results["stdout"] == printed
-        ),
-    )
-    if results["exit"] is not None:
+    # The module waits on stdin after its listing.
+    due += f"{run_line}\n{printed}"
+    transcript_wait(devtools, due)
+    module_pids = program_pids(pid, command)
+    if len(module_pids) != 1:
         raise RuntimeError(
-            f"{_MODULE_NAME} exited before reading stdin: {results['exit']},"
-            f" stdout {results['stdout']!r}, stderr {results['stderr']!r}"
+            f"{_MODULE_NAME} runs as pids {module_pids} where one was due"
         )
-    field_type(devtools, "stdin", typing)
-    devtools.call(
-        "Input.dispatchKeyEvent",
-        {"type": "keyDown", "text": "\r", "unmodifiedText": "\r"} | _ENTER_KEY,
-    )
-    devtools.call("Input.dispatchKeyEvent", {"type": "keyUp"} | _ENTER_KEY)
-    results = page_wait(devtools, lambda results: results["exit"] is not None)
-    print(results["stdout"], end="", flush=True)
-    expected = printed + f"stdin {typing}\n"
-    if results["stdout"] != expected or results["stderr"]:
-        raise RuntimeError(
-            f"{_MODULE_NAME} printed {results['stdout']!r} and"
-            f" {results['stderr']!r} on stderr where {expected!r} was due"
-        )
-    started = results["started"]
-    exit_code = results["exit"]["code"]
-    if exit_code != 0:
-        raise RuntimeError(f"{_MODULE_NAME} exited with {exit_code}")
+    line_send(devtools, typing)
+    read = f"stdin {typing}\n"
+    # The terminal echoes the line, the module prints it, then the prompt.
+    due += f"{typing}\n{read}{_PROMPT}"
+    transcript_wait(devtools, due)
+    print(printed + read, end="", flush=True)
     print(
-        f"run {started['name']} pid {started['pid']} args {started['args']}"
-        f" exit code {exit_code}, {len(expected.splitlines())} lines as"
-        " measured here",
+        f"run {_MODULE_NAME} pid {module_pids[0]} args"
+        f" {shlex.join(_MODULE_ARGS)}, {len((printed + read).splitlines())}"
+        " lines as measured here",
         flush=True,
     )
     click(devtools, "close")
@@ -493,7 +495,12 @@ def page_meet(
     )
     closed = results["closed"]
     if closed["code"] != _CLOSE_CODE_NORMAL:
-        raise RuntimeError(f"the page closed with {closed}")
+        # A close other than Close's is ttyd's fault, not this repo's.
+        raise RuntimeError(
+            f"the page closed with {closed} after Close"
+            f" ({ttyd_version(_TTYD_PATH)})"
+        )
+    transcript_check(results["output"], due)
     deadline = time.monotonic() + _STOP_WAIT_SECONDS
     while pids := program_pids(ttyd_pid, command):
         if time.monotonic() > deadline:
@@ -506,8 +513,8 @@ def page_meet(
     image = devtools.call("Page.captureScreenshot", {"format": "png"})
     image_save(image_path, image["data"])
     return (
-        f"{results['lines']} program lines, closed {closed['code']} after"
-        f" Close, pid {hello['pid']} gone"
+        f"{len(results['output'].splitlines())} transcript lines, closed"
+        f" {closed['code']} after Close, pid {pid} gone"
     )
 
 
@@ -526,7 +533,7 @@ def page_navigate(devtools: DevTools, url: str) -> None:
         time.sleep(_POLL_SECONDS)
 
 
-# Returns the page's state once the condition holds, failing on its failure.
+# Returns the state once the condition holds, failing on a failure or close.
 def page_wait(
     devtools: DevTools, condition: Callable[[dict[str, Any]], bool]
 ) -> dict[str, Any]:
@@ -535,15 +542,20 @@ def page_wait(
         # None until the page's script has run.
         if results is not None:
             failure = results["failure"]
+            closed = results["closed"]
             if failure is not None:
                 message = f"the page failed: {failure}"
                 # A close other than Close's is ttyd's fault, not this repo's.
-                closed = results["closed"]
                 if closed is not None and closed["code"] != _CLOSE_CODE_NORMAL:
                     message += f" ({ttyd_version(_TTYD_PATH)})"
                 raise RuntimeError(message)
             if condition(results):
                 return results
+            if closed is not None:
+                raise RuntimeError(
+                    f"the page closed with {closed} before Close"
+                    f" ({ttyd_version(_TTYD_PATH)})"
+                )
         time.sleep(_POLL_SECONDS)
 
 
@@ -629,6 +641,23 @@ def signal_time_out(signal_number: int, frame: types.FrameType | None) -> None:
     raise TimeoutError(f"gave up after {_RUN_TIMEOUT_SECONDS} s")
 
 
+# Fails with both texts unless the transcript is the one due.
+def transcript_check(output: str, due: str) -> None:
+    if output != due:
+        raise RuntimeError(f"the page shows {output!r} where {due!r} was due")
+
+
+# Waits until the transcript is the one due or departs from it, then checks.
+def transcript_wait(devtools: DevTools, due: str) -> None:
+    results = page_wait(
+        devtools,
+        lambda results: (
+            results["output"] == due or not due.startswith(results["output"])
+        ),
+    )
+    transcript_check(results["output"], due)
+
+
 # Returns the command ttyd runs: bootstrap.py on the modules directory.
 def ttyd_command(modules_path: str) -> list[str]:
     return ["python3", _BOOTSTRAP_PATH, modules_path]
@@ -662,6 +691,8 @@ def ttyd_serve(
         "--check-origin",
         "--interface",
         "127.0.0.1",
+        "--terminal-type",
+        "dumb",
         "--index",
         _BOOTSTRAP_PAGE_PATH,
         *ttyd_command(modules_path),
@@ -722,7 +753,8 @@ def main() -> int:
     )
     namespace = parser.parse_args()
     typing: str = namespace.typing
-    if any(character < " " for character in typing):
+    # The terminal takes these as edits or signals, `DEL` as an erase.
+    if any(character < " " or character == "\x7f" for character in typing):
         print("error: --typing can't hold control characters", file=sys.stderr)
         return 2
     out: str = namespace.out
