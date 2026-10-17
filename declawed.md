@@ -54,6 +54,9 @@ already know. No line numbers are allowed as they are fragile.
   staged during a rename then unstage them. `git` is the permission system for
   permanent changes and therefore must be reviewed by a user. The one exception
   is for staging files before running reformatting tools below.
+- Do not look at past git commits unless asked or debugging. Deletion of code
+  and documents by the maintainer may indicate a desire to remove the
+  information from the conversation instead of waiting for AI to re-read it.
 - Do not reference `CLAUDE.md` or `declawed.md` outside this doc. Do not
   explicitly mention the tests being tested themselves in other source.
 - The source formatters may need to run twice to be stable. Alert the user
