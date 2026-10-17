@@ -1,0 +1,29 @@
+# Console in debug mode: full header names; the user, then the AI with permission.
+#
+# The user presses ESC; the view shows; the UI asks the AI worker to open the console.
+0001 UI->AI {"0":{"type":"console.open","id":1},"columns":120,"rows":40}
+0002 AI->SERVER {"0":{"type":"console.open","id":1},"columns":120,"rows":40}
+0003 SERVER->AI {"0":{"type":"console.open","reply":1},"pid":4260}
+0004 AI->UI {"0":{"type":"console.open","reply":1},"pid":4260}
+0005 SERVER->AI {"0":{"type":"console.output","blobs":1},"1":{"size":2}}<1 blob>
+0006 AI->UI {"0":{"type":"console.output","blobs":1},"1":{"size":2}}<1 blob>
+# The user types ls and Enter in xterm.js; the cooked pty echoes it.
+0007 UI->AI {"0":{"type":"console.input","blobs":1},"1":{"size":3}}<1 blob>
+0008 AI->SERVER {"0":{"type":"console.input","blobs":1},"1":{"size":3}}<1 blob>
+0009 SERVER->AI {"0":{"type":"console.output","blobs":1},"1":{"size":84}}<1 blob>
+0010 AI->UI {"0":{"type":"console.output","blobs":1},"1":{"size":84}}<1 blob>
+# The AI calls server.console_run, a permit tool: the agent asks the UI first.
+0011 AI->UI {"0":{"type":"status"},"state":"turn","detail":"server.console_run"}
+0012 AI->UI {"0":{"type":"permit.ask","id":1},"permit":1,"tool":"server.console_run","input":{"text":"tail -n 2 ttyd.log"}}
+0013 UI->AI {"0":{"type":"permit.ask","reply":1}}
+0014 UI->AI {"0":{"type":"permit.answer"},"permit":1,"choice":"accept"}
+0015 AI->SERVER {"0":{"type":"mcp"},"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"console_run","arguments":{"text":"tail -n 2 ttyd.log"}}}
+0016 SERVER->AI {"0":{"type":"console.output","blobs":1},"1":{"size":144}}<1 blob>
+0017 AI->UI {"0":{"type":"console.output","blobs":1},"1":{"size":144}}<1 blob>
+0018 SERVER->AI {"0":{"type":"mcp"},"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"tail -n 2 ttyd.log\r\n[2026/10/17 14:20:11:0421] N: WS   /ws - 127.0.0.1, clients: 1\r\n[2026/10/17 14:20:11:0433] N: started process, pid: 4242\r\n$ "}]}}
+0019 AI->UI {"0":{"type":"status"},"state":"ready","detail":""}
+# The user closes the console from the view.
+0020 UI->AI {"0":{"type":"console.close","id":2}}
+0021 AI->SERVER {"0":{"type":"console.close","id":2}}
+0022 SERVER->AI {"0":{"type":"console.close","reply":2},"code":0}
+0023 AI->UI {"0":{"type":"console.close","reply":2},"code":0}

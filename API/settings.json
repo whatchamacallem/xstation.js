@@ -1,0 +1,26 @@
+{
+  "version": 0,
+  "port_windows": 5768,
+  "port_wsl": 5769,
+  "line_max": 1048576,
+  "blob_max": 1073741824,
+  "overflow_bytes": 131072,
+  "chunk_bytes": 1048576,
+  "srv_buf_size": 1048576,
+  "log_ring": 1000,
+  "media_db_bytes": 268435456,
+  "files_browser_bytes": 1073741824,
+  "provider": {
+    "scripted": true,
+    "base_url": "https://api.x.ai/v1",
+    "chat_model": "grok-4",
+    "image_model": "grok-2-image",
+    "timeout_seconds": 120
+  },
+  "mcp_protocol_version": "2025-06-18",
+  "console_enabled": true,
+  "console_columns": 120,
+  "console_rows": 40,
+  "log_forward": true,
+  "long_task_ms": 5
+}

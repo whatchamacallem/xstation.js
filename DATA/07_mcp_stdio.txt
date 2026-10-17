@@ -1,0 +1,13 @@
+# An external agent drives the server over the MCP stdio transport.
+#
+# python3 /home/t/.cache/xsjs/mcp_stdio.py --root /home/t/.cache/xsjs --debug; one JSON-RPC message per line on stdin and stdout.
+0001 CLIENT->STDIO {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"claude-code","version":"2.1"}}}
+0002 STDIO->CLIENT {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"xsjs-server","version":"0"}}}
+0003 CLIENT->STDIO {"jsonrpc":"2.0","method":"notifications/initialized"}
+0004 CLIENT->STDIO {"jsonrpc":"2.0","id":2,"method":"tools/list"}
+0005 STDIO->CLIENT {"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"console_run","description":"Run one command line in the debug console's dash and return its output until the next prompt.","inputSchema":{"type":"object","properties":{"text":{"type":"string"},"timeout_seconds":{"type":"number"}},"required":["text"]},"_meta":{"xsjs":{"permit":true}}},{"name":"log_tail","description":"The last lines of the server log.","inputSchema":{"type":"object","properties":{"count":{"type":"integer"}},"required":["count"]}},{"name":"source_put","description":"Replace one file of the server's Python package. Debug mode.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"text":{"type":"string"}},"required":["name","text"]},"_meta":{"xsjs":{"permit":true}}},{"name":"system_restart","description":"Restart the server process in place, keeping its pid. Debug mode.","inputSchema":{"type":"object","properties":{}},"_meta":{"xsjs":{"permit":true}}}]}}
+0006 CLIENT->STDIO {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"log_tail","arguments":{"count":2}}}
+0007 STDIO->CLIENT {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"[{\"at\":1792625411042,\"level\":1,\"text\":\"hello written, pid 4242\"},{\"at\":1792625411980,\"level\":1,\"text\":\"sync.pull metaverse since 0: 4 doc rows\"}]"}]}}
+0008 CLIENT->STDIO {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"console_run","arguments":{"text":"uptime"}}}
+# No UI is attached to a stdio session, so a permit tool is refused rather than silently allowed.
+0009 STDIO->CLIENT {"jsonrpc":"2.0","id":4,"error":{"code":-32000,"message":"console_run needs a permit and no UI is attached"}}

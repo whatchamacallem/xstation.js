@@ -1,0 +1,191 @@
+{
+  "browser": {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "result": {
+      "tools": [
+        {
+          "name": "sql_run",
+          "description": "Run SQL statements in one transaction on a browser database. DDL is allowed: you are the database administrator of the universe and its regions.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "db": {"type": "string"},
+              "statements": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "sql": {"type": "string"},
+                    "params": {"type": "array"}
+                  },
+                  "required": ["sql", "params"]
+                }
+              }
+            },
+            "required": ["db", "statements"]
+          }
+        },
+        {
+          "name": "universe_create",
+          "description": "Create a universe: a document metaverse/universe/<name> and a database <name> for its experience-wide tables.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "title": {"type": "string"}
+            },
+            "required": ["name", "title"]
+          }
+        },
+        {
+          "name": "region_create",
+          "description": "Create a region of a universe: a database <universe>/<name> for its entities, attached to the universe while the player is there.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "universe": {"type": "string"},
+              "name": {"type": "string"}
+            },
+            "required": ["universe", "name"]
+          }
+        },
+        {
+          "name": "doc_get",
+          "description": "Read a document version by Document-Ref, <db>/<kind>/<name>/<version>.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "ref": {"type": "string"}
+            },
+            "required": ["ref"]
+          }
+        },
+        {
+          "name": "doc_put",
+          "description": "Write a new version of a document at path <db>/<kind>/<name> and move its head. Returns the new Document-Ref.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "path": {"type": "string"},
+              "body": {"type": "object"}
+            },
+            "required": ["path", "body"]
+          }
+        },
+        {
+          "name": "doc_head",
+          "description": "The current Document-Ref of a path.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "path": {"type": "string"}
+            },
+            "required": ["path"]
+          }
+        },
+        {
+          "name": "kv_list",
+          "description": "List keys under a prefix with sizes and hashes.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "db": {"type": "string"},
+              "prefix": {"type": "string"}
+            },
+            "required": ["db", "prefix"]
+          }
+        },
+        {
+          "name": "scene_enter",
+          "description": "Make a scene the player's current scene: writes the world document and attaches the scene's region.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "scene": {"type": "string"}
+            },
+            "required": ["scene"]
+          }
+        },
+        {
+          "name": "image_make",
+          "description": "Generate an image from a prompt and keep it under a media key. Returns the key, size and sha256.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "prompt": {"type": "string"},
+              "key": {"type": "string"}
+            },
+            "required": ["prompt", "key"]
+          }
+        },
+        {
+          "name": "render",
+          "description": "Show an image by media key with a subtitle.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "image": {"type": "string"},
+              "subtitle": {"type": "string"}
+            },
+            "required": ["subtitle"]
+          }
+        }
+      ]
+    }
+  },
+  "server": {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "result": {
+      "tools": [
+        {
+          "name": "console_run",
+          "description": "Run one command line in the debug console's dash and return its output until the next prompt.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "text": {"type": "string"},
+              "timeout_seconds": {"type": "number"}
+            },
+            "required": ["text"]
+          },
+          "_meta": {"xsjs": {"permit": true}}
+        },
+        {
+          "name": "log_tail",
+          "description": "The last lines of the server log.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "count": {"type": "integer"}
+            },
+            "required": ["count"]
+          }
+        },
+        {
+          "name": "source_put",
+          "description": "Replace one file of the server's Python package. Debug mode.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "text": {"type": "string"}
+            },
+            "required": ["name", "text"]
+          },
+          "_meta": {"xsjs": {"permit": true}}
+        },
+        {
+          "name": "system_restart",
+          "description": "Restart the server process in place, keeping its pid. Debug mode.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {}
+          },
+          "_meta": {"xsjs": {"permit": true}}
+        }
+      ]
+    }
+  }
+}

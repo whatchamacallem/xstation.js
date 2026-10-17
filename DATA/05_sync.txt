@@ -1,0 +1,24 @@
+# Steady state replication: a push after a write, a pull after a server-side change.
+#
+# The player's preferences change: Always Allow for server.console_run. One doc.put, one push.
+0001 AI->WASM {"0":{"t":"doc.put","i":1},"path":"metaverse/preferences/main","body":{"refs":[],"always_allow":["server.console_run"]}}
+0002 WASM->AI {"0":{"t":"doc.put","r":1},"ref":"metaverse/preferences/main/2","seq":10}
+0003 AI->SERVER {"0":{"t":"sync.push","i":1},"db":"metaverse","seq":10,"kv":[],"gone":[],"doc":[{"path":"metaverse/preferences/main","version":2,"body":{"refs":[],"always_allow":["server.console_run"]},"seq":10}],"head":[{"path":"metaverse/preferences/main","version":2}],"turn":[],"blobs":[]}
+0004 SERVER->AI {"0":{"t":"sync.push","r":1},"seq":10}
+# An external MCP client over stdio put a script into the server's files. The server tells every connected tab.
+0005 SERVER->AI {"0":{"t":"kv.changed"},"db":"files","seq":2}
+0006 AI->SERVER {"0":{"t":"sync.pull","i":2},"db":"files","since":1}
+0007 SERVER->AI {"0":{"t":"sync.pull","r":2},"db":"files","seq":2,"kv":[{"k":"castle/gatehouse/step/doors.js","size":213,"sha256":"2e63ad2c0ed4e1528c4791a3a321c583c5ac673e77ed51d17032a12cef0e864f","seq":2}],"gone":[],"doc":[],"head":[],"turn":[]}
+0008 AI->SERVER {"0":{"t":"kv.get","i":3,"k":"castle/gatehouse/step/doors.js"},"db":"files"}
+0009 SERVER->AI {"0":{"t":"kv.get","r":3,"b":1},"1":{"s":213},"size":213,"sha256":"2e63ad2c0ed4e1528c4791a3a321c583c5ac673e77ed51d17032a12cef0e864f"}<1 blob>
+0010 AI->WASM {"0":{"t":"sync.apply","i":2,"b":1},"1":{"s":213},"db":"files","seq":2,"kv":[{"k":"castle/gatehouse/step/doors.js","size":213,"sha256":"2e63ad2c0ed4e1528c4791a3a321c583c5ac673e77ed51d17032a12cef0e864f","seq":2}],"gone":[],"doc":[],"head":[],"turn":[],"blobs":["2e63ad2c0ed4e1528c4791a3a321c583c5ac673e77ed51d17032a12cef0e864f"]}<1 blob>
+0011 WASM->AI {"0":{"t":"sync.apply","r":2},"seq":2}
+# A big value: the decoder streams it to the cache as it arrives; the handler renames the file into place by hash.
+0012 AI->WASM {"0":{"t":"cache.open","i":3}}
+0013 WASM->AI {"0":{"t":"cache.open","r":3},"handle":"cache-1"}
+0014 AI->WASM {"0":{"t":"cache.append","b":1},"1":{"s":131072},"handle":"cache-1"}<1 blob>
+0015 AI->WASM {"0":{"t":"cache.append","b":1},"1":{"s":131072},"handle":"cache-1"}<1 blob>
+0016 AI->WASM {"0":{"t":"cache.close","i":4},"handle":"cache-1"}
+0017 WASM->AI {"0":{"t":"cache.close","r":4},"sha256":"2312394bd99545d9de131c24efb781e765ac1aec243f2ed9347597a793a415e9"}
+0018 AI->WASM {"0":{"t":"kv.put","i":5,"k":"castle/gatehouse/map.bin"},"db":"files","handle":"cache-1"}
+0019 WASM->AI {"0":{"t":"kv.put","r":5},"sha256":"2312394bd99545d9de131c24efb781e765ac1aec243f2ed9347597a793a415e9","seq":3}

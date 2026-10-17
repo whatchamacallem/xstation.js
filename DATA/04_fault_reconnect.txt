@@ -1,0 +1,33 @@
+# A server fault, the disconnect, and the reconnect that reconciles.
+#
+# A doc.get names a version that does not exist. First failure only: one error line, exit 1.
+0001 AI->SERVER {"0":{"t":"doc.get","i":1},"ref":"metaverse/world/main/9"}
+0002 SERVER->AI {"0":{"t":"error","r":1},"message":"doc.get: metaverse/world/main/9: no such version","stack":"Traceback (most recent call last):\n  File \"/home/t/.cache/xsjs/main_loop.py\", line 88, in loop_run\n    reply = dispatch.line_dispatch(line)\n  File \"/home/t/.cache/xsjs/dispatch.py\", line 41, in line_dispatch\n    return fn(line, **payload_of(line))\n  File \"/home/t/.cache/xsjs/engine_doc.py\", line 17, in doc_get\n    body = store.doc_get(ref)\n  File \"/home/t/.cache/xsjs/substrate.py\", line 203, in doc_get\n    raise KeyError(i18n(\"doc_missing\", ref))\nKeyError: 'doc.get: metaverse/world/main/9: no such version'"}
+0003 TTYD->LOG process exited with code 1, pid: 4242
+# Linux ttyd ends the connection with no close frame; the browser reports 1006.
+0004 TTYD->AI WebSocket closed code 1006 wasClean false
+0005 AI->UI {"0":{"t":"fault"},"thread":"server","message":"doc.get: metaverse/world/main/9: no such version","stack":"Traceback (most recent call last):\n  File \"/home/t/.cache/xsjs/main_loop.py\", line 88, in loop_run\n    reply = dispatch.line_dispatch(line)\n  File \"/home/t/.cache/xsjs/dispatch.py\", line 41, in line_dispatch\n    return fn(line, **payload_of(line))\n  File \"/home/t/.cache/xsjs/engine_doc.py\", line 17, in doc_get\n    body = store.doc_get(ref)\n  File \"/home/t/.cache/xsjs/substrate.py\", line 203, in doc_get\n    raise KeyError(i18n(\"doc_missing\", ref))\nKeyError: 'doc.get: metaverse/world/main/9: no such version'"}
+0006 AI->UI {"0":{"t":"status"},"state":"closed","detail":"1006"}
+# The UI shows the fault and Reconnect. The user presses it; nothing reloads the page.
+0007 UI->AI {"0":{"t":"wire.reconnect","i":1}}
+# ttyd: the WebSocket, then its own protocol before JSLB.
+0008 AI->TTYD GET /token HTTP/1.1
+0009 TTYD->AI 200 {"token":""}
+0010 AI->TTYD GET /ws HTTP/1.1 Upgrade: websocket Sec-WebSocket-Protocol: tty
+0011 TTYD->AI 101 Switching Protocols Sec-WebSocket-Protocol: tty
+0012 AI->TTYD {"AuthToken":"","columns":80,"rows":24}
+0013 TTYD->AI 1python3 /home/t/.cache/xsjs/bootstrap.py --root /home/t/.cache/xsjs (xt)
+0014 TTYD->AI 2{}
+# server: tty.setraw on its pty. From here every message is '0' followed by JSLB bytes; the '0' is not shown.
+0015 SERVER->AI {"0":{"t":"hello","i":1},"bootstrap":"/home/t/.cache/xsjs/bootstrap.py","sha256":"ab30a921f2faeb729bc35cdbc0a4f5a8bb70c95624eb5bfc2ff778db2cb22f88","pid":4250,"python":"3.14.4","sqlite":"3.46.1","root":"/home/t/.cache/xsjs","debug":false,"settings":{"version":0,"port_windows":5768,"port_wsl":5769,"line_max":1048576,"blob_max":1073741824,"overflow_bytes":131072,"chunk_bytes":1048576,"srv_buf_size":1048576,"log_ring":1000,"media_db_bytes":268435456,"files_browser_bytes":1073741824,"provider":{"scripted":true,"base_url":"https://api.x.ai/v1","chat_model":"grok-4","image_model":"grok-2-image","timeout_seconds":120},"mcp_protocol_version":"2025-06-18","console_enabled":true,"console_columns":120,"console_rows":40,"log_forward":true,"long_task_ms":5},"seq":{"metaverse":9,"files":1,"castle":0,"castle/gatehouse":1},"console":{"open":false},"secrets":{"provider_key":"xai-SYNTHETIC-KEY"}}
+0016 AI->SERVER {"0":{"t":"hello","r":1},"sha256":"8ad35af9da90f18cd8108fe6543ba4990b7dede4b6811373d4c150a9d65745e5","tab":"t-7f3a9c","seq":{"metaverse":9,"files":0,"castle":0,"castle/gatehouse":1}}
+# Reconciliation: files differs, 1 on the server and 0 here; the browser pulls, lacks the hash, fetches it, applies.
+0017 AI->SERVER {"0":{"t":"sync.pull","i":2},"db":"files","since":0}
+0018 SERVER->AI {"0":{"t":"sync.pull","r":2},"db":"files","seq":1,"kv":[{"k":"castle/gatehouse/arrival.png","size":91,"sha256":"d4270cb3908ae3f796665c14721e6d14728d75ba314b01b5094ee8988359c537","seq":1}],"gone":[],"doc":[],"head":[],"turn":[]}
+# The scene's refs name the image, so the browser's files keeps it; otherwise the row alone would do.
+0019 AI->SERVER {"0":{"t":"kv.get","i":3,"k":"castle/gatehouse/arrival.png"},"db":"files"}
+0020 SERVER->AI {"0":{"t":"kv.get","r":3,"b":1},"1":{"s":91},"size":91,"sha256":"d4270cb3908ae3f796665c14721e6d14728d75ba314b01b5094ee8988359c537"}<1 blob>
+0021 AI->WASM {"0":{"t":"sync.apply","i":1,"b":1},"1":{"s":91},"db":"files","seq":1,"kv":[{"k":"castle/gatehouse/arrival.png","size":91,"sha256":"d4270cb3908ae3f796665c14721e6d14728d75ba314b01b5094ee8988359c537","seq":1}],"gone":[],"doc":[],"head":[],"turn":[],"blobs":["d4270cb3908ae3f796665c14721e6d14728d75ba314b01b5094ee8988359c537"]}<1 blob>
+0022 WASM->AI {"0":{"t":"sync.apply","r":1},"seq":1}
+0023 AI->UI {"0":{"t":"wire.reconnect","r":1},"bootstrap":"/home/t/.cache/xsjs/bootstrap.py","sha256":"ab30a921f2faeb729bc35cdbc0a4f5a8bb70c95624eb5bfc2ff778db2cb22f88","pid":4250,"python":"3.14.4","sqlite":"3.46.1","debug":false,"page_sha256":"8ad35af9da90f18cd8108fe6543ba4990b7dede4b6811373d4c150a9d65745e5","tab":"t-7f3a9c"}
+0024 AI->UI {"0":{"t":"status"},"state":"ready","detail":""}
