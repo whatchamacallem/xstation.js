@@ -186,6 +186,21 @@ Here are ways to avoid these.
   reason. Code is cheaper than negotiating requirements, and so requirements
   alignment needs to be prioritized over the cost of rewrites.
 
+When asked to write a planning doc, read all the engineering notes related to
+the conversation to understand the evolution of the users requirements while
+responding to questions. Analyze the users requirements throughout the process
+in those planning docs. Separate the requirements into:
+
+- `A`: Request unsatisfied or modified without cause.
+- `B`: Request unsatisfied or modified with cause but without confirmation.
+- `C`: Request confirmed withdrawn or modified.
+- `D`: Request satisfied without modification or withdrawal.
+
+Add both `A` and `B` class requirements in a section to the planning doc at the
+end explaining whether you were able to satisfy the requirements in the new
+plan, as is preferable, or if multiple choice questions have to be answered to
+try to solve for all the requirements simultaneously.
+
 ## Project Direction
 
 ### 1 What the project should stop depending on
