@@ -24,7 +24,8 @@ user with the postmortem text directly in the conversation as well as
 providing a link to the task doc. Provide a single sentence bug, task or other
 description alongside every in-conversation postmortem reference to a numbered
 item that is not itself in the postmortem. Referenced items require enough
-context so that no further lookup is required.
+context so that no further lookup is required. The task logs are not checked
+for column width.
 
 - Lock files by appending a per-task suffix to the filename for the duration.
 - The Lookup Accelerator may only contain information that an AI agent wouldn't
