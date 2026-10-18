@@ -81,9 +81,10 @@ manager without request.
   order on one line, or on the fewest lines that stay within 79 columns.
   `from` is banned, except that `collections.abc` and `typing` always use
   `from`, each on one line with its names in alphabetical order.
-- Adding anything to the reformat whitelist requires the maintainer's
-  permission. `.md` files are never added automatically. Top-level files
-  are named explicitly; globs are used only for files in subdirectories.
+- New source files are added to the reformat whitelist without asking, when
+  they are created: top-level files by name, files in subdirectories by
+  glob. `.md` files are never added. A source file the whitelist misses is a
+  discrepancy to fix, not a file to leave unchecked.
 - Authorship is a legal issue. Ascribing authorship to a non-person, such as
   a `Co-Authored-By` trailer or a generated-by line in a commit or pull
   request, is a violation of the project rules.
