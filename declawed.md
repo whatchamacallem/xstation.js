@@ -101,7 +101,7 @@ manager without request.
 
 Accidental-Requirements, Requirements-Data-Loss, and Requirements-Refusal are
 a set of processes observed in multiple case studies that can chain together
-to make it impossible to specify requirements to an agent al all.
+to make it impossible to specify requirements to an agent at all.
 
 Accidental-Requirements starts when an agent writes code because that code is
 handy, illustrative or already lying around, not because the design called for
@@ -116,7 +116,7 @@ The case studies showed three forms of it:
 - One planning session surveyed the existing code before writing the plan, and
   the plan carried an older tool's command loop and commands into the new
   design. A decision made for a different problem rode in on the strength of
-  existing, and a later round of questions had to remove it.
+  its mere existence, and a later round of questions had to remove it.
 - Another test plan proposed reusing an existing test driver, the stated
   reason being that the driver existed. That is reuse chosen by availability,
   not by the test plan.
@@ -126,10 +126,10 @@ The case studies showed three forms of it:
 
 The Requirements-Data-Loss process has been observed as a compounding input
 step to the Accidental-Requirements process. Accidental-Requirements can
-operate independently, the pair is simply noted here because it is a wild
+operate independently; the pair is simply noted here because it is a wild
 ride.
 
-Requirements-Data-Loss happens when planner reasons its way to a good API,
+Requirements-Data-Loss happens when a planner reasons its way to a good API,
 decides it is too much for the moment, writes down the smaller one, and leaves
 at most a clause saying the larger one is for later.
 
@@ -137,9 +137,9 @@ at most a clause saying the larger one is for later.
   not in the questions, not in the code. The maintainer is left holding the
   wrong interface with no record of the right one to judge it against, and the
   next session cannot tell a better design was ever on the table.
-- In the case studies requirements were both dropped without a trace from the
-  planning process, and then then incorrect requirements copied into the next
-  plan and from there the code as if settled.
+- In the case studies, requirements were both dropped without a trace from the
+  planning process, and then incorrect requirements were copied into the next
+  plan and from there into the code as if settled.
 - The only recovery is for the maintainer to rediscover the design, by keeping
   engineering logs and doing case studies on all planning.
 
@@ -148,9 +148,9 @@ adding some. A deferred feature with its full design written beside the
 deferral costs the maintainer one question. A deferred feature with its design
 discarded costs the design.
 
-Put more simply, first the Requirements-Data-Loss knowingly produces the wrong
-API. Then the Accidental-Requirements process ossifies it. Because once the
-reduced API is in the tree that is the thing later sessions preserve.
+Put more simply, first Requirements-Data-Loss knowingly produces the wrong
+API. Then the Accidental-Requirements process ossifies it, because once the
+reduced API is in the tree, that is the thing later sessions preserve.
 
 Requirements-Refusal is when the agent decides not to follow instructions and
 silently carries out unrequested (and thereby easily incorrect) work instead.
@@ -167,7 +167,7 @@ unsatisfied requests accumulate and the user becomes frustrated and confused.
 
 Please consider the effects of Requirements-Data-Loss,
 Accidental-Requirements, and Requirements-Refusal at the same time. It is like
-requesting a new sky scraper and never getting a call back because they didn't
+requesting a new skyscraper and never getting a call back because they didn't
 think you knew how deep a hole they had to dig.
 
 Here are ways to avoid these.
@@ -179,11 +179,11 @@ Here are ways to avoid these.
   design decision found there is checked against the plan before anything is
   built on it.
 - Prevent Requirements-Data-Loss by writing APIs and architecture for as much
-  as possible from the top down before ever writing any code.
+  of the system as possible, from the top down, before ever writing any code.
 - Write software from the bottom up using unit tests first, and integration
   tests second. Once the APIs are done, the unit tests begin.
 - Reuse is chosen by the plan, never by availability. "It exists" is not a
-  reason. Code is cheaper than negotiating requirements and so requirements
+  reason. Code is cheaper than negotiating requirements, and so requirements
   alignment needs to be prioritized over the cost of rewrites.
 
 ## Project Direction
