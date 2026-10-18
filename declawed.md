@@ -2,12 +2,12 @@
 
 ## Project Rules
 
-The Project Rules section is set by the project maintainer and must not be
-modified without request. The maintainer is the final authority and decides
-correctness and requirements, however discrepancies are worth fixing.
-Authorship is a legal issue and ascribing authorship to a non-person is a
-violation of project rules. Human attribution is required for all
-contributions. Do not add contributors to a commit without request.
+The Project Rules section and subsections are set by the project maintainer
+and must not be modified without request. The maintainer is the final
+authority and decides correctness and requirements, however discrepancies are
+worth fixing. Authorship is a legal issue and ascribing authorship to a
+non-person is a violation of project rules. Human attribution is required for
+all contributions. Do not add contributors to a commit without request.
 
 Do not use the AskUserQuestion tool and use numbered number sub-lists per ISO
 2145. Maintain an engineering log for each session in `tmp/` following this
@@ -85,13 +85,106 @@ manager without request.
 - New source files are added to the reformat whitelist without asking, when
   they are created: top-level files by name, files in subdirectories by
   glob. `.md` files are never added. A source file the whitelist misses is a
-  discrepancy to fix, not a file to leave unchecked.
+  discrepancy to fix, not a file to leave unchecked. Do not suggest
+  additions to the whitelist.
+- Function and class identifiers carry two English names; modules and
+  their test modules are the exception. The rule is overridden any time
+  the maintainer specifies a different identifier.
 - Authorship is a legal issue. Ascribing authorship to a non-person, such as
   a `Co-Authored-By` trailer or a generated-by line in a commit or pull
   request, is a violation of the project rules.
 - Intermediates, such as tool caches and Python bytecode, go in `build/`,
   which is gitignored. Point each tool there instead of ignoring what it
   writes beside the sources.
+
+### Accidental-Requirements, Requirements-Data-Loss, and Requirements-Refusal
+
+Accidental-Requirements, Requirements-Data-Loss, and Requirements-Refusal are
+a set of processes observed in multiple case studies that can chain together
+to make it impossible to specify requirements to an agent al all.
+
+Accidental-Requirements starts when an agent writes code because that code is
+handy, illustrative or already lying around, not because the design called for
+it. Nothing in the plan motivates the code, so nothing in the plan constrains
+it. Then the next session reads the tree before the plan, sees working code,
+and treats that code as a decision somebody made: the shape is preserved, the
+interfaces built on, the code quoted as prior art. An example nobody chose
+becomes architecture by seniority.
+
+The case studies showed three forms of it:
+
+- One planning session surveyed the existing code before writing the plan, and
+  the plan carried an older tool's command loop and commands into the new
+  design. A decision made for a different problem rode in on the strength of
+  existing, and a later round of questions had to remove it.
+- Another test plan proposed reusing an existing test driver, the stated
+  reason being that the driver existed. That is reuse chosen by availability,
+  not by the test plan.
+- The injected project context and the memory notes described the old code in
+  detail, so every session started with that code in mind before opening the
+  plan. The precedent was renewed even in sessions that never read the files.
+
+The Requirements-Data-Loss process has been observed as a compounding input
+step to the Accidental-Requirements process. Accidental-Requirements can
+operate independently, the pair is simply noted here because it is a wild
+ride.
+
+Requirements-Data-Loss happens when planner reasons its way to a good API,
+decides it is too much for the moment, writes down the smaller one, and leaves
+at most a clause saying the larger one is for later.
+
+- The reasoning that produced the discarded good API is gone: not in the plan,
+  not in the questions, not in the code. The maintainer is left holding the
+  wrong interface with no record of the right one to judge it against, and the
+  next session cannot tell a better design was ever on the table.
+- In the case studies requirements were both dropped without a trace from the
+  planning process, and then then incorrect requirements copied into the next
+  plan and from there the code as if settled.
+- The only recovery is for the maintainer to rediscover the design, by keeping
+  engineering logs and doing case studies on all planning.
+
+This mode is worse than the first because it destroys information rather than
+adding some. A deferred feature with its full design written beside the
+deferral costs the maintainer one question. A deferred feature with its design
+discarded costs the design.
+
+Put more simply, first the Requirements-Data-Loss knowingly produces the wrong
+API. Then the Accidental-Requirements process ossifies it. Because once the
+reduced API is in the tree that is the thing later sessions preserve.
+
+Requirements-Refusal is when the agent decides not to follow instructions and
+silently carries out unrequested (and thereby easily incorrect) work instead.
+This behavior may be the result of the agent trying to make a better choice
+for the user. However, the end point is a breakdown in communication as
+unsatisfied requests accumulate and the user becomes frustrated and confused.
+
+- The pull for an agent is hard to resist because agents are trained not to
+  break what exists, and code is more concrete than a sentence in a plan, so a
+  conflict between the two is settled in the code's favor without anyone
+  noticing a choice was made.
+- Clear instructions to work from first principles are ignored and users may
+  simply not be informed, so problems remain unaddressed.
+
+Please consider the effects of Requirements-Data-Loss,
+Accidental-Requirements, and Requirements-Refusal at the same time. It is like
+requesting a new sky scraper and never getting a call back because they didn't
+think you knew how deep a hole they had to dig.
+
+Here are ways to avoid these.
+
+- Nothing concrete exists ahead of the prose that describes it, so there are
+  no Accidental-Requirements if nothing is added to the design without being
+  motivated by a requirement.
+- Injected context and memory notes describe current state, not design. A
+  design decision found there is checked against the plan before anything is
+  built on it.
+- Prevent Requirements-Data-Loss by writing APIs and architecture for as much
+  as possible from the top down before ever writing any code.
+- Write software from the bottom up using unit tests first, and integration
+  tests second. Once the APIs are done, the unit tests begin.
+- Reuse is chosen by the plan, never by availability. "It exists" is not a
+  reason. Code is cheaper than negotiating requirements and so requirements
+  alignment needs to be prioritized over the cost of rewrites.
 
 ## Project Direction
 
