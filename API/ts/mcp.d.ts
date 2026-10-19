@@ -34,7 +34,11 @@ declare namespace mcp {
   interface Tool {
     name: string;
     description: string;
-    inputSchema: { type: "object"; properties: { [key: string]: unknown }; required?: string[] };
+    inputSchema: {
+      type: "object";
+      properties: { [key: string]: unknown };
+      required?: string[];
+    };
     _meta?: { xsjs: { permit: boolean } };
   }
 
@@ -48,51 +52,47 @@ declare namespace mcp {
     isError?: boolean;
   }
 
-  // The methods served and called: `initialize`,
-  // `notifications/initialized`, `ping`, `tools/list`, `tools/call`.
-  // Revision `settings.mcp_protocol_version`; capability `tools` only.
+  // The revision pinned, a constant: "2025-06-18". The methods served
+  // and called: `initialize`, `notifications/initialized`, `ping`,
+  // `tools/list`, `tools/call`; capability `tools` only.
+  const constants: { readonly protocol_version: string };
 
-  interface Transport {
-    send(message: Message): void;
-    receive(fn: (message: Message) => void): void;
-  }
-
-  // Same thread: a pair of ports wired to each other.
-  class LocalTransport implements Transport {
-    send(message: Message): void;
-    receive(fn: (message: Message) => void): void;
-    // The other end.
-    peer(): Transport;
-  }
-
-  // Over the wire: each message is the payload of one `mcp` line.
-  class JslbTransport implements Transport {
-    constructor(tasks: queue.TaskQueue);
-    send(message: Message): void;
-    receive(fn: (message: Message) => void): void;
-  }
+  // A tool function runs inside the `mcp` line's handler: it returns the
+  // result, or a sleep whose wake produces the result.
+  type ToolFn = (
+    args: { [key: string]: unknown }
+  ) => ToolResult | dispatch.Sleep;
 
   class Server {
-    constructor(name: string, version: string, transport: Transport);
-    tool_register(tool: Tool, fn: (args: { [key: string]: unknown }) => Promise<ToolResult>): void;
+    constructor(name: string, version: string);
+    tool_register(tool: Tool, fn: ToolFn): void;
     // Handles one message; a method's throw becomes an error response.
-    message_handle(message: Message): Promise<Message | undefined>;
+    message_handle(message: Message): Message | dispatch.Sleep | undefined;
   }
 
+  // The client sends each message as the payload of an `mcp` line on a
+  // port of the queue and reads the response from the wake.
   class Client {
-    constructor(name: string, version: string, transport: Transport);
-    // `initialize`, then `notifications/initialized`; resolves with the
-    // server's capabilities.
-    initialize_send(): Promise<{ [key: string]: unknown }>;
-    tools_list(): Promise<Tool[]>;
-    tool_call(name: string, args: { [key: string]: unknown }): Promise<ToolResult>;
+    constructor(
+      name: string,
+      version: string,
+      tasks: queue.TaskQueue,
+      owner: queue.ThreadName
+    );
+    // Submits `initialize`; the wake carries the server's capabilities,
+    // after which `notifications/initialized` is sent.
+    initialize_send(): number;
+    tools_list(): number;
+    tool_call(name: string, args: { [key: string]: unknown }): number;
+    // Reads the result out of the reply line a wake delivered.
+    result_of(reply: lines.Line): ToolResult;
   }
 
   // The agent's view of several servers as one flat tool list, each
   // tool named `<prefix>.<name>`.
   class ClientSet {
     client_add(prefix: string, client: Client): void;
-    tools_list(): Promise<Tool[]>;
-    tool_call(name: string, args: { [key: string]: unknown }): Promise<ToolResult>;
+    tools_cached(): Tool[];
+    tool_call(name: string, args: { [key: string]: unknown }): number;
   }
 }

@@ -1,0 +1,16 @@
+# The AI edits a script, runs it, and debugs it; each is a tool call and each commit is forwarded.
+#
+0001 AGENT->MCP {"0":{"t":"mcp","i":1},"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"browser.kv_put","arguments":{"ref":"/_files/script/step_tide.js","text":"// Advances the tide by args.hours in the region table of the world.\nconst results = engine.store.sql_run(\"castle_world\", [\n  {sql: \"UPDATE region SET tide = tide + ? WHERE name = ?\",\n    params: [args.hours, \"castle_gatehouse\"]},\n]);\nengine.log(1, \"tide advanced by \" + args.hours);\nreturn {changes: results[0].changes};\n"}}}
+0002 AI->SERVER {"0":{"t":"kv.put","i":1,"k":"/_files/script/step_tide.js","b":1},"1":{"s":322},"since":4}<blob "n"=1>
+0003 SERVER->AI {"0":{"t":"kv.put","r":1},"sha256":"dbc909cf0e2e7954d586c06b3291728e527d5dee4c109409fcb501e200756626","seq":5}
+0004 MCP->AGENT {"0":{"t":"mcp","r":1},"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"{\"sha256\":\"dbc909cf0e2e7954d586c06b3291728e527d5dee4c109409fcb501e200756626\",\"seq\":5}"}]}}
+0005 AGENT->MCP {"0":{"t":"mcp","i":2},"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"browser.script_run","arguments":{"name":"step_tide","args":{"hours":1}}}}
+# AI: the script runs inside the task; its commit is forwarded.
+0006 AI->SERVER {"0":{"t":"sql.run","i":2},"db":"castle_world","statements":[{"sql":"UPDATE region SET tide = tide + ? WHERE name = ?","params":[1,"castle_gatehouse"]}],"since":2}
+0007 SERVER->AI {"0":{"t":"sql.run","r":2},"results":[{"columns":[],"rows":[],"changes":1}],"seq":3}
+0008 MCP->AGENT {"0":{"t":"mcp","r":2},"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\"value\":{\"changes\":1},\"lines\":[{\"at\":1760800000000,\"level\":1,\"text\":\"tide advanced by 1\"}]}"}]}}
+0009 AGENT->MCP {"0":{"t":"mcp","i":3},"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"browser.script_debug","arguments":{"name":"step_tide","args":{"hours":1}}}}
+# AI: the same run at verbose level 2 traces every substrate call.
+0010 AI->SERVER {"0":{"t":"sql.run","i":3},"db":"castle_world","statements":[{"sql":"UPDATE region SET tide = tide + ? WHERE name = ?","params":[1,"castle_gatehouse"]}],"since":3}
+0011 SERVER->AI {"0":{"t":"sql.run","r":3},"results":[{"columns":[],"rows":[],"changes":1}],"seq":4}
+0012 MCP->AGENT {"0":{"t":"mcp","r":3},"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"{\"value\":{\"changes\":1},\"lines\":[{\"at\":1760800001000,\"level\":2,\"text\":\"substrate sql_run castle_world 1 statement\"},{\"at\":1760800001001,\"level\":1,\"text\":\"tide advanced by 1\"},{\"at\":1760800001002,\"level\":2,\"text\":\"forward sql.run castle_world since 3\"}]}"}]}}

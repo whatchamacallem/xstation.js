@@ -1,17 +1,25 @@
 declare namespace boot {
-  // The one bundle runs on three threads. `boot_run` reads `self.name`:
-  // undefined on the main thread, "ai" or "wasm" in a worker.
+  // The one bundle runs on two threads. `boot_run` reads `self.name`:
+  // undefined on the main thread, "ai" in the worker.
   function boot_run(): void;
 
-  // UI: builds the DOM, creates the workers from the bundle's Blob URL,
-  // installs log capture, routes input, paints renders, hosts the
-  // console view and the fault display.
+  // UI: error_overlay installed first; builds the DOM, creates the AI
+  // worker from the bundle's Blob URL, owns the UI queue with its media
+  // port and its DOM port, routes input, paints renders, hosts the
+  // console view and the overlays, shows permission requests.
   function page_main(): void;
 
-  // AI: owner table, store proxy, wire, MCP servers and clients, agent,
-  // replication scheduler.
-  function worker_ai_main(): void;
+  // The DOM port of the UI thread: its listeners post `ui.input` as
+  // notifications, and it answers `dom.choice` when a button of the
+  // permission request is clicked. Listeners are events, not promises.
+  class DomPort implements queue.Port {
+    constructor(container: HTMLElement);
+    line_post(line: lines.Line, transfer: ArrayBuffer[]): void;
+    line_receive(fn: (line: lines.Line) => void): void;
+  }
 
-  // WASM: sqlite3.wasm, the store, its handlers.
-  function worker_wasm_main(): void;
+  // AI: the owner table, the store, the wire and console ports, the
+  // HTTP or scripted port, the MCP servers and clients, the agent, the
+  // forwarding of replication.
+  function worker_ai_main(): void;
 }

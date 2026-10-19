@@ -1,12 +1,16 @@
 declare namespace unittest {
-  // The subset of Python's unittest the tests use, same names.
+  // The subset of Python's unittest the tests use, same names, all
+  // synchronous.
   class TestCase {
-    setUp(): void | Promise<void>;
-    tearDown(): void | Promise<void>;
+    setUp(): void;
+    tearDown(): void;
     assertEqual(first: unknown, second: unknown, message?: string): void;
     assertTrue(value: unknown, message?: string): void;
     assertFalse(value: unknown, message?: string): void;
-    assertRaises(error: new (...args: never[]) => Error, fn: () => unknown): void;
+    assertRaises(
+      error: new (...args: never[]) => Error,
+      fn: () => unknown
+    ): void;
     assertIn(member: unknown, container: unknown, message?: string): void;
     skipTest(reason: string): never;
     fail(message: string): never;

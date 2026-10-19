@@ -74,6 +74,9 @@ _POWERSHELL_TOKEN_BREAK = " \t\n;(){}|&,="
 
 _RUFF_CACHE_PATH = os.path.join(_BUILD_PATH, "ruff_cache")
 
+# The one ruff configuration, for files outside python/ too.
+_RUFF_CONFIG_PATH = os.path.join(_ROOT_PATH, "python", "pyproject.toml")
+
 # A shell here document's start: `<<`, `-` to strip tabs, a quote, its word.
 _SHELL_HEREDOC = re.compile(r"<<(-?)[ \t]*(['\"]?)(\w+)\2")
 
@@ -505,7 +508,15 @@ def main() -> None:
     # With no files, ruff checks the directory.
     if python_paths:
         subprocess.run(
-            ["ruff", "check", "--cache-dir", _RUFF_CACHE_PATH, *python_paths],
+            [
+                "ruff",
+                "check",
+                "--config",
+                _RUFF_CONFIG_PATH,
+                "--cache-dir",
+                _RUFF_CACHE_PATH,
+                *python_paths,
+            ],
             check=True,
         )
 

@@ -1,6 +1,7 @@
 declare namespace provider_script {
-  // A scripted provider for tests and transcripts: no network, no AI.
-  // The latest user message is one integer that picks a reply from the
+  // A scripted provider for tests and transcripts: no network, no AI. A
+  // port that answers the `http.request` lines of provider.ts. The
+  // latest user message is one integer that picks a reply from the
   // current node; a tool result moves to the node the reply names.
 
   interface ScriptReply {
@@ -21,15 +22,17 @@ declare namespace provider_script {
   interface Script {
     start: string;
     nodes: { [node: string]: ScriptNode };
-    // Every image request answers with this, a URL the UI can fetch.
-    image: provider.ImageResponse;
   }
 
-  class ScriptProvider implements provider.Provider {
+  class ScriptPort implements queue.Port {
     constructor(script: Script);
-    chat_complete(request: provider.ChatRequest): Promise<provider.ChatResponse>;
-    image_generate(request: provider.ImageRequest): Promise<provider.ImageResponse>;
+    line_post(line: lines.Line, transfer: ArrayBuffer[]): void;
+    line_receive(fn: (line: lines.Line) => void): void;
     // The node the script is in, for assertions.
     node(): string;
   }
+
+  // The image every image request answers with: a low resolution PNG
+  // test pattern with hard pixel edges, drawn here, as `b64_json`.
+  function image_pattern(): Uint8Array;
 }

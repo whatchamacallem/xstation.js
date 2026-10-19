@@ -1,7 +1,7 @@
 declare namespace provider {
   // The generic chat completion protocol: `POST {base_url}/chat/completions`
-  // and `POST {base_url}/images/generations`, as xAI and OpenAI serve them
-  // and Anthropic's compatibility endpoint serves the first.
+  // and `POST {base_url}/images/generations`, as xAI serves them. xAI is
+  // the only provider tested.
 
   type Role = "system" | "user" | "assistant" | "tool";
 
@@ -44,7 +44,6 @@ declare namespace provider {
     id: string;
     model: string;
     choices: ChatChoice[];
-    usage?: { prompt_tokens: number; completion_tokens: number };
   }
 
   interface ImageRequest {
@@ -58,20 +57,24 @@ declare namespace provider {
     data: { url?: string; b64_json?: string; revised_prompt?: string }[];
   }
 
-  // The one door. `provider_script.ScriptProvider` implements it too.
-  interface Provider {
-    chat_complete(request: ChatRequest): Promise<ChatResponse>;
-    image_generate(request: ImageRequest): Promise<ImageResponse>;
-  }
+  // The one door. Each builds one `http.request` line with the key in
+  // the `Authorization` header; the caller submits it to the HTTP port,
+  // or to the scripted port, and sleeps on the id.
+  function chat_request(
+    base_url: string,
+    key: string,
+    request: ChatRequest
+  ): lines.Line;
+  function image_request(
+    base_url: string,
+    key: string,
+    request: ImageRequest
+  ): lines.Line;
 
-  // One HTTPS request per call from the AI worker, the key in the
-  // `Authorization` header, `timeout_seconds` from settings. A non-2xx
-  // status or a body that isn't the shape above throws.
-  class HttpProvider implements Provider {
-    constructor(base_url: string, key: string, timeout_seconds: number);
-    chat_complete(request: ChatRequest): Promise<ChatResponse>;
-    image_generate(request: ImageRequest): Promise<ImageResponse>;
-  }
+  // Read the reply line of a wake. A body that isn't the shape above
+  // throws.
+  function chat_response(reply: lines.Line): ChatResponse;
+  function image_response(reply: lines.Line): ImageResponse;
 
   // Converts MCP tools to function tools for the request.
   function tools_convert(tools: mcp.Tool[]): FunctionTool[];

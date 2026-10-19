@@ -3,6 +3,7 @@ clean.sh
 python/*.py
 python/*.html
 API/python/*.pyi
+API/python/tap/*.pyi
 DATA/*.py
 LICENSE.md
 README.md

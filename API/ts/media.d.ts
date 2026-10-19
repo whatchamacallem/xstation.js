@@ -1,18 +1,16 @@
 declare namespace media {
-  // The UI thread's media cache: decoded images by key within a byte
-  // budget, the newest kept. Nothing here touches SQLite.
-  class MediaDb {
-    constructor(budget_bytes: number);
-    // Downloads the URL, decodes it, keeps it under `key`.
-    media_fetch(url: string, key: string): Promise<lines.MediaReply>;
-    // Keeps bytes the AI worker sent.
-    media_store(key: string, data: Uint8Array): Promise<lines.MediaReply>;
+  // The UI thread's media cache: decoded images by Key-Value-Ref within
+  // a byte budget, the newest kept. Nothing here touches SQLite. One of
+  // the four modules allowed platform callbacks: the image decode and
+  // the download are events it turns into reply lines.
+  class MediaPort implements queue.Port {
+    constructor(budget_bytes: number, timeout_seconds: number);
+    // Answers `media.fetch` with the bytes as blob "1" once downloaded
+    // and decoded, and `media.store` once decoded; `error` on failure
+    // or timeout.
+    line_post(line: lines.Line, transfer: ArrayBuffer[]): void;
+    line_receive(fn: (line: lines.Line) => void): void;
     // The decoded image, or undefined once evicted.
-    media_get(key: string): ImageBitmap | undefined;
-    // The encoded bytes, for backup; throws when evicted.
-    media_bytes(key: string): Uint8Array;
-    // Evicts oldest first until under budget; returns the keys evicted.
-    media_evict(): string[];
-    bytes_held(): number;
+    image_get(k: lines.KvRef): ImageBitmap | undefined;
   }
 }

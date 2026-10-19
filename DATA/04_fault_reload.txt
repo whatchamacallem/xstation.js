@@ -1,0 +1,28 @@
+# A handler fault: the one error line, the exit, the close, the overlay, Reload.
+#
+0001 AGENT->MCP {"0":{"t":"mcp","i":1},"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"browser.kv_get","arguments":{"ref":"/metaverse/nothing"}}}
+# AI: the browser lacks the key, so the store asks the server for it before failing.
+0002 AI->SERVER {"0":{"t":"kv.get","i":1,"k":"/metaverse/nothing"}}
+0003 SERVER->AI {"0":{"t":"error","r":1},"message":"kv_get: /metaverse/nothing: no such key","stack":"Traceback (most recent call last):\n  File \"/home/t/.cache/xsjs/main_loop.py\", line 88, in loop_run\n    reply = dispatch.line_dispatch(line)\n  File \"/home/t/.cache/xsjs/engine_kv.py\", line 14, in kv_get\n    value = store.kv_get(ref)\nKeyError: '/metaverse/nothing'"}
+# server: exit 1. ttyd ends the connection without a close frame.
+0004 TTYD->AI closed 1006
+# AI: the wire port saw the error line before the close, so the fault carries it; without one the fault would name the code alone.
+0005 AI->UI {"0":{"t":"fault"},"thread":"server","message":"kv_get: /metaverse/nothing: no such key","stack":"Traceback (most recent call last):\n  File \"/home/t/.cache/xsjs/main_loop.py\", line 88, in loop_run\n    reply = dispatch.line_dispatch(line)\n  File \"/home/t/.cache/xsjs/engine_kv.py\", line 14, in kv_get\n    value = store.kv_get(ref)\nKeyError: '/metaverse/nothing'"}
+# UI: error_overlay replaces the screen; the mcp request 1 is never answered. The user presses Reload: location.reload().
+0006 BROWSER->TTYD GET / HTTP/1.1
+0007 TTYD->BROWSER 200 text/html sha256 8ad35af9da90f18cd8108fe6543ba4990b7dede4b6811373d4c150a9d65745e5
+# ttyd: the WebSocket, then its own protocol before JSLB.
+0008 AI->TTYD GET /token HTTP/1.1
+0009 TTYD->AI 200 {"token":""}
+0010 AI->TTYD GET /ws HTTP/1.1 Upgrade: websocket Sec-WebSocket-Protocol: tty
+0011 TTYD->AI 101 Switching Protocols Sec-WebSocket-Protocol: tty
+0012 AI->TTYD {"AuthToken":"","columns":80,"rows":24}
+0013 TTYD->AI 1python3 /home/t/.cache/xsjs/bootstrap.py --root /home/t/.cache/xsjs (xt)
+0014 TTYD->AI 2{}
+# server: flock on engine.lock, tty.setraw on its pty. From here every message is '0' followed by JSLB bytes; the '0' is not shown.
+0015 SERVER->AI {"0":{"t":"hello","i":1},"bootstrap":"/home/t/.cache/xsjs/bootstrap.py","sha256":"ab30a921f2faeb729bc35cdbc0a4f5a8bb70c95624eb5bfc2ff778db2cb22f88","pid":4250,"root":"/home/t/.cache/xsjs","settings":{"debug":true,"queue_synchronous":false,"verbose_level":1,"verbose_ring":1000,"verbose_forward":true,"line_max":1048576,"blob_max":1073741824,"overflow_bytes":131072,"chunk_bytes":1048576,"srv_buf_size":1048576,"media_db_bytes":268435456,"files_browser_bytes":1073741824,"turn_compact_tokens":65536,"long_task_ms":5,"provider":{"scripted":true,"base_url":"https://api.x.ai/v1","chat_model":"grok-4","image_model":"grok-2-image","timeout_seconds":120}},"seq":{"_settings":15,"_files":1,"_preferences":0,"metaverse":5},"provider_key":"xai-SYNTHETIC-KEY"}
+# AI: the settings reach the UI before anything else runs there.
+0016 AI->UI {"0":{"t":"settings.set"},"settings":{"debug":true,"queue_synchronous":false,"verbose_level":1,"verbose_ring":1000,"verbose_forward":true,"line_max":1048576,"blob_max":1073741824,"overflow_bytes":131072,"chunk_bytes":1048576,"srv_buf_size":1048576,"media_db_bytes":268435456,"files_browser_bytes":1073741824,"turn_compact_tokens":65536,"long_task_ms":5,"provider":{"scripted":true,"base_url":"https://api.x.ai/v1","chat_model":"grok-4","image_model":"grok-2-image","timeout_seconds":120}}}
+0017 AI->SERVER {"0":{"t":"hello","r":1}}
+0018 AI->UI {"0":{"t":"boot.hello"},"bootstrap":"/home/t/.cache/xsjs/bootstrap.py","sha256":"ab30a921f2faeb729bc35cdbc0a4f5a8bb70c95624eb5bfc2ff778db2cb22f88","pid":4250,"root":"/home/t/.cache/xsjs"}
+# AI: every seq equals the server's, so no database is replaced; boot continues as 01_boot.

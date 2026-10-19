@@ -16,11 +16,23 @@ _ROOT_PATH = os.path.dirname(_PYTHON_PATH)
 
 _RUFF_CACHE_PATH = os.path.join(_ROOT_PATH, "build", "ruff_cache")
 
+# The one ruff configuration, for files outside python/ too.
+_RUFF_CONFIG_PATH = os.path.join(_PYTHON_PATH, "pyproject.toml")
+
+_RUFF_FORMAT = [
+    "ruff",
+    "format",
+    "--config",
+    _RUFF_CONFIG_PATH,
+    "--cache-dir",
+    _RUFF_CACHE_PATH,
+]
+
 # The formatter command for each extension. Other files have none.
 _FORMATTERS: dict[str, list[str]] = {
     ".md": ["mdformat", "--check"],
-    ".py": ["ruff", "format", "--cache-dir", _RUFF_CACHE_PATH],
-    ".pyi": ["ruff", "format", "--cache-dir", _RUFF_CACHE_PATH],
+    ".py": _RUFF_FORMAT,
+    ".pyi": _RUFF_FORMAT,
     ".sh": ["shfmt", "--list", "--write"],
 }
 

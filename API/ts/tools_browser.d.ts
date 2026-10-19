@@ -1,18 +1,15 @@
 declare namespace tools_browser {
   // Registers the browser's tools of API/mcp/tools.json on the server:
-  // sql_run, universe_create, region_create, doc_get, doc_put, doc_head,
-  // kv_list, scene_enter, image_make, render. Each runs through the store
-  // proxy and the task queue; `image_make` uses the provider and
-  // `media.fetch`; the two create tools also `db.open` on the server.
+  // sql_run, db_create, db_drop, kv_get, kv_put, kv_delete, kv_list,
+  // doc_get, doc_put, doc_head, script_run, script_debug, image_make,
+  // render, console_run, verbose_level, verbose_tail. Each runs through
+  // the store inside the task; image_make, render and console_run
+  // return a sleep.
   function tools_register(
     server: mcp.Server,
-    store: substrate.StoreProxy,
+    store: substrate.Store,
     tasks: queue.TaskQueue,
-    model: provider.Provider,
+    provider_owner: queue.ThreadName,
     image_model: string
   ): void;
-
-  // Runs the permission flow for a tool marked `permit`: `permit.ask` to
-  // the UI, then waits for `permit.answer`. Resolves false on deny.
-  function permit_run(tasks: queue.TaskQueue, tool: string, input: unknown): Promise<boolean>;
 }

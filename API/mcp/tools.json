@@ -6,7 +6,7 @@
       "tools": [
         {
           "name": "sql_run",
-          "description": "Run SQL statements in one transaction on a browser database. DDL is allowed: you are the database administrator of the universe and its regions.",
+          "description": "Run SQL statements in one transaction on a database. DDL is allowed: your scripts are the database administrator. Tables whose name starts with _ and the _settings database refuse writes.",
           "inputSchema": {
             "type": "object",
             "properties": {
@@ -27,66 +27,56 @@
           }
         },
         {
-          "name": "universe_create",
-          "description": "Create a universe: a document metaverse/universe/<name> and a database <name> for its experience-wide tables.",
+          "name": "db_create",
+          "description": "Create an empty database. The name is a C identifier.",
           "inputSchema": {
             "type": "object",
-            "properties": {
-              "name": {"type": "string"},
-              "title": {"type": "string"}
-            },
-            "required": ["name", "title"]
+            "properties": {"db": {"type": "string"}},
+            "required": ["db"]
           }
         },
         {
-          "name": "region_create",
-          "description": "Create a region of a universe: a database <universe>/<name> for its entities, attached to the universe while the player is there.",
+          "name": "db_drop",
+          "description": "Delete a database and everything in it.",
           "inputSchema": {
             "type": "object",
-            "properties": {
-              "universe": {"type": "string"},
-              "name": {"type": "string"}
-            },
-            "required": ["universe", "name"]
+            "properties": {"db": {"type": "string"}},
+            "required": ["db"]
           }
         },
         {
-          "name": "doc_get",
-          "description": "Read a document version by Document-Ref, <db>/<kind>/<name>/<version>.",
+          "name": "kv_get",
+          "description": "Read the value a Key-Value-Ref names, /$db/$key, as text.",
           "inputSchema": {
             "type": "object",
-            "properties": {
-              "ref": {"type": "string"}
-            },
+            "properties": {"ref": {"type": "string"}},
             "required": ["ref"]
           }
         },
         {
-          "name": "doc_put",
-          "description": "Write a new version of a document at path <db>/<kind>/<name> and move its head. Returns the new Document-Ref.",
+          "name": "kv_put",
+          "description": "Write text under a Key-Value-Ref, /$db/$key. A script is the row /_files/script/<name>.js.",
           "inputSchema": {
             "type": "object",
             "properties": {
-              "path": {"type": "string"},
-              "body": {"type": "object"}
+              "ref": {"type": "string"},
+              "text": {"type": "string"}
             },
-            "required": ["path", "body"]
+            "required": ["ref", "text"]
           }
         },
         {
-          "name": "doc_head",
-          "description": "The current Document-Ref of a path.",
+          "name": "kv_delete",
+          "description": "Delete the row a Key-Value-Ref names.",
           "inputSchema": {
             "type": "object",
-            "properties": {
-              "path": {"type": "string"}
-            },
-            "required": ["path"]
+            "properties": {"ref": {"type": "string"}},
+            "required": ["ref"]
           }
         },
         {
           "name": "kv_list",
-          "description": "List keys under a prefix with sizes and hashes.",
+          "description": "List the keys of a database under a prefix with sizes and hashes.",
           "inputSchema": {
             "type": "object",
             "properties": {
@@ -97,19 +87,66 @@
           }
         },
         {
-          "name": "scene_enter",
-          "description": "Make a scene the player's current scene: writes the world document and attaches the scene's region.",
+          "name": "doc_get",
+          "description": "Read a document by Document-Ref, /$db/$id/$version, in its encoded form: header 0, references at 1 on, {\"$ref\": n} in the body.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {"ref": {"type": "string"}},
+            "required": ["ref"]
+          }
+        },
+        {
+          "name": "doc_put",
+          "description": "Write a new version of document $id in database $db and move its head. Returns the new Document-Ref.",
           "inputSchema": {
             "type": "object",
             "properties": {
-              "scene": {"type": "string"}
+              "db": {"type": "string"},
+              "id": {"type": "string"},
+              "body": {"type": "object"}
             },
-            "required": ["scene"]
+            "required": ["db", "id", "body"]
+          }
+        },
+        {
+          "name": "doc_head",
+          "description": "The current Document-Ref of document $id in database $db.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "db": {"type": "string"},
+              "id": {"type": "string"}
+            },
+            "required": ["db", "id"]
+          }
+        },
+        {
+          "name": "script_run",
+          "description": "Run the script /_files/script/<name>.js with args as a task in this worker. Returns its value or exception and the verbose lines it wrote.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "args": {"type": "object"}
+            },
+            "required": ["name", "args"]
+          }
+        },
+        {
+          "name": "script_debug",
+          "description": "Run the script as script_run does at verbose level 2, which traces every substrate call it makes.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "args": {"type": "object"}
+            },
+            "required": ["name", "args"]
           }
         },
         {
           "name": "image_make",
-          "description": "Generate an image from a prompt and keep it under a media key. Returns the key, size and sha256.",
+          "description": "Generate an image from a prompt and keep it under /_files/<key>. Returns the key, size and sha256.",
           "inputSchema": {
             "type": "object",
             "properties": {
@@ -121,7 +158,7 @@
         },
         {
           "name": "render",
-          "description": "Show an image by media key with a subtitle.",
+          "description": "Show an image by its Key-Value-Ref with a subtitle. No image means black.",
           "inputSchema": {
             "type": "object",
             "properties": {
@@ -129,6 +166,40 @@
               "subtitle": {"type": "string"}
             },
             "required": ["subtitle"]
+          }
+        },
+        {
+          "name": "console_run",
+          "description": "Run one command line in the debug console's dash and return its output until the next prompt or the timeout. Debug mode.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "text": {"type": "string"},
+              "timeout_seconds": {"type": "number"}
+            },
+            "required": ["text", "timeout_seconds"]
+          },
+          "_meta": {"xsjs": {"permit": true}}
+        },
+        {
+          "name": "verbose_level",
+          "description": "Set this worker's verbose level: 0, 1 or 2.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {"level": {"type": "integer"}},
+            "required": ["level"]
+          }
+        },
+        {
+          "name": "verbose_tail",
+          "description": "The last lines of a thread's verbose ring: ui, ai or server.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "thread": {"type": "string"},
+              "count": {"type": "integer"}
+            },
+            "required": ["thread", "count"]
           }
         }
       ]
@@ -140,32 +211,8 @@
     "result": {
       "tools": [
         {
-          "name": "console_run",
-          "description": "Run one command line in the debug console's dash and return its output until the next prompt.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "text": {"type": "string"},
-              "timeout_seconds": {"type": "number"}
-            },
-            "required": ["text"]
-          },
-          "_meta": {"xsjs": {"permit": true}}
-        },
-        {
-          "name": "log_tail",
-          "description": "The last lines of the server log.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {
-              "count": {"type": "integer"}
-            },
-            "required": ["count"]
-          }
-        },
-        {
           "name": "source_put",
-          "description": "Replace one file of the server's Python package. Debug mode.",
+          "description": "Write a main loop file into the server's main_loop directory for system_restart to serve. Debug mode.",
           "inputSchema": {
             "type": "object",
             "properties": {
@@ -178,10 +225,11 @@
         },
         {
           "name": "system_restart",
-          "description": "Restart the server process in place, keeping its pid. Debug mode.",
+          "description": "Restart the server process in place, keeping its pid, serving the named main loop file. Debug mode.",
           "inputSchema": {
             "type": "object",
-            "properties": {}
+            "properties": {"main_loop": {"type": "string"}},
+            "required": ["main_loop"]
           },
           "_meta": {"xsjs": {"permit": true}}
         }

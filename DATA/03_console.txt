@@ -1,29 +1,39 @@
-# Console in debug mode: full header names; the user, then the AI with permission.
+# The console on tty 0, debug mode: full header names; the user opens it, then the AI runs a command through it after Accept.
 #
-# The user presses ESC; the view shows; the UI asks the AI worker to open the console.
-0001 UI->AI {"0":{"type":"console.open","id":1},"columns":120,"rows":40}
-0002 AI->SERVER {"0":{"type":"console.open","id":1},"columns":120,"rows":40}
-0003 SERVER->AI {"0":{"type":"console.open","reply":1},"pid":4260}
-0004 AI->UI {"0":{"type":"console.open","reply":1},"pid":4260}
-0005 SERVER->AI {"0":{"type":"console.output","blobs":1},"1":{"size":2}}<1 blob>
-0006 AI->UI {"0":{"type":"console.output","blobs":1},"1":{"size":2}}<1 blob>
-# The user types ls and Enter in xterm.js; the cooked pty echoes it.
-0007 UI->AI {"0":{"type":"console.input","blobs":1},"1":{"size":3}}<1 blob>
-0008 AI->SERVER {"0":{"type":"console.input","blobs":1},"1":{"size":3}}<1 blob>
-0009 SERVER->AI {"0":{"type":"console.output","blobs":1},"1":{"size":84}}<1 blob>
-0010 AI->UI {"0":{"type":"console.output","blobs":1},"1":{"size":84}}<1 blob>
-# The AI calls server.console_run, a permit tool: the agent asks the UI first.
-0011 AI->UI {"0":{"type":"status"},"state":"turn","detail":"server.console_run"}
-0012 AI->UI {"0":{"type":"permit.ask","id":1},"permit":1,"tool":"server.console_run","input":{"text":"tail -n 2 ttyd.log"}}
-0013 UI->AI {"0":{"type":"permit.ask","reply":1}}
-0014 UI->AI {"0":{"type":"permit.answer"},"permit":1,"choice":"accept"}
-0015 AI->SERVER {"0":{"type":"mcp"},"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"console_run","arguments":{"text":"tail -n 2 ttyd.log"}}}
-0016 SERVER->AI {"0":{"type":"console.output","blobs":1},"1":{"size":144}}<1 blob>
-0017 AI->UI {"0":{"type":"console.output","blobs":1},"1":{"size":144}}<1 blob>
-0018 SERVER->AI {"0":{"type":"mcp"},"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"tail -n 2 ttyd.log\r\n[2026/10/17 14:20:11:0421] N: WS   /ws - 127.0.0.1, clients: 1\r\n[2026/10/17 14:20:11:0433] N: started process, pid: 4242\r\n$ "}]}}
-0019 AI->UI {"0":{"type":"status"},"state":"ready","detail":""}
-# The user closes the console from the view.
-0020 UI->AI {"0":{"type":"console.close","id":2}}
-0021 AI->SERVER {"0":{"type":"console.close","id":2}}
-0022 SERVER->AI {"0":{"type":"console.close","reply":2},"code":0}
-0023 AI->UI {"0":{"type":"console.close","reply":2},"code":0}
+0001 UI->AI {"0":{"type":"console.open","id":1}}
+0002 AI->TTYD GET /ws?arg=console HTTP/1.1 Upgrade: websocket Sec-WebSocket-Protocol: tty
+0003 TTYD->AI 101 Switching Protocols Sec-WebSocket-Protocol: tty
+# ttyd runs python3 bootstrap.py --root ... console, which runs dash through verbose.call because the setting debug is true.
+0004 AI->UI {"0":{"type":"console.open","reply":1}}
+# UI: console_view sends ttyd's first message; the AI worker's console port relays each message as it is, both ways.
+0005 UI->AI {"0":{"type":"console.input","blobs":1},"1":{"size":40}}<blob "n"=1>
+0006 AI->TTYD {"AuthToken":"","columns":120,"rows":40}
+0007 TTYD->AI 1python3 /home/t/.cache/xsjs/bootstrap.py --root /home/t/.cache/xsjs console (xt)
+0008 AI->UI {"0":{"type":"console.output","blobs":1},"1":{"size":81}}<blob "n"=1>
+0009 TTYD->AI 2{}
+0010 AI->UI {"0":{"type":"console.output","blobs":1},"1":{"size":3}}<blob "n"=1>
+0011 TTYD->AI 0$ 
+0012 AI->UI {"0":{"type":"console.output","blobs":1},"1":{"size":3}}<blob "n"=1>
+# The AI runs a command: the permit flow, then the console port.
+0013 AGENT->MCP {"0":{"type":"mcp","id":1},"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"browser.console_run","arguments":{"text":"echo hi","timeout_seconds":5}}}
+0014 AI->UI {"0":{"type":"permit.ask","id":1},"permit":1,"tool":"browser.console_run","input":{"text":"echo hi","timeout_seconds":5}}
+# UI: the handler shows Accept, Deny and Always Allow and sleeps on the DOM port, which answers when a button is clicked.
+0015 UI->DOM {"0":{"type":"dom.choice","id":1},"permit":1,"choices":["accept","deny","always"]}
+0016 DOM->UI {"0":{"type":"dom.choice","reply":1},"choice":"accept"}
+0017 UI->UI {"0":{"type":"ui.permit_reply"},"state":{"ask":1},"replies":[{"0":{"type":"dom.choice","reply":1},"choice":"accept"}]}
+0018 UI->AI {"0":{"type":"permit.ask","reply":1},"permit":1,"choice":"accept"}
+0019 AI->AI {"0":{"type":"tools.permit_reply"},"state":{"call":1},"replies":[{"0":{"type":"permit.ask","reply":1},"permit":1,"choice":"accept"}]}
+0020 AI->CONSOLE {"0":{"type":"console.input","blobs":1},"1":{"size":9}}<blob "n"=1>
+0021 AI->CONSOLE {"0":{"type":"console.read","id":1},"until":"$ ","timeout_seconds":5}
+0022 AI->TTYD 0echo hi\n
+0023 TTYD->AI 0echo hi\r\nhi\r\n$ 
+0024 AI->UI {"0":{"type":"console.output","blobs":1},"1":{"size":16}}<blob "n"=1>
+0025 CONSOLE->AI {"0":{"type":"console.read","reply":1},"text":"echo hi\r\nhi\r\n$ ","timed_out":false}
+0026 AI->AI {"0":{"type":"tools.console_reply"},"state":{"call":1},"replies":[{"0":{"type":"console.read","reply":1},"text":"echo hi\r\nhi\r\n$ ","timed_out":false}]}
+0027 MCP->AGENT {"0":{"type":"mcp","reply":1},"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"{\"output\":\"hi\\n\",\"timed_out\":false}"}]}}
+0028 AI->AI {"0":{"type":"ai.tool_reply"},"state":{"say":1},"replies":[{"0":{"type":"mcp","reply":1},"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"{\"output\":\"hi\\n\",\"timed_out\":false}"}]}}]}
+0029 UI->AI {"0":{"type":"console.close","id":2}}
+0030 AI->TTYD close 1000
+0031 AI->UI {"0":{"type":"console.close","reply":2}}
+0032 TTYD->AI closed 1000
+0033 AI->UI {"0":{"type":"console.exit"},"code":1000}

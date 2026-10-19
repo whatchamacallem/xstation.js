@@ -1,16 +1,11 @@
--- Added to metaverse after engine.sql. The world, the preferences and the
--- universe catalogue are documents: paths metaverse/world/main,
--- metaverse/preferences/main and metaverse/universe/<name> in doc.
-
--- The conversation of each scene, by the scene's Document-Ref. n counts
--- within the scene; seq is meta's seq, for replication. content is one
--- provider message as JSON. Compaction deletes turns 1 to N and inserts
--- one summary row at n 1.
-CREATE TABLE turn (
-    scene   TEXT    NOT NULL,
-    n       INTEGER NOT NULL,
-    role    TEXT    NOT NULL,
-    content TEXT    NOT NULL CHECK (json_valid(content)),
-    seq     INTEGER NOT NULL UNIQUE,
-    PRIMARY KEY (scene, n)
+-- Seeded in metaverse by the server, the one fixed experience table:
+-- which player is in which universe and which of its worlds. The
+-- bootstrap script writes it. The player in use is the KV row player,
+-- the database of the current world the KV row world, and the current
+-- scene the Document-Ref in that database's KV row scene.
+CREATE TABLE universe (
+    name   TEXT PRIMARY KEY,
+    title  TEXT NOT NULL,
+    player TEXT NOT NULL,
+    world  TEXT NOT NULL
 ) WITHOUT ROWID, STRICT;

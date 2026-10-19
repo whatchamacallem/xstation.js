@@ -1,4 +1,5 @@
-# `python3 bootstrap.py --root <root> [--debug]`. Puts the pty in raw mode,
-# opens the store, writes `hello`, runs `loop_run`. Exits 2 on a bad
-# argument. The restart exec is `os.execv(sys.executable, sys.orig_argv)`.
-def main(argv: list[str]) -> int: ...
+# `python3 bootstrap.py --root <root> [console]`. Returns the exit code.
+# The engine role takes the lock, sets raw mode, writes `hello` and runs the
+# main loop file. The console role runs dash through `verbose.call` in
+# debug mode and exits 1 otherwise. Immutable outside debug mode.
+def bootstrap_run(argv: list[str]) -> int: ...

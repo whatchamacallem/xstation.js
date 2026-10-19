@@ -1,20 +1,20 @@
 declare namespace agent {
-  // The turn loop on the AI thread. One `turn_run` per player action:
-  // append the turn, call the provider with the tools, run each tool
-  // call through the MCP clients, repeat until a reply has no tool
-  // calls, write the scene and world documents touched, render.
-  class Agent {
-    constructor(
-      model: provider.Provider,
-      clients: mcp.ClientSet,
-      store: substrate.StoreProxy,
-      tasks: queue.TaskQueue,
-      chat_model: string
-    );
-    // Loads the world document and the current scene's prompt.
-    agent_open(): Promise<lines.DocRef>;
-    turn_run(input: lines.AiSay | lines.AiClick): Promise<lines.TurnEnd>;
-    // Replaces turns 1 to `through` of the scene with one summary turn.
-    turns_compact(scene: lines.DocRef, through: number, summary: string): Promise<void>;
-  }
+  // The turn as a chain of tasks on the AI thread. `ai.say` and
+  // `ai.click` append the player's turn, submit the provider request and
+  // sleep with `ai.model_reply`; `ai.model_reply` stores the assistant
+  // turn, submits each tool call and sleeps with `ai.tool_reply`;
+  // `ai.tool_reply` submits the next provider request or, when the
+  // reply had no tool calls, ends the turn with `TurnEnd`. The queue
+  // log is the transcript of the turn.
+  function handlers_register(
+    store: substrate.Store,
+    clients: mcp.ClientSet,
+    tasks: queue.TaskQueue,
+    provider_owner: queue.ThreadName,
+    chat_model: string
+  ): void;
+
+  // The system prompt: the analyst's prompt document, then the current
+  // universe's prompt document when the scripts have made one.
+  function prompt_build(store: substrate.Store): provider.ChatMessage[];
 }
