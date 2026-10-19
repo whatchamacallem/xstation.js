@@ -1,0 +1,34 @@
+/*
+SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+SPDX-License-Identifier: MIT
+This file is licensed under the terms of the LICENSE.md file.
+The engine page's style: a black page, white text, the image filling the
+viewport and a subtitle line.
+*/
+
+/* A black page with white text and no margin. */
+body {
+  margin: 0;
+  background: black;
+  color: white;
+}
+
+/* The image fills the viewport and keeps its proportions. */
+#image {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* The subtitle is one centred line at the bottom of the viewport. */
+#subtitle {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  margin: 0;
+  text-align: center;
+}

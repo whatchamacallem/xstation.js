@@ -5,10 +5,13 @@
 #
 # Checks the whitelisted files are UTF-8 with no non-ASCII outside
 # _NON_ASCII_ALLOWED, checks the comments of those and the PowerShell files,
-# formats the whitelisted files with reformat.py, then lints the Python ones
-# with ruff check. Below a file's header, the comment at its top, a comment
-# must be one line, not be a <# #> comment, and outside its Doxygen `code`
-# spans hold nothing but letters, digits, white space and _ENGLISH_PUNCT.
+# including the TypeScript and JavaScript ones, audits every ts/*.ts file
+# other than the _SYNCHRONIZATION_MODULES for await, .then(, new Promise,
+# Atomics and SharedArrayBuffer outside its comments, formats the whitelisted
+# files with reformat.py, then lints the Python ones with ruff check. Below a
+# file's header, the comment at its top, a comment must be one line, not be a
+# <# #> comment, and outside its Doxygen `code` spans hold nothing but
+# letters, digits, white space and _ENGLISH_PUNCT.
 
 import argparse, glob, io, os, re, subprocess, sys, tokenize
 from typing import NamedTuple
@@ -83,6 +86,17 @@ _SHELL_HEREDOC = re.compile(r"<<(-?)[ \t]*(['\"]?)(\w+)\2")
 # What the shell can have before a comment.
 _SHELL_WORD_BREAK = " \t\n;&|()<>"
 
+# The TypeScript modules that may hold a synchronization token.
+_SYNCHRONIZATION_MODULES = ("queue.ts", "wire.ts", "http.ts", "media.ts")
+
+# The tokens that only the synchronization modules may hold.
+_SYNCHRONIZATION_TOKEN = re.compile(
+    r"\bawait\b|\.then\(|\bnew Promise\b|\bAtomics\b|\bSharedArrayBuffer\b"
+)
+
+# The TypeScript files the audit covers, from the top directory.
+_TYPESCRIPT_GLOB = "ts/*.ts"
+
 
 # A comment's offsets in its file's text, and the lengths of its markers.
 class Comment(NamedTuple):
@@ -150,6 +164,8 @@ def comments_find(path: str, text: str) -> list[Comment]:
             powershell_scan(path, text, 0, False, comments)
         case ".html":
             html_scan(path, text, comments)
+        case ".ts" | ".js":
+            javascript_scan(path, text, 0, len(text), False, comments)
         case extension:
             raise RuntimeError(f"{path}: no comment lexer for {extension!r}")
     return comments
@@ -489,20 +505,48 @@ def shell_scan(
     return i
 
 
-# Checks, formats and lints the whitelisted files, and PowerShell's comments.
+# Fails on the first synchronization token in a file's code, comments blanked.
+def synchronization_check(path: str) -> None:
+    if os.path.basename(path) in _SYNCHRONIZATION_MODULES:
+        return
+    with open(path, encoding="utf-8-sig") as file:
+        text = file.read()
+    code = list(text)
+    for comment in comments_find(path, text):
+        for i in range(comment.start, comment.end):
+            if code[i] != "\n":
+                code[i] = " "
+    match = _SYNCHRONIZATION_TOKEN.search("".join(code))
+    if match:
+        raise RuntimeError(
+            f"{path}:{offset_line(text, match.start())}: {match.group()}"
+            " outside the four modules"
+        )
+
+
+# Returns the TypeScript files under the top directory, sorted.
+def typescript_paths() -> list[str]:
+    matched = glob.glob(_TYPESCRIPT_GLOB, root_dir=_ROOT_PATH)
+    return sorted(os.path.join(_ROOT_PATH, path) for path in matched)
+
+
+# Checks and audits the files, then formats and lints the whitelisted ones.
 def main() -> None:
     import reformat
 
     argparse.ArgumentParser(
         description="Check, format and lint the files"
-        " reformat_whitelist.txt lists, and check the comments of those and"
-        " the PowerShell files."
+        " reformat_whitelist.txt lists, check the comments of those and the"
+        " PowerShell files, and audit the ts/*.ts files for synchronization"
+        " tokens."
     ).parse_args()
     paths = reformat.whitelist_paths()
     for path in paths:
         non_ascii_check(path)
     for path in paths + powershell_paths():
         comments_check(path)
+    for path in typescript_paths():
+        synchronization_check(path)
     reformat.reformat(paths)
     python_paths = [path for path in paths if path.endswith((".py", ".pyi"))]
     # With no files, ruff checks the directory.

@@ -33,8 +33,12 @@ $port_ = 5768
 # Linux ttyd's port on WSL's 127.0.0.1, which a port proxy forwards to.
 $linux_port_ = 5769
 $bootstrap_script_ = 'bootstrap.py'
-$bootstrap_page_ = 'bootstrap.html'
-# Where start installs the bootstrapper, below the Linux user's home.
+# The page ttyd serves, which `page_build.py` writes into `build/`.
+$engine_page_ = 'hyperposition-engine.html'
+# Where install builds ttyd and the binary it makes, relative to the checkout.
+$ttyd_build_path_ = 'build/ttyd'
+$ttyd_binary_path_ = "$ttyd_build_path_/ttyd"
+# Where start installs the server, below the Linux user's home.
 $linux_folder_ = '.cache/xsjs'
 $task_name_ = 'xstation.js'
 $firewall_rule_name_ = 'xstation.js'
@@ -80,7 +84,7 @@ function xsjs_util_get_fingerprint ([byte[]]$certificate_) {
         '-', ':')
 }
 
-# Returns the folder in Linux for the bootstrapper, its page and modules.
+# Returns the folder in Linux, the server root, that holds ttyd and the engine.
 function xsjs_util_get_linux_path {
     $home_ = xsjs_util_get_wsl 0 '-e', 'printenv', 'HOME'
     "$home_/$linux_folder_"
@@ -117,15 +121,20 @@ function xsjs_util_get_markdown_text ([string]$text_) {
 
 # Returns the command ttyd runs for each connection, after its options.
 function xsjs_util_get_ttyd_command ([string]$linux_path_) {
-    'python3', "$linux_path_/$bootstrap_script_", "$linux_path_/modules"
+    'python3', "$linux_path_/python/$bootstrap_script_", '--root', $linux_path_
 }
 
 # Returns ttyd and its options in Linux, before any for TLS.
 function xsjs_util_get_ttyd_options ([string]$linux_path_) {
+    "$linux_path_/ttyd"
     # `-W` lets input in, `-O` checks Origin. `-i lo` binds 10.255.255.254.
-    'ttyd', '-p', "$linux_port_", '-i', '127.0.0.1', '-W', '-O'
+    '-p', "$linux_port_", '-i', '127.0.0.1', '-W', '-O'
     # `-T dumb` reports a terminal that shows lines, not escape sequences.
-    '-T', 'dumb', '--index', "$linux_path_/$bootstrap_page_"
+    '-T', 'dumb', '--index', "$linux_path_/$engine_page_"
+    # `--url-arg` lets the page append a role to the command.
+    '--url-arg'
+    # `--srv-buf-size`: the receive chunk size, 1 MiB, that a patch adds.
+    '--srv-buf-size', '1048576'
 }
 
 # Returns the lines WSL prints, throwing unless it exits with one of the codes.

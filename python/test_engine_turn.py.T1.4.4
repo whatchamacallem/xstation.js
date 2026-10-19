@@ -1,0 +1,399 @@
+# SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+# SPDX-License-Identifier: MIT
+# This file is licensed under the terms of the LICENSE.md file.
+#
+# Tests `turn.append` and `turn.compact` through the dispatcher on a real
+# store under `build/`: turns numbered within their scene, messages read off
+# the wire and stored as canonical JSON, compaction into a summary turn, a
+# stale `since`, what the store refuses, and a recorded sequence of the turn
+# transcript replayed to a second store.
+
+import dispatch, engine_turn, jslb, json, os, sqlite3, substrate, tempfile
+import unittest, unittest.mock
+from typing import Any
+
+# The checkout's build directory, where each test makes its scratch roots.
+_BUILD_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
+)
+
+# The dotted name of the handler table that the tests patch.
+_HANDLERS_TARGET = "dispatch._HANDLERS"
+
+# The dotted name of the store that the tests patch.
+_STORE_TARGET = "engine_turn._STATE.store"
+
+# The `overflow_bytes` of the settings, 128 KiB.
+_OVERFLOW_BYTES = 131072
+
+# The `line_max` of the settings, 1 MiB.
+_LINE_MAX = 1048576
+
+# The `blob_max` of the settings, 1 GiB.
+_BLOB_MAX = 1073741824
+
+# The database the tests keep their turns in.
+_DATABASE = "metaverse"
+
+# The hyperposition scene, whose conversation the tests append to.
+_SCENE = "/metaverse/hyperposition/1"
+
+# Another scene of the same database, with a conversation of its own.
+_OTHER_SCENE = "/metaverse/castle/arrival/1"
+
+# Text beyond ASCII, built from its code points.
+_WIDE_TEXT = chr(0x4E2D) + chr(0x6587) + chr(0x1F600)
+
+# The summary text that the tests compact turns into.
+_SUMMARY = "The player answered 1."
+
+# The arguments of the first tool call of the turn transcript.
+_SCRIPT_ARGUMENTS = (
+    '{"name":"bootstrap","args":{"universe":"castle","title":"The castle",'
+    '"world":"castle_world","region":"castle_gatehouse"}}'
+)
+
+# The player's first message of the turn transcript.
+_USER_TURN: dict[str, Any] = {"role": "user", "content": "1"}
+
+# The assistant's tool call of the turn transcript, whose content is null.
+_CALL_TURN: dict[str, Any] = {
+    "role": "assistant",
+    "content": None,
+    "tool_calls": [
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+                "name": "browser.script_run",
+                "arguments": _SCRIPT_ARGUMENTS,
+            },
+        }
+    ],
+}
+
+# The assistant's answer of the turn transcript.
+_ANSWER_TURN: dict[str, Any] = {
+    "role": "assistant",
+    "content": "Mind the moat.",
+}
+
+# The player's next message, which follows the compaction.
+_NEXT_TURN: dict[str, Any] = {"role": "user", "content": "2"}
+
+# The recorded operations: a type and its payload, as the transcript has.
+_RECORDED: list[tuple[str, dict[str, Any]]] = [
+    ("turn.append", {"scene": _SCENE, "role": "user", "content": _USER_TURN}),
+    (
+        "turn.append",
+        {"scene": _SCENE, "role": "assistant", "content": _CALL_TURN},
+    ),
+    (
+        "turn.append",
+        {"scene": _SCENE, "role": "assistant", "content": _ANSWER_TURN},
+    ),
+    (
+        "turn.compact",
+        {"scene": _SCENE, "through": 2, "summary": _SUMMARY},
+    ),
+    ("turn.append", {"scene": _SCENE, "role": "user", "content": _NEXT_TURN}),
+]
+
+
+# Builds a request line: the type, the id and the payload.
+def _line_make(name: str, request_id: int, **payload: Any) -> jslb.Object:
+    header = jslb.header_make(name, id=request_id)
+    return jslb.line_make(header, [], **payload)
+
+
+# Dispatches a line that must be answered and returns the reply.
+def _reply_get(line: jslb.Object) -> jslb.Object:
+    reply = dispatch.line_dispatch(line)
+    if reply is None:
+        raise AssertionError("the line was not answered")
+    return reply
+
+
+# Refuses a streamed blob, which no line of these tests carries.
+def _sink_refuse(header: jslb.Object) -> str:
+    raise AssertionError("a blob was streamed")
+
+
+# The bytes of a line on the wire, which these tests give no blobs.
+def _wire_bytes(line: jslb.Object) -> bytes:
+    wire = b""
+    for piece in jslb.line_encode(line):
+        if not isinstance(piece, bytes):
+            raise AssertionError("a blob was streamed")
+        wire += piece
+    return wire
+
+
+# Decodes the one line the bytes hold.
+def _line_decode(wire: bytes) -> jslb.Object:
+    decoder = jslb.LineDecoder(
+        _LINE_MAX, _BLOB_MAX, _OVERFLOW_BYTES, _sink_refuse
+    )
+    (line,) = decoder.bytes_feed(wire)
+    return line
+
+
+# Builds a forwarded line as the server reads it off the wire.
+def _forward_line(
+    kind: str, payload: dict[str, Any], since: int
+) -> jslb.Object:
+    line = _line_make(kind, 1, since=since, **payload)
+    return _line_decode(_wire_bytes(line))
+
+
+# The canonical JSON text of a value, as the substrate stores it.
+def _json_text(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+# The row a turn is stored as, with its content in canonical JSON.
+def _row_make(n: int, role: str, content: dict[str, Any]) -> substrate.TurnRow:
+    return substrate.TurnRow(_SCENE, n, role, _json_text(content))
+
+
+# Closes every database a store has open.
+def _store_close(store: substrate.Store) -> None:
+    for name in store.db_list():
+        store.db_close(name)
+
+
+# Every statement of the dump of a database file: its schema and its rows.
+def _database_dump(path: str) -> list[str]:
+    connection = sqlite3.connect(path)
+    try:
+        return list(connection.iterdump())
+    finally:
+        connection.close()
+
+
+# Gives each test an empty handler table, no registration and a real store.
+class IsolatedCase(unittest.TestCase):
+    # Patches the table and the state, makes a store with a database in it.
+    def setUp(self) -> None:
+        table = unittest.mock.patch.dict(_HANDLERS_TARGET, {}, clear=True)
+        state = unittest.mock.patch(_STORE_TARGET, None)
+        for patcher in (table, state):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.root = self.root_make()
+        self.store = self.store_make(self.root)
+        self.store.db_create(_DATABASE)
+
+    # Makes a scratch root under `build/`, removed when the test ends.
+    def root_make(self) -> str:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+        return self.enterContext(tempfile.TemporaryDirectory(dir=_BUILD_PATH))
+
+    # Makes a store on a root, closing its databases when the test ends.
+    def store_make(self, root: str) -> substrate.Store:
+        store = substrate.Store(root, _OVERFLOW_BYTES)
+        self.addCleanup(_store_close, store)
+        return store
+
+    # Appends the turns of the transcript through the handler, from `seq` 1.
+    def turns_append(self) -> None:
+        turns = (
+            ("user", _USER_TURN),
+            ("assistant", _CALL_TURN),
+            ("assistant", _ANSWER_TURN),
+        )
+        for index, (role, content) in enumerate(turns):
+            payload = {"scene": _SCENE, "role": role, "content": content}
+            line = _forward_line("turn.append", payload, index + 1)
+            _reply_get(line)
+
+
+# Tests the handler of `turn.append`.
+class TestAppend(IsolatedCase):
+    # A turn is numbered from 1 and the reply holds its `n` and the new `seq`.
+    def test_turn_appended(self) -> None:
+        engine_turn.handlers_register(self.store)
+        payload = {"scene": _SCENE, "role": "user", "content": _USER_TURN}
+        reply = _reply_get(_forward_line("turn.append", payload, 1))
+        self.assertEqual(reply[0], {"t": "turn.append", "r": 1})
+        self.assertEqual(jslb.payload_of(reply), {"n": 1, "seq": 2})
+        rows = self.store.turn_list(_SCENE)
+        self.assertEqual(rows, [_row_make(1, "user", _USER_TURN)])
+        self.assertEqual(self.store.seq_get(_DATABASE), 2)
+
+    # Turns count up, and a message with null and a list is stored whole.
+    def test_turns_numbered(self) -> None:
+        engine_turn.handlers_register(self.store)
+        turns = (
+            ("user", _USER_TURN),
+            ("assistant", _CALL_TURN),
+            ("assistant", _ANSWER_TURN),
+        )
+        for index, (role, content) in enumerate(turns):
+            payload = {"scene": _SCENE, "role": role, "content": content}
+            line = _forward_line("turn.append", payload, index + 1)
+            expected = {"n": index + 1, "seq": index + 2}
+            self.assertEqual(jslb.payload_of(_reply_get(line)), expected)
+        rows = self.store.turn_list(_SCENE)
+        for index, (role, content) in enumerate(turns):
+            self.assertEqual(rows[index], _row_make(index + 1, role, content))
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(json.loads(rows[1].content), _CALL_TURN)
+
+    # Each scene counts its own turns.
+    def test_scenes_apart(self) -> None:
+        engine_turn.handlers_register(self.store)
+        scenes = (_SCENE, _OTHER_SCENE, _SCENE, _OTHER_SCENE, _OTHER_SCENE)
+        counts: list[int] = []
+        for index, scene in enumerate(scenes):
+            payload = {"scene": scene, "role": "user", "content": _USER_TURN}
+            line = _forward_line("turn.append", payload, index + 1)
+            counts.append(_reply_get(line)["n"])
+        self.assertEqual(counts, [1, 1, 2, 2, 3])
+
+    # Text beyond ASCII is stored as raw characters, not as escapes.
+    def test_text_wide(self) -> None:
+        engine_turn.handlers_register(self.store)
+        content = {"role": "user", "content": _WIDE_TEXT}
+        payload = {"scene": _SCENE, "role": "user", "content": content}
+        _reply_get(_forward_line("turn.append", payload, 1))
+        stored = self.store.turn_list(_SCENE)[0].content
+        self.assertEqual(stored, _json_text(content))
+        self.assertIn(_WIDE_TEXT, stored)
+
+    # A stale `since` raises the desync and no turn is added.
+    def test_since_stale(self) -> None:
+        engine_turn.handlers_register(self.store)
+        payload = {"scene": _SCENE, "role": "user", "content": _USER_TURN}
+        line = _forward_line("turn.append", payload, 0)
+        with self.assertRaises(RuntimeError) as caught:
+            dispatch.line_dispatch(line)
+        message = "turn.append: since 0 is not seq 1 of metaverse"
+        self.assertEqual(str(caught.exception), message)
+        self.assertEqual(self.store.turn_list(_SCENE), [])
+        self.assertEqual(self.store.seq_get(_DATABASE), 1)
+
+    # A scene that is not an external document ref raises, and so does a
+    # database that is not open.
+    def test_scene_invalid(self) -> None:
+        engine_turn.handlers_register(self.store)
+        for scene in ("hyperposition/1", "/metaverse/hyperposition"):
+            with self.subTest(scene=scene):
+                payload = {"scene": scene, "role": "user", "content": {}}
+                line = _forward_line("turn.append", payload, 1)
+                with self.assertRaises(ValueError):
+                    dispatch.line_dispatch(line)
+        payload = {"scene": "/none/scene/1", "role": "user", "content": {}}
+        line = _forward_line("turn.append", payload, 1)
+        with self.assertRaises(LookupError):
+            dispatch.line_dispatch(line)
+        self.assertEqual(self.store.seq_get(_DATABASE), 1)
+
+
+# Tests the handler of `turn.compact`.
+class TestCompact(IsolatedCase):
+    # Turns 1 to `through` become one summary turn at `n` 1.
+    def test_turns_compacted(self) -> None:
+        engine_turn.handlers_register(self.store)
+        self.turns_append()
+        payload = {"scene": _SCENE, "through": 2, "summary": _SUMMARY}
+        reply = _reply_get(_forward_line("turn.compact", payload, 4))
+        self.assertEqual(reply[0], {"t": "turn.compact", "r": 1})
+        self.assertEqual(jslb.payload_of(reply), {"seq": 5})
+        summary = {"role": "system", "content": _SUMMARY}
+        self.assertEqual(
+            self.store.turn_list(_SCENE),
+            [_row_make(1, "system", summary), _row_make(3, "assistant", _ANSWER_TURN)],
+        )
+
+    # The turn after a compaction is numbered after the last that is left.
+    def test_append_after(self) -> None:
+        engine_turn.handlers_register(self.store)
+        self.turns_append()
+        payload = {"scene": _SCENE, "through": 2, "summary": _SUMMARY}
+        _reply_get(_forward_line("turn.compact", payload, 4))
+        payload = {"scene": _SCENE, "role": "user", "content": _NEXT_TURN}
+        reply = _reply_get(_forward_line("turn.append", payload, 5))
+        self.assertEqual(jslb.payload_of(reply), {"n": 4, "seq": 6})
+
+    # A stale `since` raises the desync and the turns stay.
+    def test_since_stale(self) -> None:
+        engine_turn.handlers_register(self.store)
+        self.turns_append()
+        payload = {"scene": _SCENE, "through": 2, "summary": _SUMMARY}
+        line = _forward_line("turn.compact", payload, 1)
+        with self.assertRaises(RuntimeError) as caught:
+            dispatch.line_dispatch(line)
+        message = "turn.compact: since 1 is not seq 4 of metaverse"
+        self.assertEqual(str(caught.exception), message)
+        self.assertEqual(len(self.store.turn_list(_SCENE)), 3)
+        self.assertEqual(self.store.seq_get(_DATABASE), 4)
+
+    # A `through` below 1 raises, and so does a scene with no turn to replace.
+    def test_compact_refused(self) -> None:
+        engine_turn.handlers_register(self.store)
+        payload = {"scene": _SCENE, "through": 0, "summary": _SUMMARY}
+        with self.assertRaises(ValueError):
+            dispatch.line_dispatch(_forward_line("turn.compact", payload, 1))
+        payload = {"scene": _SCENE, "through": 1, "summary": _SUMMARY}
+        with self.assertRaises(LookupError):
+            dispatch.line_dispatch(_forward_line("turn.compact", payload, 1))
+        self.assertEqual(self.store.turn_list(_SCENE), [])
+        self.assertEqual(self.store.seq_get(_DATABASE), 1)
+
+
+# Tests a recorded sequence of forwarded operations on a second store.
+class TestReplay(IsolatedCase):
+    # The server's store ends as the modifier's store did, `seq` for `seq`.
+    def test_recorded_replay(self) -> None:
+        second_root = self.root_make()
+        second = self.store_make(second_root)
+        second.db_create(_DATABASE)
+        engine_turn.handlers_register(second)
+        for kind, payload in _RECORDED:
+            since = self.store.seq_get(_DATABASE)
+            if kind == "turn.append":
+                text = _json_text(payload["content"])
+                n, seq = self.store.turn_append(
+                    payload["scene"], payload["role"], text
+                )
+                expected = {"n": n, "seq": seq}
+            else:
+                seq = self.store.turn_compact(
+                    payload["scene"], payload["through"], payload["summary"]
+                )
+                expected = {"seq": seq}
+            reply = _reply_get(_forward_line(kind, payload, since))
+            self.assertEqual(jslb.payload_of(reply), expected, kind)
+        self.assertEqual(seq, 6)
+        self.assertEqual(second.turn_list(_SCENE), self.store.turn_list(_SCENE))
+        self.assertEqual([row.n for row in second.turn_list(_SCENE)], [1, 3, 4])
+        _store_close(self.store)
+        _store_close(second)
+        name = _DATABASE + ".sqlite"
+        self.assertEqual(
+            _database_dump(os.path.join(self.root, name)),
+            _database_dump(os.path.join(second_root, name)),
+        )
+
+
+# Tests the registration.
+class TestRegister(IsolatedCase):
+    # A second registration raises, as the dispatcher refuses the pair.
+    def test_register_twice(self) -> None:
+        engine_turn.handlers_register(self.store)
+        with self.assertRaises(ValueError):
+            engine_turn.handlers_register(self.store)
+
+    # Called before the registration each handler raises.
+    def test_unregistered(self) -> None:
+        line = _line_make("turn.append", 1)
+        content: dict[str, object] = {}
+        with self.assertRaises(RuntimeError):
+            engine_turn.turn_append(
+                line, scene=_SCENE, role="user", content=content, since=1
+            )
+        with self.assertRaises(RuntimeError):
+            engine_turn.turn_compact(
+                line, scene=_SCENE, through=1, summary="x", since=1
+            )

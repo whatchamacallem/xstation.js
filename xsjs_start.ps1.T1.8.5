@@ -2,17 +2,20 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Serves bootstrap.py with its page, bootstrap.html, through ttyd in WSL on
-# port 5768, now and whenever you sign in to Windows. Run
-# xsjs_install.ps1 once first, then run this from an administrator
-# PowerShell:
+# Serves the engine, python\bootstrap.py with its page,
+# build\hyperposition-engine.html, through ttyd in WSL on port 5768, now and
+# whenever you sign in to Windows. Run xsjs_install.ps1 once first, build the
+# page in WSL with python3 python/page_build.py hyperposition-engine, then
+# run this from an administrator PowerShell:
 #
 #     .\xsjs_start.ps1                    http://localhost:5768/
 #     .\xsjs_start.ps1 username:password  https://<this PC>:5768/
 #
-# Each run copies both files from python\ into ~/.cache/xsjs in Linux,
-# which also holds the modules folder, and ttyd runs that copy on port 5769
-# of WSL's 127.0.0.1. A Windows port proxy forwards port 5768 to it.
+# Each run copies the ttyd that xsjs_install.ps1 built, the modules and seeds
+# of python\, i18n\en-US.json, settings.json and the page into ~/.cache/xsjs
+# in Linux, and ttyd runs that copy on port 5769 of WSL's 127.0.0.1. A
+# Windows port proxy forwards port 5768 to it. The environment variable
+# XSJS_PROVIDER_KEY of your user account, when set, is passed on to ttyd.
 #
 # With a username and password, ttyd serves HTTPS and asks for them, the
 # port proxy listens on every network interface, and a Windows Firewall
@@ -31,19 +34,22 @@ param()
 
 # Read `$args`, not `param()`, so a password may start with `-`.
 $arguments_ = $args
-# Where bootstrap.py and bootstrap.html are copied from.
+# The checkout, where the server's files are copied from.
+$checkout_path_ = $PSScriptRoot
+# Where the engine's Python modules and seeds are copied from.
 $python_path_ = Join-Path $PSScriptRoot 'python'
+# The user's environment variable that ttyd passes on as the provider key.
+$provider_key_name_ = 'XSJS_PROVIDER_KEY'
 
 # Throws unless the files, ttyd, Python 3 and, for HTTPS, OpenSSL are present.
 function _xsjs_start_step_check_installed {
     xsjs_util_write_log_section $i18n_.check_installed
-    foreach ($name_ in $bootstrap_script_, $bootstrap_page_) {
-        $path_ = Join-Path $python_path_ $name_
-        if (-not (Test-Path $path_)) {
-            throw ($i18n_.bootstrap_missing -f $path_)
-        }
-    }
-    xsjs_util_invoke_native { wsl -e ttyd --version }
+    $path_ = Join-Path $python_path_ $bootstrap_script_
+    if (-not (Test-Path $path_)) { throw ($i18n_.bootstrap_missing -f $path_) }
+    $path_ = Join-Path $checkout_path_ "build\$engine_page_"
+    if (-not (Test-Path $path_)) { throw ($i18n_.page_missing -f $path_) }
+    $version_ = '-e', $ttyd_binary_path_, '--version'
+    xsjs_util_invoke_native { wsl --cd $checkout_path_ @version_ }
     if ($LASTEXITCODE -ne 0) { throw ($i18n_.not_installed -f 'ttyd') }
     xsjs_util_invoke_native { wsl -e python3 --version }
     if ($LASTEXITCODE -ne 0) { throw ($i18n_.not_installed -f 'Python 3') }
@@ -84,22 +90,34 @@ function _xsjs_start_get_listener ([int]$port_number_) {
     if ($listener_) { Get-Process -Id $listener_.OwningProcess }
 }
 
-# Copies the bootstrapper and its page from the checkout into Linux.
-function _xsjs_start_step_install_bootstrap {
-    xsjs_util_write_log_section $i18n_.install_bootstrap
-    $modules_ = "$linux_path_/modules"
-    xsjs_util_invoke_native { wsl -e mkdir -p $modules_ }
+# Copies the files and folders, named from the checkout, into the Linux folder.
+function _xsjs_start_copy_files ([string[]]$sources_, [string]$target_) {
+    $copy_ = @('cp', '-r') + $sources_ + $target_
+    xsjs_util_invoke_native { wsl --cd $checkout_path_ -e @copy_ }
+    if ($LASTEXITCODE -ne 0) {
+        throw ($i18n_.bootstrap_not_installed -f $target_)
+    }
+}
+
+# Copies ttyd, the engine, its seeds, strings, settings and page into Linux.
+function _xsjs_start_step_install_server {
+    xsjs_util_write_log_section $i18n_.install_server
+    $folders_ = "$linux_path_/python", "$linux_path_/i18n"
+    xsjs_util_invoke_native { wsl -e mkdir -p @folders_ }
     if ($LASTEXITCODE -ne 0) {
         throw ($i18n_.bootstrap_not_installed -f $linux_path_)
     }
-    $copy_ = 'cp', $bootstrap_script_, $bootstrap_page_, $linux_path_
-    xsjs_util_invoke_native { wsl --cd $python_path_ -e @copy_ }
-    if ($LASTEXITCODE -ne 0) {
-        throw ($i18n_.bootstrap_not_installed -f $linux_path_)
-    }
-    $installed_ = $i18n_.bootstrap_installed -f (
-        $bootstrap_script_, $bootstrap_page_, $linux_path_)
-    xsjs_util_write_log $installed_
+    # The tests stay in the checkout.
+    $modules_ = @(
+        Get-ChildItem $python_path_ -File | Where-Object {
+            $_.Extension -eq '.py' -and $_.Name -notlike 'test_*'
+        } | ForEach-Object { "python/$($_.Name)" }
+    )
+    $root_files_ = $ttyd_binary_path_, 'settings.json', "build/$engine_page_"
+    _xsjs_start_copy_files $root_files_ $linux_path_
+    _xsjs_start_copy_files ($modules_ + 'python/seed') "$linux_path_/python"
+    _xsjs_start_copy_files 'i18n/en-US.json' "$linux_path_/i18n"
+    xsjs_util_write_log ($i18n_.server_installed -f $linux_path_)
 }
 
 # Keeps or makes the TLS certificate and returns its fingerprint.
@@ -226,6 +244,9 @@ function _xsjs_start_step_write_runner {
 
     $runner_ = @(
         '# ' + ($i18n_.runner_comment -f $task_name_)
+        '$env:WSLENV = (@($env:WSLENV, ' +
+        (_xsjs_start_quote_literal $provider_key_name_) +
+        ') -ne $null) -join '':'''
         '$server_ = @{'
         '    FilePath              = ' +
         (_xsjs_start_quote_literal $wsl_path_)
@@ -364,7 +385,7 @@ function _xsjs_start_main {
     $linux_path_ = xsjs_util_get_linux_path
     xsjs_util_step_stop_server
     _xsjs_start_step_check_port
-    _xsjs_start_step_install_bootstrap
+    _xsjs_start_step_install_server
     $fingerprint_ = $null
     if ($credential_) {
         $fingerprint_ = _xsjs_start_step_make_certificate

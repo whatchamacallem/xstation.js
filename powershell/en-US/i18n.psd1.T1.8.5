@@ -5,20 +5,28 @@
 @{
     add_proxy               = 'Forwarding port {0} to port {1}'
     administrator_ok        = 'Administrator: `{0}`.'
-    bootstrap_installed     = 'Copied {0} and {1} into `{2}`.'
     bootstrap_missing       = '{0} is missing.'
     bootstrap_not_installed = 'Copying into `{0}` failed.'
+    build_header_missing    = (
+        'The header `{0}` is missing or does not compile in Linux. ' +
+        'Ask the maintainer to install the apt package `{1}`.'
+    )
+    build_tool_missing      = (
+        '`{0}` is missing in Linux. ' +
+        'Ask the maintainer to install the apt package `{1}`.'
+    )
+    build_ttyd              = 'Building ttyd from the pinned source release'
     certificate_failed      = 'Making the TLS certificate failed.'
     certificate_fingerprint = 'TLS fingerprint (SHA-256): {0}'
     certificate_kept        = 'Kept the TLS certificate in `{0}`.'
     certificate_made        = 'Made a self-signed TLS certificate in `{0}`.'
     check_administrator     = 'Checking for administrator'
+    check_build             = 'Checking the tools that build ttyd'
     check_installed         = 'Checking installation'
     check_linux             = 'Checking Linux in WSL'
     check_openssl           = 'Checking OpenSSL'
     check_port              = 'Checking ports {0} and {1}'
     check_python            = 'Checking Python 3'
-    check_ttyd              = 'Checking ttyd'
     check_windows_ttyd      = 'Checking for ttyd for Windows'
     check_wsl               = 'Checking WSL'
     close_firewall          = 'Closing port {0} (localhost only)'
@@ -36,7 +44,7 @@
     firewall_opened         = 'Opened TCP port {0} in Windows Firewall.'
     full_stop_mode          = 'Stopping ttyd and its sign-in start.'
     https_mode              = 'Serving HTTPS to other computers. User: {0}'
-    install_bootstrap       = 'Installing the bootstrapper in Linux'
+    install_server          = 'Installing the server in Linux'
     installed               = (
         'Installed. Next, run xsjs_start.ps1 as administrator.'
     )
@@ -55,6 +63,10 @@
     open_urls               = 'Open {0} to use `{1}`.'
     openssl_install_failed  = 'Installing OpenSSL failed.'
     openssl_missing         = 'Installing OpenSSL with apt-get...'
+    page_missing            = (
+        '{0} is missing. In WSL, in the checkout, run ' +
+        '`python3 python/page_build.py hyperposition-engine`.'
+    )
     port_free               = 'Port {0} is free.'
     port_in_use             = (
         'Port {0} is used by {1} (PID {2}). Stop it and retry.'
@@ -86,6 +98,7 @@
     )
     runner_removed          = 'Deleted `{0}`.'
     runner_written          = 'Wrote `{0}`.'
+    server_installed        = 'Copied ttyd, the engine and page into `{0}`.'
     server_listening        = (
         'ttyd (Linux PID {1}) listening on port {0}, relayed by {2} ' +
         '(PID {3}). Log: `{4}`'
@@ -154,13 +167,16 @@
     test_lint_failed        = 'Fix what test_lint.ps1 found, then rerun.'
     test_passed             = 'The lifecycle ran without failures.'
     test_step_failed        = 'Step {0} failed.'
-    ttyd_install_failed     = 'Installing ttyd failed.'
-    ttyd_missing            = 'Installing ttyd with apt-get...'
+    ttyd_build_failed       = 'Building ttyd failed.'
+    ttyd_configure_failed   = 'Configuring the ttyd build failed.'
+    ttyd_fetch_failed       = 'Fetching the third party files failed.'
     ttyd_not_stopped        = (
         'ttyd (Linux PID {0}) still runs 15 s after SIGTERM.'
     )
+    ttyd_patch_failed       = 'Applying the patch `{0}` to ttyd failed.'
     ttyd_stop_failed        = 'Stopping ttyd (Linux PID {0}) failed.'
     ttyd_stopped            = 'Stopped ttyd (Linux PID {0}).'
+    ttyd_unpack_failed      = 'Unpacking the ttyd source failed.'
     ubuntu_not_working      = 'Ubuntu not ready. Restart Windows, rerun {0}.'
     windows_ttyd_left       = (
         'ttyd for Windows is no longer used and stays installed: `{0}`'

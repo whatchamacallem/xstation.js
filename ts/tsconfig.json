@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "module": "none",
+    "noEmitOnError": true,
+    "outFile": "../build/ts/engine.js",
+    "strict": true,
+    "target": "ES2022"
+  },
+  "files": [
+    "../API/ts/lines.d.ts",
+    "error_overlay.ts",
+    "utility.ts",
+    "ui_strings.ts",
+    "settings.ts",
+    "i18n.ts",
+    "verbose.ts",
+    "jslb.ts",
+    "dispatch.ts",
+    "queue.ts",
+    "http.ts",
+    "wire.ts",
+    "media.ts",
+    "substrate.ts",
+    "provider.ts",
+    "provider_script.ts",
+    "mcp.ts",
+    "script.ts",
+    "tools_browser.ts",
+    "agent.ts",
+    "console_view.ts",
+    "overlay.ts",
+    "page.ts",
+    "worker_ai.ts",
+    "boot.ts"
+  ]
+}

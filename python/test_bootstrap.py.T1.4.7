@@ -1,0 +1,600 @@
+# SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+# SPDX-License-Identifier: MIT
+# This file is licensed under the terms of the LICENSE.md file.
+#
+# Tests the platform services without a pty: the arguments, the engine lock,
+# the hello line and its reply, the loading of a main loop file from the root,
+# the console role and the error line. Each run has descriptors 0 and 1 set to
+# files and raw mode patched to record its calls, and the test main loop file
+# writes its calls to files in the root. The scratch directories go under
+# build/.
+
+import bootstrap, fcntl, hashlib, json, os, signal, sys, tempfile, termios
+import unittest, unittest.mock
+from typing import Any, NamedTuple
+from i18n import i18n
+
+# The checkout's top directory, above this file's `python/`.
+_ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Where the scratch directories go.
+_BUILD_PATH = os.path.join(_ROOT_PATH, "build")
+
+# The checkout's settings, which each test root copies with `debug` set.
+_SETTINGS_PATH = os.path.join(_ROOT_PATH, "settings.json")
+
+# The module under test, whose path and `sha256` the `hello` line carries.
+_BOOTSTRAP_PATH = os.path.abspath(bootstrap.__file__)
+
+# The environment variable that holds the provider key.
+_PROVIDER_VARIABLE = "XSJS_PROVIDER_KEY"
+
+# The provider key in the environment of an engine run.
+_PROVIDER_KEY = "the provider key of the test"
+
+# The environment of an engine run, which holds the key and nothing else.
+_ENGINE_ENVIRONMENT = {_PROVIDER_VARIABLE: _PROVIDER_KEY}
+
+# The environment of a console run: the variables it keeps and two it drops.
+_CONSOLE_ENVIRONMENT = {
+    "HOME": "/home/test",
+    "PATH": "/usr/bin:/bin",
+    "TERM": "xterm-256color",
+    _PROVIDER_VARIABLE: _PROVIDER_KEY,
+    "OTHER": "dropped",
+}
+
+# What the console keeps of that environment, which does not set `LANG`.
+_CONSOLE_KEPT = {
+    "HOME": "/home/test",
+    "PATH": "/usr/bin:/bin",
+    "TERM": "xterm-256color",
+}
+
+# The raw mode calls of an engine run: both descriptors, before any output.
+_RAW_CALLS = [(0, termios.TCSANOW, 0), (1, termios.TCSANOW, 0)]
+
+# The keys of the `hello` line in the order they are written.
+_HELLO_KEYS = [
+    "0",
+    "bootstrap",
+    "sha256",
+    "pid",
+    "root",
+    "settings",
+    "seq",
+    "provider_key",
+]
+
+# The `seq` map the test main loop returns, as the boot transcript has it.
+_LOOP_SEQ = {"_settings": 15, "_files": 1, "_preferences": 0, "metaverse": 5}
+
+# The file name the test main loop is written under in the root.
+_LOOP_NAME = "test_loop.py"
+
+# The file the test main loop's `loop_prepare` writes its argument to.
+_PREPARE_NAME = "prepare.json"
+
+# The file the test main loop's `loop_run` writes its arguments and input to.
+_RUN_NAME = "run.json"
+
+# A main loop that writes its calls to files in the root.
+_LOOP_TEXT = (
+    "import json, os\n"
+    "\n"
+    "\n"
+    "def loop_prepare(root):\n"
+    f"    with open(os.path.join(root, {_PREPARE_NAME!r}), 'w') as file:\n"
+    "        json.dump([root], file)\n"
+    f"    return {_LOOP_SEQ!r}\n"
+    "\n"
+    "\n"
+    "def loop_run(read_fd, write_fd, root):\n"
+    "    rest = os.read(read_fd, 64).decode('utf-8')\n"
+    f"    with open(os.path.join(root, {_RUN_NAME!r}), 'w') as file:\n"
+    "        json.dump([read_fd, write_fd, root, rest], file)\n"
+)
+
+# A main loop file that defines `loop_prepare` and not `loop_run`.
+_LOOP_PARTIAL = "def loop_prepare(root):\n    return {}\n"
+
+# The reply to `hello` in short names.
+_REPLY_SHORT = b'{"0":{"t":"hello","r":1}}\r'
+
+# The reply to `hello` in full names.
+_REPLY_FULL = b'{"0":{"type":"hello","reply":1}}\r'
+
+# Bytes after the reply, which the main loop must find unread.
+_AFTER_REPLY = b"the bytes after the reply"
+
+# Replies that differ from the short one, each of which is refused.
+_REPLIES_WRONG = [
+    b'{"0":{"t":"hello","r":2}}\r',
+    b'{"0":{"type":"hello","reply":1}}\r',
+    b'{"0":{"r":1,"t":"hello"}}\r',
+    b'{"0":{"t":"hello","r":true}}\r',
+    b'{"0":{"t":"hello","r":1,"b":0}}\r',
+    b'{"0":{"t":"hello","i":1,"r":1}}\r',
+    b'{"0":{"t":"hello","r":1},"extra":1}\r',
+    b'{"0":{"t":"error","r":1},"message":"m","stack":"s"}\r',
+    b'{"0":{"t":"hello","r":1,"b":1},"1":{"s":3}}\rabc',
+    b"not a line\r",
+]
+
+
+# A scratch directory and the root made in it, with the settings it holds.
+class ScratchRoot(NamedTuple):
+    scratch: str
+    root: str
+    settings: dict[str, Any]
+
+
+# What a run returned and wrote, and each raw mode call with the output size.
+class RunRecord(NamedTuple):
+    code: int
+    output: bytes
+    raw_calls: list[tuple[int, int, int]]
+
+
+# Makes a scratch directory in `build/` with a root whose `debug` is given.
+def _root_make(case: unittest.TestCase, debug: bool) -> ScratchRoot:
+    os.makedirs(_BUILD_PATH, exist_ok=True)
+    scratch = tempfile.TemporaryDirectory(dir=_BUILD_PATH)
+    case.addCleanup(scratch.cleanup)
+    root = os.path.join(scratch.name, "root")
+    os.mkdir(root)
+    with open(_SETTINGS_PATH, encoding="utf-8") as file:
+        loaded: dict[str, Any] = json.load(file)
+    loaded["debug"] = debug
+    path = os.path.join(root, "settings.json")
+    with open(path, "w", encoding="utf-8") as file:
+        json.dump(loaded, file)
+    return ScratchRoot(scratch.name, root, loaded)
+
+
+# Writes a main loop file into the root's `main_loop` directory.
+def _loop_write(root: str, text: str) -> str:
+    directory = os.path.join(root, "main_loop")
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, _LOOP_NAME)
+    with open(path, "w", encoding="utf-8") as file:
+        file.write(text)
+    return path
+
+
+# The arguments of an engine run with the test main loop file.
+def _engine_argv(root: str) -> list[str]:
+    return ["--root", root, "--main-loop", _LOOP_NAME]
+
+
+# Runs `bootstrap_run` with descriptors 0 and 1 in files and the environment.
+def _run_captured(
+    made: ScratchRoot,
+    argv: list[str],
+    given: bytes,
+    environment: dict[str, str],
+) -> RunRecord:
+    in_path = os.path.join(made.scratch, "in.bin")
+    out_path = os.path.join(made.scratch, "out.bin")
+    with open(in_path, "wb") as file:
+        file.write(given)
+    raw_calls: list[tuple[int, int, int]] = []
+
+    # Records a raw mode call and how much was written before it.
+    def raw_record(descriptor: int, when: int) -> None:
+        raw_calls.append((descriptor, when, os.fstat(1).st_size))
+
+    scrubbed = unittest.mock.patch.dict(os.environ, environment, clear=True)
+    raw = unittest.mock.patch("tty.setraw", side_effect=raw_record)
+    sys.stdout.flush()
+    saved_in = os.dup(0)
+    saved_out = os.dup(1)
+    try:
+        with open(in_path, "rb") as source, open(out_path, "wb") as sink:
+            os.dup2(source.fileno(), 0)
+            os.dup2(sink.fileno(), 1)
+            try:
+                with scrubbed, raw:
+                    code = bootstrap.bootstrap_run(argv)
+            finally:
+                os.dup2(saved_in, 0)
+                os.dup2(saved_out, 1)
+    finally:
+        os.close(saved_in)
+        os.close(saved_out)
+    with open(out_path, "rb") as file:
+        output = file.read()
+    return RunRecord(code, output, raw_calls)
+
+
+# Splits the output into its lines, each ending in CR, and parses each one.
+def _lines_parse(output: bytes) -> list[dict[str, Any]]:
+    texts = output.split(b"\r")
+    if texts.pop() != b"":
+        raise ValueError(f"the output does not end in CR: {output!r}")
+    return [json.loads(text) for text in texts]
+
+
+# Reads the JSON file a function of the test main loop wrote in the root.
+def _marker_read(root: str, name: str) -> Any:
+    with open(os.path.join(root, name), encoding="utf-8") as file:
+        return json.load(file)
+
+
+# Checks a line is an `error` line with no `r`, and returns its message.
+def _error_check(case: unittest.TestCase, line: dict[str, Any]) -> str:
+    case.assertEqual(list(line), ["0", "message", "stack"])
+    case.assertEqual(line["0"], {"t": "error"})
+    stack = line["stack"]
+    case.assertIsInstance(stack, str)
+    case.assertTrue(stack.startswith("Traceback (most recent call last):"))
+    message = line["message"]
+    case.assertIsInstance(message, str)
+    return message
+
+
+# Returns what a child process found when it tried the root's engine lock.
+def _lock_tried(root: str) -> bytes:
+    found_read, found_write = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        try:
+            os.close(found_read)
+            path = os.path.join(root, "engine.lock")
+            descriptor = os.open(path, os.O_RDWR)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                os.write(found_write, b"taken")
+            except BlockingIOError:
+                os.write(found_write, b"refused")
+        finally:
+            os.kill(os.getpid(), signal.SIGKILL)
+    os.close(found_write)
+    found = os.read(found_read, 64)
+    os.close(found_read)
+    os.waitpid(pid, 0)
+    return found
+
+
+# Holds the root's engine lock in a child until the returned descriptor closes.
+def _lock_hold(root: str) -> tuple[int, int]:
+    ready_read, ready_write = os.pipe()
+    release_read, release_write = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        try:
+            os.close(ready_read)
+            os.close(release_write)
+            path = os.path.join(root, "engine.lock")
+            descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            os.write(ready_write, b"held")
+            os.read(release_read, 1)
+        finally:
+            os.kill(os.getpid(), signal.SIGKILL)
+    os.close(ready_write)
+    os.close(release_read)
+    ready = os.read(ready_read, 64)
+    os.close(ready_read)
+    if ready != b"held":
+        os.close(release_write)
+        os.waitpid(pid, 0)
+        raise RuntimeError("the child could not take the engine lock")
+    return pid, release_write
+
+
+# Tests the arguments, which are refused with an error line before raw mode.
+class TestArguments(unittest.TestCase):
+    # No root, an unknown role, option or extra word is refused with exit 1.
+    def test_arguments_refused(self) -> None:
+        made = _root_make(self, True)
+        for argv in (
+            [],
+            ["--root"],
+            ["--root", made.root, "player2"],
+            ["--root", made.root, "--other", "x"],
+            ["--root", made.root, "console", "console"],
+        ):
+            record = _run_captured(made, argv, b"", _ENGINE_ENVIRONMENT)
+            self.assertEqual(record.code, 1)
+            self.assertEqual(record.raw_calls, [])
+            (line,) = _lines_parse(record.output)
+            _error_check(self, line)
+
+
+# Tests the engine lock of the root.
+class TestLock(unittest.TestCase):
+    # After a run the lock is still held, so a child's attempt is refused.
+    def test_lock_kept(self) -> None:
+        made = _root_make(self, False)
+        _loop_write(made.root, _LOOP_TEXT)
+        argv = _engine_argv(made.root)
+        record = _run_captured(made, argv, _REPLY_SHORT, _ENGINE_ENVIRONMENT)
+        self.assertEqual(record.code, 0)
+        self.assertEqual(_lock_tried(made.root), b"refused")
+
+    # A lock another process holds is one error line after raw mode, exit 1.
+    def test_lock_refused(self) -> None:
+        made = _root_make(self, False)
+        _loop_write(made.root, _LOOP_TEXT)
+        argv = _engine_argv(made.root)
+        pid, release = _lock_hold(made.root)
+        try:
+            record = _run_captured(
+                made, argv, _REPLY_SHORT, _ENGINE_ENVIRONMENT
+            )
+        finally:
+            os.close(release)
+            os.waitpid(pid, 0)
+        self.assertEqual(record.code, 1)
+        self.assertEqual(record.raw_calls, _RAW_CALLS)
+        (line,) = _lines_parse(record.output)
+        path = os.path.join(made.root, "engine.lock")
+        self.assertEqual(
+            _error_check(self, line), i18n("bootstrap.lock_held", path)
+        )
+        prepared = os.path.join(made.root, _PREPARE_NAME)
+        self.assertFalse(os.path.exists(prepared))
+        self.assertEqual(_lock_tried(made.root), b"taken")
+
+
+# Tests the `hello` line and the main loop calls around it.
+class TestHello(unittest.TestCase):
+    # Checks the payload of `hello` and the calls of the test main loop.
+    def hello_check(self, made: ScratchRoot, hello: dict[str, Any]) -> None:
+        self.assertEqual(list(hello), _HELLO_KEYS)
+        self.assertEqual(hello["bootstrap"], _BOOTSTRAP_PATH)
+        with open(_BOOTSTRAP_PATH, "rb") as file:
+            digest = hashlib.sha256(file.read()).hexdigest()
+        self.assertEqual(hello["sha256"], digest)
+        self.assertEqual(hello["pid"], os.getpid())
+        self.assertEqual(hello["root"], made.root)
+        self.assertEqual(hello["settings"], made.settings)
+        self.assertEqual(list(hello["settings"]), list(made.settings))
+        self.assertEqual(hello["seq"], _LOOP_SEQ)
+        self.assertEqual(hello["provider_key"], _PROVIDER_KEY)
+        self.assertEqual(_marker_read(made.root, _PREPARE_NAME), [made.root])
+        self.assertEqual(
+            _marker_read(made.root, _RUN_NAME),
+            [0, 1, made.root, _AFTER_REPLY.decode("utf-8")],
+        )
+
+    # Outside debug mode `hello` has short names and the reply is short.
+    def test_hello_short(self) -> None:
+        made = _root_make(self, False)
+        _loop_write(made.root, _LOOP_TEXT)
+        given = _REPLY_SHORT + _AFTER_REPLY
+        argv = _engine_argv(made.root)
+        record = _run_captured(made, argv, given, _ENGINE_ENVIRONMENT)
+        self.assertEqual(record.code, 0)
+        self.assertEqual(record.raw_calls, _RAW_CALLS)
+        (hello,) = _lines_parse(record.output)
+        self.assertEqual(hello["0"], {"t": "hello", "i": 1})
+        self.hello_check(made, hello)
+
+    # In debug mode `hello` has full names and the reply is full.
+    def test_hello_full(self) -> None:
+        made = _root_make(self, True)
+        _loop_write(made.root, _LOOP_TEXT)
+        given = _REPLY_FULL + _AFTER_REPLY
+        argv = _engine_argv(made.root)
+        record = _run_captured(made, argv, given, _ENGINE_ENVIRONMENT)
+        self.assertEqual(record.code, 0)
+        self.assertEqual(record.raw_calls, _RAW_CALLS)
+        (hello,) = _lines_parse(record.output)
+        self.assertEqual(hello["0"], {"type": "hello", "id": 1})
+        self.hello_check(made, hello)
+
+    # An empty provider key is sent as it is.
+    def test_provider_empty(self) -> None:
+        made = _root_make(self, False)
+        _loop_write(made.root, _LOOP_TEXT)
+        argv = _engine_argv(made.root)
+        environment = {_PROVIDER_VARIABLE: ""}
+        record = _run_captured(made, argv, _REPLY_SHORT, environment)
+        self.assertEqual(record.code, 0)
+        (hello,) = _lines_parse(record.output)
+        self.assertEqual(hello["provider_key"], "")
+
+    # No provider key variable is one error line before the main loop runs.
+    def test_provider_unset(self) -> None:
+        made = _root_make(self, False)
+        _loop_write(made.root, _LOOP_TEXT)
+        argv = _engine_argv(made.root)
+        record = _run_captured(made, argv, _REPLY_SHORT, {})
+        self.assertEqual(record.code, 1)
+        (line,) = _lines_parse(record.output)
+        self.assertEqual(
+            _error_check(self, line),
+            i18n("bootstrap.provider_unset", _PROVIDER_VARIABLE),
+        )
+        prepared = os.path.join(made.root, _PREPARE_NAME)
+        self.assertFalse(os.path.exists(prepared))
+
+
+# Tests the reply to `hello`, which must be exactly the empty reply.
+class TestReply(unittest.TestCase):
+    # Runs with the input, checks `hello` then one error line and no loop.
+    def refusal_check(
+        self, debug: bool, given: bytes, header: dict[str, Any]
+    ) -> ScratchRoot:
+        made = _root_make(self, debug)
+        _loop_write(made.root, _LOOP_TEXT)
+        argv = _engine_argv(made.root)
+        record = _run_captured(made, argv, given, _ENGINE_ENVIRONMENT)
+        self.assertEqual(record.code, 1)
+        hello, line = _lines_parse(record.output)
+        self.assertEqual(hello["0"], header)
+        self.assertFalse(os.path.exists(os.path.join(made.root, _RUN_NAME)))
+        self.assertEqual(
+            _error_check(self, line), _error_check(self, line).strip()
+        )
+        return made
+
+    # Each reply that differs from the short empty one is refused.
+    def test_reply_wrong(self) -> None:
+        for given in _REPLIES_WRONG:
+            self.refusal_check(False, given, {"t": "hello", "i": 1})
+
+    # The short reply is refused when `hello` used full names.
+    def test_reply_form(self) -> None:
+        self.refusal_check(True, _REPLY_SHORT, {"type": "hello", "id": 1})
+
+    # Input that ends before the reply is refused.
+    def test_reply_closed(self) -> None:
+        made = _root_make(self, False)
+        _loop_write(made.root, _LOOP_TEXT)
+        argv = _engine_argv(made.root)
+        record = _run_captured(made, argv, b"", _ENGINE_ENVIRONMENT)
+        self.assertEqual(record.code, 1)
+        _, line = _lines_parse(record.output)
+        self.assertEqual(
+            _error_check(self, line), i18n("bootstrap.reply_closed")
+        )
+
+    # A reply with a blob over `overflow_bytes` is refused before its bytes.
+    def test_reply_streamed(self) -> None:
+        made = _root_make(self, False)
+        _loop_write(made.root, _LOOP_TEXT)
+        size: int = made.settings["overflow_bytes"] + 1
+        reply = {"0": {"t": "hello", "r": 1, "b": 1}, "1": {"s": size}}
+        given = json.dumps(reply, separators=(",", ":")).encode() + b"\r"
+        argv = _engine_argv(made.root)
+        record = _run_captured(made, argv, given, _ENGINE_ENVIRONMENT)
+        self.assertEqual(record.code, 1)
+        _, line = _lines_parse(record.output)
+        self.assertEqual(
+            _error_check(self, line), i18n("bootstrap.reply_blob", size)
+        )
+
+
+# Tests the choice and the loading of the main loop file.
+class TestMainLoop(unittest.TestCase):
+    # A name that is not a plain file name ending in `.py` is refused.
+    def test_name_refused(self) -> None:
+        for name in (
+            "../test_loop.py",
+            "main_loop/test_loop.py",
+            ".test_loop.py",
+            "test_loop.txt",
+            "",
+        ):
+            made = _root_make(self, True)
+            _loop_write(made.root, _LOOP_TEXT)
+            argv = ["--root", made.root, "--main-loop", name]
+            record = _run_captured(
+                made, argv, _REPLY_FULL, _ENGINE_ENVIRONMENT
+            )
+            self.assertEqual(record.code, 1)
+            (line,) = _lines_parse(record.output)
+            self.assertEqual(
+                _error_check(self, line),
+                i18n("bootstrap.main_loop_name", name),
+            )
+            prepared = os.path.join(made.root, _PREPARE_NAME)
+            self.assertFalse(os.path.exists(prepared))
+
+    # A file that lacks `loop_run` is refused before `hello`.
+    def test_function_missing(self) -> None:
+        made = _root_make(self, True)
+        path = _loop_write(made.root, _LOOP_PARTIAL)
+        argv = _engine_argv(made.root)
+        record = _run_captured(made, argv, _REPLY_FULL, _ENGINE_ENVIRONMENT)
+        self.assertEqual(record.code, 1)
+        (line,) = _lines_parse(record.output)
+        self.assertEqual(
+            _error_check(self, line),
+            i18n("bootstrap.loop_missing", path, "loop_run"),
+        )
+
+    # A named file that does not exist is refused before `hello`.
+    def test_file_missing(self) -> None:
+        made = _root_make(self, True)
+        path = os.path.join(made.root, "main_loop", _LOOP_NAME)
+        argv = _engine_argv(made.root)
+        record = _run_captured(made, argv, _REPLY_FULL, _ENGINE_ENVIRONMENT)
+        self.assertEqual(record.code, 1)
+        (line,) = _lines_parse(record.output)
+        self.assertIn(path, _error_check(self, line))
+
+
+# Tests the console role, which runs dash in debug mode only.
+class TestConsole(unittest.TestCase):
+    # Outside debug mode nothing runs, nothing is written and the code is 1.
+    def test_console_refused(self) -> None:
+        made = _root_make(self, False)
+        before = os.getcwd()
+        self.addCleanup(os.chdir, before)
+        argv = ["--root", made.root, "console"]
+        with unittest.mock.patch("verbose.call") as call:
+            record = _run_captured(made, argv, b"", _CONSOLE_ENVIRONMENT)
+        call.assert_not_called()
+        self.assertEqual(record, RunRecord(1, b"", []))
+        self.assertEqual(os.getcwd(), before)
+
+    # In debug mode dash runs in the root with only the kept variables.
+    def test_console_scrubbed(self) -> None:
+        made = _root_make(self, True)
+        self.addCleanup(os.chdir, os.getcwd())
+        seen: list[tuple[int, list[str], dict[str, str], str]] = []
+
+        # Records the call and returns the code dash exits with.
+        def call_record(level: int, argv: list[str]) -> int:
+            seen.append((level, argv, dict(os.environ), os.getcwd()))
+            return 3
+
+        argv = ["--root", made.root, "console"]
+        with unittest.mock.patch("verbose.call", side_effect=call_record):
+            record = _run_captured(made, argv, b"", _CONSOLE_ENVIRONMENT)
+        self.assertEqual(record, RunRecord(3, b"", []))
+        ((level, called, environment, directory),) = seen
+        self.assertEqual((level, called), (0, ["/bin/dash"]))
+        self.assertEqual(environment, _CONSOLE_KEPT)
+        self.assertTrue(os.path.samefile(directory, made.root))
+
+    # A dash a signal ended gives the shell's code, 128 plus the signal.
+    def test_console_signal(self) -> None:
+        made = _root_make(self, True)
+        self.addCleanup(os.chdir, os.getcwd())
+        argv = ["--root", made.root, "console"]
+        ended = -signal.SIGKILL
+        with unittest.mock.patch("verbose.call", return_value=ended):
+            record = _run_captured(made, argv, b"", _CONSOLE_ENVIRONMENT)
+        self.assertEqual(record, RunRecord(128 + signal.SIGKILL, b"", []))
+
+
+# Tests the error line, written by the dispatcher or with `json` alone.
+class TestError(unittest.TestCase):
+    # A missing settings file is one error line after raw mode, and exit 1.
+    def test_error_shape(self) -> None:
+        made = _root_make(self, False)
+        path = os.path.join(made.root, "settings.json")
+        os.remove(path)
+        argv = _engine_argv(made.root)
+        record = _run_captured(made, argv, _REPLY_SHORT, _ENGINE_ENVIRONMENT)
+        self.assertEqual(record.code, 1)
+        self.assertEqual(record.raw_calls, _RAW_CALLS)
+        (line,) = _lines_parse(record.output)
+        self.assertIn(path, _error_check(self, line))
+        self.assertIn("FileNotFoundError", line["stack"])
+
+    # Without the dispatcher the line has the same shape and both faults.
+    def test_error_plain(self) -> None:
+        made = _root_make(self, False)
+        path = os.path.join(made.root, "settings.json")
+        os.remove(path)
+        argv = _engine_argv(made.root)
+        with unittest.mock.patch.dict(sys.modules, {"dispatch": None}):
+            record = _run_captured(
+                made, argv, _REPLY_SHORT, _ENGINE_ENVIRONMENT
+            )
+        self.assertEqual(record.code, 1)
+        (line,) = _lines_parse(record.output)
+        self.assertIn(path, _error_check(self, line))
+        stack: str = line["stack"]
+        self.assertIn("FileNotFoundError", stack)
+        self.assertIn("ModuleNotFoundError", stack)
+        self.assertLess(
+            stack.index("FileNotFoundError"),
+            stack.index("ModuleNotFoundError"),
+        )
