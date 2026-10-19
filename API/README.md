@@ -1,7 +1,8 @@
 # API
 
-The external API of every module R4.md names, before any is written.
-Nothing here runs. A file changes only when R4.md changes with it.
+The external API of every module hyperposition-plan.md names, before
+any is written. Nothing here runs. A file changes only when
+hyperposition-plan.md changes with it.
 
 - `python/*.pyi` and `python/tap/*.pyi`: the public names of each
   Python module, as stub files. A handler module lists one function per

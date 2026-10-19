@@ -1,18 +1,19 @@
 # DATA
 
 Synthetic transcripts of the engine's standard communication, written by
-`transcripts_make.py` from the API in API/ and the design in R4.md.
-Nothing here was recorded from a running system.
+`transcripts_make.py` from the API in API/ and the design in
+hyperposition-plan.md. Nothing here was recorded from a running system.
 
 ```text
 python3 DATA/transcripts_make.py
 ```
 
 Each `.txt` is one scenario. A line is `NNNN FROM->TO message`; a `#`
-line is a note. The message is the JSLB line rendered as R4.md 3.11: the
-JSON text exactly as its encoder writes it, without the CR, followed by
-one `<blob "n"=K>` tag per blob, K the blob header's key. On the wire
-each message also carries ttyd's `0` prefix, not shown. Sizes and SHA-256
+line is a note. The message is the JSLB line rendered as
+hyperposition-plan.md 3.11: the JSON text exactly as its encoder writes
+it, without the CR, followed by one `<blob "n"=K>` tag per blob, K the
+blob header's key. On the wire each message also carries ttyd's `0`
+prefix, not shown. Sizes and SHA-256
 values are computed from the synthetic bytes the blob would hold; pids,
 URLs, ids and timestamps are placeholders.
 
@@ -27,8 +28,8 @@ CLIENT   an external MCP client     STDIO   mcp_stdio.py
 ```
 
 A line from AI to AI is a wake the task manager enqueued for a sleeping
-task (R4.md 4.2); together with the lines around it, the queue log is the
-timeline of the thread.
+task (hyperposition-plan.md 4.2); together with the lines around it, the
+queue log is the timeline of the thread.
 
 - `01_boot.txt`: a new tab: the page, the worker, ttyd's protocol, the
   hello, the settings, the databases replaced from the server, the MCP

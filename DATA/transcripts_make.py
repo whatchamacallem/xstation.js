@@ -4,10 +4,10 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Writes the synthetic transcripts in this directory: every JSLB line is
-# encoded by the rules of R4.md section 3 and rendered as its 3.11 says,
-# the JSON text followed by one `<blob "n"=K>` tag per blob. Sizes and
-# hashes are computed from the synthetic bytes; pids and ids are
-# placeholders.
+# encoded by the rules of `hyperposition-plan.md` section 3 and rendered
+# as its 3.11 says, the JSON text followed by one `<blob "n"=K>` tag per
+# blob. Sizes and hashes are computed from the synthetic bytes; pids and
+# ids are placeholders.
 #
 #     python3 DATA/transcripts_make.py
 
