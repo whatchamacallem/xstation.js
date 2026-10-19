@@ -27,7 +27,7 @@ declare namespace wire {
 
   // The port to the console on tty 0: `/ws?arg=console`, no JSLB. Each
   // message of ttyd's protocol received becomes one `console.output`
-  // line with the bytes as blob "1"; each `console.input` line posted
+  // line with the bytes as blob 1; each `console.input` line posted
   // sends its blob as one message; a `console.read` line is answered
   // once `until` appears in the output or its timer expires.
   class ConsolePort implements queue.Port {

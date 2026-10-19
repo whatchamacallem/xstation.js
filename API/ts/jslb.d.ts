@@ -14,7 +14,7 @@ declare namespace jslb {
     sink_close(handle: string): lines.Sha256;
   }
 
-  // Builds the header "0". `full` selects full names, the debug form.
+  // Builds the header 0. `full` selects full names, the debug form.
   // A field at its default is left out.
   function header_make(
     type: string,
@@ -36,7 +36,7 @@ declare namespace jslb {
   ): BlobHeader;
 
   // Builds a line from its header, blob headers and payload, numbering
-  // the blob headers "1" on and setting `b`.
+  // the blob headers 1 on and setting `b`.
   function line_make(
     header: LineHeader,
     blobs: BlobHeader[],
@@ -46,10 +46,10 @@ declare namespace jslb {
   // Resolves a short or full field name on a header and its default.
   function field_get(header: LineHeader | BlobHeader, name: string): unknown;
 
-  // The headers of an object, "0" on, found by probing the integer keys.
+  // The headers of an object, 0 on, found by probing the integer keys.
   function headers_of(object: { [key: string]: unknown }): unknown[];
 
-  // The payload: the keys that aren't decimal integer strings.
+  // The payload: the keys that aren't integer keys.
   function payload_of(line: Line): { [key: string]: unknown };
 
   // The JSON bytes ending in CR, then each blob's `d` as it is, for the

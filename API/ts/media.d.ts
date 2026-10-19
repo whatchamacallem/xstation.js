@@ -5,7 +5,7 @@ declare namespace media {
   // the download are events it turns into reply lines.
   class MediaPort implements queue.Port {
     constructor(budget_bytes: number, timeout_seconds: number);
-    // Answers `media.fetch` with the bytes as blob "1" once downloaded
+    // Answers `media.fetch` with the bytes as blob 1 once downloaded
     // and decoded, and `media.store` once decoded; `error` on failure
     // or timeout.
     line_post(line: lines.Line, transfer: ArrayBuffer[]): void;

@@ -1,14 +1,14 @@
 from collections.abc import Callable, Iterator
 from typing import Any
 
-# A decoded JSON object: a dict whose keys are attributes too, at every level.
-class Object(dict[str, Any]):
+# A decoded JSON object, headers at integer keys, string keys attributes too.
+class Object(dict[int | str, Any]):
     def __getattr__(self, name: str) -> Any: ...
 
 # A framing or header fault. The port that fed the decoder closes on it.
 class WireError(Exception): ...
 
-# Builds the header `"0"`. `full` selects full names. Defaults are left out.
+# Builds the header `0`. `full` selects full names. Defaults are left out.
 def header_make(
     type: str,
     *,
@@ -32,10 +32,10 @@ def line_make(
 # Resolves a short or full field name on a header, and its default.
 def field_get(header: Object, name: str) -> Any: ...
 
-# The headers of an object, `"0"` on, found by probing the integer keys.
+# The headers of an object, `0` on, found by probing the integer keys.
 def headers_of(line: Object) -> list[Object | str]: ...
 
-# The payload: the keys of the object that aren't decimal integer strings.
+# The payload: the keys of the object that aren't integers.
 def payload_of(line: Object) -> dict[str, Any]: ...
 
 # Yields the JSON bytes ending in CR, then each blob's `d` as it is.

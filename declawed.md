@@ -306,7 +306,10 @@ discrepancies as this is a low priority self healing mechanism.
   `-t disableReconnect=true`. Windows ttyd closes with 1000 but loses a
   program's last output in about half of tries, as in ttyd issue #1429
   (open). ttyd's last release, 1.7.7, the one WinGet installs, dates from
-  2024-03-30; Ubuntu 26.04 packages it as 1.7.7-4build1. Windows builds
+  2024-03-30 and was still the latest on 2026-10-19; Ubuntu 26.04
+  packages it as 1.7.7-4build1. The 1.7.7 tag has `--url-arg` but not
+  `--srv-buf-size`, which upstream commit db77fde (2025-01-31) adds;
+  `../ttyd` at 1.7.7-24-g2922cb8 has both. Windows builds
   start at 1.7.0 and cut their command at 256 bytes.
 - Ubuntu's `ttyd` package enables `ttyd.service`, which runs
   `ttyd -W -i lo -p 7681 -O login` as root, set in `/etc/default/ttyd`, on

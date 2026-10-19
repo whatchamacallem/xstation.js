@@ -13,6 +13,9 @@
 
 import base64, hashlib, json, os, struct, zlib
 
+# A JSLB object: the headers at integer keys, the payload at string keys.
+Line = dict[int | str, object]
+
 _DATA_PATH = os.path.dirname(os.path.abspath(__file__))
 
 _API_PATH = os.path.join(os.path.dirname(_DATA_PATH), "API")
@@ -50,12 +53,12 @@ _ANALYST_TEXT = (
     " universe you create: typed tables, indexes, views, no JSON columns"
     " unless a document is what fits."
 )
-_SEED_DOCS: list[tuple[str, dict[str, object]]] = [
+_SEED_DOCS: list[tuple[str, Line]] = [
     (
         "hyperposition",
-        {"0": {"t": "scene"}, "subtitle": "How can I help you?"},
+        {0: {"t": "scene"}, "subtitle": "How can I help you?"},
     ),
-    ("prompt/analyst", {"0": {"t": "prompt"}, "text": _ANALYST_TEXT}),
+    ("prompt/analyst", {0: {"t": "prompt"}, "text": _ANALYST_TEXT}),
 ]
 _SEED_KV = [
     ("player", "player"),
@@ -215,7 +218,7 @@ class Transcript:
     def field(self, name: str) -> str:
         return _FULL[name] if self.full else name
 
-    # Builds the header "0" in the selected form, defaults left out.
+    # Builds the header 0 in the selected form, defaults left out.
     def header(
         self,
         type: str,
@@ -244,22 +247,22 @@ class Transcript:
         i: int | None = None,
         r: int | None = None,
         k: str | None = None,
-    ) -> dict[str, object]:
+    ) -> Line:
         blobs = blobs or []
-        line: dict[str, object] = {"0": self.header(type, i, r, k, len(blobs))}
+        line: Line = {0: self.header(type, i, r, k, len(blobs))}
         for number, (data, fields) in enumerate(blobs, 1):
             blob: dict[str, object] = {self.field("s"): len(data)}
             for name, value in fields.items():
                 blob[self.field(name) if name in _FULL else name] = value
-            line[str(number)] = blob
+            line[number] = blob
         line.update(payload or {})
         return line
 
     # Renders a line object: the JSON text, then one tag per blob.
-    def render(self, line: dict[str, object]) -> str:
+    def render(self, line: Line) -> str:
         text = json_text(line)
         number = 1
-        while str(number) in line:
+        while number in line:
             text += f'<blob "n"={number}>'
             number += 1
         return text
@@ -289,7 +292,7 @@ class Transcript:
         type: str,
         payload: dict[str, object] | None = None,
         blobs: list[Blob] | None = None,
-    ) -> dict[str, object]:
+    ) -> Line:
         line = self.object(type, payload, blobs, r=r)
         self.event(source, target, self.render(line))
         return line
@@ -317,7 +320,7 @@ class Transcript:
         blobs: list[Blob] | None = None,
         reply_blobs: list[Blob] | None = None,
         k: str | None = None,
-    ) -> dict[str, object]:
+    ) -> Line:
         i = self.request(source, target, type, payload, blobs, k)
         return self.reply(target, source, i, type, reply, reply_blobs)
 
@@ -327,7 +330,7 @@ class Transcript:
         thread: str,
         type: str,
         state: dict[str, object],
-        replies: list[dict[str, object]],
+        replies: list[Line],
     ) -> None:
         self.notify(thread, thread, type, {"state": state, "replies": replies})
 
@@ -619,9 +622,7 @@ def turn_forward(
 
 
 # A tools/call over the local port, with the result. Returns the reply.
-def tool_result(
-    t: Transcript, i: int, result: dict[str, object]
-) -> dict[str, object]:
+def tool_result(t: Transcript, i: int, result: dict[str, object]) -> Line:
     return t.reply(
         "MCP",
         "AGENT",
@@ -863,13 +864,17 @@ def turn_write() -> str:
             "content": json_text(image_result),
         }
     )
-    scene_doc: dict[str, object] = {
-        "0": {"t": "scene"},
-        "1": _IMAGE_KEY,
+    scene_doc: Line = {
+        0: {"t": "scene"},
+        1: _IMAGE_KEY,
         "subtitle": _SUBTITLE,
         "image": {"$ref": 1},
     }
-    doc_args = {"db": _REGION, "id": _SCENE_ID, "body": scene_doc}
+    doc_args: dict[str, object] = {
+        "db": _REGION,
+        "id": _SCENE_ID,
+        "body": scene_doc,
+    }
     enter_args = {"ref": f"/{_WORLD}/scene", "text": _SCENE_REF}
     render_args = {"image": _IMAGE_KEY, "subtitle": _SUBTITLE}
     assistant = chat_exchange(

@@ -1,5 +1,5 @@
 // The catalogue of every JSLB line type on every lane. A line is one JSON
-// object: header "0", blob headers "1" to "b", the payload in every other
+// object: header 0, blob headers 1 to b, the payload in every other
 // key. Short names on the wire, full names in debug mode; a field at its
 // default is not written. Each interface below is the payload of one
 // type; the comment above it gives the lane, the direction, the blobs
@@ -63,7 +63,7 @@
 // mcp               mcp      AGENT <-> MCP   0      push (JSON-RPC)
 
 declare namespace lines {
-  // Header "0". `t` type, `v` version, `i` id, `r` reply, `k` key,
+  // Header 0. `t` type, `v` version, `i` id, `r` reply, `k` key,
   // `b` blobs. Full names in debug mode.
   interface LineHeader {
     t: string;
@@ -74,7 +74,7 @@ declare namespace lines {
     b?: number;
   }
 
-  // Headers "1" to "b". `s` size, `k` key, `d` the bytes or, for a blob
+  // Headers 1 to b. `s` size, `k` key, `d` the bytes or, for a blob
   // streamed to the cache, the cache handle. Other fields are the
   // handler's.
   interface BlobHeader {
@@ -85,7 +85,7 @@ declare namespace lines {
   }
 
   interface Line {
-    "0": LineHeader;
+    0: LineHeader;
     [key: string]: unknown;
   }
 
@@ -100,11 +100,11 @@ declare namespace lines {
   // version an integer literal and the last segment.
   type DocRef = string;
 
-  // A document in its stored form: header "0" with `t` the document type
-  // and `v` its format version, reference strings at "1" on, and
+  // A document in its stored form: header 0 with `t` the document type
+  // and `v` its format version, reference strings at 1 on, and
   // `{"$ref": n}` in the body where header n is meant.
   interface Document {
-    "0": { t: string; v?: number };
+    0: { t: string; v?: number };
     [key: string]: unknown;
   }
 
@@ -137,7 +137,7 @@ declare namespace lines {
   }
 
   // kv.get: the ref is the header's `k`. Reply with the value as blob
-  // "1".
+  // 1.
   interface KvGet {}
 
   interface KvGetReply {
@@ -145,7 +145,7 @@ declare namespace lines {
     sha256: Sha256;
   }
 
-  // kv.put: the ref is the header's `k`; the value is blob "1". On the
+  // kv.put: the ref is the header's `k`; the value is blob 1. On the
   // wire `since` is the browser's `seq` before the write.
   interface KvPut {
     since?: number;
@@ -200,7 +200,7 @@ declare namespace lines {
     db: string;
   }
 
-  // db.snapshot's reply carries the file as blob "1".
+  // db.snapshot's reply carries the file as blob 1.
   interface DbSnapshotReply {
     sha256: Sha256;
     seq: number;
@@ -279,7 +279,7 @@ declare namespace lines {
     settings: settings.Settings;
   }
 
-  // source.put: blob "1" is the file written as `main_loop/<name>`.
+  // source.put: blob 1 is the file written as `main_loop/<name>`.
   interface SourcePut {
     name: string;
   }
@@ -324,13 +324,13 @@ declare namespace lines {
   }
 
   // media.fetch: the UI downloads `url`, keeps it as `k`, and replies
-  // with the bytes as blob "1" so the AI worker can back them up.
+  // with the bytes as blob 1 so the AI worker can back them up.
   interface MediaFetch {
     url: string;
     k: KvRef;
   }
 
-  // media.store: blob "1" is the image to keep as `k`.
+  // media.store: blob 1 is the image to keep as `k`.
   interface MediaStore {
     k: KvRef;
   }
@@ -374,7 +374,7 @@ declare namespace lines {
     y?: number;
   }
 
-  // console.input and console.output: blob "1" is one message of ttyd's
+  // console.input and console.output: blob 1 is one message of ttyd's
   // own protocol, as the client or the server would send it on tty 0.
   interface ConsoleBytes {}
 
@@ -426,7 +426,7 @@ declare namespace lines {
   }
 
   // http.response: `json` when the content type is JSON, else `text`;
-  // `data` as blob "1" when the request asked for `binary`.
+  // `data` as blob 1 when the request asked for `binary`.
   interface HttpResponse {
     status: number;
     headers: { [name: string]: string };

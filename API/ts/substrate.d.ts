@@ -22,7 +22,7 @@ declare namespace substrate {
   // Splits a Key-Value-Ref or Document-Ref. A bad ref throws.
   function ref_split(ref: string): RefParts;
 
-  // Moves a document's reference strings into its headers "1" on,
+  // Moves a document's reference strings into its headers 1 on,
   // sharing equal strings, and leaves `{"$ref": n}` behind.
   function doc_encode(normal: { [key: string]: unknown }): lines.Document;
 
