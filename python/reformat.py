@@ -20,6 +20,7 @@ _RUFF_CACHE_PATH = os.path.join(_ROOT_PATH, "build", "ruff_cache")
 _FORMATTERS: dict[str, list[str]] = {
     ".md": ["mdformat", "--check"],
     ".py": ["ruff", "format", "--cache-dir", _RUFF_CACHE_PATH],
+    ".pyi": ["ruff", "format", "--cache-dir", _RUFF_CACHE_PATH],
     ".sh": ["shfmt", "--list", "--write"],
 }
 

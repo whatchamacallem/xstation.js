@@ -2,5 +2,7 @@ archive.sh
 clean.sh
 python/*.py
 python/*.html
+API/python/*.pyi
+DATA/*.py
 LICENSE.md
 README.md

@@ -139,7 +139,7 @@ def comments_find(path: str, text: str) -> list[Comment]:
     match os.path.splitext(path)[1]:
         case ".md":
             pass
-        case ".py":
+        case ".py" | ".pyi":
             comments = python_comments(text)
         case ".sh":
             shell_scan(path, text, 0, False, comments)
@@ -501,7 +501,7 @@ def main() -> None:
     for path in paths + powershell_paths():
         comments_check(path)
     reformat.reformat(paths)
-    python_paths = [path for path in paths if path.endswith(".py")]
+    python_paths = [path for path in paths if path.endswith((".py", ".pyi"))]
     # With no files, ruff checks the directory.
     if python_paths:
         subprocess.run(
