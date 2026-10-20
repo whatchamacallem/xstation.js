@@ -5,8 +5,10 @@
 // JSLB, the wire format: a line is one JSON object ending in CR, its headers
 // at the integer keys 0, 1, ... and its payload at the other keys, followed
 // by the bytes of each blob the line header counts. The builders, field
-// access, the encoder, the debug rendering, and the decoder, which streams a
-// blob over overflow_bytes into a sink that hashes it on the way.
+// access, the encoder, the debug rendering, and the decoder, which bounds a
+// message by message_max, streams a blob over overflow_bytes into a sink that
+// hashes it on the way, and holds a fault met after finished lines for the
+// next feed.
 namespace jslb {
   // A line: header 0, blob headers 1 on, the payload at the other keys.
   export type Line = lines.Line;
@@ -107,8 +109,10 @@ namespace jslb {
 
   // A framing or header fault. The port that fed the decoder closes on it.
   export class WireError extends Error {
-    // The name its stack shows.
-    override name = "WireError";
+    // Names the class on its prototype, read when the stack header is made.
+    static {
+      this.prototype.name = "WireError";
+    }
   }
 
   // Where a blob over `overflow_bytes` streams as it arrives, hashed by it.
@@ -153,16 +157,14 @@ namespace jslb {
     return Object.fromEntries(named) as unknown as LineHeader;
   }
 
-  // Builds a blob header with `d` set and `s` measured from the bytes.
+  // Builds a blob header with `d` set and `s` measured, or given for a handle.
   export function blob_make(
     data: Uint8Array | string,
     key?: string,
     fields: { [field: string]: unknown } = {},
+    size?: number,
   ): BlobHeader {
-    if (typeof data === "string") {
-      throw new Error(i18n("jslb.handle_unmeasured", data));
-    }
-    const entries: [string, unknown][] = [["s", data.length]];
+    const entries: [string, unknown][] = [["s", size_get(data, size)]];
     if (key !== undefined) {
       entries.push(["k", key]);
     }
@@ -286,6 +288,23 @@ namespace jslb {
   // Views a header as the plain object of fields that it is.
   function fields_of(header: object): { [key: string]: unknown } {
     return header as { [key: string]: unknown };
+  }
+
+  // The size of a blob's bytes, or the size its caller gives a cache handle.
+  function size_get(
+    data: Uint8Array | string,
+    size: number | undefined,
+  ): number {
+    if (typeof data === "string") {
+      if (size === undefined) {
+        throw new Error(i18n("jslb.handle_unmeasured", data));
+      }
+      return size;
+    }
+    if (size !== undefined) {
+      throw new Error(i18n("jslb.size_unwanted", size));
+    }
+    return data.length;
   }
 
   // Whether the value is a plain object, from a literal or `JSON.parse`.
@@ -497,12 +516,16 @@ namespace jslb {
     readonly #line_max: number;
     // The largest blob read.
     readonly #blob_max: number;
+    // The largest message read: its line, CR included, and all its blobs.
+    readonly #message_max: number;
     // The largest blob kept in memory, larger ones stream to the sink.
     readonly #overflow_bytes: number;
     // Where a blob over `overflow_bytes` streams.
     readonly #sink: BlobSink;
-    // Whether a feed threw, after which every feed throws.
+    // Whether a feed met a fault, after which every feed throws.
     #failed = false;
+    // A fault a feed met after finishing lines, which the next feed throws.
+    #fault: { thrown: unknown } | undefined = undefined;
     // The pieces of the line read so far, before its CR.
     #pieces: Uint8Array[] = [];
     // The number of bytes in those pieces.
@@ -526,22 +549,49 @@ namespace jslb {
     constructor(
       line_max: number,
       blob_max: number,
+      message_max: number,
       overflow_bytes: number,
       sink: BlobSink,
     ) {
       this.#line_max = line_max;
       this.#blob_max = blob_max;
+      this.#message_max = message_max;
       this.#overflow_bytes = overflow_bytes;
       this.#sink = sink;
     }
 
-    // Returns the complete lines the bytes finish. Throws at the first fault.
+    // Returns the lines finished. A fault after them throws on the next call.
     bytes_feed(data: Uint8Array): Line[] {
+      const fault = this.#fault;
+      if (fault !== undefined) {
+        this.#fault = undefined;
+        throw fault.thrown;
+      }
       if (this.#failed) {
         throw new WireError(i18n("jslb.decoder_failed"));
       }
       this.#failed = true;
       const found: Line[] = [];
+      try {
+        this.#bytes_read(data, found);
+        this.#failed = false;
+      } catch (error) {
+        this.#stream_shut();
+        if (found.length === 0) {
+          throw error;
+        }
+        this.#fault = { thrown: error };
+      }
+      return found;
+    }
+
+    // Whether the decoder stands between messages and has not failed.
+    idle(): boolean {
+      return !this.#failed && this.#line === undefined && this.#length === 0;
+    }
+
+    // Reads the bytes, adding each line they finish to `found`.
+    #bytes_read(data: Uint8Array, found: Line[]): void {
       let offset = 0;
       for (;;) {
         const line = this.#line;
@@ -550,7 +600,7 @@ namespace jslb {
           if (end < 0) {
             this.#length_check(data.length - offset);
             this.#text_add(data.slice(offset));
-            break;
+            return;
           }
           this.#length_check(end - offset);
           this.#text_add(data.subarray(offset, end));
@@ -570,7 +620,7 @@ namespace jslb {
           offset += count;
         }
         if (this.#left > 0) {
-          break;
+          return;
         }
         this.#blob_finish(line);
         if (this.#number < this.#sizes.length) {
@@ -580,8 +630,15 @@ namespace jslb {
         found.push(line as Line);
         this.#line = undefined;
       }
-      this.#failed = false;
-      return found;
+    }
+
+    // Closes the sink's blob when one is open, the bytes it holds kept.
+    #stream_shut(): void {
+      const handle = this.#handle;
+      if (handle !== undefined) {
+        this.#handle = undefined;
+        this.#sink.sink_close(handle);
+      }
     }
 
     // Refuses a line once its bytes and its CR would pass `line_max`.
@@ -597,8 +654,9 @@ namespace jslb {
       this.#length += piece.length;
     }
 
-    // Parses and checks the line read so far, refusing a blob too large.
+    // Parses and checks the line read, refusing a blob or a message too large.
     #line_parse(): { [key: string]: unknown } {
+      const length = this.#length + 1;
       const text = new Uint8Array(this.#length);
       let offset = 0;
       for (const piece of this.#pieces) {
@@ -609,6 +667,7 @@ namespace jslb {
       this.#length = 0;
       const line = line_decode(text);
       const sizes = line_check(line, true);
+      let total = length;
       for (let number = 1; number <= sizes.length; number += 1) {
         const size = sizes[number - 1];
         if (size > this.#blob_max) {
@@ -616,6 +675,12 @@ namespace jslb {
             i18n("jslb.blob_over_max", number, size, this.#blob_max),
           );
         }
+        total += size;
+      }
+      if (total > this.#message_max) {
+        throw new WireError(
+          i18n("jslb.message_over", total, this.#message_max),
+        );
       }
       this.#sizes = sizes;
       return line;
@@ -646,7 +711,7 @@ namespace jslb {
       this.#left -= piece.length;
     }
 
-    // Sets `d` on the finished blob's header, and `sha256` for a streamed one.
+    // Sets `d` on the finished blob, and if streamed `sha256`, over any sent.
     #blob_finish(line: { [key: string]: unknown }): void {
       const header = header_at(line, this.#number);
       const handle = this.#handle;
@@ -655,8 +720,8 @@ namespace jslb {
         this.#memory = new Uint8Array(0);
         return;
       }
-      const sha256 = this.#sink.sink_close(handle);
       this.#handle = undefined;
+      const sha256 = this.#sink.sink_close(handle);
       header.d = handle;
       header.sha256 = sha256;
     }

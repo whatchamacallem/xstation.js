@@ -213,13 +213,9 @@ namespace media {
 
     // The `error` line of the request: the message and stack of an error.
     private error_reply(error: Error): lines.Line {
-      const stack = error.stack;
-      if (stack === undefined) {
-        return utility.fail_now(i18n("media.stack_missing"));
-      }
       return this.reply_make(constants.error_type, [], {
         message: error.message,
-        stack,
+        stack: error.stack,
       });
     }
   }

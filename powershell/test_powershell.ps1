@@ -1,4 +1,4 @@
-﻿# SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+﻿﻿# SPDX-FileCopyrightText: © 2026 Adrian Johnston.
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
@@ -8,6 +8,13 @@
 # HTTPS with a throwaway password, which opens port 5768 to the network
 # with a port proxy and a Windows Firewall rule until the last stop. Each
 # step's output and log go to test_powershell.ps1.md.
+#
+# The checkout must first hold what the scripts read and don't make:
+# settings.json, i18n\en-US.json and the page build\hyperposition-engine.html.
+# Make the page in WSL in the checkout: python3 python/third_party_fetch.py
+# fetches the pinned archives over the network, then
+# python3 python/page_build.py hyperposition-engine builds the page from
+# them with tsc.
 #
 # The test command has to be run as admin:
 #

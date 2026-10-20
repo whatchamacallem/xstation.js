@@ -4,11 +4,15 @@
 #
 # Tests `kv.get`, `kv.put`, `kv.delete` and `kv.list` through the dispatcher
 # on a real store under `build/`: values byte for byte, a blob streamed to the
-# cache by the decoder, the replies as the wire carries them, a stale `since`
-# and a recorded sequence of forwarded operations replayed to a second store.
+# cache by the decoder, the replies as the wire carries them, the sizes,
+# hashes and `seq` numbers the transcripts recorded, a stale `since`, and a
+# recorded sequence of forwarded operations replayed to a second store. A new
+# database starts at `seq` 0.
 
-import dispatch, engine_kv, hashlib, jslb, os, sqlite3, substrate, tempfile
-import unittest, unittest.mock, uuid
+import base64, dispatch, engine_kv, hashlib, jslb, os, sqlite3, substrate
+import tempfile, unittest, unittest.mock, uuid
+from collections.abc import Callable
+from i18n import i18n
 from typing import Any
 
 # The checkout's build directory, where each test makes its scratch roots.
@@ -28,8 +32,11 @@ _OVERFLOW_BYTES = 131072
 # The `line_max` of the settings, 1 MiB.
 _LINE_MAX = 1048576
 
-# The `blob_max` of the settings, 1 GiB.
-_BLOB_MAX = 1073741824
+# The `blob_max` of the settings, 10 MiB.
+_BLOB_MAX = 10485760
+
+# The `message_max` of the settings, 10 MiB.
+_MESSAGE_MAX = 10485760
 
 # The database the tests keep their values in.
 _DATABASE = "_files"
@@ -40,29 +47,67 @@ _VALUE_BYTES = bytes(range(256))
 # A value over `overflow_bytes`, which the store keeps in the cache.
 _VALUE_OVER = bytes(range(256)) * 513
 
-# A map as large as the one of the sync transcript, over `overflow_bytes`.
+# The value of the world key that the turn transcript puts.
+_WORLD_VALUE = b"castle_world"
+
+# The hash the turn transcript recorded for the value of the world key.
+_WORLD_SHA256 = (
+    "6d0be246127ef7993924a9ce127c6fa6c093dca368163093ab31c80273336ecd"
+)
+
+# The image of the turn transcript, as the scripted provider sent it.
+_IMAGE_BASE64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAH0lEQVR42mP4"
+    "jwQYkAAucYZBqGGQO48oDaPxMCg0AADZV36QzYI8swAAAABJRU5ErkJggg=="
+)
+
+# The bytes of the image of the turn transcript.
+_IMAGE_BYTES = base64.b64decode(_IMAGE_BASE64)
+
+# The hash the turn transcript recorded for the image.
+_IMAGE_SHA256 = (
+    "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0"
+)
+
+# The key of the image of the turn transcript.
+_IMAGE_KEY = "/_files/gatehouse/arrival.png"
+
+# The map of the sync transcript, over `overflow_bytes`.
 _MAP_BYTES = bytes(range(256)) * 800
 
-# The text of the script that the recorded sequence writes first.
-_SCRIPT_ONE = b"engine.say('How can I help you?');"
+# The hash the sync transcript recorded for the map.
+_MAP_SHA256 = (
+    "8c6627e25bfbdef2bba5abc03123ea8e9b60d892f7f180a8b9b5079fb3233c54"
+)
 
-# The text of the script that the recorded sequence writes over it.
-_SCRIPT_TWO = b"engine.say('Mind the moat.');"
-
-# The key of the script of the recorded sequence.
-_SCRIPT_KEY = "/_files/script/bootstrap.js"
-
-# The key of the map of the recorded sequence.
+# The key of the map of the sync transcript.
 _MAP_KEY = "/_files/maps/castle.bin"
 
-# The recorded operations on `_files`: a key, and its value or `None`.
-_RECORDED: list[tuple[str, bytes | None]] = [
+# A stand in for the script the server seeds into `_files`.
+_SCRIPT_ONE = b"engine.say('How can I help you?');"
+
+# A later text of the seeded script, written over it.
+_SCRIPT_TWO = b"engine.say('Mind the moat.');"
+
+# The key of the seeded script.
+_SCRIPT_KEY = "/_files/script/bootstrap.js"
+
+# A stand in for the script of the put the sync transcript refuses.
+_TIDE_SCRIPT = b"engine.log(1, 'tide advanced by 1');"
+
+# The key of the script of the put the sync transcript refuses.
+_TIDE_KEY = "/_files/script/step_tide.js"
+
+# The message the sync transcript recorded for the put it refuses.
+_DESYNC_MESSAGE = "kv.put: since 3 is not seq 4 of _files"
+
+# The puts on `_files` replayed: the seed, the image, the map, two rewrites.
+_RECORDED: list[tuple[str, bytes]] = [
     (_SCRIPT_KEY, _SCRIPT_ONE),
+    (_IMAGE_KEY, _IMAGE_BYTES),
     (_MAP_KEY, _MAP_BYTES),
     (_SCRIPT_KEY, _SCRIPT_ONE),
     (_SCRIPT_KEY, _SCRIPT_TWO),
-    (_MAP_KEY, None),
-    (_MAP_KEY, None),
 ]
 
 
@@ -111,7 +156,9 @@ def _decoder_make(root: str) -> jslb.LineDecoder:
     def sink_make(header: jslb.Object) -> str:
         return os.path.join(cache, "sink" + uuid.uuid4().hex)
 
-    return jslb.LineDecoder(_LINE_MAX, _BLOB_MAX, _OVERFLOW_BYTES, sink_make)
+    return jslb.LineDecoder(
+        _LINE_MAX, _BLOB_MAX, _MESSAGE_MAX, _OVERFLOW_BYTES, sink_make
+    )
 
 
 # Decodes the one line the bytes hold, streaming a big blob to the cache.
@@ -185,33 +232,45 @@ class IsolatedCase(unittest.TestCase):
         self.addCleanup(_store_close, store)
         return store
 
+    # Calls `fn` and checks the type and the text of what it raises.
+    def raise_check(
+        self, kind: type[Exception], message: str, fn: Callable[[], object]
+    ) -> None:
+        with self.assertRaises(kind) as caught:
+            fn()
+        self.assertEqual(str(caught.exception), message)
+
+    # Dispatches a line and checks the type and the text of what it raises.
+    def dispatch_check(
+        self, kind: type[Exception], message: str, line: jslb.Object
+    ) -> None:
+        self.raise_check(kind, message, lambda: dispatch.line_dispatch(line))
+
 
 # Tests the handler of `kv.get`.
 class TestGet(IsolatedCase):
     # A value in its row is replied with its size, hash and bytes as blob 1.
     def test_value_replied(self) -> None:
         engine_kv.handlers_register(self.store)
-        self.store.kv_put("/_files/a", b"castle_world")
-        reply = _reply_get(_line_make("kv.get", 4, "/_files/a"))
-        digest = hashlib.sha256(b"castle_world").hexdigest()
-        payload = {"size": 12, "sha256": digest}
+        self.store.kv_put("/_files/world", _WORLD_VALUE)
+        reply = _reply_get(_line_make("kv.get", 4, "/_files/world"))
+        payload = {"size": 12, "sha256": _WORLD_SHA256}
         self.assertEqual(reply[0], {"t": "kv.get", "r": 4, "b": 1})
-        self.assertEqual(reply[1], {"s": 12, "d": b"castle_world"})
+        self.assertEqual(reply[1], {"s": 12, "d": _WORLD_VALUE})
         self.assertEqual(jslb.payload_of(reply), payload)
 
     # A value in the cache is replied as the path of its file, which encodes.
     def test_path_replied(self) -> None:
         engine_kv.handlers_register(self.store)
-        self.store.kv_put("/_files/big", _VALUE_OVER)
-        reply = _reply_get(_line_make("kv.get", 1, "/_files/big"))
-        digest = hashlib.sha256(_VALUE_OVER).hexdigest()
-        path = os.path.join(self.root, "cache", digest)
-        payload = {"size": len(_VALUE_OVER), "sha256": digest}
-        self.assertEqual(reply[1], {"s": len(_VALUE_OVER), "d": path})
+        self.store.kv_put(_MAP_KEY, _MAP_BYTES)
+        reply = _reply_get(_line_make("kv.get", 1, _MAP_KEY))
+        path = os.path.join(self.root, "cache", _MAP_SHA256)
+        payload = {"size": 204800, "sha256": _MAP_SHA256}
+        self.assertEqual(reply[1], {"s": 204800, "d": path})
         self.assertEqual(jslb.payload_of(reply), payload)
         decoded = _line_decode(self.root, _wire_bytes(reply))
-        self.assertEqual(decoded[1]["sha256"], digest)
-        self.assertEqual(_blob_read(decoded, 1), _VALUE_OVER)
+        self.assertEqual(decoded[1]["sha256"], _MAP_SHA256)
+        self.assertEqual(_blob_read(decoded, 1), _MAP_BYTES)
         self.assertEqual(jslb.payload_of(decoded), payload)
 
     # A line in full names is answered in full names.
@@ -227,42 +286,51 @@ class TestGet(IsolatedCase):
     # A key that is not there raises, and so does a line with no key.
     def test_key_missing(self) -> None:
         engine_kv.handlers_register(self.store)
-        with self.assertRaises(LookupError):
-            dispatch.line_dispatch(_line_make("kv.get", 1, "/_files/none"))
-        with self.assertRaises(ValueError):
-            dispatch.line_dispatch(_line_make("kv.get", 1))
+        line = _line_make("kv.get", 1, "/_files/none")
+        message = i18n("substrate.key_missing", "none", _DATABASE)
+        self.dispatch_check(LookupError, message, line)
+        message = i18n("engine_kv.key_missing", "kv.get")
+        self.dispatch_check(ValueError, message, _line_make("kv.get", 1))
 
     # An internal ref or an empty key raises, and so does a closed database.
     def test_ref_invalid(self) -> None:
         engine_kv.handlers_register(self.store)
-        for key in ("a", "", "/_files/"):
+        cases = (
+            ("a", i18n("substrate.ref_internal", "a")),
+            ("", i18n("substrate.ref_bad", "")),
+            ("/_files/", i18n("substrate.ref_bad", "/_files/")),
+        )
+        for key, message in cases:
             with self.subTest(key=key):
-                with self.assertRaises(ValueError):
-                    dispatch.line_dispatch(_line_make("kv.get", 1, key))
-        with self.assertRaises(LookupError):
-            dispatch.line_dispatch(_line_make("kv.get", 1, "/none/a"))
+                line = _line_make("kv.get", 1, key)
+                self.dispatch_check(ValueError, message, line)
+        line = _line_make("kv.get", 1, "/none/a")
+        message = i18n("substrate.db_closed", "none")
+        self.dispatch_check(LookupError, message, line)
 
 
 # Tests the handler of `kv.put`.
 class TestPut(IsolatedCase):
-    # A put stores blob 1 under the key and replies with its hash and `seq`.
+    # The turn transcript's image put: its hash and `seq` 2 after the seed.
     def test_value_stored(self) -> None:
         engine_kv.handlers_register(self.store)
-        reply = _reply_get(_put_line(self.root, "/_files/a", b"one", 1))
-        digest = hashlib.sha256(b"one").hexdigest()
+        self.store.kv_put(_SCRIPT_KEY, _SCRIPT_ONE)
+        reply = _reply_get(_put_line(self.root, _IMAGE_KEY, _IMAGE_BYTES, 1))
+        payload = {"sha256": _IMAGE_SHA256, "seq": 2}
         self.assertEqual(reply[0], {"t": "kv.put", "r": 1})
-        self.assertEqual(jslb.payload_of(reply), {"sha256": digest, "seq": 2})
-        self.assertEqual(self.store.kv_get("/_files/a").data, b"one")
+        self.assertEqual(jslb.payload_of(reply), payload)
+        self.assertEqual(self.store.kv_get(_IMAGE_KEY).data, _IMAGE_BYTES)
+        self.assertEqual(self.store.kv_get(_IMAGE_KEY).size, 88)
         self.assertEqual(self.store.seq_get(_DATABASE), 2)
 
     # A line in full names is answered in full names.
     def test_full_names(self) -> None:
         engine_kv.handlers_register(self.store)
         header = jslb.header_make("kv.put", id=1, key="/_files/a", full=True)
-        line = jslb.line_make(header, [jslb.blob_make(b"one")], since=1)
+        line = jslb.line_make(header, [jslb.blob_make(b"one")], since=0)
         reply = _reply_get(line)
         self.assertEqual(reply[0], {"type": "kv.put", "reply": 1})
-        self.assertEqual(reply["seq"], 2)
+        self.assertEqual(reply["seq"], 1)
         self.assertEqual(self.store.kv_get("/_files/a").data, b"one")
 
     # Every byte value, an empty value and a cached value return as put.
@@ -271,9 +339,9 @@ class TestPut(IsolatedCase):
         values = (_VALUE_BYTES, b"", _VALUE_OVER)
         for index, value in enumerate(values):
             key = f"/_files/value{index}"
-            put = _reply_get(_put_line(self.root, key, value, index + 1))
+            put = _reply_get(_put_line(self.root, key, value, index))
             digest = hashlib.sha256(value).hexdigest()
-            payload = {"sha256": digest, "seq": index + 2}
+            payload = {"sha256": digest, "seq": index + 1}
             self.assertEqual(jslb.payload_of(put), payload)
             reply = _reply_get(_line_make("kv.get", 2, key))
             self.assertEqual(reply["size"], len(value))
@@ -283,70 +351,75 @@ class TestPut(IsolatedCase):
             self.assertEqual(_blob_read(decoded, 1), value)
             self.assertEqual(jslb.payload_of(decoded), jslb.payload_of(reply))
 
-    # A blob over `overflow_bytes` arrives as a file that is moved into place.
+    # The sync transcript's map arrives streamed and is moved into place.
     def test_streamed_put(self) -> None:
         engine_kv.handlers_register(self.store)
-        line = _put_line(self.root, _MAP_KEY, _MAP_BYTES, 1)
+        self.store.kv_put(_SCRIPT_KEY, _SCRIPT_ONE)
+        self.store.kv_put(_IMAGE_KEY, _IMAGE_BYTES)
+        line = _put_line(self.root, _MAP_KEY, _MAP_BYTES, 2)
         path = line[1]["d"]
-        digest = hashlib.sha256(_MAP_BYTES).hexdigest()
         self.assertIsInstance(path, str)
-        self.assertEqual(line[1]["sha256"], digest)
+        self.assertEqual(line[1]["sha256"], _MAP_SHA256)
         reply = _reply_get(line)
-        self.assertEqual(jslb.payload_of(reply), {"sha256": digest, "seq": 2})
+        payload = {"sha256": _MAP_SHA256, "seq": 3}
+        self.assertEqual(jslb.payload_of(reply), payload)
         cache = os.path.join(self.root, "cache")
+        stored = os.path.join(cache, _MAP_SHA256)
         self.assertFalse(os.path.exists(path))
-        self.assertEqual(os.listdir(cache), [digest])
-        self.assertEqual(
-            self.store.kv_get(_MAP_KEY).data, os.path.join(cache, digest)
-        )
-        self.assertEqual(_file_read(os.path.join(cache, digest)), _MAP_BYTES)
+        self.assertEqual(os.listdir(cache), [_MAP_SHA256])
+        self.assertEqual(self.store.kv_get(_MAP_KEY).data, stored)
+        self.assertEqual(_file_read(stored), _MAP_BYTES)
 
     # An identical write is not a change, so the `seq` stays.
     def test_put_unchanged(self) -> None:
         engine_kv.handlers_register(self.store)
         seqs: list[int] = []
-        for value, since in ((b"one", 1), (b"one", 2), (b"two", 2)):
+        for value, since in ((b"one", 0), (b"one", 1), (b"two", 1)):
             line = _put_line(self.root, "/_files/a", value, since)
             seqs.append(_reply_get(line)["seq"])
-        self.assertEqual(seqs, [2, 2, 3])
+        self.assertEqual(seqs, [1, 1, 2])
 
     # A stale `since` raises the desync and nothing is written.
     def test_since_stale(self) -> None:
         engine_kv.handlers_register(self.store)
         line = _put_line(self.root, "/_files/a", b"one", 5)
-        with self.assertRaises(RuntimeError) as caught:
-            dispatch.line_dispatch(line)
-        message = "kv.put: since 5 is not seq 1 of _files"
-        self.assertEqual(str(caught.exception), message)
-        with self.assertRaises(LookupError):
-            self.store.kv_get("/_files/a")
-        self.assertEqual(self.store.seq_get(_DATABASE), 1)
+        message = i18n("substrate.since_stale", "kv.put", 5, 0, _DATABASE)
+        self.dispatch_check(RuntimeError, message, line)
+        missing = i18n("substrate.key_missing", "a", _DATABASE)
+        self.raise_check(
+            LookupError, missing, lambda: self.store.kv_get("/_files/a")
+        )
+        self.assertEqual(self.store.seq_get(_DATABASE), 0)
 
-    # The transcript's desync: another writer moved `seq` ahead of `since`.
+    # The sync transcript's desync: another writer moved `seq` past `since`.
     def test_writer_ahead(self) -> None:
         engine_kv.handlers_register(self.store)
-        _reply_get(_put_line(self.root, _MAP_KEY, _MAP_BYTES, 1))
-        _reply_get(_put_line(self.root, "/_files/a", b"one", 2))
-        self.store.kv_put("/_files/b", b"two")
-        line = _put_line(self.root, "/_files/script/step_tide.js", b"tide", 3)
-        with self.assertRaises(RuntimeError) as caught:
-            dispatch.line_dispatch(line)
-        message = "kv.put: since 3 is not seq 4 of _files"
-        self.assertEqual(str(caught.exception), message)
-        with self.assertRaises(LookupError):
-            self.store.kv_get("/_files/script/step_tide.js")
+        self.store.kv_put(_SCRIPT_KEY, _SCRIPT_ONE)
+        self.store.kv_put(_IMAGE_KEY, _IMAGE_BYTES)
+        _reply_get(_put_line(self.root, _MAP_KEY, _MAP_BYTES, 2))
+        self.store.kv_put(_SCRIPT_KEY, _SCRIPT_TWO)
+        line = _put_line(self.root, _TIDE_KEY, _TIDE_SCRIPT, 3)
+        message = i18n("substrate.since_stale", "kv.put", 3, 4, _DATABASE)
+        self.assertEqual(message, _DESYNC_MESSAGE)
+        self.dispatch_check(RuntimeError, _DESYNC_MESSAGE, line)
+        key = "script/step_tide.js"
+        missing = i18n("substrate.key_missing", key, _DATABASE)
+        self.raise_check(
+            LookupError, missing, lambda: self.store.kv_get(_TIDE_KEY)
+        )
+        self.assertEqual(self.store.seq_get(_DATABASE), 4)
 
     # A line with no blob raises, and so does a line with no key.
     def test_line_incomplete(self) -> None:
         engine_kv.handlers_register(self.store)
-        with self.assertRaises(KeyError):
-            line = _line_make("kv.put", 1, "/_files/a", since=1)
-            dispatch.line_dispatch(line)
-        with self.assertRaises(ValueError):
-            blob = jslb.blob_make(b"one")
-            line = _line_make("kv.put", 1, None, [blob], since=1)
-            dispatch.line_dispatch(line)
-        self.assertEqual(self.store.seq_get(_DATABASE), 1)
+        line = _line_make("kv.put", 1, "/_files/a", since=0)
+        message = i18n("engine_kv.blob_missing", "kv.put")
+        self.dispatch_check(ValueError, message, line)
+        blob = jslb.blob_make(b"one")
+        line = _line_make("kv.put", 1, None, [blob], since=0)
+        message = i18n("engine_kv.key_missing", "kv.put")
+        self.dispatch_check(ValueError, message, line)
+        self.assertEqual(self.store.seq_get(_DATABASE), 0)
 
 
 # Tests the handler of `kv.delete`.
@@ -354,44 +427,45 @@ class TestDelete(IsolatedCase):
     # A delete removes the key and replies with the new `seq`.
     def test_key_deleted(self) -> None:
         engine_kv.handlers_register(self.store)
-        _reply_get(_put_line(self.root, "/_files/a", b"one", 1))
-        reply = _reply_get(_line_make("kv.delete", 2, "/_files/a", since=2))
+        _reply_get(_put_line(self.root, "/_files/a", b"one", 0))
+        reply = _reply_get(_line_make("kv.delete", 2, "/_files/a", since=1))
         self.assertEqual(reply[0], {"t": "kv.delete", "r": 2})
-        self.assertEqual(jslb.payload_of(reply), {"seq": 3})
-        with self.assertRaises(LookupError):
-            self.store.kv_get("/_files/a")
+        self.assertEqual(jslb.payload_of(reply), {"seq": 2})
+        missing = i18n("substrate.key_missing", "a", _DATABASE)
+        self.raise_check(
+            LookupError, missing, lambda: self.store.kv_get("/_files/a")
+        )
 
     # A key that is not there changes nothing, so the `seq` stays.
     def test_key_absent(self) -> None:
         engine_kv.handlers_register(self.store)
-        line = _line_make("kv.delete", 1, "/_files/none", since=1)
-        self.assertEqual(jslb.payload_of(_reply_get(line)), {"seq": 1})
+        line = _line_make("kv.delete", 1, "/_files/none", since=0)
+        self.assertEqual(jslb.payload_of(_reply_get(line)), {"seq": 0})
 
     # A value in the cache is removed together with its file.
     def test_cache_removed(self) -> None:
         engine_kv.handlers_register(self.store)
-        _reply_get(_put_line(self.root, _MAP_KEY, _MAP_BYTES, 1))
+        _reply_get(_put_line(self.root, _MAP_KEY, _MAP_BYTES, 0))
         cache = os.path.join(self.root, "cache")
-        self.assertEqual(len(os.listdir(cache)), 1)
-        _reply_get(_line_make("kv.delete", 2, _MAP_KEY, since=2))
+        self.assertEqual(os.listdir(cache), [_MAP_SHA256])
+        _reply_get(_line_make("kv.delete", 2, _MAP_KEY, since=1))
         self.assertEqual(os.listdir(cache), [])
 
     # A stale `since` raises the desync and the key stays.
     def test_since_stale(self) -> None:
         engine_kv.handlers_register(self.store)
-        _reply_get(_put_line(self.root, "/_files/a", b"one", 1))
-        line = _line_make("kv.delete", 2, "/_files/a", since=1)
-        with self.assertRaises(RuntimeError) as caught:
-            dispatch.line_dispatch(line)
-        message = "kv.delete: since 1 is not seq 2 of _files"
-        self.assertEqual(str(caught.exception), message)
+        _reply_get(_put_line(self.root, "/_files/a", b"one", 0))
+        line = _line_make("kv.delete", 2, "/_files/a", since=0)
+        message = i18n("substrate.since_stale", "kv.delete", 0, 1, _DATABASE)
+        self.dispatch_check(RuntimeError, message, line)
         self.assertEqual(self.store.kv_get("/_files/a").data, b"one")
 
     # A line with no key raises.
     def test_key_missing(self) -> None:
         engine_kv.handlers_register(self.store)
-        with self.assertRaises(ValueError):
-            dispatch.line_dispatch(_line_make("kv.delete", 1, since=1))
+        message = i18n("engine_kv.key_missing", "kv.delete")
+        line = _line_make("kv.delete", 1, since=0)
+        self.dispatch_check(ValueError, message, line)
 
 
 # Tests the handler of `kv.list`.
@@ -434,31 +508,51 @@ class TestList(IsolatedCase):
     def test_database_closed(self) -> None:
         engine_kv.handlers_register(self.store)
         line = _line_make("kv.list", 1, db="none", prefix="")
-        with self.assertRaises(LookupError):
-            dispatch.line_dispatch(line)
+        message = i18n("substrate.db_closed", "none")
+        self.dispatch_check(LookupError, message, line)
 
 
 # Tests a recorded sequence of forwarded operations on a second store.
 class TestReplay(IsolatedCase):
-    # The server's store ends as the modifier's store did, `seq` for `seq`.
+    # Runs one operation on the first store, forwards it, returns the reply.
+    def operation_forward(
+        self, second_root: str, key: str, value: bytes | None
+    ) -> dict[str, Any]:
+        since = self.store.seq_get(_DATABASE)
+        if value is None:
+            self.store.kv_delete(key)
+            line = _line_make("kv.delete", 1, key, since=since)
+        else:
+            self.store.kv_put(key, value)
+            line = _put_line(second_root, key, value, since)
+        payload = jslb.payload_of(_reply_get(line))
+        self.assertEqual(payload["seq"], self.store.seq_get(_DATABASE), key)
+        return payload
+
+    # The second store ends as the first did, `seq` for `seq`, file for file.
     def test_recorded_replay(self) -> None:
         second_root = self.root_make()
         second = self.store_make(second_root)
         second.db_create(_DATABASE)
         engine_kv.handlers_register(second)
-        seqs: list[int] = []
-        for key, value in _RECORDED:
-            since = self.store.seq_get(_DATABASE)
-            if value is None:
-                self.store.kv_delete(key)
-                line = _line_make("kv.delete", 1, key, since=since)
-            else:
-                self.store.kv_put(key, value)
-                line = _put_line(second_root, key, value, since)
-            reply = _reply_get(line)
-            self.assertEqual(reply["seq"], self.store.seq_get(_DATABASE), key)
-            seqs.append(reply["seq"])
-        self.assertEqual(seqs, [2, 3, 3, 4, 5, 5])
+        replies = [
+            self.operation_forward(second_root, key, value)
+            for key, value in _RECORDED
+        ]
+        seqs = [reply["seq"] for reply in replies]
+        self.assertEqual(seqs, [1, 2, 3, 3, 4])
+        self.assertEqual(replies[1]["sha256"], _IMAGE_SHA256)
+        self.assertEqual(replies[2]["sha256"], _MAP_SHA256)
+        cache = os.path.join(self.root, "cache")
+        second_cache = os.path.join(second_root, "cache")
+        self.assertEqual(os.listdir(second_cache), [_MAP_SHA256])
+        self.assertEqual(_files_read(cache), _files_read(second_cache))
+        deletes = [
+            self.operation_forward(second_root, _MAP_KEY, None)
+            for _ in range(2)
+        ]
+        self.assertEqual(deletes, [{"seq": 5}, {"seq": 5}])
+        self.assertEqual(os.listdir(second_cache), [])
         self.assertEqual(second.kv_get(_SCRIPT_KEY).data, _SCRIPT_TWO)
         _store_close(self.store)
         _store_close(second)
@@ -467,10 +561,6 @@ class TestReplay(IsolatedCase):
             _database_dump(os.path.join(self.root, name)),
             _database_dump(os.path.join(second_root, name)),
         )
-        self.assertEqual(
-            _files_read(os.path.join(self.root, "cache")),
-            _files_read(os.path.join(second_root, "cache")),
-        )
 
 
 # Tests the registration.
@@ -478,17 +568,22 @@ class TestRegister(IsolatedCase):
     # A second registration raises, as the dispatcher refuses the pair.
     def test_register_twice(self) -> None:
         engine_kv.handlers_register(self.store)
-        with self.assertRaises(ValueError):
-            engine_kv.handlers_register(self.store)
+        message = i18n("dispatch.handler_twice", "kv.get", 0)
+        self.raise_check(
+            ValueError,
+            message,
+            lambda: engine_kv.handlers_register(self.store),
+        )
 
     # Called before the registration each handler raises.
     def test_unregistered(self) -> None:
         line = _line_make("kv.get", 1, "/_files/a")
-        with self.assertRaises(RuntimeError):
-            engine_kv.kv_get(line)
-        with self.assertRaises(RuntimeError):
-            engine_kv.kv_put(line, since=1)
-        with self.assertRaises(RuntimeError):
-            engine_kv.kv_delete(line, since=1)
-        with self.assertRaises(RuntimeError):
-            engine_kv.kv_list(line, db="_files", prefix="")
+        message = i18n("engine_kv.not_registered")
+        calls: list[Callable[[], object]] = [
+            lambda: engine_kv.kv_get(line),
+            lambda: engine_kv.kv_put(line, since=0),
+            lambda: engine_kv.kv_delete(line, since=0),
+            lambda: engine_kv.kv_list(line, db=_DATABASE, prefix=""),
+        ]
+        for call in calls:
+            self.raise_check(RuntimeError, message, call)

@@ -9,16 +9,18 @@
 #
 # With no role it is the engine: it puts its pty in raw mode, takes the
 # engine.lock file of the root, loads the main loop file, has it prepare the
-# databases, writes hello, reads the reply and runs the loop. With the role
-# console it runs dash in the root with a scrubbed environment when the
-# setting debug is true, and exits 1 otherwise. Any exception writes one error
-# line and exits 1. The modules beside this file are imported inside the
-# functions that use them, so a broken one is reported by that error line.
+# databases, writes hello, reads and checks the reply and runs the loop.
+# --main-loop is served only to the engine role with the setting debug true,
+# and neither option may be given twice. With the role console it runs dash in
+# the root with a scrubbed environment when the setting debug is true, and
+# exits 1 otherwise. Any exception writes one error line, which jslb encodes,
+# and exits 1. The modules beside this file are imported inside the functions
+# that use them, after their bytecode has been sent to build/.
 
-import argparse, fcntl, hashlib, importlib.util, json, os, sys, termios
-import traceback, tty, types
+import argparse, fcntl, hashlib, importlib.machinery, importlib.util, os, sys
+import termios, traceback, tty, types
 from collections.abc import Iterator
-from typing import Any, NoReturn
+from typing import Any, NamedTuple, NoReturn, cast
 
 # The directory that holds this file and the modules it imports.
 _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -41,6 +43,12 @@ _MAIN_LOOP_MODULE = "main_loop"
 # The functions a main loop file must define.
 _LOOP_FUNCTIONS = ("loop_prepare", "loop_run")
 
+# The option that names the root, given exactly once.
+_ROOT_OPTION = "--root"
+
+# The option that names a main loop file in the root, given at most once.
+_LOOP_OPTION = "--main-loop"
+
 # The file in the root that holds the settings.
 _SETTINGS_NAME = "settings.json"
 
@@ -56,6 +64,9 @@ _CONSOLE_ROLE = "console"
 # The shell the console role runs.
 _DASH_PATH = "/bin/dash"
 
+# The option of dash that prints its input as it reads it, its verbose form.
+_DASH_VERBOSE = "-v"
+
 # The environment variables the console keeps when they are set.
 _CONSOLE_VARIABLES = ("HOME", "LANG", "PATH", "TERM")
 
@@ -65,7 +76,7 @@ _PROVIDER_VARIABLE = "XSJS_PROVIDER_KEY"
 # The descriptor the engine reads its lines from, its pty.
 _READ_FD = 0
 
-# The descriptor the engine writes its lines to, its pty.
+# The descriptor the engine writes its lines to, the same pty.
 _WRITE_FD = 1
 
 # The type of the engine's first request and of its reply.
@@ -73,6 +84,9 @@ _HELLO_TYPE = "hello"
 
 # The id of `hello`, the first request on the engine tty.
 _HELLO_ID = 1
+
+# The number of header fields of the reply to `hello`: its type and reply.
+_REPLY_FIELDS = 2
 
 # The type of the line that reports an exception.
 _ERROR_TYPE = "error"
@@ -89,15 +103,17 @@ sys.pycache_prefix = os.path.join(
 )
 
 
-# Returns the named string of the strings file with its arguments filled in.
-def _message_get(name: str, *args: object) -> str:
+# The root, the role and the main loop file name of a run.
+class _RunArguments(NamedTuple):
+    root: str
+    role: str | None
+    main_loop: str | None
+
+
+# Parses the arguments, refusing a repeated option and a console main loop.
+def _arguments_parse(argv: list[str]) -> _RunArguments:
     from i18n import i18n
 
-    return i18n(name, *args)
-
-
-# Parses the arguments: the root, the role and the main loop file name.
-def _arguments_parse(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="The platform services around the main loop: with no"
         " role the engine on its pty, with the role console the debug"
@@ -105,12 +121,17 @@ def _arguments_parse(argv: list[str]) -> argparse.Namespace:
         exit_on_error=False,
     )
     parser.add_argument(
-        "--root", required=True, help="the server's root directory"
+        _ROOT_OPTION,
+        action="append",
+        required=True,
+        help="the server's root directory",
     )
     parser.add_argument(
-        "--main-loop",
+        _LOOP_OPTION,
+        action="append",
+        default=[],
         help="a main loop file in the root's main_loop directory, run in"
-        " place of the stock main_loop.py",
+        " place of the stock main_loop.py in debug mode",
     )
     parser.add_argument(
         "role",
@@ -118,7 +139,17 @@ def _arguments_parse(argv: list[str]) -> argparse.Namespace:
         choices=[_CONSOLE_ROLE],
         help="console runs dash in the root in debug mode",
     )
-    return parser.parse_args(argv)
+    parsed = parser.parse_args(argv)
+    roots: list[str] = parsed.root
+    loops: list[str] = parsed.main_loop
+    for option, values in ((_ROOT_OPTION, roots), (_LOOP_OPTION, loops)):
+        if len(values) > 1:
+            raise ValueError(i18n("bootstrap.option_repeated", option))
+    role: str | None = parsed.role
+    main_loop = loops[0] if loops else None
+    if main_loop is not None and role == _CONSOLE_ROLE:
+        raise PermissionError(i18n("bootstrap.main_loop_refused", main_loop))
+    return _RunArguments(roots[0], role, main_loop)
 
 
 # Reads and checks the settings file of the root.
@@ -128,61 +159,68 @@ def _settings_read(root: str) -> dict[str, Any]:
     return settings.settings_load(os.path.join(root, _SETTINGS_NAME))
 
 
-# Takes the engine lock of the root, which lasts as long as the process.
+# Takes the engine lock of the root until exit or `exec`, which closes it.
 def _lock_take(root: str) -> None:
+    from i18n import i18n
+
     path = os.path.join(root, _LOCK_NAME)
     descriptor = os.open(path, os.O_RDWR | os.O_CREAT, _LOCK_MODE)
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as error:
         os.close(descriptor)
-        message = _message_get("bootstrap.lock_held", path)
-        raise RuntimeError(message) from error
+        raise RuntimeError(i18n("bootstrap.lock_held", path)) from error
 
 
-# Returns the provider key, raising when the environment lacks the variable.
-def _provider_get() -> str:
-    if _PROVIDER_VARIABLE not in os.environ:
-        raise LookupError(
-            _message_get("bootstrap.provider_unset", _PROVIDER_VARIABLE)
-        )
-    return os.environ[_PROVIDER_VARIABLE]
+# Returns the provider key, which only a provider that is not scripted needs.
+def _provider_get(scripted: bool) -> str:
+    from i18n import i18n
+
+    key = os.environ.get(_PROVIDER_VARIABLE, "")
+    if key == "" and not scripted:
+        raise LookupError(i18n("bootstrap.provider_unset", _PROVIDER_VARIABLE))
+    return key
 
 
-# Returns the main loop file: the stock one, or the named one in the root.
-def _loop_path(root: str, name: str | None) -> str:
+# Returns the main loop file: the stock one, or in debug mode a named one.
+def _loop_path(root: str, name: str | None, debug: bool) -> str:
+    from i18n import i18n
+
     if name is None:
         return _MAIN_LOOP_STOCK
+    if not debug:
+        raise PermissionError(i18n("bootstrap.main_loop_refused", name))
     if (
         os.path.basename(name) != name
         or name.startswith(".")
         or not name.endswith(_MAIN_LOOP_EXTENSION)
     ):
-        raise ValueError(_message_get("bootstrap.main_loop_name", name))
+        raise ValueError(i18n("bootstrap.main_loop_name", name))
     return os.path.join(root, _MAIN_LOOP_DIRECTORY, name)
 
 
-# Loads a main loop file and checks that it defines the functions it must.
+# Runs a main loop file from its source, never its bytecode, and checks it.
 def _loop_load(path: str) -> types.ModuleType:
-    spec = importlib.util.spec_from_file_location(_MAIN_LOOP_MODULE, path)
-    if spec is None or spec.loader is None:
-        raise ImportError(_message_get("bootstrap.main_loop_loader", path))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    from i18n import i18n
+
+    loader = importlib.machinery.SourceFileLoader(_MAIN_LOOP_MODULE, path)
+    spec = importlib.util.spec_from_loader(_MAIN_LOOP_MODULE, loader)
+    module = importlib.util.module_from_spec(
+        cast(importlib.machinery.ModuleSpec, spec)
+    )
+    sys.modules[_MAIN_LOOP_MODULE] = module
+    source = loader.get_data(path)
+    exec(compile(source, path, "exec"), vars(module))
     for name in _LOOP_FUNCTIONS:
         if not callable(vars(module).get(name)):
-            raise AttributeError(
-                _message_get("bootstrap.loop_missing", path, name)
-            )
+            raise AttributeError(i18n("bootstrap.loop_missing", path, name))
     return module
 
 
 # Returns the JSON text bytes, the one piece the encoder yields with no blob.
 def _text_bytes(pieces: Iterator[bytes | str]) -> bytes:
     (piece,) = pieces
-    if not isinstance(piece, bytes):
-        raise TypeError(_message_get("bootstrap.piece_file", piece))
-    return piece
+    return cast(bytes, piece)
 
 
 # Encodes `hello`, the engine's first request, in the names `full` selects.
@@ -221,17 +259,19 @@ def _bytes_write(data: bytes) -> None:
 
 
 # Reads the reply to `hello` a byte at a time, so no byte after it is taken.
-def _reply_read(loaded: dict[str, Any], full: bool) -> None:
+def _reply_read(loaded: dict[str, Any]) -> None:
     import jslb
+    from i18n import i18n
 
     # Refuses a blob large enough to stream, as the reply carries none.
     def sink_refuse(header: jslb.Object) -> NoReturn:
         size = jslb.field_get(header, "size")
-        raise jslb.WireError(_message_get("bootstrap.reply_blob", size))
+        raise jslb.WireError(i18n("bootstrap.reply_blob", size))
 
     decoder = jslb.LineDecoder(
         loaded["line_max"],
         loaded["blob_max"],
+        loaded["message_max"],
         loaded["overflow_bytes"],
         sink_refuse,
     )
@@ -239,30 +279,37 @@ def _reply_read(loaded: dict[str, Any], full: bool) -> None:
     while not lines:
         data = os.read(_READ_FD, 1)
         if not data:
-            raise EOFError(_message_get("bootstrap.reply_closed"))
+            raise EOFError(i18n("bootstrap.reply_closed"))
         lines = decoder.bytes_feed(data)
+        # Feeding nothing raises at once a fault the decoder held back.
+        decoder.bytes_feed(b"")
     (line,) = lines
-    header = jslb.header_make(_HELLO_TYPE, reply=_HELLO_ID, full=full)
-    expected = jslb.line_render(jslb.line_make(header, []))
-    found = jslb.line_render(line)
-    if found != expected:
+    header: jslb.Object = line[0]
+    reply = jslb.field_get(header, "reply")
+    if (
+        len(header) != _REPLY_FIELDS
+        or jslb.field_get(header, "type") != _HELLO_TYPE
+        or type(reply) is not int
+        or reply != _HELLO_ID
+        or len(jslb.payload_of(line)) > 0
+    ):
+        rendered = jslb.line_render(line)
         raise jslb.WireError(
-            _message_get("bootstrap.reply_unexpected", found, expected)
+            i18n("bootstrap.reply_unexpected", rendered, _HELLO_ID)
         )
 
 
 # Runs the engine: raw mode, the lock, `hello` and its reply, then the loop.
 def _engine_run(root: str, main_loop: str | None) -> int:
-    for descriptor in (_READ_FD, _WRITE_FD):
-        tty.setraw(descriptor, termios.TCSANOW)
+    tty.setraw(_READ_FD, termios.TCSANOW)
     _lock_take(root)
     loaded = _settings_read(root)
-    provider_key = _provider_get()
-    module = _loop_load(_loop_path(root, main_loop))
+    debug: bool = loaded["debug"]
+    provider_key = _provider_get(loaded["provider"]["scripted"])
+    module = _loop_load(_loop_path(root, main_loop, debug))
     seq: dict[str, int] = module.loop_prepare(root)
-    full: bool = loaded["debug"]
-    _bytes_write(_hello_encode(root, loaded, seq, provider_key, full))
-    _reply_read(loaded, full)
+    _bytes_write(_hello_encode(root, loaded, seq, provider_key, debug))
+    _reply_read(loaded)
     module.loop_run(_READ_FD, _WRITE_FD, root)
     return 0
 
@@ -281,41 +328,28 @@ def _console_run(root: str, debug: bool) -> int:
     os.environ.clear()
     os.environ.update(kept)
     os.chdir(root)
-    code = verbose.call(0, [_DASH_PATH])
+    code = verbose.exec(0, [_DASH_PATH], [_DASH_PATH, _DASH_VERBOSE])
     return code if code >= 0 else _SIGNAL_BASE - code
-
-
-# Encodes the `error` line with `json` alone, its stack holding both faults.
-def _error_plain(error: Exception, failure: Exception) -> bytes:
-    stack = "".join(traceback.format_exception(failure)).removesuffix("\n")
-    text = json.dumps(
-        {"0": {"t": _ERROR_TYPE}, "message": str(error), "stack": stack},
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-    return (text + "\r").encode("utf-8")
 
 
 # Writes the one `error` line for an exception: `message` and `stack`, no `r`.
 def _error_write(error: Exception) -> None:
-    # A package that cannot be imported must not hide the first error.
-    try:
-        import dispatch, jslb
-    except Exception as failure:
-        data = _error_plain(error, failure)
-    else:
-        data = _text_bytes(jslb.line_encode(dispatch.error_make(None, error)))
-    _bytes_write(data)
+    import jslb
+
+    stack = "".join(traceback.format_exception(error)).removesuffix("\n")
+    header = jslb.header_make(_ERROR_TYPE)
+    line = jslb.line_make(header, [], message=str(error), stack=stack)
+    _bytes_write(_text_bytes(jslb.line_encode(line)))
 
 
 # Runs the role the arguments name and returns the exit code.
 def bootstrap_run(argv: list[str]) -> int:
     try:
         arguments = _arguments_parse(argv)
-        root: str = arguments.root
         if arguments.role == _CONSOLE_ROLE:
-            return _console_run(root, _settings_read(root)["debug"])
-        return _engine_run(root, arguments.main_loop)
+            debug: bool = _settings_read(arguments.root)["debug"]
+            return _console_run(arguments.root, debug)
+        return _engine_run(arguments.root, arguments.main_loop)
     except Exception as error:
         _error_write(error)
         return _EXIT_FAILURE

@@ -83,7 +83,7 @@ namespace http {
   }
 
   // Whether the headers name a JSON body: the media type, in any case.
-  function json_media_is(headers: HeaderMap): boolean {
+  function media_json(headers: HeaderMap): boolean {
     if (!Object.hasOwn(headers, constants.content_key)) {
       return false;
     }
@@ -160,7 +160,7 @@ namespace http {
         );
       }
       const { status, headers } = answer;
-      if (!json_media_is(headers)) {
+      if (!media_json(headers)) {
         return this.reply_make({ status, headers, text: answer.text });
       }
       let json: unknown;

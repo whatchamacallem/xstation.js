@@ -11,15 +11,15 @@ import dispatch, jslb, substrate
 from i18n import i18n
 
 
-# The state the registration sets, which is empty until then.
-class _State:
+# The store the registration sets, which is empty until then.
+class _StoreState:
     # Starts with no store.
     def __init__(self) -> None:
         self.store: substrate.Store | None = None
 
 
 # The one state of the module.
-_STATE = _State()
+_STATE = _StoreState()
 
 
 # Returns the store, raising before the handlers are registered.
@@ -36,6 +36,15 @@ def _ref_get(line: jslb.Object) -> str:
         name: str = jslb.field_get(line[0], "type")
         raise ValueError(i18n("engine_kv.key_missing", name))
     return ref
+
+
+# Returns the data of blob 1, raising when the line carries no blob.
+def _blob_get(line: jslb.Object) -> bytes | str:
+    if 1 not in line:
+        name: str = jslb.field_get(line[0], "type")
+        raise ValueError(i18n("engine_kv.blob_missing", name))
+    data: bytes | str = jslb.field_get(line[1], "data")
+    return data
 
 
 # Applies the put, then reads the hash of the stored value as hex.
@@ -60,7 +69,7 @@ def kv_get(line: jslb.Object) -> jslb.Object:
 def kv_put(line: jslb.Object, *, since: int) -> jslb.Object:
     store = _store_get()
     ref = _ref_get(line)
-    data: bytes | str = jslb.field_get(line[1], "data")
+    data = _blob_get(line)
     seq, sha256 = store.transaction_run(
         lambda: _put_apply(store, ref, data, since)
     )

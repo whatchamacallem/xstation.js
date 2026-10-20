@@ -19,6 +19,16 @@ namespace test_utility {
     return Array.from(text, (character) => character.charCodeAt(0)).join(",");
   }
 
+  // The message of the error a function throws, failing the test if none.
+  function message_thrown(test: unittest.TestCase, fn: () => unknown): string {
+    try {
+      fn();
+    } catch (error) {
+      return (error as Error).message;
+    }
+    return test.fail("Nothing was thrown.");
+  }
+
   // The digests of the standard test messages, empty, short, long and huge.
   export class TestDigest extends unittest.TestCase {
     // No bytes at all still hash the one padding block.
@@ -79,6 +89,15 @@ namespace test_utility {
 
   // The `UTF-8` routines, with characters of every length.
   export class TestEncoding extends unittest.TestCase {
+    // Checks that decoding the bytes throws the message of invalid `UTF-8`.
+    bytes_refused(bytes: Uint8Array): void {
+      this.assertEqual(
+        message_thrown(this, () => utility.utf8_decode(bytes)),
+        i18n("utility.bytes_refused"),
+        bytes_text(bytes)
+      );
+    }
+
     // No text gives no bytes.
     test_empty_text(): void {
       this.assertEqual(utility.utf8_encode("").length, 0);
@@ -141,49 +160,67 @@ namespace test_utility {
       this.assertEqual(text, String.fromCodePoint(0xfeff) + "a");
     }
 
+    // A surrogate that is not half of a pair throws, wherever it stands.
+    test_lone_surrogate(): void {
+      const texts = [
+        String.fromCharCode(0xd800),
+        "a" + String.fromCharCode(0xdfff) + "b",
+        String.fromCharCode(0xdc00, 0xd800),
+        String.fromCodePoint(0x1f600) + String.fromCharCode(0xd83d),
+      ];
+      for (const [index, text] of texts.entries()) {
+        this.assertEqual(
+          message_thrown(this, () => utility.utf8_encode(text)),
+          i18n("utility.text_refused"),
+          String(index)
+        );
+      }
+    }
+
     // A byte that no sequence can hold throws.
     test_lone_byte(): void {
-      this.assertRaises(Error, () => utility.utf8_decode(Uint8Array.of(0xff)));
+      this.bytes_refused(Uint8Array.of(0xff));
     }
 
     // A lead byte without a continuation byte after it throws.
     test_bad_continuation(): void {
-      this.assertRaises(Error, () =>
-        utility.utf8_decode(Uint8Array.of(0xc3, 0x28))
-      );
+      this.bytes_refused(Uint8Array.of(0xc3, 0x28));
     }
 
     // An overlong form of a slash throws.
     test_overlong_form(): void {
-      this.assertRaises(Error, () =>
-        utility.utf8_decode(Uint8Array.of(0xc0, 0xaf))
-      );
+      this.bytes_refused(Uint8Array.of(0xc0, 0xaf));
     }
 
     // The bytes of the surrogate `U+D800` throw.
     test_surrogate_bytes(): void {
-      this.assertRaises(Error, () =>
-        utility.utf8_decode(Uint8Array.of(0xed, 0xa0, 0x80))
-      );
+      this.bytes_refused(Uint8Array.of(0xed, 0xa0, 0x80));
     }
 
     // A sequence cut short at the end throws.
     test_truncated_form(): void {
-      this.assertRaises(Error, () =>
-        utility.utf8_decode(Uint8Array.of(0xe2, 0x82))
-      );
+      this.bytes_refused(Uint8Array.of(0xe2, 0x82));
     }
 
     // A code point beyond `U+10FFFF` throws.
     test_range_limit(): void {
-      this.assertRaises(Error, () =>
-        utility.utf8_decode(Uint8Array.of(0xf4, 0x90, 0x80, 0x80))
-      );
+      this.bytes_refused(Uint8Array.of(0xf4, 0x90, 0x80, 0x80));
     }
   }
 
   // The base64 routine.
   export class TestDecoding extends unittest.TestCase {
+    // Checks that decoding each text throws the message of strict base64.
+    base64_refused(texts: string[]): void {
+      for (const text of texts) {
+        this.assertEqual(
+          message_thrown(this, () => utility.base64_decode(text)),
+          i18n("utility.base64_refused"),
+          codes_text(text)
+        );
+      }
+    }
+
     // The test vectors of the base64 standard, with and without padding.
     test_standard_vectors(): void {
       const vectors: [string, string][] = [
@@ -213,17 +250,40 @@ namespace test_utility {
 
     // A character outside the alphabet throws.
     test_bad_character(): void {
-      this.assertRaises(Error, () => utility.base64_decode("****"));
+      this.base64_refused(["****", "Zm9v-_==", "Zm9v.A=="]);
     }
 
     // A length that no padding can complete throws.
     test_bad_length(): void {
-      this.assertRaises(Error, () => utility.base64_decode("A"));
+      this.base64_refused(["A", "Zm9vY", "Zg===", "=", "===="]);
+    }
+
+    // Text whose padding is missing throws.
+    test_missing_padding(): void {
+      this.base64_refused(["Zg", "Zm8", "Zm9vYg", "Zg="]);
+    }
+
+    // A last character whose unused bits are not zero throws.
+    test_trailing_bits(): void {
+      this.base64_refused(["Zh==", "Zm9=", "Zm9vYh==", "Zm9vYmF="]);
+    }
+
+    // White space anywhere throws.
+    test_white_space(): void {
+      this.base64_refused([" Zg==", "Zg== ", "Zm9v Zg==", "Zm9v\nZg==", "\t"]);
     }
   }
 
   // The JSON text routine.
   export class TestJsonText extends unittest.TestCase {
+    // Checks that writing the value throws the message of the number.
+    number_refused(value: unknown, number: number): void {
+      this.assertEqual(
+        message_thrown(this, () => utility.json_text(value)),
+        i18n("utility.number_refused", number)
+      );
+    }
+
     // No whitespace is written outside strings, and inside them it is kept.
     test_compact_output(): void {
       const value = { list: [1, 2, 3], text: "a b", flag: true, none: null };
@@ -254,25 +314,30 @@ namespace test_utility {
 
     // NaN and the infinities throw, at any depth.
     test_non_finite(): void {
-      this.assertRaises(Error, () => utility.json_text(NaN));
-      this.assertRaises(Error, () => utility.json_text(Infinity));
-      this.assertRaises(Error, () => utility.json_text(-Infinity));
-      this.assertRaises(Error, () => utility.json_text({ nested: [1, NaN] }));
+      this.number_refused(NaN, NaN);
+      this.number_refused(Infinity, Infinity);
+      this.number_refused(-Infinity, -Infinity);
+      this.number_refused({ nested: [1, NaN] }, NaN);
     }
 
     // Integers up to 2 to the 53 are written, larger ones throw.
     test_integer_limit(): void {
       this.assertEqual(utility.json_text(2 ** 53), "9007199254740992");
       this.assertEqual(utility.json_text(-(2 ** 53)), "-9007199254740992");
-      this.assertRaises(Error, () => utility.json_text(2 ** 53 + 2));
-      this.assertRaises(Error, () => utility.json_text(-(2 ** 53) - 2));
-      this.assertRaises(Error, () => utility.json_text({ big: 1e300 }));
+      this.number_refused(2 ** 53 + 2, 2 ** 53 + 2);
+      this.number_refused(-(2 ** 53) - 2, -(2 ** 53) - 2);
+      this.number_refused({ big: 1e300 }, 1e300);
     }
 
     // A value with no JSON text throws and does not give undefined.
     test_no_text(): void {
-      this.assertRaises(Error, () => utility.json_text(undefined));
-      this.assertRaises(Error, () => utility.json_text(() => 1));
+      const values = [undefined, (): number => 1];
+      for (const value of values) {
+        this.assertEqual(
+          message_thrown(this, () => utility.json_text(value)),
+          i18n("utility.value_refused")
+        );
+      }
     }
   }
 
@@ -294,13 +359,10 @@ namespace test_utility {
 
     // The throw carries the message.
     test_fail_now(): void {
-      let message = "";
-      try {
-        utility.fail_now("boom");
-      } catch (error) {
-        message = error instanceof Error ? error.message : String(error);
-      }
-      this.assertEqual(message, "boom");
+      this.assertEqual(
+        message_thrown(this, () => utility.fail_now("boom")),
+        "boom"
+      );
     }
   }
 

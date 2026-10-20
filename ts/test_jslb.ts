@@ -3,31 +3,50 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // Tests of jslb.ts: the builders, field access, the encoder and its refusals,
-// the debug rendering, the decoder and every hard error, blobs streamed into a
+// the debug rendering, the decoder, its limits, its deferred fault and every
+// hard error, each refusal compared with its message, blobs streamed into a
 // sink kept in memory, and the vectors of python/vectors, which the test page
-// carries as test_vectors, each read whole, by single bytes and split at every
-// offset.
+// carries as test_vectors, each read with the limits its sidecar names, whole,
+// by single bytes and split at every offset.
 namespace test_jslb {
   // The vector files by name, as base64 text, a global the test page sets.
   declare const test_vectors: { readonly [name: string]: string };
 
-  // The limits of the decoders here, as the vectors were made, and texts.
+  // The limits of the decoders here, room for two largest blobs, and texts.
   const constants = Object.freeze({
     line_max: 4096,
     blob_max: 65536,
+    message_max: 131072,
     overflow_bytes: 1024,
+    echo_text: '{"0":{"t":"echo"}}',
     echo_line: '{"0":{"t":"echo"}}\r',
     vector_suffix: ".jslb",
     sidecar_suffix: ".json",
     backslash: String.fromCharCode(0x5c),
   });
 
-  // A sidecar of `vectors_make.py`: messages and renders, or a fault.
-  interface Sidecar {
-    messages?: unknown[];
-    render?: string[];
+  // The limits a vector's decoder is built with, as its sidecar holds them.
+  interface VectorLimits {
+    line_max: number;
+    blob_max: number;
+    message_max: number;
+    overflow_bytes: number;
+  }
+
+  // A sidecar: its limits, messages, renders, and fault or `canonical`.
+  interface VectorSidecar {
+    limits: VectorLimits;
+    messages: unknown[];
+    render: string[];
+    canonical?: boolean;
     error?: string;
   }
+
+  // An error vector's expected fault: its slug, then its message.
+  type FaultExpected = readonly [string, string];
+
+  // The expected fault of each error vector, by name.
+  type FaultTable = { readonly [name: string]: FaultExpected };
 
   // The bytes of text whose characters are all below 256, one byte each.
   function bytes_of(text: string): Uint8Array {
@@ -49,6 +68,14 @@ namespace test_jslb {
     return joined;
   }
 
+  // Whether two byte arrays hold the same bytes.
+  function bytes_equal(first: Uint8Array, second: Uint8Array): boolean {
+    return (
+      first.length === second.length &&
+      first.every((byte, index) => byte === second[index])
+    );
+  }
+
   // The bytes as lowercase hex, two characters each.
   function hex_of(data: Uint8Array): string {
     return Array.from(data, (byte) => byte.toString(16).padStart(2, "0")).join(
@@ -63,6 +90,28 @@ namespace test_jslb {
       data[index] = index % period;
     }
     return data;
+  }
+
+  // The text of what a call throws, which it must throw.
+  function thrown_text(call: () => unknown): string {
+    try {
+      call();
+    } catch (error) {
+      return String(error);
+    }
+    throw new Error("the call threw nothing");
+  }
+
+  // The message the decoder gives for line text that JSON cannot parse.
+  function parse_refusal(text: string): string {
+    const reason = thrown_text(() => JSON.parse(text));
+    return i18n("jslb.line_not_json", reason);
+  }
+
+  // The message the decoder gives for line bytes that are not `UTF-8`.
+  function decode_refusal(data: Uint8Array): string {
+    const reason = thrown_text(() => utility.utf8_decode(data));
+    return i18n("jslb.line_not_utf8", reason);
   }
 
   // A `BlobSink` double that keeps each streamed blob in memory by handle.
@@ -132,22 +181,61 @@ namespace test_jslb {
     }
   }
 
+  // A `BlobSink` double whose appends fail as on a full disk, closes recorded.
+  class FailingSink implements jslb.BlobSink {
+    // The text of the error every append throws.
+    readonly message = "the sink has no room left";
+    // The handles closed, in order.
+    readonly closed: string[] = [];
+
+    // Opens the one blob the double holds.
+    sink_open(): string {
+      return "blob_1";
+    }
+
+    // Refuses the bytes, as a full disk does.
+    sink_append(): void {
+      throw new RangeError(this.message);
+    }
+
+    // Records the close and returns the hash of the bytes it kept, none.
+    sink_close(handle: string): string {
+      this.closed.push(handle);
+      return utility.sha256_hex(new Uint8Array(0));
+    }
+  }
+
   // A new decoder with the limits here, streaming into the sink.
   function decoder_make(sink: jslb.BlobSink): jslb.LineDecoder {
     return new jslb.LineDecoder(
       constants.line_max,
       constants.blob_max,
+      constants.message_max,
       constants.overflow_bytes,
       sink,
     );
   }
 
-  // Feeds the pieces to a new decoder and returns every line they finish.
-  function pieces_decode(
+  // A new decoder with a sidecar's limits, streaming into the sink.
+  function sidecar_decoder(
+    sidecar: VectorSidecar,
     sink: jslb.BlobSink,
+  ): jslb.LineDecoder {
+    const limits = sidecar.limits;
+    return new jslb.LineDecoder(
+      limits.line_max,
+      limits.blob_max,
+      limits.message_max,
+      limits.overflow_bytes,
+      sink,
+    );
+  }
+
+  // Feeds the pieces to the decoder and returns every line they finish.
+  function pieces_decode(
+    decoder: jslb.LineDecoder,
     pieces: readonly Uint8Array[],
   ): jslb.Line[] {
-    const decoder = decoder_make(sink);
     const found: jslb.Line[] = [];
     for (const piece of pieces) {
       found.push(...decoder.bytes_feed(piece));
@@ -172,15 +260,6 @@ namespace test_jslb {
     return line[number] as jslb.BlobHeader;
   }
 
-  // The size of a blob header, in either name form.
-  function size_of(header: jslb.BlobHeader): number {
-    const size = jslb.field_get(header, "size");
-    if (typeof size !== "number") {
-      throw new Error(`the blob size ${String(size)} is no number`);
-    }
-    return size;
-  }
-
   // The JSON text the encoder writes for a line, its CR included.
   function encoded_text(line: jslb.Line): string {
     const first = jslb.line_encode(line)[0];
@@ -200,6 +279,20 @@ namespace test_jslb {
         typeof piece === "string" ? sink.bytes_get(piece) : piece,
       ),
     );
+  }
+
+  // An `echo` message, its line padded to the length in bytes, then blobs.
+  function message_padded(
+    length: number,
+    blobs: readonly Uint8Array[],
+  ): Uint8Array {
+    const made = blobs.map((data) => jslb.blob_make(data));
+    const header = jslb.header_make("echo");
+    const empty = jslb.line_make(header, made, { pad: "" });
+    const short = jslb.line_encode(empty)[0].length;
+    const pad = "a".repeat(length - short);
+    const line = jslb.line_make(header, made, { pad });
+    return pieces_join(jslb.line_encode(line), new MemorySink());
   }
 
   // A decoded line as a sidecar holds it, each blob's `d` in hex.
@@ -227,7 +320,7 @@ namespace test_jslb {
     const count = jslb.headers_of(line).length - 1;
     for (let number = 1; number <= count; number += 1) {
       const header = blob_at(line, number);
-      if (size_of(header) > constants.overflow_bytes) {
+      if (typeof header.d === "string") {
         sent[number] = Object.fromEntries(
           Object.entries(header).filter(([name]) => name !== "sha256"),
         );
@@ -245,9 +338,9 @@ namespace test_jslb {
   }
 
   // The sidecar of a vector.
-  function sidecar_read(name: string): Sidecar {
+  function sidecar_read(name: string): VectorSidecar {
     const file = file_bytes(name + constants.sidecar_suffix);
-    return JSON.parse(utility.utf8_decode(file)) as Sidecar;
+    return JSON.parse(utility.utf8_decode(file)) as VectorSidecar;
   }
 
   // The sorted names of the vectors whose sidecar holds a fault, or not.
@@ -260,33 +353,121 @@ namespace test_jslb {
       .filter((name) => (sidecar_read(name).error !== undefined) === error);
   }
 
-  // A test case with the asserts of the two kinds of refusal.
+  // Each error vector's slug and its message under the limits, by name.
+  function errors_expected(limits: VectorLimits): FaultTable {
+    const { line_max, blob_max, message_max } = limits;
+    const start = bytes_of('{"0":{"t":"');
+    const end = bytes_of('"}}');
+    const overlong = bytes_join([start, Uint8Array.of(0xc0, 0x80), end]);
+    const surrogate = bytes_join([
+      start,
+      Uint8Array.of(0xed, 0xa0, 0x80),
+      end,
+    ]);
+    const header: FaultExpected = [
+      "no_header_zero",
+      i18n("jslb.no_header_zero"),
+    ];
+    const size: FaultExpected = ["bad_size", i18n("jslb.bad_size", 1)];
+    const forms: FaultExpected = [
+      "both_name_forms",
+      i18n("jslb.both_name_forms"),
+    ];
+    const typed: FaultExpected = ["no_type", i18n("jslb.no_type")];
+    return {
+      error_after_line: header,
+      error_bad_size_boolean: size,
+      error_bad_size_fraction: size,
+      error_bad_size_missing: size,
+      error_bad_size_negative: size,
+      error_bad_size_string: size,
+      error_blob_data: ["blob_data_field", i18n("jslb.blob_data_field", 1)],
+      error_blob_gap: ["blob_gap", i18n("jslb.blob_gap", 2, 3)],
+      error_blob_gap_first: ["blob_gap", i18n("jslb.blob_gap", 1, 2)],
+      error_blob_over_max: [
+        "blob_over_max",
+        i18n("jslb.blob_over_max", 1, blob_max + 1, blob_max),
+      ],
+      error_blobs_mismatch: [
+        "blobs_mismatch",
+        i18n("jslb.blobs_mismatch", 2, 1),
+      ],
+      error_blobs_mismatch_extra: [
+        "blobs_mismatch",
+        i18n("jslb.blobs_mismatch", 0, 1),
+      ],
+      error_both_name_forms: forms,
+      error_both_name_forms_blob: forms,
+      error_header_not_object: [
+        "header_not_object",
+        i18n("jslb.header_not_object", 0),
+      ],
+      error_infinity: [
+        "line_not_json",
+        parse_refusal('{"0":{"t":"echo"},"n":Infinity}'),
+      ],
+      error_line_over_max: [
+        "line_over_max",
+        i18n("jslb.line_over_max", line_max),
+      ],
+      error_message_over: [
+        "message_over",
+        i18n("jslb.message_over", message_max + 1, message_max),
+      ],
+      error_nan: [
+        "line_not_json",
+        parse_refusal('{"0":{"t":"echo"},"n":NaN}'),
+      ],
+      error_no_header_zero: header,
+      error_no_type: typed,
+      error_no_type_string: typed,
+      error_not_object: ["line_not_object", i18n("jslb.line_not_object")],
+      error_payload_digit_key: [
+        "payload_digit_key",
+        i18n("jslb.payload_digit_key", "01"),
+      ],
+      error_unknown_line_field: [
+        "unknown_line_field",
+        i18n("jslb.unknown_line_field", "x"),
+      ],
+      error_utf8_overlong: ["line_not_utf8", decode_refusal(overlong)],
+      error_utf8_surrogate: ["line_not_utf8", decode_refusal(surrogate)],
+    };
+  }
+
+  // A test case with the asserts of a refusal and its message.
   class RefusalCase extends unittest.TestCase {
-    // Asserts the call throws exactly the class. Other throws pass through.
+    // Asserts the call throws exactly the class with exactly the message.
     raised_assert(
       kind: new (...args: never[]) => Error,
+      message: string,
       fn: () => unknown,
-      message?: string,
+      note?: string,
     ): void {
       try {
         fn();
       } catch (error) {
         if (error instanceof Error && error.constructor === kind) {
+          this.assertEqual(error.message, message, note);
           return;
         }
         throw error;
       }
       const standard = `${kind.name} not raised`;
-      this.fail(message === undefined ? standard : `${standard} : ${message}`);
+      this.fail(note === undefined ? standard : `${standard} : ${note}`);
     }
 
-    // Asserts the bytes throw `WireError` and leave the decoder unusable.
-    refused_assert(data: Uint8Array): void {
-      const decoder = decoder_make(new MemorySink());
-      this.raised_assert(jslb.WireError, () => decoder.bytes_feed(data));
-      this.raised_assert(jslb.WireError, () =>
+    // Asserts the bytes throw the message and leave the decoder unusable.
+    refused_assert(data: Uint8Array, message: string): MemorySink {
+      const sink = new MemorySink();
+      const decoder = decoder_make(sink);
+      this.raised_assert(jslb.WireError, message, () =>
+        decoder.bytes_feed(data),
+      );
+      this.raised_assert(jslb.WireError, i18n("jslb.decoder_failed"), () =>
         decoder.bytes_feed(bytes_of(constants.echo_line)),
       );
+      return sink;
     }
   }
 
@@ -344,9 +525,21 @@ namespace test_jslb {
       this.assertTrue(blob.d === data);
     }
 
-    // A handle names bytes that `blob_make` cannot measure, so it is refused.
+    // A handle takes the size its caller gives, which bytes refuse.
     test_blob_handle(): void {
-      this.raised_assert(Error, () => jslb.blob_make("blob_1"));
+      const blob = jslb.blob_make("blob_1", "k", { n: 1 }, 10);
+      this.assertEqual(Object.entries(blob), [
+        ["s", 10],
+        ["k", "k"],
+        ["n", 1],
+        ["d", "blob_1"],
+      ]);
+      const unmeasured = i18n("jslb.handle_unmeasured", "blob_1");
+      this.raised_assert(Error, unmeasured, () => jslb.blob_make("blob_1"));
+      const unwanted = i18n("jslb.size_unwanted", 3);
+      this.raised_assert(Error, unwanted, () =>
+        jslb.blob_make(bytes_of("abc"), undefined, {}, 3),
+      );
     }
 
     // A field that `blob_make` sets cannot be given as a handler field.
@@ -355,6 +548,7 @@ namespace test_jslb {
         const fields = { [name]: 1 };
         this.raised_assert(
           Error,
+          i18n("jslb.blob_field_reserved", name),
           () => jslb.blob_make(new Uint8Array(0), undefined, fields),
           name,
         );
@@ -409,7 +603,9 @@ namespace test_jslb {
     test_line_counted(): void {
       const header: jslb.LineHeader = { ...jslb.header_make("echo"), b: 1 };
       const blob = jslb.blob_make(bytes_of("x"));
-      this.raised_assert(Error, () => jslb.line_make(header, [blob], {}));
+      this.raised_assert(Error, i18n("jslb.blobs_preset"), () =>
+        jslb.line_make(header, [blob], {}),
+      );
     }
 
     // A payload key of decimal digits would read as a header, so is refused.
@@ -419,6 +615,7 @@ namespace test_jslb {
         const payload = { [key]: 1 };
         this.raised_assert(
           jslb.WireError,
+          i18n("jslb.payload_digit_key", key),
           () => jslb.line_make(header, [], payload),
           key,
         );
@@ -478,17 +675,25 @@ namespace test_jslb {
     // An absent required field throws, as does a name that is no field.
     test_field_refused(): void {
       const line_header = {} as jslb.LineHeader;
-      this.raised_assert(Error, () => jslb.field_get(line_header, "type"));
+      this.raised_assert(Error, i18n("jslb.field_missing", "type"), () =>
+        jslb.field_get(line_header, "type"),
+      );
       const blob_header = {} as jslb.BlobHeader;
-      this.raised_assert(Error, () => jslb.field_get(blob_header, "s"));
+      this.raised_assert(Error, i18n("jslb.field_missing", "s"), () =>
+        jslb.field_get(blob_header, "s"),
+      );
       const header = jslb.header_make("echo");
-      this.raised_assert(Error, () => jslb.field_get(header, "sha256"));
+      this.raised_assert(Error, i18n("jslb.field_unknown", "sha256"), () =>
+        jslb.field_get(header, "sha256"),
+      );
     }
 
     // A header holding both forms of a field throws.
     test_field_forms(): void {
       const header = { ...jslb.header_make("echo"), type: "echo" };
-      this.raised_assert(jslb.WireError, () => jslb.field_get(header, "t"));
+      this.raised_assert(jslb.WireError, i18n("jslb.both_name_forms"), () =>
+        jslb.field_get(header, "t"),
+      );
     }
 
     // Probing stops at the first missing integer key, strings included.
@@ -567,7 +772,7 @@ namespace test_jslb {
     // Each blob's `d` follows the JSON as the same bytes object or handle.
     test_encode_blobs(): void {
       const data = Uint8Array.of(0x0d, 0x03, 0x04);
-      const handle: jslb.BlobHeader = { s: 10, k: "k", d: "blob_9" };
+      const handle = jslb.blob_make("blob_9", "k", {}, 10);
       const blobs = [jslb.blob_make(data), handle];
       const line = jslb.line_make(jslb.header_make("echo"), blobs, {});
       const pieces = jslb.line_encode(line);
@@ -608,45 +813,59 @@ namespace test_jslb {
         '{"0":{"t":"echo"},"high":9007199254740992,' +
           '"low":-9007199254740992}\r',
       );
-      const values: unknown[] = [
-        2 ** 53 + 2,
-        -(2 ** 53) - 2,
-        [2 ** 60],
-        { a: 2 ** 60 },
-        1e300,
+      const cases: [unknown, number][] = [
+        [2 ** 53 + 2, 2 ** 53 + 2],
+        [-(2 ** 53) - 2, -(2 ** 53) - 2],
+        [[2 ** 60], 2 ** 60],
+        [{ a: 2 ** 60 }, 2 ** 60],
+        [1e300, 1e300],
       ];
-      for (const value of values) {
-        const refused = jslb.line_make(header, [], { value });
-        this.raised_assert(Error, () => jslb.line_encode(refused));
+      for (const [value, refused] of cases) {
+        const line = jslb.line_make(header, [], { value });
+        this.raised_assert(
+          Error,
+          i18n("jslb.integer_refused", refused),
+          () => jslb.line_encode(line),
+        );
       }
     }
 
     // `NaN` and the infinities are refused.
     test_float_refused(): void {
       const header = jslb.header_make("echo");
-      for (const value of [NaN, Infinity, -Infinity, [NaN]]) {
-        const refused = jslb.line_make(header, [], { value });
-        this.raised_assert(Error, () => jslb.line_encode(refused));
+      const cases: [unknown, number][] = [
+        [NaN, NaN],
+        [Infinity, Infinity],
+        [-Infinity, -Infinity],
+        [[NaN], NaN],
+      ];
+      for (const [value, refused] of cases) {
+        const line = jslb.line_make(header, [], { value });
+        this.raised_assert(Error, i18n("jslb.number_refused", refused), () =>
+          jslb.line_encode(line),
+        );
       }
     }
 
     // A value that JSON has no text for is refused, not dropped or changed.
     test_value_refused(): void {
       const header = jslb.header_make("echo");
-      const values: unknown[] = [
-        undefined,
-        [undefined],
-        new Array(1),
-        () => 1,
-        BigInt(1),
-        Symbol("x"),
-        new Uint8Array(1),
-        new Map(),
-        new Date(0),
+      const cases: [unknown, string][] = [
+        [undefined, "[object Undefined]"],
+        [[undefined], "[object Undefined]"],
+        [new Array(1), "[object Undefined]"],
+        [() => 1, "[object Function]"],
+        [BigInt(1), "[object BigInt]"],
+        [Symbol("x"), "[object Symbol]"],
+        [new Uint8Array(1), "[object Uint8Array]"],
+        [new Map(), "[object Map]"],
+        [new Date(0), "[object Date]"],
       ];
-      for (const value of values) {
-        const refused = jslb.line_make(header, [], { value });
-        this.raised_assert(Error, () => jslb.line_encode(refused));
+      for (const [value, kind] of cases) {
+        const line = jslb.line_make(header, [], { value });
+        this.raised_assert(Error, i18n("jslb.value_refused", kind), () =>
+          jslb.line_encode(line),
+        );
       }
     }
 
@@ -656,17 +875,21 @@ namespace test_jslb {
       const high = String.fromCharCode(0xd800);
       const low = String.fromCharCode(0xdc00);
       const payloads = [{ text: "a" + high }, { value: { [low]: 1 } }];
+      const refused = i18n("jslb.text_refused");
       for (const payload of payloads) {
-        const refused = jslb.line_make(header, [], payload);
-        this.raised_assert(Error, () => jslb.line_encode(refused));
-        this.raised_assert(Error, () => jslb.line_render(refused));
+        const line = jslb.line_make(header, [], payload);
+        this.raised_assert(Error, refused, () => jslb.line_encode(line));
+        this.raised_assert(Error, refused, () => jslb.line_render(line));
       }
     }
 
     // A payload key of digits is refused, a nested one is written as it is.
     test_key_digits(): void {
       const line: jslb.Line = { 0: { t: "echo" }, "01": 1 };
-      this.raised_assert(jslb.WireError, () => jslb.line_encode(line));
+      const refused = i18n("jslb.payload_digit_key", "01");
+      this.raised_assert(jslb.WireError, refused, () =>
+        jslb.line_encode(line),
+      );
       const header = jslb.header_make("echo");
       const value = { "01": 1, 5: 2 };
       const nested = jslb.line_make(header, [], { value });
@@ -681,23 +904,39 @@ namespace test_jslb {
       const header = jslb.header_make("echo");
       const blob = { ...jslb.blob_make(bytes_of("abc")), s: 4 };
       const differs = jslb.line_make(header, [blob], {});
-      this.raised_assert(Error, () => jslb.line_encode(differs));
+      this.raised_assert(
+        Error,
+        i18n("jslb.blob_size_differs", 1, 4, 3),
+        () => jslb.line_encode(differs),
+      );
       const bare: jslb.BlobHeader = { s: 3 };
       const missing = jslb.line_make(header, [bare], {});
-      this.raised_assert(Error, () => jslb.line_encode(missing));
+      this.raised_assert(Error, i18n("jslb.blob_data_missing", 1), () =>
+        jslb.line_encode(missing),
+      );
     }
 
     // The encoder refuses a line that the decoder would refuse.
     test_encode_checked(): void {
       const empty = {} as jslb.Line;
-      this.raised_assert(jslb.WireError, () => jslb.line_encode(empty));
+      this.raised_assert(jslb.WireError, i18n("jslb.no_header_zero"), () =>
+        jslb.line_encode(empty),
+      );
       const blob = jslb.blob_make(bytes_of("x"));
       const counted = jslb.line_make(jslb.header_make("echo"), [blob], {});
       counted[0].b = 2;
-      this.raised_assert(jslb.WireError, () => jslb.line_encode(counted));
+      this.raised_assert(
+        jslb.WireError,
+        i18n("jslb.blobs_mismatch", 2, 1),
+        () => jslb.line_encode(counted),
+      );
       const header = { ...jslb.header_make("echo"), x: 1 };
       const extra = jslb.line_make(header, [], {});
-      this.raised_assert(jslb.WireError, () => jslb.line_encode(extra));
+      this.raised_assert(
+        jslb.WireError,
+        i18n("jslb.unknown_line_field", "x"),
+        () => jslb.line_encode(extra),
+      );
     }
   }
 
@@ -726,12 +965,13 @@ namespace test_jslb {
     }
   }
 
-  // Tests `LineDecoder` on lines and blobs in memory and on every hard error.
+  // Tests `LineDecoder` on lines, blobs in memory, its limits and every fault.
   export class TestDecode extends RefusalCase {
     // A line decodes to plain objects, and integer keys encode first again.
     test_decode_line(): void {
       const text = '{"0":{"t":"echo","i":1},"x":[{"02":4,"2":3}]}\r';
-      const found = pieces_decode(new MemorySink(), [bytes_of(text)]);
+      const decoder = decoder_make(new MemorySink());
+      const found = pieces_decode(decoder, [bytes_of(text)]);
       this.assertEqual(found.length, 1);
       const line = found[0];
       this.assertEqual(Object.keys(line), ["0", "x"]);
@@ -749,7 +989,8 @@ namespace test_jslb {
     // Nested digit keys beyond the array indices encode as integer keys.
     test_decode_keys(): void {
       const text = '{"0":{"t":"echo"},"x":{"b":1,"4294967296":2,"7":3}}\r';
-      const found = pieces_decode(new MemorySink(), [bytes_of(text)]);
+      const decoder = decoder_make(new MemorySink());
+      const found = pieces_decode(decoder, [bytes_of(text)]);
       this.assertEqual(found.length, 1);
       this.assertEqual(
         encoded_text(found[0]),
@@ -762,7 +1003,8 @@ namespace test_jslb {
       const text =
         '{"0":{"t":"echo","b":3},"1":{"s":2},"2":{"s":0},' +
         '"3":{"s":0,"k":"z"}}\r\r\n';
-      const found = pieces_decode(new MemorySink(), [bytes_of(text)]);
+      const decoder = decoder_make(new MemorySink());
+      const found = pieces_decode(decoder, [bytes_of(text)]);
       this.assertEqual(found.length, 1);
       const line = found[0];
       this.assertEqual(blob_at(line, 1).d, bytes_of("\r\n"));
@@ -804,6 +1046,59 @@ namespace test_jslb {
       );
     }
 
+    // An integral float count or size reads as an integer, in either form.
+    test_integral_floats(): void {
+      const found = pieces_decode(decoder_make(new MemorySink()), [
+        bytes_of('{"0":{"t":"echo","b":1.0},"1":{"s":2.0}}\rxy'),
+        bytes_of('{"0":{"type":"echo","blobs":1e0},"1":{"size":1.0}}\rz'),
+      ]);
+      this.assertEqual(found.length, 2);
+      for (const [index, data] of ["xy", "z"].entries()) {
+        const blob = blob_at(found[index], 1);
+        this.assertEqual(jslb.field_get(found[index][0], "blobs"), 1);
+        this.assertEqual(jslb.field_get(blob, "size"), data.length);
+        this.assertEqual(blob.d, bytes_of(data));
+      }
+      this.assertEqual(
+        jslb.line_render(found[0]),
+        '{"0":{"t":"echo","b":1},"1":{"s":2}}<blob "n"=1>',
+      );
+    }
+
+    // Lines before a fault are returned and the next call throws the fault.
+    test_fault_deferred(): void {
+      const decoder = decoder_make(new MemorySink());
+      const echo = constants.echo_line;
+      const data = bytes_of(echo + '{"t":"echo"}\r' + echo);
+      this.assertEqual(decoder.bytes_feed(data), [{ 0: { t: "echo" } }]);
+      this.assertFalse(decoder.idle());
+      const empty = new Uint8Array(0);
+      this.raised_assert(jslb.WireError, i18n("jslb.no_header_zero"), () =>
+        decoder.bytes_feed(empty),
+      );
+      this.raised_assert(jslb.WireError, i18n("jslb.decoder_failed"), () =>
+        decoder.bytes_feed(empty),
+      );
+    }
+
+    // The decoder is idle between messages only, and never after a fault.
+    test_idle_states(): void {
+      const decoder = decoder_make(new MemorySink());
+      this.assertTrue(decoder.idle());
+      const head = bytes_of('{"0":{"t":"echo","b":1}');
+      this.assertEqual(decoder.bytes_feed(head), []);
+      this.assertFalse(decoder.idle());
+      const rest = bytes_of(',"1":{"s":2}}\rx');
+      this.assertEqual(decoder.bytes_feed(rest), []);
+      this.assertFalse(decoder.idle());
+      this.assertEqual(decoder.bytes_feed(bytes_of("y")).length, 1);
+      this.assertTrue(decoder.idle());
+      this.raised_assert(jslb.WireError, parse_refusal(""), () =>
+        decoder.bytes_feed(bytes_of("\r")),
+      );
+      this.assertFalse(decoder.idle());
+    }
+
     // A line of `line_max` bytes with its CR is read, one byte more is not.
     test_line_max(): void {
       const prefix = '{"0":{"t":"echo"},"pad":"';
@@ -811,11 +1106,10 @@ namespace test_jslb {
       const length = constants.line_max - prefix.length - suffix.length;
       const pad = "a".repeat(length);
       const text = prefix + pad + suffix;
-      this.assertEqual(
-        pieces_decode(new MemorySink(), [bytes_of(text)]).length,
-        1,
-      );
-      this.refused_assert(bytes_of(prefix + pad + "a" + suffix));
+      const decoder = decoder_make(new MemorySink());
+      this.assertEqual(pieces_decode(decoder, [bytes_of(text)]).length, 1);
+      const message = i18n("jslb.line_over_max", constants.line_max);
+      this.refused_assert(bytes_of(prefix + pad + "a" + suffix), message);
     }
 
     // A line is refused once it passes `line_max`, before its CR arrives.
@@ -823,126 +1117,193 @@ namespace test_jslb {
       const decoder = decoder_make(new MemorySink());
       const open = "{".repeat(constants.line_max - 1);
       this.assertEqual(decoder.bytes_feed(bytes_of(open)), []);
-      this.raised_assert(jslb.WireError, () =>
+      const message = i18n("jslb.line_over_max", constants.line_max);
+      this.raised_assert(jslb.WireError, message, () =>
         decoder.bytes_feed(bytes_of("{")),
       );
     }
 
-    // A blob of `blob_max` bytes is read, one more is refused at the CR.
+    // A blob of `blob_max` bytes is read, one more refused before buffering.
     test_blob_max(): void {
       const largest = constants.blob_max;
+      const head = `{"0":{"t":"echo","b":1},"1":{"s":${largest + 1}}}\r`;
+      const over = bytes_join([bytes_of(head), new Uint8Array(largest + 1)]);
+      const message = i18n("jslb.blob_over_max", 1, largest + 1, largest);
+      const sink = this.refused_assert(over, message);
+      this.assertEqual(sink.headers.length, 0);
       const text = `{"0":{"t":"echo","b":1},"1":{"s":${largest}}}\r`;
-      const data = new Uint8Array(largest);
-      const found = pieces_decode(new MemorySink(), [bytes_of(text), data]);
+      const found = pieces_decode(decoder_make(new MemorySink()), [
+        bytes_of(text),
+        new Uint8Array(largest),
+      ]);
       this.assertEqual(found.length, 1);
-      const over = `{"0":{"t":"echo","b":1},"1":{"s":${largest + 1}}}\r`;
-      this.refused_assert(bytes_of(over));
+    }
+
+    // A message of `message_max` bytes is read, one more refused at its CR.
+    test_message_max(): void {
+      const { line_max, blob_max, message_max } = constants;
+      const first = new Uint8Array(blob_max);
+      const rest = message_max - blob_max - line_max / 2;
+      const over = message_padded(line_max / 2, [
+        first,
+        new Uint8Array(rest + 1),
+      ]);
+      const message = i18n("jslb.message_over", message_max + 1, message_max);
+      const sink = this.refused_assert(over, message);
+      this.assertEqual(sink.headers.length, 0);
+      const data = message_padded(line_max / 2, [first, new Uint8Array(rest)]);
+      this.assertEqual(data.length, message_max);
+      const found = pieces_decode(decoder_make(new MemorySink()), [data]);
+      this.assertEqual(found.length, 1);
     }
 
     // A line without header 0 is refused.
     test_header_missing(): void {
-      this.refused_assert(bytes_of('{"t":"echo"}\r'));
-      this.refused_assert(bytes_of('{"1":{"s":0}}\r'));
+      const message = i18n("jslb.no_header_zero");
+      this.refused_assert(bytes_of('{"t":"echo"}\r'), message);
+      this.refused_assert(bytes_of('{"1":{"s":0}}\r'), message);
     }
 
     // A header that is not a JSON object is refused.
     test_header_object(): void {
-      this.refused_assert(bytes_of('{"0":"echo"}\r'));
-      this.refused_assert(bytes_of('{"0":{"t":"echo","b":1},"1":[]}\r'));
+      this.refused_assert(
+        bytes_of('{"0":"echo"}\r'),
+        i18n("jslb.header_not_object", 0),
+      );
+      this.refused_assert(
+        bytes_of('{"0":{"t":"echo","b":1},"1":[]}\r'),
+        i18n("jslb.header_not_object", 1),
+      );
     }
 
     // A line header without a type string is refused.
     test_type_missing(): void {
-      this.refused_assert(bytes_of('{"0":{"i":1}}\r'));
-      this.refused_assert(bytes_of('{"0":{"t":null}}\r'));
-      this.refused_assert(bytes_of('{"0":{"t":1}}\r'));
-      this.refused_assert(bytes_of('{"0":{}}\r'));
+      const message = i18n("jslb.no_type");
+      this.refused_assert(bytes_of('{"0":{"i":1}}\r'), message);
+      this.refused_assert(bytes_of('{"0":{"t":null}}\r'), message);
+      this.refused_assert(bytes_of('{"0":{"t":1}}\r'), message);
+      this.refused_assert(bytes_of('{"0":{}}\r'), message);
     }
 
     // A blob count that differs from the blob headers is refused.
     test_count_mismatch(): void {
-      this.refused_assert(bytes_of('{"0":{"t":"echo","b":2},"1":{"s":0}}\r'));
-      this.refused_assert(bytes_of('{"0":{"t":"echo"},"1":{"s":0}}\r'));
-      this.refused_assert(
-        bytes_of('{"0":{"t":"echo","b":true},"1":{"s":0}}\r'),
-      );
-      this.refused_assert(bytes_of('{"0":{"t":"echo","b":-1}}\r'));
-      this.refused_assert(bytes_of('{"0":{"t":"echo","b":0.5}}\r'));
+      const cases: [string, unknown, number][] = [
+        ['{"0":{"t":"echo","b":2},"1":{"s":0}}\r', 2, 1],
+        ['{"0":{"t":"echo"},"1":{"s":0}}\r', 0, 1],
+        ['{"0":{"t":"echo","b":true},"1":{"s":0}}\r', true, 1],
+        ['{"0":{"t":"echo","b":-1}}\r', -1, 0],
+        ['{"0":{"t":"echo","b":0.5}}\r', 0.5, 0],
+      ];
+      for (const [text, count, probed] of cases) {
+        const message = i18n("jslb.blobs_mismatch", count, probed);
+        this.refused_assert(bytes_of(text), message);
+      }
     }
 
     // A gap in the blob headers is refused, a huge integer key too.
     test_header_gap(): void {
-      this.refused_assert(
-        bytes_of('{"0":{"t":"echo","b":2},"1":{"s":0},"3":{"s":0}}\r'),
-      );
-      this.refused_assert(bytes_of('{"0":{"t":"echo","b":1},"2":{"s":0}}\r'));
-      this.refused_assert(bytes_of('{"0":{"t":"echo"},"4294967296":{}}\r'));
+      const cases: [string, number, number][] = [
+        ['{"0":{"t":"echo","b":2},"1":{"s":0},"3":{"s":0}}\r', 2, 3],
+        ['{"0":{"t":"echo","b":1},"2":{"s":0}}\r', 1, 2],
+        ['{"0":{"t":"echo"},"4294967296":{}}\r', 1, 4294967296],
+      ];
+      for (const [text, missing, present] of cases) {
+        const message = i18n("jslb.blob_gap", missing, present);
+        this.refused_assert(bytes_of(text), message);
+      }
     }
 
     // A size that is not a non negative integer is refused.
     test_size_invalid(): void {
+      const message = i18n("jslb.bad_size", 1);
       for (const size of ["-1", "1.5", '"1"', "true", "null"]) {
         const text = `{"0":{"t":"echo","b":1},"1":{"s":${size}}}\r`;
-        this.refused_assert(bytes_of(text));
+        this.refused_assert(bytes_of(text), message);
       }
       this.refused_assert(
         bytes_of('{"0":{"t":"echo","b":1},"1":{"k":"a"}}\r'),
+        message,
       );
     }
 
     // A payload key of decimal digits is refused.
     test_payload_digits(): void {
-      this.refused_assert(bytes_of('{"0":{"t":"echo"},"01":1}\r'));
-      this.refused_assert(bytes_of('{"0":{"t":"echo"},"00":1}\r'));
+      for (const key of ["01", "00"]) {
+        const message = i18n("jslb.payload_digit_key", key);
+        const text = `{"0":{"t":"echo"},"${key}":1}\r`;
+        this.refused_assert(bytes_of(text), message);
+      }
     }
 
     // Short and full names in one line are refused, across headers too.
     test_forms_mixed(): void {
-      this.refused_assert(bytes_of('{"0":{"t":"echo","version":1}}\r'));
-      this.refused_assert(bytes_of('{"0":{"t":"echo","type":"echo"}}\r'));
+      const message = i18n("jslb.both_name_forms");
+      for (const field of ['"version":1', '"type":"echo"']) {
+        const text = `{"0":{"t":"echo",${field}}}\r`;
+        this.refused_assert(bytes_of(text), message);
+      }
       this.refused_assert(
         bytes_of('{"0":{"type":"echo","blobs":1},"1":{"s":0}}\r'),
+        message,
       );
       this.refused_assert(
         bytes_of('{"0":{"t":"echo","b":1},"1":{"s":0,"key":"a"}}\r'),
+        message,
       );
     }
 
     // An unknown field in the line header is refused.
     test_line_field(): void {
-      this.refused_assert(bytes_of('{"0":{"t":"echo","x":1}}\r'));
-      this.refused_assert(bytes_of('{"0":{"t":"echo","s":1}}\r'));
+      for (const name of ["x", "s"]) {
+        const message = i18n("jslb.unknown_line_field", name);
+        const text = `{"0":{"t":"echo","${name}":1}}\r`;
+        this.refused_assert(bytes_of(text), message);
+      }
     }
 
     // A blob header that carries `d` or `data` on the wire is refused.
     test_data_sent(): void {
+      const message = i18n("jslb.blob_data_field", 1);
       this.refused_assert(
         bytes_of('{"0":{"t":"echo","b":1},"1":{"s":0,"d":""}}\r'),
+        message,
       );
       this.refused_assert(
         bytes_of('{"0":{"type":"echo","blobs":1},"1":{"size":0,"data":""}}\r'),
+        message,
       );
     }
 
     // A line that is not strict `UTF-8` or not a JSON object is refused.
     test_text_invalid(): void {
       const start = bytes_of('{"0":{"t":"');
-      const end = bytes_of('"}}\r');
+      const end = bytes_of('"}}');
+      const line_end = bytes_of("\r");
       const middles = [[0xff], [0xed, 0xa0, 0x80], [0xc0, 0x80]];
       for (const middle of middles) {
-        this.refused_assert(bytes_join([start, Uint8Array.from(middle), end]));
+        const line = bytes_join([start, Uint8Array.from(middle), end]);
+        const data = bytes_join([line, line_end]);
+        this.refused_assert(data, decode_refusal(line));
       }
       const mark = Uint8Array.of(0xef, 0xbb, 0xbf);
-      this.refused_assert(bytes_join([mark, bytes_of(constants.echo_line)]));
-      this.refused_assert(bytes_of("{\r"));
-      this.refused_assert(bytes_of('[{"0":{"t":"echo"}}]\r'));
-      this.refused_assert(bytes_of("\r"));
+      const marked = bytes_join([mark, bytes_of(constants.echo_text)]);
+      this.refused_assert(
+        bytes_join([marked, line_end]),
+        parse_refusal(utility.utf8_decode(marked)),
+      );
+      this.refused_assert(bytes_of("{\r"), parse_refusal("{"));
+      this.refused_assert(
+        bytes_of('[{"0":{"t":"echo"}}]\r'),
+        i18n("jslb.line_not_object"),
+      );
+      this.refused_assert(bytes_of("\r"), parse_refusal(""));
     }
 
-    // The `NaN` and `Infinity` constants are refused.
+    // The `NaN` and `Infinity` constants are refused as not JSON.
     test_constant_refused(): void {
       for (const constant of ["NaN", "Infinity", "-Infinity"]) {
-        this.refused_assert(bytes_of(`{"0":{"t":"echo"},"n":${constant}}\r`));
+        const text = `{"0":{"t":"echo"},"n":${constant}}`;
+        this.refused_assert(bytes_of(text + "\r"), parse_refusal(text));
       }
     }
   }
@@ -957,7 +1318,7 @@ namespace test_jslb {
         `{"0":{"t":"echo","b":2},"1":{"s":${data.length},"k":"big"},` +
         '"2":{"s":1}}\r';
       const pieces = [bytes_of(text), data, bytes_of("x")];
-      const found = pieces_decode(sink, pieces);
+      const found = pieces_decode(decoder_make(sink), pieces);
       this.assertEqual(found.length, 1);
       const blob = blob_at(found[0], 1);
       this.assertTrue(sink.headers[0] === blob);
@@ -973,7 +1334,8 @@ namespace test_jslb {
       const sink = new MemorySink();
       const data = pattern_make(constants.overflow_bytes, 256);
       const text = `{"0":{"t":"echo","b":1},"1":{"s":${data.length}}}\r`;
-      const found = pieces_decode(sink, [bytes_join([bytes_of(text), data])]);
+      const stream = bytes_join([bytes_of(text), data]);
+      const found = pieces_decode(decoder_make(sink), [stream]);
       this.assertEqual(found.length, 1);
       this.assertEqual(blob_at(found[0], 1).d, data);
       this.assertFalse(Object.hasOwn(blob_at(found[0], 1), "sha256"));
@@ -987,7 +1349,7 @@ namespace test_jslb {
       const text = `{"0":{"t":"echo","b":1},"1":{"s":${data.length}}}\r`;
       const stream = bytes_join([bytes_of(text), data]);
       const found = pieces_decode(
-        sink,
+        decoder_make(sink),
         Array.from(stream, (_byte, index) =>
           stream.subarray(index, index + 1),
         ),
@@ -1003,16 +1365,61 @@ namespace test_jslb {
       const decoder = decoder_make(new FullSink());
       const size = constants.overflow_bytes + 1;
       const text = `{"0":{"t":"echo","b":1},"1":{"s":${size}}}\r`;
-      this.raised_assert(RangeError, () => decoder.bytes_feed(bytes_of(text)));
-      this.raised_assert(jslb.WireError, () =>
+      this.raised_assert(RangeError, "the sink is full", () =>
+        decoder.bytes_feed(bytes_of(text)),
+      );
+      this.raised_assert(jslb.WireError, i18n("jslb.decoder_failed"), () =>
         decoder.bytes_feed(bytes_of(constants.echo_line)),
       );
+    }
+
+    // A streamed blob's handle is closed when an append fails, then or later.
+    test_stream_closed(): void {
+      const size = constants.overflow_bytes + 1;
+      const text = `{"0":{"t":"echo","b":1},"1":{"s":${size}}}\rx`;
+      const failing = new FailingSink();
+      const decoder = decoder_make(failing);
+      this.raised_assert(RangeError, failing.message, () =>
+        decoder.bytes_feed(bytes_of(text)),
+      );
+      this.assertEqual(failing.closed, ["blob_1"]);
+      const later = new FailingSink();
+      const deferred = decoder_make(later);
+      const found = deferred.bytes_feed(bytes_of(constants.echo_line + text));
+      this.assertEqual(found, [{ 0: { t: "echo" } }]);
+      this.assertEqual(later.closed, ["blob_1"]);
+      this.raised_assert(RangeError, later.message, () =>
+        deferred.bytes_feed(new Uint8Array(0)),
+      );
+    }
+
+    // A sent `sha256` is replaced on a streamed blob, kept on one in memory.
+    test_hash_sent(): void {
+      const sink = new MemorySink();
+      const sent = "0".repeat(64);
+      const data = new Uint8Array(constants.overflow_bytes + 1);
+      const text =
+        `{"0":{"t":"echo","b":2},"1":{"s":${data.length},` +
+        `"sha256":"${sent}"},"2":{"s":1,"sha256":"${sent}"}}\r`;
+      const stream = bytes_join([bytes_of(text), data, bytes_of("x")]);
+      const found = pieces_decode(decoder_make(sink), [stream]);
+      this.assertEqual(found.length, 1);
+      this.assertEqual(Object.entries(blob_at(found[0], 1)), [
+        ["s", data.length],
+        ["sha256", utility.sha256_hex(data)],
+        ["d", "blob_1"],
+      ]);
+      this.assertEqual(Object.entries(blob_at(found[0], 2)), [
+        ["s", 1],
+        ["sha256", sent],
+        ["d", bytes_of("x")],
+      ]);
     }
   }
 
   // Reads each vector of `test_vectors`, whole, by bytes and split.
   export class TestVectors extends RefusalCase {
-    // Each success vector decodes to its sidecar and encodes to its bytes.
+    // Each success vector, and the bytes it encodes to, decode to its sidecar.
     test_vectors_success(): void {
       const names = vector_names(false);
       this.assertTrue(names.length > 0, "no success vectors in test_vectors");
@@ -1020,34 +1427,60 @@ namespace test_jslb {
         const data = file_bytes(name + constants.vector_suffix);
         const sidecar = sidecar_read(name);
         const messages = JSON.stringify(sidecar.messages);
-        for (const pieces of feeds_make(data)) {
-          const sink = new MemorySink();
-          const found = pieces_decode(sink, pieces);
-          const plain = found.map((line) => line_plain(line, sink));
-          this.assertEqual(JSON.stringify(plain), messages, name);
-          const renders = found.map((line) => jslb.line_render(line));
-          this.assertEqual(renders, sidecar.render, name);
-        }
-        const encoder_sink = new MemorySink();
-        const encoded = pieces_decode(encoder_sink, [data]).map((line) =>
-          pieces_join(jslb.line_encode(line_sent(line)), encoder_sink),
+        const sink = new MemorySink();
+        const decoded = pieces_decode(sidecar_decoder(sidecar, sink), [data]);
+        const encoded = bytes_join(
+          decoded.map((line) =>
+            pieces_join(jslb.line_encode(line_sent(line)), sink),
+          ),
         );
-        this.assertEqual(bytes_join(encoded), data, name);
+        const same = bytes_equal(encoded, data);
+        this.assertEqual(same, sidecar.canonical, name);
+        for (const source of same ? [data] : [data, encoded]) {
+          for (const pieces of feeds_make(source)) {
+            const feed_sink = new MemorySink();
+            const decoder = sidecar_decoder(sidecar, feed_sink);
+            const found = pieces_decode(decoder, pieces);
+            const plain = found.map((line) => line_plain(line, feed_sink));
+            this.assertEqual(JSON.stringify(plain), messages, name);
+            const renders = found.map((line) => jslb.line_render(line));
+            this.assertEqual(renders, sidecar.render, name);
+          }
+        }
       }
     }
 
-    // Each error vector throws `WireError` however it is fed.
+    // Each error vector gives its lines, then its fault, however it is fed.
     test_vectors_error(): void {
       const names = vector_names(true);
       this.assertTrue(names.length > 0, "no error vectors in test_vectors");
       for (const name of names) {
         const data = file_bytes(name + constants.vector_suffix);
+        const sidecar = sidecar_read(name);
+        const expected = errors_expected(sidecar.limits);
+        this.assertEqual(Object.keys(expected).sort(), names);
+        const [slug, message] = expected[name];
+        this.assertEqual(sidecar.error, slug, name);
+        const messages = JSON.stringify(sidecar.messages);
         for (const pieces of feeds_make(data)) {
+          const sink = new MemorySink();
+          const decoder = sidecar_decoder(sidecar, sink);
+          const found: jslb.Line[] = [];
           this.raised_assert(
             jslb.WireError,
-            () => pieces_decode(new MemorySink(), pieces),
+            message,
+            () => {
+              for (const piece of pieces) {
+                found.push(...decoder.bytes_feed(piece));
+              }
+              decoder.bytes_feed(new Uint8Array(0));
+            },
             name,
           );
+          const plain = found.map((line) => line_plain(line, sink));
+          this.assertEqual(JSON.stringify(plain), messages, name);
+          const renders = found.map((line) => jslb.line_render(line));
+          this.assertEqual(renders, sidecar.render, name);
         }
       }
     }
@@ -1072,6 +1505,14 @@ namespace test_jslb {
       this.assertTrue(Object.isFrozen(jslb));
       this.assertEqual(Object.keys(jslb).sort(), names);
       this.assertTrue(new jslb.WireError("x") instanceof Error);
+    }
+
+    // The error is named on its prototype, so its stack header shows it.
+    test_error_name(): void {
+      const error = new jslb.WireError("x");
+      this.assertEqual(error.name, "WireError");
+      this.assertFalse(Object.hasOwn(error, "name"));
+      this.assertTrue(String(error.stack).startsWith("WireError: x"));
     }
   }
 }

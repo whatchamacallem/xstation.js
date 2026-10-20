@@ -4,12 +4,15 @@
 #
 # Tests `db.create`, `db.drop` and `db.snapshot` through the dispatcher on a
 # real store under `build/`: databases made and dropped by forwarded lines, a
-# stale `since`, the file of a snapshot as blob 1 in memory and streamed to
-# the cache, a snapshot restored into a second store, and a recorded sequence
-# of creates and drops replayed to a second store.
+# new database at `seq` 0 as the turn transcript shows, a stale `since`, the
+# file of a snapshot as blob 1 in memory and streamed to the cache, a
+# snapshot restored into a second store, and a recorded sequence of creates
+# and drops replayed to a second store.
 
 import dispatch, engine_db, hashlib, jslb, os, sqlite3, substrate, tempfile
 import unittest, unittest.mock, uuid
+from collections.abc import Callable
+from i18n import i18n
 from typing import Any
 
 # The checkout's build directory, where each test makes its scratch roots.
@@ -29,8 +32,11 @@ _OVERFLOW_BYTES = 131072
 # The `line_max` of the settings, 1 MiB.
 _LINE_MAX = 1048576
 
-# The `blob_max` of the settings, 1 GiB.
-_BLOB_MAX = 1073741824
+# The `blob_max` of the settings, 10 MiB.
+_BLOB_MAX = 10485760
+
+# The `message_max` of the settings, 10 MiB.
+_MESSAGE_MAX = 10485760
 
 # The database the tests create, snapshot and drop.
 _DATABASE = "castle"
@@ -41,10 +47,13 @@ _WIDE_TEXT = chr(0x4E2D) + chr(0x6587) + chr(0x1F600)
 # A text row large enough to put the database file over `overflow_bytes`.
 _BIG_TEXT = "x" * 200000
 
+# A value over `overflow_bytes`, which the store keeps in the cache.
+_VALUE_OVER = bytes(range(256)) * 800
+
 # The magic bytes that start every SQLite database file.
 _FILE_MAGIC = b"SQLite format 3\x00"
 
-# The recorded operations: a type and a database name, as the transcript has.
+# Creates and a drop to replay, among them the turn transcript's creates.
 _RECORDED: list[tuple[str, str]] = [
     ("db.create", "metaverse"),
     ("db.create", "castle"),
@@ -93,7 +102,9 @@ def _decoder_make(root: str) -> jslb.LineDecoder:
     def sink_make(header: jslb.Object) -> str:
         return os.path.join(cache, "sink" + uuid.uuid4().hex)
 
-    return jslb.LineDecoder(_LINE_MAX, _BLOB_MAX, _OVERFLOW_BYTES, sink_make)
+    return jslb.LineDecoder(
+        _LINE_MAX, _BLOB_MAX, _MESSAGE_MAX, _OVERFLOW_BYTES, sink_make
+    )
 
 
 # Decodes the one line the bytes hold, streaming a big blob to the cache.
@@ -157,10 +168,24 @@ class IsolatedCase(unittest.TestCase):
         self.addCleanup(_store_close, store)
         return store
 
+    # Calls `fn` and checks the type and the text of what it raises.
+    def raise_check(
+        self, kind: type[Exception], message: str, fn: Callable[[], object]
+    ) -> None:
+        with self.assertRaises(kind) as caught:
+            fn()
+        self.assertEqual(str(caught.exception), message)
+
+    # Dispatches a line and checks the type and the text of what it raises.
+    def dispatch_check(
+        self, kind: type[Exception], message: str, line: jslb.Object
+    ) -> None:
+        self.raise_check(kind, message, lambda: dispatch.line_dispatch(line))
+
 
 # Tests the handler of `db.create`.
 class TestCreate(IsolatedCase):
-    # A create makes the database file with `seq` 1 and replies with nothing.
+    # A create makes the database file at `seq` 0 and replies with nothing.
     def test_database_created(self) -> None:
         engine_db.handlers_register(self.store)
         line = _line_make("db.create", 3, db=_DATABASE, since=0)
@@ -168,7 +193,7 @@ class TestCreate(IsolatedCase):
         self.assertEqual(reply[0], {"t": "db.create", "r": 3})
         self.assertEqual(jslb.payload_of(reply), {})
         self.assertEqual(self.store.db_list(), [_DATABASE])
-        self.assertEqual(self.store.seq_get(_DATABASE), 1)
+        self.assertEqual(self.store.seq_get(_DATABASE), 0)
         path = os.path.join(self.root, "castle.sqlite")
         self.assertTrue(os.path.isfile(path))
 
@@ -176,10 +201,8 @@ class TestCreate(IsolatedCase):
     def test_since_stale(self) -> None:
         engine_db.handlers_register(self.store)
         line = _line_make("db.create", 1, db=_DATABASE, since=1)
-        with self.assertRaises(RuntimeError) as caught:
-            dispatch.line_dispatch(line)
-        message = "db.create: since 1 is not seq 0 of castle"
-        self.assertEqual(str(caught.exception), message)
+        message = i18n("substrate.since_stale", "db.create", 1, 0, _DATABASE)
+        self.dispatch_check(RuntimeError, message, line)
         self.assertEqual(self.store.db_list(), [])
         self.assertEqual(os.listdir(self.root), ["cache"])
 
@@ -188,14 +211,16 @@ class TestCreate(IsolatedCase):
         engine_db.handlers_register(self.store)
         self.store.db_create(_DATABASE)
         line = _line_make("db.create", 1, db=_DATABASE, since=0)
-        with self.assertRaises(FileExistsError):
+        with self.assertRaises(FileExistsError) as caught:
             dispatch.line_dispatch(line)
-        self.assertEqual(self.store.seq_get(_DATABASE), 1)
+        path = os.path.join(self.root, "castle.sqlite")
+        self.assertEqual(caught.exception.filename, path)
+        self.assertEqual(self.store.seq_get(_DATABASE), 0)
         for name in ("", "a-b", "9a", "a/b"):
             with self.subTest(name=name):
                 line = _line_make("db.create", 1, db=name, since=0)
-                with self.assertRaises(ValueError):
-                    dispatch.line_dispatch(line)
+                message = i18n("substrate.name_bad", name)
+                self.dispatch_check(ValueError, message, line)
         self.assertEqual(self.store.db_list(), [_DATABASE])
         self.assertEqual(_files_find(self.root), ["castle.sqlite"])
 
@@ -206,10 +231,10 @@ class TestDrop(IsolatedCase):
     def test_database_dropped(self) -> None:
         engine_db.handlers_register(self.store)
         self.store.db_create(_DATABASE)
-        self.store.kv_put("/castle/maps/castle.bin", bytes(range(256)) * 800)
+        self.store.kv_put("/castle/maps/castle.bin", _VALUE_OVER)
         cache = os.path.join(self.root, "cache")
         self.assertEqual(len(os.listdir(cache)), 1)
-        line = _line_make("db.drop", 4, db=_DATABASE, since=2)
+        line = _line_make("db.drop", 4, db=_DATABASE, since=1)
         reply = _reply_get(line)
         self.assertEqual(reply[0], {"t": "db.drop", "r": 4})
         self.assertEqual(jslb.payload_of(reply), {})
@@ -221,11 +246,10 @@ class TestDrop(IsolatedCase):
     def test_since_stale(self) -> None:
         engine_db.handlers_register(self.store)
         self.store.db_create(_DATABASE)
+        self.store.kv_put("/castle/a", b"one")
         line = _line_make("db.drop", 1, db=_DATABASE, since=0)
-        with self.assertRaises(RuntimeError) as caught:
-            dispatch.line_dispatch(line)
-        message = "db.drop: since 0 is not seq 1 of castle"
-        self.assertEqual(str(caught.exception), message)
+        message = i18n("substrate.since_stale", "db.drop", 0, 1, _DATABASE)
+        self.dispatch_check(RuntimeError, message, line)
         self.assertEqual(self.store.db_list(), [_DATABASE])
         self.assertEqual(_files_find(self.root), ["castle.sqlite"])
 
@@ -233,13 +257,13 @@ class TestDrop(IsolatedCase):
     def test_drop_unknown(self) -> None:
         engine_db.handlers_register(self.store)
         line = _line_make("db.drop", 1, db=_DATABASE, since=0)
-        with self.assertRaises(LookupError):
-            dispatch.line_dispatch(line)
+        message = i18n("substrate.db_closed", _DATABASE)
+        self.dispatch_check(LookupError, message, line)
 
 
 # Tests the handler of `db.snapshot`.
 class TestSnapshot(IsolatedCase):
-    # Makes the database with a table and one row of the text.
+    # Makes the database with a table and one row of the text: `seq` 1.
     def database_fill(self, text: str) -> None:
         self.store.db_create(_DATABASE)
         statements = [
@@ -251,7 +275,7 @@ class TestSnapshot(IsolatedCase):
     # Restores the snapshot into a second store and reads back the row.
     def row_restored(self, data: bytes) -> list[list[Any]]:
         second = self.store_make(self.root_make())
-        self.assertEqual(second.db_restore(_DATABASE, data), 2)
+        self.assertEqual(second.db_restore(_DATABASE, data), 1)
         statement = _statement_make("SELECT x FROM t")
         return second.sql_run(_DATABASE, [statement])[0].rows
 
@@ -261,7 +285,7 @@ class TestSnapshot(IsolatedCase):
         self.database_fill(_WIDE_TEXT)
         reply = _reply_get(_line_make("db.snapshot", 9, db=_DATABASE))
         data = reply[1]["d"]
-        payload = {"sha256": hashlib.sha256(data).hexdigest(), "seq": 2}
+        payload = {"sha256": hashlib.sha256(data).hexdigest(), "seq": 1}
         self.assertEqual(reply[0], {"t": "db.snapshot", "r": 9, "b": 1})
         self.assertEqual(reply[1], {"s": len(data), "d": data})
         self.assertEqual(jslb.payload_of(reply), payload)
@@ -291,17 +315,17 @@ class TestSnapshot(IsolatedCase):
         engine_db.handlers_register(self.store)
         self.store.db_create(_DATABASE)
         line = _line_make("db.snapshot", 1, db=_DATABASE)
-        self.assertEqual(_reply_get(line)["seq"], 1)
+        self.assertEqual(_reply_get(line)["seq"], 0)
         self.store.kv_put("/castle/a", b"one")
         line = _line_make("db.snapshot", 2, db=_DATABASE)
-        self.assertEqual(_reply_get(line)["seq"], 2)
+        self.assertEqual(_reply_get(line)["seq"], 1)
 
     # A database that is not open raises.
     def test_snapshot_unknown(self) -> None:
         engine_db.handlers_register(self.store)
         line = _line_make("db.snapshot", 1, db=_DATABASE)
-        with self.assertRaises(LookupError):
-            dispatch.line_dispatch(line)
+        message = i18n("substrate.db_closed", _DATABASE)
+        self.dispatch_check(LookupError, message, line)
 
 
 # Tests a recorded sequence of forwarded operations on a second store.
@@ -324,7 +348,7 @@ class TestReplay(IsolatedCase):
         self.assertEqual(self.store.db_list(), names)
         self.assertEqual(second.db_list(), names)
         for name in names:
-            self.assertEqual(second.seq_get(name), 1)
+            self.assertEqual(second.seq_get(name), 0)
         _store_close(self.store)
         _store_close(second)
         for name in names:
@@ -344,15 +368,21 @@ class TestRegister(IsolatedCase):
     # A second registration raises, as the dispatcher refuses the pair.
     def test_register_twice(self) -> None:
         engine_db.handlers_register(self.store)
-        with self.assertRaises(ValueError):
-            engine_db.handlers_register(self.store)
+        message = i18n("dispatch.handler_twice", "db.create", 0)
+        self.raise_check(
+            ValueError,
+            message,
+            lambda: engine_db.handlers_register(self.store),
+        )
 
     # Called before the registration each handler raises.
     def test_unregistered(self) -> None:
         line = _line_make("db.create", 1)
-        with self.assertRaises(RuntimeError):
-            engine_db.db_create(line, db=_DATABASE, since=0)
-        with self.assertRaises(RuntimeError):
-            engine_db.db_drop(line, db=_DATABASE, since=1)
-        with self.assertRaises(RuntimeError):
-            engine_db.db_snapshot(line, db=_DATABASE)
+        message = i18n("engine_db.not_registered")
+        calls: list[Callable[[], object]] = [
+            lambda: engine_db.db_create(line, db=_DATABASE, since=0),
+            lambda: engine_db.db_drop(line, db=_DATABASE, since=0),
+            lambda: engine_db.db_snapshot(line, db=_DATABASE),
+        ]
+        for call in calls:
+            self.raise_check(RuntimeError, message, call)

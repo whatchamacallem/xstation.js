@@ -5,15 +5,17 @@
 #
 # Checks the whitelisted files are UTF-8 with no non-ASCII outside
 # _NON_ASCII_ALLOWED, checks the comments of those and the PowerShell files,
-# including the TypeScript and JavaScript ones, audits every ts/*.ts file
-# other than the _SYNCHRONIZATION_MODULES for await, .then(, new Promise,
-# Atomics and SharedArrayBuffer outside its comments, formats the whitelisted
-# files with reformat.py, then lints the Python ones with ruff check. Below a
-# file's header, the comment at its top, a comment must be one line, not be a
-# <# #> comment, and outside its Doxygen `code` spans hold nothing but
-# letters, digits, white space and _ENGLISH_PUNCT.
+# including the TypeScript and JavaScript ones, proves the synchronization
+# audit on probe files under build/, audits every ts/*.ts file other than the
+# _SYNCHRONIZATION_MODULES for await, .then(, new Promise, Atomics and
+# SharedArrayBuffer outside its comments and its string, template and regular
+# expression literals, formats the whitelisted files with reformat.py, then
+# lints the Python ones with ruff check. Below a file's header, the comment at
+# its top, a comment must be one line, not be a <# #> comment, and outside its
+# Doxygen `code` spans hold nothing but letters, digits, white space and
+# _ENGLISH_PUNCT.
 
-import argparse, glob, io, os, re, subprocess, sys, tokenize
+import argparse, glob, io, os, re, subprocess, sys, tempfile, tokenize
 from typing import NamedTuple
 
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -22,6 +24,29 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
 # Bytecode of the modules main imports goes in build/.
 sys.pycache_prefix = os.path.join(_BUILD_PATH, "pycache")
+
+# Probe code the audit must pass: each token in a literal or a comment.
+_AUDIT_PASSED = (
+    'const s = "await p.then( new Promise Atomics SharedArrayBuffer";\n',
+    "const s = 'await p.then(';\n",
+    "const t = `await p.then( ${n} new Promise`;\n",
+    "const r = /await|\\.then\\(|Atomics/;\n",
+    "// await p.then( new Promise\n",
+    "/* Atomics SharedArrayBuffer */\n",
+)
+
+# Probe code the audit must refuse, one synchronization token in each.
+_AUDIT_REFUSED = (
+    "await x;\n",
+    "p.then(f);\n",
+    "p.then<T>(f);\n",
+    "p.then (f);\n",
+    "p.then\n  (f);\n",
+    "new Promise(f);\n",
+    "Atomics.wait(a, 0, 0);\n",
+    "new SharedArrayBuffer(8);\n",
+    "const t = `${await x}`;\n",
+)
 
 # A Doxygen code span, cut from a comment before its punctuation is checked.
 _CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
@@ -91,7 +116,8 @@ _SYNCHRONIZATION_MODULES = ("queue.ts", "wire.ts", "http.ts", "media.ts")
 
 # The tokens that only the synchronization modules may hold.
 _SYNCHRONIZATION_TOKEN = re.compile(
-    r"\bawait\b|\.then\(|\bnew Promise\b|\bAtomics\b|\bSharedArrayBuffer\b"
+    r"\bawait\b|\.then\s*(?:<[^()]*>)?\s*\(|\bnew Promise\b|\bAtomics\b"
+    r"|\bSharedArrayBuffer\b"
 )
 
 # The TypeScript files the audit covers, from the top directory.
@@ -104,6 +130,22 @@ class Comment(NamedTuple):
     end: int
     opener: int
     closer: int
+
+
+# Fails unless the audit refuses each probe token and passes each literal.
+def audit_probe() -> None:
+    os.makedirs(_BUILD_PATH, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
+        path = os.path.join(scratch, "probe.ts")
+        for code in _AUDIT_REFUSED:
+            if not token_find(probe_write(path, code)):
+                raise RuntimeError(f"the audit misses the token in {code!r}")
+        for code in _AUDIT_PASSED:
+            found = token_find(probe_write(path, code))
+            if found:
+                raise RuntimeError(
+                    f"the audit finds {found.group()!r} in {code!r}"
+                )
 
 
 # Fails on the first comment below the header that breaks a comment rule.
@@ -165,7 +207,7 @@ def comments_find(path: str, text: str) -> list[Comment]:
         case ".html":
             html_scan(path, text, comments)
         case ".ts" | ".js":
-            javascript_scan(path, text, 0, len(text), False, comments)
+            javascript_scan(path, text, 0, len(text), False, comments, [])
         case extension:
             raise RuntimeError(f"{path}: no comment lexer for {extension!r}")
     return comments
@@ -212,7 +254,9 @@ def html_scan(path: str, text: str, comments: list[Comment]) -> None:
                 f"{path}:{offset_line(text, region.start())}: no end tag"
             )
         if region.group(1).lower() == "script":
-            javascript_scan(path, text, region.end(), stop, False, comments)
+            javascript_scan(
+                path, text, region.end(), stop, False, comments, []
+            )
         else:
             css_scan(path, text, region.end(), stop, comments)
         i = stop
@@ -226,6 +270,7 @@ def javascript_scan(
     stop: int,
     closer: bool,
     comments: list[Comment],
+    literals: list[tuple[int, int]],
 ) -> int:
     depth = 0
     previous = ""
@@ -246,13 +291,19 @@ def javascript_scan(
             i = end
             continue
         if character in "'\"":
-            i = javascript_string_scan(path, text, i)
+            end = javascript_string_scan(path, text, i)
+            literals.append((i, end))
+            i = end
             character = "a"
         elif character == "`":
-            i = javascript_template_scan(path, text, i, stop, comments)
+            i = javascript_template_scan(
+                path, text, i, stop, comments, literals
+            )
             character = "a"
         elif character == "/" and previous in _JAVASCRIPT_REGEX_AFTER:
-            i = javascript_regex_scan(path, text, i)
+            end = javascript_regex_scan(path, text, i)
+            literals.append((i, end))
+            i = end
             character = "a"
         elif word := _JAVASCRIPT_WORD.match(text, i):
             i = word.end()
@@ -312,19 +363,30 @@ def javascript_string_scan(path: str, text: str, i: int) -> int:
     )
 
 
-# Returns the offset past the template literal at the offset.
+# Returns the offset past the template literal, adding its text spans.
 def javascript_template_scan(
-    path: str, text: str, i: int, stop: int, comments: list[Comment]
+    path: str,
+    text: str,
+    i: int,
+    stop: int,
+    comments: list[Comment],
+    literals: list[tuple[int, int]],
 ) -> int:
     start = i
+    span_start = i
     i += 1
     while i < stop:
         if text[i] == "\\":
             i += 2
         elif text[i] == "`":
+            literals.append((span_start, i + 1))
             return i + 1
         elif text.startswith("${", i):
-            i = javascript_scan(path, text, i + 2, stop, True, comments)
+            literals.append((span_start, i))
+            i = javascript_scan(
+                path, text, i + 2, stop, True, comments, literals
+            )
+            span_start = i
         else:
             i += 1
     raise RuntimeError(
@@ -424,6 +486,13 @@ def powershell_scan(
     return i
 
 
+# Writes the code to the probe file and returns its path.
+def probe_write(path: str, code: str) -> str:
+    with open(path, "w", encoding="utf-8") as file:
+        file.write(code)
+    return path
+
+
 # Returns the comments Python's tokenizer finds in the text.
 def python_comments(text: str) -> list[Comment]:
     line_starts = [0]
@@ -505,28 +574,41 @@ def shell_scan(
     return i
 
 
-# Fails on the first synchronization token in a file's code, comments blanked.
+# Fails on the first synchronization token in a file's code.
 def synchronization_check(path: str) -> None:
     if os.path.basename(path) in _SYNCHRONIZATION_MODULES:
         return
-    with open(path, encoding="utf-8-sig") as file:
-        text = file.read()
-    code = list(text)
-    for comment in comments_find(path, text):
-        for i in range(comment.start, comment.end):
-            if code[i] != "\n":
-                code[i] = " "
-    match = _SYNCHRONIZATION_TOKEN.search("".join(code))
+    match = token_find(path)
     if match:
         raise RuntimeError(
-            f"{path}:{offset_line(text, match.start())}: {match.group()}"
-            " outside the four modules"
+            f"{path}:{offset_line(match.string, match.start())}:"
+            f" {match.group()} outside the four modules"
         )
 
 
-# Returns the TypeScript files under the top directory, sorted.
+# Returns the first synchronization token, comments and literals blanked.
+def token_find(path: str) -> re.Match[str] | None:
+    with open(path, encoding="utf-8-sig") as file:
+        text = file.read()
+    comments: list[Comment] = []
+    literals: list[tuple[int, int]] = []
+    javascript_scan(path, text, 0, len(text), False, comments, literals)
+    spans = [(comment.start, comment.end) for comment in comments]
+    code = list(text)
+    for start, end in spans + literals:
+        for i in range(start, end):
+            if code[i] != "\n":
+                code[i] = " "
+    return _SYNCHRONIZATION_TOKEN.search("".join(code))
+
+
+# Returns the TypeScript files under the top directory, failing on none.
 def typescript_paths() -> list[str]:
     matched = glob.glob(_TYPESCRIPT_GLOB, root_dir=_ROOT_PATH)
+    if not matched:
+        raise RuntimeError(
+            f"{_TYPESCRIPT_GLOB} matches no file under {_ROOT_PATH}"
+        )
     return sorted(os.path.join(_ROOT_PATH, path) for path in matched)
 
 
@@ -545,6 +627,7 @@ def main() -> None:
         non_ascii_check(path)
     for path in paths + powershell_paths():
         comments_check(path)
+    audit_probe()
     for path in typescript_paths():
         synchronization_check(path)
     reformat.reformat(paths)

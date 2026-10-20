@@ -25,6 +25,24 @@ def _header_full(header: jslb.Object) -> bool:
     return "type" in header
 
 
+# Returns the version of a line, which must be an integer and not a bool.
+def _version_get(header: jslb.Object, name: str) -> int:
+    version: object = jslb.field_get(header, "version")
+    if type(version) is not int:
+        raise ValueError(i18n("dispatch.version_refused", name, repr(version)))
+    return version
+
+
+# Returns the id of a line, None for a notification, else an integer from 1.
+def _id_get(header: jslb.Object, name: str) -> int | None:
+    request_id: object = jslb.field_get(header, "id")
+    if request_id is None:
+        return None
+    if type(request_id) is not int or request_id < 1:
+        raise ValueError(i18n("dispatch.id_refused", name, repr(request_id)))
+    return request_id
+
+
 # Registers `fn` for one type and version. A second registration raises.
 def handler_register(type: str, version: int, fn: Handler) -> None:
     if (type, version) in _HANDLERS:
@@ -36,11 +54,11 @@ def handler_register(type: str, version: int, fn: Handler) -> None:
 def line_dispatch(line: jslb.Object) -> jslb.Object | None:
     header: jslb.Object = line[0]
     name: str = jslb.field_get(header, "type")
-    version: int = jslb.field_get(header, "version")
+    version = _version_get(header, name)
+    request_id = _id_get(header, name)
     fn = _HANDLERS.get((name, version))
     if fn is None:
         raise LookupError(i18n("dispatch.handler_unknown", name, version))
-    request_id: int | None = jslb.field_get(header, "id")
     reply = fn(line, **jslb.payload_of(line))
     if request_id is None:
         if reply is not None:

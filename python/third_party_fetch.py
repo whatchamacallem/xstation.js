@@ -11,7 +11,6 @@
 #     python3 python/third_party_fetch.py
 
 import argparse, hashlib, os, re, tempfile, urllib.request
-from typing import NamedTuple
 
 # The checkout's top directory.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -22,35 +21,30 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 # A sha256 digest: 64 lowercase hex characters.
 _DIGEST_PATTERN = re.compile(r"[0-9a-f]{64}")
 
-# Where the fetched files go.
-_THIRD_PARTY_PATH = os.path.join(_ROOT_PATH, "third_party")
-
-
-# A pinned file: its name in `third_party/`, its URL and its sha256.
-class _PinEntry(NamedTuple):
-    name: str
-    url: str
-    sha256: str
-
-
 # The pinned files: name in `third_party/`, URL and `sha256sum` of the bytes.
-_PINS: tuple[_PinEntry, ...] = (
-    _PinEntry(
-        name="ttyd-1.7.7.tar.gz",
-        url="https://github.com/tsl0922/ttyd/archive/refs/tags/1.7.7.tar.gz",
-        sha256="",
+_PINS: tuple[tuple[str, str, str], ...] = (
+    (
+        "ttyd-1.7.7.tar.gz",
+        "https://github.com/tsl0922/ttyd/archive/refs/tags/1.7.7.tar.gz",
+        "",
     ),
-    _PinEntry(
-        name="sqlite-wasm-3460100.zip",
-        url="https://sqlite.org/2024/sqlite-wasm-3460100.zip",
-        sha256="",
+    (
+        "sqlite-wasm-3460100.zip",
+        "https://sqlite.org/2024/sqlite-wasm-3460100.zip",
+        "",
     ),
-    _PinEntry(
-        name="xterm-5.5.0.tgz",
-        url="https://registry.npmjs.org/@xterm/xterm/-/xterm-5.5.0.tgz",
-        sha256="",
+    (
+        "xterm-5.5.0.tgz",
+        "https://registry.npmjs.org/@xterm/xterm/-/xterm-5.5.0.tgz",
+        "",
     ),
 )
+
+# Seconds a connect or a read may stall, a default chosen by its writer.
+_SOCKET_SECONDS = 60.0
+
+# Where the fetched files go.
+_THIRD_PARTY_PATH = os.path.join(_ROOT_PATH, "third_party")
 
 
 # Returns the path of the file, fetching it unless it has the sha256 now.
@@ -64,7 +58,7 @@ def file_fetch(url: str, sha256: str, name: str) -> str:
         with open(path, "rb") as file:
             if hashlib.file_digest(file, "sha256").hexdigest() == sha256:
                 return path
-    with urllib.request.urlopen(url) as response:
+    with urllib.request.urlopen(url, timeout=_SOCKET_SECONDS) as response:
         data: bytes = response.read()
     actual = hashlib.sha256(data).hexdigest()
     if actual != sha256:
@@ -86,8 +80,8 @@ def main() -> None:
     argparse.ArgumentParser(
         description="Fetch the pinned third party files into third_party/."
     ).parse_args()
-    for pin in _PINS:
-        file_fetch(pin.url, pin.sha256, pin.name)
+    for name, url, sha256 in _PINS:
+        file_fetch(url, sha256, name)
 
 
 if __name__ == "__main__":

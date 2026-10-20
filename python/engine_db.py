@@ -4,22 +4,24 @@
 #
 # The handlers of the `db.create`, `db.drop` and `db.snapshot` lines, over the
 # substrate's databases. A create and a drop are forwarded operations that
-# carry `since` and go through `operation_apply`. A snapshot replies with the
-# bytes of the database file as blob 1.
+# carry `since` and go through `operation_apply`: a create's `since` is 0, the
+# `seq` a database has before it exists and keeps when created, a drop's is
+# the database's `seq`. A snapshot replies with the bytes of the database
+# file as blob 1.
 
 import dispatch, hashlib, jslb, substrate
 from i18n import i18n
 
 
-# The state the registration sets, which is empty until then.
-class _State:
+# The store the registration sets, which is empty until then.
+class _StoreState:
     # Starts with no store.
     def __init__(self) -> None:
         self.store: substrate.Store | None = None
 
 
 # The one state of the module.
-_STATE = _State()
+_STATE = _StoreState()
 
 
 # Returns the store, raising before the handlers are registered.

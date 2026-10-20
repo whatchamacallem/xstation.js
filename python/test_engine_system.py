@@ -3,15 +3,19 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests `settings.put`, `source.put` and `system.restart` through the
-# dispatcher and the two tools of the same names on an MCP server: the
-# settings file rewritten whole, a main loop file written from a blob in
-# memory or one streamed to the cache, its name refused unless plain, and the
-# arguments of the restart up to the call of `os.execv`, which is patched.
-# Debug mode gates all of them. The scratch directories go under `build/`.
+# dispatcher and the two tools of the same names on an MCP server. Each line
+# is encoded and decoded as the wire carries it, so a nested object arrives as
+# the decoder makes it. The settings file is rewritten whole, a main loop file
+# is written from a blob in memory or from one the decoder streamed to the
+# cache, its name is refused unless plain, and the arguments of the restart
+# are checked up to the call of `os.execv`, which is patched. Debug mode gates
+# all of them. The scratch directories go under `build/`.
 
-import dispatch, engine_system, hashlib, io, jslb, json, mcp, os, sys, tempfile
+import dispatch, engine_system, hashlib, jslb, json, mcp, os, sys, tempfile
 import unittest, unittest.mock
-from typing import Any
+from collections.abc import Callable
+from i18n import i18n
+from typing import Any, cast
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -24,6 +28,18 @@ _SETTINGS_PATH = os.path.join(_ROOT_PATH, "settings.json")
 
 # The API file that holds the tools as `tools/list` returns them.
 _TOOLS_PATH = os.path.join(_ROOT_PATH, "API", "mcp", "tools.json")
+
+# The longest line the test decoder takes, the size of the setting.
+_LINE_MAX = 1048576
+
+# The largest blob the test decoder takes, the size of the setting.
+_BLOB_MAX = 10485760
+
+# The largest message the test decoder takes, the size of the setting.
+_MESSAGE_MAX = 10485760
+
+# The size above which the test decoder streams a blob, from the setting.
+_OVERFLOW_BYTES = 131072
 
 # The dotted name of the handler table that the tests patch.
 _HANDLERS_TARGET = "dispatch._HANDLERS"
@@ -40,11 +56,8 @@ _EXEC_TARGET = "os.execv"
 # The dotted name of the arguments the process was started with.
 _ARGV_TARGET = "sys.orig_argv"
 
-# The dotted name of the standard output.
-_STDOUT_TARGET = "sys.stdout"
-
-# The dotted name of the standard error.
-_STDERR_TARGET = "sys.stderr"
+# The process option that names the main loop file.
+_MAIN_LOOP_OPTION = "--main-loop"
 
 # The arguments of a process that was started with no main loop option.
 _PROGRAM_ARGV = ["python3", "-X", "dev", "/r/bootstrap.py", "--root", "/r"]
@@ -62,15 +75,48 @@ _CODE_INTERNAL = -32603
 _NAMES_INVALID = ("", "b", "b.txt", ".b.py", ".py", "d/b.py", "../b.py")
 
 
-# Builds a line: the type, an optional id, the blobs and the payload.
+# Reads a file with a handle of its own.
+def _file_read(path: str) -> bytes:
+    with open(path, "rb") as file:
+        return file.read()
+
+
+# Stands for the sink of a decoder whose blobs all stay in memory.
+def _sink_refuse(header: jslb.Object) -> str:
+    raise AssertionError("a blob was streamed")
+
+
+# Encodes the line and decodes it as the server does, with the sink given.
+def _wire_pass(
+    line: jslb.Object,
+    overflow_bytes: int,
+    sink_make: Callable[[jslb.Object], str],
+) -> jslb.Object:
+    data = b"".join(cast(bytes, piece) for piece in jslb.line_encode(line))
+    decoder = jslb.LineDecoder(
+        _LINE_MAX, _BLOB_MAX, _MESSAGE_MAX, overflow_bytes, sink_make
+    )
+    (decoded,) = decoder.bytes_feed(data)
+    return decoded
+
+
+# Builds a line, then passes it through the wire with its blobs in memory.
 def _line_make(
     name: str,
     request_id: int | None = None,
-    blobs: list[jslb.Object] | None = None,
+    blobs: tuple[jslb.Object, ...] = (),
     **payload: Any,
 ) -> jslb.Object:
     header = jslb.header_make(name, id=request_id)
-    return jslb.line_make(header, [] if blobs is None else blobs, **payload)
+    line = jslb.line_make(header, list(blobs), **payload)
+    return _wire_pass(line, _OVERFLOW_BYTES, _sink_refuse)
+
+
+# Builds a `source.put` line whose blob the decoder streams to the path.
+def _streamed_make(name: str, data: bytes, path: str) -> jslb.Object:
+    header = jslb.header_make("source.put", id=4)
+    line = jslb.line_make(header, [jslb.blob_make(data)], name=name)
+    return _wire_pass(line, 0, lambda blob: path)
 
 
 # Dispatches a line that must be answered and returns the reply.
@@ -79,12 +125,6 @@ def _reply_get(line: jslb.Object) -> jslb.Object:
     if reply is None:
         raise AssertionError("the line was not answered")
     return reply
-
-
-# Reads a file with a handle of its own.
-def _file_read(path: str) -> bytes:
-    with open(path, "rb") as file:
-        return file.read()
 
 
 # Reads the settings file of the checkout as an object.
@@ -128,22 +168,9 @@ def _response_get(server: mcp.Server, message: mcp.Message) -> mcp.Message:
     return response
 
 
-# Stands for the end of the process, which a successful exec causes.
-class ExecCalled(BaseException):
+# Stands for the end of the process image, which a successful exec causes.
+class ImageReplaced(BaseException):
     pass
-
-
-# A text stream that counts its flushes.
-class FlushCounter(io.StringIO):
-    # Starts with no flushes.
-    def __init__(self) -> None:
-        super().__init__()
-        self.flushes = 0
-
-    # Counts the flush, then does it.
-    def flush(self) -> None:
-        self.flushes += 1
-        super().flush()
 
 
 # Gives each test an empty handler table, no registration and a scratch root.
@@ -163,6 +190,20 @@ class IsolatedCase(unittest.TestCase):
         self.settings_path = os.path.join(self.root, "settings.json")
         self.loop_path = os.path.join(self.root, "main_loop")
         self.file_path = os.path.join(self.loop_path, "a.py")
+
+    # Calls `fn` and checks the type and the text of what it raises.
+    def raise_check(
+        self, kind: type[Exception], message: str, fn: Callable[[], object]
+    ) -> None:
+        with self.assertRaises(kind) as caught:
+            fn()
+        self.assertEqual(str(caught.exception), message)
+
+    # Dispatches a line and checks the type and the text of what it raises.
+    def dispatch_check(
+        self, kind: type[Exception], message: str, line: jslb.Object
+    ) -> None:
+        self.raise_check(kind, message, lambda: dispatch.line_dispatch(line))
 
 
 # Tests the handler of `settings.put`.
@@ -193,6 +234,18 @@ class TestSettings(IsolatedCase):
         self.assertEqual(list(written), list(changed))
         self.assertEqual(os.listdir(self.root), ["settings.json"])
 
+    # The nested provider comes from the decoder as an `Object` and is kept.
+    def test_provider_object(self) -> None:
+        engine_system.handlers_register(self.root, True)
+        changed = _settings_read()
+        changed["provider"]["timeout_seconds"] = 60
+        line = _line_make("settings.put", 2, settings=changed)
+        self.assertIs(type(line["settings"]["provider"]), jslb.Object)
+        _reply_get(line)
+        with open(self.settings_path, encoding="utf-8") as file:
+            written: dict[str, Any] = json.load(file)
+        self.assertEqual(written["provider"], changed["provider"])
+
     # Settings that fail the check raise and the old file stays as it was.
     def test_settings_invalid(self) -> None:
         engine_system.handlers_register(self.root, True)
@@ -204,11 +257,23 @@ class TestSettings(IsolatedCase):
         extra["other"] = 1
         wrong = _settings_read()
         wrong["provider"]["timeout_seconds"] = "120"
-        for bad in (missing, extra, wrong):
-            with self.subTest(bad=bad):
+        cases: list[tuple[dict[str, Any], str]] = [
+            (missing, i18n("settings.key_missing", "line_max")),
+            (extra, i18n("settings.key_extra", "other")),
+            (
+                wrong,
+                i18n(
+                    "settings.type_wrong",
+                    "provider.timeout_seconds",
+                    "int",
+                    "str",
+                ),
+            ),
+        ]
+        for bad, message in cases:
+            with self.subTest(message=message):
                 line = _line_make("settings.put", 1, settings=bad)
-                with self.assertRaises(ValueError):
-                    dispatch.line_dispatch(line)
+                self.dispatch_check(ValueError, message, line)
                 self.assertEqual(_file_read(self.settings_path), b"old\n")
                 self.assertEqual(os.listdir(self.root), ["settings.json"])
 
@@ -216,8 +281,8 @@ class TestSettings(IsolatedCase):
     def test_settings_gated(self) -> None:
         engine_system.handlers_register(self.root, False)
         line = _line_make("settings.put", 1, settings=_settings_read())
-        with self.assertRaises(RuntimeError):
-            dispatch.line_dispatch(line)
+        message = i18n("engine_system.debug_off", "settings.put")
+        self.dispatch_check(RuntimeError, message, line)
         self.assertEqual(os.listdir(self.root), [])
 
 
@@ -228,25 +293,24 @@ class TestSource(IsolatedCase):
         engine_system.handlers_register(self.root, True)
         data = _SOURCE_TEXT.encode("utf-8")
         blob = jslb.blob_make(data)
-        reply = _reply_get(_line_make("source.put", 4, [blob], name="a.py"))
+        reply = _reply_get(_line_make("source.put", 4, (blob,), name="a.py"))
         digest = hashlib.sha256(data).hexdigest()
         self.assertEqual(reply[0]["r"], 4)
         self.assertEqual(jslb.payload_of(reply), {"sha256": digest})
         self.assertEqual(os.listdir(self.loop_path), ["a.py"])
         self.assertEqual(_file_read(self.file_path), data)
 
-    # A blob streamed to the cache is moved into place with the hash it has.
+    # A blob the decoder streamed to the cache is moved into place.
     def test_blob_streamed(self) -> None:
         engine_system.handlers_register(self.root, True)
         cache = os.path.join(self.root, "cache")
         os.makedirs(cache)
         source = os.path.join(cache, "blob")
         data = _SOURCE_TEXT.encode("utf-8")
-        with open(source, "wb") as file:
-            file.write(data)
+        line = _streamed_make("a.py", data, source)
+        self.assertEqual(line[1]["d"], source)
+        reply = _reply_get(line)
         digest = hashlib.sha256(data).hexdigest()
-        blob = jslb.blob_make(source, sha256=digest)
-        reply = _reply_get(_line_make("source.put", 4, [blob], name="a.py"))
         self.assertEqual(jslb.payload_of(reply), {"sha256": digest})
         self.assertFalse(os.path.exists(source))
         self.assertEqual(os.listdir(self.loop_path), ["a.py"])
@@ -257,7 +321,7 @@ class TestSource(IsolatedCase):
         engine_system.handlers_register(self.root, True)
         _main_loop_write(self.root, "a.py")
         blob = jslb.blob_make(b"new\n")
-        _reply_get(_line_make("source.put", 1, [blob], name="a.py"))
+        _reply_get(_line_make("source.put", 1, (blob,), name="a.py"))
         self.assertEqual(os.listdir(self.loop_path), ["a.py"])
         self.assertEqual(_file_read(self.file_path), b"new\n")
 
@@ -267,38 +331,35 @@ class TestSource(IsolatedCase):
         for name in _NAMES_INVALID:
             with self.subTest(name=name):
                 blob = jslb.blob_make(b"x")
-                line = _line_make("source.put", 1, [blob], name=name)
-                with self.assertRaises(ValueError):
-                    dispatch.line_dispatch(line)
+                line = _line_make("source.put", 1, (blob,), name=name)
+                message = i18n("engine_system.name_invalid", name)
+                self.dispatch_check(ValueError, message, line)
                 self.assertEqual(os.listdir(self.root), [])
 
     # A streamed blob under a name that is not plain stays in the cache.
     def test_streamed_refused(self) -> None:
         engine_system.handlers_register(self.root, True)
         source = os.path.join(self.root, "blob")
-        with open(source, "wb") as file:
-            file.write(b"x")
-        blob = jslb.blob_make(source, sha256=hashlib.sha256(b"x").hexdigest())
-        line = _line_make("source.put", 1, [blob], name="../a.py")
-        with self.assertRaises(ValueError):
-            dispatch.line_dispatch(line)
+        line = _streamed_make("../a.py", b"x", source)
+        message = i18n("engine_system.name_invalid", "../a.py")
+        self.dispatch_check(ValueError, message, line)
         self.assertEqual(os.listdir(self.root), ["blob"])
 
-    # A line with no blob raises.
+    # A line with no blob raises and nothing is written.
     def test_blob_missing(self) -> None:
         engine_system.handlers_register(self.root, True)
         line = _line_make("source.put", 1, name="a.py")
-        with self.assertRaises(KeyError):
-            dispatch.line_dispatch(line)
+        message = i18n("engine_system.blob_missing")
+        self.dispatch_check(ValueError, message, line)
         self.assertEqual(os.listdir(self.root), [])
 
     # With debug mode off the handler raises and writes nothing.
     def test_source_gated(self) -> None:
         engine_system.handlers_register(self.root, False)
         blob = jslb.blob_make(b"x")
-        line = _line_make("source.put", 1, [blob], name="a.py")
-        with self.assertRaises(RuntimeError):
-            dispatch.line_dispatch(line)
+        line = _line_make("source.put", 1, (blob,), name="a.py")
+        message = i18n("engine_system.debug_off", "source.put")
+        self.dispatch_check(RuntimeError, message, line)
         self.assertEqual(os.listdir(self.root), [])
 
 
@@ -310,12 +371,14 @@ class TestRestart(IsolatedCase):
         _main_loop_write(self.root, "b.py")
         line = _line_make("system.restart", main_loop="b.py")
         with (
-            unittest.mock.patch(_EXEC_TARGET, side_effect=ExecCalled) as execv,
+            unittest.mock.patch(
+                _EXEC_TARGET, side_effect=ImageReplaced
+            ) as execv,
             unittest.mock.patch(_ARGV_TARGET, _PROGRAM_ARGV),
-            self.assertRaises(ExecCalled),
+            self.assertRaises(ImageReplaced),
         ):
             dispatch.line_dispatch(line)
-        expected = _PROGRAM_ARGV + ["--main-loop", "b.py"]
+        expected = _PROGRAM_ARGV + [_MAIN_LOOP_OPTION, "b.py"]
         execv.assert_called_once_with(sys.executable, expected)
 
     # An option the process already had is removed with its value.
@@ -323,14 +386,16 @@ class TestRestart(IsolatedCase):
         engine_system.handlers_register(self.root, True)
         _main_loop_write(self.root, "b.py")
         line = _line_make("system.restart", main_loop="b.py")
-        argv = _PROGRAM_ARGV + ["--main-loop", "a.py", "--other"]
+        argv = _PROGRAM_ARGV + [_MAIN_LOOP_OPTION, "a.py", "--other"]
         with (
-            unittest.mock.patch(_EXEC_TARGET, side_effect=ExecCalled) as execv,
+            unittest.mock.patch(
+                _EXEC_TARGET, side_effect=ImageReplaced
+            ) as execv,
             unittest.mock.patch(_ARGV_TARGET, argv),
-            self.assertRaises(ExecCalled),
+            self.assertRaises(ImageReplaced),
         ):
             dispatch.line_dispatch(line)
-        expected = _PROGRAM_ARGV + ["--other", "--main-loop", "b.py"]
+        expected = _PROGRAM_ARGV + ["--other", _MAIN_LOOP_OPTION, "b.py"]
         execv.assert_called_once_with(sys.executable, expected)
 
     # An option with no value raises and the process is not replaced.
@@ -338,30 +403,16 @@ class TestRestart(IsolatedCase):
         engine_system.handlers_register(self.root, True)
         _main_loop_write(self.root, "b.py")
         line = _line_make("system.restart", main_loop="b.py")
+        argv = _PROGRAM_ARGV + [_MAIN_LOOP_OPTION]
+        message = i18n("engine_system.option_unfinished", _MAIN_LOOP_OPTION)
         with (
-            unittest.mock.patch(_EXEC_TARGET, side_effect=ExecCalled) as execv,
-            unittest.mock.patch(_ARGV_TARGET, _PROGRAM_ARGV + ["--main-loop"]),
-            self.assertRaises(ValueError),
+            unittest.mock.patch(
+                _EXEC_TARGET, side_effect=ImageReplaced
+            ) as execv,
+            unittest.mock.patch(_ARGV_TARGET, argv),
         ):
-            dispatch.line_dispatch(line)
+            self.dispatch_check(ValueError, message, line)
         execv.assert_not_called()
-
-    # Both streams are flushed before the call.
-    def test_flushed(self) -> None:
-        engine_system.handlers_register(self.root, True)
-        _main_loop_write(self.root, "b.py")
-        line = _line_make("system.restart", main_loop="b.py")
-        out = FlushCounter()
-        err = FlushCounter()
-        with (
-            unittest.mock.patch(_EXEC_TARGET, side_effect=ExecCalled),
-            unittest.mock.patch(_ARGV_TARGET, _PROGRAM_ARGV),
-            unittest.mock.patch(_STDOUT_TARGET, out),
-            unittest.mock.patch(_STDERR_TARGET, err),
-            self.assertRaises(ExecCalled),
-        ):
-            dispatch.line_dispatch(line)
-        self.assertEqual((out.flushes, err.flushes), (1, 1))
 
     # A file that does not exist raises and the process is not replaced.
     def test_file_missing(self) -> None:
@@ -371,11 +422,10 @@ class TestRestart(IsolatedCase):
         for name in ("a.py", "b.py"):
             with self.subTest(name=name):
                 line = _line_make("system.restart", main_loop=name)
-                with (
-                    unittest.mock.patch(_EXEC_TARGET) as execv,
-                    self.assertRaises(FileNotFoundError),
-                ):
-                    dispatch.line_dispatch(line)
+                path = os.path.join(self.loop_path, name)
+                message = i18n("engine_system.main_loop_missing", path)
+                with unittest.mock.patch(_EXEC_TARGET) as execv:
+                    self.dispatch_check(FileNotFoundError, message, line)
                 execv.assert_not_called()
 
     # A name that is not plain raises, even where a file of it exists.
@@ -389,11 +439,9 @@ class TestRestart(IsolatedCase):
         for name in _NAMES_INVALID:
             with self.subTest(name=name):
                 line = _line_make("system.restart", main_loop=name)
-                with (
-                    unittest.mock.patch(_EXEC_TARGET) as execv,
-                    self.assertRaises(ValueError),
-                ):
-                    dispatch.line_dispatch(line)
+                message = i18n("engine_system.name_invalid", name)
+                with unittest.mock.patch(_EXEC_TARGET) as execv:
+                    self.dispatch_check(ValueError, message, line)
                 execv.assert_not_called()
 
     # With debug mode off the handler raises and the process is not replaced.
@@ -401,11 +449,9 @@ class TestRestart(IsolatedCase):
         engine_system.handlers_register(self.root, False)
         _main_loop_write(self.root, "b.py")
         line = _line_make("system.restart", main_loop="b.py")
-        with (
-            unittest.mock.patch(_EXEC_TARGET) as execv,
-            self.assertRaises(RuntimeError),
-        ):
-            dispatch.line_dispatch(line)
+        message = i18n("engine_system.debug_off", "system.restart")
+        with unittest.mock.patch(_EXEC_TARGET) as execv:
+            self.dispatch_check(RuntimeError, message, line)
         execv.assert_not_called()
 
 
@@ -427,8 +473,11 @@ class TestTools(IsolatedCase):
     # A second registration on one server raises.
     def test_tools_twice(self) -> None:
         server = self.server_make(True)
-        with self.assertRaises(ValueError):
-            engine_system.tools_register(server, self.root, True)
+        self.raise_check(
+            ValueError,
+            i18n("mcp.tool_twice", "source_put"),
+            lambda: engine_system.tools_register(server, self.root, True),
+        )
 
     # The source tool writes the text as the file and answers its `sha256`.
     def test_source_tool(self) -> None:
@@ -482,12 +531,14 @@ class TestTools(IsolatedCase):
         _main_loop_write(self.root, "b.py")
         call = _call_make("system_restart", {"main_loop": "b.py"})
         with (
-            unittest.mock.patch(_EXEC_TARGET, side_effect=ExecCalled) as execv,
+            unittest.mock.patch(
+                _EXEC_TARGET, side_effect=ImageReplaced
+            ) as execv,
             unittest.mock.patch(_ARGV_TARGET, _PROGRAM_ARGV),
-            self.assertRaises(ExecCalled),
+            self.assertRaises(ImageReplaced),
         ):
             server.message_handle(call)
-        expected = _PROGRAM_ARGV + ["--main-loop", "b.py"]
+        expected = _PROGRAM_ARGV + [_MAIN_LOOP_OPTION, "b.py"]
         execv.assert_called_once_with(sys.executable, expected)
 
     # With debug mode off the restart tool raises and nothing is replaced.
@@ -522,15 +573,20 @@ class TestRegister(IsolatedCase):
     # A second registration raises, as the dispatcher refuses the pair.
     def test_register_twice(self) -> None:
         engine_system.handlers_register(self.root, True)
-        with self.assertRaises(ValueError):
-            engine_system.handlers_register(self.root, True)
+        self.raise_check(
+            ValueError,
+            i18n("dispatch.handler_twice", "settings.put", 0),
+            lambda: engine_system.handlers_register(self.root, True),
+        )
 
     # Called before the registration each handler raises.
     def test_unregistered(self) -> None:
         line = _line_make("settings.put")
-        with self.assertRaises(RuntimeError):
-            engine_system.settings_put(line, settings={})
-        with self.assertRaises(RuntimeError):
-            engine_system.source_put(line, name="a.py")
-        with self.assertRaises(RuntimeError):
-            engine_system.system_restart(line, main_loop="b.py")
+        message = i18n("engine_system.not_registered")
+        uses: list[Callable[[], object]] = [
+            lambda: engine_system.settings_put(line, settings={}),
+            lambda: engine_system.source_put(line, name="a.py"),
+            lambda: engine_system.system_restart(line, main_loop="b.py"),
+        ]
+        for use in uses:
+            self.raise_check(RuntimeError, message, use)

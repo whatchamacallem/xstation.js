@@ -15,10 +15,15 @@ namespace unittest {
     text_max: 80,
   });
 
+  // The test methods marked as expected to fail.
+  const expected_methods = new WeakSet<object>();
+
   // What a failed assertion throws, which a result counts as a failure.
   class AssertionError extends Error {
-    // The name its stack shows.
-    override name = "AssertionError";
+    // Names the prototype, which the stack reads when the error is made.
+    static {
+      this.prototype.name = "AssertionError";
+    }
   }
 
   // What `skipTest` throws, which a result counts as a skip.
@@ -47,6 +52,15 @@ namespace unittest {
     addError(test: TestCase, error: Error): void;
     // The test skipped itself.
     addSkip(test: TestCase, reason: string): void;
+    // The test failed the way it was expected to.
+    addExpectedFailure(test: TestCase, error: Error): void;
+    // The test passed though it was expected to fail.
+    addUnexpectedSuccess(test: TestCase): void;
+  }
+
+  // Marks a test method as expected to fail, as Python's decorator does.
+  export function expectedFailure(method: () => unknown): void {
+    expected_methods.add(method);
   }
 
   // One `test_` method of a subclass, run between `setUp` and `tearDown`.
@@ -83,13 +97,28 @@ namespace unittest {
     // Runs the parts of the test in Python's order, reporting each outcome.
     run(result: TestResult): void {
       result.startTest(this);
+      const expecting = expected_methods.has(this.#method);
+      const outcome: { expected: Error | null } = { expected: null };
       let passed = part_run(this, result, () => this.setUp());
       if (passed) {
-        passed = part_run(this, result, () => this.#method.call(this));
+        passed = part_run(this, result, () => {
+          if (expecting) {
+            outcome.expected = failure_catch(this.#method, this);
+          } else {
+            this.#method.call(this);
+          }
+        });
         passed = part_run(this, result, () => this.tearDown()) && passed;
       }
-      if (passed) {
+      if (!passed) {
+        return;
+      }
+      if (!expecting) {
         result.addSuccess(this);
+      } else if (outcome.expected === null) {
+        result.addUnexpectedSuccess(this);
+      } else {
+        result.addExpectedFailure(this, outcome.expected);
       }
     }
 
@@ -240,6 +269,19 @@ namespace unittest {
       return false;
     }
     return true;
+  }
+
+  // Calls a test method expected to fail and returns its error, null if none.
+  function failure_catch(method: () => unknown, test: TestCase): Error | null {
+    try {
+      method.call(test);
+    } catch (error) {
+      if (error instanceof SkipTest || !(error instanceof Error)) {
+        throw error;
+      }
+      return error;
+    }
+    return null;
   }
 
   // Throws a failure, the caller's message after the standard one, as Python.

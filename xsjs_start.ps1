@@ -1,4 +1,4 @@
-﻿# SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+﻿﻿# SPDX-FileCopyrightText: © 2026 Adrian Johnston.
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
@@ -11,11 +11,12 @@
 #     .\xsjs_start.ps1                    http://localhost:5768/
 #     .\xsjs_start.ps1 username:password  https://<this PC>:5768/
 #
-# Each run copies the ttyd that xsjs_install.ps1 built, the modules and seeds
-# of python\, i18n\en-US.json, settings.json and the page into ~/.cache/xsjs
-# in Linux, and ttyd runs that copy on port 5769 of WSL's 127.0.0.1. A
-# Windows port proxy forwards port 5768 to it. The environment variable
-# XSJS_PROVIDER_KEY of your user account, when set, is passed on to ttyd.
+# Each run copies the ttyd that xsjs_install.ps1 built, the engine's modules
+# and seeds from python\, i18n\en-US.json, settings.json and the page into
+# ~/.cache/xsjs in Linux, and ttyd runs that copy on port 5769 of WSL's
+# 127.0.0.1. A Windows port proxy forwards port 5768 to it. The environment
+# variable XSJS_PROVIDER_KEY of your user account, when set, is passed on to
+# ttyd.
 #
 # With a username and password, ttyd serves HTTPS and asks for them, the
 # port proxy listens on every network interface, and a Windows Firewall
@@ -38,6 +39,13 @@ $arguments_ = $args
 $checkout_path_ = $PSScriptRoot
 # Where the engine's Python modules and seeds are copied from.
 $python_path_ = Join-Path $PSScriptRoot 'python'
+# The modules the server runs, by name in `python`, which start copies.
+$runtime_modules_ = @(
+    'i18n', 'jslb', 'verbose', 'settings', 'substrate', 'dispatch', 'mcp'
+    'mcp_stdio', 'engine_kv', 'engine_doc', 'engine_db', 'engine_turn'
+    'engine_sql', 'engine_verbose', 'engine_tap', 'engine_mcp'
+    'engine_system', 'main_loop', 'bootstrap'
+)
 # The user's environment variable that ttyd passes on as the provider key.
 $provider_key_name_ = 'XSJS_PROVIDER_KEY'
 
@@ -107,12 +115,7 @@ function _xsjs_start_step_install_server {
     if ($LASTEXITCODE -ne 0) {
         throw ($i18n_.bootstrap_not_installed -f $linux_path_)
     }
-    # The tests stay in the checkout.
-    $modules_ = @(
-        Get-ChildItem $python_path_ -File | Where-Object {
-            $_.Extension -eq '.py' -and $_.Name -notlike 'test_*'
-        } | ForEach-Object { "python/$($_.Name)" }
-    )
+    $modules_ = @($runtime_modules_ | ForEach-Object { "python/$_.py" })
     $root_files_ = $ttyd_binary_path_, 'settings.json', "build/$engine_page_"
     _xsjs_start_copy_files $root_files_ $linux_path_
     _xsjs_start_copy_files ($modules_ + 'python/seed') "$linux_path_/python"

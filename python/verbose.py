@@ -7,7 +7,7 @@
 # one place the engine starts an external program. It depends on no other
 # engine module but the strings.
 
-import collections, os, shlex, sqlite3, subprocess, time
+import collections, os, shlex, sqlite3, subprocess, sys, time
 from i18n import i18n
 from typing import IO, NamedTuple, cast
 
@@ -48,10 +48,16 @@ CREATE TABLE line (
 # The statement that stores one line.
 _LINE_INSERT = "INSERT INTO line (at, thread, level, text) VALUES (?, ?, ?, ?)"
 
-# The line that opens the Markdown code block of a level 1 call's output.
+# The statement that reads the newest lines of one thread, newest first.
+_TAIL_SELECT = (
+    "SELECT at, level, text FROM line WHERE thread = ? ORDER BY seq DESC"
+    " LIMIT ?"
+)
+
+# The line that opens the Markdown code block of a level 1 run's output.
 _FENCE_OPEN = "```text"
 
-# The line that closes the Markdown code block of a level 1 call's output.
+# The line that closes the Markdown code block of a level 1 run's output.
 _FENCE_CLOSE = "```"
 
 
@@ -104,8 +110,8 @@ def log_open(root: str, ring: int) -> None:
 
 # Closes the file and returns the log to its state before it was opened.
 def log_close() -> None:
-    if _STATE.connection is not None:
-        _STATE.connection.close()
+    connection, _ = _open_get()
+    connection.close()
     _STATE.level = None
     _STATE.ring = None
     _STATE.connection = None
@@ -157,12 +163,26 @@ def lines_put(thread: str, lines: list[LogLine]) -> None:
         )
 
 
-# Runs the program with its output logged, in a block at level 1, raw at 2.
-def _call_piped(level: int, argv: list[str]) -> int:
+# The last `count` lines of the page thread `ui` or `ai`, oldest first.
+def tail_get(thread: str, count: int) -> list[LogLine]:
+    if thread not in _PAGE_THREADS:
+        raise ValueError(i18n("verbose.thread_unknown", thread))
+    if count < 0:
+        raise ValueError(i18n("verbose.count_invalid", count))
+    connection, _ = _open_get()
+    rows: list[tuple[int, int, str]] = connection.execute(
+        _TAIL_SELECT, (thread, count)
+    ).fetchall()
+    return [LogLine(at, level, text) for at, level, text in reversed(rows)]
+
+
+# Runs the program with no input and its output logged, in a block at level 1.
+def _run_logged(level: int, argv: list[str]) -> int:
     command = shlex.join(argv)
-    log(level, i18n("verbose.call_run", command))
+    log(level, i18n("verbose.exec_run", command))
     with subprocess.Popen(
         argv,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         encoding="utf-8",
@@ -174,13 +194,17 @@ def _call_piped(level: int, argv: list[str]) -> int:
         if level == 1:
             log(level, _FENCE_CLOSE)
     code: int = process.returncode
-    log(level, i18n("verbose.call_exit", command, code))
+    log(level, i18n("verbose.exec_exit", command, code))
     return code
 
 
-# Runs an external program, the one place that does. Returns its exit code.
-def call(level: int, argv: list[str]) -> int:
+# Runs `argv`, or `argv_verbose` at level 2, the one place a program starts.
+def exec(level: int, argv: list[str], argv_verbose: list[str]) -> int:
     _level_check(level)
     if level == 0:
+        sys.stdout.flush()
+        sys.stderr.flush()
         return subprocess.run(argv).returncode
-    return _call_piped(level, argv)
+    if level == 1:
+        return _run_logged(level, argv)
+    return _run_logged(level, argv_verbose)

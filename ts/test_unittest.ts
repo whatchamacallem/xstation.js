@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests the unittest subset: the outcome each kind of test reports, the order
-// of a test's parts, the loader, the stop flag and the asserts. The fixtures
-// are nested in the test class so that no loader collects them.
+// Tests the unittest subset: the outcome each kind of test reports, expected
+// failures, the order of a test's parts, the loader, the stop flag, the
+// asserts and the stack of a failed assertion. The fixtures are nested in the
+// test class so that no loader collects them.
 
 namespace test_unittest {
   // A result that records each event it receives as one line of text.
@@ -51,6 +52,16 @@ namespace test_unittest {
     addSkip(test: unittest.TestCase, reason: string): void {
       this.skipped += 1;
       this.events.push(`skip ${test.id()} ${reason}`);
+    }
+
+    // Records an expected failure and its message.
+    addExpectedFailure(test: unittest.TestCase, error: Error): void {
+      this.events.push(`expected ${test.id()} ${error.message}`);
+    }
+
+    // Records an unexpected success.
+    addUnexpectedSuccess(test: unittest.TestCase): void {
+      this.events.push(`unexpected ${test.id()}`);
     }
   }
 
@@ -116,6 +127,57 @@ namespace test_unittest {
         helper_method(): void {}
       };
 
+    // Tests expected to fail: one fails, one throws, one passes, one skips.
+    static readonly ExpectedFixture =
+      class ExpectedFixture extends unittest.TestCase {
+        // Fails an assertion.
+        test_assertion_fails(): void {
+          this.assertEqual(1, 2);
+        }
+
+        // Throws an error that is not an assertion's.
+        test_error_thrown(): void {
+          throw new Error("fixture error");
+        }
+
+        // Passes.
+        test_values_equal(): void {
+          this.assertEqual(1, 1);
+        }
+
+        // Skips itself.
+        test_skip_self(): void {
+          this.skipTest("fixture skip");
+        }
+
+        // Marks every test of the class as expected to fail.
+        static {
+          unittest.expectedFailure(this.prototype.test_assertion_fails);
+          unittest.expectedFailure(this.prototype.test_error_thrown);
+          unittest.expectedFailure(this.prototype.test_values_equal);
+          unittest.expectedFailure(this.prototype.test_skip_self);
+        }
+      };
+
+    // A test expected to fail whose `setUp` throws.
+    static readonly SetupFixture =
+      class SetupFixture extends unittest.TestCase {
+        // Throws before the test.
+        override setUp(): void {
+          throw new Error("fixture error");
+        }
+
+        // Never runs.
+        test_values_differ(): void {
+          this.assertEqual(1, 2);
+        }
+
+        // Marks the test as expected to fail.
+        static {
+          unittest.expectedFailure(this.prototype.test_values_differ);
+        }
+      };
+
     // Each kind of test reports the outcome Python reports.
     test_outcome_events(): void {
       const log = new EventLog();
@@ -171,6 +233,46 @@ namespace test_unittest {
         "start OrderFixture.test_alpha_second",
         "success OrderFixture.test_alpha_second",
       ]);
+    }
+
+    // A test expected to fail reports a throw as expected and a pass as not.
+    test_expected_outcomes(): void {
+      const log = new EventLog();
+      const suite = new unittest.TestLoader().loadTestsFromModule({
+        ExpectedFixture: TestUnittest.ExpectedFixture,
+      });
+      suite.run(log);
+      this.assertEqual(log.events, [
+        "start ExpectedFixture.test_assertion_fails",
+        "expected ExpectedFixture.test_assertion_fails 1 != 2",
+        "start ExpectedFixture.test_error_thrown",
+        "expected ExpectedFixture.test_error_thrown fixture error",
+        "start ExpectedFixture.test_values_equal",
+        "unexpected ExpectedFixture.test_values_equal",
+        "start ExpectedFixture.test_skip_self",
+        "skip ExpectedFixture.test_skip_self fixture skip",
+      ]);
+    }
+
+    // An error in `setUp` of a test expected to fail is an error.
+    test_expected_setup(): void {
+      const log = new EventLog();
+      new TestUnittest.SetupFixture("test_values_differ").run(log);
+      this.assertEqual(log.events, [
+        "start SetupFixture.test_values_differ",
+        "error SetupFixture.test_values_differ fixture error",
+      ]);
+    }
+
+    // The stack of a failed assertion starts with its name and message.
+    test_stack_header(): void {
+      let header = "";
+      try {
+        this.fail("header check");
+      } catch (error) {
+        header = String((error as Error).stack).split("\n")[0];
+      }
+      this.assertEqual(header, "AssertionError: header check");
     }
 
     // A result that asks to stop before the first test runs nothing.

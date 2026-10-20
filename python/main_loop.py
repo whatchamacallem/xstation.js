@@ -4,11 +4,12 @@
 #
 # The server's main loop, which `bootstrap.py` loads and a main loop file can
 # replace in debug mode. `loop_prepare` runs before `hello`: it loads the
-# settings, opens the log and the databases, creating and seeding them on a
-# new root, and returns their `seq`. `loop_run` registers the stock handlers
-# and runs the select loop on the engine tty: it decodes each line, takes the
-# reply to `hello`, dispatches every other line and writes each reply. A
-# failure writes one `error` line, logs it and exits 1.
+# settings into `_settings`, opens the log and every database under the root,
+# creating the fixed ones that are missing, seeds the metaverse while its `seq`
+# is 0, and returns the `seq` of each database. `loop_run` registers the stock
+# handlers and runs the select loop on the engine tty: it decodes each line,
+# refuses any reply, dispatches every other line and writes each reply. A
+# failure writes one `error` line and exits 1.
 
 import dispatch, engine_db, engine_doc, engine_kv, engine_mcp, engine_sql
 import engine_system, engine_tap, engine_turn, engine_verbose, functools, jslb
@@ -37,8 +38,14 @@ _FILES_DB = "_files"
 # The database that holds the `universe` table and the hyperposition.
 _METAVERSE_DB = "metaverse"
 
-# The databases opened before `hello`, in order, whose `seq` it carries.
+# The fixed databases, opened first and created when their file is missing.
 _DATABASES = (_SETTINGS_DB, _PREFERENCES_DB, _FILES_DB, _METAVERSE_DB)
+
+# The log's own database, which `verbose` opens and the store never does.
+_VERBOSE_DB = "_verbose"
+
+# A database name, a C identifier.
+_C_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 # The directory beside this file that holds the seed of a new metaverse.
 _SEED_DIRECTORY = os.path.join(
@@ -83,28 +90,18 @@ _UNIVERSE_DDL = """CREATE TABLE universe (
 # A top level key of a seed document that names a header: canonical digits.
 _HEADER_KEY = re.compile(r"0|[1-9][0-9]*")
 
-# The port of the engine tty, whose ids the dispatcher counts.
-_WIRE_PORT = "wire"
-
-# The type of the request `bootstrap.py` sends before the loop runs.
-_HELLO_TYPE = "hello"
-
 # The name the server's MCP server gives in its `serverInfo`.
 _SERVER_NAME = "xsjs-server"
 
 # The version the server's MCP server gives in its `serverInfo`.
 _SERVER_VERSION = "0"
 
-# The verbose level of the line that logs a failure, which must be said.
-_FAILURE_LEVEL = 0
-
 # The exit code of a failure.
 _EXIT_FAILED = 1
 
 
-# What `loop_prepare` opened for a root: its settings and its store.
+# What `loop_prepare` opened for the root: its settings and its store.
 class _PreparedRoot(NamedTuple):
-    root: str
     values: dict[str, Any]
     store: substrate.Store
 
@@ -130,6 +127,21 @@ _STATE = _LoopState()
 # The file of a database under the root.
 def _database_path(root: str, name: str) -> str:
     return os.path.join(root, name + _DB_EXTENSION)
+
+
+# The other databases under the root, the scripts' ones, by name.
+def _databases_found(root: str) -> list[str]:
+    names: list[str] = []
+    for file_name in sorted(os.listdir(root)):
+        name, extension = os.path.splitext(file_name)
+        if (
+            extension == _DB_EXTENSION
+            and _C_IDENTIFIER.fullmatch(name) is not None
+            and name not in _DATABASES
+            and name != _VERBOSE_DB
+        ):
+            names.append(name)
+    return names
 
 
 # The JSON text of a value as the wire and the substrate write it.
@@ -170,8 +182,8 @@ def _settings_write(store: substrate.Store, values: dict[str, Any]) -> None:
         store.kv_put(key, _json_text(value).encode("utf-8"), _SETTINGS_DB)
 
 
-# Creates the `universe` table, writes the seed and the bootstrap script.
-def _metaverse_seed(store: substrate.Store, seed: _SeedFiles) -> None:
+# Creates the `universe` table and writes the two documents and three rows.
+def _metaverse_write(store: substrate.Store, seed: _SeedFiles) -> None:
     store.sql_run(_METAVERSE_DB, [substrate.SqlStatement(_UNIVERSE_DDL, [])])
     scene, _ = store.doc_put(
         _METAVERSE_DB, _HYPERPOSITION_ID, seed.hyperposition
@@ -184,47 +196,39 @@ def _metaverse_seed(store: substrate.Store, seed: _SeedFiles) -> None:
     )
     for key, text in rows:
         store.kv_put(key, text.encode("utf-8"), _METAVERSE_DB)
+
+
+# Writes the script row, a no op when unchanged, then the metaverse at once.
+def _metaverse_seed(store: substrate.Store, seed: _SeedFiles) -> None:
     store.kv_put(_SCRIPT_KEY, seed.script, _FILES_DB)
+    store.transaction_run(lambda: _metaverse_write(store, seed))
 
 
-# Loads the settings, opens the log and the databases, creating what is new.
+# Loads the settings, opens the log and every database, seeding what is new.
 def _prepare_run(root: str) -> _PreparedRoot:
     values = settings.settings_load(os.path.join(root, _SETTINGS_NAME))
     verbose.log_open(root, values["verbose_ring"])
     verbose.level_set(values["verbose_level"])
-    missing = [
-        name
-        for name in _DATABASES
-        if not os.path.exists(_database_path(root, name))
-    ]
-    seed = _seed_read() if _METAVERSE_DB in missing else None
     store = substrate.Store(root, values["overflow_bytes"])
     for name in _DATABASES:
-        if name in missing:
-            store.db_create(name)
-        else:
+        if os.path.exists(_database_path(root, name)):
             store.db_open(name)
+        else:
+            store.db_create(name)
+    for name in _databases_found(root):
+        store.db_open(name)
     _settings_write(store, values)
-    if seed is not None:
-        _metaverse_seed(store, seed)
-    return _PreparedRoot(root, values, store)
-
-
-# Returns what was prepared for the root, preparing it on the first call.
-def _prepared_get(root: str) -> _PreparedRoot:
-    prepared = _STATE.prepared
-    if prepared is None:
-        prepared = _prepare_run(root)
-        _STATE.prepared = prepared
-    elif prepared.root != root:
-        raise RuntimeError(i18n("main_loop.root_differs", prepared.root, root))
-    return prepared
+    if store.seq_get(_METAVERSE_DB) == 0:
+        _metaverse_seed(store, _seed_read())
+    return _PreparedRoot(values, store)
 
 
 # Prepares the root once, before `hello`, and returns each database's `seq`.
 def loop_prepare(root: str) -> dict[str, int]:
-    store = _prepared_get(root).store
-    return {name: store.seq_get(name) for name in _DATABASES}
+    prepared = _prepare_run(root)
+    _STATE.prepared = prepared
+    store = prepared.store
+    return {name: store.seq_get(name) for name in store.db_list()}
 
 
 # Registers every stock handler, and the server's MCP server with its tools.
@@ -271,80 +275,60 @@ def _line_write(line: jslb.Object, write_fd: int, chunk: int) -> None:
             _file_copy(piece, write_fd, chunk)
 
 
-# Writes the one `error` line of a failure, logs it and exits 1.
+# Writes the one `error` line of a failure and exits 1.
 def _failure_exit(
     line: jslb.Object | None, error: Exception, write_fd: int, chunk: int
 ) -> NoReturn:
-    failure = dispatch.error_make(line, error)
-    _line_write(failure, write_fd, chunk)
-    text = i18n("main_loop.line_failed", failure["stack"])
-    verbose.log(_FAILURE_LEVEL, text)
+    _line_write(dispatch.error_make(line, error), write_fd, chunk)
     raise SystemExit(_EXIT_FAILED) from error
 
 
-# Takes the reply to a request the server sent, which must be outstanding.
-def _reply_take(
-    line: jslb.Object, reply_id: int, pending: dict[int, str]
-) -> None:
-    if reply_id not in pending:
+# Refuses a reply, as the server has no request open, and dispatches the rest.
+def _line_serve(line: jslb.Object, write_fd: int, chunk: int) -> None:
+    # A first server request must take its ids after the 1 that `hello` used.
+    if jslb.field_get(line[0], "reply") is not None:
         raise LookupError(
             i18n("main_loop.reply_unknown", jslb.line_render(line))
         )
-    wanted = pending.pop(reply_id)
-    if jslb.field_get(line[0], "type") != wanted:
-        raise RuntimeError(
-            i18n("main_loop.reply_wrong", jslb.line_render(line), wanted)
-        )
-
-
-# Takes a reply to the server, or dispatches the line and writes its reply.
-def _line_serve(
-    line: jslb.Object, pending: dict[int, str], write_fd: int, chunk: int
-) -> None:
-    reply_id: int | None = jslb.field_get(line[0], "reply")
-    if reply_id is not None:
-        _reply_take(line, reply_id, pending)
-        return
     reply = dispatch.line_dispatch(line)
     if reply is not None:
         _line_write(reply, write_fd, chunk)
 
 
-# Serves each line the bytes finish, or writes the error line and exits 1.
+# Serves the lines one read finished, then feeds no bytes to raise a fault.
 def _bytes_serve(
-    decoder: jslb.LineDecoder,
-    data: bytes,
-    pending: dict[int, str],
-    write_fd: int,
-    chunk: int,
+    decoder: jslb.LineDecoder, data: bytes, write_fd: int, chunk: int
 ) -> None:
     line: jslb.Object | None = None
     try:
-        for line in decoder.bytes_feed(data):
-            _line_serve(line, pending, write_fd, chunk)
+        if not data and not decoder.idle():
+            raise jslb.WireError(i18n("main_loop.input_partial"))
+        for piece in (data, b""):
+            for line in decoder.bytes_feed(piece):
+                _line_serve(line, write_fd, chunk)
+            line = None
     except Exception as error:
         _failure_exit(line, error, write_fd, chunk)
 
 
 # The select loop: reads the pty, decodes, dispatches, writes each reply.
 def loop_run(read_fd: int, write_fd: int, root: str) -> None:
-    prepared = _prepared_get(root)
+    prepared = _STATE.prepared
+    if prepared is None:
+        raise RuntimeError(i18n("main_loop.not_prepared"))
     values = prepared.values
     _handlers_register(prepared.store, root, values["debug"])
-    # The `hello` that `bootstrap.py` sent before the loop holds the first id.
-    pending = {dispatch.id_next(_WIRE_PORT): _HELLO_TYPE}
-    cache = os.path.join(root, _CACHE_DIRECTORY)
-    os.makedirs(cache, exist_ok=True)
     decoder = jslb.LineDecoder(
         values["line_max"],
         values["blob_max"],
+        values["message_max"],
         values["overflow_bytes"],
-        functools.partial(_sink_make, cache),
+        functools.partial(_sink_make, os.path.join(root, _CACHE_DIRECTORY)),
     )
     chunk: int = values["chunk_bytes"]
     while True:
         select.select([read_fd], [], [])
         data = os.read(read_fd, chunk)
+        _bytes_serve(decoder, data, write_fd, chunk)
         if not data:
             return
-        _bytes_serve(decoder, data, pending, write_fd, chunk)

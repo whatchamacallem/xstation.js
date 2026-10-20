@@ -1,4 +1,4 @@
-﻿# SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+﻿﻿# SPDX-FileCopyrightText: © 2026 Adrian Johnston.
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
@@ -116,6 +116,9 @@ function _xsjs_install_step_check_openssl {
 
 # Runs the command in Linux from the checkout, or throws the message.
 function _xsjs_install_run_linux ([string[]]$arguments_, [string]$failure_) {
+    # The exit line names the variables, so log the command they hold first.
+    $shown_ = 'wsl --cd {0} -e {1}' -f $checkout_path_, ($arguments_ -join ' ')
+    xsjs_util_write_log ('`{0}`' -f $shown_)
     xsjs_util_invoke_native { wsl --cd $checkout_path_ -e @arguments_ }
     if ($LASTEXITCODE -ne 0) { throw $failure_ }
 }

@@ -5,20 +5,22 @@
 # The handlers of the `doc.put` and `doc.head` lines, over the substrate's
 # documents. A put is a forwarded operation that carries `since` and goes
 # through `operation_apply`: it writes the next version and moves the head.
+# The body arrives decoded, its header keys integers.
 
 import dispatch, jslb, substrate
 from i18n import i18n
+from typing import Any
 
 
-# The state the registration sets, which is empty until then.
-class _State:
+# The store the registration sets, which is empty until then.
+class _StoreState:
     # Starts with no store.
     def __init__(self) -> None:
         self.store: substrate.Store | None = None
 
 
 # The one state of the module.
-_STATE = _State()
+_STATE = _StoreState()
 
 
 # Returns the store, raising before the handlers are registered.
@@ -33,7 +35,7 @@ def _document_apply(
     store: substrate.Store,
     db: str,
     id: str,
-    body: dict[str, object],
+    body: dict[int | str, Any],
     since: int,
 ) -> tuple[int, str]:
     seq = store.operation_apply("doc.put", since, db=db, id=id, body=body)
@@ -42,7 +44,12 @@ def _document_apply(
 
 # Writes the next version of a document as a forwarded operation.
 def doc_put(
-    line: jslb.Object, *, db: str, id: str, body: dict[str, object], since: int
+    line: jslb.Object,
+    *,
+    db: str,
+    id: str,
+    body: dict[int | str, Any],
+    since: int,
 ) -> jslb.Object:
     store = _store_get()
     seq, ref = store.transaction_run(

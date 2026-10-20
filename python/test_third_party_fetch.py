@@ -5,20 +5,19 @@
 # Tests of third_party_fetch: `file_fetch` against file URLs and a scratch
 # directory under build/, and the table of pinned files.
 
-import hashlib, os, pathlib, tempfile, third_party_fetch, unittest.mock
-from typing import Any
+import hashlib, os, page_build, pathlib, re, tempfile, third_party_fetch
+import unittest.mock
+from typing import cast
 
 # The checkout's build directory, where each test makes its scratch directory.
 _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
 )
 
-# The extension of the archive that each pinned name and URL must end in.
-_EXTENSIONS = {
-    "sqlite-wasm-3460100.zip": ".zip",
-    "ttyd-1.7.7.tar.gz": ".tar.gz",
-    "xterm-5.5.0.tgz": ".tgz",
-}
+# A pinned name: words joined by hyphens, a hyphen, the version, the extension.
+_NAME_PATTERN = re.compile(
+    r"[a-z]+(?:-[a-z]+)*-([0-9]+(?:\.[0-9]+)*)(\.tar\.gz|\.tgz|\.zip)"
+)
 
 
 # Tests of `file_fetch` with a source file and a target directory in scratch.
@@ -122,18 +121,24 @@ class TestFetch(unittest.TestCase):
 # Tests of the table of pinned files.
 class TestPins(unittest.TestCase):
     # Returns the module's private table, which is read by name.
-    def pins_get(self) -> tuple[Any, ...]:
-        pins: tuple[Any, ...] = getattr(third_party_fetch, "_PINS")
+    def pins_get(self) -> tuple[tuple[str, str, str], ...]:
+        pins: tuple[tuple[str, str, str], ...] = getattr(
+            third_party_fetch, "_PINS"
+        )
         return pins
 
-    # Every pin's name and URL end in the extension of its archive.
-    def test_pin_extensions(self) -> None:
-        for pin in self.pins_get():
-            extension = _EXTENSIONS[pin.name]
-            self.assertTrue(pin.name.endswith(extension), pin.name)
-            self.assertTrue(pin.url.endswith(extension), pin.url)
+    # The two archives `page_build` reads are names of the table.
+    def test_archives_pinned(self) -> None:
+        names = [name for name, _url, _sha256 in self.pins_get()]
+        for constant in ("_SQLITE_ARCHIVE", "_XTERM_ARCHIVE"):
+            archive: str = getattr(page_build, constant)
+            self.assertIn(archive, names, constant)
 
-    # The table has the three names that other modules read, once each.
-    def test_pin_names(self) -> None:
-        names = sorted(pin.name for pin in self.pins_get())
-        self.assertEqual(names, sorted(_EXTENSIONS))
+    # The version in each name occurs in its URL, which ends in its extension.
+    def test_pin_versions(self) -> None:
+        for name, url, _sha256 in self.pins_get():
+            found = _NAME_PATTERN.fullmatch(name)
+            self.assertIsNotNone(found, name)
+            version, extension = cast(re.Match[str], found).group(1, 2)
+            self.assertIn(version, url)
+            self.assertTrue(url.endswith(extension), url)

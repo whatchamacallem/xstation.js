@@ -242,13 +242,15 @@ class Client:
     def message_handle(self, message: Message) -> None:
         if "method" in message:
             raise ValueError(i18n("mcp.message_unexpected", message["method"]))
-        if "error" in message:
-            error = message["error"]
-            raise RpcError(error["code"], error["message"], error.get("data"))
-        reply_id = message["id"]
+        reply_id: object = message["id"]
+        if type(reply_id) is not int:
+            raise ValueError(i18n("mcp.reply_id_refused", repr(reply_id)))
         if reply_id not in self._waiting:
             raise ValueError(i18n("mcp.reply_unknown", reply_id))
         fn = self._waiting.pop(reply_id)
+        if "error" in message:
+            error = message["error"]
+            raise RpcError(error["code"], error["message"], error.get("data"))
         fn(message["result"])
 
     # Sends `initialize`, then `notifications/initialized` on its reply.

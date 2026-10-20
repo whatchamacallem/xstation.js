@@ -7,6 +7,7 @@
 # with the tools of API/mcp/tools.json. No transport and no process is used.
 
 import functools, json, mcp, os, unittest
+from i18n import i18n
 from typing import Any
 
 # The root of the checkout.
@@ -31,6 +32,9 @@ _INITIALIZE_REQUEST = (
 
 # The schema of a tool that takes nothing.
 _EMPTY_SCHEMA: dict[str, Any] = {"type": "object", "properties": {}}
+
+# The error member a server answers to a message that is no request.
+_INVALID_ERROR: dict[str, Any] = {"code": -32600, "message": "no"}
 
 
 # Reads the tool entries of one side of the API file, "browser" or "server".
@@ -89,7 +93,7 @@ def _response_get(server: mcp.Server, message: mcp.Message) -> mcp.Message:
 
 
 # Carries the messages of a client to a server and the responses back.
-class Loopback:
+class DirectLink:
     # Makes a client whose transport is a call of the server.
     def __init__(self, server: mcp.Server) -> None:
         self.server = server
@@ -339,8 +343,11 @@ class TestServer(unittest.TestCase):
     # Registering a name twice raises.
     def test_tool_twice(self) -> None:
         tool = _tool_make(self.entries[0])
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as caught:
             self.server.tool_register(tool, lambda arguments: _result_make(""))
+        self.assertEqual(
+            str(caught.exception), i18n("mcp.tool_twice", tool.name)
+        )
 
 
 # Tests the client against a server and against a transport that is slow.
@@ -355,7 +362,7 @@ class TestClient(unittest.TestCase):
                 _tool_make(entry),
                 functools.partial(self.tool_run, entry["name"]),
             )
-        self.rig = Loopback(self.server)
+        self.rig = DirectLink(self.server)
 
     # Answers with the name of the tool as text.
     def tool_run(self, name: str, arguments: dict[str, Any]) -> mcp.ToolResult:
@@ -391,7 +398,7 @@ class TestClient(unittest.TestCase):
         self.rig.client.tool_call("kv_get", {}, self.rig.result_keep)
         ids = [message["id"] for message in self.rig.sent if "id" in message]
         self.assertEqual(ids, [1, 2, 3])
-        other = Loopback(self.server)
+        other = DirectLink(self.server)
         other.client.tools_list(other.result_keep)
         self.assertEqual(other.sent[0]["id"], 1)
 
@@ -421,6 +428,9 @@ class TestClient(unittest.TestCase):
         with self.assertRaises(mcp.RpcError) as caught:
             self.rig.client.tool_call("nothing", {}, self.rig.result_keep)
         self.assertEqual(caught.exception.code, -32602)
+        self.assertEqual(
+            str(caught.exception), i18n("mcp.tool_unknown", "nothing")
+        )
         self.assertIsNone(caught.exception.data)
         self.assertEqual(self.rig.results, [])
 
@@ -449,8 +459,9 @@ class TestClient(unittest.TestCase):
         reply = _response_get(self.server, outbox[0])
         client.message_handle(reply)
         self.assertEqual(results, [_result_make("kv_get")])
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as caught:
             client.message_handle(reply)
+        self.assertEqual(str(caught.exception), i18n("mcp.reply_unknown", 1))
 
     # A result with no `isError` member is not an error.
     def test_error_absent(self) -> None:
@@ -465,16 +476,63 @@ class TestClient(unittest.TestCase):
 
     # A reply nobody asked for raises.
     def test_reply_unknown(self) -> None:
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as caught:
             self.rig.client.message_handle(
                 {"jsonrpc": "2.0", "id": 99, "result": {}}
             )
+        self.assertEqual(str(caught.exception), i18n("mcp.reply_unknown", 99))
+
+    # An error response ends the wait for its id, so a second one is unknown.
+    def test_error_pops(self) -> None:
+        client = mcp.Client("c", "0", lambda message: None)
+        client.tools_list(lambda tools: None)
+        reply = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "error": {"code": -32000, "message": "no"},
+        }
+        with self.assertRaises(mcp.RpcError) as refused:
+            client.message_handle(reply)
+        self.assertEqual(refused.exception.code, -32000)
+        self.assertEqual(str(refused.exception), "no")
+        with self.assertRaises(ValueError) as caught:
+            client.message_handle(reply)
+        self.assertEqual(str(caught.exception), i18n("mcp.reply_unknown", 1))
+
+    # A reply whose id is not an integer raises and leaves the wait in place.
+    def test_id_refused(self) -> None:
+        results: list[list[mcp.Tool]] = []
+        client = mcp.Client("c", "0", lambda message: None)
+        client.tools_list(results.append)
+        replies: list[mcp.Message] = [
+            {"jsonrpc": "2.0", "id": True, "result": {"tools": []}},
+            {"jsonrpc": "2.0", "id": 1.0, "result": {"tools": []}},
+            {"jsonrpc": "2.0", "id": "1", "result": {"tools": []}},
+            {"jsonrpc": "2.0", "id": None, "error": _INVALID_ERROR},
+        ]
+        for reply in replies:
+            with self.subTest(reply=reply):
+                with self.assertRaises(ValueError) as caught:
+                    client.message_handle(reply)
+                self.assertEqual(
+                    str(caught.exception),
+                    i18n("mcp.reply_id_refused", repr(reply["id"])),
+                )
+        self.assertEqual(results, [])
+        client.message_handle(
+            {"jsonrpc": "2.0", "id": 1, "result": {"tools": []}}
+        )
+        self.assertEqual(results, [[]])
 
     # A request or a notification sent to the client raises.
     def test_request_received(self) -> None:
         for method in ("ping", "notifications/tools/list_changed"):
             with self.subTest(method=method):
-                with self.assertRaises(ValueError):
+                with self.assertRaises(ValueError) as caught:
                     self.rig.client.message_handle(
                         {"jsonrpc": "2.0", "id": 1, "method": method}
                     )
+                self.assertEqual(
+                    str(caught.exception),
+                    i18n("mcp.message_unexpected", method),
+                )

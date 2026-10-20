@@ -3,13 +3,16 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests `turn.append` and `turn.compact` through the dispatcher on a real
-# store under `build/`: turns numbered within their scene, messages read off
-# the wire and stored as canonical JSON, compaction into a summary turn, a
-# stale `since`, what the store refuses, and a recorded sequence of the turn
-# transcript replayed to a second store.
+# store under `build/`: turns numbered within their scene, the `n` and `seq`
+# the turn transcript recorded after the seed of `metaverse`, messages read
+# off the wire and stored as canonical JSON, compaction into a summary turn,
+# a stale `since`, what the store refuses, and a recorded sequence replayed
+# to a second store. A new database starts at `seq` 0.
 
 import dispatch, engine_turn, jslb, json, os, sqlite3, substrate, tempfile
 import unittest, unittest.mock
+from collections.abc import Callable
+from i18n import i18n
 from typing import Any
 
 # The checkout's build directory, where each test makes its scratch roots.
@@ -29,8 +32,11 @@ _OVERFLOW_BYTES = 131072
 # The `line_max` of the settings, 1 MiB.
 _LINE_MAX = 1048576
 
-# The `blob_max` of the settings, 1 GiB.
-_BLOB_MAX = 1073741824
+# The `blob_max` of the settings, 10 MiB.
+_BLOB_MAX = 10485760
+
+# The `message_max` of the settings, 10 MiB.
+_MESSAGE_MAX = 10485760
 
 # The database the tests keep their turns in.
 _DATABASE = "metaverse"
@@ -40,6 +46,28 @@ _SCENE = "/metaverse/hyperposition/1"
 
 # Another scene of the same database, with a conversation of its own.
 _OTHER_SCENE = "/metaverse/castle/arrival/1"
+
+# The hyperposition document the server seeds, in its stored form.
+_HYPERPOSITION_BODY: dict[int | str, Any] = {
+    0: {"t": "scene"},
+    "subtitle": "How can I help you?",
+}
+
+# A stand in for the analyst's prompt document the server seeds.
+_PROMPT_BODY: dict[int | str, Any] = {
+    0: {"t": "prompt"},
+    "text": "You are the analyst.",
+}
+
+# The keys the server seeds into `metaverse`, and their values.
+_SEED_KEYS: list[tuple[str, bytes]] = [
+    ("/metaverse/player", b"player"),
+    ("/metaverse/world", b"metaverse"),
+    ("/metaverse/scene", b"/metaverse/hyperposition/1"),
+]
+
+# The `seq` of `metaverse` after its seed, the first `since` of the turns.
+_SEED_SEQ = 5
 
 # Text beyond ASCII, built from its code points.
 _WIDE_TEXT = chr(0x4E2D) + chr(0x6587) + chr(0x1F600)
@@ -81,7 +109,14 @@ _ANSWER_TURN: dict[str, Any] = {
 # The player's next message, which follows the compaction.
 _NEXT_TURN: dict[str, Any] = {"role": "user", "content": "2"}
 
-# The recorded operations: a type and its payload, as the transcript has.
+# The turns that the tests append in order, each a role and a message.
+_TURNS: list[tuple[str, dict[str, Any]]] = [
+    ("user", _USER_TURN),
+    ("assistant", _CALL_TURN),
+    ("assistant", _ANSWER_TURN),
+]
+
+# The operations to replay, a type and a payload, the transcript's two first.
 _RECORDED: list[tuple[str, dict[str, Any]]] = [
     ("turn.append", {"scene": _SCENE, "role": "user", "content": _USER_TURN}),
     (
@@ -132,7 +167,7 @@ def _wire_bytes(line: jslb.Object) -> bytes:
 # Decodes the one line the bytes hold.
 def _line_decode(wire: bytes) -> jslb.Object:
     decoder = jslb.LineDecoder(
-        _LINE_MAX, _BLOB_MAX, _OVERFLOW_BYTES, _sink_refuse
+        _LINE_MAX, _BLOB_MAX, _MESSAGE_MAX, _OVERFLOW_BYTES, _sink_refuse
     )
     (line,) = decoder.bytes_feed(wire)
     return line
@@ -144,6 +179,20 @@ def _forward_line(
 ) -> jslb.Object:
     line = _line_make(kind, 1, since=since, **payload)
     return _line_decode(_wire_bytes(line))
+
+
+# Builds a forwarded `turn.append` line of a turn of the hyperposition.
+def _append_line(
+    role: str, content: dict[str, Any], since: int
+) -> jslb.Object:
+    payload = {"scene": _SCENE, "role": role, "content": content}
+    return _forward_line("turn.append", payload, since)
+
+
+# Builds a forwarded `turn.append` of the first message, `since` 0, to a scene.
+def _scene_line(scene: str) -> jslb.Object:
+    payload = {"scene": scene, "role": "user", "content": _USER_TURN}
+    return _forward_line("turn.append", payload, 0)
 
 
 # The canonical JSON text of a value, as the substrate stores it.
@@ -195,49 +244,67 @@ class IsolatedCase(unittest.TestCase):
         self.addCleanup(_store_close, store)
         return store
 
-    # Appends the turns of the transcript through the handler, from `seq` 1.
+    # Writes the seed of a new `metaverse` straight to a store, five changes.
+    def seed_write(self, store: substrate.Store) -> None:
+        store.doc_put(_DATABASE, "hyperposition", _HYPERPOSITION_BODY)
+        store.doc_put(_DATABASE, "prompt", _PROMPT_BODY)
+        for key, value in _SEED_KEYS:
+            store.kv_put(key, value)
+        self.assertEqual(store.seq_get(_DATABASE), _SEED_SEQ)
+
+    # Appends the turns through the handler from `seq` 0, ending at `seq` 3.
     def turns_append(self) -> None:
-        turns = (
-            ("user", _USER_TURN),
-            ("assistant", _CALL_TURN),
-            ("assistant", _ANSWER_TURN),
-        )
-        for index, (role, content) in enumerate(turns):
-            payload = {"scene": _SCENE, "role": role, "content": content}
-            line = _forward_line("turn.append", payload, index + 1)
-            _reply_get(line)
+        for index, (role, content) in enumerate(_TURNS):
+            _reply_get(_append_line(role, content, index))
+
+    # Calls `fn` and checks the type and the text of what it raises.
+    def raise_check(
+        self, kind: type[Exception], message: str, fn: Callable[[], object]
+    ) -> None:
+        with self.assertRaises(kind) as caught:
+            fn()
+        self.assertEqual(str(caught.exception), message)
+
+    # Dispatches a line and checks the type and the text of what it raises.
+    def dispatch_check(
+        self, kind: type[Exception], message: str, line: jslb.Object
+    ) -> None:
+        self.raise_check(kind, message, lambda: dispatch.line_dispatch(line))
 
 
 # Tests the handler of `turn.append`.
 class TestAppend(IsolatedCase):
-    # A turn is numbered from 1 and the reply holds its `n` and the new `seq`.
+    # The turn transcript's first turn after the seed: `n` 1 and `seq` 6.
     def test_turn_appended(self) -> None:
         engine_turn.handlers_register(self.store)
-        payload = {"scene": _SCENE, "role": "user", "content": _USER_TURN}
-        reply = _reply_get(_forward_line("turn.append", payload, 1))
+        self.seed_write(self.store)
+        reply = _reply_get(_append_line("user", _USER_TURN, _SEED_SEQ))
         self.assertEqual(reply[0], {"t": "turn.append", "r": 1})
-        self.assertEqual(jslb.payload_of(reply), {"n": 1, "seq": 2})
+        self.assertEqual(jslb.payload_of(reply), {"n": 1, "seq": 6})
         rows = self.store.turn_list(_SCENE)
         self.assertEqual(rows, [_row_make(1, "user", _USER_TURN)])
-        self.assertEqual(self.store.seq_get(_DATABASE), 2)
+        self.assertEqual(self.store.seq_get(_DATABASE), 6)
 
     # Turns count up, and a message with null and a list is stored whole.
     def test_turns_numbered(self) -> None:
         engine_turn.handlers_register(self.store)
-        turns = (
-            ("user", _USER_TURN),
-            ("assistant", _CALL_TURN),
-            ("assistant", _ANSWER_TURN),
-        )
-        for index, (role, content) in enumerate(turns):
-            payload = {"scene": _SCENE, "role": role, "content": content}
-            line = _forward_line("turn.append", payload, index + 1)
-            expected = {"n": index + 1, "seq": index + 2}
-            self.assertEqual(jslb.payload_of(_reply_get(line)), expected)
+        self.seed_write(self.store)
+        replies = [
+            jslb.payload_of(_reply_get(_append_line(role, content, since)))
+            for since, (role, content) in enumerate(_TURNS, _SEED_SEQ)
+        ]
+        expected = [
+            {"n": 1, "seq": 6},
+            {"n": 2, "seq": 7},
+            {"n": 3, "seq": 8},
+        ]
+        self.assertEqual(replies, expected)
         rows = self.store.turn_list(_SCENE)
-        for index, (role, content) in enumerate(turns):
-            self.assertEqual(rows[index], _row_make(index + 1, role, content))
-        self.assertEqual(len(rows), 3)
+        made = [
+            _row_make(index, role, content)
+            for index, (role, content) in enumerate(_TURNS, 1)
+        ]
+        self.assertEqual(rows, made)
         self.assertEqual(json.loads(rows[1].content), _CALL_TURN)
 
     # Each scene counts its own turns.
@@ -247,7 +314,7 @@ class TestAppend(IsolatedCase):
         counts: list[int] = []
         for index, scene in enumerate(scenes):
             payload = {"scene": scene, "role": "user", "content": _USER_TURN}
-            line = _forward_line("turn.append", payload, index + 1)
+            line = _forward_line("turn.append", payload, index)
             counts.append(_reply_get(line)["n"])
         self.assertEqual(counts, [1, 1, 2, 2, 3])
 
@@ -255,8 +322,7 @@ class TestAppend(IsolatedCase):
     def test_text_wide(self) -> None:
         engine_turn.handlers_register(self.store)
         content = {"role": "user", "content": _WIDE_TEXT}
-        payload = {"scene": _SCENE, "role": "user", "content": content}
-        _reply_get(_forward_line("turn.append", payload, 1))
+        _reply_get(_append_line("user", content, 0))
         stored = self.store.turn_list(_SCENE)[0].content
         self.assertEqual(stored, _json_text(content))
         self.assertIn(_WIDE_TEXT, stored)
@@ -264,30 +330,25 @@ class TestAppend(IsolatedCase):
     # A stale `since` raises the desync and no turn is added.
     def test_since_stale(self) -> None:
         engine_turn.handlers_register(self.store)
-        payload = {"scene": _SCENE, "role": "user", "content": _USER_TURN}
-        line = _forward_line("turn.append", payload, 0)
-        with self.assertRaises(RuntimeError) as caught:
-            dispatch.line_dispatch(line)
-        message = "turn.append: since 0 is not seq 1 of metaverse"
-        self.assertEqual(str(caught.exception), message)
+        self.seed_write(self.store)
+        line = _append_line("user", _USER_TURN, 4)
+        message = i18n("substrate.since_stale", "turn.append", 4, 5, _DATABASE)
+        self.dispatch_check(RuntimeError, message, line)
         self.assertEqual(self.store.turn_list(_SCENE), [])
-        self.assertEqual(self.store.seq_get(_DATABASE), 1)
+        self.assertEqual(self.store.seq_get(_DATABASE), _SEED_SEQ)
 
-    # A scene that is not an external document ref raises, and so does a
-    # database that is not open.
+    # A scene not an external document ref raises, as does a closed database.
     def test_scene_invalid(self) -> None:
         engine_turn.handlers_register(self.store)
         for scene in ("hyperposition/1", "/metaverse/hyperposition"):
             with self.subTest(scene=scene):
-                payload = {"scene": scene, "role": "user", "content": {}}
-                line = _forward_line("turn.append", payload, 1)
-                with self.assertRaises(ValueError):
-                    dispatch.line_dispatch(line)
-        payload = {"scene": "/none/scene/1", "role": "user", "content": {}}
-        line = _forward_line("turn.append", payload, 1)
-        with self.assertRaises(LookupError):
-            dispatch.line_dispatch(line)
-        self.assertEqual(self.store.seq_get(_DATABASE), 1)
+                line = _scene_line(scene)
+                message = i18n("substrate.scene_bad", scene)
+                self.dispatch_check(ValueError, message, line)
+        line = _scene_line("/none/scene/1")
+        message = i18n("substrate.db_closed", "none")
+        self.dispatch_check(LookupError, message, line)
+        self.assertEqual(self.store.seq_get(_DATABASE), 0)
 
 
 # Tests the handler of `turn.compact`.
@@ -297,13 +358,16 @@ class TestCompact(IsolatedCase):
         engine_turn.handlers_register(self.store)
         self.turns_append()
         payload = {"scene": _SCENE, "through": 2, "summary": _SUMMARY}
-        reply = _reply_get(_forward_line("turn.compact", payload, 4))
+        reply = _reply_get(_forward_line("turn.compact", payload, 3))
         self.assertEqual(reply[0], {"t": "turn.compact", "r": 1})
-        self.assertEqual(jslb.payload_of(reply), {"seq": 5})
+        self.assertEqual(jslb.payload_of(reply), {"seq": 4})
         summary = {"role": "system", "content": _SUMMARY}
         self.assertEqual(
             self.store.turn_list(_SCENE),
-            [_row_make(1, "system", summary), _row_make(3, "assistant", _ANSWER_TURN)],
+            [
+                _row_make(1, "system", summary),
+                _row_make(3, "assistant", _ANSWER_TURN),
+            ],
         )
 
     # The turn after a compaction is numbered after the last that is left.
@@ -311,10 +375,9 @@ class TestCompact(IsolatedCase):
         engine_turn.handlers_register(self.store)
         self.turns_append()
         payload = {"scene": _SCENE, "through": 2, "summary": _SUMMARY}
-        _reply_get(_forward_line("turn.compact", payload, 4))
-        payload = {"scene": _SCENE, "role": "user", "content": _NEXT_TURN}
-        reply = _reply_get(_forward_line("turn.append", payload, 5))
-        self.assertEqual(jslb.payload_of(reply), {"n": 4, "seq": 6})
+        _reply_get(_forward_line("turn.compact", payload, 3))
+        reply = _reply_get(_append_line("user", _NEXT_TURN, 4))
+        self.assertEqual(jslb.payload_of(reply), {"n": 4, "seq": 5})
 
     # A stale `since` raises the desync and the turns stay.
     def test_since_stale(self) -> None:
@@ -322,52 +385,72 @@ class TestCompact(IsolatedCase):
         self.turns_append()
         payload = {"scene": _SCENE, "through": 2, "summary": _SUMMARY}
         line = _forward_line("turn.compact", payload, 1)
-        with self.assertRaises(RuntimeError) as caught:
-            dispatch.line_dispatch(line)
-        message = "turn.compact: since 1 is not seq 4 of metaverse"
-        self.assertEqual(str(caught.exception), message)
+        kind = "turn.compact"
+        message = i18n("substrate.since_stale", kind, 1, 3, _DATABASE)
+        self.dispatch_check(RuntimeError, message, line)
         self.assertEqual(len(self.store.turn_list(_SCENE)), 3)
-        self.assertEqual(self.store.seq_get(_DATABASE), 4)
+        self.assertEqual(self.store.seq_get(_DATABASE), 3)
 
     # A `through` below 1 raises, and so does a scene with no turn to replace.
     def test_compact_refused(self) -> None:
         engine_turn.handlers_register(self.store)
         payload = {"scene": _SCENE, "through": 0, "summary": _SUMMARY}
-        with self.assertRaises(ValueError):
-            dispatch.line_dispatch(_forward_line("turn.compact", payload, 1))
+        line = _forward_line("turn.compact", payload, 0)
+        message = i18n("substrate.through_bad", 0)
+        self.dispatch_check(ValueError, message, line)
         payload = {"scene": _SCENE, "through": 1, "summary": _SUMMARY}
-        with self.assertRaises(LookupError):
-            dispatch.line_dispatch(_forward_line("turn.compact", payload, 1))
+        line = _forward_line("turn.compact", payload, 0)
+        message = i18n("substrate.turns_none", _SCENE, 1)
+        self.dispatch_check(LookupError, message, line)
         self.assertEqual(self.store.turn_list(_SCENE), [])
-        self.assertEqual(self.store.seq_get(_DATABASE), 1)
+        self.assertEqual(self.store.seq_get(_DATABASE), 0)
 
 
 # Tests a recorded sequence of forwarded operations on a second store.
 class TestReplay(IsolatedCase):
-    # The server's store ends as the modifier's store did, `seq` for `seq`.
+    # Runs one operation on the first store, forwards it, returns the reply.
+    def operation_forward(
+        self, kind: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        since = self.store.seq_get(_DATABASE)
+        scene: str = payload["scene"]
+        if kind == "turn.append":
+            text = _json_text(payload["content"])
+            n, seq = self.store.turn_append(scene, payload["role"], text)
+            expected: dict[str, Any] = {"n": n, "seq": seq}
+        else:
+            seq = self.store.turn_compact(
+                scene, payload["through"], payload["summary"]
+            )
+            expected = {"seq": seq}
+        line = _forward_line(kind, payload, since)
+        reply = jslb.payload_of(_reply_get(line))
+        self.assertEqual(reply, expected, kind)
+        return reply
+
+    # The second store ends as the first did, `seq` for `seq`.
     def test_recorded_replay(self) -> None:
         second_root = self.root_make()
         second = self.store_make(second_root)
         second.db_create(_DATABASE)
+        self.seed_write(self.store)
+        self.seed_write(second)
         engine_turn.handlers_register(second)
-        for kind, payload in _RECORDED:
-            since = self.store.seq_get(_DATABASE)
-            if kind == "turn.append":
-                text = _json_text(payload["content"])
-                n, seq = self.store.turn_append(
-                    payload["scene"], payload["role"], text
-                )
-                expected = {"n": n, "seq": seq}
-            else:
-                seq = self.store.turn_compact(
-                    payload["scene"], payload["through"], payload["summary"]
-                )
-                expected = {"seq": seq}
-            reply = _reply_get(_forward_line(kind, payload, since))
-            self.assertEqual(jslb.payload_of(reply), expected, kind)
-        self.assertEqual(seq, 6)
-        self.assertEqual(second.turn_list(_SCENE), self.store.turn_list(_SCENE))
-        self.assertEqual([row.n for row in second.turn_list(_SCENE)], [1, 3, 4])
+        replies = [
+            self.operation_forward(kind, payload)
+            for kind, payload in _RECORDED
+        ]
+        expected = [
+            {"n": 1, "seq": 6},
+            {"n": 2, "seq": 7},
+            {"n": 3, "seq": 8},
+            {"seq": 9},
+            {"n": 4, "seq": 10},
+        ]
+        self.assertEqual(replies, expected)
+        rows = second.turn_list(_SCENE)
+        self.assertEqual(rows, self.store.turn_list(_SCENE))
+        self.assertEqual([row.n for row in rows], [1, 3, 4])
         _store_close(self.store)
         _store_close(second)
         name = _DATABASE + ".sqlite"
@@ -382,18 +465,25 @@ class TestRegister(IsolatedCase):
     # A second registration raises, as the dispatcher refuses the pair.
     def test_register_twice(self) -> None:
         engine_turn.handlers_register(self.store)
-        with self.assertRaises(ValueError):
-            engine_turn.handlers_register(self.store)
+        message = i18n("dispatch.handler_twice", "turn.append", 0)
+        self.raise_check(
+            ValueError,
+            message,
+            lambda: engine_turn.handlers_register(self.store),
+        )
 
     # Called before the registration each handler raises.
     def test_unregistered(self) -> None:
         line = _line_make("turn.append", 1)
         content: dict[str, object] = {}
-        with self.assertRaises(RuntimeError):
-            engine_turn.turn_append(
-                line, scene=_SCENE, role="user", content=content, since=1
-            )
-        with self.assertRaises(RuntimeError):
-            engine_turn.turn_compact(
-                line, scene=_SCENE, through=1, summary="x", since=1
-            )
+        message = i18n("engine_turn.not_registered")
+        calls: list[Callable[[], object]] = [
+            lambda: engine_turn.turn_append(
+                line, scene=_SCENE, role="user", content=content, since=0
+            ),
+            lambda: engine_turn.turn_compact(
+                line, scene=_SCENE, through=1, summary="x", since=0
+            ),
+        ]
+        for call in calls:
+            self.raise_check(RuntimeError, message, call)

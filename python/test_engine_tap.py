@@ -8,8 +8,9 @@
 # handled, and a language other than python or typescript refused. The
 # scratch directories go under `build/`.
 
-import dispatch, engine_tap, jslb, json, os, tempfile, unittest
-import unittest.mock
+import dispatch, engine_tap, jslb, json, os, tempfile, unittest, unittest.mock
+from collections.abc import Callable
+from i18n import i18n
 from typing import Any
 
 # The checkout's top directory, above this file's `python/`.
@@ -74,6 +75,14 @@ class IsolatedCase(unittest.TestCase):
         scratch = tempfile.TemporaryDirectory(dir=_BUILD_PATH)
         self.addCleanup(scratch.cleanup)
         self.root = scratch.name
+
+    # Calls `fn` and checks the type and the text of what it raises.
+    def raise_check(
+        self, kind: type[Exception], message: str, fn: Callable[[], object]
+    ) -> None:
+        with self.assertRaises(kind) as caught:
+            fn()
+        self.assertEqual(str(caught.exception), message)
 
 
 # Tests the lines appended to the files.
@@ -151,18 +160,27 @@ class TestRefuse(IsolatedCase):
         for language in ("rust", "", "Python", "../python"):
             with self.subTest(language=language):
                 line = _line_make("tap.line", language=language, text="x")
-                with self.assertRaises(ValueError):
-                    dispatch.line_dispatch(line)
+                self.raise_check(
+                    ValueError,
+                    i18n("engine_tap.language_unknown", language),
+                    lambda: dispatch.line_dispatch(line),
+                )
                 self.assertEqual(os.listdir(self.root), [])
 
     # Called before the registration the handler raises.
     def test_unregistered(self) -> None:
         line = _line_make("tap.line")
-        with self.assertRaises(RuntimeError):
-            engine_tap.tap_line(line, language="python", text="x")
+        self.raise_check(
+            RuntimeError,
+            i18n("engine_tap.not_registered"),
+            lambda: engine_tap.tap_line(line, language="python", text="x"),
+        )
 
     # A second registration raises, as the dispatcher refuses the pair.
     def test_register_twice(self) -> None:
         engine_tap.handlers_register(self.root)
-        with self.assertRaises(ValueError):
-            engine_tap.handlers_register(self.root)
+        self.raise_check(
+            ValueError,
+            i18n("dispatch.handler_twice", "tap.line", 0),
+            lambda: engine_tap.handlers_register(self.root),
+        )

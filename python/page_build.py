@@ -138,6 +138,7 @@ def page_build(name: str, test: bool) -> str:
         os.path.join(_THIRD_PARTY_PATH, _XTERM_ARCHIVE),
         [_XTERM_JS, _XTERM_CSS],
     )
+    # The worker joins `data-worker` texts by `"\n"` after `"use strict";\n`.
     pieces = {
         "XSJS_BUILD_BUNDLE": table_substitute(bundle, text_read(_TABLE_PATH)),
         "XSJS_BUILD_ENGINE_CSS": text_read(_ENGINE_CSS_PATH),

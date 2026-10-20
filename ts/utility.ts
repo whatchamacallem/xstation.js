@@ -3,9 +3,10 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // The routines the other modules share: error helpers, `SHA-256`, `UTF-8`,
-// base64 and JSON text. Every one is synchronous. It uses no other module.
+// base64 and JSON text. Every one is synchronous. Its messages come from
+// `i18n`, called only when a routine throws.
 namespace utility {
-  // The sizes and limits of the routines below, and their messages.
+  // The sizes and limits of the routines below.
   const constants = Object.freeze({
     block_bytes: 64,
     block_words: 16,
@@ -17,9 +18,22 @@ namespace utility {
     padding_marker: 0x80,
     word_range: 2 ** 32,
     integer_limit: 2 ** 53,
-    number_failure: "JSON cannot carry the number",
-    value_failure: "JSON has no text for the value",
+    surrogate_first: 0xd800,
+    surrogate_last: 0xdfff,
   });
+
+  // Matches a surrogate that is not half of a pair, read by code points.
+  const surrogate_lone = new RegExp(
+    `[${String.fromCharCode(constants.surrogate_first)}-` +
+      `${String.fromCharCode(constants.surrogate_last)}]`,
+    "u"
+  );
+
+  // Matches strict base64: padded, no white space, zero unused bits.
+  const base64_form = new RegExp(
+    "^(?:[A-Za-z0-9+/]{4})*" +
+      "(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$"
+  );
 
   // The first prime numbers, as many as asked for.
   function primes_first(count: number): number[] {
@@ -152,18 +166,28 @@ namespace utility {
     return hex;
   }
 
-  // Encodes text as `UTF-8`.
+  // Encodes text as `UTF-8` and throws on a lone surrogate.
   export function utf8_encode(text: string): Uint8Array {
+    if (surrogate_lone.test(text)) {
+      fail_now(i18n("utility.text_refused"));
+    }
     return text_encoder.encode(text);
   }
 
   // Decodes `UTF-8` and throws on an invalid sequence.
   export function utf8_decode(data: Uint8Array): string {
-    return text_decoder.decode(data);
+    try {
+      return text_decoder.decode(data);
+    } catch (error) {
+      throw error_wrap(i18n("utility.bytes_refused"), error);
+    }
   }
 
-  // Decodes base64 text into bytes.
+  // Decodes strict base64 text into bytes and throws on any other text.
   export function base64_decode(text: string): Uint8Array {
+    if (!base64_form.test(text)) {
+      fail_now(i18n("utility.base64_refused"));
+    }
     const binary = atob(text);
     const bytes = new Uint8Array(binary.length);
     for (let index = 0; index < binary.length; index += 1) {
@@ -178,7 +202,7 @@ namespace utility {
       typeof value === "number" &&
       (!Number.isFinite(value) || Math.abs(value) > constants.integer_limit)
     ) {
-      fail_now(`${constants.number_failure} ${value}`);
+      fail_now(i18n("utility.number_refused", value));
     }
     return value;
   }
@@ -187,7 +211,7 @@ namespace utility {
   export function json_text(value: unknown): string {
     const text: unknown = JSON.stringify(value, number_check);
     if (typeof text !== "string") {
-      return fail_now(constants.value_failure);
+      return fail_now(i18n("utility.value_refused"));
     }
     return text;
   }

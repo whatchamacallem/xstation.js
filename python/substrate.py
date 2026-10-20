@@ -4,11 +4,11 @@
 #
 # The server substrate, the single door to SQLite: one connection for each
 # database file under a root, the substrate's tables in each, rows of values
-# with overflow to a cache directory, documents, turns, guarded SQL,
-# snapshots and the forwarded operations of replication, `seq` counting each.
+# with overflow to a cache directory, documents, turns, SQL, snapshots
+# and the forwarded operations of replication, `seq` counting each.
 
-import hashlib, json, os, re, sqlite3, tempfile, urllib.parse
-from collections.abc import Callable
+import hashlib, json, math, os, re, sqlite3, tempfile, urllib.parse
+from collections.abc import Callable, Iterable
 from i18n import i18n
 from typing import Any, NamedTuple, cast
 
@@ -43,14 +43,20 @@ _SCHEMA_TABLES = frozenset({"_meta", "_kv", "_head", "_turn"})
 # The version of the substrate's tables, the `schema` row of `_meta`.
 _SCHEMA_VERSION = "1"
 
-# The database whose contents `sql_run` may read and never write.
-_SETTINGS_DB = "_settings"
-
 # The file extension of a database under the root.
 _DB_EXTENSION = ".sqlite"
 
 # The permissions of a new database file, those SQLite gives one it makes.
 _DB_MODE = 0o644
+
+# The suffix of the file a restore writes beside the database's own file.
+_RESTORE_SUFFIX = "-restore"
+
+# The query that opens an existing database file to read and write.
+_QUERY_WRITE = "mode=rw"
+
+# The query that opens a database file to read once: read only, immutable.
+_QUERY_READ = "mode=ro&immutable=1"
 
 # The directory under the root that holds the values over `overflow_bytes`.
 _CACHE_DIRECTORY = "cache"
@@ -67,57 +73,14 @@ _C_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 # An external ref: a slash, a database name, a slash and a nonempty key.
 _EXTERNAL_REF = re.compile(r"/([A-Za-z_][A-Za-z0-9_]*)/(.+)", re.DOTALL)
 
+# A reference string of a document: an external ref with no white space.
+_REFERENCE_STRING = re.compile(r"/[A-Za-z_][A-Za-z0-9_]*/\S+")
+
 # An integer literal: decimal digits with no sign and no leading zero.
 _INTEGER_LITERAL = re.compile(r"0|[1-9][0-9]*")
 
 # Decimal digits, which no payload key of a document may be.
 _DIGITS = re.compile(r"[0-9]+")
-
-# The authorizer actions that only read, all that `_settings` allows.
-_READ_ACTIONS = frozenset(
-    {
-        sqlite3.SQLITE_READ,
-        sqlite3.SQLITE_SELECT,
-        sqlite3.SQLITE_FUNCTION,
-        sqlite3.SQLITE_RECURSIVE,
-    }
-)
-
-# The authorizer actions refused in every database: transactions, attaching.
-_REFUSED_ACTIONS = frozenset(
-    {
-        sqlite3.SQLITE_TRANSACTION,
-        sqlite3.SQLITE_SAVEPOINT,
-        sqlite3.SQLITE_ATTACH,
-        sqlite3.SQLITE_DETACH,
-    }
-)
-
-# The writing authorizer actions, each with the argument naming its table.
-_TABLE_ARGUMENTS: dict[int, int] = {
-    sqlite3.SQLITE_INSERT: 1,
-    sqlite3.SQLITE_UPDATE: 1,
-    sqlite3.SQLITE_DELETE: 1,
-    sqlite3.SQLITE_CREATE_TABLE: 1,
-    sqlite3.SQLITE_CREATE_TEMP_TABLE: 1,
-    sqlite3.SQLITE_DROP_TABLE: 1,
-    sqlite3.SQLITE_DROP_TEMP_TABLE: 1,
-    sqlite3.SQLITE_CREATE_VIEW: 1,
-    sqlite3.SQLITE_CREATE_TEMP_VIEW: 1,
-    sqlite3.SQLITE_DROP_VIEW: 1,
-    sqlite3.SQLITE_DROP_TEMP_VIEW: 1,
-    sqlite3.SQLITE_CREATE_VTABLE: 1,
-    sqlite3.SQLITE_DROP_VTABLE: 1,
-    sqlite3.SQLITE_ALTER_TABLE: 2,
-    sqlite3.SQLITE_CREATE_INDEX: 2,
-    sqlite3.SQLITE_CREATE_TEMP_INDEX: 2,
-    sqlite3.SQLITE_DROP_INDEX: 2,
-    sqlite3.SQLITE_DROP_TEMP_INDEX: 2,
-    sqlite3.SQLITE_CREATE_TRIGGER: 2,
-    sqlite3.SQLITE_CREATE_TEMP_TRIGGER: 2,
-    sqlite3.SQLITE_DROP_TRIGGER: 2,
-    sqlite3.SQLITE_DROP_TEMP_TRIGGER: 2,
-}
 
 
 # A `_kv` row without its data.
@@ -192,39 +155,57 @@ def _scene_database(scene: str) -> str:
     return parts.db
 
 
-# Raises on an integer beyond `_INTEGER_LIMIT` anywhere in a JSON value.
-def _integers_check(value: object) -> None:
-    if isinstance(value, int) and not isinstance(value, bool):
-        if abs(value) > _INTEGER_LIMIT:
-            raise ValueError(i18n("substrate.integer_range", value))
-    elif isinstance(value, dict):
-        for item in cast(dict[object, object], value).values():
-            _integers_check(item)
-    elif isinstance(value, list):
-        for item in cast(list[object], value):
-            _integers_check(item)
+# A JSON value ready to write: at every level integer keys first, all checked.
+def _json_ordered(value: object) -> object:
+    if isinstance(value, dict):
+        source = cast(dict[object, object], value)
+        numbers: list[int] = []
+        names: list[str] = []
+        for key in source:
+            if type(key) is int and key >= 0:
+                numbers.append(key)
+            elif type(key) is str and not _INTEGER_LITERAL.fullmatch(key):
+                names.append(key)
+            else:
+                raise ValueError(i18n("substrate.key_refused", repr(key)))
+        return {
+            key: _json_ordered(source[key])
+            for key in [*sorted(numbers), *names]
+        }
+    if isinstance(value, (list, tuple)):
+        items = cast(Iterable[object], value)
+        return [_json_ordered(item) for item in items]
+    if type(value) is int and abs(value) > _INTEGER_LIMIT:
+        raise ValueError(i18n("substrate.integer_range", value))
+    if type(value) is float and not math.isfinite(value):
+        raise ValueError(i18n("substrate.number_refused", value))
+    return value
 
 
-# The canonical JSON text of an object: integer keys ascending, then the rest.
-def _json_canonical(value: dict[Any, Any]) -> str:
-    _integers_check(value)
-    headers = sorted(key for key in value if isinstance(key, int))
-    ordered: dict[Any, Any] = {key: value[key] for key in headers}
-    for key, item in value.items():
-        if not isinstance(key, int):
-            ordered[key] = item
+# The canonical JSON text of a value, the text the wire's encoder writes.
+def _json_canonical(value: object) -> str:
     return json.dumps(
-        ordered, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+        _json_ordered(value),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
     )
+
+
+# A JSON object from parsed pairs, its integer literal keys made integers.
+def _pairs_object(pairs: list[tuple[str, Any]]) -> dict[int | str, Any]:
+    return {
+        (int(key) if _INTEGER_LITERAL.fullmatch(key) else key): item
+        for key, item in pairs
+    }
 
 
 # A stored document: JSON text whose integer literal keys are its headers.
 def _document_parse(data: bytes) -> dict[int | str, Any]:
-    loaded = cast(dict[str, Any], json.loads(data.decode("utf-8")))
-    return {
-        (int(key) if _INTEGER_LITERAL.fullmatch(key) else key): item
-        for key, item in loaded.items()
-    }
+    loaded: dict[int | str, Any] = json.loads(
+        data.decode("utf-8"), object_pairs_hook=_pairs_object
+    )
+    return loaded
 
 
 # The bytes of a value: as held, or read from its cache file.
@@ -267,7 +248,7 @@ def _key_check(key: str) -> None:
 # Replaces each reference string in a body value by `{"$ref": n}`.
 def _refs_take(value: Any, refs: dict[str, int]) -> Any:
     if isinstance(value, str):
-        if _EXTERNAL_REF.fullmatch(value) is None:
+        if _REFERENCE_STRING.fullmatch(value) is None:
             return value
         if value not in refs:
             refs[value] = len(refs) + 1
@@ -297,9 +278,9 @@ def _refs_restore(value: Any, refs: list[str]) -> Any:
     return value
 
 
-# The URI that opens an existing database file to read and write.
-def _uri_make(path: str) -> str:
-    return "file:" + urllib.parse.quote(path) + "?mode=rw"
+# The URI that opens a database file with the query's mode.
+def _uri_make(path: str, query: str) -> str:
+    return "file:" + urllib.parse.quote(path) + "?" + query
 
 
 # Sets the pragmas of a new connection and checks the journal mode took.
@@ -351,46 +332,46 @@ def _since_check(type: str, since: int, seq: int, db: str) -> None:
         raise RuntimeError(i18n("substrate.since_stale", type, since, seq, db))
 
 
-# The authorizer of `sql_run` on `_settings`: reading only.
-def _settings_authorize(
-    action: int,
-    first: str | None,
-    second: str | None,
-    database: str | None,
-    trigger: str | None,
-) -> int:
-    if action in _READ_ACTIONS:
-        return sqlite3.SQLITE_OK
-    return sqlite3.SQLITE_DENY
+# The substrate's tables that a database holds.
+def _tables_found(connection: sqlite3.Connection) -> set[str]:
+    rows = connection.execute(
+        "SELECT name FROM sqlite_schema WHERE type = 'table'"
+    ).fetchall()
+    return {row[0] for row in rows} & _SCHEMA_TABLES
 
 
-# The authorizer of `sql_run`: no transactions, no attaching, no `_` writes.
-def _tables_authorize(
-    action: int,
-    first: str | None,
-    second: str | None,
-    database: str | None,
-    trigger: str | None,
-) -> int:
-    if action in _REFUSED_ACTIONS:
-        return sqlite3.SQLITE_DENY
-    if action not in _TABLE_ARGUMENTS:
-        return sqlite3.SQLITE_OK
-    table = cast(str, first if _TABLE_ARGUMENTS[action] == 1 else second)
-    if table.startswith("_"):
-        return sqlite3.SQLITE_DENY
-    return sqlite3.SQLITE_OK
+# Raises unless the tables found are all of the substrate's, at its version.
+def _schema_check(connection: sqlite3.Connection, found: set[str]) -> None:
+    if found != _SCHEMA_TABLES:
+        raise RuntimeError(i18n("substrate.schema_partial", sorted(found)))
+    row = connection.execute(
+        "SELECT value FROM _meta WHERE name = 'schema'"
+    ).fetchone()
+    if row != (_SCHEMA_VERSION,):
+        raise RuntimeError(
+            i18n("substrate.schema_version", row, _SCHEMA_VERSION)
+        )
+
+
+# Raises unless a database file holds the substrate's tables, writing nothing.
+def _schema_verify(path: str) -> None:
+    connection = sqlite3.connect(
+        _uri_make(path, _QUERY_READ), uri=True, isolation_level=None
+    )
+    try:
+        _schema_check(connection, _tables_found(connection))
+    finally:
+        connection.close()
 
 
 # Creates the substrate's `_` tables in a database that lacks them.
 def schema_apply(connection: sqlite3.Connection) -> None:
     connection.execute("BEGIN IMMEDIATE")
     try:
-        rows = connection.execute(
-            "SELECT name FROM sqlite_schema WHERE type = 'table'"
-        ).fetchall()
-        found = {row[0] for row in rows} & _SCHEMA_TABLES
-        if not found:
+        found = _tables_found(connection)
+        if found:
+            _schema_check(connection, found)
+        else:
             for statement in _SCHEMA_STATEMENTS:
                 connection.execute(statement)
             connection.execute(
@@ -398,16 +379,6 @@ def schema_apply(connection: sqlite3.Connection) -> None:
                 " VALUES ('seq', '0'), ('schema', ?)",
                 (_SCHEMA_VERSION,),
             )
-        elif found != _SCHEMA_TABLES:
-            raise RuntimeError(i18n("substrate.schema_partial", sorted(found)))
-        else:
-            row = connection.execute(
-                "SELECT value FROM _meta WHERE name = 'schema'"
-            ).fetchone()
-            if row != (_SCHEMA_VERSION,):
-                raise RuntimeError(
-                    i18n("substrate.schema_version", row, _SCHEMA_VERSION)
-                )
         connection.execute("COMMIT")
     except BaseException:
         if connection.in_transaction:
@@ -452,9 +423,8 @@ def doc_decode(encoded: dict[int | str, Any]) -> dict[int | str, Any]:
     refs: list[str] = []
     while len(refs) + 1 in encoded:
         text = encoded[len(refs) + 1]
-        if not isinstance(text, str):
+        if not isinstance(text, str) or not _REFERENCE_STRING.fullmatch(text):
             raise ValueError(i18n("substrate.header_ref", len(refs) + 1))
-        ref_split(text)
         refs.append(text)
     normal: dict[int | str, Any] = {0: header}
     for key, value in encoded.items():
@@ -485,7 +455,9 @@ class Store:
         if name in self._connections:
             raise RuntimeError(i18n("substrate.db_open", name))
         connection = sqlite3.connect(
-            _uri_make(self._path_find(name)), uri=True, isolation_level=None
+            _uri_make(self._path_find(name), _QUERY_WRITE),
+            uri=True,
+            isolation_level=None,
         )
         try:
             _pragmas_set(connection)
@@ -509,14 +481,17 @@ class Store:
     def db_list(self) -> list[str]:
         return sorted(self._connections)
 
-    # Creates and opens a new database. Raises when the file exists.
+    # Creates and opens a new database, `seq` 0. Raises when the file exists.
     def db_create(self, name: str) -> None:
         _name_check(name)
+        path = self._path_find(name)
         flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
-        os.close(os.open(self._path_find(name), flags, _DB_MODE))
-        self.db_open(name)
-        connection = self._connections[name]
-        self.transaction_run(lambda: self._seq_count(connection))
+        os.close(os.open(path, flags, _DB_MODE))
+        try:
+            self.db_open(name)
+        except BaseException:
+            os.remove(path)
+            raise
 
     # Closes and deletes a database and its cache files.
     def db_drop(self, name: str) -> None:
@@ -636,13 +611,13 @@ class Store:
             lambda: self._turns_compact(connection, scene, through, summary)
         )
 
-    # Runs the statements in order. Writing `_` tables or `_settings` raises.
+    # Runs the statements in order, in the running transaction.
     def sql_run(
         self, db: str, statements: list[SqlStatement]
     ) -> list[SqlResult]:
         connection = self._connection_get(db)
         return self.transaction_run(
-            lambda: self._statements_run(db, connection, statements)
+            lambda: self._statements_run(connection, statements)
         )
 
     # `Connection.serialize` bytes, and the database's `seq`.
@@ -654,15 +629,18 @@ class Store:
     def db_restore(self, db: str, data: bytes | str) -> int:
         _name_check(db)
         if isinstance(data, str):
-            source = data
+            self._file_replace(db, data)
         else:
-            descriptor, source = tempfile.mkstemp(dir=self._root)
-            with os.fdopen(descriptor, "wb") as file:
-                file.write(data)
-        if db in self._connections:
-            self.db_close(db)
-        self._wal_check(db)
-        os.replace(source, self._path_find(db))
+            temporary = self._path_find(db) + _RESTORE_SUFFIX
+            flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+            descriptor = os.open(temporary, flags, _DB_MODE)
+            try:
+                with os.fdopen(descriptor, "wb") as file:
+                    file.write(data)
+                self._file_replace(db, temporary)
+            except BaseException:
+                os.remove(temporary)
+                raise
         return self.db_open(db)
 
     # Applies one forwarded operation when `since` is the database's `seq`.
@@ -741,6 +719,14 @@ class Store:
         if os.path.exists(self._path_find(name) + "-wal"):
             raise RuntimeError(i18n("substrate.wal_left", name))
 
+    # Checks a file's tables, then closes the database and renames it over.
+    def _file_replace(self, db: str, source: str) -> None:
+        _schema_verify(source)
+        if db in self._connections:
+            self.db_close(db)
+        self._wal_check(db)
+        os.replace(source, self._path_find(db))
+
     # The cache file of a hash.
     def _cache_path(self, sha256: bytes) -> str:
         return os.path.join(self._cache, sha256.hex())
@@ -767,7 +753,7 @@ class Store:
                 named |= _hashes_read(self._connections[name])
                 continue
             connection = sqlite3.connect(
-                _uri_make(self._path_find(name)),
+                _uri_make(self._path_find(name), _QUERY_WRITE),
                 uri=True,
                 isolation_level=None,
             )
@@ -783,7 +769,11 @@ class Store:
             return
         named = self._hashes_named()
         for name in sorted(hashes - named):
-            os.remove(os.path.join(self._cache, name))
+            # An absent file meets the removal, and a read of it still fails.
+            try:
+                os.remove(os.path.join(self._cache, name))
+            except FileNotFoundError:
+                pass
 
     # Writes a row, its cache file first, and says whether the row changed.
     def _row_write(
@@ -909,33 +899,23 @@ class Store:
         )
         return _seq_bump(connection)
 
-    # Runs statements under the authorizer and counts a change of any row.
+    # Runs the statements and counts a change of any row or of the schema.
     def _statements_run(
-        self,
-        db: str,
-        connection: sqlite3.Connection,
-        statements: list[SqlStatement],
+        self, connection: sqlite3.Connection, statements: list[SqlStatement]
     ) -> list[SqlResult]:
         self._transaction_join(connection)
         changes = connection.total_changes
         schema = _schema_read(connection)
         results: list[SqlResult] = []
-        if db == _SETTINGS_DB:
-            connection.set_authorizer(_settings_authorize)
-        else:
-            connection.set_authorizer(_tables_authorize)
-        try:
-            for statement in statements:
-                before = connection.total_changes
-                cursor = connection.execute(statement.sql, statement.params)
-                rows = [list(row) for row in cursor.fetchall()]
-                columns: list[str] = []
-                if cursor.description is not None:
-                    columns = [column[0] for column in cursor.description]
-                changed = connection.total_changes - before
-                results.append(SqlResult(columns, rows, changed))
-        finally:
-            connection.set_authorizer(None)
+        for statement in statements:
+            before = connection.total_changes
+            cursor = connection.execute(statement.sql, statement.params)
+            rows = [list(row) for row in cursor.fetchall()]
+            columns: list[str] = []
+            if cursor.description is not None:
+                columns = [column[0] for column in cursor.description]
+            changed = connection.total_changes - before
+            results.append(SqlResult(columns, rows, changed))
         if (
             connection.total_changes != changes
             or _schema_read(connection) != schema
@@ -949,11 +929,6 @@ class Store:
     ) -> tuple[bytes, int]:
         self._transaction_join(connection)
         return connection.serialize(), _seq_read(connection)
-
-    # Counts one modifying operation inside the transaction.
-    def _seq_count(self, connection: sqlite3.Connection) -> int:
-        self._transaction_join(connection)
-        return _seq_bump(connection)
 
     # Runs a forwarded operation in a transaction when `since` is the `seq`.
     def _since_apply(
@@ -1006,7 +981,7 @@ class Store:
             type, since, db, lambda: self.doc_put(db, id, body)
         )
 
-    # Applies `db.create`: `db`, which has `seq` 0 before it exists.
+    # Applies `db.create`: `db`, which has `seq` 0 before it exists and after.
     def _create_apply(self, type: str, since: int, *, db: str) -> int:
         _since_check(type, since, 0, db)
         self.db_create(db)

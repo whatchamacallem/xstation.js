@@ -9,10 +9,9 @@
 // the one copy it holds is the key that `hello` brings, in memory only.
 
 namespace provider {
-  // The line types, the request parts, the header names and the tool type.
+  // The line type, the request parts, the header names and the tool type.
   const constants = Object.freeze({
     request_type: "http.request",
-    error_type: "error",
     method: "POST",
     chat_path: "/chat/completions",
     image_path: "/images/generations",
@@ -225,11 +224,6 @@ namespace provider {
   function body_read(reply: lines.Line): Fields {
     const type = jslb.field_get(reply[0], "type");
     const payload = jslb.payload_of(reply);
-    if (type === constants.error_type) {
-      throw new Error(
-        i18n("provider.reply_error", text_read(payload, "message", "error")),
-      );
-    }
     if (type !== constants.request_type) {
       return utility.fail_now(
         i18n("provider.reply_type", type, constants.request_type),
@@ -305,7 +299,7 @@ namespace provider {
     };
   }
 
-  // Converts MCP tools to function tools, keeping the order.
+  // Converts MCP tools to function tools, keeping the order and dotted names.
   export function tools_convert(tools: mcp.Tool[]): FunctionTool[] {
     return tools.map(
       (tool: mcp.Tool): FunctionTool => ({
@@ -322,11 +316,8 @@ namespace provider {
   // The provider key as set, or `undefined` before that.
   let key_stored: string | undefined = undefined;
 
-  // Keeps the provider key in memory. It can be set once.
+  // Keeps the provider key in memory, replacing the one set before.
   export function key_set(key: string): void {
-    if (key_stored !== undefined) {
-      throw new Error(i18n("provider.key_twice"));
-    }
     key_stored = key;
   }
 

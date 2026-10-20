@@ -6,6 +6,7 @@
 # requests and notifications, and the reply, error and id lines it builds.
 
 import dispatch, jslb, unittest, unittest.mock
+from i18n import i18n
 from typing import Any
 
 # The dotted name of the handler table that the tests patch.
@@ -25,6 +26,12 @@ _STACK_HEAD = "Traceback (most recent call last):"
 
 # The last line of the stack of the error that the tests raise.
 _STACK_TAIL = "ValueError: boom"
+
+# Ids a request must not carry: below 1, a bool, a float, text, a list.
+_IDS_REFUSED = (0, -1, True, 1.0, "1", [1])
+
+# Versions a line must not carry: a bool, a float, text, a list, null.
+_VERSIONS_REFUSED = (True, 1.0, "1", [1], None)
 
 
 # Builds a line with no blobs: the type, the header fields and the payload.
@@ -76,8 +83,11 @@ class TestRegistration(IsolatedCase):
     def test_twice_raises(self) -> None:
         first = _handler_make()
         dispatch.handler_register("kv.get", 0, first)
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as context:
             dispatch.handler_register("kv.get", 0, _handler_make())
+        self.assertEqual(
+            str(context.exception), i18n("dispatch.handler_twice", "kv.get", 0)
+        )
         dispatch.line_dispatch(_line_make("kv.get"))
         first.assert_called_once()
 
@@ -118,10 +128,53 @@ class TestDispatch(IsolatedCase):
     # A type or a version that nothing registered raises.
     def test_pair_unknown(self) -> None:
         dispatch.handler_register("kv.get", 0, _handler_make())
-        with self.assertRaises(LookupError):
+        with self.assertRaises(LookupError) as context:
             dispatch.line_dispatch(_line_make("kv.put"))
-        with self.assertRaises(LookupError):
+        self.assertEqual(
+            str(context.exception),
+            i18n("dispatch.handler_unknown", "kv.put", 0),
+        )
+        with self.assertRaises(LookupError) as context:
             dispatch.line_dispatch(_line_make("kv.get", version=1))
+        self.assertEqual(
+            str(context.exception),
+            i18n("dispatch.handler_unknown", "kv.get", 1),
+        )
+
+    # An id that is not an integer of at least 1 raises before any call.
+    def test_id_refused(self) -> None:
+        handler = _handler_make()
+        dispatch.handler_register("kv.get", 0, handler)
+        for value in _IDS_REFUSED:
+            with self.subTest(value=value):
+                line = _line_make("kv.get")
+                line[0]["i"] = value
+                with self.assertRaises(ValueError) as context:
+                    dispatch.line_dispatch(line)
+                self.assertEqual(
+                    str(context.exception),
+                    i18n("dispatch.id_refused", "kv.get", repr(value)),
+                )
+        handler.assert_not_called()
+
+    # A version that is not an integer raises before any call.
+    def test_version_refused(self) -> None:
+        first = _handler_make()
+        second = _handler_make()
+        dispatch.handler_register("kv.get", 0, first)
+        dispatch.handler_register("kv.get", 1, second)
+        for value in _VERSIONS_REFUSED:
+            with self.subTest(value=value):
+                line = _line_make("kv.get")
+                line[0]["v"] = value
+                with self.assertRaises(ValueError) as context:
+                    dispatch.line_dispatch(line)
+                self.assertEqual(
+                    str(context.exception),
+                    i18n("dispatch.version_refused", "kv.get", repr(value)),
+                )
+        first.assert_not_called()
+        second.assert_not_called()
 
     # An exception from a handler propagates unchanged.
     def test_handler_raises(self) -> None:
@@ -156,8 +209,12 @@ class TestDispatch(IsolatedCase):
     # A request whose handler returns nothing raises.
     def test_request_none(self) -> None:
         dispatch.handler_register("kv.get", 0, _handler_make())
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as context:
             dispatch.line_dispatch(_line_make("kv.get", request_id=7))
+        self.assertEqual(
+            str(context.exception),
+            i18n("dispatch.request_unanswered", "kv.get", 0, 7),
+        )
 
     # A notification whose handler returns nothing returns nothing.
     def test_notification_none(self) -> None:
@@ -169,8 +226,12 @@ class TestDispatch(IsolatedCase):
     def test_notification_reply(self) -> None:
         reply = _line_make("verbose.put")
         dispatch.handler_register("verbose.put", 0, _handler_make(reply))
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as context:
             dispatch.line_dispatch(_line_make("verbose.put"))
+        self.assertEqual(
+            str(context.exception),
+            i18n("dispatch.notification_replied", "verbose.put", 0),
+        )
 
 
 # Tests the reply line a handler builds.

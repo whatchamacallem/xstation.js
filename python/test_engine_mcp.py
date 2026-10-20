@@ -9,6 +9,8 @@
 # nothing replied when it gives none. No process is started.
 
 import dispatch, engine_mcp, jslb, json, mcp, os, unittest, unittest.mock
+from collections.abc import Callable
+from i18n import i18n
 from typing import Any
 
 # The checkout's top directory, above this file's `python/`.
@@ -19,6 +21,12 @@ _TOOLS_PATH = os.path.join(_ROOT_PATH, "API", "mcp", "tools.json")
 
 # The transcript of a new tab, which holds the `mcp` lines of the server.
 _TRANSCRIPT_PATH = os.path.join(_ROOT_PATH, "DATA", "01_boot.txt")
+
+# The start of the JSON text of a transcript line of the type `mcp`.
+_MCP_START = '{"0":{"t":"mcp"'
+
+# The two directions of the transcript between the AI worker and the server.
+_DIRECTIONS = ("AI->SERVER", "SERVER->AI")
 
 # The dotted name of the handler table that the tests patch.
 _HANDLERS_TARGET = "dispatch._HANDLERS"
@@ -90,15 +98,13 @@ def _transcript_read() -> list[tuple[str, int | None, dict[str, Any]]]:
     exchange: list[tuple[str, int | None, dict[str, Any]]] = []
     with open(_TRANSCRIPT_PATH, encoding="utf-8") as file:
         for line in file.read().splitlines():
-            if line.startswith("#"):
+            if _MCP_START not in line:
                 continue
             _, direction, text = line.split(" ", 2)
-            if direction not in ("AI->SERVER", "SERVER->AI"):
+            if direction not in _DIRECTIONS:
                 continue
             message: dict[str, Any] = json.loads(text)
             header: dict[str, Any] = message.pop("0")
-            if header["t"] != "mcp":
-                continue
             number = header.get("r" if direction == "SERVER->AI" else "i")
             exchange.append((direction, number, message))
     return exchange
@@ -113,6 +119,14 @@ class IsolatedCase(unittest.TestCase):
         for patcher in (table, state):
             patcher.start()
             self.addCleanup(patcher.stop)
+
+    # Calls `fn` and checks the type and the text of what it raises.
+    def raise_check(
+        self, kind: type[Exception], message: str, fn: Callable[[], object]
+    ) -> None:
+        with self.assertRaises(kind) as caught:
+            fn()
+        self.assertEqual(str(caught.exception), message)
 
 
 # Tests the exchange with a real MCP server.
@@ -177,8 +191,11 @@ class TestExchange(IsolatedCase):
     def test_request_pushed(self) -> None:
         engine_mcp.handlers_register(_server_make())
         line = _line_make(None, jsonrpc="2.0", id=1, method="ping")
-        with self.assertRaises(ValueError):
-            dispatch.line_dispatch(line)
+        self.raise_check(
+            ValueError,
+            i18n("dispatch.notification_replied", "mcp", 0),
+            lambda: dispatch.line_dispatch(line),
+        )
 
 
 # Tests how the message reaches the server and the response comes back.
@@ -218,11 +235,17 @@ class TestPass(IsolatedCase):
     # Called before the registration the handler raises.
     def test_unregistered(self) -> None:
         line = _line_make(None, **_MESSAGES[3])
-        with self.assertRaises(RuntimeError):
-            engine_mcp.mcp_message(line, **_MESSAGES[3])
+        self.raise_check(
+            RuntimeError,
+            i18n("engine_mcp.not_registered"),
+            lambda: engine_mcp.mcp_message(line, **_MESSAGES[3]),
+        )
 
     # A second registration raises, as the dispatcher refuses the pair.
     def test_register_twice(self) -> None:
         engine_mcp.handlers_register(_server_make())
-        with self.assertRaises(ValueError):
-            engine_mcp.handlers_register(_server_make())
+        self.raise_check(
+            ValueError,
+            i18n("dispatch.handler_twice", "mcp", 0),
+            lambda: engine_mcp.handlers_register(_server_make()),
+        )

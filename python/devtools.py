@@ -10,10 +10,13 @@
 # `powershell.exe` carries the WebSocket over its stdin and stdout. Standard
 # library only, and `powershell.exe` and `wslpath` are the programs it starts.
 
-import base64, functools, hashlib, json, os, select, shutil, subprocess, time
-import types, uuid
+import base64, errno, functools, hashlib, json, os, select, shutil
+import subprocess, time, types, uuid
 from collections.abc import Callable
-from typing import IO, Any, NamedTuple, Self
+from typing import IO, Any, NamedTuple, Self, cast
+
+# The public name of this module, as its stub declares it.
+__all__ = ["Browser"]
 
 # Where to look for a browser, in order: a Windows variable and a path in it.
 _BROWSER_LOCATIONS: tuple[tuple[str, str], ...] = (
@@ -24,13 +27,13 @@ _BROWSER_LOCATIONS: tuple[tuple[str, str], ...] = (
     ("ProgramFiles", r"Microsoft\Edge\Application\msedge.exe"),
 )
 
-# The longest a command started here may run before it fails.
+# The longest a command started here may run, a default chosen by its writer.
 _COMMAND_WAIT_SECONDS = 60
 
 # The file the browser writes its DevTools port and path to, in the profile.
 _DEVTOOLS_PORT_FILE_NAME = "DevToolsActivePort"
 
-# Chrome can take more than 10 seconds to start on a new profile.
+# Seconds for the browser to serve DevTools, a default chosen by its writer.
 _DEVTOOLS_WAIT_SECONDS = 60
 
 # Prints the Windows variables the browser is found from, as JSON.
@@ -45,14 +48,25 @@ foreach ($name_ in 'LOCALAPPDATA', 'ProgramFiles', 'ProgramFiles(x86)',
 ConvertTo-Json $values_ -Compress
 """
 
-# How often the profile is looked at for the DevTools port file.
+# How often a polling wait looks again, a default chosen by its writer.
 _POLL_SECONDS = 0.1
 
 # The program that runs scripts on Windows, looked up on the PATH.
 _POWERSHELL_NAME = "powershell.exe"
 
+# The errors of removing a file that a browser helper still holds open.
+_PROFILE_BUSY_ERRNOS = frozenset(
+    (errno.EACCES, errno.EBUSY, errno.ENOTEMPTY, errno.EPERM)
+)
+
 # The start of the name of the profile folder each run makes.
 _PROFILE_PREFIX = "xsjs_devtools-"
+
+# Seconds for the profile to become removable, a default chosen by its writer.
+_PROFILE_REMOVE_SECONDS = 10
+
+# The navigation error while WSL has not yet forwarded a new listener.
+_REFUSED_ERROR_TEXT = "net::ERR_CONNECTION_REFUSED"
 
 # `C#` reading `$port_`, a thread each way, as PowerShell's CopyToAsync hangs.
 _RELAY_SCRIPT = r"""
@@ -92,8 +106,11 @@ public static class XsjsDevToolsRelay {
 [XsjsDevToolsRelay]::Run($port_)
 """
 
-# The longest the client waits for one answer, one event or one page load.
+# Seconds for one answer, event or page load, a default chosen by its writer.
 _REPLY_WAIT_SECONDS = 60
+
+# Seconds to retry a refused navigation, a default chosen by its writer.
+_SERVER_WAIT_SECONDS = 60
 
 # Stops each process named `$name_` with `$profile_` in its command line.
 _STOP_SCRIPT = r"""
@@ -114,11 +131,11 @@ while ($true) {
     if ([DateTime]::UtcNow -gt $end_) {
         throw "$name_ still runs on $profile_ after $seconds_ s"
     }
-    Start-Sleep -Milliseconds 100
+    Start-Sleep -Milliseconds $milliseconds_
 }
 """
 
-# The longest a stopped browser or relay may take to be gone.
+# Seconds for a stopped process to be gone, a default chosen by its writer.
 _STOP_WAIT_SECONDS = 5
 
 # What RFC 6455 appends to the key before it is hashed into the accept value.
@@ -360,9 +377,8 @@ class Browser:
             stdout=subprocess.PIPE,
             cwd=temp_path,
         )
-        relay_input = self.relay_process.stdin
-        relay_output = self.relay_process.stdout
-        assert relay_input is not None and relay_output is not None
+        relay_input = cast(IO[bytes], self.relay_process.stdin)
+        relay_output = cast(IO[bytes], self.relay_process.stdout)
         self.client = ProtocolClient(
             functools.partial(pipe_read, relay_output.fileno()),
             functools.partial(stream_write, relay_input),
@@ -380,7 +396,8 @@ class Browser:
             f"stopping {self.executable_name}",
             f"$name_ = '{self.executable_name}'\n"
             f"$profile_ = '{self.profile_name}'\n"
-            f"$seconds_ = {_STOP_WAIT_SECONDS}\n" + _STOP_SCRIPT,
+            f"$seconds_ = {_STOP_WAIT_SECONDS}\n"
+            f"$milliseconds_ = {round(_POLL_SECONDS * 1000)}\n" + _STOP_SCRIPT,
         )
         self.process_wait(self.executable_name, self.browser_process)
 
@@ -396,7 +413,7 @@ class Browser:
 
     # Returns the DevTools port and path once the browser has written them.
     def devtools_wait(self) -> EndpointAddress:
-        assert self.browser_process is not None, "the browser never started"
+        process = cast(subprocess.Popen[bytes], self.browser_process)
         port_path = os.path.join(self.profile_path, _DEVTOOLS_PORT_FILE_NAME)
         timer = WaitTimer(
             f"{self.executable_name} to serve DevTools", _DEVTOOLS_WAIT_SECONDS
@@ -407,9 +424,10 @@ class Browser:
                     text = port_file.read()
             except FileNotFoundError:
                 text = ""
-            if text.strip() != "":
+            # Fewer than two fields is a file the browser is still writing.
+            if len(text.split()) >= 2:
                 return address_parse(text)
-            exit_code = self.browser_process.poll()
+            exit_code = process.poll()
             if exit_code is not None:
                 raise RuntimeError(
                     f"{self.executable_name} exited with {exit_code} before"
@@ -419,16 +437,20 @@ class Browser:
 
     # Closes the page, so no more calls to it work.
     def page_close(self) -> None:
-        closed = self.client_get().method_call(
+        self.client_get().method_call(
             "Target.closeTarget", {"targetId": self.target_id}
         )
-        if not closed["success"]:
-            raise RuntimeError("DevTools didn't close the page")
 
-    # Navigates the page to the URL and returns once it has loaded.
+    # Navigates to the URL, again while refused, and returns once it loads.
     def page_open(self, url: str) -> None:
         client = self.client_get()
+        timer = WaitTimer(
+            f"{url} to accept connections", _SERVER_WAIT_SECONDS
+        )
         navigated = client.method_call("Page.navigate", {"url": url})
+        while navigated.get("errorText") == _REFUSED_ERROR_TEXT:
+            time.sleep(min(_POLL_SECONDS, timer.seconds_left()))
+            navigated = client.method_call("Page.navigate", {"url": url})
         if "errorText" in navigated:
             raise RuntimeError(f"{url}: {navigated['errorText']}")
         loader_id = navigated["loaderId"]
@@ -459,20 +481,30 @@ class Browser:
                 " to exit"
             ) from error
 
-    # Removes the profile once nothing of the browser holds it.
+    # Removes the profile, waiting while browser helpers still hold its files.
     def profile_remove(self) -> None:
-        if self.profile_path and os.path.isdir(self.profile_path):
-            shutil.rmtree(self.profile_path)
+        if not self.profile_path or not os.path.isdir(self.profile_path):
+            return
+        timer = WaitTimer(
+            f"{self.profile_path} to be removable", _PROFILE_REMOVE_SECONDS
+        )
+        while True:
+            try:
+                shutil.rmtree(self.profile_path)
+                return
+            except OSError as error:
+                if error.errno not in _PROFILE_BUSY_ERRNOS:
+                    raise
+                time.sleep(min(_POLL_SECONDS, timer.seconds_left()))
 
     # Ends the relay, which exits once its connection or its input ends.
     def relay_stop(self) -> None:
         process = self.relay_process
         if process is None:
             return
-        assert process.stdin is not None and process.stdout is not None
-        process.stdin.close()
+        cast(IO[bytes], process.stdin).close()
         self.process_wait(f"{_POWERSHELL_NAME} relaying DevTools", process)
-        process.stdout.close()
+        cast(IO[bytes], process.stdout).close()
 
     # Stops the browser and the relay, then removes the profile.
     def resources_release(self) -> None:

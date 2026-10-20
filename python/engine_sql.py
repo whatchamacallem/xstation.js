@@ -12,15 +12,15 @@ from i18n import i18n
 from typing import Any, cast
 
 
-# The state the registration sets, which is empty until then.
-class _State:
+# The store the registration sets, which is empty until then.
+class _StoreState:
     # Starts with no store.
     def __init__(self) -> None:
         self.store: substrate.Store | None = None
 
 
 # The one state of the module.
-_STATE = _State()
+_STATE = _StoreState()
 
 
 # Returns the store, raising before the handler is registered.

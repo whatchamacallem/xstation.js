@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the task manager in synchronous mode with port doubles: routing,
-// ids, replies, sleeps and wakes, faults, depth, blob moves and the verbose
-// sink.
+// Tests of the task manager with port doubles: routing, ids, replies, sleeps
+// and wakes, faults, depth, blob moves, the bound on the bytes it holds, and
+// the verbose sink and its batches.
 
 namespace test_queue {
   // The type prefix the tests own and a type that no owner table matches.
@@ -137,12 +137,15 @@ namespace test_queue {
       verbose_ring: 1000,
       verbose_forward,
       line_max: 1048576,
-      blob_max: 1073741824,
+      blob_max: 10485760,
+      message_max: 10485760,
+      queue_max: 104857600,
       overflow_bytes: 131072,
       chunk_bytes: 1048576,
       srv_buf_size: 1048576,
       media_db_bytes: 268435456,
       files_browser_bytes: 1073741824,
+      db_soft_bytes: 1073741824,
       turn_compact_tokens: 65536,
       long_task_ms: 5,
       provider: {
@@ -155,14 +158,54 @@ namespace test_queue {
     };
   }
 
-  // The reader of a settings store holding those settings.
+  // The reader of a settings store holding the settings given.
+  function reader_from(value: settings.Settings): (id: string) => unknown {
+    const store = new settings.ValueStore();
+    store.value_set(value);
+    return (id: string) => store.value_get(id);
+  }
+
+  // The reader of settings with `debug` and `verbose_forward` as given.
   function reader_make(
     debug: boolean,
     verbose_forward: boolean,
   ): (id: string) => unknown {
-    const store = new settings.ValueStore();
-    store.value_set(settings_make(debug, verbose_forward));
-    return (id: string) => store.value_get(id);
+    return reader_from(settings_make(debug, verbose_forward));
+  }
+
+  // A bench whose queue holds at most the bytes given, its `queue_max`.
+  function bench_bounded(far: queue.OwnerTable, limit: number): Bench {
+    const bench = bench_make(owners_make({ "verbose.": "server", ...far }));
+    const value = settings_make(false, false);
+    value.queue_max = limit;
+    bench.tasks.sink_attach(() => {}, reader_from(value));
+    return bench;
+  }
+
+  // The bytes of the JSON text of a value in `UTF-8`.
+  function text_bytes(value: unknown): number {
+    return utility.utf8_encode(utility.json_text(value)).length;
+  }
+
+  // A `verbose.put` of the thread with no lines, as a batch builds it.
+  function put_empty(thread: "ui" | "ai"): lines.Line {
+    const header = jslb.header_make("verbose.put", { full: true });
+    return jslb.line_make(header, [], { thread, lines: [] });
+  }
+
+  // The newest verbose line of this thread, none when its ring is empty.
+  function mark_take(): lines.VerboseLine | undefined {
+    return verbose.history_get(1).at(0);
+  }
+
+  // The texts of the verbose lines of this thread written after the mark.
+  function texts_after(mark: lines.VerboseLine | undefined): string[] {
+    const history = verbose.history_get(Number.MAX_SAFE_INTEGER);
+    const start = mark === undefined ? 0 : history.indexOf(mark) + 1;
+    if (mark !== undefined && start === 0) {
+      throw new Error("The mark has left the verbose ring.");
+    }
+    return history.slice(start).map((line) => line.text);
   }
 
   // A ring of ten lines whose sink is the batch.
@@ -306,6 +349,30 @@ namespace test_queue {
       );
       this.assertEqual(own.message, i18n("queue.port_twice", "ai", "ai"));
     }
+
+    // A line whose owner is the port it came on throws and is not sent back.
+    test_forward_back(): void {
+      const far = type_fresh();
+      const bench = bench_make(owners_make({ [far]: "ui" }));
+      const line = line_build(far);
+      const error = thrown_get(() => bench.ui.line_send(line));
+      this.assertEqual(
+        error.message,
+        i18n("queue.forward_back", "ai", utility.json_text(line[0]), "ui"),
+      );
+      this.assertEqual(bench.ui.posted.length, 0);
+    }
+
+    // A thread port takes one receiver, and a second one throws.
+    test_thread_receiver(): void {
+      const channel = new MessageChannel();
+      const port = new queue.ThreadPort(channel.port1);
+      port.line_receive(() => {});
+      const twice = thrown_get(() => port.line_receive(() => {}));
+      this.assertEqual(twice.message, i18n("queue.receiver_twice"));
+      channel.port1.close();
+      channel.port2.close();
+    }
   }
 
   // Requests, their ids and the replies that answer them.
@@ -416,7 +483,10 @@ namespace test_queue {
       const later = thrown_get(() =>
         bench.ui.line_send(line_build(type_fresh())),
       );
-      this.assertEqual(later.message, i18n("queue.stopped", "ai"));
+      this.assertEqual(
+        later.message,
+        i18n("queue.stopped", "ai", thrown.message, thrown.stack),
+      );
       this.assertTrue(later.cause === thrown);
     }
 
@@ -686,7 +756,7 @@ namespace test_queue {
 
   // The synchronous mode: the same run twice, faults and the depth.
   export class TestSynchronousMode extends unittest.TestCase {
-    // The same inputs give the same posts and the same handler order twice.
+    // The same inputs give the same posts, handler order and log lines twice.
     test_run_twice(): void {
       const to_server = type_fresh();
       const to_ui = type_fresh();
@@ -715,8 +785,10 @@ namespace test_queue {
         return dispatch.task_sleep({ request: line }, [first, second], done);
       });
       const runs: string[] = [];
+      const logs: string[] = [];
       for (let index = 0; index < 2; index += 1) {
         bench = bench_make(owners);
+        const mark = mark_take();
         bench.ui.line_send(line_build(say, { id: 1 }, { text: "1" }));
         const request = bench.server.posted[0];
         bench.ui.line_send(dispatch.reply_make(bench.ui.posted[0], {}));
@@ -733,11 +805,13 @@ namespace test_queue {
         this.assertEqual(bench.ui.posted[1].count, 2);
         this.assertEqual(bench.tasks.depth(), 0);
         runs.push(bench.trace.join("\n"));
+        logs.push(texts_after(mark).join("\n"));
       }
       this.assertEqual(runs[0], runs[1]);
+      this.assertEqual(logs[0], logs[1]);
     }
 
-    // A handler that throws stops the queue, and later inputs throw too.
+    // A handler that throws stops the queue, idle, and later inputs throw too.
     test_handler_throws(): void {
       const bench = bench_make(owners_make({}));
       const failure = new Error("The handler failed.");
@@ -746,9 +820,28 @@ namespace test_queue {
       });
       const thrown = thrown_get(() => bench.ui.line_send(line_build(boom)));
       this.assertTrue(thrown === failure);
+      this.assertEqual(bench.tasks.depth(), 0);
       const later = thrown_get(() => bench.ui.line_send(line_build(boom)));
-      this.assertEqual(later.message, i18n("queue.stopped", "ai"));
+      this.assertEqual(
+        later.message,
+        i18n("queue.stopped", "ai", failure.message, failure.stack),
+      );
       this.assertTrue(later.cause === failure);
+    }
+
+    // Without synchronous mode a line from a port waits for a later step.
+    test_step_waits(): void {
+      const seen: unknown[] = [];
+      const note = handler_fresh((line) => {
+        seen.push(line.n);
+        return undefined;
+      });
+      const tasks = new queue.TaskQueue("ai", owners_make({}), false);
+      const ui = new PortDouble("ui", []);
+      tasks.port_add("ui", ui);
+      ui.line_send(line_build(note, {}, { n: 1 }));
+      this.assertEqual(seen.length, 0);
+      this.assertEqual(tasks.depth(), 1);
     }
 
     // The depth counts the tasks waiting, the one running and the sleeping.
@@ -798,7 +891,6 @@ namespace test_queue {
       });
       bench.ui.line_send(line_build(start));
       this.assertEqual(data.byteLength, 0);
-      this.assertTrue(blob.d === data);
       this.assertEqual(bytes_of(line[1]).byteLength, 0);
       this.assertEqual(field_of(line, "id"), 1);
       const posted = bench.server.posted[0];
@@ -830,6 +922,99 @@ namespace test_queue {
       this.assertEqual(transfer.length, 1);
       this.assertTrue(moved_head.buffer === transfer[0]);
       this.assertTrue(moved_tail.buffer === transfer[0]);
+    }
+  }
+
+  // The bound `queue_max` puts on the bytes of the lines a queue holds.
+  export class TestQueueLimit extends unittest.TestCase {
+    // A line counts its JSON text in `UTF-8` without blob data, then sizes.
+    test_line_measured(): void {
+      const note = handler_fresh(() => undefined);
+      const bench = bench_bounded({}, 1);
+      const accent = String.fromCodePoint(0xe9);
+      const data = Uint8Array.from([1, 2, 3, 4, 5, 6]);
+      const header = jslb.header_make(note);
+      const line = jslb.line_make(header, [jslb.blob_make(data)], {
+        text: accent,
+      });
+      const text =
+        `{"0":{"t":"${note}","b":1},"1":{"s":6},` + `"text":"${accent}"}`;
+      const bytes = utility.utf8_encode(text).length + data.length;
+      this.assertEqual(bytes, text.length + 1 + data.length);
+      const error = thrown_get(() => bench.ui.line_send(line));
+      const header_text = utility.json_text(line[0]);
+      this.assertEqual(
+        error.message,
+        i18n("queue.queue_over", "ai", header_text, bytes, 0, 1),
+      );
+      this.assertEqual(bench.tasks.depth(), 0);
+    }
+
+    // A line filling the bound is held, then freed, one byte more is not.
+    test_limit_exact(): void {
+      const seen: unknown[] = [];
+      const note = handler_fresh((line) => {
+        seen.push(line.text);
+        return undefined;
+      });
+      const fits = line_build(note, {}, { text: "ab" });
+      const limit = text_bytes(fits);
+      const bench = bench_bounded({}, limit);
+      bench.ui.line_send(fits);
+      bench.ui.line_send(line_build(note, {}, { text: "cd" }));
+      this.assertEqual(seen.join(","), "ab,cd");
+      const over = line_build(note, {}, { text: "efg" });
+      const error = thrown_get(() => bench.ui.line_send(over));
+      const over_text = utility.json_text(over[0]);
+      this.assertEqual(
+        error.message,
+        i18n("queue.queue_over", "ai", over_text, limit + 1, 0, limit),
+      );
+      const later = thrown_get(() => bench.ui.line_send(fits));
+      this.assertEqual(
+        later.message,
+        i18n("queue.stopped", "ai", error.message, error.stack),
+      );
+      this.assertTrue(later.cause === error);
+      this.assertEqual(seen.join(","), "ab,cd");
+    }
+
+    // A reply stays held until its wake runs, and then its bytes are free.
+    test_replies_held(): void {
+      const far = type_fresh();
+      const seen: unknown[] = [];
+      const note = handler_fresh((line) => {
+        seen.push(line.text);
+        return undefined;
+      });
+      const extra = line_build(note, {}, { text: "held back" });
+      const first_reply = dispatch.reply_make(line_build(far, { id: 1 }), {});
+      const held = text_bytes(first_reply);
+      const limit = held + text_bytes(extra) - 1;
+      let bench = bench_bounded({ [far]: "server" }, limit);
+      const wake = handler_fresh(() => undefined);
+      const start = handler_fresh(() => {
+        const first = bench.tasks.task_submit(line_build(far));
+        const second = bench.tasks.task_submit(line_build(far));
+        return dispatch.task_sleep(null, [first, second], wake);
+      });
+      bench.ui.line_send(line_build(start));
+      bench.server.line_send(dispatch.reply_make(bench.server.posted[0], {}));
+      const error = thrown_get(() => bench.ui.line_send(extra));
+      const extra_text = utility.json_text(extra[0]);
+      const extra_bytes = text_bytes(extra);
+      this.assertEqual(
+        error.message,
+        i18n("queue.queue_over", "ai", extra_text, extra_bytes, held, limit),
+      );
+      bench = bench_bounded({ [far]: "server" }, limit);
+      bench.ui.line_send(line_build(start));
+      for (const request of bench.server.posted) {
+        bench.server.line_send(dispatch.reply_make(request, {}));
+      }
+      this.assertEqual(bench.tasks.depth(), 0);
+      bench.ui.line_send(extra);
+      this.assertEqual(seen.join(","), "held back");
     }
   }
 
@@ -891,6 +1076,50 @@ namespace test_queue {
       this.assertEqual(texts.join(","), "before,sending,after");
     }
 
+    // The kept lines go out in order as `verbose.put` lines below `line_max`.
+    test_batch_split(): void {
+      const value = settings_make(true, true);
+      const batch = new queue.VerboseBatch("ai", reader_from(value));
+      const ring = ring_make(batch);
+      for (const text of ["a", "b", "c", "d", "e"]) {
+        ring.log(2, text);
+      }
+      const [first, second] = ring.history_get(5);
+      const empty = text_bytes(put_empty("ai"));
+      const pair = empty + text_bytes(first) + 1 + text_bytes(second);
+      value.line_max = pair + 1;
+      const posted = batch_take(batch);
+      const texts = posted.map((line) => texts_of(line));
+      this.assertEqual(texts.join(" "), "a,b c,d e");
+      for (const line of posted) {
+        this.assertTrue(text_bytes(line) < value.line_max);
+      }
+      this.assertEqual(text_bytes(posted[0]), pair);
+    }
+
+    // A line too long for a `verbose.put` of its own throws, and nothing goes.
+    test_entry_over(): void {
+      const value = settings_make(true, true);
+      const batch = new queue.VerboseBatch("ui", reader_from(value));
+      const ring = ring_make(batch);
+      ring.log(2, "a");
+      ring.log(2, "a longer line");
+      const [longer] = ring.history_get(1);
+      const bytes = text_bytes(put_empty("ui")) + text_bytes(longer);
+      value.line_max = bytes;
+      const posted: lines.Line[] = [];
+      const error = thrown_get(() =>
+        batch.batch_send((line) => {
+          posted.push(line);
+        }),
+      );
+      this.assertEqual(
+        error.message,
+        i18n("queue.entry_over", "ui", bytes, bytes),
+      );
+      this.assertEqual(posted.length, 0);
+    }
+
     // Only the threads `ui` and `ai` forward verbose lines.
     test_thread_refused(): void {
       const error = thrown_get(
@@ -931,6 +1160,32 @@ namespace test_queue {
       this.assertEqual(field_of(put, "id"), undefined);
       this.assertEqual(put.thread, "ui");
       this.assertEqual(texts_of(put), "before,during");
+    }
+
+    // A task that throws stops the queue with its verbose lines unsent.
+    test_fault_unsent(): void {
+      const owners: queue.OwnerTable = {
+        [constants.type_prefix]: "ui",
+        "verbose.": "ai",
+      };
+      const tasks = new queue.TaskQueue("ui", owners, true);
+      const ai = new PortDouble("ai", []);
+      tasks.port_add("ai", ai);
+      const ring = new verbose.LineRing(() => 10);
+      tasks.sink_attach(
+        (fn) => {
+          ring.sink_set(fn);
+        },
+        reader_make(true, true),
+      );
+      const failure = new Error("The handler failed.");
+      const boom = handler_fresh(() => {
+        ring.log(2, "during");
+        throw failure;
+      });
+      const thrown = thrown_get(() => ai.line_send(line_build(boom)));
+      this.assertTrue(thrown === failure);
+      this.assertEqual(ai.posted.length, 0);
     }
 
     // A second sink, or a sink where the thread owns `verbose.put`, throws.

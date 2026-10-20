@@ -99,7 +99,7 @@ class TestLookup(unittest.TestCase):
     def test_braces_literal(self) -> None:
         self.assertEqual(i18n.i18n("t.literal"), _TEST_STRINGS["t.literal"])
         self.assertEqual(i18n.i18n("t.mixed", "x"), "{a} x {}")
-        self.assertEqual(i18n.i18n("t.mixed", "{0}"), "{a} {0} {}")
+        self.assertEqual(i18n.i18n("t.two", "{1}", "b"), "{1} then b")
 
 
 # Tests the real strings file and the names the sources look up in it.

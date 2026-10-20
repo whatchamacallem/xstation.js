@@ -10,11 +10,44 @@ namespace error_overlay {
   const constants = Object.freeze({
     reload_button: "<button onclick=\"location.reload()\">Reload</button>",
     resource_failure: "Failed to load ",
+    address_names: Object.freeze(["src", "href"]),
+    address_missing: "Neither src nor href names what failed to load in ",
     stop_twice: "The stop function was registered twice",
   });
 
-  // What stopping the app means, set once by the page.
-  let stop_function: (() => void) | null = null;
+  // One fault screen: it shows the first fault and ignores later ones.
+  export class FaultScreen {
+    // What stopping the app means, set once by the page.
+    #stop_function: (() => void) | null = null;
+
+    // Whether a fault was shown, after which later faults are ignored.
+    #fault_shown = false;
+
+    // Registers what stopping the app means, once.
+    stop_register(fn: () => void): void {
+      if (this.#stop_function !== null) {
+        throw new Error(constants.stop_twice);
+      }
+      this.#stop_function = fn;
+    }
+
+    // Shows the first fault only, stops the app and offers Reload.
+    overlay_show(message: string, stack: string): void {
+      if (this.#fault_shown) {
+        return;
+      }
+      this.#fault_shown = true;
+      const pre = `<pre>${text_escape(message)}\n${text_escape(stack)}</pre>`;
+      document.write(pre + constants.reload_button);
+      document.close();
+      if (this.#stop_function !== null) {
+        this.#stop_function();
+      }
+    }
+  }
+
+  // The fault screen of this page.
+  const screen_page = new FaultScreen();
 
   // Tells whether this code runs in a worker, which has no document.
   function worker_inside(): boolean {
@@ -39,11 +72,16 @@ namespace error_overlay {
     return value instanceof Error ? (value.stack ?? "") : "";
   }
 
-  // Names the element that failed to load and the address it asked for.
+  // Names the element that failed to load and the one address it has.
   function resource_message(element: Element): string {
-    const address =
-      element.getAttribute("src") ?? element.getAttribute("href");
-    return `${constants.resource_failure}${element.localName} ${address}`;
+    for (const name of constants.address_names) {
+      const address = element.getAttribute(name);
+      if (address !== null) {
+        const failure = constants.resource_failure;
+        return `${failure}${element.localName} ${name}="${address}"`;
+      }
+    }
+    throw new Error(`${constants.address_missing}${element.localName}`);
   }
 
   // Shows a fault on the main thread, or posts it to the page from the worker.
@@ -86,20 +124,12 @@ namespace error_overlay {
 
   // Registers what stopping the app means, once.
   export function stop_register(fn: () => void): void {
-    if (stop_function !== null) {
-      throw new Error(constants.stop_twice);
-    }
-    stop_function = fn;
+    screen_page.stop_register(fn);
   }
 
-  // Replaces the screen with the fault, stops the app and offers Reload.
+  // Replaces the screen with the first fault, stops the app and offers Reload.
   export function overlay_show(message: string, stack: string): void {
-    const pre = `<pre>${text_escape(message)}\n${text_escape(stack)}</pre>`;
-    document.write(pre + constants.reload_button);
-    document.close();
-    if (stop_function !== null) {
-      stop_function();
-    }
+    screen_page.overlay_show(message, stack);
   }
 }
 Object.freeze(error_overlay);

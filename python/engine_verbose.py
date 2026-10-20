@@ -4,12 +4,13 @@
 #
 # The handlers of the `verbose.put` and `verbose.tail` lines: the lines of the
 # page threads go into the `_verbose` database in debug mode only, and the
-# last lines of the server's own ring go back on request.
+# last lines of a thread go back on request, the server's from its own ring
+# and those of a page thread from the database.
 
 import dispatch, jslb, verbose
 from i18n import i18n
 
-# The one thread whose ring the server holds, and so the only one it tails.
+# The thread whose lines the server's own ring holds.
 _SERVER_THREAD = "server"
 
 # The fields of a line from the page, and no others.
@@ -17,14 +18,14 @@ _LINE_FIELDS = {"at", "level", "text"}
 
 
 # The state the registration sets, which is empty until then.
-class _State:
+class _VerboseState:
     # Starts with no debug setting.
     def __init__(self) -> None:
         self.debug: bool | None = None
 
 
 # The one state of the module.
-_STATE = _State()
+_STATE = _VerboseState()
 
 
 # Raises unless the handlers are registered and debug mode is on.
@@ -55,17 +56,19 @@ def verbose_put(
     verbose.lines_put(thread, [_line_read(entry) for entry in lines])
 
 
-# Replies with the last `count` lines of the server's ring, oldest first.
+# Replies with the last `count` lines of the thread, oldest first.
 def verbose_tail(
     line: jslb.Object, *, thread: str, count: int
 ) -> jslb.Object:
-    if thread != _SERVER_THREAD:
-        raise ValueError(i18n("engine_verbose.thread_unknown", thread))
+    if thread == _SERVER_THREAD:
+        entries = verbose.history_get(count)
+    else:
+        entries = verbose.tail_get(thread, count)
     return dispatch.reply_make(
         line,
         lines=[
             {"at": entry.at, "level": entry.level, "text": entry.text}
-            for entry in verbose.history_get(count)
+            for entry in entries
         ],
     )
 

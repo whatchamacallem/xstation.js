@@ -3,12 +3,15 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests `doc.put` and `doc.head` through the dispatcher on a real store under
-# `build/`: a document put and its head read back, versions that never change,
-# bodies read off the wire with integer header keys, a stale `since`, bodies
-# the store refuses, and a recorded sequence replayed to a second store.
+# `build/`: the turn transcript's scene put and its head read back, versions
+# that never change, bodies read off the wire with integer header keys, a
+# stale `since`, bodies the store refuses, and a recorded sequence replayed to
+# a second store. A new database starts at `seq` 0.
 
 import dispatch, engine_doc, jslb, os, sqlite3, substrate, tempfile, unittest
 import unittest.mock
+from collections.abc import Callable
+from i18n import i18n
 from typing import Any
 
 # The checkout's build directory, where each test makes its scratch roots.
@@ -28,11 +31,20 @@ _OVERFLOW_BYTES = 131072
 # The `line_max` of the settings, 1 MiB.
 _LINE_MAX = 1048576
 
-# The `blob_max` of the settings, 1 GiB.
-_BLOB_MAX = 1073741824
+# The `blob_max` of the settings, 10 MiB.
+_BLOB_MAX = 10485760
+
+# The `message_max` of the settings, 10 MiB.
+_MESSAGE_MAX = 10485760
 
 # The database the tests put their documents in.
 _DATABASE = "castle_gatehouse"
+
+# The id of the arrival scene of the turn transcript.
+_SCENE_ID = "scene/arrival"
+
+# The ref the turn transcript recorded for the first version of the scene.
+_SCENE_REF = "/castle_gatehouse/scene/arrival/1"
 
 # Text beyond ASCII, built from its code points.
 _WIDE_TEXT = chr(0x4E2D) + chr(0x6587) + chr(0x1F600)
@@ -72,21 +84,12 @@ _PROMPT_BODY: dict[int | str, Any] = {
     "text": "You are the analyst.",
 }
 
-# Bodies the store refuses: no header, a dangling reference, a bad header.
-_BODIES_BAD: list[dict[int | str, Any]] = [
-    {"subtitle": "x"},
-    {0: {"t": "scene"}, "image": {"$ref": 1}},
-    {0: {"t": "scene", "x": 1}},
-    {0: {"t": "scene", "v": 0}},
-    {0: {"v": 2}},
-]
-
-# The recorded operations: an id and a body, as the transcripts send them.
+# The puts to replay, an id and a body, the first the turn transcript's.
 _RECORDED: list[tuple[str, dict[int | str, Any]]] = [
-    ("scene/arrival", _ARRIVAL_BODY),
+    (_SCENE_ID, _ARRIVAL_BODY),
     ("prompt", _PROMPT_BODY),
-    ("scene/arrival", _ARRIVAL_BODY_TWO),
-    ("scene/arrival", _ARRIVAL_BODY),
+    (_SCENE_ID, _ARRIVAL_BODY_TWO),
+    (_SCENE_ID, _ARRIVAL_BODY),
 ]
 
 
@@ -122,7 +125,7 @@ def _wire_bytes(line: jslb.Object) -> bytes:
 # Decodes the one line the bytes hold.
 def _line_decode(wire: bytes) -> jslb.Object:
     decoder = jslb.LineDecoder(
-        _LINE_MAX, _BLOB_MAX, _OVERFLOW_BYTES, _sink_refuse
+        _LINE_MAX, _BLOB_MAX, _MESSAGE_MAX, _OVERFLOW_BYTES, _sink_refuse
     )
     (line,) = decoder.bytes_feed(wire)
     return line
@@ -175,33 +178,55 @@ class IsolatedCase(unittest.TestCase):
         self.addCleanup(_store_close, store)
         return store
 
+    # Calls `fn` and checks the type and the text of what it raises.
+    def raise_check(
+        self, kind: type[Exception], message: str, fn: Callable[[], object]
+    ) -> None:
+        with self.assertRaises(kind) as caught:
+            fn()
+        self.assertEqual(str(caught.exception), message)
+
+    # Dispatches a line and checks the type and the text of what it raises.
+    def dispatch_check(
+        self, kind: type[Exception], message: str, line: jslb.Object
+    ) -> None:
+        self.raise_check(kind, message, lambda: dispatch.line_dispatch(line))
+
+    # Checks that the scene has no head, as nothing was put under its id.
+    def head_absent(self) -> None:
+        message = i18n("substrate.id_missing", _SCENE_ID, _DATABASE)
+        self.raise_check(
+            LookupError,
+            message,
+            lambda: self.store.doc_head(_DATABASE, _SCENE_ID),
+        )
+
 
 # Tests the handler of `doc.put`.
 class TestPut(IsolatedCase):
-    # A put writes version 1 and replies with its ref and the new `seq`.
+    # The turn transcript's put writes version 1, its ref and `seq` 1.
     def test_version_written(self) -> None:
         engine_doc.handlers_register(self.store)
-        line = _put_line(_DATABASE, "scene/arrival", _ARRIVAL_BODY, 1)
+        line = _put_line(_DATABASE, _SCENE_ID, _ARRIVAL_BODY, 0)
         reply = _reply_get(line)
-        ref = "/castle_gatehouse/scene/arrival/1"
         self.assertEqual(reply[0], {"t": "doc.put", "r": 1})
-        self.assertEqual(jslb.payload_of(reply), {"ref": ref, "seq": 2})
-        self.assertEqual(self.store.doc_get(ref), _ARRIVAL_BODY)
-        stored = self.store.kv_get(ref).data
+        self.assertEqual(jslb.payload_of(reply), {"ref": _SCENE_REF, "seq": 1})
+        self.assertEqual(self.store.doc_get(_SCENE_REF), _ARRIVAL_BODY)
+        stored = self.store.kv_get(_SCENE_REF).data
         self.assertEqual(stored, _ARRIVAL_TEXT.encode("utf-8"))
-        self.assertEqual(self.store.seq_get(_DATABASE), 2)
+        self.assertEqual(self.store.seq_get(_DATABASE), 1)
 
     # A version once written never changes, and the head follows the puts.
     def test_versions_kept(self) -> None:
         engine_doc.handlers_register(self.store)
         bodies = (_ARRIVAL_BODY, _ARRIVAL_BODY, _ARRIVAL_BODY_TWO)
         for index, body in enumerate(bodies):
-            line = _put_line(_DATABASE, "scene/arrival", body, index + 1)
+            line = _put_line(_DATABASE, _SCENE_ID, body, index)
             reply = _reply_get(line)
             ref = f"/castle_gatehouse/scene/arrival/{index + 1}"
-            payload = {"ref": ref, "seq": index + 2}
+            payload = {"ref": ref, "seq": index + 1}
             self.assertEqual(jslb.payload_of(reply), payload)
-            head = {"db": _DATABASE, "id": "scene/arrival"}
+            head = {"db": _DATABASE, "id": _SCENE_ID}
             request = _line_make("doc.head", 2, **head)
             self.assertEqual(_reply_get(request)["ref"], ref)
         first = self.store.doc_get("/castle_gatehouse/scene/arrival/1")
@@ -212,13 +237,10 @@ class TestPut(IsolatedCase):
     # Two ids keep two heads.
     def test_ids_apart(self) -> None:
         engine_doc.handlers_register(self.store)
-        _reply_get(_put_line(_DATABASE, "scene/arrival", _ARRIVAL_BODY, 1))
+        _reply_get(_put_line(_DATABASE, _SCENE_ID, _ARRIVAL_BODY, 0))
+        _reply_get(_put_line(_DATABASE, "prompt", _PROMPT_BODY, 1))
         _reply_get(_put_line(_DATABASE, "prompt", _PROMPT_BODY, 2))
-        _reply_get(_put_line(_DATABASE, "prompt", _PROMPT_BODY, 3))
-        self.assertEqual(
-            self.store.doc_head(_DATABASE, "scene/arrival"),
-            "/castle_gatehouse/scene/arrival/1",
-        )
+        self.assertEqual(self.store.doc_head(_DATABASE, _SCENE_ID), _SCENE_REF)
         self.assertEqual(
             self.store.doc_head(_DATABASE, "prompt"),
             "/castle_gatehouse/prompt/2",
@@ -228,7 +250,7 @@ class TestPut(IsolatedCase):
     def test_text_wide(self) -> None:
         engine_doc.handlers_register(self.store)
         body: dict[int | str, Any] = {0: {"t": "prompt"}, "text": _WIDE_TEXT}
-        reply = _reply_get(_put_line(_DATABASE, "wide", body, 1))
+        reply = _reply_get(_put_line(_DATABASE, "wide", body, 0))
         stored = self.store.kv_get(reply["ref"]).data
         self.assertIn(_WIDE_TEXT.encode("utf-8"), stored)
         self.assertEqual(self.store.doc_get(reply["ref"]), body)
@@ -236,37 +258,48 @@ class TestPut(IsolatedCase):
     # A stale `since` raises the desync and nothing is written.
     def test_since_stale(self) -> None:
         engine_doc.handlers_register(self.store)
-        line = _put_line(_DATABASE, "scene/arrival", _ARRIVAL_BODY, 0)
-        with self.assertRaises(RuntimeError) as caught:
-            dispatch.line_dispatch(line)
-        message = "doc.put: since 0 is not seq 1 of castle_gatehouse"
-        self.assertEqual(str(caught.exception), message)
-        with self.assertRaises(LookupError):
-            self.store.doc_head(_DATABASE, "scene/arrival")
-        self.assertEqual(self.store.seq_get(_DATABASE), 1)
+        line = _put_line(_DATABASE, _SCENE_ID, _ARRIVAL_BODY, 1)
+        message = i18n("substrate.since_stale", "doc.put", 1, 0, _DATABASE)
+        self.dispatch_check(RuntimeError, message, line)
+        self.head_absent()
+        self.assertEqual(self.store.seq_get(_DATABASE), 0)
 
     # A body the store refuses raises and nothing is written.
     def test_body_invalid(self) -> None:
         engine_doc.handlers_register(self.store)
-        for body in _BODIES_BAD:
+        cases: list[tuple[dict[int | str, Any], str]] = [
+            ({"subtitle": "x"}, i18n("substrate.header_missing")),
+            (
+                {0: {"t": "scene"}, "image": {"$ref": 1}},
+                i18n("substrate.ref_index", 1),
+            ),
+            (
+                {0: {"t": "scene", "x": 1}},
+                i18n("substrate.header_bad", {"t": "scene", "x": 1}),
+            ),
+            (
+                {0: {"t": "scene", "v": 0}},
+                i18n("substrate.header_bad", {"t": "scene", "v": 0}),
+            ),
+            ({0: {"v": 2}}, i18n("substrate.header_bad", {"v": 2})),
+        ]
+        for body, message in cases:
             with self.subTest(body=body):
-                line = _put_line(_DATABASE, "scene/arrival", body, 1)
-                with self.assertRaises(ValueError):
-                    dispatch.line_dispatch(line)
-        with self.assertRaises(LookupError):
-            self.store.doc_head(_DATABASE, "scene/arrival")
-        self.assertEqual(self.store.seq_get(_DATABASE), 1)
+                line = _put_line(_DATABASE, _SCENE_ID, body, 0)
+                self.dispatch_check(ValueError, message, line)
+        self.head_absent()
+        self.assertEqual(self.store.seq_get(_DATABASE), 0)
 
     # An empty id raises, and so does a database that is not open.
     def test_target_invalid(self) -> None:
         engine_doc.handlers_register(self.store)
-        line = _put_line(_DATABASE, "", _PROMPT_BODY, 1)
-        with self.assertRaises(ValueError):
-            dispatch.line_dispatch(line)
-        line = _put_line("none", "prompt", _PROMPT_BODY, 1)
-        with self.assertRaises(LookupError):
-            dispatch.line_dispatch(line)
-        self.assertEqual(self.store.seq_get(_DATABASE), 1)
+        line = _put_line(_DATABASE, "", _PROMPT_BODY, 0)
+        message = i18n("substrate.id_empty")
+        self.dispatch_check(ValueError, message, line)
+        line = _put_line("none", "prompt", _PROMPT_BODY, 0)
+        message = i18n("substrate.db_closed", "none")
+        self.dispatch_check(LookupError, message, line)
+        self.assertEqual(self.store.seq_get(_DATABASE), 0)
 
 
 # Tests the handler of `doc.head`.
@@ -274,10 +307,10 @@ class TestHead(IsolatedCase):
     # The head is the ref of the version the last put wrote.
     def test_head_replied(self) -> None:
         engine_doc.handlers_register(self.store)
-        _reply_get(_put_line(_DATABASE, "scene/arrival", _ARRIVAL_BODY, 1))
-        line = _line_make("doc.head", 5, db=_DATABASE, id="scene/arrival")
+        _reply_get(_put_line(_DATABASE, _SCENE_ID, _ARRIVAL_BODY, 0))
+        line = _line_make("doc.head", 5, db=_DATABASE, id=_SCENE_ID)
         reply = _reply_get(line)
-        payload = {"ref": "/castle_gatehouse/scene/arrival/1"}
+        payload = {"ref": _SCENE_REF}
         self.assertEqual(reply[0], {"t": "doc.head", "r": 5})
         self.assertEqual(jslb.payload_of(reply), payload)
         decoded = _line_decode(_wire_bytes(reply))
@@ -287,11 +320,11 @@ class TestHead(IsolatedCase):
     def test_head_unknown(self) -> None:
         engine_doc.handlers_register(self.store)
         line = _line_make("doc.head", 1, db=_DATABASE, id="prompt")
-        with self.assertRaises(LookupError):
-            dispatch.line_dispatch(line)
+        message = i18n("substrate.id_missing", "prompt", _DATABASE)
+        self.dispatch_check(LookupError, message, line)
         line = _line_make("doc.head", 1, db="none", id="prompt")
-        with self.assertRaises(LookupError):
-            dispatch.line_dispatch(line)
+        message = i18n("substrate.db_closed", "none")
+        self.dispatch_check(LookupError, message, line)
 
 
 # Tests a recorded sequence of forwarded operations on a second store.
@@ -315,13 +348,13 @@ class TestReplay(IsolatedCase):
         self.assertEqual(
             refs,
             [
-                "/castle_gatehouse/scene/arrival/1",
+                _SCENE_REF,
                 "/castle_gatehouse/prompt/1",
                 "/castle_gatehouse/scene/arrival/2",
                 "/castle_gatehouse/scene/arrival/3",
             ],
         )
-        self.assertEqual(seqs, [2, 3, 4, 5])
+        self.assertEqual(seqs, [1, 2, 3, 4])
         _store_close(self.store)
         _store_close(second)
         name = _DATABASE + ".sqlite"
@@ -336,14 +369,23 @@ class TestRegister(IsolatedCase):
     # A second registration raises, as the dispatcher refuses the pair.
     def test_register_twice(self) -> None:
         engine_doc.handlers_register(self.store)
-        with self.assertRaises(ValueError):
-            engine_doc.handlers_register(self.store)
+        message = i18n("dispatch.handler_twice", "doc.put", 0)
+        self.raise_check(
+            ValueError,
+            message,
+            lambda: engine_doc.handlers_register(self.store),
+        )
 
     # Called before the registration each handler raises.
     def test_unregistered(self) -> None:
         line = _line_make("doc.head", 1)
-        body: dict[str, object] = {}
-        with self.assertRaises(RuntimeError):
-            engine_doc.doc_put(line, db=_DATABASE, id="p", body=body, since=1)
-        with self.assertRaises(RuntimeError):
-            engine_doc.doc_head(line, db=_DATABASE, id="prompt")
+        body: dict[int | str, Any] = {}
+        message = i18n("engine_doc.not_registered")
+        calls: list[Callable[[], object]] = [
+            lambda: engine_doc.doc_put(
+                line, db=_DATABASE, id="p", body=body, since=0
+            ),
+            lambda: engine_doc.doc_head(line, db=_DATABASE, id="prompt"),
+        ]
+        for call in calls:
+            self.raise_check(RuntimeError, message, call)

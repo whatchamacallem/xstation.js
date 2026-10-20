@@ -8,12 +8,14 @@
 
 // The xterm.js 5.5.0 members that the view uses, which no package declares.
 declare class Terminal {
-  // The width in character cells, 80 until the terminal is resized.
+  // The width in character cells.
   readonly cols: number;
-  // The height in character cells, 24 until the terminal is resized.
+  // The height in character cells.
   readonly rows: number;
-  // Makes a terminal with the default options, not yet in the page.
-  constructor();
+  // The live options, of which the view sets whether keystrokes are taken.
+  readonly options: { disableStdin: boolean };
+  // Makes a terminal of the size given, not yet in the page.
+  constructor(options: { cols: number; rows: number; disableStdin: boolean });
   // Puts the terminal in the page, inside the element.
   open(parent: HTMLElement): void;
   // Parses bytes of output as `UTF-8` and shows them.
@@ -29,7 +31,7 @@ declare class Terminal {
 }
 
 namespace console_view {
-  // The message kinds of ttyd, the line types and the debug header names.
+  // The ttyd message kinds, line types, owner, terminal size and name form.
   const constants = Object.freeze({
     input_kind: 0x30,
     output_kind: 0x30,
@@ -38,12 +40,16 @@ namespace console_view {
     preferences_kind: 0x32,
     open_type: "console.open",
     input_type: "console.input",
-    auth_token: "",
+    wake_type: "ui.console_reply",
+    owner: "ai" as const,
+    // The size of the terminal, as the recorded console session shows it.
+    columns: 120,
+    rows: 40,
     names_full: true,
   });
 
-  // How far the console has got: idle, opening or open.
-  type Phase = "idle" | "opening" | "open";
+  // How far the console has got: idle, opening, open, or closed at its end.
+  type Phase = "idle" | "opening" | "open" | "closed";
 
   // A message of ttyd's client: the kind byte, then the body.
   function message_make(kind: number, body: Uint8Array): Uint8Array {
@@ -67,6 +73,7 @@ namespace console_view {
     private readonly child: HTMLElement;
     private readonly terminal: Terminal;
     private phase: Phase = "idle";
+    private placed = false;
     private open_id: number | undefined = undefined;
 
     // Makes the hidden child and the terminal, which is not yet in the page.
@@ -75,21 +82,21 @@ namespace console_view {
       this.child = container.ownerDocument.createElement("div");
       this.child.hidden = true;
       container.append(this.child);
-      this.terminal = new Terminal();
+      this.terminal = new Terminal({
+        cols: constants.columns,
+        rows: constants.rows,
+        disableStdin: true,
+      });
       this.terminal.onData((data) => this.input_send(data));
       this.terminal.onResize((size) => this.resize_send(size.cols, size.rows));
     }
 
-    // Shows the view. The first show opens the terminal and requests tty 0.
+    // Shows the view, putting the terminal in the page the first time.
     view_show(): void {
       this.child.hidden = false;
-      if (this.phase === "idle") {
+      if (!this.placed) {
         this.terminal.open(this.child);
-        this.phase = "opening";
-        const header = jslb.header_make(constants.open_type, {
-          full: constants.names_full,
-        });
-        this.open_id = this.tasks.task_submit(jslb.line_make(header, [], {}));
+        this.placed = true;
       }
       this.terminal.focus();
     }
@@ -108,26 +115,58 @@ namespace console_view {
       }
     }
 
-    // Takes the reply to `console.open` and sends ttyd's first message.
-    open_reply(line: lines.Line): void {
+    // Asks the AI worker for tty 0 from a UI handler, which returns the sleep.
+    open_request(): dispatch.Sleep {
+      if (this.phase !== "idle") {
+        throw new Error(i18n("console_view.open_phase", this.phase));
+      }
+      const header = jslb.header_make(constants.open_type, {
+        full: constants.names_full,
+      });
+      const line = jslb.line_make(header, [], {});
+      const id = this.tasks.task_submit(line, constants.owner);
+      this.phase = "opening";
+      this.open_id = id;
+      return dispatch.task_sleep(null, [id], constants.wake_type);
+    }
+
+    // Takes the wake of that sleep, sends ttyd's first message, takes input.
+    open_done(wake: lines.Line): void {
       if (this.phase !== "opening") {
         throw new Error(i18n("console_view.reply_phase", this.phase));
       }
-      const type = jslb.field_get(line[0], "type");
+      const replies = jslb.payload_of(wake).replies as lines.Line[];
+      const reply = replies[0];
+      const type = jslb.field_get(reply[0], "type");
       if (type !== constants.open_type) {
         throw new Error(i18n("console_view.reply_type", type));
       }
-      const reply = jslb.field_get(line[0], "reply");
-      if (reply !== this.open_id) {
-        throw new Error(i18n("console_view.reply_id", reply, this.open_id));
+      const id = jslb.field_get(reply[0], "reply");
+      if (id !== this.open_id) {
+        throw new Error(i18n("console_view.reply_id", id, this.open_id));
       }
-      this.phase = "open";
+      const token = jslb.payload_of(reply).token;
+      if (typeof token !== "string") {
+        throw new Error(i18n("console_view.token_invalid", typeof token));
+      }
       const text = utility.json_text({
-        AuthToken: constants.auth_token,
+        AuthToken: token,
         columns: this.terminal.cols,
         rows: this.terminal.rows,
       });
-      this.tasks.line_notify(input_line(utility.utf8_encode(text)));
+      const message = utility.utf8_encode(text);
+      this.tasks.line_notify(input_line(message), constants.owner);
+      this.phase = "open";
+      this.terminal.options.disableStdin = false;
+    }
+
+    // Takes the end of tty 0: the screen stays, the terminal takes no input.
+    exit_done(): void {
+      if (this.phase !== "open") {
+        throw new Error(i18n("console_view.exit_phase", this.phase));
+      }
+      this.phase = "closed";
+      this.terminal.options.disableStdin = true;
     }
 
     // Writes a ttyd output message and ignores the title and preferences.
@@ -149,24 +188,24 @@ namespace console_view {
       throw new Error(i18n("console_view.kind_unknown", kind));
     }
 
-    // Sends the text of a keystroke batch as one input message.
+    // Sends typed text. The terminal takes no keystrokes unless it is open.
     private input_send(data: string): void {
       if (this.phase !== "open") {
-        throw new Error(i18n("console_view.input_early", this.phase));
+        throw new Error(i18n("console_view.input_phase", this.phase));
       }
       const body = utility.utf8_encode(data);
       const message = message_make(constants.input_kind, body);
-      this.tasks.line_notify(input_line(message));
+      this.tasks.line_notify(input_line(message), constants.owner);
     }
 
     // Sends the new size of the terminal as one resize message.
     private resize_send(columns: number, rows: number): void {
       if (this.phase !== "open") {
-        throw new Error(i18n("console_view.resize_early", this.phase));
+        throw new Error(i18n("console_view.resize_phase", this.phase));
       }
       const body = utility.utf8_encode(utility.json_text({ columns, rows }));
       const message = message_make(constants.resize_kind, body);
-      this.tasks.line_notify(input_line(message));
+      this.tasks.line_notify(input_line(message), constants.owner);
     }
   }
 }

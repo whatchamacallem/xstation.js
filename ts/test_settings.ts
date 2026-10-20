@@ -14,12 +14,15 @@ namespace test_settings {
       verbose_ring: 1000,
       verbose_forward: true,
       line_max: 1048576,
-      blob_max: 1073741824,
+      blob_max: 10485760,
+      message_max: 10485760,
+      queue_max: 104857600,
       overflow_bytes: 131072,
       chunk_bytes: 1048576,
       srv_buf_size: 1048576,
       media_db_bytes: 268435456,
       files_browser_bytes: 1073741824,
+      db_soft_bytes: 1073741824,
       turn_compact_tokens: 65536,
       long_task_ms: 5,
       provider: {
@@ -32,12 +35,23 @@ namespace test_settings {
     };
   }
 
+  // The message of the error a function throws, failing the test if none.
+  function message_thrown(test: unittest.TestCase, fn: () => unknown): string {
+    try {
+      fn();
+    } catch (error) {
+      return (error as Error).message;
+    }
+    return test.fail("Nothing was thrown.");
+  }
+
   // One store for each test, so no test leaves a state behind.
   export class TestValueStore extends unittest.TestCase {
     // Reading an id before the settings are set throws.
     test_get_unset(): void {
       const store = new settings.ValueStore();
-      this.assertRaises(Error, () => store.value_get("debug"));
+      const message = message_thrown(this, () => store.value_get("debug"));
+      this.assertEqual(message, i18n("settings.not_set"));
     }
 
     // An id that names no key throws, at any depth.
@@ -53,7 +67,8 @@ namespace test_settings {
         "",
       ];
       for (const id of ids) {
-        this.assertRaises(Error, () => store.value_get(id));
+        const message = message_thrown(this, () => store.value_get(id));
+        this.assertEqual(message, i18n("settings.unknown_id", id));
       }
     }
 
@@ -90,7 +105,9 @@ namespace test_settings {
     test_set_twice(): void {
       const store = new settings.ValueStore();
       store.value_set(settings_make(false));
-      this.assertRaises(Error, () => store.value_set(settings_make(true)));
+      const second = settings_make(true);
+      const message = message_thrown(this, () => store.value_set(second));
+      this.assertEqual(message, i18n("settings.already_set"));
       this.assertEqual(store.value_get("debug"), false);
     }
 
@@ -113,7 +130,10 @@ namespace test_settings {
       store.sender_register((payload) => {
         sent.push(payload);
       });
-      this.assertRaises(Error, () => store.value_put("line_max", 2048));
+      const message = message_thrown(this, () => {
+        store.value_put("line_max", 2048);
+      });
+      this.assertEqual(message, i18n("settings.put_denied"));
       this.assertEqual(store.value_get("line_max"), 1048576);
       this.assertEqual(sent.length, 0);
     }
@@ -122,7 +142,10 @@ namespace test_settings {
     test_put_unset(): void {
       const store = new settings.ValueStore();
       store.sender_register(() => {});
-      this.assertRaises(Error, () => store.value_put("line_max", 2048));
+      const message = message_thrown(this, () => {
+        store.value_put("line_max", 2048);
+      });
+      this.assertEqual(message, i18n("settings.not_set"));
     }
 
     // A put in debug mode changes the live value and sends all settings.
@@ -153,7 +176,9 @@ namespace test_settings {
       store.sender_register((payload) => {
         sent.push(payload);
       });
-      this.assertRaises(Error, () => store.value_put("test.no_such_id", 1));
+      const id = "test.no_such_id";
+      const message = message_thrown(this, () => store.value_put(id, 1));
+      this.assertEqual(message, i18n("settings.unknown_id", id));
       this.assertEqual(sent.length, 0);
     }
 
@@ -161,7 +186,10 @@ namespace test_settings {
     test_sender_missing(): void {
       const store = new settings.ValueStore();
       store.value_set(settings_make(true));
-      this.assertRaises(Error, () => store.value_put("line_max", 2048));
+      const message = message_thrown(this, () => {
+        store.value_put("line_max", 2048);
+      });
+      this.assertEqual(message, i18n("settings.no_sender"));
       this.assertEqual(store.value_get("line_max"), 1048576);
     }
 
@@ -169,22 +197,10 @@ namespace test_settings {
     test_sender_twice(): void {
       const store = new settings.ValueStore();
       store.sender_register(() => {});
-      this.assertRaises(Error, () => store.sender_register(() => {}));
-    }
-  }
-
-  // The functions of the module, on whatever state the thread has.
-  export class TestLiveSettings extends unittest.TestCase {
-    // An unknown id throws whether or not the settings were set.
-    test_get_unknown(): void {
-      const id = "test.no_such_id";
-      this.assertRaises(Error, () => settings.settings_get(id));
-    }
-
-    // A put of an unknown id throws in every state and sends nothing.
-    test_put_unknown(): void {
-      const id = "test.no_such_id";
-      this.assertRaises(Error, () => settings.settings_put(id, 1));
+      const message = message_thrown(this, () => {
+        store.sender_register(() => {});
+      });
+      this.assertEqual(message, i18n("settings.sender_twice"));
     }
   }
 }

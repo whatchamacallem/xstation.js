@@ -32,8 +32,8 @@ _BLOB_NAMES = {"s": "size", "k": "key"}
 # The full blob header field names the wire carries and their short forms.
 _BLOB_SHORT = {full: short for short, full in _BLOB_NAMES.items()}
 
-# The blob header names `blob_make` sets itself, in either form.
-_BLOB_RESERVED = frozenset(("s", "k", "d", "size", "key", "data"))
+# The blob header names `blob_make` sets itself, which no field may take.
+_BLOB_RESERVED = frozenset(("s", "k", "d", "size"))
 
 # Every short field name `field_get` resolves and its full form.
 _FIELD_NAMES = {**_LINE_NAMES, **_BLOB_NAMES, "d": "data"}
@@ -62,7 +62,7 @@ _DIGIT_KEY = re.compile(r"[0-9]+")
 
 # A decoded JSON object, headers at integer keys, string keys attributes too.
 class Object(dict[int | str, Any]):
-    # Returns the value at a string key, so `line[1].d` reads a blob.
+    # Reads a string key. A key named like a dict method, `keys`, needs `[]`.
     def __getattr__(self, name: str) -> Any:
         if name not in self:
             raise AttributeError(i18n("jslb.attribute_missing", name))
@@ -237,13 +237,13 @@ def _line_check(line: dict[int | str, Any], wire: bool) -> list[int]:
     full = _form_get(header, _LINE_NAMES)
     if not isinstance(header.get("type" if full else "t"), str):
         raise WireError(i18n("jslb.no_type"))
-    count = header.get("blobs" if full else "b", 0)
     probed = 0
     while probed + 1 in line:
         probed += 1
     for key in line:
         if type(key) is int and key > probed:
             raise WireError(i18n("jslb.blob_gap", probed + 1, key))
+    count = _integer_read(header, "blobs" if full else "b", wire, 0)
     if type(count) is not int or count != probed:
         raise WireError(i18n("jslb.blobs_mismatch", count, probed))
     sizes: list[int] = []
@@ -253,7 +253,7 @@ def _line_check(line: dict[int | str, Any], wire: bool) -> list[int]:
             raise WireError(i18n("jslb.blob_data_field", number))
         if _form_get(blob, _BLOB_NAMES) not in (None, full):
             raise WireError(i18n("jslb.both_name_forms"))
-        size = blob.get("size" if full else "s")
+        size = _integer_read(blob, "size" if full else "s", wire, None)
         if type(size) is not int or size < 0:
             raise WireError(i18n("jslb.bad_size", number))
         sizes.append(size)
@@ -261,6 +261,17 @@ def _line_check(line: dict[int | str, Any], wire: bool) -> list[int]:
         if isinstance(key, str) and _DIGIT_KEY.fullmatch(key):
             raise WireError(i18n("jslb.payload_digit_key", key))
     return sizes
+
+
+# Returns a header field or `absent`, an integral float on the wire made `int`.
+def _integer_read(
+    header: dict[int | str, Any], name: str, wire: bool, absent: object
+) -> Any:
+    value: object = header.get(name, absent)
+    if wire and type(value) is float and value.is_integer():
+        value = int(value)
+        header[name] = value
+    return value
 
 
 # Returns the JSON text the encoder writes for a line with `count` blobs.
@@ -314,9 +325,9 @@ def _object_make(pairs: list[tuple[str, Any]]) -> Object:
     return made
 
 
-# Refuses the `NaN` and `Infinity` constants Python's parser would accept.
+# Refuses the `NaN` and `Infinity` constants, which are not JSON.
 def _constant_refuse(name: str) -> NoReturn:
-    raise WireError(i18n("jslb.number_refused", name))
+    raise WireError(i18n("jslb.line_not_json", name))
 
 
 # Parses line bytes as strict `UTF-8` JSON into an `Object`.
@@ -333,6 +344,8 @@ def _line_decode(text: bytes) -> Object:
         )
     except json.JSONDecodeError as error:
         raise WireError(i18n("jslb.line_not_json", error.msg)) from error
+    except (RecursionError, ValueError) as error:
+        raise WireError(i18n("jslb.line_not_json", str(error))) from error
     if not isinstance(value, Object):
         raise WireError(i18n("jslb.line_not_object"))
     return value
@@ -345,14 +358,17 @@ class LineDecoder:
         self,
         line_max: int,
         blob_max: int,
+        message_max: int,
         overflow_bytes: int,
         sink_make: Callable[[Object], str],
     ) -> None:
         self._line_max = line_max
         self._blob_max = blob_max
+        self._message_max = message_max
         self._overflow_bytes = overflow_bytes
         self._sink_make = sink_make
         self._failed = False
+        self._fault: Exception | None = None
         self._text = bytearray()
         self._line: Object | None = None
         self._sizes: list[int] = []
@@ -363,12 +379,34 @@ class LineDecoder:
         self._path = ""
         self._hash = hashlib.sha256()
 
-    # Returns the complete lines the bytes finish. Raises WireError on a fault.
+    # Returns the lines finished. A fault after them raises on the next call.
     def bytes_feed(self, data: bytes) -> list[Object]:
+        fault = self._fault
+        if fault is not None:
+            self._fault = None
+            raise fault
         if self._failed:
             raise WireError(i18n("jslb.decoder_failed"))
         self._failed = True
         lines: list[Object] = []
+        try:
+            self._bytes_read(data, lines)
+            self._failed = False
+        except Exception as error:
+            if not lines:
+                raise
+            self._fault = error
+        finally:
+            if self._failed:
+                self._file_shut()
+        return lines
+
+    # Returns whether the decoder stands between messages and has not failed.
+    def idle(self) -> bool:
+        return not self._failed and self._line is None and not self._text
+
+    # Reads the bytes, adding each line they finish to `lines`.
+    def _bytes_read(self, data: bytes, lines: list[Object]) -> None:
         offset = 0
         while True:
             line = self._line
@@ -377,7 +415,7 @@ class LineDecoder:
                 if end < 0:
                     self._length_check(len(data) - offset)
                     self._text += data[offset:]
-                    break
+                    return
                 self._length_check(end - offset)
                 self._text += data[offset:end]
                 offset = end + 1
@@ -392,23 +430,29 @@ class LineDecoder:
             self._blob_write(data[offset : offset + count])
             offset += count
             if self._left > 0:
-                break
+                return
             self._blob_finish(line)
             if self._number < len(self._sizes):
                 self._blob_start(line, self._number + 1)
                 continue
             lines.append(line)
             self._line = None
-        self._failed = False
-        return lines
+
+    # Closes the file of a streamed blob when one is open, keeping its bytes.
+    def _file_shut(self) -> None:
+        file = self._file
+        if file is not None:
+            self._file = None
+            file.close()
 
     # Refuses a line once its bytes and its CR would pass `line_max`.
     def _length_check(self, more: int) -> None:
         if len(self._text) + more + 1 > self._line_max:
             raise WireError(i18n("jslb.line_over_max", self._line_max))
 
-    # Parses and checks the line read so far, refusing a blob too large.
+    # Parses and checks the line read, refusing a blob or a message too large.
     def _line_parse(self) -> Object:
+        length = len(self._text) + 1
         line = _line_decode(bytes(self._text))
         self._text.clear()
         sizes = _line_check(line, True)
@@ -417,6 +461,12 @@ class LineDecoder:
                 raise WireError(
                     i18n("jslb.blob_over_max", number, size, self._blob_max)
                 )
+        total = length + sum(sizes)
+        # Memory per message is bounded here by `message_max`, a settled limit.
+        if total > self._message_max:
+            raise WireError(
+                i18n("jslb.message_over", total, self._message_max)
+            )
         self._sizes = sizes
         return line
 
@@ -440,7 +490,7 @@ class LineDecoder:
             self._hash.update(chunk)
         self._left -= len(chunk)
 
-    # Sets `d` on the finished blob's header, and `sha256` for a file.
+    # Sets `d` on the finished blob, and for a file `sha256`, over any sent.
     def _blob_finish(self, line: Object) -> None:
         header = line[self._number]
         if self._file is None:

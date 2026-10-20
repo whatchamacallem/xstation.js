@@ -14,7 +14,11 @@
 // in the region database and entered. Returns `universe`, `world`, `region`
 // and, when a scene was entered, its Document-Ref as `scene`.
 
+// The store of the AI worker the script works through.
 const store = engine.store;
+
+// Encodes the text the script writes, because KV values are bytes.
+const text = new TextEncoder();
 
 // The names, with the defaults `current_universe` and `world`.
 const universe = args.universe ?? "current_universe";
@@ -73,16 +77,16 @@ if (args.scene !== undefined) {
     body.image = { $ref: 1 };
   }
   const put = store.doc_put(region, id, body);
-  store.kv_put("/" + world + "/scene", put.ref);
+  store.kv_put("/" + world + "/scene", text.encode(put.ref));
   result.scene = put.ref;
 }
 
 // Switches the player in use when one is given.
 if (args.player !== undefined) {
-  store.kv_put("/metaverse/player", args.player);
+  store.kv_put("/metaverse/player", text.encode(args.player));
 }
 
 // Makes the new world the current one.
-store.kv_put("/metaverse/world", world);
+store.kv_put("/metaverse/world", text.encode(world));
 
 return result;

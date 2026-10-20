@@ -4,11 +4,25 @@
 #
 # Tests the parts of devtools.py that need no browser: WebSocket frames with
 # and without masks, the handshake, joining a message from its fragments, the
-# relay script, the DevTools address, the timers, and a client reading canned
-# bytes or an empty pipe. No process is started.
+# relay script, the DevTools address, the timers, a client reading canned
+# bytes or an empty pipe, and a browser's page calls and waits with canned
+# bytes, a scratch profile and a patched removal. No process is started.
 
-import devtools, functools, io, json, os, unittest
-from typing import Any
+import devtools, errno, functools, io, json, os, subprocess, tempfile
+import unittest.mock
+from typing import Any, cast
+
+# The checkout's build directory, where each test makes its scratch directory.
+_BUILD_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
+)
+
+# What DevTools answers a navigation to an address nothing listens on yet.
+_REFUSED_RESULT = {
+    "errorText": "net::ERR_CONNECTION_REFUSED",
+    "frameId": "F",
+    "loaderId": "L0",
+}
 
 # RFC 6455's sample key.
 _SAMPLE_KEY = "dGhlIHNhbXBsZSBub25jZQ=="
@@ -72,6 +86,26 @@ class ClientRig:
             self.events.append,
             wait_seconds,
         )
+
+
+# A browser process that has not exited.
+class RunningProcess:
+    # Returns no exit code, as a running process does.
+    def poll(self) -> int | None:
+        return None
+
+
+# Returns a browser that starts nothing and whose client reads the bytes.
+def browser_make(data: bytes, writes: list[bytes]) -> devtools.Browser:
+    with unittest.mock.patch("shutil.which", return_value="/w/ps.exe"):
+        browser = devtools.Browser(800, 600)
+    browser.client = devtools.ProtocolClient(
+        CannedReader(data).bytes_next,
+        writes.append,
+        browser.events.message_handle,
+        60,
+    )
+    return browser
 
 
 # Returns the frame a server sends for a DevTools message.
@@ -576,3 +610,165 @@ class TestPage(unittest.TestCase):
         self.assertEqual(
             devtools.exception_text({"text": "Script error"}), "Script error"
         )
+
+
+# A browser's page calls and waits, on canned bytes and a scratch profile.
+class TestBrowser(unittest.TestCase):
+    # Makes the scratch directory a profile is in.
+    def setUp(self) -> None:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+        self.scratch_path = self.enterContext(
+            tempfile.TemporaryDirectory(dir=_BUILD_PATH)
+        )
+
+    # Returns a browser waiting on a port file that holds the text.
+    def browser_waiting(self, text: str) -> devtools.Browser:
+        port_path = os.path.join(self.scratch_path, "DevToolsActivePort")
+        with open(port_path, "w") as port_file:
+            port_file.write(text)
+        browser = browser_make(b"", [])
+        browser.profile_path = self.scratch_path
+        browser.executable_name = "chrome.exe"
+        browser.browser_process = cast(
+            subprocess.Popen[bytes], RunningProcess()
+        )
+        return browser
+
+    # A refused navigation is sent again until one loads.
+    def test_open_refused(self) -> None:
+        loaded = {"frameId": "F", "loaderId": "L1"}
+        event = {
+            "method": "Page.lifecycleEvent",
+            "params": {"loaderId": "L1", "name": "load"},
+        }
+        writes: list[bytes] = []
+        browser = browser_make(
+            message_frame({"id": 1, "result": _REFUSED_RESULT})
+            + message_frame({"id": 2, "result": loaded})
+            + message_frame(event),
+            writes,
+        )
+        browser.page_open("http://u/")
+        self.assertEqual(
+            [request_decode(write) for write in writes],
+            [
+                {
+                    "id": call_id,
+                    "method": "Page.navigate",
+                    "params": {"url": "http://u/"},
+                }
+                for call_id in (1, 2)
+            ],
+        )
+
+    # Any other navigation error fails at once.
+    def test_open_error(self) -> None:
+        failed = {"errorText": "net::ERR_NAME_NOT_RESOLVED", "loaderId": "L0"}
+        writes: list[bytes] = []
+        browser = browser_make(
+            message_frame({"id": 1, "result": failed}), writes
+        )
+        with self.assertRaises(RuntimeError) as caught:
+            browser.page_open("http://u/")
+        self.assertEqual(
+            str(caught.exception), "http://u/: net::ERR_NAME_NOT_RESOLVED"
+        )
+        self.assertEqual(len(writes), 1)
+
+    # A navigation refused until its timer ends fails, naming the URL.
+    def test_open_timeout(self) -> None:
+        writes: list[bytes] = []
+        browser = browser_make(
+            message_frame({"id": 1, "result": _REFUSED_RESULT}), writes
+        )
+        with (
+            unittest.mock.patch.object(devtools, "_SERVER_WAIT_SECONDS", 0),
+            self.assertRaises(TimeoutError) as caught,
+        ):
+            browser.page_open("http://u/")
+        self.assertEqual(
+            str(caught.exception),
+            "gave up after 0 s waiting for http://u/ to accept connections",
+        )
+        self.assertEqual(len(writes), 1)
+
+    # Closing the page names its target and reads nothing of the result.
+    def test_close_target(self) -> None:
+        writes: list[bytes] = []
+        browser = browser_make(message_frame({"id": 1, "result": {}}), writes)
+        browser.target_id = "T"
+        browser.page_close()
+        self.assertEqual(
+            request_decode(writes[0]),
+            {
+                "id": 1,
+                "method": "Target.closeTarget",
+                "params": {"targetId": "T"},
+            },
+        )
+
+    # A port file with fewer than two fields is still being written.
+    def test_port_partial(self) -> None:
+        for text in ("", "9222", "9222\n"):
+            browser = self.browser_waiting(text)
+            with (
+                unittest.mock.patch.object(
+                    devtools, "_DEVTOOLS_WAIT_SECONDS", 0
+                ),
+                self.assertRaises(TimeoutError, msg=repr(text)) as caught,
+            ):
+                browser.devtools_wait()
+            self.assertEqual(
+                str(caught.exception),
+                "gave up after 0 s waiting for chrome.exe to serve DevTools",
+            )
+
+    # A port file with a port and a path gives the address.
+    def test_port_written(self) -> None:
+        browser = self.browser_waiting("9222\n/devtools/browser/abc")
+        self.assertEqual(
+            browser.devtools_wait(),
+            devtools.EndpointAddress(9222, "/devtools/browser/abc"),
+        )
+
+    # A profile a helper still holds is removed once it lets go.
+    def test_remove_busy(self) -> None:
+        browser = browser_make(b"", [])
+        browser.profile_path = self.scratch_path
+        held = PermissionError(errno.EACCES, "Permission denied")
+        with unittest.mock.patch(
+            "shutil.rmtree", side_effect=[held, None]
+        ) as rmtree:
+            browser.profile_remove()
+        self.assertEqual(rmtree.call_count, 2)
+
+    # A profile held past its timer fails, with the last error as context.
+    def test_remove_timeout(self) -> None:
+        browser = browser_make(b"", [])
+        browser.profile_path = self.scratch_path
+        held = PermissionError(errno.EACCES, "Permission denied")
+        with (
+            unittest.mock.patch.object(devtools, "_PROFILE_REMOVE_SECONDS", 0),
+            unittest.mock.patch("shutil.rmtree", side_effect=held),
+            self.assertRaises(TimeoutError) as caught,
+        ):
+            browser.profile_remove()
+        self.assertEqual(
+            str(caught.exception),
+            f"gave up after 0 s waiting for {self.scratch_path} to be"
+            " removable",
+        )
+        self.assertIs(caught.exception.__context__, held)
+
+    # Any other error of the removal fails at once.
+    def test_remove_failed(self) -> None:
+        browser = browser_make(b"", [])
+        browser.profile_path = self.scratch_path
+        failed = OSError(errno.EIO, "Input/output error")
+        with (
+            unittest.mock.patch("shutil.rmtree", side_effect=failed) as rmtree,
+            self.assertRaises(OSError) as caught,
+        ):
+            browser.profile_remove()
+        self.assertIs(caught.exception, failed)
+        self.assertEqual(rmtree.call_count, 1)

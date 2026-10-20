@@ -5,10 +5,12 @@
 #
 # Writes the JSLB vectors that the Python and the TypeScript decoders read
 # into python/vectors. NAME.jslb holds a stream of messages that jslb.py
-# encodes or, for an error vector, bytes made by hand that the encoder would
-# refuse. NAME.json beside it is what a decoder with the limits below returns:
-# the messages, every key a string and each blob's d in lowercase hex, and
-# their rendered form, or the slug of the fault:
+# encodes or bytes made by hand, which the encoder would write otherwise or
+# refuse. NAME.json beside it holds the limits its decoder is built with, the
+# messages that decoder returns, every key a string and each blob's d in
+# lowercase hex, and their rendered form. A success sidecar says whether
+# jslb.py encodes the messages back to the same bytes; an error sidecar names
+# the slug of the fault that follows its messages:
 #
 #     python3 python/vectors_make.py
 
@@ -27,8 +29,19 @@ _LINE_MAX = 4096
 # The largest blob a vector's decoder reads.
 _BLOB_MAX = 65536
 
+# The largest message a vector's decoder reads, small so splits run fast.
+_MESSAGE_MAX = 8192
+
 # The largest blob a vector's decoder keeps in memory.
 _OVERFLOW_BYTES = 1024
+
+# The limits a decoder reads every vector with, written into each sidecar.
+_LIMITS = {
+    "line_max": _LINE_MAX,
+    "blob_max": _BLOB_MAX,
+    "message_max": _MESSAGE_MAX,
+    "overflow_bytes": _OVERFLOW_BYTES,
+}
 
 # Bytecode of `jslb` and of what it imports goes in `build`.
 sys.pycache_prefix = os.path.join(
@@ -40,6 +53,14 @@ sys.pycache_prefix = os.path.join(
 class _EncodedMessage(NamedTuple):
     line: bytes
     blobs: list[bytes]
+
+
+# One error vector: the slug of its fault, the messages before it, its bytes.
+class _ErrorVector(NamedTuple):
+    name: str
+    slug: str
+    before: list[_EncodedMessage]
+    fault: bytes
 
 
 # Returns `count` bytes that run through every byte value in turn.
@@ -166,18 +187,33 @@ def _success_vectors() -> list[tuple[str, list[_EncodedMessage]]]:
     length = len(next(jslb.line_encode(echo_make([], pad=""))))
     padded = echo_make([], pad="a" * (_LINE_MAX - length))
     vectors.append(("line_at_max", [padded]))
+    # A line of half `line_max` and a blob of the rest of `message_max`.
+    largest = _pattern_make(_MESSAGE_MAX - _LINE_MAX // 2)
+    length = len(next(jslb.line_encode(echo_make([largest], pad=""))))
+    at_max = echo_make([largest], pad="a" * (_LINE_MAX // 2 - length))
+    vectors.append(("message_at_max", [at_max]))
     return [
         (name, [_pieces_split(list(jslb.line_encode(line))) for line in lines])
         for name, lines in vectors
     ]
 
 
-# Returns each error vector's name, the slug of its fault and its bytes.
-def _error_vectors() -> list[tuple[str, str, bytes]]:
+# Returns each vector made by hand whose messages `jslb.py` encodes otherwise.
+def _loose_vectors() -> list[tuple[str, list[_EncodedMessage]]]:
+    line = b'{"0":{"t":"echo","b":1.0},"1":{"s":1.0}}\r'
+    return [("integral_floats", [_EncodedMessage(line, [b"x"])])]
+
+
+# Returns each error vector: its fault's slug, the messages before it, bytes.
+def _error_vectors() -> list[_ErrorVector]:
     prefix = b'{"0":{"t":"echo"},"pad":"'
     suffix = b'"}\r'
     pad = b"a" * (_LINE_MAX + 1 - len(prefix) - len(suffix))
-    return [
+    # A line of half `line_max` and a blob one byte past `message_max`.
+    blob = _pattern_make(_MESSAGE_MAX - _LINE_MAX // 2 + 1)
+    head = b'{"0":{"t":"echo","b":1},"1":{"s":%d},"pad":"' % len(blob)
+    filler = b"a" * (_LINE_MAX // 2 - len(head) - len(suffix))
+    faults = [
         ("error_no_header_zero", "no_header_zero", b'{"t":"echo"}\r'),
         ("error_no_type", "no_type", b'{"0":{"i":1}}\r'),
         ("error_no_type_string", "no_type", b'{"0":{"t":1}}\r'),
@@ -252,18 +288,68 @@ def _error_vectors() -> list[tuple[str, str, bytes]]:
             "blob_over_max",
             b'{"0":{"t":"echo","b":1},"1":{"s":%d}}\r' % (_BLOB_MAX + 1),
         ),
+        (
+            "error_message_over",
+            "message_over",
+            head + filler + suffix + blob,
+        ),
+        (
+            "error_utf8_overlong",
+            "line_not_utf8",
+            b'{"0":{"t":"' + bytes.fromhex("c080") + b'"}}\r',
+        ),
+        (
+            "error_utf8_surrogate",
+            "line_not_utf8",
+            b'{"0":{"t":"' + bytes.fromhex("eda080") + b'"}}\r',
+        ),
+        ("error_not_object", "line_not_object", b'[{"0":{"t":"echo"}}]\r'),
+        ("error_header_not_object", "header_not_object", b'{"0":"echo"}\r'),
+        (
+            "error_blob_data",
+            "blob_data_field",
+            b'{"0":{"t":"echo","b":1},"1":{"s":1,"d":"x"}}\rx',
+        ),
+        ("error_nan", "line_not_json", b'{"0":{"t":"echo"},"n":NaN}\r'),
+        (
+            "error_infinity",
+            "line_not_json",
+            b'{"0":{"t":"echo"},"n":Infinity}\r',
+        ),
     ]
+    vectors = [
+        _ErrorVector(name, slug, [], data) for name, slug, data in faults
+    ]
+    before = _EncodedMessage(
+        b'{"0":{"t":"echo","b":1},"1":{"s":1},"text":"before"}\r', [b"\r"]
+    )
+    vectors.append(
+        _ErrorVector(
+            "error_after_line", "no_header_zero", [before], b'{"t":"echo"}\r'
+        )
+    )
+    return vectors
 
 
 # What a decoder returns for a message: `d` in hex, `sha256` when streamed.
 def _message_expected(message: _EncodedMessage) -> dict[str, Any]:
     expected: dict[str, Any] = json.loads(message.line[:-1].decode("utf-8"))
+    _integral_set(expected["0"], ("b", "blobs"))
     for number, data in enumerate(message.blobs, 1):
         header: dict[str, Any] = expected[str(number)]
+        _integral_set(header, ("s", "size"))
         header["d"] = data.hex()
         if len(data) > _OVERFLOW_BYTES:
             header["sha256"] = hashlib.sha256(data).hexdigest()
     return expected
+
+
+# Makes each named field that holds an integral float an `int`, as decoders do.
+def _integral_set(header: dict[str, Any], names: tuple[str, str]) -> None:
+    for name in names:
+        value: object = header.get(name)
+        if type(value) is float and value.is_integer():
+            header[name] = int(value)
 
 
 # Returns the rendered form: the JSON text without `d`, then a tag per blob.
@@ -277,6 +363,23 @@ def _message_render(expected: dict[str, Any], count: int) -> str:
     text = json.dumps(sent, ensure_ascii=False, separators=(",", ":"))
     tags = "".join(f'<blob "n"={number}>' for number in range(1, count + 1))
     return text + tags
+
+
+# The messages a decoder returns and their renders, as a sidecar holds them.
+def _messages_expected(messages: list[_EncodedMessage]) -> dict[str, Any]:
+    expected = [_message_expected(message) for message in messages]
+    render = [
+        _message_render(item, len(message.blobs))
+        for item, message in zip(expected, messages, strict=True)
+    ]
+    return {"messages": expected, "render": render}
+
+
+# The bytes of the messages, each line followed by its blobs.
+def _messages_join(messages: list[_EncodedMessage]) -> bytes:
+    return b"".join(
+        message.line + b"".join(message.blobs) for message in messages
+    )
 
 
 # Writes a vector's bytes and its sidecar into the vectors directory.
@@ -295,18 +398,23 @@ def main() -> None:
         " python/vectors/."
     ).parse_args()
     os.makedirs(_VECTORS_PATH, exist_ok=True)
-    for name, messages in _success_vectors():
-        expected = [_message_expected(message) for message in messages]
-        render = [
-            _message_render(item, len(message.blobs))
-            for item, message in zip(expected, messages, strict=True)
-        ]
-        data = b"".join(
-            message.line + b"".join(message.blobs) for message in messages
-        )
-        _vector_write(name, data, {"messages": expected, "render": render})
-    for name, slug, data in _error_vectors():
-        _vector_write(name, data, {"error": slug})
+    made = ((True, _success_vectors()), (False, _loose_vectors()))
+    for canonical, vectors in made:
+        for name, messages in vectors:
+            sidecar: dict[str, Any] = {
+                **_messages_expected(messages),
+                "canonical": canonical,
+                "limits": _LIMITS,
+            }
+            _vector_write(name, _messages_join(messages), sidecar)
+    for vector in _error_vectors():
+        sidecar = {
+            "error": vector.slug,
+            **_messages_expected(vector.before),
+            "limits": _LIMITS,
+        }
+        data = _messages_join(vector.before) + vector.fault
+        _vector_write(vector.name, data, sidecar)
 
 
 if __name__ == "__main__":

@@ -11,14 +11,14 @@ from i18n import i18n
 
 
 # The state the registration sets, which is empty until then.
-class _State:
+class _McpState:
     # Starts with no MCP server.
     def __init__(self) -> None:
         self.server: mcp.Server | None = None
 
 
 # The one state of the module.
-_STATE = _State()
+_STATE = _McpState()
 
 
 # Returns the MCP server, raising before the handler is registered.

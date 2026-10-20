@@ -3,11 +3,15 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the level filter, the ring, the database that holds each line the
-# moment it is logged, the lines of the page threads and the three levels of
-# the external call. The only program a test starts is the interpreter that
-# runs it. The scratch directories go under `build/`.
+# moment it is logged, the lines of the page threads written and read back,
+# and the three levels of the external program run. The only program a test
+# starts is the interpreter that runs it. The scratch directories go under
+# `build/`.
 
-import contextlib, os, sqlite3, sys, tempfile, time, unittest, verbose
+import contextlib, os, shlex, sqlite3, sys, tempfile, time, unittest
+import unittest.mock, verbose
+from collections.abc import Callable
+from i18n import i18n
 from typing import Any, cast
 
 # The checkout's top directory, above this file's `python/`.
@@ -24,6 +28,9 @@ _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
 
 # The file in the root that holds the lines.
 _FILE_NAME = "_verbose.sqlite"
+
+# The highest verbose level, which the message of a level refused names.
+_LEVEL_HIGHEST = 2
 
 # A count of lines greater than any ring a test makes.
 _HISTORY_ALL = 100
@@ -54,6 +61,9 @@ _EXIT_PROGRAM = "import sys; sys.exit(int(sys.argv[1]))"
 # A program that writes its arguments as a list.
 _ARGS_PROGRAM = "import sys; print(sys.argv[1:], flush=True)"
 
+# A program that writes what it reads from its input, quoted.
+_INPUT_PROGRAM = "import sys; print(repr(sys.stdin.read()), flush=True)"
+
 # A program that makes the file that its first argument names.
 _MARKER_PROGRAM = "import sys; open(sys.argv[1], 'w').close()"
 
@@ -71,21 +81,38 @@ _HARD_PROGRAM = (
 )
 
 
-# Makes a scratch directory in `build/` that goes after the log is closed.
+# Makes a scratch directory in `build/` that goes when the test ends.
 def _scratch_make(case: unittest.TestCase) -> str:
     os.makedirs(_BUILD_PATH, exist_ok=True)
     scratch = tempfile.TemporaryDirectory(dir=_BUILD_PATH)
     case.addCleanup(scratch.cleanup)
-    case.addCleanup(verbose.log_close)
     return scratch.name
+
+
+# Opens the log in a directory, then has it closed when the test ends.
+def _log_open(case: unittest.TestCase, path: str, ring: int) -> None:
+    verbose.log_open(path, ring)
+    case.addCleanup(verbose.log_close)
 
 
 # Opens the log in a scratch directory at a level, and returns the directory.
 def _log_ready(case: unittest.TestCase, ring: int, level: int) -> str:
     path = _scratch_make(case)
-    verbose.log_open(path, ring)
+    _log_open(case, path, ring)
     verbose.level_set(level)
     return path
+
+
+# Calls `fn` and checks the type and the text of what it raises.
+def _raise_check(
+    case: unittest.TestCase,
+    kind: type[Exception],
+    message: str,
+    fn: Callable[[], object],
+) -> None:
+    with case.assertRaises(kind) as caught:
+        fn()
+    case.assertEqual(str(caught.exception), message)
 
 
 # Runs a query on the database in the directory with a connection of its own.
@@ -110,9 +137,18 @@ def _ring_texts() -> list[str]:
     return _texts_get(verbose.history_get(_HISTORY_ALL))
 
 
-# Runs a call with the output descriptors of this process set to files.
-def _call_captured(
-    level: int, argv: list[str], path: str
+# Returns the progress lines of a run: its start, then its end with the code.
+def _progress_texts(argv: list[str], code: int) -> tuple[str, str]:
+    command = shlex.join(argv)
+    return (
+        i18n("verbose.exec_run", command),
+        i18n("verbose.exec_exit", command, code),
+    )
+
+
+# Runs `fn` with the output descriptors of this process set to files.
+def _output_captured(
+    path: str, fn: Callable[[], int]
 ) -> tuple[int, str, str]:
     out_path = os.path.join(path, "out.txt")
     err_path = os.path.join(path, "err.txt")
@@ -125,7 +161,7 @@ def _call_captured(
             os.dup2(out.fileno(), 1)
             os.dup2(err.fileno(), 2)
             try:
-                code = verbose.call(level, argv)
+                code = fn()
             finally:
                 os.dup2(saved_out, 1)
                 os.dup2(saved_err, 2)
@@ -137,6 +173,19 @@ def _call_captured(
     with open(err_path, encoding="utf-8") as file:
         err_text = file.read()
     return code, out_text, err_text
+
+
+# Runs at level 0 with text held in the buffers of both Python streams.
+def _buffered_run(argv: list[str]) -> int:
+    with (
+        open(1, "w", encoding="utf-8", closefd=False) as out,
+        open(2, "w", encoding="utf-8", closefd=False) as err,
+        unittest.mock.patch("sys.stdout", out),
+        unittest.mock.patch("sys.stderr", err),
+    ):
+        out.write("before ")
+        err.write("before ")
+        return verbose.exec(0, argv, argv)
 
 
 # Tests which lines the level lets through and what the log refuses.
@@ -163,16 +212,21 @@ class TestLevel(unittest.TestCase):
     # A level outside 0 to 2 raises and changes nothing.
     def test_level_unknown(self) -> None:
         path = _log_ready(self, 10, 1)
-        with self.assertRaises(ValueError):
-            verbose.level_set(3)
-        with self.assertRaises(ValueError):
-            verbose.level_set(-1)
-        with self.assertRaises(ValueError):
-            verbose.log(3, "high")
-        with self.assertRaises(ValueError):
-            verbose.log(-1, "low")
-        with self.assertRaises(ValueError):
-            verbose.call(3, [sys.executable, "-c", ""])
+        argv = [sys.executable, "-c", ""]
+        for level in (3, -1):
+            message = i18n("verbose.level_invalid", level, _LEVEL_HIGHEST)
+            _raise_check(
+                self, ValueError, message, lambda: verbose.level_set(level)
+            )
+            _raise_check(
+                self, ValueError, message, lambda: verbose.log(level, "x")
+            )
+            _raise_check(
+                self,
+                ValueError,
+                message,
+                lambda: verbose.exec(level, argv, argv),
+            )
         verbose.log(1, "still one")
         self.assertEqual(_ring_texts(), ["still one"])
         self.assertEqual(len(_rows_read(path)), 1)
@@ -180,36 +234,56 @@ class TestLevel(unittest.TestCase):
     # A line logged before the level is set raises and is not written.
     def test_level_unset(self) -> None:
         path = _scratch_make(self)
-        verbose.log_open(path, 10)
-        with self.assertRaises(RuntimeError):
-            verbose.log(0, "early")
+        _log_open(self, path, 10)
+        _raise_check(
+            self,
+            RuntimeError,
+            i18n("verbose.level_unset"),
+            lambda: verbose.log(0, "early"),
+        )
         self.assertEqual(_ring_texts(), [])
         self.assertEqual(_rows_read(path), [])
 
-    # Every use of the log before it is opened raises.
+    # Every use of the log before it is opened raises, a close too.
     def test_log_unopened(self) -> None:
-        _scratch_make(self)
-        verbose.level_set(2)
-        with self.assertRaises(RuntimeError):
-            verbose.log(0, "early")
-        with self.assertRaises(RuntimeError):
-            verbose.history_get(1)
-        with self.assertRaises(RuntimeError):
-            verbose.lines_put("ui", [])
+        message = i18n("verbose.not_open")
+        uses: list[Callable[[], object]] = [
+            lambda: verbose.log(0, "early"),
+            lambda: verbose.history_get(1),
+            lambda: verbose.lines_put("ui", []),
+            lambda: verbose.tail_get("ui", 1),
+            verbose.log_close,
+        ]
+        for use in uses:
+            _raise_check(self, RuntimeError, message, use)
 
-    # Closing the log forgets the file, the ring and the level.
+    # A closed log refuses every use, a second close too, until it reopens.
+    def test_log_closed(self) -> None:
+        path = _log_ready(self, 10, 2)
+        verbose.log_close()
+        self.addCleanup(verbose.log_open, path, 10)
+        message = i18n("verbose.not_open")
+        uses: list[Callable[[], object]] = [
+            lambda: verbose.log(0, "closed"),
+            lambda: verbose.history_get(1),
+            verbose.log_close,
+        ]
+        for use in uses:
+            _raise_check(self, RuntimeError, message, use)
+
+    # Closing the log forgets the ring and the level.
     def test_close_resets(self) -> None:
         path = _log_ready(self, 10, 2)
         verbose.log(2, "before")
         verbose.log_close()
-        verbose.log_close()
-        with self.assertRaises(RuntimeError):
-            verbose.log(0, "closed")
-        with self.assertRaises(RuntimeError):
-            verbose.history_get(1)
         verbose.log_open(path, 10)
-        with self.assertRaises(RuntimeError):
-            verbose.log(0, "unset")
+        self.assertEqual(_ring_texts(), [])
+        _raise_check(
+            self,
+            RuntimeError,
+            i18n("verbose.level_unset"),
+            lambda: verbose.log(0, "unset"),
+        )
 
 
 # Tests the ring and the history it gives back.
@@ -248,8 +322,12 @@ class TestRing(unittest.TestCase):
     # A negative count raises.
     def test_history_negative(self) -> None:
         _log_ready(self, 10, 1)
-        with self.assertRaises(ValueError):
-            verbose.history_get(-1)
+        _raise_check(
+            self,
+            ValueError,
+            i18n("verbose.count_invalid", -1),
+            lambda: verbose.history_get(-1),
+        )
 
     # A line holds the time in milliseconds, its level and its text.
     def test_line_fields(self) -> None:
@@ -302,8 +380,12 @@ class TestDatabase(unittest.TestCase):
     # A second open of the log raises and the first stays in use.
     def test_open_twice(self) -> None:
         path = _log_ready(self, 10, 1)
-        with self.assertRaises(RuntimeError):
-            verbose.log_open(path, 10)
+        _raise_check(
+            self,
+            RuntimeError,
+            i18n("verbose.open_twice"),
+            lambda: verbose.log_open(path, 10),
+        )
         verbose.log(1, "still open")
         self.assertEqual(_ring_texts(), ["still open"])
 
@@ -332,7 +414,7 @@ class TestDatabase(unittest.TestCase):
             path,
             _PYCACHE_PATH,
         ]
-        self.assertEqual(verbose.call(0, argv), 7)
+        self.assertEqual(verbose.exec(0, argv, argv), 7)
         rows = _rows_read(path)
         self.assertEqual(
             [(row[2], row[3], row[4]) for row in rows],
@@ -340,7 +422,7 @@ class TestDatabase(unittest.TestCase):
         )
 
 
-# Tests the lines of the page threads that are written to the database.
+# Tests the lines of the page threads, written to the database and read back.
 class TestPage(unittest.TestCase):
     # Page lines are stored under their thread, whatever the level.
     def test_page_lines(self) -> None:
@@ -371,24 +453,34 @@ class TestPage(unittest.TestCase):
     def test_page_thread(self) -> None:
         path = _log_ready(self, 10, 2)
         for thread in ["server", "console", ""]:
-            with self.assertRaises(ValueError):
-                verbose.lines_put(thread, [verbose.LogLine(1, 1, "x")])
+            _raise_check(
+                self,
+                ValueError,
+                i18n("verbose.thread_unknown", thread),
+                lambda: verbose.lines_put(
+                    thread, [verbose.LogLine(1, 1, "x")]
+                ),
+            )
         self.assertEqual(_rows_read(path), [])
 
     # A level outside 0 to 2 raises and nothing of the batch is written.
     def test_page_level(self) -> None:
         path = _log_ready(self, 10, 2)
-        with self.assertRaises(ValueError):
-            verbose.lines_put(
+        _raise_check(
+            self,
+            ValueError,
+            i18n("verbose.level_invalid", 3, _LEVEL_HIGHEST),
+            lambda: verbose.lines_put(
                 "ui",
                 [verbose.LogLine(1, 1, "ok"), verbose.LogLine(2, 3, "bad")],
-            )
+            ),
+        )
         self.assertEqual(_rows_read(path), [])
 
-    # A batch with a row the table refuses writes none of its rows.
+    # A batch with a row the strict table refuses writes none of its rows.
     def test_page_batch(self) -> None:
         path = _log_ready(self, 10, 2)
-        with self.assertRaises(sqlite3.Error):
+        with self.assertRaisesRegex(sqlite3.IntegrityError, "line[.]at"):
             verbose.lines_put(
                 "ui",
                 [
@@ -398,89 +490,181 @@ class TestPage(unittest.TestCase):
             )
         self.assertEqual(_rows_read(path), [])
 
+    # The tail of a page thread is its newest lines, oldest first, its own.
+    def test_page_tail(self) -> None:
+        _log_ready(self, 10, 2)
+        a = verbose.LogLine(10, 1, "a")
+        b = verbose.LogLine(20, 2, "b")
+        c = verbose.LogLine(30, 0, "c")
+        d = verbose.LogLine(40, 1, "d")
+        verbose.lines_put("ui", [a, b, c])
+        verbose.lines_put("ai", [d])
+        verbose.log(1, "e")
+        expected: dict[int, list[verbose.LogLine]] = {
+            0: [],
+            1: [c],
+            2: [b, c],
+            3: [a, b, c],
+            _HISTORY_ALL: [a, b, c],
+        }
+        for count, lines in expected.items():
+            self.assertEqual(verbose.tail_get("ui", count), lines)
+        self.assertEqual(verbose.tail_get("ai", _HISTORY_ALL), [d])
 
-# Tests the external call at its three levels.
-class TestCall(unittest.TestCase):
+    # The tail reads the file, so it holds the lines of an earlier opening.
+    def test_tail_reopen(self) -> None:
+        path = _log_ready(self, 10, 2)
+        line = verbose.LogLine(10, 1, "a")
+        verbose.lines_put("ui", [line])
+        verbose.log_close()
+        verbose.log_open(path, 10)
+        self.assertEqual(verbose.tail_get("ui", 1), [line])
+
+    # A thread other than ui or ai and a negative count raise.
+    def test_tail_refused(self) -> None:
+        _log_ready(self, 10, 2)
+        for thread in ["server", "console", ""]:
+            _raise_check(
+                self,
+                ValueError,
+                i18n("verbose.thread_unknown", thread),
+                lambda: verbose.tail_get(thread, 1),
+            )
+        _raise_check(
+            self,
+            ValueError,
+            i18n("verbose.count_invalid", -1),
+            lambda: verbose.tail_get("ui", -1),
+        )
+
+
+# Tests the external program run at its three levels.
+class TestCommand(unittest.TestCase):
     # Level 0 returns the exit code of the program.
-    def test_call_code(self) -> None:
+    def test_command_code(self) -> None:
         argv = [sys.executable, "-c", _EXIT_PROGRAM]
-        self.assertEqual(verbose.call(0, argv + ["0"]), 0)
-        self.assertEqual(verbose.call(0, argv + ["5"]), 5)
+        self.assertEqual(verbose.exec(0, argv + ["0"], argv + ["0"]), 0)
+        self.assertEqual(verbose.exec(0, argv + ["5"], argv + ["5"]), 5)
 
     # Level 0 passes the output through and logs nothing.
-    def test_call_pass(self) -> None:
+    def test_command_pass(self) -> None:
         path = _log_ready(self, 10, 2)
         argv = [sys.executable, "-c", _OUTPUT_PROGRAM]
-        code, out, err = _call_captured(0, argv, path)
+        code, out, err = _output_captured(
+            path, lambda: verbose.exec(0, argv, argv)
+        )
         self.assertEqual((code, out, err), (3, "alpha\n", "beta\n"))
         self.assertEqual(_ring_texts(), [])
         self.assertEqual(_rows_read(path), [])
 
+    # Level 0 writes what Python holds for both streams before it runs.
+    def test_command_flushed(self) -> None:
+        path = _scratch_make(self)
+        argv = [sys.executable, "-c", _OUTPUT_PROGRAM]
+        code, out, err = _output_captured(path, lambda: _buffered_run(argv))
+        self.assertEqual(
+            (code, out, err), (3, "before alpha\n", "before beta\n")
+        )
+
     # Level 1 logs Markdown progress with the output in a text block.
-    def test_call_markdown(self) -> None:
+    def test_command_markdown(self) -> None:
         path = _log_ready(self, 10, 1)
         argv = [sys.executable, "-c", _OUTPUT_PROGRAM]
-        self.assertEqual(verbose.call(1, argv), 3)
+        self.assertEqual(verbose.exec(1, argv, argv), 3)
         lines = verbose.history_get(_HISTORY_ALL)
         self.assertEqual([line.level for line in lines], [1] * 6)
-        texts = _texts_get(lines)
-        self.assertIn(sys.executable, texts[0])
-        self.assertEqual(texts[1:5], ["```text", "alpha", "beta", "```"])
-        self.assertIn(sys.executable, texts[5])
-        self.assertTrue(texts[5].endswith(" 3."))
+        started, ended = _progress_texts(argv, 3)
+        texts = [started, "```text", "alpha", "beta", "```", ended]
+        self.assertEqual(_texts_get(lines), texts)
         self.assertEqual([row[4] for row in _rows_read(path)], texts)
 
     # Level 2 logs the output raw, with no block around it.
-    def test_call_raw(self) -> None:
+    def test_command_raw(self) -> None:
         path = _log_ready(self, 10, 2)
         argv = [sys.executable, "-c", _OUTPUT_PROGRAM]
-        self.assertEqual(verbose.call(2, argv), 3)
+        self.assertEqual(verbose.exec(2, argv, argv), 3)
         lines = verbose.history_get(_HISTORY_ALL)
         self.assertEqual([line.level for line in lines], [2] * 4)
-        texts = _texts_get(lines)
-        self.assertIn(sys.executable, texts[0])
-        self.assertEqual(texts[1:3], ["alpha", "beta"])
-        self.assertTrue(texts[3].endswith(" 3."))
+        started, ended = _progress_texts(argv, 3)
+        texts = [started, "alpha", "beta", ended]
+        self.assertEqual(_texts_get(lines), texts)
         self.assertEqual([row[4] for row in _rows_read(path)], texts)
 
-    # A call above the level of the log writes nothing and still runs.
-    def test_call_gated(self) -> None:
+    # Level 2 runs the verbose command line, levels 0 and 1 the plain one.
+    def test_command_chosen(self) -> None:
+        path = _log_ready(self, 10, 2)
+        program = [sys.executable, "-c", _ARGS_PROGRAM]
+        argv = [*program, "plain"]
+        argv_verbose = [*program, "--verbose", "x y"]
+        listed = str(["plain"])
+        listed_verbose = str(["--verbose", "x y"])
+        self.assertEqual(verbose.exec(2, argv, argv_verbose), 0)
+        started, ended = _progress_texts(argv_verbose, 0)
+        self.assertEqual(_ring_texts(), [started, listed_verbose, ended])
+        self.assertEqual(verbose.exec(1, argv, argv_verbose), 0)
+        started, ended = _progress_texts(argv, 0)
+        self.assertEqual(
+            _ring_texts()[3:], [started, "```text", listed, "```", ended]
+        )
+        code, out, _ = _output_captured(
+            path, lambda: verbose.exec(0, argv, argv_verbose)
+        )
+        self.assertEqual((code, out), (0, listed + "\n"))
+
+    # Levels 1 and 2 give the program no input, so it cannot read the wire.
+    def test_command_input(self) -> None:
+        _log_ready(self, 10, 2)
+        argv = [sys.executable, "-c", _INPUT_PROGRAM]
+        read_fd, write_fd = os.pipe()
+        os.write(write_fd, b"wire")
+        os.close(write_fd)
+        saved = os.dup(0)
+        try:
+            os.dup2(read_fd, 0)
+            for level in (1, 2):
+                self.assertEqual(verbose.exec(level, argv, argv), 0)
+        finally:
+            os.dup2(saved, 0)
+            os.close(saved)
+            os.close(read_fd)
+        texts = _ring_texts()
+        self.assertEqual(texts.count(repr("")), 2)
+        self.assertNotIn(repr("wire"), texts)
+
+    # A run above the level of the log writes nothing and still runs.
+    def test_command_gated(self) -> None:
         path = _log_ready(self, 10, 1)
         argv = [sys.executable, "-c", _OUTPUT_PROGRAM]
-        self.assertEqual(verbose.call(2, argv), 3)
+        self.assertEqual(verbose.exec(2, argv, argv), 3)
         verbose.level_set(0)
-        self.assertEqual(verbose.call(1, argv), 3)
+        self.assertEqual(verbose.exec(1, argv, argv), 3)
         self.assertEqual(_ring_texts(), [])
         self.assertEqual(_rows_read(path), [])
 
-    # The arguments reach the program unchanged at every level.
-    def test_call_flags(self) -> None:
-        path = _log_ready(self, 10, 2)
-        argv = [sys.executable, "-c", _ARGS_PROGRAM, "--verbose", "x y"]
-        listed = str(["--verbose", "x y"])
-        self.assertEqual(verbose.call(2, argv), 0)
-        self.assertEqual(verbose.call(1, argv), 0)
-        self.assertEqual(_ring_texts().count(listed), 2)
-        code, out, _ = _call_captured(0, argv, path)
-        self.assertEqual((code, out), (0, listed + "\n"))
-
     # A program that cannot start raises at every level.
-    def test_call_start(self) -> None:
+    def test_command_start(self) -> None:
         path = _log_ready(self, 10, 2)
-        absent = os.path.join(path, "absent")
+        absent = [os.path.join(path, "absent")]
         for level in range(3):
-            with self.assertRaises(OSError):
-                verbose.call(level, [absent])
-        self.assertEqual(len(verbose.history_get(_HISTORY_ALL)), 2)
+            with self.assertRaises(FileNotFoundError) as caught:
+                verbose.exec(level, absent, absent)
+            self.assertEqual(caught.exception.filename, absent[0])
+        started = i18n("verbose.exec_run", shlex.join(absent))
+        self.assertEqual(_ring_texts(), [started, started])
 
     # Level 0 needs no log and levels 1 and 2 refuse before they run.
-    def test_call_unopened(self) -> None:
+    def test_command_unopened(self) -> None:
         path = _scratch_make(self)
-        first = os.path.join(path, "first")
-        second = os.path.join(path, "second")
-        argv = [sys.executable, "-c", _MARKER_PROGRAM]
-        self.assertEqual(verbose.call(0, argv + [first]), 0)
-        self.assertTrue(os.path.exists(first))
-        with self.assertRaises(RuntimeError):
-            verbose.call(1, argv + [second])
-        self.assertFalse(os.path.exists(second))
+        program = [sys.executable, "-c", _MARKER_PROGRAM]
+        first = [*program, os.path.join(path, "first")]
+        second = [*program, os.path.join(path, "second")]
+        self.assertEqual(verbose.exec(0, first, first), 0)
+        self.assertTrue(os.path.exists(first[-1]))
+        for level in (1, 2):
+            _raise_check(
+                self,
+                RuntimeError,
+                i18n("verbose.not_open"),
+                lambda: verbose.exec(level, second, second),
+            )
+        self.assertFalse(os.path.exists(second[-1]))

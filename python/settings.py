@@ -18,11 +18,14 @@ _SETTING_TYPES: dict[str, type[object]] = {
     "verbose_forward": bool,
     "line_max": int,
     "blob_max": int,
+    "message_max": int,
+    "queue_max": int,
     "overflow_bytes": int,
     "chunk_bytes": int,
     "srv_buf_size": int,
     "media_db_bytes": int,
     "files_browser_bytes": int,
+    "db_soft_bytes": int,
     "turn_compact_tokens": int,
     "long_task_ms": int,
     "provider": dict,
@@ -38,7 +41,7 @@ _PROVIDER_TYPES: dict[str, type[object]] = {
 }
 
 
-# Checks an object has exactly the keys of the table with exactly its types.
+# Checks an object's keys and types, any `dict` subclass passing as `dict`.
 def _object_check(
     value: dict[str, Any], types: dict[str, type[object]], prefix: str
 ) -> None:
@@ -50,7 +53,11 @@ def _object_check(
             raise ValueError(i18n("settings.key_extra", prefix + key))
     for key, wanted in types.items():
         found = type(value[key])
-        if found is not wanted:
+        if wanted is dict:
+            matches = isinstance(value[key], dict)
+        else:
+            matches = found is wanted
+        if not matches:
             raise ValueError(
                 i18n(
                     "settings.type_wrong",

@@ -63,7 +63,7 @@ _RESTART_SCHEMA: dict[str, Any] = {
 
 
 # The state the registration sets, which is empty until then.
-class _State:
+class _SystemState:
     # Starts with no root and no debug setting.
     def __init__(self) -> None:
         self.root: str | None = None
@@ -71,7 +71,7 @@ class _State:
 
 
 # The one state of the module.
-_STATE = _State()
+_STATE = _SystemState()
 
 
 # Returns the root and the debug setting, raising before the registration.
@@ -146,15 +146,12 @@ def _argv_make(argv: list[str], main_loop: str) -> list[str]:
     return [*kept, _MAIN_LOOP_OPTION, main_loop]
 
 
-# Flushes the output, then replaces the process image to serve the file.
+# Replaces the process image to serve the main loop file, which must exist.
 def _restart_run(root: str, main_loop: str) -> NoReturn:
     path = _main_loop_path(root, main_loop)
     if not os.path.isfile(path):
         raise FileNotFoundError(i18n("engine_system.main_loop_missing", path))
-    argv = _argv_make(sys.orig_argv, main_loop)
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os.execv(sys.executable, argv)
+    os.execv(sys.executable, _argv_make(sys.orig_argv, main_loop))
 
 
 # Reads the text argument of a tool call, raising unless it is there.
@@ -202,17 +199,15 @@ def settings_put(
 def source_put(line: jslb.Object, *, name: str) -> jslb.Object:
     root, debug = _registered_get()
     _debug_check(debug, "source.put")
-    blob = line[1]
-    data = jslb.field_get(blob, "data")
-    if isinstance(data, bytes):
-        digest = _bytes_install(root, name, data)
-    elif isinstance(data, str):
-        digest = blob["sha256"]
+    if 1 not in line:
+        raise ValueError(i18n("engine_system.blob_missing"))
+    blob: jslb.Object = line[1]
+    data: bytes | str = jslb.field_get(blob, "data")
+    if isinstance(data, str):
+        digest: str = blob["sha256"]
         _file_install(root, name, data)
     else:
-        raise TypeError(
-            i18n("engine_system.blob_invalid", type(data).__name__)
-        )
+        digest = _bytes_install(root, name, data)
     return dispatch.reply_make(line, sha256=digest)
 
 

@@ -20,14 +20,14 @@ _TAP_EXTENSION = ".tap"
 
 
 # The state the registration sets, which is empty until then.
-class _State:
+class _TapState:
     # Starts with no root.
     def __init__(self) -> None:
         self.root: str | None = None
 
 
 # The one state of the module.
-_STATE = _State()
+_STATE = _TapState()
 
 
 # Returns the root, raising before the handler is registered.

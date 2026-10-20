@@ -3,9 +3,9 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // The task manager of one thread, the one synchronization tool: its ports,
-// the owner table, one line dispatched at a time, sleeps and their wakes, and
-// the verbose sink of the thread. Its message channel only turns a platform
-// event into the next step.
+// the owner table, one line dispatched at a time, sleeps and their wakes, the
+// bound on the bytes it holds, and the verbose sink of the thread. Its message
+// channel only turns a platform event into the next step.
 
 namespace queue {
   // The names this module reads and writes and the level of its log lines.
@@ -15,10 +15,14 @@ namespace queue {
     type_field: "type",
     id_field: "id",
     reply_field: "reply",
+    size_field: "size",
+    data_field: "d",
     id_short: "i",
     full_marker: "type",
     debug_setting: "debug",
     forward_setting: "verbose_forward",
+    line_setting: "line_max",
+    limit_setting: "queue_max",
     log_level: 2,
   });
 
@@ -47,12 +51,13 @@ namespace queue {
     from: ThreadName;
   }
 
-  // A sleeping task: state, wake type, replies so far and what it owes.
+  // A sleeping task: state, wake type, replies so far, their bytes, the debt.
   interface SleepRecord {
     state: unknown;
     then_type: string;
     count: number;
     replies: Map<number, lines.Line>;
+    bytes: number;
     owed: Owed | undefined;
   }
 
@@ -67,12 +72,13 @@ namespace queue {
     submitted: Map<number, ThreadName>;
   }
 
-  // A line held to run, the port it came on, and what a wake owes.
+  // A line held to run, the port it came on, what a wake owes, its bytes.
   interface HeldItem {
     line: lines.Line;
     from: ThreadName;
     wake: boolean;
     owed: Owed | undefined;
+    bytes: number;
   }
 
   // The type of a header, which must be text.
@@ -111,6 +117,11 @@ namespace queue {
     return utility.json_text(line[0]);
   }
 
+  // The bytes of the JSON text of a value in `UTF-8`.
+  function json_bytes(value: unknown): number {
+    return utility.utf8_encode(utility.json_text(value)).length;
+  }
+
   // Says whether a handler result is a sleep, by its three fields.
   function sleep_is(result: object): result is dispatch.Sleep {
     return "state" in result && "wait_ids" in result && "then_type" in result;
@@ -119,6 +130,21 @@ namespace queue {
   // The blob headers of a line, 1 on.
   function blobs_of(line: lines.Line): lines.BlobHeader[] {
     return jslb.headers_of(line).slice(1) as lines.BlobHeader[];
+  }
+
+  // The bytes a held line counts: its JSON text without blob data, then sizes.
+  function line_bytes(line: lines.Line): number {
+    const shown: { [key: string]: unknown } = { ...line };
+    const blobs = blobs_of(line);
+    let sizes = 0;
+    for (let index = 0; index < blobs.length; index += 1) {
+      const blob = blobs[index];
+      shown[index + 1] = Object.fromEntries(
+        Object.entries(blob).filter(([name]) => name !== constants.data_field),
+      );
+      sizes += jslb.field_get(blob, constants.size_field) as number;
+    }
+    return json_bytes(shown) + sizes;
   }
 
   // The bytes of the blobs of a line that are held in memory.
@@ -227,7 +253,7 @@ namespace queue {
     }
   }
 
-  // The verbose lines of a thread waiting to go out as one `verbose.put`.
+  // The verbose lines of a thread waiting to go out as `verbose.put` lines.
   export class VerboseBatch {
     private readonly thread: "ui" | "ai";
     private readonly settings_get: (id: string) => unknown;
@@ -250,19 +276,17 @@ namespace queue {
       }
     }
 
-    // Posts the kept lines as one `verbose.put`, keeping out its own lines.
+    // Posts the kept lines in order as `verbose.put` lines below `line_max`.
     batch_send(post: (line: lines.Line) => void): void {
       if (this.kept.length === 0) {
         return;
       }
-      const header = jslb.header_make(constants.verbose_type, { full: true });
-      const line = jslb.line_make(header, [], {
-        thread: this.thread,
-        lines: this.kept,
-      });
+      const groups = this.groups_split();
       this.kept = [];
       this.sending = true;
-      post(line);
+      for (const group of groups) {
+        post(this.put_make(group));
+      }
       this.sending = false;
     }
 
@@ -272,6 +296,42 @@ namespace queue {
         this.settings_get(constants.debug_setting) === true &&
         this.settings_get(constants.forward_setting) === true
       );
+    }
+
+    // Splits the kept lines into groups whose `verbose.put` fits `line_max`.
+    private groups_split(): lines.VerboseLine[][] {
+      const limit = this.settings_get(constants.line_setting) as number;
+      const empty = json_bytes(this.put_make([]));
+      const groups: lines.VerboseLine[][] = [];
+      let group: lines.VerboseLine[] = [];
+      // The bytes of the group's line: the empty line, each entry, the commas.
+      let bytes = empty;
+      for (const entry of this.kept) {
+        const size = json_bytes(entry);
+        if (empty + size >= limit) {
+          throw new Error(
+            i18n("queue.entry_over", this.thread, empty + size, limit),
+          );
+        }
+        if (group.length > 0 && bytes + 1 + size >= limit) {
+          groups.push(group);
+          group = [];
+          bytes = empty;
+        }
+        bytes += group.length > 0 ? size + 1 : size;
+        group.push(entry);
+      }
+      groups.push(group);
+      return groups;
+    }
+
+    // A `verbose.put` of this thread holding the lines given.
+    private put_make(entries: lines.VerboseLine[]): lines.Line {
+      const header = jslb.header_make(constants.verbose_type, { full: true });
+      return jslb.line_make(header, [], {
+        thread: this.thread,
+        lines: entries,
+      });
     }
   }
 
@@ -287,11 +347,13 @@ namespace queue {
     private readonly tick = new MessageChannel();
     private id_last = 0;
     private sleeping = 0;
+    private held_bytes = 0;
     private draining = false;
     private scheduled = false;
     private current: HandlerRun | undefined;
     private batch: VerboseBatch | undefined;
-    private fault: { cause: unknown } | undefined;
+    private settings_get: ((id: string) => unknown) | undefined;
+    private fault: Error | undefined;
 
     // Takes the thread, its owner table and the mode, and adds its own port.
     constructor(
@@ -338,7 +400,9 @@ namespace queue {
         : constants.id_short;
       Object.assign(header, { [name]: id });
       run.submitted.set(id, target);
-      this.log_write("queue.submit", target, header_text(line));
+      this.log_write(
+        i18n("queue.submit", this.thread, target, header_text(line)),
+      );
       this.line_send(target, blobs_move(line));
       return id;
     }
@@ -351,7 +415,9 @@ namespace queue {
         throw new Error(i18n("queue.notify_marked", header_text(line)));
       }
       const target = owner ?? this.owner_find(type);
-      this.log_write("queue.notify", target, header_text(line));
+      this.log_write(
+        i18n("queue.notify", this.thread, target, header_text(line)),
+      );
       this.line_send(target, blobs_move(line));
     }
 
@@ -369,7 +435,9 @@ namespace queue {
           i18n("queue.forward_marked", this.thread, header_text(line)),
         );
       }
-      this.log_write("queue.forward", owner, header_text(line));
+      this.log_write(
+        i18n("queue.forward", this.thread, owner, header_text(line)),
+      );
       this.line_send(owner, line);
     }
 
@@ -379,7 +447,7 @@ namespace queue {
       return this.local.length + this.inbox.length + running + this.sleeping;
     }
 
-    // Installs the verbose sink, whose batch goes out after each task.
+    // Installs the verbose sink and the settings reader that bounds the queue.
     sink_attach(
       sink_set: (fn: (line: lines.VerboseLine) => void) => void,
       settings_get: (id: string) => unknown,
@@ -395,6 +463,7 @@ namespace queue {
         batch.line_add(line);
       });
       this.batch = batch;
+      this.settings_get = settings_get;
     }
 
     // The owner of a type: the thread of its longest matching prefix.
@@ -423,12 +492,46 @@ namespace queue {
       port.line_post(line, buffers_of(arrays_of(line)));
     }
 
-    // Holds a line that came on a port and starts the tasks.
+    // Counts and holds a line that came on a port and starts the tasks.
     private line_arrive(from: ThreadName, line: lines.Line): void {
       this.fault_check();
-      const item = { line, from, wake: false, owed: undefined };
+      const bytes = this.hold_take(line);
+      const item = { line, from, wake: false, owed: undefined, bytes };
       this.item_push(item, from === this.thread);
       this.run_start();
+    }
+
+    // Counts the bytes of a line to hold, a fault when past `queue_max`.
+    private hold_take(line: lines.Line): number {
+      try {
+        const bytes = line_bytes(line);
+        this.limit_check(line, bytes);
+        this.held_bytes += bytes;
+        return bytes;
+      } catch (error) {
+        return this.fault_stop(error);
+      }
+    }
+
+    // Throws when the bytes held would pass `queue_max`, once it can be read.
+    private limit_check(line: lines.Line, bytes: number): void {
+      const settings_get = this.settings_get;
+      if (settings_get === undefined) {
+        return;
+      }
+      const limit = settings_get(constants.limit_setting) as number;
+      if (this.held_bytes + bytes > limit) {
+        throw new Error(
+          i18n(
+            "queue.queue_over",
+            this.thread,
+            header_text(line),
+            bytes,
+            this.held_bytes,
+            limit,
+          ),
+        );
+      }
     }
 
     // Holds an item, in synchronous mode its own ahead of the inputs.
@@ -489,24 +592,30 @@ namespace queue {
       return this.local.shift() ?? this.inbox.shift();
     }
 
-    // Runs one item, then sends the verbose batch, keeping the first fault.
+    // Runs one item, then sends the verbose batch, unsent after a fault.
     private item_run(item: HeldItem): void {
       try {
         this.item_route(item);
         this.batch_flush();
       } catch (error) {
-        this.fault = { cause: error };
-        throw error;
+        this.fault_stop(error);
       }
     }
 
-    // Throws once a fault has stopped this queue.
+    // Keeps the fault that stops this queue, no task running, and throws it.
+    private fault_stop(error: unknown): never {
+      this.current = undefined;
+      this.fault = error as Error;
+      throw error;
+    }
+
+    // Throws once a fault has stopped this queue, with its message and stack.
     private fault_check(): void {
       const fault = this.fault;
       if (fault !== undefined) {
         throw utility.error_wrap(
-          i18n("queue.stopped", this.thread),
-          fault.cause,
+          i18n("queue.stopped", this.thread, fault.message, fault.stack),
+          fault,
         );
       }
     }
@@ -515,6 +624,7 @@ namespace queue {
     private item_route(item: HeldItem): void {
       const { line, from } = item;
       if (item.wake) {
+        this.held_bytes -= item.bytes;
         this.task_run(line, from, item.owed);
         return;
       }
@@ -534,15 +644,22 @@ namespace queue {
       }
       const reply = field_number(header, constants.reply_field);
       if (reply !== undefined) {
-        this.reply_receive(from, reply, line);
+        this.reply_receive(from, reply, line, item.bytes);
         return;
       }
-      if (from !== this.thread && this.owner_find(type) !== this.thread) {
-        this.line_forward(line);
+      this.held_bytes -= item.bytes;
+      const owner = from === this.thread ? from : this.owner_find(type);
+      if (owner === this.thread) {
+        const id = field_number(header, constants.id_field);
+        this.task_run(line, from, id === undefined ? undefined : { id, from });
         return;
       }
-      const id = field_number(header, constants.id_field);
-      this.task_run(line, from, id === undefined ? undefined : { id, from });
+      if (owner === from) {
+        throw new Error(
+          i18n("queue.forward_back", this.thread, header_text(line), from),
+        );
+      }
+      this.line_forward(line);
     }
 
     // Runs the handler of a line and takes what it returns.
@@ -551,7 +668,9 @@ namespace queue {
       from: ThreadName,
       owed: Owed | undefined,
     ): void {
-      this.log_write("queue.dispatch", from, header_text(line));
+      this.log_write(
+        i18n("queue.dispatch", this.thread, from, header_text(line)),
+      );
       const run: HandlerRun = { submitted: new Map<number, ThreadName>() };
       this.current = run;
       const result = dispatch.line_dispatch(line);
@@ -627,6 +746,7 @@ namespace queue {
         then_type: sleep.then_type,
         count: waits.size,
         replies: new Map<number, lines.Line>(),
+        bytes: 0,
         owed,
       };
       for (const [id, owner] of run.submitted) {
@@ -634,20 +754,24 @@ namespace queue {
       }
       this.sleeping += 1;
       this.log_write(
-        "queue.sleep",
-        utility.json_text(sleep.wait_ids),
-        sleep.then_type,
+        i18n(
+          "queue.sleep",
+          this.thread,
+          utility.json_text(sleep.wait_ids),
+          sleep.then_type,
+        ),
       );
       if (record.count === 0) {
         this.wake_start(record);
       }
     }
 
-    // Gives a reply to the sleep that waits for it, waking it at the last.
+    // Gives a reply and its bytes to the sleep that waits, waking it at last.
     private reply_receive(
       from: ThreadName,
       reply: number,
       line: lines.Line,
+      bytes: number,
     ): void {
       const request = this.pending.get(reply);
       if (request === undefined || request.owner !== from) {
@@ -656,9 +780,12 @@ namespace queue {
         );
       }
       this.pending.delete(reply);
-      this.log_write("queue.reply_received", from, header_text(line));
+      this.log_write(
+        i18n("queue.reply_received", this.thread, from, header_text(line)),
+      );
       const sleep = request.sleep;
       sleep.replies.set(reply, line);
+      sleep.bytes += bytes;
       if (sleep.replies.size === sleep.count) {
         this.wake_start(sleep);
       }
@@ -674,8 +801,21 @@ namespace queue {
       const replies = entries.map((entry) => entry[1]);
       const header = jslb.header_make(sleep.then_type);
       const line = jslb.line_make(header, [], { state: sleep.state, replies });
-      this.log_write("queue.wake", sleep.then_type, utility.json_text(ids));
-      const item = { line, from: this.thread, wake: true, owed: sleep.owed };
+      this.log_write(
+        i18n(
+          "queue.wake",
+          this.thread,
+          sleep.then_type,
+          utility.json_text(ids),
+        ),
+      );
+      const item = {
+        line,
+        from: this.thread,
+        wake: true,
+        owed: sleep.owed,
+        bytes: sleep.bytes,
+      };
       this.item_push(item, true);
     }
 
@@ -696,7 +836,9 @@ namespace queue {
           ),
         );
       }
-      this.log_write("queue.reply", owed.from, header_text(reply));
+      this.log_write(
+        i18n("queue.reply", this.thread, owed.from, header_text(reply)),
+      );
       this.line_send(owed.from, reply);
     }
 
@@ -710,9 +852,9 @@ namespace queue {
       }
     }
 
-    // Writes one verbose line at level 2 with this thread as its first value.
-    private log_write(name: string, ...values: unknown[]): void {
-      verbose.log(constants.log_level, i18n(name, this.thread, ...values));
+    // Writes one finished line of the thread's timeline at level 2.
+    private log_write(text: string): void {
+      verbose.log(constants.log_level, text);
     }
   }
 }

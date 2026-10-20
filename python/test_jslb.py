@@ -3,13 +3,15 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests of jslb: the builders, field access, the encoder and its refusals,
-# the debug rendering, the decoder and every hard error, blobs streamed into
-# a sink in a scratch directory under build/, and the vectors vectors_make.py
+# the debug rendering, the decoder, its limits, its deferred fault and every
+# hard error, each refusal compared with its message, blobs streamed into a
+# sink in a scratch directory under build/, and the vectors vectors_make.py
 # writes, each read whole, by single bytes and split at every offset.
 
-import hashlib, jslb, json, math, os, tempfile, unittest
-from collections.abc import Iterable, Iterator
-from typing import Any
+import errno, hashlib, jslb, json, math, os, tempfile, unittest, unittest.mock
+from collections.abc import Callable, Iterable, Iterator
+from typing import Any, NoReturn
+from i18n import i18n
 
 # The checkout's build directory, where each test makes its scratch directory.
 _BUILD_PATH = os.path.join(
@@ -26,6 +28,9 @@ _LINE_MAX = 4096
 
 # The largest blob the decoders here read.
 _BLOB_MAX = 65536
+
+# The largest message the decoders here read, room for two largest blobs.
+_MESSAGE_MAX = 2 * _BLOB_MAX
 
 # The largest blob the decoders here keep in memory.
 _OVERFLOW_BYTES = 1024
@@ -47,8 +52,50 @@ class _ScratchSink:
         return os.path.join(self.directory, f"blob_{len(self.headers)}")
 
 
+# A file whose every write fails as on a full disk, and which records a close.
+class _FailingFile:
+    # Holds the error each write raises, with the file not closed yet.
+    def __init__(self) -> None:
+        self.error = OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+        self.closed = False
+
+    # Raises the error, as a write to a full disk does.
+    def write(self, data: bytes) -> NoReturn:
+        raise self.error
+
+    # Records that the file was closed.
+    def close(self) -> None:
+        self.closed = True
+
+
+# A test case that compares raised messages and asks the stdlib for reasons.
+class _MessageCase(unittest.TestCase):
+    # Asserts the call raises the kind of error carrying exactly the message.
+    def raised_assert(
+        self,
+        kind: type[BaseException],
+        message: str,
+        call: Callable[[], object],
+    ) -> None:
+        with self.assertRaises(kind) as caught:
+            call()
+        self.assertEqual(caught.exception.args, (message,))
+
+    # Returns the reason the stdlib JSON parser gives for refusing the text.
+    def parse_reason(self, text: str) -> str:
+        with self.assertRaises(json.JSONDecodeError) as caught:
+            json.loads(text)
+        return caught.exception.msg
+
+    # Returns the reason the stdlib gives for refusing the bytes as `UTF-8`.
+    def decode_reason(self, data: bytes) -> str:
+        with self.assertRaises(UnicodeDecodeError) as caught:
+            data.decode("utf-8")
+        return caught.exception.reason
+
+
 # A test case with a scratch directory under `build` and a sink in it.
-class _ScratchCase(unittest.TestCase):
+class _ScratchCase(_MessageCase):
     # Makes the scratch directory, removed when the test ends.
     def setUp(self) -> None:
         os.makedirs(_BUILD_PATH, exist_ok=True)
@@ -60,12 +107,28 @@ class _ScratchCase(unittest.TestCase):
     # Returns a new decoder with the limits here, streaming into the sink.
     def decoder_make(self) -> jslb.LineDecoder:
         return jslb.LineDecoder(
-            _LINE_MAX, _BLOB_MAX, _OVERFLOW_BYTES, self.sink.path_make
+            _LINE_MAX,
+            _BLOB_MAX,
+            _MESSAGE_MAX,
+            _OVERFLOW_BYTES,
+            self.sink.path_make,
         )
 
-    # Feeds the pieces to a new decoder and returns every line they finish.
-    def pieces_decode(self, pieces: Iterable[bytes]) -> list[jslb.Object]:
-        decoder = self.decoder_make()
+    # Returns a new decoder with a sidecar's limits, streaming into the sink.
+    def sidecar_decoder(self, sidecar: dict[str, Any]) -> jslb.LineDecoder:
+        limits: dict[str, int] = sidecar["limits"]
+        return jslb.LineDecoder(
+            limits["line_max"],
+            limits["blob_max"],
+            limits["message_max"],
+            limits["overflow_bytes"],
+            self.sink.path_make,
+        )
+
+    # Feeds the pieces to the decoder and returns every line they finish.
+    def pieces_decode(
+        self, decoder: jslb.LineDecoder, pieces: Iterable[bytes]
+    ) -> list[jslb.Object]:
         lines: list[jslb.Object] = []
         for piece in pieces:
             lines += decoder.bytes_feed(piece)
@@ -82,6 +145,15 @@ def _pieces_join(pieces: Iterable[bytes | str]) -> bytes:
         else:
             parts.append(piece)
     return b"".join(parts)
+
+
+# Returns an `echo` message, its line padded to `length` bytes, then blobs.
+def _message_padded(length: int, blobs: list[bytes]) -> bytes:
+    made = [jslb.blob_make(data) for data in blobs]
+    header = jslb.header_make("echo")
+    short = len(next(jslb.line_encode(jslb.line_make(header, made, pad=""))))
+    line = jslb.line_make(header, made, pad="a" * (length - short))
+    return _pieces_join(jslb.line_encode(line))
 
 
 # Returns a decoded line as a sidecar holds it, each blob's `d` in hex.
@@ -103,7 +175,7 @@ def _line_sent(line: jslb.Object) -> jslb.Object:
     sent = jslb.Object(line)
     for number in range(1, jslb.field_get(line[0], "blobs") + 1):
         header: dict[int | str, Any] = line[number]
-        if jslb.field_get(line[number], "size") > _OVERFLOW_BYTES:
+        if isinstance(header["d"], str):
             sent[number] = jslb.Object(
                 (name, value)
                 for name, value in header.items()
@@ -143,7 +215,7 @@ def _vector_names(error: bool) -> list[str]:
 
 
 # Tests the attribute access of a decoded object.
-class TestObject(unittest.TestCase):
+class TestObject(_MessageCase):
     # A string key reads as an attribute.
     def test_attribute_read(self) -> None:
         line = jslb.Object()
@@ -154,8 +226,25 @@ class TestObject(unittest.TestCase):
     def test_attribute_missing(self) -> None:
         line = jslb.Object()
         self.assertFalse(hasattr(line, "d"))
-        with self.assertRaises(AttributeError):
-            getattr(line, "d")
+        message = i18n("jslb.attribute_missing", "d")
+        self.raised_assert(AttributeError, message, lambda: line.d)
+
+    # A key named like a dict method reads only with `[]`, as the method wins.
+    def test_attribute_shadowed(self) -> None:
+        names = (
+            "keys",
+            "items",
+            "values",
+            "get",
+            "copy",
+            "update",
+            "pop",
+            "clear",
+        )
+        line = jslb.Object((name, index) for index, name in enumerate(names))
+        for index, name in enumerate(names):
+            self.assertEqual(line[name], index)
+            self.assertTrue(callable(getattr(line, name)))
 
 
 # Tests `header_make`, `blob_make` and `line_make`.
@@ -209,9 +298,11 @@ class TestBuild(_ScratchCase):
 
     # A field that `blob_make` sets cannot be given as a handler field.
     def test_blob_reserved(self) -> None:
-        for name in ("s", "d", "size"):
-            with self.assertRaises(ValueError):
-                jslb.blob_make(b"", **{name: 1})
+        for name in ("s", "k", "d", "size"):
+            message = i18n("jslb.blob_field_reserved", name)
+            self.raised_assert(
+                ValueError, message, lambda: jslb.blob_make(b"", **{name: "x"})
+            )
 
     # Blob headers are numbered from 1 and counted in a copy of the header.
     def test_line_numbering(self) -> None:
@@ -249,12 +340,15 @@ class TestBuild(_ScratchCase):
     def test_line_counted(self) -> None:
         header = jslb.header_make("echo")
         header["b"] = 1
-        with self.assertRaises(ValueError):
-            jslb.line_make(header, [jslb.blob_make(b"x")])
+        blobs = [jslb.blob_make(b"x")]
+        message = i18n("jslb.blobs_preset")
+        self.raised_assert(
+            ValueError, message, lambda: jslb.line_make(header, blobs)
+        )
 
 
 # Tests `field_get`, `headers_of` and `payload_of`.
-class TestFields(unittest.TestCase):
+class TestFields(_MessageCase):
     # Either name form finds each field of a short header.
     def test_field_short(self) -> None:
         header = jslb.header_make("echo", version=2, id=3, reply=4, key="k")
@@ -294,19 +388,25 @@ class TestFields(unittest.TestCase):
 
     # An absent required field raises, as does a name that is no field.
     def test_field_refused(self) -> None:
-        with self.assertRaises(KeyError):
-            jslb.field_get(jslb.Object(), "type")
-        with self.assertRaises(KeyError):
-            jslb.field_get(jslb.Object(), "s")
-        with self.assertRaises(ValueError):
-            jslb.field_get(jslb.header_make("echo"), "sha256")
+        for name in ("type", "s"):
+            message = i18n("jslb.field_missing", name)
+            self.raised_assert(
+                KeyError, message, lambda: jslb.field_get(jslb.Object(), name)
+            )
+        header = jslb.header_make("echo")
+        message = i18n("jslb.field_unknown", "sha256")
+        self.raised_assert(
+            ValueError, message, lambda: jslb.field_get(header, "sha256")
+        )
 
     # A header holding both forms of a field raises.
     def test_field_forms(self) -> None:
         header = jslb.header_make("echo")
         header["type"] = "echo"
-        with self.assertRaises(jslb.WireError):
-            jslb.field_get(header, "t")
+        message = i18n("jslb.both_name_forms")
+        self.raised_assert(
+            jslb.WireError, message, lambda: jslb.field_get(header, "t")
+        )
 
     # Probing stops at the first missing integer key, strings included.
     def test_headers_probing(self) -> None:
@@ -390,26 +490,56 @@ class TestEncode(_ScratchCase):
             b'{"0":{"t":"echo"},"high":9007199254740992,'
             b'"low":-9007199254740992}\r',
         )
-        for value in (2**53 + 1, -(2**53) - 1, [2**60], {"a": 2**60}):
-            with self.assertRaises(ValueError):
-                jslb.line_encode(jslb.line_make(header, [], value=value))
+        cases = (
+            (2**53 + 1, 2**53 + 1),
+            (-(2**53) - 1, -(2**53) - 1),
+            ([2**60], 2**60),
+            ({"a": 2**60}, 2**60),
+        )
+        for value, refused in cases:
+            message = i18n("jslb.integer_refused", refused)
+            line = jslb.line_make(header, [], value=value)
+            self.raised_assert(
+                ValueError, message, lambda: jslb.line_encode(line)
+            )
 
     # `NaN` and the infinities are refused.
     def test_float_refused(self) -> None:
         header = jslb.header_make("echo")
-        for value in (math.nan, math.inf, -math.inf, [math.nan]):
-            with self.assertRaises(ValueError):
-                jslb.line_encode(jslb.line_make(header, [], value=value))
+        cases = (
+            (math.nan, math.nan),
+            (math.inf, math.inf),
+            (-math.inf, -math.inf),
+            ([math.nan], math.nan),
+        )
+        for value, refused in cases:
+            message = i18n("jslb.number_refused", refused)
+            line = jslb.line_make(header, [], value=value)
+            self.raised_assert(
+                ValueError, message, lambda: jslb.line_encode(line)
+            )
 
     # A key that would decode as another key or type is refused.
     def test_key_refused(self) -> None:
         header = jslb.header_make("echo")
-        for value in ({"5": 1}, {-1: 1}, {True: 1}, {1.5: 1}):
-            with self.assertRaises(ValueError):
-                jslb.line_encode(jslb.line_make(header, [], value=value))
+        cases = (
+            ({"5": 1}, "5"),
+            ({-1: 1}, -1),
+            ({True: 1}, True),
+            ({1.5: 1}, 1.5),
+        )
+        for value, key in cases:
+            message = i18n("jslb.key_refused", repr(key))
+            line = jslb.line_make(header, [], value=value)
+            self.raised_assert(
+                ValueError, message, lambda: jslb.line_encode(line)
+            )
         for name in ("5", "01"):
-            with self.assertRaises(jslb.WireError):
-                jslb.line_encode(jslb.line_make(header, [], **{name: 1}))
+            message = i18n("jslb.payload_digit_key", name)
+            line = jslb.line_make(header, [], **{name: 1})
+            self.raised_assert(
+                jslb.WireError, message, lambda: jslb.line_encode(line)
+            )
         line = jslb.line_make(header, [], value={"01": 1})
         self.assertEqual(
             next(jslb.line_encode(line)),
@@ -421,25 +551,33 @@ class TestEncode(_ScratchCase):
         header = jslb.header_make("echo")
         blob = jslb.blob_make(b"abc")
         blob["s"] = 4
-        with self.assertRaises(ValueError):
-            jslb.line_encode(jslb.line_make(header, [blob]))
+        line = jslb.line_make(header, [blob])
+        message = i18n("jslb.blob_size_differs", 1, 4, 3)
+        self.raised_assert(ValueError, message, lambda: jslb.line_encode(line))
         blob = jslb.blob_make(b"abc")
         del blob["d"]
-        with self.assertRaises(ValueError):
-            jslb.line_encode(jslb.line_make(header, [blob]))
+        line = jslb.line_make(header, [blob])
+        message = i18n("jslb.blob_data_missing", 1)
+        self.raised_assert(ValueError, message, lambda: jslb.line_encode(line))
 
     # The encoder refuses a line that the decoder would refuse.
     def test_encode_checked(self) -> None:
-        with self.assertRaises(jslb.WireError):
-            jslb.line_encode(jslb.Object())
+        message = i18n("jslb.no_header_zero")
+        self.raised_assert(
+            jslb.WireError, message, lambda: jslb.line_encode(jslb.Object())
+        )
         line = jslb.line_make(jslb.header_make("echo"), [jslb.blob_make(b"x")])
         line[0]["b"] = 2
-        with self.assertRaises(jslb.WireError):
-            jslb.line_encode(line)
+        message = i18n("jslb.blobs_mismatch", 2, 1)
+        self.raised_assert(
+            jslb.WireError, message, lambda: jslb.line_encode(line)
+        )
         line = jslb.line_make(jslb.header_make("echo"), [])
         line[0]["x"] = 1
-        with self.assertRaises(jslb.WireError):
-            jslb.line_encode(line)
+        message = i18n("jslb.unknown_line_field", "x")
+        self.raised_assert(
+            jslb.WireError, message, lambda: jslb.line_encode(line)
+        )
 
 
 # Tests `line_render`, the debug form.
@@ -460,20 +598,24 @@ class TestRender(unittest.TestCase):
         self.assertEqual(jslb.line_render(line), '{"0":{"type":"echo"}}')
 
 
-# Tests `LineDecoder` on lines and blobs in memory and on every hard error.
+# Tests `LineDecoder` on lines, blobs in memory, its limits and every fault.
 class TestDecode(_ScratchCase):
-    # Asserts the bytes raise `WireError` and leave the decoder unusable.
-    def refused_assert(self, data: bytes) -> None:
+    # Asserts the bytes raise the message and leave the decoder unusable.
+    def refused_assert(self, data: bytes, message: str) -> None:
         decoder = self.decoder_make()
-        with self.assertRaises(jslb.WireError):
-            decoder.bytes_feed(data)
-        with self.assertRaises(jslb.WireError):
-            decoder.bytes_feed(_ECHO_LINE)
+        self.raised_assert(
+            jslb.WireError, message, lambda: decoder.bytes_feed(data)
+        )
+        failed = i18n("jslb.decoder_failed")
+        self.raised_assert(
+            jslb.WireError, failed, lambda: decoder.bytes_feed(_ECHO_LINE)
+        )
 
     # A line decodes to an `Object` with integer keys, nested objects too.
     def test_decode_line(self) -> None:
         lines = self.pieces_decode(
-            [b'{"0":{"t":"echo","i":1},"x":[{"2":3,"02":4}]}\r']
+            self.decoder_make(),
+            [b'{"0":{"t":"echo","i":1},"x":[{"2":3,"02":4}]}\r'],
         )
         self.assertEqual(len(lines), 1)
         line = lines[0]
@@ -487,10 +629,11 @@ class TestDecode(_ScratchCase):
     # Blobs follow the CR, each `d` set to its bytes, empty ones too.
     def test_decode_blobs(self) -> None:
         lines = self.pieces_decode(
+            self.decoder_make(),
             [
                 b'{"0":{"t":"echo","b":3},"1":{"s":2},"2":{"s":0},'
                 b'"3":{"s":0,"k":"z"}}\r\r\n'
-            ]
+            ],
         )
         self.assertEqual(len(lines), 1)
         line = lines[0]
@@ -521,108 +664,240 @@ class TestDecode(_ScratchCase):
         lines = decoder.bytes_feed(b':{"t":"d"}}\r')
         self.assertEqual([line[0]["t"] for line in lines], ["d"])
 
+    # An integral float count or size is read as an `int`, in either form.
+    def test_integral_floats(self) -> None:
+        lines = self.pieces_decode(
+            self.decoder_make(),
+            [
+                b'{"0":{"t":"echo","b":1.0},"1":{"s":2.0}}\rxy',
+                b'{"0":{"type":"echo","blobs":1e0},"1":{"size":1.0}}\rz',
+            ],
+        )
+        self.assertEqual(len(lines), 2)
+        for line, count, size, data in (
+            (lines[0], "b", "s", b"xy"),
+            (lines[1], "blobs", "size", b"z"),
+        ):
+            self.assertIs(type(line[0][count]), int)
+            self.assertEqual(line[0][count], 1)
+            self.assertIs(type(line[1][size]), int)
+            self.assertEqual(line[1][size], len(data))
+            self.assertEqual(line[1].d, data)
+
+    # Lines before a fault are returned and the next call raises the fault.
+    def test_fault_deferred(self) -> None:
+        decoder = self.decoder_make()
+        data = _ECHO_LINE + b'{"t":"echo"}\r' + _ECHO_LINE
+        self.assertEqual(decoder.bytes_feed(data), [{0: {"t": "echo"}}])
+        self.assertFalse(decoder.idle())
+        fault = i18n("jslb.no_header_zero")
+        self.raised_assert(
+            jslb.WireError, fault, lambda: decoder.bytes_feed(b"")
+        )
+        failed = i18n("jslb.decoder_failed")
+        self.raised_assert(
+            jslb.WireError, failed, lambda: decoder.bytes_feed(b"")
+        )
+
+    # The decoder is idle between messages only, and never after a fault.
+    def test_idle_states(self) -> None:
+        decoder = self.decoder_make()
+        self.assertTrue(decoder.idle())
+        self.assertEqual(decoder.bytes_feed(b'{"0":{"t":"echo","b":1}'), [])
+        self.assertFalse(decoder.idle())
+        self.assertEqual(decoder.bytes_feed(b',"1":{"s":2}}\rx'), [])
+        self.assertFalse(decoder.idle())
+        self.assertEqual(len(decoder.bytes_feed(b"y")), 1)
+        self.assertTrue(decoder.idle())
+        message = i18n("jslb.line_not_json", self.parse_reason(""))
+        self.raised_assert(
+            jslb.WireError, message, lambda: decoder.bytes_feed(b"\r")
+        )
+        self.assertFalse(decoder.idle())
+
     # A line of `line_max` bytes with its CR is read, one byte more is not.
     def test_line_max(self) -> None:
         prefix = b'{"0":{"t":"echo"},"pad":"'
         suffix = b'"}\r'
         pad = b"a" * (_LINE_MAX - len(prefix) - len(suffix))
-        self.assertEqual(len(self.pieces_decode([prefix + pad + suffix])), 1)
-        self.refused_assert(prefix + pad + b"a" + suffix)
+        lines = self.pieces_decode(
+            self.decoder_make(), [prefix + pad + suffix]
+        )
+        self.assertEqual(len(lines), 1)
+        message = i18n("jslb.line_over_max", _LINE_MAX)
+        self.refused_assert(prefix + pad + b"a" + suffix, message)
 
     # A line is refused once it passes `line_max`, before its CR arrives.
     def test_line_early(self) -> None:
         decoder = self.decoder_make()
         self.assertEqual(decoder.bytes_feed(b"{" * (_LINE_MAX - 1)), [])
-        with self.assertRaises(jslb.WireError):
-            decoder.bytes_feed(b"{")
-
-    # A blob of `blob_max` bytes is read, one more is refused at the CR.
-    def test_blob_max(self) -> None:
-        line = b'{"0":{"t":"echo","b":1},"1":{"s":%d}}\r' % _BLOB_MAX
-        lines = self.pieces_decode([line, bytes(_BLOB_MAX)])
-        self.assertEqual(len(lines), 1)
-        self.refused_assert(
-            b'{"0":{"t":"echo","b":1},"1":{"s":%d}}\r' % (_BLOB_MAX + 1)
+        message = i18n("jslb.line_over_max", _LINE_MAX)
+        self.raised_assert(
+            jslb.WireError, message, lambda: decoder.bytes_feed(b"{")
         )
+
+    # A blob of `blob_max` bytes is read, one more refused before buffering.
+    def test_blob_max(self) -> None:
+        line = b'{"0":{"t":"echo","b":1},"1":{"s":%d}}\r'
+        over = line % (_BLOB_MAX + 1) + bytes(_BLOB_MAX + 1)
+        message = i18n("jslb.blob_over_max", 1, _BLOB_MAX + 1, _BLOB_MAX)
+        self.refused_assert(over, message)
+        self.assertEqual(self.sink.headers, [])
+        self.assertEqual(os.listdir(self.scratch), [])
+        lines = self.pieces_decode(
+            self.decoder_make(), [line % _BLOB_MAX, bytes(_BLOB_MAX)]
+        )
+        self.assertEqual(len(lines), 1)
+
+    # A message of `message_max` bytes is read, one more refused at its CR.
+    def test_message_max(self) -> None:
+        first = bytes(_BLOB_MAX)
+        rest = _MESSAGE_MAX - _BLOB_MAX - _LINE_MAX // 2
+        over = _message_padded(_LINE_MAX // 2, [first, bytes(rest + 1)])
+        message = i18n("jslb.message_over", _MESSAGE_MAX + 1, _MESSAGE_MAX)
+        self.refused_assert(over, message)
+        self.assertEqual(self.sink.headers, [])
+        self.assertEqual(os.listdir(self.scratch), [])
+        data = _message_padded(_LINE_MAX // 2, [first, bytes(rest)])
+        self.assertEqual(len(data), _MESSAGE_MAX)
+        lines = self.pieces_decode(self.decoder_make(), [data])
+        self.assertEqual(len(lines), 1)
 
     # A line without header 0 is refused.
     def test_header_missing(self) -> None:
-        self.refused_assert(b'{"t":"echo"}\r')
-        self.refused_assert(b'{"1":{"s":0}}\r')
+        message = i18n("jslb.no_header_zero")
+        self.refused_assert(b'{"t":"echo"}\r', message)
+        self.refused_assert(b'{"1":{"s":0}}\r', message)
 
     # A header that is not a JSON object is refused.
     def test_header_object(self) -> None:
-        self.refused_assert(b'{"0":"echo"}\r')
-        self.refused_assert(b'{"0":{"t":"echo","b":1},"1":[]}\r')
+        self.refused_assert(
+            b'{"0":"echo"}\r', i18n("jslb.header_not_object", 0)
+        )
+        self.refused_assert(
+            b'{"0":{"t":"echo","b":1},"1":[]}\r',
+            i18n("jslb.header_not_object", 1),
+        )
 
     # A line header without a type string is refused.
     def test_type_missing(self) -> None:
-        self.refused_assert(b'{"0":{"i":1}}\r')
-        self.refused_assert(b'{"0":{"t":null}}\r')
-        self.refused_assert(b'{"0":{"t":1}}\r')
-        self.refused_assert(b'{"0":{}}\r')
+        message = i18n("jslb.no_type")
+        self.refused_assert(b'{"0":{"i":1}}\r', message)
+        self.refused_assert(b'{"0":{"t":null}}\r', message)
+        self.refused_assert(b'{"0":{"t":1}}\r', message)
+        self.refused_assert(b'{"0":{}}\r', message)
 
     # A blob count that differs from the blob headers is refused.
     def test_count_mismatch(self) -> None:
-        self.refused_assert(b'{"0":{"t":"echo","b":2},"1":{"s":0}}\r')
-        self.refused_assert(b'{"0":{"t":"echo"},"1":{"s":0}}\r')
-        self.refused_assert(b'{"0":{"t":"echo","b":true},"1":{"s":0}}\r')
-        self.refused_assert(b'{"0":{"t":"echo","b":-1}}\r')
+        cases = (
+            (b'{"0":{"t":"echo","b":2},"1":{"s":0}}\r', 2, 1),
+            (b'{"0":{"t":"echo"},"1":{"s":0}}\r', 0, 1),
+            (b'{"0":{"t":"echo","b":true},"1":{"s":0}}\r', True, 1),
+            (b'{"0":{"t":"echo","b":1.5},"1":{"s":0}}\r', 1.5, 1),
+            (b'{"0":{"t":"echo","b":-1}}\r', -1, 0),
+        )
+        for data, count, probed in cases:
+            message = i18n("jslb.blobs_mismatch", count, probed)
+            self.refused_assert(data, message)
 
     # A gap in the blob headers is refused.
     def test_header_gap(self) -> None:
         self.refused_assert(
-            b'{"0":{"t":"echo","b":2},"1":{"s":0},"3":{"s":0}}\r'
+            b'{"0":{"t":"echo","b":2},"1":{"s":0},"3":{"s":0}}\r',
+            i18n("jslb.blob_gap", 2, 3),
         )
-        self.refused_assert(b'{"0":{"t":"echo","b":1},"2":{"s":0}}\r')
+        self.refused_assert(
+            b'{"0":{"t":"echo","b":1},"2":{"s":0}}\r',
+            i18n("jslb.blob_gap", 1, 2),
+        )
 
     # A size that is not a non negative integer is refused.
     def test_size_invalid(self) -> None:
+        message = i18n("jslb.bad_size", 1)
         for size in (b"-1", b"1.5", b'"1"', b"true", b"null"):
             self.refused_assert(
-                b'{"0":{"t":"echo","b":1},"1":{"s":%s}}\r' % size
+                b'{"0":{"t":"echo","b":1},"1":{"s":%s}}\r' % size, message
             )
-        self.refused_assert(b'{"0":{"t":"echo","b":1},"1":{"k":"a"}}\r')
+        self.refused_assert(
+            b'{"0":{"t":"echo","b":1},"1":{"k":"a"}}\r', message
+        )
 
     # A payload key of decimal digits is refused.
     def test_payload_digits(self) -> None:
-        self.refused_assert(b'{"0":{"t":"echo"},"01":1}\r')
-        self.refused_assert(b'{"0":{"t":"echo"},"00":1}\r')
+        for name in ("01", "00"):
+            message = i18n("jslb.payload_digit_key", name)
+            data = b'{"0":{"t":"echo"},"%s":1}\r' % name.encode()
+            self.refused_assert(data, message)
 
     # Short and full names in one line are refused, across headers too.
     def test_forms_mixed(self) -> None:
-        self.refused_assert(b'{"0":{"t":"echo","version":1}}\r')
-        self.refused_assert(b'{"0":{"t":"echo","type":"echo"}}\r')
-        self.refused_assert(b'{"0":{"type":"echo","blobs":1},"1":{"s":0}}\r')
+        message = i18n("jslb.both_name_forms")
+        self.refused_assert(b'{"0":{"t":"echo","version":1}}\r', message)
+        self.refused_assert(b'{"0":{"t":"echo","type":"echo"}}\r', message)
         self.refused_assert(
-            b'{"0":{"t":"echo","b":1},"1":{"s":0,"key":"a"}}\r'
+            b'{"0":{"type":"echo","blobs":1},"1":{"s":0}}\r', message
+        )
+        self.refused_assert(
+            b'{"0":{"t":"echo","b":1},"1":{"s":0,"key":"a"}}\r', message
         )
 
     # An unknown field in the line header is refused.
     def test_line_field(self) -> None:
-        self.refused_assert(b'{"0":{"t":"echo","x":1}}\r')
-        self.refused_assert(b'{"0":{"t":"echo","s":1}}\r')
+        for name in ("x", "s"):
+            message = i18n("jslb.unknown_line_field", name)
+            data = b'{"0":{"t":"echo","%s":1}}\r' % name.encode()
+            self.refused_assert(data, message)
 
     # A blob header that carries `d` or `data` on the wire is refused.
     def test_data_sent(self) -> None:
-        self.refused_assert(b'{"0":{"t":"echo","b":1},"1":{"s":0,"d":""}}\r')
+        message = i18n("jslb.blob_data_field", 1)
         self.refused_assert(
-            b'{"0":{"type":"echo","blobs":1},"1":{"size":0,"data":""}}\r'
+            b'{"0":{"t":"echo","b":1},"1":{"s":0,"d":""}}\r', message
+        )
+        self.refused_assert(
+            b'{"0":{"type":"echo","blobs":1},"1":{"size":0,"data":""}}\r',
+            message,
         )
 
     # A line that is not strict `UTF-8` or not a JSON object is refused.
     def test_text_invalid(self) -> None:
-        self.refused_assert(b'{"0":{"t":"\xff"}}\r')
-        self.refused_assert(b'{"0":{"t":"\xed\xa0\x80"}}\r')
-        self.refused_assert(b'{"0":{"t":"\xc0\x80"}}\r')
-        self.refused_assert(b"{\r")
-        self.refused_assert(b'[{"0":{"t":"echo"}}]\r')
-        self.refused_assert(b"\r")
+        for text in ("ff", "eda080", "c080"):
+            data = bytes.fromhex(text)
+            message = i18n("jslb.line_not_utf8", self.decode_reason(data))
+            self.refused_assert(b'{"0":{"t":"' + data + b'"}}\r', message)
+        for text in ("{", ""):
+            message = i18n("jslb.line_not_json", self.parse_reason(text))
+            self.refused_assert(text.encode() + b"\r", message)
+        message = i18n("jslb.line_not_object")
+        self.refused_assert(b'[{"0":{"t":"echo"}}]\r', message)
 
-    # The `NaN` and `Infinity` constants are refused.
+    # The `NaN` and `Infinity` constants are refused as not JSON.
     def test_constant_refused(self) -> None:
-        for constant in (b"NaN", b"Infinity", b"-Infinity"):
-            self.refused_assert(b'{"0":{"t":"echo"},"n":%s}\r' % constant)
+        for constant in ("NaN", "Infinity", "-Infinity"):
+            message = i18n("jslb.line_not_json", constant)
+            data = b'{"0":{"t":"echo"},"n":%s}\r' % constant.encode()
+            self.refused_assert(data, message)
+
+    # A number or a key too long for an `int` is refused as not JSON.
+    def test_number_long(self) -> None:
+        digits = b"1" * 5000
+        for data in (
+            b'{"0":{"t":"echo"},"n":' + digits + b"}\r",
+            b'{"0":{"t":"echo"},"n":{"' + digits + b'":1}}\r',
+        ):
+            decoder = jslb.LineDecoder(
+                2 * len(data),
+                _BLOB_MAX,
+                _MESSAGE_MAX,
+                _OVERFLOW_BYTES,
+                self.sink.path_make,
+            )
+            with self.assertRaises(jslb.WireError) as caught:
+                decoder.bytes_feed(data)
+            cause = caught.exception.__cause__
+            self.assertIs(type(cause), ValueError)
+            message = i18n("jslb.line_not_json", str(cause))
+            self.assertEqual(caught.exception.args, (message,))
 
 
 # Tests blobs over `overflow_bytes`, streamed into the sink's files.
@@ -631,7 +906,9 @@ class TestStream(_ScratchCase):
     def test_stream_sink(self) -> None:
         data = bytes(index % 256 for index in range(_OVERFLOW_BYTES + 1))
         line = b'{"0":{"t":"echo","b":2},"1":{"s":%d,"k":"big"},"2":{"s":1}}\r'
-        lines = self.pieces_decode([line % len(data), data, b"x"])
+        lines = self.pieces_decode(
+            self.decoder_make(), [line % len(data), data, b"x"]
+        )
         self.assertEqual(len(lines), 1)
         blob = lines[0][1]
         self.assertIs(self.sink.headers[0], blob)
@@ -646,7 +923,7 @@ class TestStream(_ScratchCase):
     def test_stream_exact(self) -> None:
         data = bytes(index % 256 for index in range(_OVERFLOW_BYTES))
         line = b'{"0":{"t":"echo","b":1},"1":{"s":%d}}\r' % len(data)
-        lines = self.pieces_decode([line + data])
+        lines = self.pieces_decode(self.decoder_make(), [line + data])
         self.assertEqual(lines[0][1].d, data)
         self.assertNotIn("sha256", lines[0][1])
         self.assertEqual(os.listdir(self.scratch), [])
@@ -657,7 +934,8 @@ class TestStream(_ScratchCase):
         line = b'{"0":{"t":"echo","b":1},"1":{"s":%d}}\r' % len(data)
         stream = line + data
         lines = self.pieces_decode(
-            stream[index : index + 1] for index in range(len(stream))
+            self.decoder_make(),
+            (stream[index : index + 1] for index in range(len(stream))),
         )
         self.assertEqual(len(lines), 1)
         with open(lines[0][1].d, "rb") as file:
@@ -670,44 +948,195 @@ class TestStream(_ScratchCase):
         with open(path, "wb") as file:
             file.write(b"kept")
         decoder = jslb.LineDecoder(
-            _LINE_MAX, _BLOB_MAX, _OVERFLOW_BYTES, lambda header: path
+            _LINE_MAX,
+            _BLOB_MAX,
+            _MESSAGE_MAX,
+            _OVERFLOW_BYTES,
+            lambda header: path,
         )
         size = _OVERFLOW_BYTES + 1
-        with self.assertRaises(FileExistsError):
+        with self.assertRaises(FileExistsError) as caught:
             decoder.bytes_feed(
                 b'{"0":{"t":"echo","b":1},"1":{"s":%d}}\r' % size
             )
+        self.assertEqual(caught.exception.filename, path)
         with open(path, "rb") as file:
             self.assertEqual(file.read(), b"kept")
+
+    # A streamed blob's file is closed when a write fails, at once or later.
+    def test_stream_closed(self) -> None:
+        size = _OVERFLOW_BYTES + 1
+        data = b'{"0":{"t":"echo","b":1},"1":{"s":%d}}\rx' % size
+        failing = _FailingFile()
+        decoder = self.decoder_make()
+        with unittest.mock.patch(
+            "jslb.open", create=True, return_value=failing
+        ):
+            with self.assertRaises(OSError) as caught:
+                decoder.bytes_feed(data)
+        self.assertIs(caught.exception, failing.error)
+        self.assertTrue(failing.closed)
+        failing = _FailingFile()
+        decoder = self.decoder_make()
+        with unittest.mock.patch(
+            "jslb.open", create=True, return_value=failing
+        ):
+            lines = decoder.bytes_feed(_ECHO_LINE + data)
+        self.assertEqual(lines, [{0: {"t": "echo"}}])
+        self.assertTrue(failing.closed)
+        with self.assertRaises(OSError) as caught:
+            decoder.bytes_feed(b"")
+        self.assertIs(caught.exception, failing.error)
+
+    # A sent `sha256` is replaced on a streamed blob and kept on one in memory.
+    def test_hash_sent(self) -> None:
+        sent = b"0" * 64
+        data = bytes(_OVERFLOW_BYTES + 1)
+        head = b'{"0":{"t":"echo","b":2},"1":{"s":%d,"sha256":"%s"},'
+        tail = b'"2":{"s":1,"sha256":"%s"}}\r'
+        line = head % (len(data), sent) + tail % sent
+        lines = self.pieces_decode(self.decoder_make(), [line + data + b"x"])
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(
+            list(lines[0][1].items()),
+            [
+                ("s", len(data)),
+                ("sha256", hashlib.sha256(data).hexdigest()),
+                ("d", os.path.join(self.scratch, "blob_1")),
+            ],
+        )
+        self.assertEqual(
+            list(lines[0][2].items()),
+            [("s", 1), ("sha256", sent.decode()), ("d", b"x")],
+        )
 
 
 # Reads each vector `vectors_make.py` wrote, whole, by bytes and split.
 class TestVectors(_ScratchCase):
-    # Each success vector decodes to its sidecar and encodes to its bytes.
+    # Returns each error vector's slug and its message under the limits.
+    def errors_expected(
+        self, limits: dict[str, int]
+    ) -> dict[str, tuple[str, str]]:
+        blob_max = limits["blob_max"]
+        message_max = limits["message_max"]
+        start = self.decode_reason(bytes.fromhex("c080"))
+        continuation = self.decode_reason(bytes.fromhex("eda080"))
+        header = ("no_header_zero", i18n("jslb.no_header_zero"))
+        size = ("bad_size", i18n("jslb.bad_size", 1))
+        forms = ("both_name_forms", i18n("jslb.both_name_forms"))
+        typed = ("no_type", i18n("jslb.no_type"))
+        return {
+            "error_after_line": header,
+            "error_bad_size_boolean": size,
+            "error_bad_size_fraction": size,
+            "error_bad_size_missing": size,
+            "error_bad_size_negative": size,
+            "error_bad_size_string": size,
+            "error_blob_data": (
+                "blob_data_field",
+                i18n("jslb.blob_data_field", 1),
+            ),
+            "error_blob_gap": ("blob_gap", i18n("jslb.blob_gap", 2, 3)),
+            "error_blob_gap_first": ("blob_gap", i18n("jslb.blob_gap", 1, 2)),
+            "error_blob_over_max": (
+                "blob_over_max",
+                i18n("jslb.blob_over_max", 1, blob_max + 1, blob_max),
+            ),
+            "error_blobs_mismatch": (
+                "blobs_mismatch",
+                i18n("jslb.blobs_mismatch", 2, 1),
+            ),
+            "error_blobs_mismatch_extra": (
+                "blobs_mismatch",
+                i18n("jslb.blobs_mismatch", 0, 1),
+            ),
+            "error_both_name_forms": forms,
+            "error_both_name_forms_blob": forms,
+            "error_header_not_object": (
+                "header_not_object",
+                i18n("jslb.header_not_object", 0),
+            ),
+            "error_infinity": (
+                "line_not_json",
+                i18n("jslb.line_not_json", "Infinity"),
+            ),
+            "error_line_over_max": (
+                "line_over_max",
+                i18n("jslb.line_over_max", limits["line_max"]),
+            ),
+            "error_message_over": (
+                "message_over",
+                i18n("jslb.message_over", message_max + 1, message_max),
+            ),
+            "error_nan": ("line_not_json", i18n("jslb.line_not_json", "NaN")),
+            "error_no_header_zero": header,
+            "error_no_type": typed,
+            "error_no_type_string": typed,
+            "error_not_object": (
+                "line_not_object",
+                i18n("jslb.line_not_object"),
+            ),
+            "error_payload_digit_key": (
+                "payload_digit_key",
+                i18n("jslb.payload_digit_key", "01"),
+            ),
+            "error_unknown_line_field": (
+                "unknown_line_field",
+                i18n("jslb.unknown_line_field", "x"),
+            ),
+            "error_utf8_overlong": (
+                "line_not_utf8",
+                i18n("jslb.line_not_utf8", start),
+            ),
+            "error_utf8_surrogate": (
+                "line_not_utf8",
+                i18n("jslb.line_not_utf8", continuation),
+            ),
+        }
+
+    # Each success vector, and the bytes it encodes to, decode to its sidecar.
     def test_vectors_success(self) -> None:
         names = _vector_names(False)
         self.assertTrue(names, f"no success vectors in {_VECTORS_PATH}")
         for name in names:
             data, sidecar = _vector_read(name)
             messages = json.dumps(sidecar["messages"])
-            for pieces in _feeds_make(data):
-                lines = self.pieces_decode(pieces)
-                plain = json.dumps([_line_plain(line) for line in lines])
-                self.assertEqual(plain, messages, name)
-                renders = [jslb.line_render(line) for line in lines]
-                self.assertEqual(renders, sidecar["render"], name)
+            decoded = self.pieces_decode(self.sidecar_decoder(sidecar), [data])
             encoded = b"".join(
                 _pieces_join(jslb.line_encode(_line_sent(line)))
-                for line in self.pieces_decode([data])
+                for line in decoded
             )
-            self.assertEqual(encoded, data, name)
+            self.assertEqual(encoded == data, sidecar["canonical"], name)
+            # Reads the vector, then the bytes encoded again when they differ.
+            for source in dict.fromkeys((data, encoded)):
+                for pieces in _feeds_make(source):
+                    decoder = self.sidecar_decoder(sidecar)
+                    lines = self.pieces_decode(decoder, pieces)
+                    plain = json.dumps([_line_plain(line) for line in lines])
+                    self.assertEqual(plain, messages, name)
+                    renders = [jslb.line_render(line) for line in lines]
+                    self.assertEqual(renders, sidecar["render"], name)
 
-    # Each error vector raises `WireError` however it is fed.
+    # Each error vector gives its lines, then its fault, however it is fed.
     def test_vectors_error(self) -> None:
         names = _vector_names(True)
         self.assertTrue(names, f"no error vectors in {_VECTORS_PATH}")
         for name in names:
-            data, _ = _vector_read(name)
+            data, sidecar = _vector_read(name)
+            expected = self.errors_expected(sidecar["limits"])
+            self.assertEqual(sorted(expected), names)
+            slug, message = expected[name]
+            self.assertEqual(sidecar["error"], slug, name)
+            messages = json.dumps(sidecar["messages"])
             for pieces in _feeds_make(data):
-                with self.assertRaises(jslb.WireError, msg=name):
-                    self.pieces_decode(pieces)
+                decoder = self.sidecar_decoder(sidecar)
+                lines: list[jslb.Object] = []
+                with self.assertRaises(jslb.WireError, msg=name) as caught:
+                    for piece in pieces:
+                        lines += decoder.bytes_feed(piece)
+                    decoder.bytes_feed(b"")
+                self.assertEqual(caught.exception.args, (message,), name)
+                plain = json.dumps([_line_plain(line) for line in lines])
+                self.assertEqual(plain, messages, name)
+                renders = [jslb.line_render(line) for line in lines]
+                self.assertEqual(renders, sidecar["render"], name)

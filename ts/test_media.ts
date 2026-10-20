@@ -19,10 +19,10 @@ namespace test_media {
   });
 
   // A payload of fields by name.
-  type Payload = { [key: string]: unknown };
+  type PayloadFields = { [key: string]: unknown };
 
   // The header options of a line: its id and whether it has full names.
-  type Options = { id?: number; full?: boolean };
+  type HeaderOptions = { id?: number; full?: boolean };
 
   // An image that counts its closes and, once closed, reports no size.
   class ImageDouble {
@@ -62,46 +62,52 @@ namespace test_media {
   // A line of the type with the payload, header options and blobs given.
   function line_build(
     type: string,
-    payload: Payload,
-    options: Options,
+    payload: PayloadFields,
+    options: HeaderOptions,
     blobs: lines.BlobHeader[] = [],
   ): lines.Line {
     return jslb.line_make(jslb.header_make(type, options), blobs, payload);
   }
 
   // A `media.store` line of the key with one blob holding the bytes.
-  function store_line(options: Options): lines.Line {
+  function store_line(options: HeaderOptions): lines.Line {
     const blob = jslb.blob_make(bytes_make());
     return line_build("media.store", { k: constants.key }, options, [blob]);
   }
 
   // A `media.fetch` line of the url and key.
-  function fetch_line(options: Options): lines.Line {
+  function fetch_line(options: HeaderOptions): lines.Line {
     const payload = { url: constants.url, k: constants.key };
     return line_build("media.fetch", payload, options);
   }
 
-  // The exchange of a `media.store` line, numbered 7 and in short names.
+  // The exchange of a `media.store` line, by default numbered 7, short names.
   function store_exchange(
-    options: Options = { id: constants.id },
+    options: HeaderOptions = { id: constants.id },
   ): media.MediaExchange {
     return new media.MediaExchange(store_line(options));
   }
 
-  // The exchange of a `media.fetch` line, numbered 7 and in short names.
+  // The exchange of a `media.fetch` line, by default numbered 7, short names.
   function fetch_exchange(
-    options: Options = { id: constants.id },
+    options: HeaderOptions = { id: constants.id },
   ): media.MediaExchange {
     return new media.MediaExchange(fetch_line(options));
   }
 
-  // The message of an error line, which the tests read as text.
-  function message_get(reply: lines.Line): string {
-    const message = reply.message;
-    if (typeof message !== "string") {
-      throw new Error("The error line has no message text.");
+  // The message of the error the function throws, failing the test if none.
+  function message_thrown(test: unittest.TestCase, fn: () => unknown): string {
+    try {
+      fn();
+    } catch (error) {
+      return (error as Error).message;
     }
-    return message;
+    return test.fail("Nothing was thrown.");
+  }
+
+  // The message a new exchange of the line throws, failing the test if none.
+  function refusal_text(test: unittest.TestCase, line: lines.Line): string {
+    return message_thrown(test, () => new media.MediaExchange(line));
   }
 
   // The order and accounting of the images a cache keeps.
@@ -127,8 +133,7 @@ namespace test_media {
       this.assertEqual(first.closes + second.closes, 0);
     }
 
-    // The oldest image goes first and is closed, and the total drops by its
-    // counted bytes, not by the size it reports once closed.
+    // The oldest goes first, closed, and the total drops by its counted bytes.
     test_oldest_evicted(): void {
       const cache = cache_make();
       const images = [image_make(400), image_make(400), image_make(400)];
@@ -242,7 +247,7 @@ namespace test_media {
     }
 
     // Looking an image up does not make it newer.
-    test_get_not_newer(): void {
+    test_lookup_order(): void {
       const cache = cache_make();
       cache.image_put("a", image_make(400));
       cache.image_put("b", image_make(400));
@@ -265,14 +270,18 @@ namespace test_media {
     // Budgets above 0 are accepted, whole bytes or not.
     test_budget_valid(): void {
       for (const budget of [0.5, 1, 268435456]) {
-        this.assertTrue(new media.ImageCache(budget) instanceof media.ImageCache);
+        this.assertEqual(new media.ImageCache(budget).total_bytes(), 0);
       }
     }
 
     // Budgets that are 0, negative or not finite throw.
     test_budget_invalid(): void {
       for (const budget of [0, -1, NaN, Infinity, -Infinity]) {
-        this.assertRaises(Error, () => new media.ImageCache(budget));
+        const message = message_thrown(
+          this,
+          () => new media.ImageCache(budget),
+        );
+        this.assertEqual(message, i18n("media.budget_invalid", budget));
       }
     }
   }
@@ -297,27 +306,45 @@ namespace test_media {
     test_type_other(): void {
       const payload = { url: constants.url, k: constants.key };
       const line = line_build("kv.get", payload, { id: constants.id });
-      this.assertRaises(Error, () => new media.MediaExchange(line));
+      const expected = i18n(
+        "media.type_invalid",
+        "kv.get",
+        "media.store",
+        "media.fetch",
+      );
+      this.assertEqual(refusal_text(this, line), expected);
     }
 
     // A request with no id is refused, as nothing could answer it.
     test_id_missing(): void {
-      this.assertRaises(Error, () => store_exchange({}));
-      this.assertRaises(Error, () => fetch_exchange({}));
+      const store = refusal_text(this, store_line({}));
+      const fetched = refusal_text(this, fetch_line({}));
+      this.assertEqual(store, i18n("media.id_missing", "media.store"));
+      this.assertEqual(fetched, i18n("media.id_missing", "media.fetch"));
     }
 
     // A store needs exactly one blob and a fetch needs none.
     test_blobs_count(): void {
       const options = { id: constants.id };
       const blob = jslb.blob_make(bytes_make());
-      const payload = { url: constants.url, k: constants.key };
-      const lines_bad = [
-        line_build("media.store", { k: constants.key }, options),
-        line_build("media.store", { k: constants.key }, options, [blob, blob]),
-        line_build("media.fetch", payload, options, [blob]),
+      const store_payload = { k: constants.key };
+      const fetch_payload = { url: constants.url, k: constants.key };
+      const cases: [lines.Line, string][] = [
+        [
+          line_build("media.store", store_payload, options),
+          i18n("media.blobs_invalid", "media.store", 0, 1),
+        ],
+        [
+          line_build("media.store", store_payload, options, [blob, blob]),
+          i18n("media.blobs_invalid", "media.store", 2, 1),
+        ],
+        [
+          line_build("media.fetch", fetch_payload, options, [blob]),
+          i18n("media.blobs_invalid", "media.fetch", 1, 0),
+        ],
       ];
-      for (const line of lines_bad) {
-        this.assertRaises(Error, () => new media.MediaExchange(line));
+      for (const [line, expected] of cases) {
+        this.assertEqual(refusal_text(this, line), expected);
       }
     }
 
@@ -330,37 +357,44 @@ namespace test_media {
         { id: constants.id },
         [blob],
       );
-      this.assertRaises(Error, () => new media.MediaExchange(line));
+      const expected = i18n("media.blob_bytes", "media.store");
+      this.assertEqual(refusal_text(this, line), expected);
     }
 
     // A key that is missing, empty or not text is refused in both types.
     test_key_invalid(): void {
       const blob = jslb.blob_make(bytes_make());
       const options = { id: constants.id };
-      for (const k of [undefined, null, "", 5, ["a"]]) {
-        const store = line_build("media.store", { k }, options, [blob]);
-        const fetch = line_build("media.fetch", { url: constants.url, k }, options);
-        this.assertRaises(Error, () => new media.MediaExchange(store));
-        this.assertRaises(Error, () => new media.MediaExchange(fetch));
-      }
-      const absent = [
+      const refused: lines.Line[] = [
         line_build("media.store", {}, options, [blob]),
         line_build("media.fetch", { url: constants.url }, options),
       ];
-      for (const line of absent) {
-        this.assertRaises(Error, () => new media.MediaExchange(line));
+      for (const k of [undefined, null, "", 5, ["a"]]) {
+        refused.push(line_build("media.store", { k }, options, [blob]));
+        refused.push(
+          line_build("media.fetch", { url: constants.url, k }, options),
+        );
+      }
+      const expected = i18n("media.field_invalid", "k");
+      for (const line of refused) {
+        this.assertEqual(refusal_text(this, line), expected);
       }
     }
 
     // A url that is missing, empty or not text is refused.
     test_url_invalid(): void {
       const options = { id: constants.id };
+      const refused: lines.Line[] = [
+        line_build("media.fetch", { k: constants.key }, options),
+      ];
       for (const url of [undefined, null, "", 5, {}]) {
-        const line = line_build("media.fetch", { url, k: constants.key }, options);
-        this.assertRaises(Error, () => new media.MediaExchange(line));
+        const payload = { url, k: constants.key };
+        refused.push(line_build("media.fetch", payload, options));
       }
-      const absent = line_build("media.fetch", { k: constants.key }, options);
-      this.assertRaises(Error, () => new media.MediaExchange(absent));
+      const expected = i18n("media.field_invalid", "url");
+      for (const line of refused) {
+        this.assertEqual(refusal_text(this, line), expected);
+      }
     }
   }
 
@@ -396,8 +430,8 @@ namespace test_media {
     test_reply_number(): void {
       for (const id of [1, 2, 41]) {
         const store = store_exchange({ id }).image_reply(bytes_make());
-        const fetch = fetch_exchange({ id }).image_reply(bytes_make());
-        for (const reply of [store, fetch]) {
+        const fetched = fetch_exchange({ id }).image_reply(bytes_make());
+        for (const reply of [store, fetched]) {
           this.assertEqual(jslb.field_get(reply[0], "reply"), id);
           this.assertFalse(Object.hasOwn(reply[0], "i"));
         }
@@ -409,11 +443,11 @@ namespace test_media {
       const options = { id: constants.id, full: true };
       const store = store_exchange(options).image_reply(bytes_make());
       this.assertEqual(store[0], { type: "media.store", reply: constants.id });
-      const fetch = fetch_exchange(options).image_reply(bytes_make());
-      this.assertEqual(jslb.field_get(fetch[0], "type"), "media.fetch");
-      this.assertTrue(Object.hasOwn(fetch[0], "type"));
-      this.assertFalse(Object.hasOwn(fetch[0], "t"));
-      this.assertEqual(jslb.field_get(fetch[0], "reply"), constants.id);
+      const fetched = fetch_exchange(options).image_reply(bytes_make());
+      this.assertEqual(jslb.field_get(fetched[0], "type"), "media.fetch");
+      this.assertTrue(Object.hasOwn(fetched[0], "type"));
+      this.assertFalse(Object.hasOwn(fetched[0], "t"));
+      this.assertEqual(jslb.field_get(fetched[0], "reply"), constants.id);
     }
 
     // The size and hash are those of the bytes in a view, not of its buffer.
@@ -429,12 +463,14 @@ namespace test_media {
   export class TestFailureLines extends unittest.TestCase {
     // Bytes that do not decode give an error line naming the key and cause.
     test_decode_text(): void {
-      const reply = store_exchange().decode_reply(new Error("bad bytes"));
+      const cause = new Error("bad bytes");
+      const reply = store_exchange().decode_reply(cause);
+      const text = String(cause);
+      const expected = i18n("media.decode_failed", constants.key, text);
       this.assertEqual(reply[0], { t: "error", r: constants.id });
       this.assertEqual(Object.keys(reply).join(","), "0,message,stack");
-      this.assertIn(constants.key, message_get(reply));
-      this.assertIn("bad bytes", message_get(reply));
-      this.assertTrue(String(reply.stack).length > 0);
+      this.assertEqual(reply.message, expected);
+      this.assertEqual(typeof reply.stack, "string");
     }
 
     // A cause that is no error is named by its text.
@@ -442,7 +478,9 @@ namespace test_media {
       const exchange = store_exchange();
       for (const cause of ["boom", 5, undefined, null]) {
         const reply = exchange.decode_reply(cause);
-        this.assertIn(String(cause), message_get(reply));
+        const text = String(cause);
+        const expected = i18n("media.decode_failed", constants.key, text);
+        this.assertEqual(reply.message, expected);
       }
     }
 
@@ -451,29 +489,43 @@ namespace test_media {
       const exchange = fetch_exchange();
       const cause = new TypeError("Failed to fetch");
       const reply = exchange.download_reply(constants.url, cause);
+      const expected = i18n(
+        "media.download_failed",
+        constants.url,
+        constants.key,
+        String(cause),
+      );
       this.assertEqual(reply[0], { t: "error", r: constants.id });
       this.assertEqual(Object.keys(reply).join(","), "0,message,stack");
-      this.assertIn(constants.url, message_get(reply));
-      this.assertIn(constants.key, message_get(reply));
-      this.assertIn("Failed to fetch", message_get(reply));
-      this.assertTrue(String(reply.stack).length > 0);
+      this.assertEqual(reply.message, expected);
+      this.assertEqual(typeof reply.stack, "string");
     }
 
     // The timeout gives an error line naming the url, key and seconds.
     test_timeout_text(): void {
       const reply = fetch_exchange().timeout_reply(constants.url, 5);
+      const expected = i18n(
+        "media.download_expired",
+        constants.url,
+        constants.key,
+        5,
+      );
       this.assertEqual(reply[0], { t: "error", r: constants.id });
       this.assertEqual(Object.keys(reply).join(","), "0,message,stack");
-      this.assertIn(constants.url, message_get(reply));
-      this.assertIn(constants.key, message_get(reply));
-      this.assertIn("5", message_get(reply));
-      this.assertTrue(String(reply.stack).length > 0);
+      this.assertEqual(reply.message, expected);
+      this.assertEqual(typeof reply.stack, "string");
     }
 
     // Fractions of a second are named as they are.
     test_timeout_fraction(): void {
       const reply = fetch_exchange().timeout_reply(constants.url, 0.5);
-      this.assertIn("0.5", message_get(reply));
+      const expected = i18n(
+        "media.download_expired",
+        constants.url,
+        constants.key,
+        0.5,
+      );
+      this.assertEqual(reply.message, expected);
     }
 
     // The three failures have three different messages.
@@ -481,9 +533,9 @@ namespace test_media {
       const exchange = fetch_exchange();
       const cause = new Error("x");
       const messages = [
-        message_get(exchange.decode_reply(cause)),
-        message_get(exchange.download_reply(constants.url, cause)),
-        message_get(exchange.timeout_reply(constants.url, 5)),
+        exchange.decode_reply(cause).message,
+        exchange.download_reply(constants.url, cause).message,
+        exchange.timeout_reply(constants.url, 5).message,
       ];
       this.assertEqual(new Set(messages).size, 3);
     }
@@ -493,8 +545,9 @@ namespace test_media {
       const exchange = fetch_exchange({ id: constants.id, full: true });
       const expected = { type: "error", reply: constants.id };
       const cause = new Error("x");
+      const download = exchange.download_reply(constants.url, cause);
       this.assertEqual(exchange.decode_reply(cause)[0], expected);
-      this.assertEqual(exchange.download_reply(constants.url, cause)[0], expected);
+      this.assertEqual(download[0], expected);
       this.assertEqual(exchange.timeout_reply(constants.url, 5)[0], expected);
     }
   }
@@ -505,21 +558,29 @@ namespace test_media {
     test_timeout_valid(): void {
       for (const seconds of [0.5, 1, 120, 2147483]) {
         const port = new media.MediaPort(constants.budget, seconds);
-        this.assertTrue(port instanceof media.MediaPort);
+        this.assertEqual(port.image_get(constants.key), undefined);
       }
     }
 
     // Timeouts that are 0, negative, not finite or too long for a timer throw.
     test_timeout_invalid(): void {
       for (const seconds of [0, -1, NaN, Infinity, 2147484]) {
-        this.assertRaises(Error, () => new media.MediaPort(constants.budget, seconds));
+        const message = message_thrown(
+          this,
+          () => new media.MediaPort(constants.budget, seconds),
+        );
+        this.assertEqual(message, i18n("media.timeout_invalid", seconds));
       }
     }
 
     // A budget that is 0, negative or not finite throws from the port too.
     test_budget_invalid(): void {
       for (const budget of [0, -1, NaN, Infinity]) {
-        this.assertRaises(Error, () => new media.MediaPort(budget, 1));
+        const message = message_thrown(
+          this,
+          () => new media.MediaPort(budget, 1),
+        );
+        this.assertEqual(message, i18n("media.budget_invalid", budget));
       }
     }
 
@@ -527,14 +588,16 @@ namespace test_media {
     test_receiver_twice(): void {
       const port = new media.MediaPort(constants.budget, 1);
       port.line_receive(() => {});
-      this.assertRaises(Error, () => port.line_receive(() => {}));
+      const message = message_thrown(this, () => port.line_receive(() => {}));
+      this.assertEqual(message, i18n("media.receiver_twice"));
     }
 
     // A request posted before a receiver is set throws.
     test_post_unreceived(): void {
       const port = new media.MediaPort(constants.budget, 1);
       const line = store_line({ id: constants.id });
-      this.assertRaises(Error, () => port.line_post(line, []));
+      const message = message_thrown(this, () => port.line_post(line, []));
+      this.assertEqual(message, i18n("media.receiver_missing"));
     }
 
     // A line that fails a check throws from the post and nothing is received.
@@ -545,15 +608,27 @@ namespace test_media {
         received += 1;
       });
       const options = { id: constants.id };
-      const refused = [
-        line_build("kv.get", { k: constants.key }, options),
-        store_line({}),
-        fetch_line({}),
-        line_build("media.store", { k: constants.key }, options),
-        line_build("media.fetch", { url: 5, k: constants.key }, options),
+      const store_payload = { k: constants.key };
+      const fetch_payload = { url: 5, k: constants.key };
+      const cases: [lines.Line, string][] = [
+        [
+          line_build("kv.get", store_payload, options),
+          i18n("media.type_invalid", "kv.get", "media.store", "media.fetch"),
+        ],
+        [store_line({}), i18n("media.id_missing", "media.store")],
+        [fetch_line({}), i18n("media.id_missing", "media.fetch")],
+        [
+          line_build("media.store", store_payload, options),
+          i18n("media.blobs_invalid", "media.store", 0, 1),
+        ],
+        [
+          line_build("media.fetch", fetch_payload, options),
+          i18n("media.field_invalid", "url"),
+        ],
       ];
-      for (const line of refused) {
-        this.assertRaises(Error, () => port.line_post(line, []));
+      for (const [line, expected] of cases) {
+        const message = message_thrown(this, () => port.line_post(line, []));
+        this.assertEqual(message, expected);
       }
       this.assertEqual(received, 0);
     }
