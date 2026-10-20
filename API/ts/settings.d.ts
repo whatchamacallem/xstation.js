@@ -8,24 +8,24 @@ declare namespace settings {
     verbose_forward: boolean;
     line_max: number;
     blob_max: number;
+    message_max: number;
+    queue_max: number;
     overflow_bytes: number;
     chunk_bytes: number;
     srv_buf_size: number;
     media_db_bytes: number;
     files_browser_bytes: number;
+    db_soft_bytes: number;
     turn_compact_tokens: number;
     long_task_ms: number;
     provider: {
       scripted: boolean;
-      base_url: string;
-      chat_model: string;
-      image_model: string;
       timeout_seconds: number;
     };
   }
 
   // The ids `settings_get` takes: every key, nested ones joined by `.`,
-  // as `provider.chat_model`.
+  // as `provider.timeout_seconds`.
   type Id = string;
 
   // Stores the settings the hello carried, once per thread; deep frozen

@@ -34,9 +34,6 @@ _SETTING_TYPES: dict[str, type[object]] = {
 # The keys of the provider object, each with the type its value must have.
 _PROVIDER_TYPES: dict[str, type[object]] = {
     "scripted": bool,
-    "base_url": str,
-    "chat_model": str,
-    "image_model": str,
     "timeout_seconds": int,
 }
 

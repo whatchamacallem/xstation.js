@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests `tap.line` through the dispatcher: the transcript of a browser test
+# Tests `tap.line` through the dispatcher: the TAP lines of a browser test
 # run appended to its file line for line, the two languages kept apart, the
 # directory made when it is absent, each line on disk the moment it is
 # handled, and a language other than python or typescript refused. The
 # scratch directories go under `build/`.
 
-import dispatch, engine_tap, jslb, json, os, tempfile, unittest, unittest.mock
+import dispatch, engine_tap, jslb, os, tempfile, unittest, unittest.mock
 from collections.abc import Callable
 from i18n import i18n
 from typing import Any
@@ -19,8 +19,18 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
-# The transcript of a browser test run, each TAP line sent as its own line.
-_TRANSCRIPT_PATH = os.path.join(_ROOT_PATH, "DATA", "06_tap.txt")
+# The TAP lines of a run of two modules, in the shape the runner writes.
+_RUN_LINES = (
+    "TAP version 14",
+    "1..2",
+    "    1..2",
+    "    ok 1 - test_one",
+    "    ok 2 - test_two",
+    "ok 1 - test_first",
+    "    1..1",
+    "    ok 1 - test_one",
+    "ok 2 - test_second",
+)
 
 # The dotted name of the handler table that the tests patch.
 _HANDLERS_TARGET = "dispatch._HANDLERS"
@@ -35,20 +45,6 @@ _WIDE_TEXT = "ok 1 - caf" + chr(0xE9) + " " + chr(0x4E2D)
 # Builds a line with no blobs: the type and the payload.
 def _line_make(name: str, **payload: Any) -> jslb.Object:
     return jslb.line_make(jslb.header_make(name), [], **payload)
-
-
-# Reads the payload of each line of the transcript, which the page sends.
-def _transcript_read() -> list[dict[str, Any]]:
-    payloads: list[dict[str, Any]] = []
-    with open(_TRANSCRIPT_PATH, encoding="utf-8") as file:
-        for line in file.read().splitlines():
-            if line.startswith("#"):
-                continue
-            _, _, text = line.split(" ", 2)
-            message: dict[str, Any] = json.loads(text)
-            del message["0"]
-            payloads.append(message)
-    return payloads
 
 
 # Returns the path of the TAP file of a language in a root.
@@ -87,14 +83,13 @@ class IsolatedCase(unittest.TestCase):
 
 # Tests the lines appended to the files.
 class TestAppend(IsolatedCase):
-    # The transcript replays into one file, line for line, and no other.
-    def test_transcript_replay(self) -> None:
+    # A run's lines replay into one file, line for line, and no other.
+    def test_run_replay(self) -> None:
         engine_tap.handlers_register(self.root)
-        payloads = _transcript_read()
-        for payload in payloads:
-            line = _line_make("tap.line", **payload)
+        for text in _RUN_LINES:
+            line = _line_make("tap.line", language="typescript", text=text)
             self.assertIsNone(dispatch.line_dispatch(line))
-        expected = "".join(payload["text"] + "\n" for payload in payloads)
+        expected = "".join(text + "\n" for text in _RUN_LINES)
         path = _tap_path(self.root, "typescript")
         self.assertEqual(_file_read(path), expected.encode("utf-8"))
         self.assertEqual(os.listdir(os.path.dirname(path)), ["typescript.tap"])

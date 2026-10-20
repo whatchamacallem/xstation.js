@@ -3,10 +3,10 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests `doc.put` and `doc.head` through the dispatcher on a real store under
-# `build/`: the turn transcript's scene put and its head read back, versions
-# that never change, bodies read off the wire with integer header keys, a
-# stale `since`, bodies the store refuses, and a recorded sequence replayed to
-# a second store. A new database starts at `seq` 0.
+# `build/`: a scene put and its head read back, versions that never change,
+# bodies read off the wire with integer header keys, a stale `since`, bodies
+# the store refuses, and a recorded sequence replayed to a second store. A new
+# database starts at `seq` 0.
 
 import dispatch, engine_doc, jslb, os, sqlite3, substrate, tempfile, unittest
 import unittest.mock
@@ -40,16 +40,16 @@ _MESSAGE_MAX = 10485760
 # The database the tests put their documents in.
 _DATABASE = "castle_gatehouse"
 
-# The id of the arrival scene of the turn transcript.
+# The id of the arrival scene of the castle gatehouse.
 _SCENE_ID = "scene/arrival"
 
-# The ref the turn transcript recorded for the first version of the scene.
+# The ref of the first version of the scene: its database, id and 1.
 _SCENE_REF = "/castle_gatehouse/scene/arrival/1"
 
 # Text beyond ASCII, built from its code points.
 _WIDE_TEXT = chr(0x4E2D) + chr(0x6587) + chr(0x1F600)
 
-# The subtitle of the arrival scene of the turn transcript.
+# The subtitle of the arrival scene.
 _ARRIVAL_SUBTITLE = (
     "Mind the moat. The gatehouse keeper has been expecting someone,"
     " though not necessarily you."
@@ -71,7 +71,7 @@ _ARRIVAL_BODY_TWO: dict[int | str, Any] = {
     "image": {"$ref": 1},
 }
 
-# The stored text of the arrival scene, as the turn transcript sends it.
+# The stored text of the arrival scene, its canonical JSON.
 _ARRIVAL_TEXT = (
     '{"0":{"t":"scene"},"1":"/_files/gatehouse/arrival.png","subtitle":"'
     + _ARRIVAL_SUBTITLE
@@ -84,7 +84,7 @@ _PROMPT_BODY: dict[int | str, Any] = {
     "text": "You are the analyst.",
 }
 
-# The puts to replay, an id and a body, the first the turn transcript's.
+# The puts to replay, each an id and a body.
 _RECORDED: list[tuple[str, dict[int | str, Any]]] = [
     (_SCENE_ID, _ARRIVAL_BODY),
     ("prompt", _PROMPT_BODY),
@@ -204,7 +204,7 @@ class IsolatedCase(unittest.TestCase):
 
 # Tests the handler of `doc.put`.
 class TestPut(IsolatedCase):
-    # The turn transcript's put writes version 1, its ref and `seq` 1.
+    # The first put writes version 1, its ref and `seq` 1.
     def test_version_written(self) -> None:
         engine_doc.handlers_register(self.store)
         line = _put_line(_DATABASE, _SCENE_ID, _ARRIVAL_BODY, 0)

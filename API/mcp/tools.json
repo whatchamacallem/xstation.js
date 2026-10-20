@@ -6,7 +6,7 @@
       "tools": [
         {
           "name": "sql_run",
-          "description": "Run SQL statements in one transaction on a database. DDL is allowed: your scripts are the database administrator. Tables whose name starts with _ and the _settings database refuse writes.",
+          "description": "Run SQL statements in one transaction on a database. DDL is allowed: your scripts are the database administrator.",
           "inputSchema": {
             "type": "object",
             "properties": {
@@ -220,8 +220,7 @@
               "text": {"type": "string"}
             },
             "required": ["name", "text"]
-          },
-          "_meta": {"xsjs": {"permit": true}}
+          }
         },
         {
           "name": "system_restart",
@@ -230,8 +229,7 @@
             "type": "object",
             "properties": {"main_loop": {"type": "string"}},
             "required": ["main_loop"]
-          },
-          "_meta": {"xsjs": {"permit": true}}
+          }
         }
       ]
     }

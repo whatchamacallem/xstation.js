@@ -6,7 +6,7 @@
 // reply lines, the conversion of MCP tools and the key it keeps in memory.
 
 namespace test_provider {
-  // The values the tests share, as the settings and the recorded turn hold.
+  // A provider's address, key and models, and values of the castle turn.
   const constants = Object.freeze({
     base_url: "https://api.x.ai/v1",
     key: "xai-SYNTHETIC-KEY",
@@ -100,7 +100,7 @@ namespace test_provider {
     return message_with({ tool_calls: [{ ...call_valid(), ...fields }] });
   }
 
-  // The chat body of the recorded turn that runs the bootstrap script.
+  // The chat body of the castle turn that runs the bootstrap script.
   function recorded_calling(): Fields {
     return {
       id: "chatcmpl-synthetic-3",
@@ -128,7 +128,7 @@ namespace test_provider {
     };
   }
 
-  // The chat body of the recorded turn that ends it with the subtitle.
+  // The chat body of the castle turn that ends it with the subtitle.
   function recorded_stop(): Fields {
     return {
       id: "chatcmpl-synthetic-60",
@@ -162,7 +162,7 @@ namespace test_provider {
 
   // The request lines the two builders make.
   export class TestRequestBuild extends unittest.TestCase {
-    // A chat request is one `http.request` line with no id, as recorded.
+    // A chat request is one `http.request` line with no id.
     test_chat_line(): void {
       const request: provider.ChatRequest = {
         model: constants.chat_model,
@@ -233,13 +233,13 @@ namespace test_provider {
 
   // The chat completion read out of a reply line.
   export class TestChatResponse extends unittest.TestCase {
-    // The recorded reply that calls a tool is read whole.
+    // The castle turn's reply that calls a tool is read whole.
     test_recorded_calls(): void {
       const response = provider.chat_response(reply_build(recorded_calling()));
       this.assertEqual(response, recorded_calling());
     }
 
-    // The recorded reply that ends the turn has no tool calls.
+    // The castle turn's reply that ends the turn has no tool calls.
     test_recorded_stop(): void {
       const response = provider.chat_response(reply_build(recorded_stop()));
       this.assertEqual(response, recorded_stop());
@@ -331,7 +331,7 @@ namespace test_provider {
 
   // The images read out of a reply line.
   export class TestImageResponse extends unittest.TestCase {
-    // The recorded reply with the test pattern as base64 is read whole.
+    // A reply with a checkerboard PNG of 88 bytes as base64 is read whole.
     test_recorded_image(): void {
       const json = { data: [{ b64_json: constants.recorded_png }] };
       this.assertEqual(provider.image_response(reply_build(json)), json);
@@ -388,7 +388,6 @@ namespace test_provider {
           "the named main loop file. Debug mode.",
         "main_loop",
       );
-      restart._meta = { xsjs: { permit: true } };
       const converted = provider.tools_convert([create, restart]);
       this.assertEqual(converted, [
         {

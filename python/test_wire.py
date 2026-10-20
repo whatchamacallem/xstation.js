@@ -3,241 +3,471 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# The wire test: starts Linux ttyd, from a checkout of ttyd beside this
-# project, serving bootstrap.html and running a copy of bootstrap.py made
-# in a directory under build/, then types commands to the program through
-# ttyd's protocol as the page does, rung by rung: over one WebSocket, then
-# over new ones on the same ttyd, two at once, and last one while ttyd is
-# killed. The program runs on ttyd's terminal, which echoes what is typed,
-# so a check compares what the terminal shows, echo included, byte for
-# byte wherever that is deterministic, and waits for the output it expects
-# before typing more. ttyd's log is copied to stderr whole. It stops at the
-# first failed check with the measurement that failed and exits 1; on
-# success it prints one line per rung and exits 0. Standard library only,
-# and ttyd is the one program it starts:
+# The wire test. ttyd as xsjs_install.ps1 builds it serves roots made under
+# build/ as the start script makes the server root, running
+# `python3 <root>/python/bootstrap.py --root <root>`, and a standard library
+# WebSocket client speaks ttyd's protocol and JSLB to them as the page does,
+# rung by rung, each rung under a timer. On the echo main loop file, which
+# --main-loop names in the query: hello, echo, echo 1 MiB with control bytes,
+# a message of exactly message_max echoed, echo 128 MiB as messages that each
+# fit with ttyd's resident size, a second connection refused and a message
+# one byte over message_max refused; then the last line regression on the
+# console role, and ttyd killed. On the stock main loop: the mcp lines that
+# open a session and a tools/call, kv.put and kv.get, doc.put and doc.head,
+# verbose.tail, an unknown type, and system.restart serving the echo main
+# loop after source.put; on a root whose setting debug is false, the same
+# refused. Where a program writes its last line and exits, a lone loss of
+# that line is a ttyd fault, reported with ttyd's version and never retried.
+# It prints one line per rung and exits 0, or stops at the first failed
+# check, names its rung and exits 1. ttyd's log is copied to stderr. Standard
+# library only, and ttyd is the one program it starts:
 #
 #     python3 python/test_wire.py
 
-import argparse, base64, contextlib, hashlib, http.client, json, os, re, select
-import shlex, shutil, signal, socket, subprocess, sys, tempfile, time, types
-from collections.abc import Callable, Generator
-from typing import Any, NamedTuple, cast
+import argparse, base64, collections, hashlib, http.client, json, os, re
+import select, shutil, signal, socket, subprocess, sys, tempfile, time, types
+from collections.abc import Callable
+from typing import Any, NamedTuple, NoReturn, Self, TypeAlias, cast
 
+# The checkout's `python` directory, which holds this file.
 _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
 
-_BOOTSTRAP_PATH = os.path.join(_PYTHON_PATH, "bootstrap.py")
+# The checkout, which holds the `python` directory.
+_CHECKOUT_PATH = os.path.dirname(_PYTHON_PATH)
 
-# The banner as the terminal shows it, then the prompt.
-_BANNER_PATTERN = re.compile(
-    rb"bootstrap (.+) sha256 ([0-9a-f]{64}) pid (\d+) python (\S+)"
-    rb" modules (.+)\r\n\$ "
+# The build directory: each run's roots, and the bytecode of what is imported.
+_BUILD_PATH = os.path.join(_CHECKOUT_PATH, "build")
+
+# The ttyd the install script builds from the pinned release and its patches.
+_TTYD_PATH = os.path.join(_BUILD_PATH, "ttyd", "ttyd")
+
+# The script that builds ttyd, which a missing ttyd names.
+_INSTALL_SCRIPT = "xsjs_install.ps1"
+
+# The start of the name of the directory each run makes its roots in.
+_WORK_PREFIX = "test_wire-"
+
+# The checkout's settings, the object each root's settings are made from.
+_SETTINGS_PATH = os.path.join(_CHECKOUT_PATH, "settings.json")
+
+# The strings file, which the start script copies into the root.
+_STRINGS_PATH = os.path.join(_CHECKOUT_PATH, "i18n", "en-US.json")
+
+# The seed directory, which the start script copies into the root.
+_SEED_PATH = os.path.join(_PYTHON_PATH, "seed")
+
+# The modules the server runs, which the start script copies into the root.
+_RUNTIME_MODULES = (
+    "i18n",
+    "jslb",
+    "verbose",
+    "settings",
+    "substrate",
+    "dispatch",
+    "mcp",
+    "mcp_stdio",
+    "engine_kv",
+    "engine_doc",
+    "engine_db",
+    "engine_turn",
+    "engine_sql",
+    "engine_verbose",
+    "engine_tap",
+    "engine_mcp",
+    "engine_system",
+    "main_loop",
+    "bootstrap",
 )
 
-# 1 MiB in lines of `_LINE_BYTES` bytes and a newline: units, then ASCII.
-_BIG_LINES = 256
+# The directory of a root that holds the main loop files.
+_MAIN_LOOP_DIRECTORY = "main_loop"
 
-# A unit: 23 random ASCII characters, then characters of 2, 3 and 4 bytes.
-_BIG_ASCII_PER_UNIT = 23
-_BIG_WIDE_TEXT = "\u00e9\u4e2d\U0001f600"
+# The main loop file that serves `echo`.
+_ECHO_NAME = "echo_loop.py"
 
-# Where the copy of bootstrap.py and its modules go, in a directory each run.
-_BUILD_PATH = os.path.join(os.path.dirname(_PYTHON_PATH), "build")
+# That file in the checkout, beside this one.
+_ECHO_PATH = os.path.join(_PYTHON_PATH, _ECHO_NAME)
 
-# The terminal size the first message gives.
-_COLUMNS = 80
-_ROWS = 24
+# The main loop file name the `source_put` tool call writes.
+_TOOL_NAME = "echo_tool.py"
 
-_CREDENTIAL = "user:pass"
+# The file in a root whose lock one engine at a time holds.
+_LOCK_NAME = "engine.lock"
 
-# What the terminal takes, at the start of a line, as the end of input.
-_EOF = b"\x04"
+# The API file that holds the tools as `tools/list` returns them.
+_TOOLS_PATH = os.path.join(_CHECKOUT_PATH, "API", "mcp", "tools.json")
 
-# Commands the bootstrapper refuses, each with the line it writes to stderr.
-_ERRORS = [
-    ("nosuch", "nosuch: not found"),
-    ("not-a-name", "not-a-name: not a module name"),
-    ("'unclosed", "'unclosed: No closing quotation"),
-    ("put", "usage: put NAME"),
-    ("put one two", "usage: put NAME"),
-    ("ls extra", "usage: ls"),
-    ("restart now", "usage: restart"),
-]
+# The `initialize` request the AI worker's MCP client sends the server.
+_INITIALIZE_MESSAGE: dict[str, Any] = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "hyperposition-engine", "version": "0"},
+    },
+}
 
-# A module that exits with the code its argument gives.
-_EXITER_SOURCE = "import sys\n\nsys.exit(int(sys.argv[1]))\n"
+# The notification the client sends once the `initialize` reply is in.
+_INITIALIZED_MESSAGE: dict[str, Any] = {
+    "jsonrpc": "2.0",
+    "method": "notifications/initialized",
+}
 
-_INDEX_PATH = os.path.join(_PYTHON_PATH, "bootstrap.html")
+# The `tools/list` request the client sends after the notification.
+_LIST_MESSAGE: dict[str, Any] = {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/list",
+}
 
-# `^C`, and how the terminal echoes it.
-_INTERRUPT = b"\x03"
-_INTERRUPT_ECHO = b"^C"
+# The response to `initialize`: the pinned revision, `tools`, the server.
+_INITIALIZE_RESPONSE: dict[str, Any] = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {"tools": {}},
+        "serverInfo": {"name": "xsjs-server", "version": "0"},
+    },
+}
 
-# The most bytes a terminal line holds before its newline.
-_LINE_BYTES = 4095
+# The `JSON-RPC` id of the tools call, after `initialize` and `tools/list`.
+_CALL_ID = 3
 
-# The lines lines.py prints, 1 to this.
-_LINES_COUNT = 100000
-_LINES_SOURCE = f"for n in range(1, {_LINES_COUNT} + 1):\n    print(n)\n"
+# The name `argparse` shows, as `sys.argv` may be empty.
+_PROGRAM_NAME = "test_wire.py"
 
-_LISTENING_PATTERN = re.compile(r" Listening on port: (\d+)$")
+# A default chosen by its writer: the seconds a rung runs before it fails.
+_RUNG_SECONDS = 120.0
 
-_MADE_UP_PATH = "/other.js"
+# A default chosen by its writer: the seconds ttyd has to exit on `SIGTERM`.
+_STOP_SECONDS = 5.0
 
-# Holds 2, 3 and 4 byte characters, and the split lands inside the last.
-_NON_ASCII_TEXT = "na\u00efve \u65e5\u672c\u8a9e \U0001f600 \u00e9t\u00e9"
-_NON_ASCII_SPLIT_CHARACTER = "\U0001f600"
+# The environment variable ttyd passes on to the server as the provider key.
+_PROVIDER_VARIABLE = "XSJS_PROVIDER_KEY"
 
-_POLL_SECONDS = 0.05
+# The provider key ttyd's environment holds, which `hello` must carry.
+_PROVIDER_KEY = "test-wire-key"
 
-# What the bootstrapper writes when it waits for a command.
-_PROMPT = b"$ "
-
-# A module that raises, so the interpreter's own exit reports it.
-_RAISER_SOURCE = f"raise ValueError({_NON_ASCII_TEXT!r})\n"
-
-# A module that prints what it was given and where it runs.
-_REPORT_SOURCE = f"""\
-import os, sys
-
-TEXT = {_NON_ASCII_TEXT!r}
-
-print("argv", sys.argv[1:])
-print("text", TEXT)
-print("cwd", os.getcwd())
-print("path", sys.path[0])
-print("bootstrap", os.environ["XSJS_BOOTSTRAP"])
-print("modules", os.environ["XSJS_MODULES"])
-print("name", __name__)
-print("stderr", TEXT, file=sys.stderr)
-"""
-
-# The arguments report.py runs with.
-_RUN_ARGS = ["--who", "two words", _NON_ASCII_TEXT]
-
-_RUN_TIMEOUT_SECONDS = 120
-
-# The bytes shown on each side of where a transcript first differs.
-_SHOWN_BYTES = 200
-
-# A module that forks a second process, and both sleep until killed.
-_SLEEPER_SOURCE = """\
-import os, time
-
-child = os.fork()
-if child == 0:
-    time.sleep(600)
-    os._exit(0)
-print("pids", os.getpid(), child)
-time.sleep(600)
-"""
-
-# A module that says its pids, then prints each line of stdin until EOF.
-_STDIN_SOURCE = """\
-import os, sys
-
-print("ready", os.getpid(), os.getppid())
-count = 0
-for line in sys.stdin:
-    count += 1
-    print("got", line, end="")
-print("eof", count)
-"""
-
-_STOP_WAIT_SECONDS = 5
-
-_TTYD_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(_PYTHON_PATH)), "ttyd", "build", "ttyd"
-)
-
-# `--terminal-type dumb`, as deployed, so Python doesn't colour tracebacks.
-_TTYD_OPTIONS = [
+# ttyd's options as the start script gives them, but its port and its page.
+_TTYD_OPTIONS = (
+    "--interface",
+    "127.0.0.1",
     "--writable",
     "--check-origin",
     "--terminal-type",
     "dumb",
-    "--index",
-    _INDEX_PATH,
+    "--url-arg",
+)
+
+# The option, patched into the release, that sets ttyd's receive chunk size.
+_BUFFER_OPTION = "--srv-buf-size"
+
+# The query arguments that run the echo main loop file.
+_ECHO_ARGS = ("--main-loop", _ECHO_NAME)
+
+# The query arguments that run the console role.
+_CONSOLE_ARGS = ("console",)
+
+# The query arguments that run the stock main loop: none.
+_STOCK_ARGS: tuple[str, ...] = ()
+
+# The status of a request that succeeded.
+_HTTP_OK = 200
+
+# The id of `hello`, the first request on the engine tty.
+_HELLO_ID = 1
+
+# The payload fields of `hello`, in order.
+_HELLO_FIELDS = [
+    "bootstrap",
+    "sha256",
+    "pid",
+    "root",
+    "settings",
+    "seq",
+    "provider_key",
 ]
 
-# What update.py appends to the bootstrapper it runs under.
-_UPDATE_LINE = b"# updated by update.py\n"
-_UPDATE_SOURCE = f"""\
-import hashlib, os
+# The type of the line the echo main loop serves.
+_ECHO_TYPE = "echo"
 
-path = os.environ["XSJS_BOOTSTRAP"]
-with open(path, "rb") as old_file:
-    data = old_file.read() + {_UPDATE_LINE!r}
-with open(path + ".new", "wb") as new_file:
-    new_file.write(data)
-os.replace(path + ".new", path)
-print("sha256", hashlib.sha256(data).hexdigest())
-"""
+# A type no handler serves.
+_UNKNOWN_TYPE = "unknown.type"
+
+# The version of every line this client builds.
+_LINE_VERSION = 0
+
+# The CR that ends a JSLB line.
+_LINE_END = b"\r"
+
+# The tag `line_render` writes after the JSON text for blob 1.
+_BLOB_TAG = '<blob "n"=1>'
+
+# Text of 2, 3 and 4 byte characters for payloads, built from code points.
+_WIDE_TEXT = (
+    "na" + chr(0xEF) + "ve " + chr(0x65E5) + chr(0x672C) + " " + chr(0x1F600)
+)
+
+# The payload the small echoes carry.
+_ECHO_PAYLOAD: dict[str, Any] = {
+    "text": _WIDE_TEXT,
+    "count": -3,
+    "nested": {"list": [1, "two", None, True]},
+}
+
+# A small blob: the control bytes below space, CR and LF among them.
+_SMALL_BYTES = bytes(range(32))
+
+# The bytes of the 1 MiB echo and value: every byte value 4096 times.
+_CONTROL_BYTES = bytes(range(256)) * 4096
+
+# The bytes in a MiB.
+_MIB = 1 << 20
+
+# The blob bytes the large echo sends in all, 128 MiB.
+_LARGE_BYTES = 128 * _MIB
+
+# The database the kv rung writes in, which every new root has.
+_FILES_DB = "_files"
+
+# The ref the kv rung puts its value under.
+_VALUE_REF = "/_files/test_wire/control.bin"
+
+# The database the doc rung writes in, which every new root has.
+_METAVERSE_DB = "metaverse"
+
+# The id of the document the doc rung writes.
+_DOCUMENT_ID = "test_wire"
+
+# The version the first put of a document writes.
+_DOCUMENT_VERSION = 1
+
+# The document the doc rung writes: its header and a text.
+_DOCUMENT_BODY: dict[int | str, Any] = {0: {"t": "note"}, "text": _WIDE_TEXT}
+
+# The page thread whose lines the verbose rung puts and reads back.
+_PAGE_THREAD = "ai"
+
+# The server's own thread, whose ring the verbose rung reads.
+_SERVER_THREAD = "server"
+
+# The levels of the lines the verbose rung puts, one line each.
+_LEVELS = (0, 1, 2)
+
+# How many of those lines the verbose rung reads back.
+_TAIL_COUNT = 2
+
+# How many nanoseconds the clock counts in a millisecond.
+_NANOSECONDS_PER_MILLISECOND = 1_000_000
+
+# How many lines the last line regression prints, 1 to this.
+_LINES_COUNT = 100000
+
+# The regression's command: a subshell prints the lines and exits at once.
+_LINES_COMMAND = (
+    f'( i=1; while [ "$i" -le {_LINES_COUNT} ]; do echo "$i";'
+    " i=$((i + 1)); done )"
+)
+
+# The prompt dash writes when it waits for a command.
+_PROMPT = b"$ "
+
+# The columns the first message gives the terminal.
+_COLUMNS = 80
+
+# The rows the first message gives the terminal.
+_ROWS = 24
 
 # ttyd's first log line, with its version and that of libwebsockets.
 _VERSION_PATTERN = re.compile(r" N: (ttyd \S+ \(libwebsockets \S+\))$")
 
+# ttyd's log line of the port it listens on.
+_LISTENING_PATTERN = re.compile(r" Listening on port: (\d+)$")
+
+# ttyd's log line of a program's end: how, its code or signal, its pid.
+_ENDED_PATTERN = re.compile(
+    r"process (killed with signal|exited with code) (\d+), pid: (\d+)$"
+)
+
+# How ttyd's log says a program exited with a code.
+_EXITED_WORDS = "exited with code"
+
+# The code a refused or failed program exits with.
+_PROGRAM_FAILED = 1
+
+# What RFC 6455 appends to the key before it is hashed into the accept value.
 _WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-_WEBSOCKET_OPCODE_BINARY = 0x2
-_WEBSOCKET_OPCODE_CLOSE = 0x8
-_WEBSOCKET_OPCODE_CONTINUATION = 0x0
-_WEBSOCKET_OPCODE_PING = 0x9
-_WEBSOCKET_OPCODE_PONG = 0xA
-_WEBSOCKET_CLOSE_NORMAL = 1000
+
+# The opcode of a frame that continues a message.
+_OPCODE_CONTINUATION = 0x0
+
+# The opcode of a binary frame, which carries every ttyd message.
+_OPCODE_BINARY = 0x2
+
+# The opcode of a frame that closes the connection.
+_OPCODE_CLOSE = 0x8
+
+# The opcode of a ping, which a pong answers.
+_OPCODE_PING = 0x9
+
+# The opcode of a pong.
+_OPCODE_PONG = 0xA
+
+# The code of a normal close.
+_CLOSE_NORMAL = 1000
+
+# The bytes shown on each side of where a transcript first differs.
+_SHOWN_BYTES = 200
+
+# The most bytes read from ttyd's socket or log at once.
+_READ_BYTES = 1 << 20
+
+# The exit code of a run with a failed check.
+_EXIT_FAILED = 1
+
+# The exit code of a run that `^C` ended.
+_EXIT_INTERRUPTED = 130
+
+# A shell's exit code for a signal is this plus the signal's number.
+_SIGNAL_BASE = 128
+
+# Bytecode of the modules imported from the python directory goes in `build`.
+sys.pycache_prefix = os.path.join(_BUILD_PATH, "pycache")
+
+# A decoded JSLB line, the `jslb.Object` dict: headers at integer keys.
+LineObject: TypeAlias = dict[int | str, Any]
 
 
-# The bootstrapper's banner: its pid, its Python's version and its sha256.
-class Banner(NamedTuple):
-    pid: int
-    python: str
-    sha256: str
-
-
+# A check that failed, with the measurement that failed it.
 class CheckFailed(Exception):
     pass
 
 
-class Ttyd:
-    # Starts ttyd in a session of its own with its stderr on a pipe.
+# A process's resident size and its peak, in KiB.
+class MemoryUse(NamedTuple):
+    resident: int
+    peak: int
+
+
+# A rung's time limit, which fails loud once it has passed.
+class RungTimer:
+    # Starts the rung's time.
+    def __init__(self, rung: str, seconds: float) -> None:
+        self.rung = rung
+        self.seconds = seconds
+        self.end = time.monotonic() + seconds
+
+    # Returns the seconds left, failing the rung once there are none.
+    def seconds_left(self, what: str) -> float:
+        left = self.end - time.monotonic()
+        if left <= 0:
+            raise CheckFailed(
+                f"the rung {self.rung} ran out of its {self.seconds:g} s"
+                f" waiting for {what}"
+            )
+        return left
+
+
+# The rung that runs, its timer, and the line each rung prints.
+class RungLog:
+    # Starts on ttyd, before any rung.
+    def __init__(self) -> None:
+        self.rung = "ttyd"
+        self.timer = RungTimer(self.rung, _RUNG_SECONDS)
+
+    # Names the rung that runs now and starts its timer.
+    def rung_start(self, rung: str) -> None:
+        self.rung = rung
+        self.timer = RungTimer(rung, _RUNG_SECONDS)
+
+    # Prints the summary of the rung that ran.
+    def rung_print(self, summary: str) -> None:
+        print(f"{self.rung}: {summary}", flush=True)
+
+    # Runs a rung under its timer and prints its summary.
+    def rung_run(self, rung: str, check: Callable[[], str]) -> None:
+        self.rung_start(rung)
+        self.rung_print(check())
+
+
+# ttyd serving one root, in a session of its own, its log read from a pipe.
+class TtydServer:
+    # Starts ttyd on a port of its choosing, running the root's bootstrap.
     def __init__(
-        self, options: list[str], command: list[str], deadline: float
+        self, root: str, values: dict[str, Any], log: RungLog
     ) -> None:
-        self.command = command
-        # The path, until ttyd's log names its version.
+        self.root = root
+        self.log = log
+        self.command = [
+            "python3",
+            os.path.join(root, "python", "bootstrap.py"),
+            "--root",
+            root,
+        ]
         self.version = _TTYD_PATH
-        self.deadline = deadline
-        # ttyd's stderr lines so far, and what follows the last of them.
         self.lines: list[str] = []
         self.partial = b""
         self.port = 0
         self.killed = False
-        self.stderr_ended = False
+        self.log_ended = False
+        environment = dict(os.environ)
+        environment[_PROVIDER_VARIABLE] = _PROVIDER_KEY
         self.fd, write_fd = os.pipe()
         try:
-            # In a session of its own, so a `^C` reaches only this script.
             self.process = subprocess.Popen(
                 [
                     _TTYD_PATH,
                     "--port",
                     "0",
-                    "--interface",
-                    "127.0.0.1",
-                    *options,
-                    *command,
+                    *_TTYD_OPTIONS,
+                    _BUFFER_OPTION,
+                    str(values["srv_buf_size"]),
+                    *self.command,
                 ],
                 stdin=subprocess.DEVNULL,
                 stdout=sys.stderr,
                 stderr=write_fd,
+                env=environment,
                 start_new_session=True,
             )
         finally:
             os.close(write_fd)
 
-    # Sends ttyd the signal, after which its exit is awaited, not failed.
-    def kill(self, signal_number: int) -> None:
-        self.killed = True
-        os.kill(self.process.pid, signal_number)
+    # Waits for ttyd's version and port, stopping it when that fails.
+    def __enter__(self) -> Self:
+        try:
+            _, found = self.line_wait(_VERSION_PATTERN, "ttyd's version", 0)
+            self.version = found.group(1)
+            _, found = self.line_wait(_LISTENING_PATTERN, "ttyd to listen", 0)
+            self.port = int(found.group(1))
+        except BaseException:
+            self.process_stop()
+            raise
+        return self
 
-    # Copies whole lines to this script's stderr and keeps them.
+    # Stops ttyd whatever ended the block, a slow exit failing a clean run.
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception: BaseException | None,
+        traceback: types.TracebackType | None,
+    ) -> None:
+        stopped = self.process_stop()
+        if not stopped and exception is None:
+            raise CheckFailed(
+                f"{self.version} still ran {_STOP_SECONDS:g} s after SIGTERM"
+                " and was killed"
+            )
+
+    # Sends ttyd a signal, after which the end of its log is no failure.
+    def signal_send(self, number: int) -> None:
+        self.killed = True
+        os.kill(self.process.pid, number)
+
+    # Copies whole log lines to stderr and keeps them.
     def lines_take(self, data: bytes) -> None:
         *complete, self.partial = (self.partial + data).split(b"\n")
         for line in complete:
@@ -246,109 +476,118 @@ class Ttyd:
             sys.stderr.write(f"{text}\n")
         sys.stderr.flush()
 
-    # Returns the first match from the start'th line on, reading stderr for it.
-    def line_wait(
-        self, pattern: re.Pattern[str], start: int, what: str
-    ) -> re.Match[str]:
-        index = start
-        while True:
-            while index < len(self.lines):
-                found = pattern.search(self.lines[index])
-                if found:
-                    return found
-                index += 1
-            readable, _, _ = select.select(
-                [self.fd], [], [], remaining(self.deadline, what)
-            )
-            if readable:
-                self.stderr_read()
-
-    # Reads ttyd's stderr, failing on its end unless ttyd was killed.
-    def stderr_read(self) -> None:
-        data = os.read(self.fd, 1 << 16)
+    # Reads ttyd's log, failing at its end unless ttyd was killed.
+    def log_read(self) -> None:
+        data = os.read(self.fd, _READ_BYTES)
         if not data:
             if not self.killed:
                 raise CheckFailed(
                     f"{self.version} exited with {self.process.wait()}"
                 )
-            self.stderr_ended = True
+            self.log_ended = True
             return
         self.lines_take(data)
 
-    # Stops ttyd and its session, then copies out the rest of its stderr.
-    def stop(self) -> None:
-        # Until ttyd is waited for, its pid names its session and no other.
+    # Returns the first log line from `start` on that matches, and its index.
+    def line_wait(
+        self, pattern: re.Pattern[str], what: str, start: int
+    ) -> tuple[int, re.Match[str]]:
+        index = start
+        while True:
+            while index < len(self.lines):
+                found = pattern.search(self.lines[index])
+                if found is not None:
+                    return index, found
+                index += 1
+            readable, _, _ = select.select(
+                [self.fd], [], [], self.log.timer.seconds_left(what)
+            )
+            if readable:
+                self.log_read()
+
+    # Returns how ttyd logged the end of the program of that pid, and the code.
+    def end_wait(self, pid: int, what: str) -> tuple[str, int]:
+        start = 0
+        while True:
+            index, found = self.line_wait(_ENDED_PATTERN, what, start)
+            if int(found.group(3)) == pid:
+                return found.group(1), int(found.group(2))
+            start = index + 1
+
+    # Stops ttyd, then reads the rest of its log. False when it needed SIGKILL.
+    def process_stop(self) -> bool:
+        stopped = True
         if self.process.poll() is None:
             os.killpg(self.process.pid, signal.SIGTERM)
-        try:
-            self.process.wait(_STOP_WAIT_SECONDS)
-        except subprocess.TimeoutExpired:
-            os.killpg(self.process.pid, signal.SIGKILL)
-            self.process.wait()
-        while data := os.read(self.fd, 1 << 16):
+            try:
+                self.process.wait(_STOP_SECONDS)
+            except subprocess.TimeoutExpired:
+                os.killpg(self.process.pid, signal.SIGKILL)
+                self.process.wait()
+                stopped = False
+        while data := os.read(self.fd, _READ_BYTES):
             self.lines_take(data)
         os.close(self.fd)
         if self.partial:
             sys.stderr.write(f"{self.partial.decode()}\n")
             sys.stderr.flush()
+        return stopped
 
 
-class Wire:
+# A WebSocket on ttyd: its protocol, and the program's output raw or in lines.
+class WireClient:
     # Takes the socket after the upgrade and handles any frames already read.
-    def __init__(self, ttyd: Ttyd, sock: socket.socket, rest: bytes) -> None:
+    def __init__(
+        self,
+        ttyd: TtydServer,
+        sock: socket.socket,
+        rest: bytes,
+        values: dict[str, Any],
+        raw: bool,
+    ) -> None:
+        import jslb
+
         self.ttyd = ttyd
         self.sock = sock
-        # It never waits, as it is used only once `select` finds it ready.
-        self.sock.setblocking(False)
-        # What ttyd sent that isn't yet a whole frame.
         self.unread = bytearray(rest)
-        # The frames so far of a message ttyd sends in more than one.
         self.fragments: bytearray | None = None
-        # The frames queued that the socket hasn't yet taken.
-        self.unsent = bytearray()
+        self.unsent: collections.deque[bytes] = collections.deque()
+        self.unsent_offset = 0
         self.close_sent = False
         self.close_code: int | None = None
         self.close_reason = b""
-        # Set before ttyd is made to end the connection, so it is not failed.
         self.end_expected = False
-        # Set once ttyd's end of the TCP connection is read.
         self.ended = False
+        self.reset = False
         self.ttyd_messages = 0
-        self.ttyd_pings = 0
+        self.pings = 0
         self.title = ""
         self.preferences: dict[str, Any] = {}
-        # What the terminal showed, echo included, as ttyd relays it.
+        self.raw = raw
         self.output = bytearray()
-        # The banners so far, the first and then one each restart.
-        self.banners: list[Banner] = []
-        # The pids that modules said they run as.
-        self.module_pids: set[int] = set()
+        self.chunk_bytes: int = values["chunk_bytes"]
+        self.decoder = jslb.LineDecoder(
+            values["line_max"],
+            values["blob_max"],
+            values["message_max"],
+            values["message_max"],
+            blob_refuse,
+        )
+        self.lines: collections.deque[LineObject] = collections.deque()
+        self.full = False
+        self.id_last = 0
+        self.pid = 0
+        self.seq: dict[str, int] = {}
         self.frames_handle()
 
-    # Queues a close frame with the normal code.
-    def close_send(self) -> None:
-        self.close_sent = True
-        self.frame_send(
-            _WEBSOCKET_OPCODE_CLOSE, _WEBSOCKET_CLOSE_NORMAL.to_bytes(2, "big")
-        )
-
-    # Sends the input, then returns the mark before it once the prompt shows.
-    def command(self, data: bytes) -> int:
-        mark = len(self.output)
-        self.input_send(data)
-        self.prompt_wait(mark, f"the prompt after {data[:40]!r}")
-        return mark
-
-    # Sends the input and fails unless the output to the prompt is expected.
-    def command_check(self, data: bytes, expected: bytes) -> None:
-        mark = self.command(data)
-        self.transcript_check(mark, expected, f"{data[:40]!r}'s output")
+    # Returns the next request id of this connection, from 1.
+    def id_next(self) -> int:
+        self.id_last += 1
+        return self.id_last
 
     # Queues one WebSocket frame, masked as a client's must be.
-    def frame_send(
-        self, opcode: int, payload: bytes, final: bool = True
-    ) -> None:
-        head = bytearray([(0x80 if final else 0) | opcode])
+    def frame_send(self, opcode: int, payload: bytes) -> None:
+        head = bytearray([0x80 | opcode])
         if len(payload) < 126:
             head.append(0x80 | len(payload))
         elif len(payload) < 1 << 16:
@@ -362,1000 +601,335 @@ class Wire:
         masked = (
             int.from_bytes(payload, "big") ^ int.from_bytes(keys, "big")
         ).to_bytes(len(payload), "big")
-        self.unsent += head + mask + masked
+        self.unsent.append(bytes(head) + mask + masked)
 
-    # Handles each whole frame that has been read.
-    def frames_handle(self) -> None:
-        version = self.ttyd.version
-        while len(self.unread) >= 2:
-            first, second = self.unread[0], self.unread[1]
-            if second & 0x80:
-                raise CheckFailed(f"{version} sent a masked frame")
-            length = second & 0x7F
-            start = 2
-            if length == 126:
-                start = 4
-            elif length == 127:
-                start = 10
-            if len(self.unread) < start:
-                return
-            if start > 2:
-                length = int.from_bytes(self.unread[2:start], "big")
-            if len(self.unread) < start + length:
-                return
-            payload = bytes(self.unread[start : start + length])
-            del self.unread[: start + length]
-            opcode = first & 0x0F
-            if opcode == _WEBSOCKET_OPCODE_PING:
-                self.ttyd_pings += 1
-                self.frame_send(_WEBSOCKET_OPCODE_PONG, payload)
-            elif opcode == _WEBSOCKET_OPCODE_CLOSE:
-                if len(payload) < 2:
-                    raise CheckFailed(f"{version} closed with no code")
-                self.close_code = int.from_bytes(payload[:2], "big")
-                self.close_reason = payload[2:]
-                if not self.close_sent and not self.end_expected:
-                    raise CheckFailed(
-                        f"{version} closed the connection with"
-                        f" {self.close_code}, reason {self.close_reason!r}"
-                    )
-            elif opcode == _WEBSOCKET_OPCODE_BINARY and self.fragments is None:
-                self.fragments = bytearray(payload)
-            elif (
-                opcode == _WEBSOCKET_OPCODE_CONTINUATION
-                and self.fragments is not None
-            ):
-                self.fragments += payload
-            else:
-                raise CheckFailed(
-                    f"{version} sent a frame of opcode {opcode} out of turn"
-                )
-            if opcode in (
-                _WEBSOCKET_OPCODE_BINARY,
-                _WEBSOCKET_OPCODE_CONTINUATION,
-            ) and (first & 0x80):
-                message = bytes(cast(bytearray, self.fragments))
-                self.fragments = None
-                self.ttyd_message_handle(message)
-
-    # Queues one line of the input a ttyd message.
-    def input_lines_send(self, data: bytes) -> None:
-        for line in data.splitlines(keepends=True):
-            self.input_send(line)
-
-    # Queues the input to the terminal as one ttyd message.
+    # Queues bytes for the program as ttyd input messages of `chunk_bytes`.
     def input_send(self, data: bytes) -> None:
-        self.frame_send(_WEBSOCKET_OPCODE_BINARY, b"0" + data)
+        for start in range(0, len(data), self.chunk_bytes):
+            piece = data[start : start + self.chunk_bytes]
+            self.frame_send(_OPCODE_BINARY, b"0" + piece)
 
-    # Queues the input split by `split_offset` in two messages or two frames.
-    def input_split_send(self, data: bytes, frames: bool) -> None:
-        split = split_offset(data)
-        if frames:
-            self.frame_send(
-                _WEBSOCKET_OPCODE_BINARY, b"0" + data[:split], False
-            )
-            self.frame_send(_WEBSOCKET_OPCODE_CONTINUATION, data[split:])
-        else:
-            self.input_send(data[:split])
-            self.input_send(data[split:])
+    # Queues a close frame with the normal code, after which the end is due.
+    def close_send(self) -> None:
+        self.close_sent = True
+        self.end_expected = True
+        self.frame_send(_OPCODE_CLOSE, _CLOSE_NORMAL.to_bytes(2, "big"))
 
-    # Answers whether the output from the mark on holds that many lines.
-    def lines_after(self, mark: int, count: int) -> bool:
-        return self.output.count(b"\r\n", mark) >= count
+    # Sends as much of the first queued frame as the socket takes.
+    def unsent_send(self) -> None:
+        frame = self.unsent[0]
+        sent = self.sock.send(memoryview(frame)[self.unsent_offset :])
+        self.unsent_offset += sent
+        if self.unsent_offset == len(frame):
+            self.unsent.popleft()
+            self.unsent_offset = 0
 
-    # Waits for as many lines as expected, then fails unless they are it.
-    def lines_check(self, mark: int, expected: bytes, what: str) -> None:
-        count = expected.count(b"\r\n")
-        self.wait(lambda: self.lines_after(mark, count), what)
-        self.transcript_check(mark, expected, what)
-
-    # Answers whether the output from the mark on ends with the prompt.
-    def prompt_after(self, mark: int) -> bool:
-        after = len(self.output) - mark
-        return after >= len(_PROMPT) and self.output.endswith(_PROMPT)
-
-    # Waits until the output from the mark on ends with the prompt.
-    def prompt_wait(self, mark: int, what: str) -> None:
-        self.wait(lambda: self.prompt_after(mark), what)
-
-    # Reads from ttyd and handles its frames, failing on an unexpected drop.
+    # Reads from ttyd, failing on an end of the connection that is not due.
     def socket_read(self) -> None:
-        data = self.sock.recv(1 << 20)
+        version = self.ttyd.version
+        try:
+            data = self.sock.recv(_READ_BYTES)
+        except ConnectionResetError as error:
+            if not self.end_expected:
+                raise CheckFailed(f"{version} reset the connection") from error
+            self.reset = True
+            self.ended = True
+            return
         if not data:
             if self.close_code is None and not self.end_expected:
                 raise CheckFailed(
-                    f"{self.ttyd.version} dropped the connection with no"
-                    " close frame"
+                    f"{version} ended the connection with no close frame"
                 )
             self.ended = True
             return
         self.unread += data
         self.frames_handle()
 
-    # Queues the first message, which starts the program, with ttyd's token.
-    def start_send(self) -> None:
-        status, body = http_get(self.ttyd, "/token", {})
-        if status != 200:
-            raise CheckFailed(f"GET /token answered {status}")
-        token = json.loads(body)["token"]
-        self.frame_send(
-            _WEBSOCKET_OPCODE_BINARY,
-            json.dumps(
-                {"AuthToken": token, "columns": _COLUMNS, "rows": _ROWS}
-            ).encode(),
-        )
+    # Handles each whole frame read so far, then drops their bytes.
+    def frames_handle(self) -> None:
+        unread = self.unread
+        start = 0
+        while len(unread) - start >= 2:
+            first, second = unread[start], unread[start + 1]
+            if second & 0x80:
+                raise CheckFailed(f"{self.ttyd.version} sent a masked frame")
+            length = second & 0x7F
+            head = 2
+            if length == 126:
+                head = 4
+            elif length == 127:
+                head = 10
+            if len(unread) - start < head:
+                break
+            if head > 2:
+                size = unread[start + 2 : start + head]
+                length = int.from_bytes(size, "big")
+            end = start + head + length
+            if len(unread) < end:
+                break
+            payload = bytes(unread[start + head : end])
+            start = end
+            self.frame_take(first, payload)
+        del unread[:start]
 
-    # Fails unless the output from the mark on is expected, showing where not.
-    def transcript_check(self, mark: int, expected: bytes, what: str) -> None:
-        shown = bytes(self.output[mark:])
-        if shown == expected:
-            return
-        at = next(
-            (
-                index
-                for index, (one, other) in enumerate(zip(shown, expected))
-                if one != other
-            ),
-            min(len(shown), len(expected)),
-        )
-        start = max(0, at - _SHOWN_BYTES)
-        end = at + _SHOWN_BYTES
-        raise CheckFailed(
-            f"{what} through {self.ttyd.version} is {len(shown)} bytes where"
-            f" {len(expected)} were due, unequal from byte {at}:"
-            f" {shown[start:end]!r} where {expected[start:end]!r} was due"
-        )
+    # Handles one frame: a ping answered, a close, or a piece of a message.
+    def frame_take(self, first: int, payload: bytes) -> None:
+        opcode = first & 0x0F
+        if opcode == _OPCODE_PING:
+            self.pings += 1
+            self.frame_send(_OPCODE_PONG, payload)
+        elif opcode == _OPCODE_CLOSE:
+            self.close_take(payload)
+        elif opcode == _OPCODE_BINARY and self.fragments is None:
+            self.fragments = bytearray(payload)
+        elif opcode == _OPCODE_CONTINUATION and self.fragments is not None:
+            self.fragments += payload
+        else:
+            raise CheckFailed(
+                f"{self.ttyd.version} sent a frame of opcode {opcode} out of"
+                " turn"
+            )
+        if opcode in (_OPCODE_BINARY, _OPCODE_CONTINUATION) and first & 0x80:
+            message = bytes(cast(bytearray, self.fragments))
+            self.fragments = None
+            self.message_take(message)
+
+    # Keeps ttyd's close code and reason, failing on a close that is not due.
+    def close_take(self, payload: bytes) -> None:
+        version = self.ttyd.version
+        if len(payload) < 2:
+            raise CheckFailed(f"{version} closed with no code")
+        self.close_code = int.from_bytes(payload[:2], "big")
+        self.close_reason = payload[2:]
+        if not self.end_expected:
+            raise CheckFailed(
+                f"{version} closed the connection with {self.close_code},"
+                f" reason {self.close_reason!r}"
+            )
 
     # Handles one ttyd message: the title, the preferences, then output.
-    def ttyd_message_handle(self, message: bytes) -> None:
+    def message_take(self, message: bytes) -> None:
+        version = self.ttyd.version
         self.ttyd_messages += 1
         kind = message[:1]
-        expected = (
-            b"1"
-            if self.ttyd_messages == 1
-            else b"2"
-            if self.ttyd_messages == 2
-            else b"0"
-        )
-        if kind != expected:
+        due = b"0"
+        if self.ttyd_messages <= 2:
+            due = str(self.ttyd_messages).encode()
+        if kind != due:
             raise CheckFailed(
-                f"{self.ttyd.version}'s message {self.ttyd_messages} is type"
-                f" {kind!r}, not {expected!r}: {message[:60]!r}"
+                f"{version}'s message {self.ttyd_messages} is of type"
+                f" {kind!r}, not {due!r}: {message[:_SHOWN_BYTES]!r}"
             )
         if kind == b"1":
             self.title = message[1:].decode()
         elif kind == b"2":
-            try:
-                preferences: object = json.loads(message[1:])
-            except json.JSONDecodeError as error:
-                raise CheckFailed(
-                    f"{self.ttyd.version}'s preferences aren't JSON: {error}:"
-                    f" {message!r}"
-                ) from error
-            if type(preferences) is not dict:
-                raise CheckFailed(
-                    f"{self.ttyd.version}'s preferences aren't an object:"
-                    f" {message!r}"
-                )
-            self.preferences = cast(dict[str, Any], preferences)
+            self.preferences = preferences_parse(version, message[1:])
         else:
-            self.output += message[1:]
+            self.output_take(message[1:])
 
-    # Sends as much of the queued frames as the socket takes.
-    def unsent_send(self) -> None:
-        sent = self.sock.send(self.unsent)
-        del self.unsent[:sent]
+    # Keeps the program's output: raw bytes, or its lines, failing on a fault.
+    def output_take(self, data: bytes) -> None:
+        import jslb
 
-    # Sends what is queued and handles what ttyd sends until done answers True.
-    def wait(self, done: Callable[[], bool], what: str) -> None:
-        wires_wait([self], done, what)
-
-
-# Fails unless the text is the banner of ttyd's command, then the prompt.
-def banner_check(wire: Wire, text: bytes) -> Banner:
-    found = _BANNER_PATTERN.fullmatch(text)
-    if found is None:
-        raise CheckFailed(
-            f"the program showed {text!r} through {wire.ttyd.version} where"
-            " its banner and the prompt were due"
-        )
-    path, digest, pid, python, modules = (
-        group.decode() for group in found.groups()
-    )
-    command = wire.ttyd.command
-    with open(command[1], "rb") as bootstrap_file:
-        file_digest = hashlib.sha256(bootstrap_file.read()).hexdigest()
-    for name, value, expected in (
-        ("path", path, command[1]),
-        ("sha256", digest, file_digest),
-        ("modules", modules, command[2]),
-    ):
-        if value != expected:
+        if self.raw:
+            self.output += data
+            return
+        try:
+            self.lines.extend(self.decoder.bytes_feed(data))
+            self.decoder.bytes_feed(b"")
+        except jslb.WireError as error:
             raise CheckFailed(
-                f"the banner's {name} is {value}, not {expected}"
-            )
-    program_check(wire.ttyd, int(pid))
-    banner = Banner(int(pid), python, digest)
-    wire.banners.append(banner)
-    return banner
+                f"the program's output through {self.ttyd.version} is not"
+                f" JSLB: {error}"
+            ) from error
 
 
-# Returns lines of `_LINE_BYTES` bytes of random ASCII and of wide characters.
-def big_text() -> str:
-    unit_bytes = _BIG_ASCII_PER_UNIT + len(_BIG_WIDE_TEXT.encode())
-    units, rest = divmod(_LINE_BYTES, unit_bytes)
-    lines: list[str] = []
-    for _ in range(_BIG_LINES):
-        ascii_text = base64.b64encode(os.urandom(_LINE_BYTES)).decode()
-        line = "".join(
-            ascii_text[index : index + _BIG_ASCII_PER_UNIT] + _BIG_WIDE_TEXT
-            for index in range(
-                0, units * _BIG_ASCII_PER_UNIT, _BIG_ASCII_PER_UNIT
+# The large echo: messages that each fit, in flight within `queue_max`.
+class EchoStream:
+    # Starts with nothing sent.
+    def __init__(self, client: WireClient, values: dict[str, Any]) -> None:
+        self.client = client
+        self.message_max: int = values["message_max"]
+        self.queue_max: int = values["queue_max"]
+        self.left = _LARGE_BYTES
+        self.held = 0
+        self.held_peak = 0
+        self.sent = 0
+        self.waiting: dict[int, tuple[int, str]] = {}
+
+    # Checks the replies in, sends what fits, says whether all came back.
+    def stream_step(self) -> bool:
+        client = self.client
+        while client.lines:
+            self.reply_check(client.lines.popleft())
+        while self.left > 0:
+            request_id = client.id_last + 1
+            fit = blob_fit(False, request_id, self.message_max)
+            size = min(self.left, fit)
+            total = len(echo_text(False, request_id, size)) + size
+            if self.held + total > self.queue_max:
+                break
+            data = os.urandom(size)
+            request = request_make(client, False, _ECHO_TYPE, [data], None, {})
+            line_send(client, request)
+            self.waiting[request_id] = (total, sha256_text(data))
+            self.held += total
+            self.held_peak = max(self.held_peak, self.held)
+            self.left -= size
+            self.sent += 1
+        return self.left == 0 and not self.waiting
+
+    # Checks one reply against the request it answers and frees its bytes.
+    def reply_check(self, reply: LineObject) -> None:
+        import jslb
+
+        header: Any = reply[0]
+        reply_id = jslb.field_get(header, "reply")
+        blobs = blobs_of(reply)
+        if (
+            jslb.field_get(header, "type") != _ECHO_TYPE
+            or reply_id not in self.waiting
+            or len(blobs) != 1
+            or jslb.payload_of(cast(jslb.Object, reply))
+        ):
+            raise CheckFailed(
+                f"the large echo: the server wrote {line_text(reply)}"
             )
+        total, digest = self.waiting.pop(reply_id)
+        if sha256_text(blobs[0]) != digest:
+            raise CheckFailed(
+                f"the large echo: the blob of reply {reply_id} has sha256"
+                f" {sha256_text(blobs[0])}, where {digest} went"
+            )
+        self.held -= total
+
+
+# Refuses a blob the client would stream, as it keeps each message in memory.
+def blob_refuse(header: LineObject) -> NoReturn:
+    raise CheckFailed(
+        f"the client's decoder was asked to stream the blob {header}"
+    )
+
+
+# Returns ttyd's preferences, which must be a JSON object.
+def preferences_parse(version: str, data: bytes) -> dict[str, Any]:
+    try:
+        value: object = json.loads(data)
+    except json.JSONDecodeError as error:
+        raise CheckFailed(
+            f"{version}'s preferences are not JSON: {error}: {data!r}"
+        ) from error
+    if type(value) is not dict:
+        raise CheckFailed(
+            f"{version}'s preferences are not an object: {data!r}"
         )
-        tail = units * _BIG_ASCII_PER_UNIT
-        lines.append(f"{line}{ascii_text[tail : tail + rest]}\n")
-    return "".join(lines)
+    return cast(dict[str, Any], value)
 
 
-# Describes how ttyd ended the connection, with a close frame or without.
-def connection_end(wire: Wire) -> str:
-    if wire.close_code is None:
+# Returns the `SHA-256` of the bytes as 64 lowercase hex digits.
+def sha256_text(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+# Returns the text as a terminal shows it: `UTF-8`, each LF as CR LF.
+def terminal_text(text: str) -> bytes:
+    return text.encode().replace(b"\n", b"\r\n")
+
+
+# Says how the connection ended: a close frame, a reset, or neither.
+def connection_end(client: WireClient) -> str:
+    if client.reset:
+        return "the TCP connection was reset"
+    if client.close_code is None:
         return (
             "the TCP connection ended with no close frame, which a browser"
             " reports as 1006"
         )
     return (
-        f"a close frame of code {wire.close_code}, reason"
-        f" {wire.close_reason!r}, came and the TCP connection ended"
+        f"a close frame of code {client.close_code}, reason"
+        f" {client.close_reason!r}, came and the TCP connection ended"
     )
 
 
-# Fails unless the module's file holds the data.
-def file_check(wire: Wire, name: str, data: bytes) -> None:
-    path = os.path.join(wire.ttyd.command[2], f"{name}.py")
-    with open(path, "rb") as module_file:
-        on_disk = module_file.read()
-    if on_disk != data:
-        raise CheckFailed(
-            f"{path} has {len(on_disk)} bytes, sha256"
-            f" {hashlib.sha256(on_disk).hexdigest()}, where {len(data)} bytes,"
-            f" sha256 {hashlib.sha256(data).hexdigest()}, were put"
-        )
+# Sends what the clients queued and reads ttyd until `done` holds.
+def clients_wait(
+    clients: list[WireClient], done: Callable[[], bool], what: str
+) -> None:
+    ttyd = clients[0].ttyd
+    while not done() or any(
+        client.unsent for client in clients if not client.ended
+    ):
+        readers: list[socket.socket | int] = [
+            client.sock for client in clients if not client.ended
+        ]
+        writers = [
+            client.sock
+            for client in clients
+            if client.unsent and not client.ended
+        ]
+        if not ttyd.log_ended:
+            readers.append(ttyd.fd)
+        left = ttyd.log.timer.seconds_left(f"{what} through {ttyd.version}")
+        readable, writable, _ = select.select(readers, writers, [], left)
+        if ttyd.fd in readable:
+            ttyd.log_read()
+        for client in clients:
+            if client.sock in writable:
+                client.unsent_send()
+            if client.sock in readable:
+                client.socket_read()
 
 
-# Returns ttyd's status and body for a GET of the path.
-def http_get(
-    ttyd: Ttyd, path: str, headers: dict[str, str]
-) -> tuple[int, bytes]:
+# Sends what the client queued and reads ttyd until `done` holds.
+def client_wait(
+    client: WireClient, done: Callable[[], bool], what: str
+) -> None:
+    clients_wait([client], done, what)
+
+
+# Returns ttyd's status and body for a GET of the path, within the rung.
+def http_get(ttyd: TtydServer, path: str) -> tuple[int, bytes]:
     connection = http.client.HTTPConnection(
-        "127.0.0.1", ttyd.port, timeout=remaining(ttyd.deadline, f"GET {path}")
+        "127.0.0.1",
+        ttyd.port,
+        timeout=ttyd.log.timer.seconds_left(f"GET {path}"),
     )
     try:
-        connection.request("GET", path, headers=headers)
+        connection.request("GET", path)
         response = connection.getresponse()
         return response.status, response.read()
+    except TimeoutError as error:
+        raise CheckFailed(
+            f"GET {path} through {ttyd.version} outlasted the rung's timer"
+        ) from error
     finally:
         connection.close()
 
 
-# Runs the module and returns the two numbers of its first line.
-def module_ready(wire: Wire, name: str, word: str) -> tuple[int, int]:
-    mark = len(wire.output)
-    wire.input_send(f"{name}\n".encode())
-    wire.wait(lambda: wire.lines_after(mark, 2), f"{name}'s first line")
-    return ready_parse(wire, mark, name, word)
-
-
-# Returns what `ls` lists for the directory, from its files as they are.
-def modules_listing(modules: str) -> str:
-    lines: list[str] = []
-    for name in sorted(os.listdir(modules)):
-        with open(os.path.join(modules, name), "rb") as module_file:
-            data = module_file.read()
-        digest = hashlib.sha256(data).hexdigest()
-        lines.append(f"{len(data)} {digest} {name}\n")
-    return "".join(lines)
-
-
-# Returns the text as the terminal shows it: `UTF-8`, newlines as `\r\n`.
-def on_terminal(text: str) -> bytes:
-    return text.encode().replace(b"\n", b"\r\n")
-
-
-# Returns the number of the process's parent.
-def process_parent(pid: int) -> int:
-    with open(f"/proc/{pid}/stat", "rb") as stat_file:
-        stat = stat_file.read()
-    # After the name in brackets: state, ppid.
-    return int(stat[stat.rindex(b")") + 2 :].split()[1])
-
-
-# Returns the sorted pids watched, in the session or children of the parent.
-def processes_left(watched: set[int], session: int, parent: int) -> list[int]:
-    left: list[int] = []
-    for name in os.listdir("/proc"):
-        if not name.isdigit():
-            continue
-        try:
-            with open(f"/proc/{name}/stat", "rb") as stat_file:
-                stat = stat_file.read()
-        except (FileNotFoundError, ProcessLookupError):
-            # It ended between the listing and the reading.
-            continue
-        # After the name in brackets: state, ppid, pgrp, session.
-        fields = stat[stat.rindex(b")") + 2 :].split()
-        pid = int(name)
-        if (
-            pid in watched
-            or int(fields[3]) == session
-            or int(fields[1]) == parent
-        ):
-            left.append(pid)
-    return sorted(left)
-
-
-# Waits until the processes are gone. Returns the seconds since the start.
-def processes_wait(
-    wire: Wire, watched: set[int], session: int, parent: int, start: float
-) -> float:
-    while left := processes_left(watched, session, parent):
-        remaining(wire.ttyd.deadline, f"processes {left} to end")
-        time.sleep(_POLL_SECONDS)
-    return time.monotonic() - start
-
-
-# Waits for ttyd's log of the end of the program of that pid.
-def program_end_wait(ttyd: Ttyd, pid: int) -> re.Match[str]:
-    ended = (
-        rf"process (killed with signal|exited with code) (\d+), pid: {pid}$"
-    )
-    return ttyd.line_wait(
-        re.compile(ended), 0, "ttyd's log of the program's end"
-    )
-
-
-# Fails unless the pid is ttyd's child running its command.
-def program_check(ttyd: Ttyd, pid: int) -> None:
-    with open(f"/proc/{pid}/cmdline", "rb") as cmdline_file:
-        cmdline = cmdline_file.read().split(b"\0")[:-1]
-    if cmdline != [argument.encode() for argument in ttyd.command]:
-        raise CheckFailed(f"the banner's pid {pid} runs {cmdline}")
-    parent = process_parent(pid)
-    if parent != ttyd.process.pid:
-        raise CheckFailed(
-            f"the banner's pid {pid} is the child of {parent}, not of"
-            f" ttyd's {ttyd.process.pid}"
-        )
-
-
-# Returns the input that puts the source as the module, then ends input.
-def put_input(name: str, source: str) -> bytes:
-    return f"put {name}\n{source}".encode() + _EOF
-
-
-# Puts the module via send, checks echo, saved line and file. Returns sha256.
-def put_check(
-    wire: Wire, name: str, source: str, send: Callable[[bytes], None]
-) -> str:
-    data = source.encode()
-    digest = hashlib.sha256(data).hexdigest()
-    mark = len(wire.output)
-    send(put_input(name, source))
-    wire.prompt_wait(mark, f"put {name}'s saved line")
-    saved = f"saved {name}.py {len(data)} bytes sha256 {digest}\n"
-    wire.transcript_check(
-        mark,
-        on_terminal(f"put {name}\n{source}{saved}") + _PROMPT,
-        f"put {name}",
-    )
-    file_check(wire, name, data)
-    return digest
-
-
-# Fails unless the output from the mark on is the echo and the first line.
-def ready_parse(
-    wire: Wire, mark: int, name: str, word: str
-) -> tuple[int, int]:
-    shown = bytes(wire.output[mark:])
-    found = re.fullmatch(
-        re.escape(on_terminal(f"{name}\n{word} ")) + rb"(\d+) (\d+)\r\n",
-        shown,
-    )
-    if found is None:
-        raise CheckFailed(
-            f"{name} showed {shown!r} where its echo and a line of {word}"
-            f" and two numbers were due, through {wire.ttyd.version}"
-        )
-    wire.module_pids.add(int(found.group(1)))
-    return int(found.group(1)), int(found.group(2))
-
-
-# Returns the seconds left before the overall timeout, failing once past.
-def remaining(deadline: float, what: str) -> float:
-    left = deadline - time.monotonic()
-    if left <= 0:
-        raise CheckFailed(
-            f"gave up after {_RUN_TIMEOUT_SECONDS} s waiting for {what}"
-        )
-    return left
-
-
-# Runs report.py with the arguments and checks it all. Returns its command.
-def report_check(wire: Wire, args: list[str]) -> str:
-    line = shlex.join(["report", *args])
-    bootstrap_path, modules = wire.ttyd.command[1:]
-    shown = [
-        line,
-        f"argv {args}",
-        f"text {_NON_ASCII_TEXT}",
-        f"cwd {modules}",
-        f"path {modules}",
-        f"bootstrap {bootstrap_path}",
-        f"modules {modules}",
-        "name __main__",
-        f"stderr {_NON_ASCII_TEXT}",
-    ]
-    wire.command_check(
-        f"{line}\n".encode(),
-        on_terminal("".join(f"{text}\n" for text in shown)) + _PROMPT,
-    )
-    return line
-
-
-# Checks `^C` at the prompt and in a put abandons it. Returns a summary.
-def rung_abandon(wire: Wire) -> str:
-    abandoned = _INTERRUPT_ECHO + on_terminal("\n") + _PROMPT
-    mark = wire.command(b"ls\n")
-    listed = bytes(wire.output[mark:])
-    wire.command_check(_INTERRUPT, abandoned)
-    for line in ("put abandoned\n", "print(1)\n"):
-        mark = len(wire.output)
-        wire.input_send(line.encode())
-        wire.lines_check(mark, on_terminal(line), f"the echo of {line!r}")
-    wire.command_check(_INTERRUPT, abandoned)
-    wire.command_check(b"ls\n", listed)
-    path = os.path.join(wire.ttyd.command[2], "abandoned.py")
-    if os.path.lexists(path):
-        raise CheckFailed(f"{path} exists after its put was abandoned")
-    # The lines after the echo of `ls`.
-    files = listed.count(b"\r\n") - 1
-    return (
-        f"^C at the prompt showed {abandoned!r}; put abandoned and a line,"
-        f" each echoed, then ^C showed the same; ls unchanged, listing"
-        f" {files} files, none of them abandoned.py"
-    )
-
-
-# Starts the program and checks the title, preferences, banner and `ls`.
-def rung_banner(wire: Wire) -> str:
-    sent_at = time.monotonic()
-    wire.start_send()
-    wire.prompt_wait(0, "the banner and the prompt")
-    seconds = time.monotonic() - sent_at
-    banner = banner_check(wire, bytes(wire.output))
-    title = f"{' '.join(wire.ttyd.command)} ({socket.gethostname()})"
-    if wire.title != title:
-        raise CheckFailed(
-            f"{wire.ttyd.version}'s title is {wire.title!r}, not {title!r}"
-        )
-    wire.command_check(b"ls\n", on_terminal("ls\n") + _PROMPT)
-    return (
-        f"ttyd title {wire.title!r}, its command and host; ttyd preferences"
-        f" {json.dumps(wire.preferences)}; banner pid {banner.pid}, ttyd's"
-        f" child running {' '.join(wire.ttyd.command)}, python"
-        f" {banner.python}, sha256 {banner.sha256[:12]} equal to"
-        " bootstrap.py's, its path and modules directory those of the"
-        f" command, then the prompt, {seconds:.3f} s after the first message"
-        " went; ls listed nothing"
-    )
-
-
-# Puts 1 MiB of 1, 2, 3 and 4 byte characters. Returns a summary.
-def rung_big_put(wire: Wire) -> str:
-    text = big_text()
-    messages_before = wire.ttyd_messages
-    start = time.monotonic()
-    digest = put_check(wire, "big", text, wire.input_lines_send)
-    seconds = time.monotonic() - start
-    lines = text.count("\n")
-    messages = len(put_input("big", text).splitlines())
-    return (
-        f"big.py of {len(text.encode())} bytes ({len(text)} characters),"
-        f" {lines} lines of {_LINE_BYTES} bytes and a newline,"
-        f" sent as {messages} ttyd messages"
-        " while reading: its echo, equal to what was sent, and saved with"
-        f" sha256 {digest[:12]}, equal to this client's and to the file's,"
-        f" came in {wire.ttyd_messages - messages_before} ttyd messages,"
-        f" {seconds:.2f} s from the put to the prompt"
-    )
-
-
-# Closes with a module running and checks all of it ends. Returns a summary.
-def rung_close(wire: Wire) -> str:
-    module_pid, _ = module_ready(wire, "stdin", "ready")
-    seconds = session_close(wire, [], wire.ttyd.process.pid)
-    return (
-        f"with stdin running as pid {module_pid}: close"
-        f" {_WEBSOCKET_CLOSE_NORMAL} answered with {wire.close_code}; ttyd"
-        f" logged the program, pid {wire.banners[-1].pid}, killed with"
-        f" signal {int(signal.SIGHUP)} (SIGHUP); it, its module and every"
-        f" module that told its pid (pids {sorted(wire.module_pids)}) were"
-        f" gone and ttyd had no child {seconds:.3f} s after the close;"
-        f" {wire.ttyd_pings} ttyd pings answered"
-    )
-
-
-# Ends input at a new program's prompt and checks it exits. Returns a summary.
-def rung_eof(ttyd: Ttyd) -> str:
-    wire = websocket_open(ttyd, {})
-    wire.start_send()
-    wire.prompt_wait(0, "the banner and the prompt")
-    pid = banner_check(wire, bytes(wire.output)).pid
-    mark = len(wire.output)
-    wire.end_expected = True
-    sent_at = time.monotonic()
-    wire.input_send(_EOF)
-    wire.wait(lambda: wire.ended, "the connection's end after ^D")
-    ended_seconds = time.monotonic() - sent_at
-    wire.sock.close()
-    if len(wire.output) != mark:
-        raise CheckFailed(
-            f"after ^D the program showed {bytes(wire.output[mark:])!r}"
-        )
-    found = program_end_wait(ttyd, pid)
-    if found.group(1, 2) != ("exited with code", "0"):
-        raise CheckFailed(f"{ttyd.version} logged: {found.string}")
-    gone_seconds = processes_wait(wire, {pid}, pid, pid, sent_at)
-    return (
-        f"^D at the prompt of pid {pid}: nothing shown; {ttyd.version}"
-        f" logged it exited with code 0; {ended_seconds:.4f} s after the ^D"
-        f" {connection_end(wire)}; pid {pid} and its session gone"
-        f" {gone_seconds:.3f} s after it"
-    )
-
-
-# Sends commands the bootstrapper refuses and checks each. Returns a summary.
-def rung_errors(wire: Wire) -> str:
-    for line, error in _ERRORS:
-        wire.command_check(
-            f"{line}\n".encode(), on_terminal(f"{line}\n{error}\n") + _PROMPT
-        )
-    refused = "; ".join(f"{line!r}: {error!r}" for line, error in _ERRORS)
-    return (
-        f"{len(_ERRORS)} commands each showed its echo, its error and the"
-        f" prompt, equal to this client's: {refused}"
-    )
-
-
-# Runs a module that forks, sends `^C`, and checks both end. Returns a summary.
-def rung_interrupt(wire: Wire) -> str:
-    put_check(wire, "sleeper", _SLEEPER_SOURCE, wire.input_send)
-    pid, forked = module_ready(wire, "sleeper", "pids")
-    interrupted_at = time.monotonic()
-    mark = wire.command(_INTERRUPT)
-    prompt_seconds = time.monotonic() - interrupted_at
-    shown = bytes(wire.output[mark:])
-    end = on_terminal(f"sleeper: exit {-int(signal.SIGINT)}\n") + _PROMPT
-    if not shown.startswith(_INTERRUPT_ECHO) or not shown.endswith(end):
-        raise CheckFailed(
-            f"^C to sleeper showed {shown!r} through {wire.ttyd.version}"
-        )
-    seconds = processes_wait(wire, {pid, forked}, pid, pid, interrupted_at)
-    return (
-        f"sleeper as pid {pid} forked pid {forked}; ^C: its echo, then"
-        f" {len(shown) - len(_INTERRUPT_ECHO) - len(end)} bytes of"
-        f" tracebacks, then {end!r}, {prompt_seconds:.3f} s after the ^C;"
-        f" both pids gone {seconds:.3f} s after it"
-    )
-
-
-# Runs a module printing many lines, checking none is lost. Returns a summary.
-def rung_lines(wire: Wire) -> str:
-    put_check(wire, "lines", _LINES_SOURCE, wire.input_send)
-    expected = (
-        on_terminal(
-            "lines\n"
-            + "".join(f"{number}\n" for number in range(1, _LINES_COUNT + 1))
-        )
-        + _PROMPT
-    )
-    messages_before = wire.ttyd_messages
-    start = time.monotonic()
-    mark = wire.command(b"lines\n")
-    seconds = time.monotonic() - start
-    wire.transcript_check(mark, expected, "lines")
-    return (
-        f"lines printed {_LINES_COUNT} lines, all of them in order and no"
-        f" exit line, {len(expected)} bytes in"
-        f" {wire.ttyd_messages - messages_before} ttyd messages,"
-        f" {seconds:.2f} s from the command to the prompt"
-    )
-
-
-# Puts a module whole and split two ways, checking each. Returns a summary.
-def rung_put(wire: Wire) -> str:
-    digest = put_check(wire, "report", _REPORT_SOURCE, wire.input_send)
-    put_check(
-        wire,
-        "report",
-        _REPORT_SOURCE,
-        lambda data: wire.input_split_send(data, False),
-    )
-    put_check(
-        wire,
-        "report",
-        _REPORT_SOURCE,
-        lambda data: wire.input_split_send(data, True),
-    )
-    data = _REPORT_SOURCE.encode()
-    wire.command_check(
-        b"ls\n",
-        on_terminal(f"ls\n{len(data)} {digest} report.py\n") + _PROMPT,
-    )
-    put = put_input("report", _REPORT_SOURCE)
-    return (
-        f"report.py put whole, then split at byte {split_offset(put)} of"
-        f" {len(put)}, inside U+{ord(_NON_ASCII_SPLIT_CHARACTER):04X}, across"
-        " two ttyd messages, then across two frames of one WebSocket"
-        f" message; each echoed and saved {len(data)} bytes, sha256"
-        f" {digest[:12]}, equal to this client's and to the file's; ls"
-        " listed it alone"
-    )
-
-
-# Runs modules that report, exit with a code and raise. Returns a summary.
-def rung_run(wire: Wire) -> str:
-    line = report_check(wire, _RUN_ARGS)
-    put_check(wire, "exiter", _EXITER_SOURCE, wire.input_send)
-    wire.command_check(
-        b"exiter 3\n", on_terminal("exiter 3\nexiter: exit 3\n") + _PROMPT
-    )
-    put_check(wire, "raiser", _RAISER_SOURCE, wire.input_send)
-    mark = wire.command(b"raiser\n")
-    shown = bytes(wire.output[mark:])
-    path = os.path.join(wire.ttyd.command[2], "raiser.py")
-    head = on_terminal("raiser\nTraceback (most recent call last):\n")
-    tail = (
-        on_terminal(
-            f'  File "{path}", line 1, in <module>\n    {_RAISER_SOURCE}'
-            f"ValueError: {_NON_ASCII_TEXT}\nraiser: exit 1\n"
-        )
-        + _PROMPT
-    )
-    if not shown.startswith(head) or not shown.endswith(tail):
-        raise CheckFailed(
-            f"raiser showed {shown!r} through {wire.ttyd.version}"
-        )
-    # The lines between the echo and the exit line.
-    traceback_lines = shown.count(b"\r\n") - 2
-    return (
-        f"{line} showed its echo, argv, the text, working directory and"
-        " first path the modules directory, XSJS_BOOTSTRAP, XSJS_MODULES,"
-        " __main__ and its stderr line, equal to this client's, and no exit"
-        f" line; exiter 3 showed exiter: exit 3; raiser showed"
-        f" {traceback_lines} lines of traceback, from its first line to its"
-        " ValueError, then raiser: exit 1"
-    )
-
-
-# Checks the page, token, a made up path and credentials. Returns a summary.
-def rung_serve(ttyd: Ttyd) -> str:
-    with open(_INDEX_PATH, "rb") as index_file:
-        page = index_file.read()
-    page_sha256 = hashlib.sha256(page).hexdigest()
-    status, body = http_get(ttyd, "/", {})
-    if status != 200 or hashlib.sha256(body).hexdigest() != page_sha256:
-        raise CheckFailed(
-            f"GET / answered {status} with {len(body)} bytes, sha256"
-            f" {hashlib.sha256(body).hexdigest()}; {_INDEX_PATH} has"
-            f" {len(page)} bytes, sha256 {page_sha256}"
-        )
-    status, token_body = http_get(ttyd, "/token", {})
-    if status != 200 or json.loads(token_body) != {"token": ""}:
-        raise CheckFailed(f"GET /token answered {status} with {token_body!r}")
-    status, _ = http_get(ttyd, _MADE_UP_PATH, {})
-    if status != 404:
-        raise CheckFailed(f"GET {_MADE_UP_PATH} answered {status}")
-    credential = base64.b64encode(_CREDENTIAL.encode()).decode()
-    authorization = {"Authorization": f"Basic {credential}"}
-    with ttyd_serve(
-        ["--credential", _CREDENTIAL, *_TTYD_OPTIONS],
-        ttyd.command,
-        ttyd.deadline,
-    ) as guarded:
-        status, _ = http_get(guarded, "/", {})
-        if status != 401:
-            raise CheckFailed(f"GET / without credentials answered {status}")
-        status, body = http_get(guarded, "/", authorization)
-        if status != 200 or hashlib.sha256(body).hexdigest() != page_sha256:
-            raise CheckFailed(
-                f"GET / with credentials answered {status} with"
-                f" {len(body)} bytes"
-            )
-        sock, _ = upgrade_send(guarded, {})
-        with sock:
-            answer = upgrade_read(sock, guarded)
-        if answer:
-            raise CheckFailed(
-                f"/ws without credentials answered {answer[:200]!r}"
-            )
-        wire = websocket_open(guarded, authorization)
-        with wire.sock:
-            wire.close_send()
-            wire.wait(lambda: wire.close_code is not None, "the close")
-        if wire.close_code != _WEBSOCKET_CLOSE_NORMAL:
-            raise CheckFailed(
-                f"{guarded.version} answered close"
-                f" {_WEBSOCKET_CLOSE_NORMAL} with {wire.close_code}"
-            )
-    return (
-        f"{ttyd.version}: GET / 200, {len(page)} bytes, sha256 equal to"
-        f" {os.path.basename(_INDEX_PATH)}'s;"
-        f" /token {token_body.decode()}; {_MADE_UP_PATH} 404; with"
-        " --credential:"
-        " / 401 without it and 200 with it, /ws closed unanswered without"
-        " it and 101 with it"
-    )
-
-
-# Runs a module reading stdin, sends it lines and `^D`. Returns a summary.
-def rung_stdin(wire: Wire) -> str:
-    put_check(wire, "stdin", _STDIN_SOURCE, wire.input_send)
-    module_pid, parent = module_ready(wire, "stdin", "ready")
-    bootstrap_pid = wire.banners[-1].pid
-    if parent != bootstrap_pid or process_parent(module_pid) != bootstrap_pid:
-        raise CheckFailed(
-            f"stdin's pid {module_pid}, with parent {parent}, isn't the"
-            f" child of the bootstrapper's {bootstrap_pid}"
-        )
-    cmdlines: list[bytes] = []
-    for pid in (bootstrap_pid, module_pid):
-        with open(f"/proc/{pid}/cmdline", "rb") as cmdline_file:
-            cmdlines.append(cmdline_file.read())
-    if cmdlines[0] != cmdlines[1]:
-        raise CheckFailed(
-            f"stdin's pid runs {cmdlines[1]!r}, not the bootstrapper's"
-            f" {cmdlines[0]!r}"
-        )
-    whole = f"whole {_NON_ASCII_TEXT}\n"
-    mark = len(wire.output)
-    wire.input_send(whole.encode())
-    wire.lines_check(mark, on_terminal(f"{whole}got {whole}"), "whole")
-    halves = f"halves {_NON_ASCII_TEXT}\n"
-    mark = len(wire.output)
-    wire.input_split_send(halves.encode(), False)
-    wire.lines_check(mark, on_terminal(f"{halves}got {halves}"), "halves")
-    wire.command_check(_EOF, on_terminal("eof 2\n") + _PROMPT)
-    return (
-        f"stdin as pid {module_pid}, the child of the bootstrapper's pid"
-        f" {bootstrap_pid} and running its command line, so no program was"
-        " started for it; a line whole, then a line split at byte"
-        f" {split_offset(halves.encode())} of {len(halves.encode())} inside"
-        f" U+{ord(_NON_ASCII_SPLIT_CHARACTER):04X} across two ttyd messages,"
-        " each echoed, then got back whole; ^D: eof 2, then the prompt with"
-        " no exit line"
-    )
-
-
-# Kills ttyd under a client and checks what ends and how. Returns a summary.
-def rung_ttyd_killed(ttyd: Ttyd) -> str:
-    wire = websocket_open(ttyd, {})
-    wire.start_send()
-    wire.prompt_wait(0, "the banner and the prompt")
-    pid = banner_check(wire, bytes(wire.output)).pid
-    module_pid, _ = module_ready(wire, "stdin", "ready")
-    wire.end_expected = True
-    killed_at = time.monotonic()
-    ttyd.kill(signal.SIGKILL)
-    wire.wait(lambda: wire.ended, "the connection's end")
-    ended_seconds = time.monotonic() - killed_at
-    wire.wait(lambda: ttyd.stderr_ended, "ttyd's exit")
-    status = ttyd.process.wait()
-    if status != -signal.SIGKILL:
-        raise CheckFailed(f"{ttyd.version} exited with {status} on SIGKILL")
-    wire.sock.close()
-    processes_wait(wire, {pid, module_pid}, pid, pid, killed_at)
-    gone_seconds = processes_wait(
-        wire, set(), module_pid, module_pid, killed_at
-    )
-    return (
-        f"SIGKILL to {ttyd.version} with stdin running as pid"
-        f" {module_pid} under pid {pid} reached its client:"
-        f" {ended_seconds:.4f} s after the kill {connection_end(wire)};"
-        f" ttyd exited with {status}; the program, its module and their"
-        f" sessions were gone {gone_seconds:.3f} s after the kill"
-    )
-
-
-# Checks two clients at once, each with its own program. Returns a summary.
-def rung_two_clients(ttyd: Ttyd) -> str:
-    first = websocket_open(ttyd, {})
-    second = websocket_open(ttyd, {})
-    wires = [first, second]
-    for wire in wires:
-        wire.start_send()
-    wires_wait(
-        wires,
-        lambda: all(wire.prompt_after(0) for wire in wires),
-        "both clients' banners and prompts",
-    )
-    first_pid, second_pid = (
-        banner_check(wire, bytes(wire.output)).pid for wire in wires
-    )
-    if first_pid == second_pid:
-        raise CheckFailed(f"both clients' banners have pid {first_pid}")
-    marks = [len(wire.output) for wire in wires]
-    for wire in wires:
-        wire.input_send(b"stdin\n")
-    wires_wait(
-        wires,
-        lambda: all(
-            wire.lines_after(mark, 2) for wire, mark in zip(wires, marks)
-        ),
-        "stdin's first line on both clients",
-    )
-    words = ["first", "second"]
-    module_pids: list[int] = []
-    for wire, mark, word in zip(wires, marks, words):
-        module_pid, parent = ready_parse(wire, mark, "stdin", "ready")
-        pid = wire.banners[-1].pid
-        if parent != pid or process_parent(module_pid) != pid:
-            raise CheckFailed(
-                f"the {word} client's stdin, pid {module_pid}, isn't its"
-                " program's child"
-            )
-        module_pids.append(module_pid)
-        wire.input_send(f"{word}\n".encode())
-        wire.input_send(_EOF)
-    wires_wait(
-        wires,
-        lambda: all(
-            wire.prompt_after(mark) for wire, mark in zip(wires, marks)
-        ),
-        "both clients' stdin exits",
-    )
-    for wire, mark, word, module_pid in zip(wires, marks, words, module_pids):
-        wire.transcript_check(
-            mark,
-            on_terminal(
-                f"stdin\nready {module_pid} {wire.banners[-1].pid}\n{word}\n"
-                f"got {word}\neof 1\n"
-            )
-            + _PROMPT,
-            f"the {word} client's stdin",
-        )
-    first_seconds = session_close(first, [second], first_pid)
-    program_check(ttyd, second_pid)
-    second.command_check(
-        b"ls\n",
-        on_terminal(f"ls\n{modules_listing(ttyd.command[2])}") + _PROMPT,
-    )
-    second_seconds = session_close(second, [], second_pid)
-    return (
-        f"banners with pids {first_pid} and {second_pid}; stdin ran on both"
-        f" at once as pids {module_pids[0]} and {module_pids[1]}, each its"
-        " own program's child, and each showed only its own client's line;"
-        f" the first closed with {_WEBSOCKET_CLOSE_NORMAL} answered with"
-        f" {first.close_code}, pid {first_pid} killed with signal"
-        f" {int(signal.SIGHUP)} (SIGHUP) and gone {first_seconds:.3f} s after"
-        f" the close; then the second's ls, with pid {second_pid} still"
-        " running, listed the modules directory as it is; the second closed"
-        f" with {_WEBSOCKET_CLOSE_NORMAL} answered with {second.close_code},"
-        f" gone {second_seconds:.3f} s after the close"
-    )
-
-
-# Updates the bootstrapper from a module and restarts it. Returns a summary.
-def rung_update(wire: Wire) -> str:
-    bootstrap_path = wire.ttyd.command[1]
-    with open(bootstrap_path, "rb") as bootstrap_file:
-        updated = bootstrap_file.read() + _UPDATE_LINE
-    digest = hashlib.sha256(updated).hexdigest()
-    put_check(wire, "update", _UPDATE_SOURCE, wire.input_send)
-    wire.command_check(
-        b"update\n", on_terminal(f"update\nsha256 {digest}\n") + _PROMPT
-    )
-    first = wire.banners[-1]
-    restarted_at = time.monotonic()
-    mark = wire.command(b"restart\n")
-    seconds = time.monotonic() - restarted_at
-    shown = bytes(wire.output[mark:])
-    echo = on_terminal("restart\n")
-    if not shown.startswith(echo):
-        raise CheckFailed(
-            f"restart showed {shown!r} through {wire.ttyd.version}"
-        )
-    second = banner_check(wire, shown[len(echo) :])
-    if second.pid != first.pid or second.sha256 != digest:
-        raise CheckFailed(
-            f"restart's banner {second} after banner {first}, where pid"
-            f" {first.pid} and sha256 {digest} were due"
-        )
-    line = report_check(wire, [])
-    return (
-        f"update appended {len(_UPDATE_LINE)} bytes to"
-        f" {os.path.basename(bootstrap_path)} and printed its sha256"
-        f" {digest[:12]}, equal to this client's; restart: a banner with the"
-        f" same pid {second.pid} and that sha256, then the prompt,"
-        f" {seconds:.3f} s after the command; {line} then showed what it did"
-        " before"
-    )
-
-
-# Closes the wire and returns the seconds until all its processes are gone.
-def session_close(wire: Wire, others: list[Wire], parent: int) -> float:
-    pid = wire.banners[-1].pid
-    wire.close_send()
-    closed_at = time.monotonic()
-    wires_wait(
-        [wire, *others],
-        lambda: wire.close_code is not None,
-        "ttyd's close frame",
-    )
-    if wire.close_code != _WEBSOCKET_CLOSE_NORMAL:
-        raise CheckFailed(
-            f"{wire.ttyd.version} answered close {_WEBSOCKET_CLOSE_NORMAL}"
-            f" with {wire.close_code}"
-        )
-    wire.sock.close()
-    found = program_end_wait(wire.ttyd, pid)
-    if found.group(1, 2) != ("killed with signal", str(int(signal.SIGHUP))):
-        raise CheckFailed(f"{wire.ttyd.version} logged: {found.string}")
-    return processes_wait(
-        wire, {pid, *wire.module_pids}, pid, parent, closed_at
-    )
-
-
-# Exits with 128 plus the signal's number.
-def signal_exit(signal_number: int, frame: types.FrameType | None) -> None:
-    sys.exit(128 + signal_number)
-
-
-# Returns the offset 2 bytes into the first `_NON_ASCII_SPLIT_CHARACTER`.
-def split_offset(data: bytes) -> int:
-    return data.index(_NON_ASCII_SPLIT_CHARACTER.encode()) + 2
-
-
-# Starts ttyd on a port of its choosing, read from its log, then stops it.
-@contextlib.contextmanager
-def ttyd_serve(
-    options: list[str], command: list[str], deadline: float
-) -> Generator[Ttyd]:
-    ttyd = Ttyd(options, command, deadline)
-    try:
-        found = ttyd.line_wait(_VERSION_PATTERN, 0, "ttyd's version")
-        ttyd.version = found.group(1)
-        found = ttyd.line_wait(_LISTENING_PATTERN, 0, "ttyd to listen")
-        ttyd.port = int(found.group(1))
-        yield ttyd
-    finally:
-        ttyd.stop()
-
-
-# Returns what ttyd sent up to its headers' end, or all if it closed first.
-def upgrade_read(sock: socket.socket, ttyd: Ttyd) -> bytes:
-    data = b""
-    while b"\r\n\r\n" not in data:
-        sock.settimeout(remaining(ttyd.deadline, "ttyd's answer to /ws"))
-        chunk = sock.recv(1 << 16)
-        if not chunk:
-            return data
-        data += chunk
-    return data
-
-
-# Asks ttyd for a WebSocket on /ws from its origin. Returns the socket and key.
-def upgrade_send(
-    ttyd: Ttyd, headers: dict[str, str]
-) -> tuple[socket.socket, str]:
+# Sends ttyd's first message, with its token, which starts the program.
+def start_send(client: WireClient) -> None:
+    status, body = http_get(client.ttyd, "/token")
+    if status != _HTTP_OK:
+        raise CheckFailed(f"GET /token answered {status}")
+    token = json.loads(body)["token"]
+    first = {"AuthToken": token, "columns": _COLUMNS, "rows": _ROWS}
+    client.frame_send(_OPCODE_BINARY, json.dumps(first).encode())
+
+
+# Opens a WebSocket on `/ws` with the query arguments and starts the program.
+def websocket_open(
+    ttyd: TtydServer, args: tuple[str, ...], values: dict[str, Any], raw: bool
+) -> WireClient:
+    timer = ttyd.log.timer
     key = base64.b64encode(os.urandom(16)).decode()
     host = f"127.0.0.1:{ttyd.port}"
+    query = "&".join(f"arg={arg}" for arg in args)
+    path = f"/ws?{query}" if args else "/ws"
     sock = socket.create_connection(
-        ("127.0.0.1", ttyd.port), remaining(ttyd.deadline, "ttyd's /ws")
+        ("127.0.0.1", ttyd.port), timer.seconds_left(f"ttyd to take {path}")
     )
-    lines = [
-        "GET /ws HTTP/1.1",
+    request = [
+        f"GET {path} HTTP/1.1",
         f"Host: {host}",
         f"Origin: http://{host}",
         "Upgrade: websocket",
@@ -1363,110 +937,1046 @@ def upgrade_send(
         f"Sec-WebSocket-Key: {key}",
         "Sec-WebSocket-Version: 13",
         "Sec-WebSocket-Protocol: tty",
-        *(f"{name}: {value}" for name, value in headers.items()),
     ]
-    sock.sendall(("\r\n".join(lines) + "\r\n\r\n").encode())
-    return sock, key
-
-
-# Returns a Wire on a WebSocket ttyd accepted with the tty subprotocol.
-def websocket_open(ttyd: Ttyd, headers: dict[str, str]) -> Wire:
-    sock, key = upgrade_send(ttyd, headers)
-    data = upgrade_read(sock, ttyd)
-    head, separator, rest = data.partition(b"\r\n\r\n")
+    sock.sendall(("\r\n".join(request) + "\r\n\r\n").encode())
+    sock.setblocking(False)
+    data = bytearray()
+    while b"\r\n\r\n" not in data:
+        readable, _, _ = select.select(
+            [sock], [], [], timer.seconds_left(f"ttyd's answer to {path}")
+        )
+        if readable:
+            chunk = sock.recv(_READ_BYTES)
+            if not chunk:
+                raise CheckFailed(
+                    f"{ttyd.version} closed {path} unanswered after"
+                    f" {bytes(data)!r}"
+                )
+            data += chunk
+    head, _, rest = bytes(data).partition(b"\r\n\r\n")
     status, *header_lines = head.decode("latin-1").split("\r\n")
-    if not separator or not status.startswith("HTTP/1.1 101 "):
-        raise CheckFailed(f"{ttyd.version} answered /ws with {data[:200]!r}")
     answered: dict[str, str] = {}
     for header_line in header_lines:
         name, _, value = header_line.partition(":")
         answered[name.strip().lower()] = value.strip()
-    accept = base64.b64encode(
-        hashlib.sha1((key + _WEBSOCKET_GUID).encode()).digest()
-    ).decode()
-    if answered.get("sec-websocket-accept") != accept:
-        raise CheckFailed(f"{ttyd.version} answered the key wrongly: {head!r}")
-    if answered.get("sec-websocket-protocol") != "tty":
-        raise CheckFailed(f"{ttyd.version} didn't choose tty: {head!r}")
-    return Wire(ttyd, sock, rest)
+    digest = hashlib.sha1((key + _WEBSOCKET_GUID).encode()).digest()
+    accept = base64.b64encode(digest).decode()
+    if (
+        not status.startswith("HTTP/1.1 101 ")
+        or answered.get("sec-websocket-accept") != accept
+        or answered.get("sec-websocket-protocol") != "tty"
+    ):
+        raise CheckFailed(f"{ttyd.version} answered {path} with {head!r}")
+    client = WireClient(ttyd, sock, rest, values, raw)
+    start_send(client)
+    return client
 
 
-# Sends what each wire queued and handles what ttyd sends until done.
-def wires_wait(wires: list[Wire], done: Callable[[], bool], what: str) -> None:
-    ttyd = wires[0].ttyd
-    while not done() or any(wire.unsent for wire in wires):
-        readers: list[socket.socket | int] = [
-            wire.sock for wire in wires if not wire.ended
-        ]
-        writers = [wire.sock for wire in wires if wire.unsent]
-        if not ttyd.stderr_ended:
-            readers.append(ttyd.fd)
-        readable, writable, _ = select.select(
-            readers,
-            writers,
-            [],
-            remaining(ttyd.deadline, f"{what} through {ttyd.version}"),
+# Closes the connection with the normal code and checks ttyd's answer.
+def session_close(client: WireClient) -> None:
+    client.close_send()
+    client_wait(
+        client,
+        lambda: client.close_code is not None or client.ended,
+        "ttyd's close frame",
+    )
+    client.sock.close()
+    if client.close_code != _CLOSE_NORMAL:
+        raise CheckFailed(
+            f"{client.ttyd.version} answered close {_CLOSE_NORMAL}:"
+            f" {connection_end(client)}"
         )
-        if ttyd.fd in readable:
-            ttyd.stderr_read()
-        for wire in wires:
-            if wire.sock in writable:
-                wire.unsent_send()
-            if wire.sock in readable:
-                wire.socket_read()
+
+
+# The line as its debug rendering shows it.
+def line_text(line: LineObject) -> str:
+    import jslb
+
+    return jslb.line_render(cast(jslb.Object, line))
+
+
+# The bytes of each blob of a line, held in memory, in order.
+def blobs_of(line: LineObject) -> list[bytes]:
+    import jslb
+
+    return [
+        jslb.field_get(cast(jslb.Object, header), "data")
+        for header in jslb.headers_of(cast(jslb.Object, line))[1:]
+    ]
+
+
+# The bytes a line and its blobs take on the wire.
+def message_bytes(line: LineObject) -> int:
+    import jslb
+
+    pieces = jslb.line_encode(cast(jslb.Object, line))
+    return sum(len(cast(bytes, piece)) for piece in pieces)
+
+
+# The text and CR of an echo request with no payload and one blob of the size.
+def echo_text(full: bool, request_id: int, size: int) -> bytes:
+    import jslb
+
+    header = jslb.header_make(_ECHO_TYPE, id=request_id, full=full)
+    blob = jslb.Object()
+    blob["s"] = size
+    line = jslb.line_make(header, [blob])
+    text = jslb.line_render(line).removesuffix(_BLOB_TAG)
+    return text.encode("utf-8") + _LINE_END
+
+
+# The size of the blob that makes an echo request exactly `limit` bytes.
+def blob_fit(full: bool, request_id: int, limit: int) -> int:
+    length = len(echo_text(full, request_id, limit))
+    size = limit - length
+    if len(echo_text(full, request_id, size)) != length:
+        raise CheckFailed(
+            f"no blob makes echo request {request_id} exactly {limit} bytes"
+        )
+    return size
+
+
+# Builds a request of the connection with the next id, its blobs and payload.
+def request_make(
+    client: WireClient,
+    full: bool,
+    line_type: str,
+    blobs: list[bytes],
+    key: str | None,
+    payload: dict[str, Any],
+) -> LineObject:
+    import jslb
+
+    header = jslb.header_make(
+        line_type, id=client.id_next(), key=key, full=full
+    )
+    return jslb.line_make(
+        header, [jslb.blob_make(data) for data in blobs], **payload
+    )
+
+
+# Builds a notification, a line with no id, in the connection's names.
+def notice_make(
+    client: WireClient, line_type: str, payload: dict[str, Any]
+) -> LineObject:
+    import jslb
+
+    header = jslb.header_make(line_type, full=client.full)
+    return jslb.line_make(header, [], **payload)
+
+
+# Queues a line and its blobs as the program's input.
+def line_send(client: WireClient, line: LineObject) -> None:
+    import jslb
+
+    pieces = jslb.line_encode(cast(jslb.Object, line))
+    client.input_send(b"".join(cast(bytes, piece) for piece in pieces))
+
+
+# Returns the next line the program wrote, failing if the connection ends.
+def line_next(client: WireClient, what: str) -> LineObject:
+    client_wait(client, lambda: bool(client.lines) or client.ended, what)
+    if not client.lines:
+        raise CheckFailed(
+            f"{connection_end(client)} before {what} came, through"
+            f" {client.ttyd.version}"
+        )
+    return client.lines.popleft()
+
+
+# Returns the program's last line, then waits for ttyd to end the connection.
+def line_last(client: WireClient, what: str) -> LineObject:
+    client.end_expected = True
+    client_wait(client, lambda: bool(client.lines) or client.ended, what)
+    if not client.lines:
+        raise CheckFailed(
+            f"{connection_end(client)} before {what}, the program's last"
+            f" line, came: a lone loss through {client.ttyd.version}, a ttyd"
+            " fault, reported and not retried"
+        )
+    line = client.lines.popleft()
+    client_wait(client, lambda: client.ended, f"the end after {what}")
+    if client.lines:
+        raise CheckFailed(
+            f"the program wrote {line_text(client.lines[0])} after {what}"
+        )
+    client.sock.close()
+    return line
+
+
+# Returns the reply to the request, failing on an error or any other line.
+def reply_take(
+    client: WireClient, request: LineObject, what: str
+) -> LineObject:
+    import jslb
+
+    line = line_next(client, what)
+    asked: Any = request[0]
+    header: Any = line[0]
+    due = (jslb.field_get(asked, "type"), jslb.field_get(asked, "id"))
+    came = (jslb.field_get(header, "type"), jslb.field_get(header, "reply"))
+    if came != due:
+        raise CheckFailed(f"{what}: the server wrote {line_text(line)}")
+    return line
+
+
+# Sends the request and returns its reply.
+def exchange_run(
+    client: WireClient, request: LineObject, what: str
+) -> LineObject:
+    line_send(client, request)
+    return reply_take(client, request, what)
+
+
+# Fails unless the line is an `error` line with the message, answering `reply`.
+def error_check(
+    line: LineObject, reply: int | None, message: str, what: str
+) -> None:
+    import jslb
+
+    header: Any = line[0]
+    payload = jslb.payload_of(cast(jslb.Object, line))
+    if (
+        jslb.field_get(header, "type") != "error"
+        or jslb.field_get(header, "reply") != reply
+        or list(payload) != ["message", "stack"]
+        or payload["message"] != message
+    ):
+        raise CheckFailed(
+            f"{what}: the server wrote {line_text(line)} where an error line"
+            f" with the message {message!r} and r {reply} was due"
+        )
+
+
+# Fails unless the reply holds exactly the payload and no blob.
+def payload_check(reply: LineObject, due: dict[str, Any], what: str) -> None:
+    import jslb
+
+    line = cast(jslb.Object, reply)
+    if jslb.payload_of(line) != due or len(jslb.headers_of(line)) != 1:
+        shown = json.dumps(due, ensure_ascii=False)
+        raise CheckFailed(
+            f"{what}: the server wrote {line_text(reply)} where the payload"
+            f" {shown} and no blob were due"
+        )
+
+
+# Fails unless the reply is the echo of the request: its payload and blobs.
+def echo_check(request: LineObject, reply: LineObject, what: str) -> None:
+    import jslb
+
+    asked = cast(jslb.Object, request)
+    header: Any = asked[0]
+    sent = blobs_of(asked)
+    expected = jslb.line_make(
+        jslb.header_make(
+            _ECHO_TYPE,
+            reply=jslb.field_get(header, "id"),
+            full="type" in header,
+        ),
+        [jslb.blob_make(data) for data in sent],
+        **jslb.payload_of(asked),
+    )
+    if line_text(reply) != line_text(expected):
+        raise CheckFailed(
+            f"{what}: the server wrote {line_text(reply)} where"
+            f" {line_text(expected)} was due"
+        )
+    for number, (came, went) in enumerate(zip(blobs_of(reply), sent), 1):
+        if came != went:
+            raise CheckFailed(
+                f"{what}: blob {number} came back {len(came)} bytes, sha256"
+                f" {sha256_text(came)}, where {len(went)} bytes, sha256"
+                f" {sha256_text(went)}, went"
+            )
+
+
+# Fails unless the file holds exactly the bytes.
+def file_check(path: str, data: bytes) -> None:
+    with open(path, "rb") as file:
+        found = file.read()
+    if found != data:
+        raise CheckFailed(
+            f"{path} holds {len(found)} bytes, sha256 {sha256_text(found)},"
+            f" where {len(data)} bytes, sha256 {sha256_text(data)}, were put"
+        )
+
+
+# The bytes of the echo main loop file in the checkout.
+def echo_source() -> bytes:
+    with open(_ECHO_PATH, "rb") as file:
+        return file.read()
+
+
+# Returns the parent's pid, the second field after the name in brackets.
+def process_parent(pid: int) -> int:
+    with open(f"/proc/{pid}/stat", "rb") as file:
+        stat = file.read()
+    return int(stat[stat.rindex(b")") + 2 :].split()[1])
+
+
+# Fails unless the pid is ttyd's child running its command and the arguments.
+def program_check(ttyd: TtydServer, pid: int, args: tuple[str, ...]) -> None:
+    with open(f"/proc/{pid}/cmdline", "rb") as file:
+        cmdline = file.read().split(b"\0")[:-1]
+    due = [word.encode() for word in (*ttyd.command, *args)]
+    if cmdline != due:
+        raise CheckFailed(f"hello's pid {pid} runs {cmdline}, not {due}")
+    parent = process_parent(pid)
+    if parent != ttyd.process.pid:
+        raise CheckFailed(
+            f"hello's pid {pid} is the child of {parent}, not of ttyd's"
+            f" {ttyd.process.pid}"
+        )
+
+
+# Reads a process's resident size and its peak, in KiB, from its status file.
+def memory_read(pid: int) -> MemoryUse:
+    fields: dict[str, int] = {}
+    with open(f"/proc/{pid}/status", encoding="utf-8") as file:
+        for row in file:
+            name, _, value = row.partition(":")
+            if name in ("VmRSS", "VmHWM"):
+                fields[name] = int(value.split()[0])
+    return MemoryUse(fields["VmRSS"], fields["VmHWM"])
+
+
+# Reads `hello`, checks it came from ttyd's child, answers it, keeps its facts.
+def hello_take(
+    client: WireClient,
+    values: dict[str, Any],
+    args: tuple[str, ...],
+    what: str,
+) -> None:
+    import jslb
+
+    ttyd = client.ttyd
+    line = line_next(client, what)
+    header: Any = line[0]
+    payload = jslb.payload_of(cast(jslb.Object, line))
+    path = ttyd.command[1]
+    with open(path, "rb") as file:
+        digest = hashlib.file_digest(file, "sha256").hexdigest()
+    due: dict[str, Any] = {
+        "bootstrap": path,
+        "sha256": digest,
+        "root": ttyd.root,
+        "settings": values,
+        "provider_key": _PROVIDER_KEY,
+    }
+    full = "type" in header
+    form = "full" if values["debug"] else "short"
+    if (
+        jslb.field_get(header, "type") != "hello"
+        or jslb.field_get(header, "id") != _HELLO_ID
+        or len(header) != 2
+        or full != values["debug"]
+        or list(payload) != _HELLO_FIELDS
+        or any(payload[name] != value for name, value in due.items())
+    ):
+        raise CheckFailed(
+            f"{what}: the program wrote {line_text(line)} where hello with id"
+            f" {_HELLO_ID} in {form} names was due from {path}, sha256"
+            f" {digest}, with the root {ttyd.root}, its settings and the"
+            f" provider key {_PROVIDER_KEY}"
+        )
+    title = f"{' '.join(ttyd.command)} ({socket.gethostname()})"
+    if client.title != title:
+        raise CheckFailed(
+            f"{ttyd.version}'s title is {client.title!r}, not {title!r}"
+        )
+    pid = cast(int, payload["pid"])
+    program_check(ttyd, pid, args)
+    client.pid = pid
+    client.seq = cast(dict[str, int], payload["seq"])
+    client.full = full
+    answer = jslb.header_make("hello", reply=_HELLO_ID, full=full)
+    line_send(client, jslb.line_make(answer, []))
+
+
+# Fails unless ttyd logged that the program of that pid exited with code 1.
+def exit_check(ttyd: TtydServer, pid: int, what: str) -> None:
+    how, number = ttyd.end_wait(pid, what)
+    if (how, number) != (_EXITED_WORDS, _PROGRAM_FAILED):
+        raise CheckFailed(
+            f"{ttyd.version} logged that the process of pid {pid} {how}"
+            f" {number}, where it exited with code {_PROGRAM_FAILED}"
+        )
+
+
+# Fails unless the next end ttyd logs from `mark` on is an exit with code 1.
+def exit_after(ttyd: TtydServer, mark: int, what: str) -> int:
+    _, found = ttyd.line_wait(_ENDED_PATTERN, what, mark)
+    if found.group(1, 2) != (_EXITED_WORDS, str(_PROGRAM_FAILED)):
+        raise CheckFailed(f"{ttyd.version} logged: {found.string}")
+    return int(found.group(3))
+
+
+# Fails unless the raw output from the mark on is the expected bytes.
+def transcript_check(
+    client: WireClient, mark: int, expected: bytes, what: str
+) -> None:
+    shown = bytes(client.output[mark:])
+    if shown == expected:
+        return
+    at = next(
+        (
+            index
+            for index, (one, other) in enumerate(zip(shown, expected))
+            if one != other
+        ),
+        min(len(shown), len(expected)),
+    )
+    start = max(0, at - _SHOWN_BYTES)
+    end = at + _SHOWN_BYTES
+    raise CheckFailed(
+        f"{what} through {client.ttyd.version} is {len(shown)} bytes where"
+        f" {len(expected)} were due, unequal from byte {at}:"
+        f" {shown[start:end]!r} where {expected[start:end]!r} was due; a"
+        " loss is a ttyd fault, reported and not retried"
+    )
+
+
+# Opens the echo main loop's connection and checks `hello`, with a summary.
+def rung_hello(
+    ttyd: TtydServer, values: dict[str, Any]
+) -> tuple[WireClient, str]:
+    opened_at = time.monotonic()
+    client = websocket_open(ttyd, _ECHO_ARGS, values, False)
+    hello_take(client, values, _ECHO_ARGS, "hello")
+    seconds = time.monotonic() - opened_at
+    if client.seq:
+        raise CheckFailed(
+            f"hello's seq is {client.seq}, where the echo main loop, which"
+            " opens no database, gives none"
+        )
+    form = "full" if client.full else "short"
+    running = " ".join([*ttyd.command, *_ECHO_ARGS])
+    return client, (
+        f"ttyd's title {client.title!r} and preferences"
+        f" {json.dumps(client.preferences)}; hello with id {_HELLO_ID} in"
+        f" {form} names from pid {client.pid}, ttyd's child running"
+        f" {running}, with bootstrap.py's path and sha256, the root, the"
+        " root's settings, no seq and the provider key of ttyd's"
+        f" environment, {seconds:.3f} s after the WebSocket opened; answered"
+        " with an empty reply"
+    )
+
+
+# Echoes a payload, then a payload with a small blob and an empty one.
+def rung_echo(client: WireClient) -> str:
+    started = time.monotonic()
+    what = "the echo of a payload"
+    plain = request_make(
+        client, client.full, _ECHO_TYPE, [], None, _ECHO_PAYLOAD
+    )
+    echo_check(plain, exchange_run(client, plain, what), what)
+    what = "the echo of two blobs"
+    pair = [_SMALL_BYTES, b""]
+    blobs = request_make(
+        client, client.full, _ECHO_TYPE, pair, None, _ECHO_PAYLOAD
+    )
+    echo_check(blobs, exchange_run(client, blobs, what), what)
+    seconds = time.monotonic() - started
+    return (
+        "a payload of text in 2, 3 and 4 byte characters, a negative number"
+        " and a nested list came back equal, its r the request's i; then the"
+        f" same with a blob of the {len(_SMALL_BYTES)} control bytes below"
+        f" space and an empty blob, equal byte for byte; {seconds:.3f} s for"
+        " both"
+    )
+
+
+# Echoes 1 MiB of every byte value, which the server streams through a file.
+def rung_control(client: WireClient, values: dict[str, Any]) -> str:
+    what = "the 1 MiB echo"
+    request = request_make(
+        client, client.full, _ECHO_TYPE, [_CONTROL_BYTES], None, {}
+    )
+    before = client.ttyd_messages
+    started = time.monotonic()
+    echo_check(request, exchange_run(client, request, what), what)
+    seconds = time.monotonic() - started
+    return (
+        f"one blob of {len(_CONTROL_BYTES)} bytes, every byte value"
+        f" {len(_CONTROL_BYTES) // 256} times, CR, LF, 0x03, 0x04, 0x13 and"
+        " bytes invalid in UTF-8 among them, over overflow_bytes"
+        f" {values['overflow_bytes']} so the server streamed it through a"
+        " cache file, came back equal, sha256"
+        f" {sha256_text(_CONTROL_BYTES)[:12]}, in"
+        f" {client.ttyd_messages - before} ttyd messages, {seconds:.3f} s"
+    )
+
+
+# Echoes a request of exactly `message_max` bytes, in short names.
+def rung_fit(client: WireClient, values: dict[str, Any]) -> str:
+    what = "the echo of message_max bytes"
+    message_max: int = values["message_max"]
+    size = blob_fit(False, client.id_last + 1, message_max)
+    request = request_make(
+        client, False, _ECHO_TYPE, [os.urandom(size)], None, {}
+    )
+    sent = message_bytes(request)
+    if sent != message_max:
+        raise CheckFailed(
+            f"the request takes {sent} bytes, not message_max {message_max}"
+        )
+    started = time.monotonic()
+    reply = exchange_run(client, request, what)
+    seconds = time.monotonic() - started
+    echo_check(request, reply, what)
+    return (
+        f"a request in short names of {sent} bytes, message_max, its line and"
+        f" a blob of {size} random bytes, came back equal in a reply of"
+        f" {message_bytes(reply)} bytes, {seconds:.3f} s"
+    )
+
+
+# Echoes 128 MiB as messages that each fit, measuring ttyd's resident size.
+def rung_large(client: WireClient, values: dict[str, Any]) -> str:
+    ttyd = client.ttyd
+    before = memory_read(ttyd.process.pid)
+    stream = EchoStream(client, values)
+    started = time.monotonic()
+    client_wait(client, stream.stream_step, "the large echo")
+    seconds = time.monotonic() - started
+    after = memory_read(ttyd.process.pid)
+    rate = _LARGE_BYTES / _MIB / seconds
+    return (
+        f"{_LARGE_BYTES} bytes of random blobs in {stream.sent} requests in"
+        f" short names of at most message_max {stream.message_max} bytes"
+        " each, line and blob, sent while the bytes not yet echoed stayed"
+        f" within queue_max {stream.queue_max}, at most {stream.held_peak};"
+        f" every reply equal by sha256; {seconds:.2f} s, {rate:.1f} MiB/s"
+        f" each way; ttyd's resident size {before.resident} KiB before and"
+        f" {after.resident} KiB after, its peak {after.peak} KiB"
+    )
+
+
+# Opens a second engine connection, which the lock refuses, then echoes.
+def rung_second(client: WireClient, values: dict[str, Any]) -> str:
+    from i18n import i18n
+
+    ttyd = client.ttyd
+    mark = len(ttyd.lines)
+    other = websocket_open(ttyd, _ECHO_ARGS, values, False)
+    message = i18n("bootstrap.lock_held", os.path.join(ttyd.root, _LOCK_NAME))
+    what = "the second connection's error line"
+    error_check(line_last(other, what), None, message, what)
+    pid = exit_after(ttyd, mark, "ttyd's log of the second program's end")
+    if pid == client.pid:
+        raise CheckFailed(f"{ttyd.version} logged the end of pid {pid}")
+    what = "the first connection's echo"
+    echo = request_make(
+        client, client.full, _ECHO_TYPE, [], None, _ECHO_PAYLOAD
+    )
+    echo_check(echo, exchange_run(client, echo, what), what)
+    return (
+        "a second WebSocket on the same root got ttyd's title"
+        f" {other.title!r}, then no hello but the error {message!r} with no"
+        f" r, and its program, pid {pid}, exited with code {_PROGRAM_FAILED}"
+        f" as ttyd logged; {connection_end(other)}; the first connection, pid"
+        f" {client.pid}, still echoed"
+    )
+
+
+# Sends a line announcing one byte over `message_max`, refused at its CR.
+def rung_over(client: WireClient, values: dict[str, Any]) -> str:
+    from i18n import i18n
+
+    message_max: int = values["message_max"]
+    request_id = client.id_next()
+    size = blob_fit(False, request_id, message_max) + 1
+    text = echo_text(False, request_id, size)
+    length = len(text)
+    if length + size != message_max + 1:
+        raise CheckFailed(
+            f"no echo request {request_id} is one byte over message_max"
+            f" {message_max}"
+        )
+    client.input_send(text)
+    message = i18n("jslb.message_over", message_max + 1, message_max)
+    what = "the error line of the message over message_max"
+    error_check(line_last(client, what), None, message, what)
+    exit_check(client.ttyd, client.pid, "ttyd's log of the program's end")
+    return (
+        f"a line of {length} bytes announcing a blob of {size} bytes,"
+        f" {message_max + 1} bytes in all, sent without the blob: the server"
+        f" wrote the error {message!r} with no r at the line's CR, before any"
+        f" blob byte, and exited with code {_PROGRAM_FAILED} as ttyd logged;"
+        f" {connection_end(client)}"
+    )
+
+
+# The last line regression: on the console a subshell prints and exits.
+def rung_lines(ttyd: TtydServer, values: dict[str, Any]) -> str:
+    client = websocket_open(ttyd, _CONSOLE_ARGS, values, True)
+    client_wait(
+        client,
+        lambda: client.output.endswith(_PROMPT) or client.ended,
+        "dash's prompt",
+    )
+    if client.output != _PROMPT:
+        raise CheckFailed(
+            f"the console showed {bytes(client.output)!r} through"
+            f" {ttyd.version} where dash's prompt {_PROMPT!r} was due"
+        )
+    typed = _LINES_COMMAND + "\n"
+    numbers = "".join(f"{number}\n" for number in range(1, _LINES_COUNT + 1))
+    expected = terminal_text(typed + numbers) + _PROMPT
+    mark = len(client.output)
+    before = client.ttyd_messages
+    started = time.monotonic()
+    client.input_send(typed.encode())
+    client_wait(
+        client,
+        lambda: client.ended
+        or (
+            len(client.output) - mark >= len(expected)
+            and client.output.endswith(_PROMPT)
+        ),
+        "the lines and the prompt after them",
+    )
+    seconds = time.monotonic() - started
+    transcript_check(client, mark, expected, "the subshell's lines")
+    messages = client.ttyd_messages - before
+    session_close(client)
+    return (
+        f"on the console role, dash's prompt, then {typed!r} echoed and its"
+        f" subshell's {_LINES_COUNT} lines in order, the last of them just"
+        " before the subshell exited, then the prompt:"
+        f" {len(expected)} bytes equal to this client's in {messages} ttyd"
+        f" messages, {seconds:.2f} s from the command to the prompt; close"
+        f" {_CLOSE_NORMAL} answered with {_CLOSE_NORMAL}"
+    )
+
+
+# Kills ttyd under an engine connection and checks what ends and how.
+def rung_killed(ttyd: TtydServer, values: dict[str, Any]) -> str:
+    client = websocket_open(ttyd, _ECHO_ARGS, values, False)
+    hello_take(client, values, _ECHO_ARGS, "hello")
+    descriptor = os.pidfd_open(client.pid)
+    try:
+        client.end_expected = True
+        killed_at = time.monotonic()
+        ttyd.signal_send(signal.SIGKILL)
+        client_wait(
+            client,
+            lambda: client.ended and ttyd.log_ended,
+            "the end of the connection and of ttyd's log",
+        )
+        ended_seconds = time.monotonic() - killed_at
+        status = ttyd.process.wait()
+        if status != -signal.SIGKILL:
+            raise CheckFailed(
+                f"{ttyd.version} exited with {status} on SIGKILL"
+            )
+        readable: list[Any] = []
+        while not readable:
+            left = ttyd.log.timer.seconds_left(f"pid {client.pid} to end")
+            readable, _, _ = select.select([descriptor], [], [], left)
+        gone_seconds = time.monotonic() - killed_at
+    finally:
+        os.close(descriptor)
+    client.sock.close()
+    return (
+        f"SIGKILL to {ttyd.version} with the echo main loop running as pid"
+        f" {client.pid}: {ended_seconds:.4f} s after the kill"
+        f" {connection_end(client)} and ttyd's log ended; ttyd exited with"
+        f" {status}; pid {client.pid} was gone {gone_seconds:.3f} s after the"
+        " kill"
+    )
+
+
+# The response to `tools/list`: each server tool of the API file, no permit.
+def list_response() -> dict[str, Any]:
+    with open(_TOOLS_PATH, encoding="utf-8") as file:
+        data: dict[str, Any] = json.load(file)
+    tools = [
+        {
+            "name": entry["name"],
+            "description": entry["description"],
+            "inputSchema": entry["inputSchema"],
+        }
+        for entry in data["server"]["result"]["tools"]
+    ]
+    return {"jsonrpc": "2.0", "id": 2, "result": {"tools": tools}}
+
+
+# Opens a stock connection, opens an MCP session on the `mcp` line, calls.
+def rung_mcp(
+    ttyd: TtydServer, values: dict[str, Any]
+) -> tuple[WireClient, str]:
+    import jslb
+
+    client = websocket_open(ttyd, _STOCK_ARGS, values, False)
+    hello_take(client, values, _STOCK_ARGS, "hello")
+    what = "the reply to initialize"
+    request = request_make(
+        client, client.full, "mcp", [], None, _INITIALIZE_MESSAGE
+    )
+    reply = exchange_run(client, request, what)
+    payload_check(reply, _INITIALIZE_RESPONSE, what)
+    line_send(client, notice_make(client, "mcp", _INITIALIZED_MESSAGE))
+    what = "the reply to tools/list"
+    request = request_make(client, client.full, "mcp", [], None, _LIST_MESSAGE)
+    reply = exchange_run(client, request, what)
+    payload_check(reply, list_response(), what)
+    source = echo_source()
+    digest = sha256_text(source)
+    arguments = {"name": _TOOL_NAME, "text": source.decode("utf-8")}
+    message = {
+        "jsonrpc": "2.0",
+        "id": _CALL_ID,
+        "method": "tools/call",
+        "params": {"name": "source_put", "arguments": arguments},
+    }
+    what = "the reply to tools/call"
+    request = request_make(client, client.full, "mcp", [], None, message)
+    reply = exchange_run(client, request, what)
+    result_text = json.dumps({"sha256": digest}, separators=(",", ":"))
+    response: dict[str, Any] = {
+        "jsonrpc": "2.0",
+        "id": _CALL_ID,
+        "result": {
+            "content": [{"type": "text", "text": result_text}],
+            "isError": False,
+        },
+    }
+    if jslb.payload_of(cast(jslb.Object, reply)) != response:
+        raise CheckFailed(
+            f"{what}: the server wrote {line_text(reply)} where"
+            f" {json.dumps(response)} was due"
+        )
+    path = os.path.join(ttyd.root, _MAIN_LOOP_DIRECTORY, _TOOL_NAME)
+    file_check(path, source)
+    return client, (
+        f"hello from pid {client.pid}; initialize, notifications/initialized"
+        " with no reply and tools/list sent on the mcp line, each reply the"
+        " response the protocol and API/mcp/tools.json give; tools/call of"
+        f" source_put, unasked, wrote {_TOOL_NAME} of {len(source)} bytes"
+        f" equal to the file and answered its sha256 {digest[:12]}"
+    )
+
+
+# Puts 1 MiB under a ref, streamed through the cache, and gets it back.
+def rung_kv(client: WireClient) -> str:
+    import jslb
+
+    since = client.seq[_FILES_DB]
+    digest = sha256_text(_CONTROL_BYTES)
+    put = request_make(
+        client,
+        client.full,
+        "kv.put",
+        [_CONTROL_BYTES],
+        _VALUE_REF,
+        {"since": since},
+    )
+    reply = exchange_run(client, put, "the reply to kv.put")
+    payload_check(reply, {"sha256": digest, "seq": since + 1}, "kv.put")
+    client.seq[_FILES_DB] = since + 1
+    get = request_make(client, client.full, "kv.get", [], _VALUE_REF, {})
+    reply = exchange_run(client, get, "the reply to kv.get")
+    due = {"size": len(_CONTROL_BYTES), "sha256": digest}
+    blobs = blobs_of(reply)
+    if (
+        jslb.payload_of(cast(jslb.Object, reply)) != due
+        or blobs != [_CONTROL_BYTES]
+    ):
+        raise CheckFailed(
+            f"kv.get: the server wrote {line_text(reply)} with blobs of"
+            f" {[len(blob) for blob in blobs]} bytes where {json.dumps(due)}"
+            " and the bytes put were due"
+        )
+    return (
+        f"kv.put of {len(_CONTROL_BYTES)} bytes, every byte value, under"
+        f" {_VALUE_REF} with since {since}: sha256 {digest[:12]} and seq"
+        f" {since + 1}; kv.get gave the size, the sha256 and the bytes back,"
+        " byte for byte"
+    )
+
+
+# Puts a document and reads the ref of its head.
+def rung_doc(client: WireClient) -> str:
+    since = client.seq[_METAVERSE_DB]
+    ref = f"/{_METAVERSE_DB}/{_DOCUMENT_ID}/{_DOCUMENT_VERSION}"
+    document = {
+        "db": _METAVERSE_DB,
+        "id": _DOCUMENT_ID,
+        "body": _DOCUMENT_BODY,
+        "since": since,
+    }
+    put = request_make(client, client.full, "doc.put", [], None, document)
+    reply = exchange_run(client, put, "the reply to doc.put")
+    payload_check(reply, {"ref": ref, "seq": since + 1}, "doc.put")
+    client.seq[_METAVERSE_DB] = since + 1
+    names = {"db": _METAVERSE_DB, "id": _DOCUMENT_ID}
+    head = request_make(client, client.full, "doc.head", [], None, names)
+    reply = exchange_run(client, head, "the reply to doc.head")
+    payload_check(reply, {"ref": ref}, "doc.head")
+    return (
+        f"doc.put of {_DOCUMENT_ID} in {_METAVERSE_DB} with since {since}:"
+        f" ref {ref} and seq {since + 1}; doc.head gave the same ref"
+    )
+
+
+# Puts lines of a page thread and reads the last of them back, oldest first.
+def rung_verbose(client: WireClient) -> str:
+    import jslb
+
+    at = time.time_ns() // _NANOSECONDS_PER_MILLISECOND
+    lines = [
+        {"at": at, "level": level, "text": f"{_WIDE_TEXT} {level}"}
+        for level in _LEVELS
+    ]
+    put = {"thread": _PAGE_THREAD, "lines": lines}
+    line_send(client, notice_make(client, "verbose.put", put))
+    asked = {"thread": _PAGE_THREAD, "count": _TAIL_COUNT}
+    tail = request_make(client, client.full, "verbose.tail", [], None, asked)
+    reply = exchange_run(client, tail, "the reply to verbose.tail")
+    payload_check(reply, {"lines": lines[-_TAIL_COUNT:]}, "verbose.tail")
+    asked = {"thread": _SERVER_THREAD, "count": _TAIL_COUNT}
+    tail = request_make(client, client.full, "verbose.tail", [], None, asked)
+    reply = exchange_run(client, tail, "the server's verbose.tail")
+    payload = jslb.payload_of(cast(jslb.Object, reply))
+    if list(payload) != ["lines"]:
+        raise CheckFailed(
+            f"the server's verbose.tail: the server wrote {line_text(reply)}"
+        )
+    server_lines: list[Any] = payload["lines"]
+    return (
+        f"verbose.put of {len(lines)} lines on thread {_PAGE_THREAD}, a"
+        f" notification with no reply, then verbose.tail of {_TAIL_COUNT}"
+        f" gave its last {_TAIL_COUNT}, oldest first, equal to what was put;"
+        f" verbose.tail of thread {_SERVER_THREAD} answered"
+        f" {len(server_lines)} lines"
+    )
+
+
+# Sends a type no handler serves: one error line, then exit 1.
+def rung_unknown(client: WireClient) -> str:
+    from i18n import i18n
+
+    request = request_make(client, client.full, _UNKNOWN_TYPE, [], None, {})
+    line_send(client, request)
+    message = i18n("dispatch.handler_unknown", _UNKNOWN_TYPE, _LINE_VERSION)
+    what = "the error line of the unknown type"
+    error_check(line_last(client, what), client.id_last, message, what)
+    exit_check(client.ttyd, client.pid, "ttyd's log of the program's end")
+    return (
+        f"{_UNKNOWN_TYPE} with i {client.id_last}: the error {message!r}"
+        f" with r {client.id_last}, the program's last line, then pid"
+        f" {client.pid} exited with code {_PROGRAM_FAILED} as ttyd logged;"
+        f" {connection_end(client)}"
+    )
+
+
+# Puts the echo main loop with `source.put`, then `system.restart` serves it.
+def rung_restart(ttyd: TtydServer, values: dict[str, Any]) -> str:
+    client = websocket_open(ttyd, _STOCK_ARGS, values, False)
+    hello_take(client, values, _STOCK_ARGS, "hello")
+    first_pid = client.pid
+    source = echo_source()
+    named = {"name": _ECHO_NAME}
+    put = request_make(
+        client, client.full, "source.put", [source], None, named
+    )
+    reply = exchange_run(client, put, "the reply to source.put")
+    payload_check(reply, {"sha256": sha256_text(source)}, "source.put")
+    path = os.path.join(ttyd.root, _MAIN_LOOP_DIRECTORY, _ECHO_NAME)
+    file_check(path, source)
+    chosen = {"main_loop": _ECHO_NAME}
+    restart = request_make(
+        client, client.full, "system.restart", [], None, chosen
+    )
+    restart_id = client.id_last
+    started = time.monotonic()
+    line_send(client, restart)
+    what = "a second hello, where no reply to system.restart is due"
+    hello_take(client, values, _ECHO_ARGS, what)
+    seconds = time.monotonic() - started
+    if client.pid != first_pid or client.seq:
+        raise CheckFailed(
+            f"the second hello came from pid {client.pid} with seq"
+            f" {client.seq}, where the pid {first_pid} the restart keeps and"
+            " the echo main loop's empty seq were due"
+        )
+    what = "the echo of the second main loop"
+    echo = request_make(
+        client, client.full, _ECHO_TYPE, [], None, _ECHO_PAYLOAD
+    )
+    echo_check(echo, exchange_run(client, echo, what), what)
+    session_close(client)
+    return (
+        f"on the stock main loop of pid {first_pid}, source.put of"
+        f" {len(source)} bytes as {_ECHO_NAME} answered its sha256, equal to"
+        f" the file's; system.restart with i {restart_id} got no reply, and"
+        f" {seconds:.3f} s after it a second hello came from the same pid,"
+        f" now running {_ECHO_NAME}, which then echoed; close {_CLOSE_NORMAL}"
+        f" answered with {_CLOSE_NORMAL}"
+    )
+
+
+# With debug false: `source.put`, a restart and a main loop file refused.
+def rung_refused(ttyd: TtydServer, values: dict[str, Any]) -> str:
+    from i18n import i18n
+
+    source = echo_source()
+    first = websocket_open(ttyd, _STOCK_ARGS, values, False)
+    hello_take(first, values, _STOCK_ARGS, "hello")
+    named = {"name": _ECHO_NAME}
+    put = request_make(first, first.full, "source.put", [source], None, named)
+    line_send(first, put)
+    put_message = i18n("engine_system.debug_off", "source.put")
+    what = "the error line of source.put"
+    error_check(line_last(first, what), first.id_last, put_message, what)
+    exit_check(ttyd, first.pid, "ttyd's log of the first program's end")
+    path = os.path.join(ttyd.root, _MAIN_LOOP_DIRECTORY, _ECHO_NAME)
+    if os.path.lexists(path):
+        raise CheckFailed(f"{path} exists after source.put was refused")
+    second = websocket_open(ttyd, _STOCK_ARGS, values, False)
+    hello_take(second, values, _STOCK_ARGS, "hello")
+    chosen = {"main_loop": _ECHO_NAME}
+    restart = request_make(
+        second, second.full, "system.restart", [], None, chosen
+    )
+    line_send(second, restart)
+    restart_message = i18n("engine_system.debug_off", "system.restart")
+    what = "the error line of system.restart"
+    error_check(line_last(second, what), second.id_last, restart_message, what)
+    exit_check(ttyd, second.pid, "ttyd's log of the second program's end")
+    mark = len(ttyd.lines)
+    third = websocket_open(ttyd, _ECHO_ARGS, values, False)
+    loop_message = i18n("bootstrap.main_loop_refused", _ECHO_NAME)
+    what = "the error line of the main loop option"
+    error_check(line_last(third, what), None, loop_message, what)
+    pid = exit_after(ttyd, mark, "ttyd's log of the third program's end")
+    return (
+        "on a root whose setting debug is false, hello in short names from"
+        f" pid {first.pid}, then source.put refused with {put_message!r}"
+        f" and r {first.id_last}, nothing written; on a new connection"
+        f" system.restart refused with {restart_message!r}; a connection"
+        f" with --main-loop {_ECHO_NAME} got no hello but {loop_message!r};"
+        f" each program, the last pid {pid}, exited with code"
+        f" {_PROGRAM_FAILED} as ttyd logged"
+    )
+
+
+# Makes a root as the start script does, its setting debug as given.
+def root_make(
+    work: str, name: str, debug: bool
+) -> tuple[str, dict[str, Any]]:
+    root = os.path.join(work, name)
+    python_path = os.path.join(root, "python")
+    os.makedirs(python_path)
+    for module in _RUNTIME_MODULES:
+        file_name = module + ".py"
+        shutil.copyfile(
+            os.path.join(_PYTHON_PATH, file_name),
+            os.path.join(python_path, file_name),
+        )
+    shutil.copytree(_SEED_PATH, os.path.join(python_path, "seed"))
+    strings_path = os.path.join(root, "i18n")
+    os.makedirs(strings_path)
+    shutil.copyfile(_STRINGS_PATH, os.path.join(strings_path, "en-US.json"))
+    with open(_SETTINGS_PATH, encoding="utf-8") as file:
+        values: dict[str, Any] = json.load(file)
+    values["debug"] = debug
+    text = json.dumps(values, ensure_ascii=False, indent=2) + "\n"
+    with open(
+        os.path.join(root, "settings.json"), "w", encoding="utf-8"
+    ) as file:
+        file.write(text)
+    return root, values
+
+
+# The rungs on a root whose `--main-loop` serves the echo main loop file.
+def stage_echo(log: RungLog, work: str) -> None:
+    root, values = root_make(work, "echo", True)
+    directory = os.path.join(root, _MAIN_LOOP_DIRECTORY)
+    os.makedirs(directory)
+    shutil.copyfile(_ECHO_PATH, os.path.join(directory, _ECHO_NAME))
+    log.rung_start("ttyd")
+    with TtydServer(root, values, log) as ttyd:
+        log.rung_start("hello")
+        client, summary = rung_hello(ttyd, values)
+        log.rung_print(summary)
+        log.rung_run("echo", lambda: rung_echo(client))
+        log.rung_run(
+            "echo 1 MiB with control bytes",
+            lambda: rung_control(client, values),
+        )
+        log.rung_run("echo message_max", lambda: rung_fit(client, values))
+        log.rung_run("echo 128 MiB", lambda: rung_large(client, values))
+        log.rung_run(
+            "second connection refused", lambda: rung_second(client, values)
+        )
+        log.rung_run(
+            "message_max plus one refused", lambda: rung_over(client, values)
+        )
+        log.rung_run("last line", lambda: rung_lines(ttyd, values))
+        log.rung_run("ttyd killed", lambda: rung_killed(ttyd, values))
+
+
+# The rungs on a root that serves the stock main loop in debug mode.
+def stage_stock(log: RungLog, work: str) -> None:
+    root, values = root_make(work, "stock", True)
+    log.rung_start("ttyd")
+    with TtydServer(root, values, log) as ttyd:
+        log.rung_start("mcp line")
+        client, summary = rung_mcp(ttyd, values)
+        log.rung_print(summary)
+        log.rung_run("kv.put and kv.get", lambda: rung_kv(client))
+        log.rung_run("doc.put and doc.head", lambda: rung_doc(client))
+        log.rung_run("verbose.tail", lambda: rung_verbose(client))
+        log.rung_run("unknown type", lambda: rung_unknown(client))
+        log.rung_run("system.restart", lambda: rung_restart(ttyd, values))
+
+
+# The rung on a root whose setting debug is false.
+def stage_release(log: RungLog, work: str) -> None:
+    root, values = root_make(work, "release", False)
+    log.rung_start("ttyd")
+    with TtydServer(root, values, log) as ttyd:
+        log.rung_run(
+            "system.restart refused without debug",
+            lambda: rung_refused(ttyd, values),
+        )
+
+
+# Exits with 128 plus the signal's number, so the blocks stop ttyd.
+def signal_exit(number: int, frame: types.FrameType | None) -> None:
+    sys.exit(_SIGNAL_BASE + number)
 
 
 # Runs the rungs in order, printing a line each, and returns the exit code.
 def main() -> int:
     argparse.ArgumentParser(
-        description="Run the wire test: a copy of bootstrap.py through"
-        " Linux ttyd, from a standard library WebSocket client."
-    ).parse_args()
-    for signal_number in (signal.SIGHUP, signal.SIGTERM):
-        signal.signal(signal_number, signal_exit)
-    deadline = time.monotonic() + _RUN_TIMEOUT_SECONDS
-    os.makedirs(_BUILD_PATH, exist_ok=True)
-    rung = "serve"
+        prog=_PROGRAM_NAME,
+        description="Run the wire test: the server in roots under build/,"
+        " through the ttyd the install script builds, from a standard"
+        " library WebSocket client.",
+    ).parse_args(sys.argv[1:])
+    for number in (signal.SIGHUP, signal.SIGTERM):
+        signal.signal(number, signal_exit)
+    log = RungLog()
     try:
+        if not os.path.isfile(_TTYD_PATH):
+            raise CheckFailed(
+                f"{_TTYD_PATH} is missing: {_INSTALL_SCRIPT} builds it"
+            )
         with tempfile.TemporaryDirectory(
-            prefix="test_wire-", dir=_BUILD_PATH
-        ) as work_path:
-            bootstrap_path = os.path.join(work_path, "bootstrap.py")
-            shutil.copyfile(_BOOTSTRAP_PATH, bootstrap_path)
-            command = [
-                "python3",
-                bootstrap_path,
-                os.path.join(work_path, "modules"),
-            ]
-            with ttyd_serve(_TTYD_OPTIONS, command, deadline) as ttyd:
-                print(f"{rung}: {rung_serve(ttyd)}", flush=True)
-                wire = websocket_open(ttyd, {})
-                for rung, check in (
-                    ("banner", rung_banner),
-                    ("put", rung_put),
-                    ("errors", rung_errors),
-                    ("run", rung_run),
-                    ("stdin", rung_stdin),
-                    ("interrupt", rung_interrupt),
-                    ("abandon", rung_abandon),
-                    ("big put", rung_big_put),
-                    ("lines", rung_lines),
-                    ("update", rung_update),
-                    ("close", rung_close),
-                ):
-                    print(f"{rung}: {check(wire)}", flush=True)
-                # Each on new WebSockets, and last the one that ends ttyd.
-                for rung, ttyd_check in (
-                    ("eof", rung_eof),
-                    ("two clients", rung_two_clients),
-                    ("ttyd killed", rung_ttyd_killed),
-                ):
-                    print(f"{rung}: {ttyd_check(ttyd)}", flush=True)
+            prefix=_WORK_PREFIX, dir=_BUILD_PATH
+        ) as work:
+            stage_echo(log, work)
+            stage_stock(log, work)
+            stage_release(log, work)
     except CheckFailed as failure:
-        print(f"error: {rung}: {failure}", file=sys.stderr)
-        return 1
+        print(f"error: {log.rung}: {failure}", file=sys.stderr)
+        return _EXIT_FAILED
     except KeyboardInterrupt:
-        return 130
+        return _EXIT_INTERRUPTED
     return 0
 
 

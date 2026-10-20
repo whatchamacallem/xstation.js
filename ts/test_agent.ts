@@ -5,9 +5,10 @@
 // Tests of the agent loop on a store over the sqlite3.wasm module and OPFS
 // pool the test page sets as globals, a task queue in synchronous mode, the
 // scripted provider and a double of the MCP clients whose tools answer at
-// once: the recorded turn, the turn after it, short turns and a click, the
-// system prompt, the measurement over the soft limit, and every error the
-// agent throws.
+// once: the castle turn, in which the player answers 1 and the analyst builds
+// the castle's gatehouse scene, the turn after it, short turns and a click,
+// the system prompt, the measurement over the soft limit, and every error
+// the agent throws.
 
 namespace test_agent {
   // The initialized sqlite3.wasm module, a global the test page sets.
@@ -16,13 +17,22 @@ namespace test_agent {
   // Its installed OPFS SAH pool, a global the test page sets.
   declare const test_pool: substrate.SqlitePool;
 
-  // The values of the settings, the seeds, the recorded turn and the tests.
+  // The values of the settings, the seeds, the castle turn and the tests.
   const constants = Object.freeze({
-    // The provider key the recorded turn sends.
+    // A synthetic provider key, which every chat request carries.
     key: "xai-SYNTHETIC-KEY",
-    // The base url and the chat model of `settings.json`.
-    base_url: "https://api.x.ai/v1",
-    chat_model: "grok-4",
+    // The provider's address and models a hello carries when not scripted.
+    info: Object.freeze<lines.ProviderInfo>({
+      base_url: "https://api.x.ai/v1",
+      chat_model: "grok-4",
+      image_model: "grok-2-image",
+    }),
+    // The provider's address and models of a scripted run, empty.
+    scripted_info: Object.freeze<lines.ProviderInfo>({
+      base_url: "",
+      chat_model: "",
+      image_model: "",
+    }),
     // The `overflow_bytes` of `settings.json`, 128 KiB.
     overflow_bytes: 131072,
     // The owner whose port answers the provider's requests.
@@ -31,11 +41,11 @@ namespace test_agent {
     tools_owner: "server" as const,
     // The start of the root of each store a test makes in the pool.
     root_prefix: "/test_agent/",
-    // The hyperposition scene, on screen when the recorded turn starts.
+    // The hyperposition scene, on screen when the castle turn starts.
     scene: "/metaverse/hyperposition/1",
-    // The arrival scene the recorded turn writes and enters.
+    // The arrival scene the castle turn writes and enters.
     arrival: "/castle_gatehouse/scene/arrival/1",
-    // The system prompt of the recorded turn.
+    // The analyst's system prompt, which each store of the tests holds.
     analyst:
       "You are a very bored British psychoanalyst. You hold the" +
       " hyperposition, a dark place of fog and a few inexplicable lights." +
@@ -43,11 +53,11 @@ namespace test_agent {
       " judgement. Your scripts are the database administrator of every" +
       " universe you create: typed tables, indexes, views, no JSON columns" +
       " unless a document is what fits.",
-    // The subtitle the recorded turn ends with.
+    // The subtitle the castle turn ends with.
     subtitle:
       "Mind the moat. The gatehouse keeper has been expecting someone," +
       " though not necessarily you.",
-    // The prompt of the image the recorded turn makes.
+    // The prompt of the image the castle turn makes.
     image_prompt:
       "A rain dark castle gatehouse at dusk seen from the far side of a" +
       " moat, one lantern lit, painted, wide still frame, no people",
@@ -55,7 +65,7 @@ namespace test_agent {
     universe_sql:
       "CREATE TABLE universe (name TEXT PRIMARY KEY, title TEXT NOT NULL," +
       " player TEXT NOT NULL, world TEXT NOT NULL) WITHOUT ROWID, STRICT",
-    // The statements the bootstrap script runs in the recorded turn.
+    // The statements the bootstrap script runs in the castle turn.
     world_sql:
       "CREATE TABLE world (name TEXT PRIMARY KEY, title TEXT NOT NULL)" +
       " STRICT",
@@ -65,9 +75,9 @@ namespace test_agent {
       " tide INTEGER NOT NULL DEFAULT 0) STRICT",
     region_insert: "INSERT INTO region (name) VALUES (?)",
     universe_insert: "INSERT INTO universe VALUES (?, ?, ?, ?)",
-    // The title the recorded turn gives its universe.
+    // The title the castle turn gives its universe.
     universe_title: "The castle",
-    // The result texts of the recorded turn's tool calls, in call order.
+    // The result texts of the castle turn's tool calls, in call order.
     bootstrap_result:
       '{"value":{"universe":"castle","world":"castle_world",' +
       '"region":"castle_gatehouse"},"lines":[]}',
@@ -80,7 +90,7 @@ namespace test_agent {
       '"1e2806a1029564579de9739ef0014f0332c5a8026bca9373e473224a3b094d8b",' +
       '"seq":2}',
     render_result: "{}",
-    // The replies of the test script beside the recorded turn.
+    // The replies of the test script beside the castle turn.
     nothing_reply: "Nothing happens.",
     moat_reply: "Still the moat.",
     // The reply of the answering provider in the test of a click.
@@ -180,9 +190,6 @@ namespace test_agent {
       long_task_ms: 5,
       provider: {
         scripted: true,
-        base_url: "https://api.x.ai/v1",
-        chat_model: "grok-4",
-        image_model: "grok-2-image",
         timeout_seconds: 120,
       },
     };
@@ -204,7 +211,7 @@ namespace test_agent {
     return { id, type: "function", function: { name, arguments: text } };
   }
 
-  // The calls of the recorded turn, each with its arguments as recorded.
+  // The calls of the castle turn, each with its arguments as JSON text.
   function calls_recorded(): provider.ToolCall[] {
     return [
       call_make(
@@ -256,7 +263,7 @@ namespace test_agent {
     };
   }
 
-  // The recorded turn's tools as the MCP clients list them, in its order.
+  // The castle turn's tools as the MCP clients list them, in its order.
   function tools_listed(): mcp.Tool[] {
     const text_type = { type: "string" };
     const object_type = { type: "object" };
@@ -300,7 +307,7 @@ namespace test_agent {
     ];
   }
 
-  // The function tools the recorded requests list for those tools.
+  // The function tools the castle turn's requests list for those tools.
   function functions_recorded(): provider.FunctionTool[] {
     return tools_listed().map(
       (tool: mcp.Tool): provider.FunctionTool => ({
@@ -342,7 +349,7 @@ namespace test_agent {
     return { role: "tool", tool_call_id: call.id, content: text };
   }
 
-  // The rounds of the recorded turn: the calls, then their results.
+  // The rounds of the castle turn: the calls, then their results.
   function rounds_recorded(): provider.ChatMessage[][] {
     const [bootstrap, image, scene, enter, render] = calls_recorded();
     return [
@@ -360,7 +367,7 @@ namespace test_agent {
     ];
   }
 
-  // The messages of each chat request of the recorded turn, in order.
+  // The messages of each chat request of the castle turn, in order.
   function messages_recorded(): provider.ChatMessage[][] {
     const start = [system_said(constants.analyst), user_said("1")];
     const [first, second, third] = rounds_recorded();
@@ -372,7 +379,7 @@ namespace test_agent {
     ];
   }
 
-  // The messages the recorded turn stores as turns of its scene, in order.
+  // The messages the castle turn stores as turns of its scene, in order.
   function contents_recorded(): provider.ChatMessage[] {
     return [
       user_said("1"),
@@ -381,7 +388,7 @@ namespace test_agent {
     ];
   }
 
-  // The script of the recorded turn, with the replies the tests add.
+  // The script of the castle turn, with the replies the tests add.
   function script_recorded(): provider_script.Script {
     const [bootstrap, image, scene, enter, render] = calls_recorded();
     return {
@@ -460,7 +467,7 @@ namespace test_agent {
     return { 0: { t: type }, text };
   }
 
-  // The store changes of the seeded bootstrap script, as the turn records.
+  // The store changes the seeded bootstrap script makes in the castle turn.
   function bootstrap_run(store: substrate.Store, args: Fields): void {
     const universe = args.universe as string;
     const title = args.title as string;
@@ -482,7 +489,7 @@ namespace test_agent {
     world_set(store, world);
   }
 
-  // The tools of the recorded turn: what each changes and the text it gives.
+  // The tools of the castle turn: what each changes and the text it gives.
   function tools_recorded(store: substrate.Store): ToolTable {
     return {
       "browser.script_run": (args: Fields) => {
@@ -532,7 +539,7 @@ namespace test_agent {
       headers: { "content-type": "application/json" },
       json: {
         id: constants.answer_id,
-        model: constants.chat_model,
+        model: constants.info.chat_model,
         choices: [{ index: 0, message, finish_reason: "stop" }],
       },
     });
@@ -540,8 +547,9 @@ namespace test_agent {
 
   // The payload of the chat request the provider door makes for messages.
   function request_expected(messages: provider.ChatMessage[]): Fields {
-    const line = provider.chat_request(constants.base_url, constants.key, {
-      model: constants.chat_model,
+    const { base_url, chat_model } = constants.info;
+    const line = provider.chat_request(base_url, constants.key, {
+      model: chat_model,
       messages,
       tools: functions_recorded(),
       tool_choice: "auto",
@@ -782,6 +790,7 @@ namespace test_agent {
       provider_port: queue.Port,
       value: settings.Settings,
       tools_make: (store: substrate.Store) => ToolTable,
+      info: lines.ProviderInfo,
     ): Bench {
       const forwarded: lines.Line[] = [];
       const store = this.store_make(forwarded, true);
@@ -800,7 +809,7 @@ namespace test_agent {
         new ClientsDouble(tasks, tools_listed()),
         tasks,
         constants.provider_owner,
-        constants.chat_model,
+        info,
         reader_from(value),
         (type: string, _version: number, fn: dispatch.Handler) => {
           routed.set(type, fn);
@@ -809,18 +818,23 @@ namespace test_agent {
       return { store, tasks, ui, provider_tap, tools_tap, forwarded };
     }
 
-    // A bench whose tool doubles are those of the recorded turn.
+    // A bench whose tool doubles are those of the castle turn.
     bench_recorded(
       provider_port: queue.Port,
       value: settings.Settings,
     ): Bench {
-      return this.bench_make(provider_port, value, tools_recorded);
+      return this.bench_make(
+        provider_port,
+        value,
+        tools_recorded,
+        constants.info,
+      );
     }
   }
 
-  // The recorded turn: the player answers 1 and the analyst builds a scene.
+  // The castle turn: the player answers 1 and the analyst builds a scene.
   export class TestTurnRecorded extends AgentCase {
-    // The four chat requests are the recorded ones, made by the door.
+    // The four chat requests are the castle turn's, made by the door.
     test_requests_recorded(): void {
       const script = new provider_script.ScriptPort(script_recorded());
       const bench = this.bench_recorded(script, settings_make());
@@ -900,7 +914,7 @@ namespace test_agent {
     }
   }
 
-  // The turn after the recorded one, in the scene that turn entered.
+  // The turn after the castle turn, in the scene that turn entered.
   export class TestTurnNext extends AgentCase {
     // The next turn is a new conversation, that of the arrival scene.
     test_scene_new(): void {
@@ -1015,7 +1029,12 @@ namespace test_agent {
         }),
       });
       const port = new provider_script.ScriptPort(script);
-      const bench = this.bench_make(port, settings_make(), tools);
+      const bench = this.bench_make(
+        port,
+        settings_make(),
+        tools,
+        constants.info,
+      );
       say_send(bench, 1, "1");
       const messages = requests_of(bench)[1].messages;
       this.assertEqual(
@@ -1025,6 +1044,28 @@ namespace test_agent {
       const reply = bench.ui.posted[0];
       this.assertEqual(
         jslb.payload_of(reply).subtitle,
+        constants.nothing_reply,
+      );
+    }
+
+    // With a scripted run's empty information the request names no model.
+    test_info_scripted(): void {
+      const script = new provider_script.ScriptPort(script_recorded());
+      const bench = this.bench_make(
+        script,
+        settings_make(),
+        tools_recorded,
+        constants.scripted_info,
+      );
+      say_send(bench, 1, "2");
+      const posted = bench.provider_tap.posted;
+      this.assertEqual(posted.length, 1);
+      this.assertEqual(posted[0].url, "/chat/completions");
+      this.assertEqual(requests_of(bench)[0].model, "");
+      const answer = provider.chat_response(bench.provider_tap.received[0]);
+      this.assertEqual(answer.model, "");
+      this.assertEqual(
+        jslb.payload_of(bench.ui.posted[0]).subtitle,
         constants.nothing_reply,
       );
     }
@@ -1214,7 +1255,12 @@ namespace test_agent {
         }),
       });
       const port = new provider_script.ScriptPort(script);
-      const bench = this.bench_make(port, settings_make(), tools);
+      const bench = this.bench_make(
+        port,
+        settings_make(),
+        tools,
+        constants.info,
+      );
       const error = thrown_get(() => say_send(bench, 1, "1"));
       this.assertEqual(
         error.message,
@@ -1306,7 +1352,7 @@ namespace test_agent {
         new ClientsDouble(tasks, []),
         tasks,
         constants.provider_owner,
-        constants.chat_model,
+        constants.info,
         reader_from(settings_make()),
         (type: string, version: number) => {
           seen.push([type, version]);

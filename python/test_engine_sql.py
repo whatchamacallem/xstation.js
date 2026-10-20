@@ -3,11 +3,11 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests `sql.run` through the dispatcher on a real store under `build/`: the
-# statements, results and `seq` numbers the turn and sync transcripts
-# recorded, a read that leaves `seq`, a stale `since` that runs nothing, a
-# failed commit rolled back whole, malformed statements, bound parameters,
-# and the transcripts' statements replayed to a second store, compared by
-# dump and `seq` at every step. A new database starts at `seq` 0.
+# statements that build a universe, their results and `seq` numbers, a read
+# that leaves `seq`, a stale `since` that runs nothing, a failed commit
+# rolled back whole, malformed statements, bound parameters, and those
+# statements replayed to a second store, compared by dump and `seq` at every
+# step. A new database starts at `seq` 0.
 
 import dispatch, engine_sql, jslb, os, sqlite3, substrate, tempfile, unittest
 import unittest.mock
@@ -38,16 +38,16 @@ _BLOB_MAX = 10485760
 # The `message_max` of the settings, 10 MiB.
 _MESSAGE_MAX = 10485760
 
-# The universe database that the turn transcript creates.
+# The universe database that the tests create.
 _UNIVERSE = "castle"
 
-# The world database that the turn transcript creates.
+# The world database of that universe.
 _WORLD = "castle_world"
 
 # The database of the universe table.
 _METAVERSE = "metaverse"
 
-# The `seq` of `metaverse` when the turn transcript inserts the universe.
+# The `seq` the test gives `metaverse` before it inserts the universe row.
 _METAVERSE_SINCE = 7
 
 # The universe table, the one fixed schema of `metaverse`.
@@ -67,7 +67,7 @@ _REGION_DDL = (
     " DEFAULT 0) STRICT"
 )
 
-# The statements the turn transcript commits in the universe database.
+# The statements that build the universe database.
 _UNIVERSE_STATEMENTS: list[dict[str, Any]] = [
     {"sql": _WORLD_DDL, "params": []},
     {
@@ -76,7 +76,7 @@ _UNIVERSE_STATEMENTS: list[dict[str, Any]] = [
     },
 ]
 
-# The statements the turn transcript commits in the world database.
+# The statements that build the world database.
 _WORLD_STATEMENTS: list[dict[str, Any]] = [
     {"sql": _REGION_DDL, "params": []},
     {
@@ -85,7 +85,7 @@ _WORLD_STATEMENTS: list[dict[str, Any]] = [
     },
 ]
 
-# The statement the turn transcript commits in `metaverse`.
+# The statement that adds the universe row to `metaverse`.
 _METAVERSE_STATEMENTS: list[dict[str, Any]] = [
     {
         "sql": "INSERT INTO universe VALUES (?, ?, ?, ?)",
@@ -93,7 +93,7 @@ _METAVERSE_STATEMENTS: list[dict[str, Any]] = [
     },
 ]
 
-# The statement the sync transcript commits in the universe database.
+# A later statement that changes the world's title in the universe database.
 _UPDATE_STATEMENTS: list[dict[str, Any]] = [
     {
         "sql": "UPDATE world SET title = ? WHERE name = ?",
@@ -236,7 +236,7 @@ class IsolatedCase(unittest.TestCase):
             dispatch.line_dispatch(line)
 
 
-# Tests the handler of `sql.run` with the transcripts' statements.
+# Tests the handler of `sql.run` with the statements that build a universe.
 class TestRecorded(IsolatedCase):
     # The universe database's commit: two results and `seq` 1 from 0.
     def test_universe_statements(self) -> None:
@@ -272,7 +272,7 @@ class TestRecorded(IsolatedCase):
         payload = {"results": [_ONE_CHANGE], "seq": 8}
         self.assertEqual(jslb.payload_of(reply), payload)
 
-    # The sync transcript's update after the universe commit: `seq` 2 from 1.
+    # An update after the universe commit: `seq` 2 from 1.
     def test_update_statement(self) -> None:
         engine_sql.handlers_register(self.store)
         _reply_get(_run_line(_UNIVERSE, _UNIVERSE_STATEMENTS, 0))
@@ -369,7 +369,7 @@ class TestEdges(IsolatedCase):
         self.assertTrue(self.table_exists("t"))
 
 
-# Tests the transcripts' statements replayed on a second store.
+# Tests those statements replayed on a second store.
 class TestReplay(IsolatedCase):
     # Runs statements on the first store, forwards them, compares the two.
     def operation_forward(

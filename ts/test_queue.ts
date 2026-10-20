@@ -150,9 +150,6 @@ namespace test_queue {
       long_task_ms: 5,
       provider: {
         scripted: true,
-        base_url: "https://api.x.ai/v1",
-        chat_model: "grok-4",
-        image_model: "grok-2-image",
         timeout_seconds: 120,
       },
     };

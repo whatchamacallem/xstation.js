@@ -25,7 +25,6 @@ namespace agent {
     prompt_type: "prompt",
     part_separator: "\n",
     tool_choice: "auto" as const,
-    base_setting: "provider.base_url",
     soft_setting: "db_soft_bytes",
     // The universes whose row names a world.
     universe_sql: "SELECT name FROM universe WHERE world = ?",
@@ -135,8 +134,8 @@ namespace agent {
     readonly #tasks: queue.TaskQueue;
     // The owner whose port answers the provider's requests.
     readonly #provider_owner: queue.ThreadName;
-    // The model every chat request names.
-    readonly #chat_model: string;
+    // The provider's address and the model every chat request names.
+    readonly #info: lines.ProviderInfo;
     // The reader of the settings.
     readonly #settings_get: SettingsRead;
     // The measurement over the soft limit that the next request carries.
@@ -148,14 +147,14 @@ namespace agent {
       clients: mcp.ClientSet,
       tasks: queue.TaskQueue,
       provider_owner: queue.ThreadName,
-      chat_model: string,
+      info: lines.ProviderInfo,
       settings_get: SettingsRead,
     ) {
       this.#store = store;
       this.#clients = clients;
       this.#tasks = tasks;
       this.#provider_owner = provider_owner;
-      this.#chat_model = chat_model;
+      this.#info = info;
       this.#settings_get = settings_get;
     }
 
@@ -237,9 +236,9 @@ namespace agent {
       for (const row of store.turn_list(scene)) {
         messages.push(row.content);
       }
-      const base_url = this.#settings_get(constants.base_setting) as string;
-      const line = provider.chat_request(base_url, provider.key_get(), {
-        model: this.#chat_model,
+      const info = this.#info;
+      const line = provider.chat_request(info.base_url, provider.key_get(), {
+        model: info.chat_model,
         messages,
         tools: provider.tools_convert(this.#clients.tools_cached()),
         tool_choice: constants.tool_choice,
@@ -284,7 +283,7 @@ namespace agent {
     clients: mcp.ClientSet,
     tasks: queue.TaskQueue,
     provider_owner: queue.ThreadName,
-    chat_model: string,
+    info: lines.ProviderInfo,
     settings_get: SettingsRead,
     register: HandlerRegister,
   ): void {
@@ -293,7 +292,7 @@ namespace agent {
       clients,
       tasks,
       provider_owner,
-      chat_model,
+      info,
       settings_get,
     );
     const version = constants.handler_version;

@@ -27,9 +27,6 @@ namespace test_settings {
       long_task_ms: 5,
       provider: {
         scripted: true,
-        base_url: "https://api.x.ai/v1",
-        chat_model: "grok-4",
-        image_model: "grok-2-image",
         timeout_seconds: 120,
       },
     };
@@ -61,6 +58,9 @@ namespace test_settings {
       const ids = [
         "test.no_such_id",
         "provider.no_such_id",
+        "provider.base_url",
+        "provider.chat_model",
+        "provider.image_model",
         "debug.no_such_id",
         "provider.",
         ".provider",
@@ -79,10 +79,9 @@ namespace test_settings {
       this.assertEqual(store.value_get("debug"), false);
       this.assertEqual(store.value_get("line_max"), 1048576);
       this.assertEqual(store.value_get("provider.scripted"), true);
-      this.assertEqual(store.value_get("provider.chat_model"), "grok-4");
       this.assertEqual(store.value_get("provider.timeout_seconds"), 120);
-      const provider = store.value_get("provider") as { base_url: string };
-      this.assertEqual(provider.base_url, "https://api.x.ai/v1");
+      const provider = store.value_get("provider") as { scripted: boolean };
+      this.assertEqual(provider.scripted, true);
     }
 
     // Outside debug mode the whole object is frozen and refuses a write.
@@ -96,7 +95,7 @@ namespace test_settings {
         value.debug = true;
       });
       this.assertRaises(TypeError, () => {
-        value.provider.base_url = "https://example.invalid";
+        value.provider.timeout_seconds = 60;
       });
       this.assertEqual(store.value_get("debug"), false);
     }
@@ -118,8 +117,8 @@ namespace test_settings {
       store.value_set(value);
       this.assertFalse(Object.isFrozen(value));
       this.assertFalse(Object.isFrozen(value.provider));
-      value.provider.chat_model = "changed";
-      this.assertEqual(store.value_get("provider.chat_model"), "changed");
+      value.provider.timeout_seconds = 60;
+      this.assertEqual(store.value_get("provider.timeout_seconds"), 60);
     }
 
     // A put outside debug mode throws, sends nothing and changes nothing.
@@ -156,16 +155,16 @@ namespace test_settings {
       store.sender_register((payload) => {
         sent.push(payload);
       });
-      store.value_put("provider.chat_model", "grok-x");
+      store.value_put("provider.timeout_seconds", 60);
       store.value_put("line_max", 2048);
-      this.assertEqual(store.value_get("provider.chat_model"), "grok-x");
+      this.assertEqual(store.value_get("provider.timeout_seconds"), 60);
       this.assertEqual(store.value_get("line_max"), 2048);
       this.assertEqual(sent.length, 2);
-      this.assertEqual(sent[0].settings.provider.chat_model, "grok-x");
+      this.assertEqual(sent[0].settings.provider.timeout_seconds, 60);
       this.assertEqual(sent[0].settings.line_max, 1048576);
       this.assertEqual(sent[1].settings.line_max, 2048);
       this.assertEqual(sent[1].settings.debug, true);
-      this.assertEqual(sent[1].settings.provider.timeout_seconds, 120);
+      this.assertEqual(sent[1].settings.provider.scripted, true);
     }
 
     // A put of an unknown id throws and sends nothing.

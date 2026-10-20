@@ -43,10 +43,21 @@ already know. No line numbers are allowed as they are fragile.
   buffering beyond a single external command.
 - No fake data - every value is a measurement or plain arithmetic on one. If a
   tool can't supply a view's data, the view isn't built.
+- System initialization does not have to abide by the rules for how the
+  system is used, such as the one synchronization tool and its audit, unless
+  it is reasonably convenient for it to do so.
+- Nothing refuses the AI API access to the databases unless the maintainer
+  requires it: no protection, permission gate or refusal is added because it
+  seems safe. A refusal that was never a requirement is an
+  Accidental-Requirement and violates the API agreement between the AI API
+  and the databases; when the maintainer lifts it, it is removed, not argued
+  for. Trashed databases are part of developing the AI API; recovery is
+  added later.
 - Any urge to add decorative comments, "helpful" extra logging, or stylistic
   polish not asked for anywhere above is banned. Adding borders, tooltips,
   using alpha, adjusting shade, using gradients, adding requested style or
   redesigning on your own initiative is actively unwanted.
+- Unintentional invisibility is always a bug, not a style issue.
 - When asked to review a commit or unstaged change do not read this document.
   Report inconsistencies with this document only when encountered through
   knowledge gained when it was injected in your context. That is the only self
@@ -96,6 +107,8 @@ manager without request.
 - Intermediates, such as tool caches and Python bytecode, go in `build/`,
   which is gitignored. Point each tool there instead of ignoring what it
   writes beside the sources.
+- Always use the reformatting tools to reformat code when needed instead of
+  doing it manually. Stage code for this reason first if safety is required.
 
 ### Accidental-Requirements, Requirements-Data-Loss, and Requirements-Refusal
 

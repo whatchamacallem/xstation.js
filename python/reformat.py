@@ -5,8 +5,9 @@
 #
 # Formats the files reformat_whitelist.txt's shell globs match, from the
 # project's top directory: Python with ruff, at the 79 columns
-# pyproject.toml sets, and shell with shfmt. Markdown is checked with
-# mdformat, not rewritten.
+# pyproject.toml sets, shell with shfmt, and TypeScript, JavaScript and HTML
+# with prettier, at 79 columns given on its command line and no
+# configuration file. Markdown is checked with mdformat, not rewritten.
 
 import argparse, glob, os, subprocess
 
@@ -28,12 +29,24 @@ _RUFF_FORMAT = [
     _RUFF_CACHE_PATH,
 ]
 
+# `prettier` rewrites the files in place at 79 columns, reading no config.
+_PRETTIER_FORMAT = [
+    "prettier",
+    "--write",
+    "--no-config",
+    "--print-width",
+    "79",
+]
+
 # The formatter command for each extension. Other files have none.
 _FORMATTERS: dict[str, list[str]] = {
+    ".html": _PRETTIER_FORMAT,
+    ".js": _PRETTIER_FORMAT,
     ".md": ["mdformat", "--check"],
     ".py": _RUFF_FORMAT,
     ".pyi": _RUFF_FORMAT,
     ".sh": ["shfmt", "--list", "--write"],
+    ".ts": _PRETTIER_FORMAT,
 }
 
 _WHITELIST_PATH = os.path.join(_PYTHON_PATH, "reformat_whitelist.txt")

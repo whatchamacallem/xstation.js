@@ -12,11 +12,11 @@
 #     .\xsjs_start.ps1 username:password  https://<this PC>:5768/
 #
 # Each run copies the ttyd that xsjs_install.ps1 built, the engine's modules
-# and seeds from python\, i18n\en-US.json, settings.json and the page into
-# ~/.cache/xsjs in Linux, and ttyd runs that copy on port 5769 of WSL's
-# 127.0.0.1. A Windows port proxy forwards port 5768 to it. The environment
-# variable XSJS_PROVIDER_KEY of your user account, when set, is passed on to
-# ttyd.
+# and seeds from python\, i18n\en-US.json, settings.json, provider.json and
+# the page into ~/.cache/xsjs in Linux, and ttyd runs that copy on port 5769
+# of WSL's 127.0.0.1. A Windows port proxy forwards port 5768 to it. The
+# environment variable XSJS_PROVIDER_KEY of your user account, when set, is
+# passed on to ttyd.
 #
 # With a username and password, ttyd serves HTTPS and asks for them, the
 # port proxy listens on every network interface, and a Windows Firewall
@@ -107,7 +107,7 @@ function _xsjs_start_copy_files ([string[]]$sources_, [string]$target_) {
     }
 }
 
-# Copies ttyd, the engine, its seeds, strings, settings and page into Linux.
+# Copies ttyd, engine, seeds, strings, settings, provider and page to Linux.
 function _xsjs_start_step_install_server {
     xsjs_util_write_log_section $i18n_.install_server
     $folders_ = "$linux_path_/python", "$linux_path_/i18n"
@@ -116,7 +116,10 @@ function _xsjs_start_step_install_server {
         throw ($i18n_.bootstrap_not_installed -f $linux_path_)
     }
     $modules_ = @($runtime_modules_ | ForEach-Object { "python/$_.py" })
-    $root_files_ = $ttyd_binary_path_, 'settings.json', "build/$engine_page_"
+    $root_files_ = @(
+        $ttyd_binary_path_, 'settings.json', 'provider.json'
+        "build/$engine_page_"
+    )
     _xsjs_start_copy_files $root_files_ $linux_path_
     _xsjs_start_copy_files ($modules_ + 'python/seed') "$linux_path_/python"
     _xsjs_start_copy_files 'i18n/en-US.json' "$linux_path_/i18n"

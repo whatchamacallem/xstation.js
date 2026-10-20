@@ -5,13 +5,12 @@
 #
 # The stdio transport of the MCP server, so an external agent drives the
 # server's tools directly: newline delimited `JSON-RPC` on stdin and stdout.
-# Run as python3 python/mcp_stdio.py --root ROOT. A permit tool is listed but
-# refused when called, as stdio has no UI to ask. A line that is not a JSON
+# Run as python3 python/mcp_stdio.py --root ROOT. A line that is not a JSON
 # object is a hard error: the exception reaches stderr and the exit code is 1.
 
-import argparse, engine_system, functools, json, mcp, os, settings, sys
+import argparse, engine_system, json, mcp, os, settings, sys
 from collections.abc import Callable
-from typing import Any, TextIO, cast
+from typing import TextIO, cast
 from i18n import i18n
 
 # The name the server reports to a client.
@@ -22,24 +21,6 @@ _SERVER_VERSION = "0"
 
 # The settings file in the root.
 _SETTINGS_NAME = "settings.json"
-
-# The `JSON-RPC` code of a permit tool refused.
-_CODE_PERMIT = -32000
-
-
-# Refuses a permit tool with an error, as stdio has no UI to ask.
-def _permit_refuse(name: str, arguments: dict[str, Any]) -> mcp.ToolResult:
-    raise mcp.RpcError(_CODE_PERMIT, i18n("mcp_stdio.permit_needed", name))
-
-
-# A server that lists every tool but refuses the call of a permit tool.
-class _StdioServer(mcp.Server):
-    # Registers a tool, a permit tool with a function that refuses.
-    def tool_register(
-        self, tool: mcp.Tool, fn: Callable[[dict[str, Any]], mcp.ToolResult]
-    ) -> None:
-        refuse = functools.partial(_permit_refuse, tool.name)
-        super().tool_register(tool, refuse if tool.permit else fn)
 
 
 # Parses one input line, raising when it is not a JSON object.
@@ -66,7 +47,7 @@ def _text_make(message: mcp.Message) -> str:
 def stdio_run(
     register: Callable[[mcp.Server], None], stdin: TextIO, stdout: TextIO
 ) -> int:
-    server = _StdioServer(_SERVER_NAME, _SERVER_VERSION)
+    server = mcp.Server(_SERVER_NAME, _SERVER_VERSION)
     register(server)
     for number, line in enumerate(stdin, 1):
         response = server.message_handle(_line_parse(number, line))

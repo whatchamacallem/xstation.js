@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the scripted provider: a script walked through the recorded turn,
-// the reply lines, every refusal, the image answer, the PNG test pattern held
-// against the recorded one, and the port behind a task queue in synchronous
-// mode.
+// Tests of the scripted provider: a script walked through the castle turn,
+// which builds the gatehouse scene, the reply lines, every refusal, the image
+// answer, the PNG test pattern held against a reference PNG of the same
+// checkerboard in 88 bytes with other compressed data, and the port behind a
+// task queue in synchronous mode.
 
 namespace test_provider_script {
-  // The values the tests share, as the settings and the recorded turn hold.
+  // A provider's address, key and models, the castle turn's values, the PNG's.
   const constants = Object.freeze({
     base_url: "https://api.x.ai/v1",
     key: "xai-SYNTHETIC-KEY",
@@ -99,7 +100,7 @@ namespace test_provider_script {
     };
   }
 
-  // The test script: the recorded turn and a reply for each other path.
+  // The test script: the castle turn and a reply for each other path.
   function script_make(): provider_script.Script {
     const bootstrap = call_make("call_1", "browser.script_run", {
       name: "bootstrap",
@@ -261,7 +262,7 @@ namespace test_provider_script {
     });
   }
 
-  // The bytes of the recorded test pattern.
+  // The bytes of the reference PNG of the checkerboard.
   function recorded_get(): Uint8Array {
     return utility.base64_decode(constants.recorded_png);
   }
@@ -318,7 +319,7 @@ namespace test_provider_script {
     return ~crc >>> 0;
   }
 
-  // The rows of the checkerboard as the recorded turn draws them.
+  // The rows of the checkerboard, 16 by 16 pixels in squares of 4.
   function rows_expected(): Uint8Array {
     const { pattern_size, square_size, channel_count } = constants;
     const bytes: number[] = [];
@@ -338,7 +339,7 @@ namespace test_provider_script {
 
   // The walk of a script and the reply lines that carry it.
   export class TestScriptWalk extends unittest.TestCase {
-    // The recorded turn: three rounds of tool calls, then the subtitle.
+    // The castle turn: three rounds of tool calls, then the subtitle.
     test_turn_walk(): void {
       const bench = bench_make();
       const script = script_make();
@@ -377,7 +378,7 @@ namespace test_provider_script {
       this.assertEqual(bench.port.node(), "gatehouse");
     }
 
-    // The reply comes inside the post, shaped as the recorded replies are.
+    // The reply comes inside the post, shaped as a chat completion reply.
     test_reply_line(): void {
       const bench = bench_make();
       bench.port.line_post(chat_line([user_say("2")], 7, false), []);
@@ -733,9 +734,9 @@ namespace test_provider_script {
     }
   }
 
-  // The PNG test pattern held against the recorded one.
+  // The PNG test pattern held against the reference PNG.
   export class TestImagePattern extends unittest.TestCase {
-    // The PNG starts with the bytes the recorded one starts with.
+    // The PNG starts with the bytes the reference starts with.
     test_signature_recorded(): void {
       const size = constants.signature_bytes;
       this.assertEqual(
@@ -744,14 +745,14 @@ namespace test_provider_script {
       );
     }
 
-    // The chunks are a header, the data and an end, as recorded.
+    // The chunks are a header, the data and an end, as the reference's are.
     test_chunks_recorded(): void {
       const kinds = kinds_of(recorded_get());
       this.assertEqual(kinds, ["IHDR", "IDAT", "IEND"]);
       this.assertEqual(kinds_of(provider_script.image_pattern()), kinds);
     }
 
-    // The header chunk is the recorded one byte for byte, its CRC included.
+    // The header chunk is the reference's byte for byte, its CRC included.
     test_header_recorded(): void {
       this.assertEqual(
         chunk_find(provider_script.image_pattern(), "IHDR").whole,
@@ -759,7 +760,7 @@ namespace test_provider_script {
       );
     }
 
-    // The end chunk is the recorded one byte for byte.
+    // The end chunk is the reference's byte for byte.
     test_end_recorded(): void {
       this.assertEqual(
         chunk_find(provider_script.image_pattern(), "IEND").whole,
@@ -767,7 +768,7 @@ namespace test_provider_script {
       );
     }
 
-    // The reference reads every recorded chunk's CRC, then every one made.
+    // The bitwise CRC matches each chunk of the reference, then each one made.
     test_chunk_crcs(): void {
       for (const chunk of chunks_read(recorded_get())) {
         this.assertEqual(crc_reference(chunk.typed), chunk.crc);
@@ -810,7 +811,7 @@ namespace test_provider_script {
       this.assertEqual(Uint8Array.from(rows), rows_expected());
     }
 
-    // The stream ends in the checksum the recorded stream of the rows ends in.
+    // The stream ends in the checksum the reference's stream of the rows does.
     test_adler_recorded(): void {
       const stream = chunk_find(provider_script.image_pattern(), "IDAT").body;
       const recorded = chunk_find(recorded_get(), "IDAT").body;

@@ -4,10 +4,10 @@
 #
 # Tests `db.create`, `db.drop` and `db.snapshot` through the dispatcher on a
 # real store under `build/`: databases made and dropped by forwarded lines, a
-# new database at `seq` 0 as the turn transcript shows, a stale `since`, the
-# file of a snapshot as blob 1 in memory and streamed to the cache, a
-# snapshot restored into a second store, and a recorded sequence of creates
-# and drops replayed to a second store.
+# new database at `seq` 0, a stale `since`, the file of a snapshot as blob 1
+# in memory and streamed to the cache, a snapshot restored into a second
+# store, and a recorded sequence of creates and drops replayed to a second
+# store.
 
 import dispatch, engine_db, hashlib, jslb, os, sqlite3, substrate, tempfile
 import unittest, unittest.mock, uuid
@@ -53,7 +53,7 @@ _VALUE_OVER = bytes(range(256)) * 800
 # The magic bytes that start every SQLite database file.
 _FILE_MAGIC = b"SQLite format 3\x00"
 
-# Creates and a drop to replay, among them the turn transcript's creates.
+# Creates of the metaverse, a universe, its world and region, then a drop.
 _RECORDED: list[tuple[str, str]] = [
     ("db.create", "metaverse"),
     ("db.create", "castle"),

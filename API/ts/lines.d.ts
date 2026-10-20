@@ -124,8 +124,17 @@ declare namespace lines {
     stack: string;
   }
 
+  // provider.json: the provider's address and model names, none empty.
+  interface ProviderInfo {
+    base_url: string;
+    chat_model: string;
+    image_model: string;
+  }
+
   // hello: the server's request with `i` 1. `seq` per server database.
   // `provider_key` is the environment's `XSJS_PROVIDER_KEY`.
+  // `provider_info` is the root's provider.json, present only when
+  // `provider.scripted` is false.
   interface Hello {
     bootstrap: string;
     sha256: Sha256;
@@ -134,6 +143,7 @@ declare namespace lines {
     settings: settings.Settings;
     seq: { [db: string]: number };
     provider_key: string;
+    provider_info?: ProviderInfo;
   }
 
   // kv.get: the ref is the header's `k`. Reply with the value as blob

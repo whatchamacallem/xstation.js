@@ -4,10 +4,10 @@
 #
 # Tests `turn.append` and `turn.compact` through the dispatcher on a real
 # store under `build/`: turns numbered within their scene, the `n` and `seq`
-# the turn transcript recorded after the seed of `metaverse`, messages read
-# off the wire and stored as canonical JSON, compaction into a summary turn,
-# a stale `since`, what the store refuses, and a recorded sequence replayed
-# to a second store. A new database starts at `seq` 0.
+# of the first turn after the seed of `metaverse`, messages read off the
+# wire and stored as canonical JSON, compaction into a summary turn, a stale
+# `since`, what the store refuses, and a recorded sequence replayed to a
+# second store. A new database starts at `seq` 0.
 
 import dispatch, engine_turn, jslb, json, os, sqlite3, substrate, tempfile
 import unittest, unittest.mock
@@ -75,16 +75,16 @@ _WIDE_TEXT = chr(0x4E2D) + chr(0x6587) + chr(0x1F600)
 # The summary text that the tests compact turns into.
 _SUMMARY = "The player answered 1."
 
-# The arguments of the first tool call of the turn transcript.
+# The arguments of a `script_run` call that builds a universe, as JSON text.
 _SCRIPT_ARGUMENTS = (
     '{"name":"bootstrap","args":{"universe":"castle","title":"The castle",'
     '"world":"castle_world","region":"castle_gatehouse"}}'
 )
 
-# The player's first message of the turn transcript.
+# The player's first message.
 _USER_TURN: dict[str, Any] = {"role": "user", "content": "1"}
 
-# The assistant's tool call of the turn transcript, whose content is null.
+# The assistant's turn that calls `script_run`, whose content is null.
 _CALL_TURN: dict[str, Any] = {
     "role": "assistant",
     "content": None,
@@ -100,7 +100,7 @@ _CALL_TURN: dict[str, Any] = {
     ],
 }
 
-# The assistant's answer of the turn transcript.
+# The assistant's answer to the player.
 _ANSWER_TURN: dict[str, Any] = {
     "role": "assistant",
     "content": "Mind the moat.",
@@ -116,7 +116,7 @@ _TURNS: list[tuple[str, dict[str, Any]]] = [
     ("assistant", _ANSWER_TURN),
 ]
 
-# The operations to replay, a type and a payload, the transcript's two first.
+# The operations to replay, each a type and a payload.
 _RECORDED: list[tuple[str, dict[str, Any]]] = [
     ("turn.append", {"scene": _SCENE, "role": "user", "content": _USER_TURN}),
     (
@@ -274,7 +274,7 @@ class IsolatedCase(unittest.TestCase):
 
 # Tests the handler of `turn.append`.
 class TestAppend(IsolatedCase):
-    # The turn transcript's first turn after the seed: `n` 1 and `seq` 6.
+    # The first turn after the seed gets `n` 1 and the next `seq`, 6.
     def test_turn_appended(self) -> None:
         engine_turn.handlers_register(self.store)
         self.seed_write(self.store)

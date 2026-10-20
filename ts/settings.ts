@@ -32,14 +32,11 @@ namespace settings {
     long_task_ms: number;
     provider: {
       scripted: boolean;
-      base_url: string;
-      chat_model: string;
-      image_model: string;
       timeout_seconds: number;
     };
   }
 
-  // An id is a key, nested keys joined by `.`, as `provider.chat_model`.
+  // An id is a key, nested keys joined by `.`, as `provider.timeout_seconds`.
   export type Id = string;
 
   // Submits the payload of one `settings.put` line to the server.

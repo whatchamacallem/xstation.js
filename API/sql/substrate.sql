@@ -1,6 +1,5 @@
 -- The substrate's tables, created on first use in every database it
--- opens. The prefix keeps them apart from the scripts' tables; a write
--- to one of them through sql_run is refused.
+-- opens. The prefix keeps them apart from the scripts' tables.
 
 -- _meta holds seq, incremented in the same transaction as every
 -- modifying operation, and schema.

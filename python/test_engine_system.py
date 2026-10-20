@@ -226,7 +226,7 @@ class TestSettings(IsolatedCase):
             file.write("old\n")
         changed = _settings_read()
         changed["debug"] = False
-        changed["provider"]["chat_model"] = "other"
+        changed["provider"]["scripted"] = False
         _reply_get(_line_make("settings.put", 1, settings=changed))
         with open(self.settings_path, encoding="utf-8") as file:
             written: dict[str, Any] = json.load(file)
@@ -469,6 +469,16 @@ class TestTools(IsolatedCase):
         request = {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
         listed = _response_get(server, request)["result"]["tools"]
         self.assertEqual(json.dumps(listed), json.dumps(_entries_read()))
+
+    # Neither tool is listed with a permit mark, so no client asks for one.
+    def test_permit_absent(self) -> None:
+        server = self.server_make(True)
+        request = {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
+        listed = _response_get(server, request)["result"]["tools"]
+        self.assertEqual(
+            [(tool["name"], "_meta" in tool) for tool in listed],
+            [("source_put", False), ("system_restart", False)],
+        )
 
     # A second registration on one server raises.
     def test_tools_twice(self) -> None:

@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests the stdio loop on text streams: the transcript DATA/07_mcp_stdio.txt
-# replayed against the tools of API/mcp/tools.json, a permit tool refused and
-# never run, a plain tool run, an output flushed for each response, and a
-# line that is not a JSON object ending the loop with an exception. Then tests
-# the script as a process started the way an external agent starts it, on a
-# root in build/ that holds a copy of the checkout's settings.json.
+# Tests the stdio loop on text streams: an external agent's session opened
+# against the tools of API/mcp/tools.json, each server tool run when called,
+# an output flushed for each response, and a line that is not a JSON object
+# ending the loop with an exception. Then tests the script as a process
+# started the way an external agent starts it, on a root in build/ that holds
+# a copy of the checkout's settings.json.
 
 import contextlib, functools, io, json, mcp, mcp_stdio, os, select, shutil
 import subprocess, sys, tempfile, unittest
@@ -36,12 +36,6 @@ _STDIO_PATH = os.path.join(_ROOT_PATH, "python", "mcp_stdio.py")
 # The API file that holds the tools as `tools/list` returns them.
 _TOOLS_PATH = os.path.join(_ROOT_PATH, "API", "mcp", "tools.json")
 
-# The transcript of an external agent driving the server over stdio.
-_TRANSCRIPT_PATH = os.path.join(_ROOT_PATH, "DATA", "07_mcp_stdio.txt")
-
-# The direction of a transcript line that the client sends.
-_CLIENT_DIRECTION = "CLIENT->STDIO"
-
 # The most seconds a wait on the child takes, a default chosen by its writer.
 _CHILD_SECONDS = 30
 
@@ -60,32 +54,49 @@ _PING_LINE = '{"jsonrpc":"2.0","id":1,"method":"ping"}'
 # The response to it.
 _PING_REPLY = '{"jsonrpc":"2.0","id":1,"result":{}}'
 
-# A call of a permit tool.
-_PERMIT_LINE = (
+# A call of the tool that writes a main loop file.
+_SOURCE_LINE = (
     '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":'
     '{"name":"source_put","arguments":{"name":"a.py","text":"x"}}}'
 )
 
-# The response that refuses it.
-_PERMIT_REPLY = (
-    '{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":'
-    '"source_put needs a permit and stdio has no UI to ask"}}'
+# The response of the recorder to it.
+_SOURCE_REPLY = (
+    '{"jsonrpc":"2.0","id":2,"result":{"content":'
+    '[{"type":"text","text":"source_put"}],"isError":false}}'
 )
 
-# A call of a tool that needs no permit.
-_PLAIN_LINE = (
+# A call of the tool that restarts the process.
+_RESTART_LINE = (
     '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":'
-    '{"name":"plain","arguments":{}}}'
+    '{"name":"system_restart","arguments":{"main_loop":"a.py"}}}'
 )
 
-# The response to it.
-_PLAIN_REPLY = (
+# The response of the recorder to it.
+_RESTART_REPLY = (
     '{"jsonrpc":"2.0","id":3,"result":{"content":'
-    '[{"type":"text","text":"plain"}],"isError":false}}'
+    '[{"type":"text","text":"system_restart"}],"isError":false}}'
+)
+
+# A client's `initialize` request, which opens a session.
+_INITIALIZE_LINE = (
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":'
+    '{"protocolVersion":"2025-06-18","capabilities":{},'
+    '"clientInfo":{"name":"xsjs-test","version":"1"}}}'
+)
+
+# The response to it: the pinned revision, `tools`, the server's identity.
+_INITIALIZE_REPLY = (
+    '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18",'
+    '"capabilities":{"tools":{}},'
+    '"serverInfo":{"name":"xsjs-server","version":"0"}}}'
 )
 
 # The notification that follows a client's `initialize`.
 _INITIALIZED_LINE = '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+
+# A client's `tools/list` request, after the notification.
+_LIST_LINE = '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 
 # A line that is not JSON, with the newline the loop reads with it.
 _MALFORMED_LINE = '{"jsonrpc"\n'
@@ -98,36 +109,34 @@ def _entries_read() -> list[dict[str, Any]]:
     return data["server"]["result"]["tools"]
 
 
-# Builds a tool from an entry of the API file.
+# Builds a tool from an entry of the API file, never a permit tool.
 def _tool_make(entry: dict[str, Any]) -> mcp.Tool:
-    permit = entry.get("_meta", {}).get("xsjs", {}).get("permit", False)
     return mcp.Tool(
-        entry["name"], entry["description"], entry["inputSchema"], permit
+        entry["name"], entry["description"], entry["inputSchema"], False
     )
 
 
-# Reads the transcript in order: the direction and the text of each line.
-def _transcript_steps() -> list[tuple[str, str]]:
-    steps: list[tuple[str, str]] = []
-    with open(_TRANSCRIPT_PATH, encoding="utf-8") as file:
-        for line in file.read().splitlines():
-            if line.startswith("#"):
-                continue
-            _, direction, text = line.split(" ", 2)
-            steps.append((direction, text))
-    return steps
+# The response to `tools/list`: the server tools of the API file, no permit.
+def _list_reply() -> str:
+    tools = [
+        {
+            "name": entry["name"],
+            "description": entry["description"],
+            "inputSchema": entry["inputSchema"],
+        }
+        for entry in _entries_read()
+    ]
+    response = {"jsonrpc": "2.0", "id": 2, "result": {"tools": tools}}
+    return json.dumps(response, ensure_ascii=False, separators=(",", ":"))
 
 
-# Reads the transcript: the lines the client sends, the lines expected back.
-def _transcript_read() -> tuple[list[str], list[str]]:
-    sent: list[str] = []
-    expected: list[str] = []
-    for direction, text in _transcript_steps():
-        if direction == _CLIENT_DIRECTION:
-            sent.append(text)
-        else:
-            expected.append(text)
-    return sent, expected
+# A session in order: each line the client sends and the reply due, if any.
+def _session_steps() -> list[tuple[str, str | None]]:
+    return [
+        (_INITIALIZE_LINE, _INITIALIZE_REPLY),
+        (_INITIALIZED_LINE, None),
+        (_LIST_LINE, _list_reply()),
+    ]
 
 
 # Runs the loop on the text and returns the exit code and the output.
@@ -213,14 +222,6 @@ class CallRecorder:
                 functools.partial(self.tool_run, entry["name"]),
             )
 
-    # Registers those and a tool that needs no permit.
-    def plain_fill(self, server: mcp.Server) -> None:
-        self.server_fill(server)
-        server.tool_register(
-            mcp.Tool("plain", "Plain.", _EMPTY_SCHEMA, False),
-            functools.partial(self.tool_run, "plain"),
-        )
-
     # Registers a tool that answers a number that JSON cannot hold.
     def nan_fill(self, server: mcp.Server) -> None:
         server.tool_register(
@@ -244,15 +245,14 @@ class FlushCounter(io.StringIO):
 
 # Tests the loop on lines that are messages.
 class TestLoop(unittest.TestCase):
-    # The transcript replays line for line, and the permit tool never runs.
-    def test_transcript_replay(self) -> None:
-        sent, expected = _transcript_read()
-        recorder = CallRecorder()
-        text = "".join(line + "\n" for line in sent)
-        code, output = _loop_run(recorder.server_fill, text)
+    # A session replays line for line, the notification with no reply.
+    def test_session_replay(self) -> None:
+        steps = _session_steps()
+        text = "".join(sent + "\n" for sent, _ in steps)
+        code, output = _loop_run(CallRecorder().server_fill, text)
         self.assertEqual(code, 0)
+        expected = [reply for _, reply in steps if reply is not None]
         self.assertEqual(output.splitlines(), expected)
-        self.assertEqual(recorder.calls, [])
 
     # No input ends the loop with exit code 0 and no output.
     def test_input_empty(self) -> None:
@@ -268,21 +268,14 @@ class TestLoop(unittest.TestCase):
         code, output = _loop_run(CallRecorder().server_fill, _PING_LINE)
         self.assertEqual((code, output), (0, _PING_REPLY + "\n"))
 
-    # A permit tool is refused with code `-32000` and its function never runs.
-    def test_permit_refused(self) -> None:
+    # Both server tools run when called, and nothing asks for a permit.
+    def test_tools_run(self) -> None:
         recorder = CallRecorder()
-        code, output = _loop_run(recorder.plain_fill, _PERMIT_LINE + "\n")
-        self.assertEqual((code, output), (0, _PERMIT_REPLY + "\n"))
-        self.assertEqual(recorder.calls, [])
-
-    # A tool that needs no permit runs, beside a refused one.
-    def test_plain_runs(self) -> None:
-        recorder = CallRecorder()
-        text = _PERMIT_LINE + "\n" + _PLAIN_LINE + "\n"
-        code, output = _loop_run(recorder.plain_fill, text)
+        text = _SOURCE_LINE + "\n" + _RESTART_LINE + "\n"
+        code, output = _loop_run(recorder.server_fill, text)
         self.assertEqual(code, 0)
-        self.assertEqual(output.splitlines(), [_PERMIT_REPLY, _PLAIN_REPLY])
-        self.assertEqual(recorder.calls, ["plain"])
+        self.assertEqual(output.splitlines(), [_SOURCE_REPLY, _RESTART_REPLY])
+        self.assertEqual(recorder.calls, ["source_put", "system_restart"])
 
     # Each response is flushed as it is written, and a notification is not.
     def test_flush_each(self) -> None:
@@ -381,14 +374,13 @@ class TestProcess(unittest.TestCase):
         self.addCleanup(_child_stop, process)
         return process
 
-    # The transcript replays line for line, then closing stdin exits with 0.
+    # A session replays line for line, then closing stdin exits with 0.
     def test_process_replay(self) -> None:
         process = self.child_start()
-        for direction, text in _transcript_steps():
-            if direction == _CLIENT_DIRECTION:
-                _line_write(process, text + "\n")
-            else:
-                self.assertEqual(_line_read(process), text + "\n")
+        for sent, reply in _session_steps():
+            _line_write(process, sent + "\n")
+            if reply is not None:
+                self.assertEqual(_line_read(process), reply + "\n")
         output, errors = process.communicate(timeout=_CHILD_SECONDS)
         self.assertEqual((process.returncode, output, errors), (0, b"", b""))
 

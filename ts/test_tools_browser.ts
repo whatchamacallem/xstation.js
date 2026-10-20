@@ -5,10 +5,11 @@
 // Tests of tools_browser.ts on a store of the sqlite3.wasm module and OPFS
 // pool the test page sets as globals, with a server double that keeps the
 // tools and wakes registered on it and a queue double that keeps what the
-// tools submit: the tools as the boot transcript lists them, the result of
+// tools submit: the tools in their listed order and texts, the result of
 // every tool, the requests of the tools that sleep and the results of their
-// wakes against the turn, console and script transcripts, the administration
-// of the databases, and every error.
+// wakes on the values of the castle turn, which builds the gatehouse scene,
+// of a console command and of the step script, the administration of the
+// databases, and every error.
 
 namespace test_tools_browser {
   // The initialized sqlite3.wasm module, a global the test page sets.
@@ -49,19 +50,21 @@ namespace test_tools_browser {
     slot_count: 8,
     // The highest verbose level.
     level_max: 2,
-    // The provider key the transcripts carry.
+    // A synthetic provider key, which every image request carries.
     key: "xai-SYNTHETIC-KEY",
-    // The `provider.base_url` of `settings.json`.
-    base_url: "https://api.x.ai/v1",
-    // The `provider.image_model` of `settings.json`.
-    image_model: "grok-2-image",
+    // The provider's address and models a hello carries when not scripted.
+    info: Object.freeze<lines.ProviderInfo>({
+      base_url: "https://api.x.ai/v1",
+      chat_model: "grok-4",
+      image_model: "grok-2-image",
+    }),
     // The owner the image requests go to.
     provider_owner: "http" as const,
-    // The sentence the recorded description of `sql_run` ends with.
+    // The sentence the old description of `sql_run` ended with, now removed.
     refusal_sentence:
       " Tables whose name starts with _ and the _settings database" +
       " refuse writes.",
-    // The tools that follow the recorded ones, in order.
+    // The tools that follow the first ones, in order.
     added_tools: ["db_stats", "db_compact", "db_unload", "db_load"],
     // The wake types the tools sleep with.
     wake_types: [
@@ -74,35 +77,35 @@ namespace test_tools_browser {
       "tools.tail_reply",
       "tools.snapshot_reply",
     ],
-    // The world table of the castle universe, from the turn transcript.
+    // The world table of the castle universe.
     world_sql:
       "CREATE TABLE world" +
       " (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT",
-    // The region table of the castle world, from the turn transcript.
+    // The region table of the castle world.
     region_sql:
       "CREATE TABLE region" +
       " (name TEXT PRIMARY KEY, tide INTEGER NOT NULL DEFAULT 0) STRICT",
-    // The reply to the castle's statements the turn transcript records.
+    // The result of the castle's two statements and the `seq` after them.
     castle_reply:
       '{"results":[{"columns":[],"rows":[],"changes":0},' +
       '{"columns":[],"rows":[],"changes":1}],"seq":1}',
-    // The ref of the arrival scene of the turn transcript.
+    // The ref of the arrival scene of the castle turn.
     arrival_ref: "/castle_gatehouse/scene/arrival/1",
-    // The result of `doc_put` the turn transcript records.
+    // The result of `doc_put` for the arrival scene, its first version.
     doc_result: '{"ref":"/castle_gatehouse/scene/arrival/1"}',
-    // The subtitle of the arrival scene of the turn transcript.
+    // The subtitle of the arrival scene of the castle turn.
     arrival_subtitle:
       "Mind the moat. The gatehouse keeper has been expecting someone," +
       " though not necessarily you.",
-    // The digest the turn transcript records for the text `castle_world`.
+    // The `SHA-256` of the text `castle_world`.
     world_sha256:
       "6d0be246127ef7993924a9ce127c6fa6c093dca368163093ab31c80273336ecd",
-    // The digest the turn transcript records for the arrival scene's ref.
+    // The `SHA-256` of the arrival scene's ref as text.
     scene_sha256:
       "1e2806a1029564579de9739ef0014f0332c5a8026bca9373e473224a3b094d8b",
-    // The ref of the step script the script transcript puts.
+    // The ref of the step script, which advances the tide of a region.
     step_ref: "/_files/script/step_tide.js",
-    // The step script the script transcript puts, 322 bytes.
+    // The step script, 322 bytes.
     step_script:
       "// Advances the tide by args.hours in the region table" +
       " of the world.\n" +
@@ -112,16 +115,16 @@ namespace test_tools_browser {
       "]);\n" +
       'engine.log(1, "tide advanced by " + args.hours);\n' +
       "return {changes: results[0].changes};\n",
-    // The digest the script transcript records for the step script.
+    // The `SHA-256` of the step script.
     step_sha256:
       "dbc909cf0e2e7954d586c06b3291728e527d5dee4c109409fcb501e200756626",
-    // The line the step script logs, as the script transcript records it.
+    // The line the step script logs when it advances the tide by 1.
     step_line: "tide advanced by 1",
     // The arguments of the step script's call of the store, as JSON.
     step_arguments:
       '["castle_world",[{"sql":"UPDATE region SET tide = tide + ?' +
       ' WHERE name = ?","params":[1,"castle_gatehouse"]}]]',
-    // The prompt of the image the turn transcript makes.
+    // The prompt of the image the castle turn makes.
     image_prompt:
       "A rain dark castle gatehouse at dusk seen from the far side of a" +
       " moat, one lantern lit, painted, wide still frame, no people",
@@ -129,58 +132,58 @@ namespace test_tools_browser {
     image_key: "gatehouse/arrival.png",
     // The ref of that image.
     image_ref: "/_files/gatehouse/arrival.png",
-    // The image the provider answered in the turn transcript, its base64.
+    // The image the provider answers, a checkerboard PNG, in base64.
     image_base64:
       "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAH0lEQVR42mP4jwQYkAAuc" +
       "YZBqGGQO48oDaPxMCg0AADZV36QzYI8swAAAABJRU5ErkJggg==",
-    // The size the turn transcript records for the image.
+    // The size of the image in bytes.
     image_size: 88,
-    // The digest the turn transcript records for the image.
+    // The `SHA-256` of the image.
     image_sha256:
       "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0",
-    // The body of the image request the turn transcript records.
+    // The body of the image request of the castle turn.
     image_json:
       '{"model":"grok-2-image","prompt":"A rain dark castle gatehouse at' +
       " dusk seen from the far side of a moat, one lantern lit, painted," +
       ' wide still frame, no people","n":1,"response_format":"b64_json"}',
-    // The result of `image_make` the turn transcript records.
+    // The result of `image_make`: the image's ref, size and digest.
     image_result:
       '{"key":"/_files/gatehouse/arrival.png","size":88,"sha256":' +
       '"90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0"}',
     // A url an image answer may hold instead of base64, a reserved name.
     image_url: "https://images.invalid/gatehouse/arrival.png",
-    // The payload of the render the turn transcript records.
+    // The payload of the render of the arrival scene.
     render_payload:
       '{"scene":"/castle_gatehouse/scene/arrival/1","subtitle":"Mind the' +
       " moat. The gatehouse keeper has been expecting someone, though not" +
       ' necessarily you.","image":"/_files/gatehouse/arrival.png"}',
-    // The hyperposition, the scene the boot transcript renders.
+    // The hyperposition, the scene the boot renders.
     hyperposition_ref: "/metaverse/hyperposition/1",
     // The subtitle of the hyperposition.
     hyperposition_subtitle: "How can I help you?",
-    // The payload of the render the boot transcript records.
+    // The payload of the render of the hyperposition, black.
     black_payload:
       '{"scene":"/metaverse/hyperposition/1",' +
       '"subtitle":"How can I help you?"}',
-    // The payload of the permit request the console transcript records.
+    // The payload of the first permit request, for `echo hi`.
     permit_payload:
       '{"permit":1,"tool":"browser.console_run",' +
       '"input":{"text":"echo hi","timeout_seconds":5}}',
-    // The input message the console transcript records, 9 bytes.
+    // The input message of ttyd's protocol that types `echo hi`, 9 bytes.
     console_input: "0echo hi\n",
-    // The size the console transcript records for that message.
+    // The size of that message.
     input_size: 9,
-    // The payload of the console read the console transcript records.
+    // The payload of the console read that waits for the prompt.
     read_payload: '{"until":"$ ","timeout_seconds":5}',
-    // The output of the console read the console transcript records.
+    // The output of `echo hi`: its echo, its line and the prompt.
     console_text: "echo hi\r\nhi\r\n$ ",
-    // The result of `console_run` the console transcript records.
+    // The result of `console_run` for that output, trimmed.
     console_result: '{"output":"hi\\n","timed_out":false}',
-    // A verbose line, as the script transcript records it.
+    // A verbose line the step script logs, with a time.
     verbose_line: { at: 1760800000000, level: 1, text: "tide advanced by 1" },
   });
 
-  // The first tools of `tools/list`, as the boot transcript records them.
+  // The first tools of `tools/list` as JSON text, `sql_run` with its old text.
   const recorded_tools: readonly string[] = [
     '{"name":"sql_run","description":"Run SQL statements in one' +
       " transaction on a database. DDL is allowed: your scripts are the" +
@@ -259,7 +262,7 @@ namespace test_tools_browser {
       '"count":{"type":"integer"}},"required":["thread","count"]}}',
   ];
 
-  // The stored text of the arrival scene, as the turn transcript sends it.
+  // The stored text of the arrival scene, its encoded document as JSON.
   const arrival_text =
     '{"0":{"t":"scene"},"1":"/_files/gatehouse/arrival.png","subtitle":"' +
     constants.arrival_subtitle +
@@ -378,9 +381,6 @@ namespace test_tools_browser {
       long_task_ms: 5,
       provider: {
         scripted: true,
-        base_url: "https://api.x.ai/v1",
-        chat_model: "grok-4",
-        image_model: "grok-2-image",
         timeout_seconds: 120,
       },
     };
@@ -507,7 +507,7 @@ namespace test_tools_browser {
         store,
         tasks as unknown as queue.TaskQueue,
         constants.provider_owner,
-        constants.image_model,
+        constants.info,
         reader_make(),
       );
       return { store, server, tasks };
@@ -592,7 +592,7 @@ namespace test_tools_browser {
 
   // The tools and the wakes registered on the server.
   export class TestRegistry extends ToolCase {
-    // The boot transcript's tools come first, `sql_run` refusing nothing.
+    // The first tools come in their order, `sql_run` refusing nothing.
     test_tools_recorded(): void {
       const bench = this.bench_make();
       const recorded = recorded_tools.map(
@@ -652,7 +652,7 @@ namespace test_tools_browser {
 
   // The tools of SQL and of creating and dropping databases.
   export class TestDatabases extends ToolCase {
-    // `sql_run` answers as the server's reply the turn transcript records.
+    // `sql_run` answers the results and the `seq` of the castle's statements.
     test_sql_recorded(): void {
       const bench = this.bench_make();
       bench.store.db_create("castle");
@@ -683,7 +683,7 @@ namespace test_tools_browser {
 
   // The tools of values: put, get, delete and list.
   export class TestValues extends ToolCase {
-    // `kv_put` writes the text's bytes and returns the recorded digests.
+    // `kv_put` writes the text's bytes and returns their known digests.
     test_put_recorded(): void {
       const bench = this.bench_make();
       for (const db of ["metaverse", "castle_world", "_files"]) {
@@ -773,7 +773,7 @@ namespace test_tools_browser {
 
   // The tools of documents.
   export class TestDocuments extends ToolCase {
-    // The arrival scene is put, read and found as the transcript records.
+    // The arrival scene is put, read back as its stored text, and found.
     test_doc_recorded(): void {
       const bench = this.bench_make();
       bench.store.db_create("castle_gatehouse");
@@ -792,7 +792,7 @@ namespace test_tools_browser {
 
   // The tools that run scripts.
   export class TestScripts extends ToolCase {
-    // The recorded step script returns its change and its line.
+    // The step script returns its change and its line.
     test_run_recorded(): void {
       const bench = this.bench_make();
       bench.store.db_create("_files");
@@ -860,7 +860,7 @@ namespace test_tools_browser {
 
   // The tool that makes images, through the provider and the UI.
   export class TestImages extends ToolCase {
-    // The recorded image is asked for, kept, sent to the UI and returned.
+    // The castle turn's image is asked for, kept, sent to the UI, returned.
     test_image_recorded(): void {
       const bench = this.bench_make();
       bench.store.db_create("_files");
@@ -876,10 +876,10 @@ namespace test_tools_browser {
       const request = bench.tasks.sent[0];
       this.assertEqual(request.owner, constants.provider_owner);
       const expected = provider.image_request(
-        constants.base_url,
+        constants.info.base_url,
         constants.key,
         {
-          model: constants.image_model,
+          model: constants.info.image_model,
           prompt: constants.image_prompt,
           n: 1,
           response_format: "b64_json",
@@ -975,7 +975,7 @@ namespace test_tools_browser {
 
   // The tool that renders the current scene.
   export class TestRender extends ToolCase {
-    // The recorded render names the world's scene, the image and subtitle.
+    // The render names the world's scene, the image and the subtitle.
     test_render_recorded(): void {
       const bench = this.bench_make();
       bench.store.db_create("metaverse");
@@ -1002,7 +1002,7 @@ namespace test_tools_browser {
       this.assertEqual(this.text_of(result), "{}");
     }
 
-    // A render with no image is black, as the boot transcript records.
+    // A render with no image is black, as the boot's render is.
     test_render_black(): void {
       const bench = this.bench_make();
       bench.store.db_create("metaverse");
@@ -1043,7 +1043,7 @@ namespace test_tools_browser {
       return reply_build("permit.ask", ask.id as number, { permit, choice });
     }
 
-    // The recorded command asks, runs and returns its output trimmed.
+    // A command asks, runs and returns its output trimmed.
     test_console_recorded(): void {
       const bench = this.bench_make();
       const asked = this.permit_start(bench, "echo hi");

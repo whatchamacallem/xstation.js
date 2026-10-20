@@ -5,9 +5,9 @@
 # Tests `kv.get`, `kv.put`, `kv.delete` and `kv.list` through the dispatcher
 # on a real store under `build/`: values byte for byte, a blob streamed to the
 # cache by the decoder, the replies as the wire carries them, the sizes,
-# hashes and `seq` numbers the transcripts recorded, a stale `since`, and a
-# recorded sequence of forwarded operations replayed to a second store. A new
-# database starts at `seq` 0.
+# hashes and `seq` numbers of known values, a stale `since`, and a recorded
+# sequence of forwarded operations replayed to a second store. A new database
+# starts at `seq` 0.
 
 import base64, dispatch, engine_kv, hashlib, jslb, os, sqlite3, substrate
 import tempfile, unittest, unittest.mock, uuid
@@ -47,40 +47,40 @@ _VALUE_BYTES = bytes(range(256))
 # A value over `overflow_bytes`, which the store keeps in the cache.
 _VALUE_OVER = bytes(range(256)) * 513
 
-# The value of the world key that the turn transcript puts.
+# The value of a world key: the name of a world database.
 _WORLD_VALUE = b"castle_world"
 
-# The hash the turn transcript recorded for the value of the world key.
+# The `sha256` of the value of the world key, in hex.
 _WORLD_SHA256 = (
     "6d0be246127ef7993924a9ce127c6fa6c093dca368163093ab31c80273336ecd"
 )
 
-# The image of the turn transcript, as the scripted provider sent it.
+# A small PNG image, as base64 text.
 _IMAGE_BASE64 = (
     "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAH0lEQVR42mP4"
     "jwQYkAAucYZBqGGQO48oDaPxMCg0AADZV36QzYI8swAAAABJRU5ErkJggg=="
 )
 
-# The bytes of the image of the turn transcript.
+# The bytes of the image.
 _IMAGE_BYTES = base64.b64decode(_IMAGE_BASE64)
 
-# The hash the turn transcript recorded for the image.
+# The `sha256` of the image, in hex.
 _IMAGE_SHA256 = (
     "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0"
 )
 
-# The key of the image of the turn transcript.
+# The ref the image is put under.
 _IMAGE_KEY = "/_files/gatehouse/arrival.png"
 
-# The map of the sync transcript, over `overflow_bytes`.
+# A map over `overflow_bytes`.
 _MAP_BYTES = bytes(range(256)) * 800
 
-# The hash the sync transcript recorded for the map.
+# The `sha256` of the map, in hex.
 _MAP_SHA256 = (
     "8c6627e25bfbdef2bba5abc03123ea8e9b60d892f7f180a8b9b5079fb3233c54"
 )
 
-# The key of the map of the sync transcript.
+# The ref the map is put under.
 _MAP_KEY = "/_files/maps/castle.bin"
 
 # A stand in for the script the server seeds into `_files`.
@@ -92,13 +92,13 @@ _SCRIPT_TWO = b"engine.say('Mind the moat.');"
 # The key of the seeded script.
 _SCRIPT_KEY = "/_files/script/bootstrap.js"
 
-# A stand in for the script of the put the sync transcript refuses.
+# A stand in for the script of the put that a desync refuses.
 _TIDE_SCRIPT = b"engine.log(1, 'tide advanced by 1');"
 
-# The key of the script of the put the sync transcript refuses.
+# The ref of that script.
 _TIDE_KEY = "/_files/script/step_tide.js"
 
-# The message the sync transcript recorded for the put it refuses.
+# The English text of the desync message for that put.
 _DESYNC_MESSAGE = "kv.put: since 3 is not seq 4 of _files"
 
 # The puts on `_files` replayed: the seed, the image, the map, two rewrites.
@@ -311,7 +311,7 @@ class TestGet(IsolatedCase):
 
 # Tests the handler of `kv.put`.
 class TestPut(IsolatedCase):
-    # The turn transcript's image put: its hash and `seq` 2 after the seed.
+    # The image put after the seed: its hash and `seq` 2.
     def test_value_stored(self) -> None:
         engine_kv.handlers_register(self.store)
         self.store.kv_put(_SCRIPT_KEY, _SCRIPT_ONE)
@@ -351,7 +351,7 @@ class TestPut(IsolatedCase):
             self.assertEqual(_blob_read(decoded, 1), value)
             self.assertEqual(jslb.payload_of(decoded), jslb.payload_of(reply))
 
-    # The sync transcript's map arrives streamed and is moved into place.
+    # The map arrives streamed and is moved into place.
     def test_streamed_put(self) -> None:
         engine_kv.handlers_register(self.store)
         self.store.kv_put(_SCRIPT_KEY, _SCRIPT_ONE)
@@ -391,7 +391,7 @@ class TestPut(IsolatedCase):
         )
         self.assertEqual(self.store.seq_get(_DATABASE), 0)
 
-    # The sync transcript's desync: another writer moved `seq` past `since`.
+    # A desync: another writer moved `seq` past `since`.
     def test_writer_ahead(self) -> None:
         engine_kv.handlers_register(self.store)
         self.store.kv_put(_SCRIPT_KEY, _SCRIPT_ONE)

@@ -3,11 +3,11 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the platform services without a pty: the arguments, the engine lock,
-# the hello line and its reply, the choice and loading of the main loop file,
-# the console role and the error line. Each run has descriptors 0 and 1 set to
-# files and raw mode patched to record its calls, and the test main loop files
-# write their calls to files in the root. The scratch directories go under
-# build/.
+# the hello line, the provider file and the reply, the choice and loading of
+# the main loop file, the console role and the error line. Each run has
+# descriptors 0 and 1 set to files and raw mode patched to record its calls,
+# and the test main loop files write their calls to files in the root. The
+# scratch directories go under build/.
 
 import bootstrap, fcntl, hashlib, json, os, signal, sys, tempfile, unittest
 import unittest.mock
@@ -41,6 +41,28 @@ _PROVIDER_KEY = "the provider key of the test"
 # The environment of an engine run, which holds the key and nothing else.
 _ENGINE_ENVIRONMENT = {_PROVIDER_VARIABLE: _PROVIDER_KEY}
 
+# The file in the root that a provider that is not scripted reads.
+_PROVIDER_NAME = "provider.json"
+
+# The provider file of a root whose provider is not scripted, filled out.
+_PROVIDER_INFO = {
+    "base_url": "the base url of the test",
+    "chat_model": "the chat model of the test",
+    "image_model": "the image model of the test",
+}
+
+# Values the provider file may not hold: empty text and values not text.
+_INFO_EMPTY: tuple[object, ...] = ("", None, 0, [])
+
+# The provider fields of `hello` with the key set and the provider file read.
+_FIELDS_FILLED: dict[str, Any] = {
+    "provider_key": _PROVIDER_KEY,
+    "provider_info": _PROVIDER_INFO,
+}
+
+# The provider fields of `hello` with the key set and the provider scripted.
+_FIELDS_SCRIPTED: dict[str, Any] = {"provider_key": _PROVIDER_KEY}
+
 # The environment of a console run: the variables it keeps and two it drops.
 _CONSOLE_ENVIRONMENT = {
     "HOME": "/home/test",
@@ -57,7 +79,7 @@ _CONSOLE_KEPT = {
     "TERM": "xterm-256color",
 }
 
-# The keys of the `hello` line in the order they are written.
+# The keys of the `hello` line before its provider fields, in written order.
 _HELLO_KEYS = [
     "0",
     "bootstrap",
@@ -66,10 +88,9 @@ _HELLO_KEYS = [
     "root",
     "settings",
     "seq",
-    "provider_key",
 ]
 
-# The `seq` map the test main loop returns, as the boot transcript has it.
+# The `seq` map the test main loop returns.
 _LOOP_SEQ = {"_settings": 15, "_files": 1, "_preferences": 0, "metaverse": 5}
 
 # The file name the test main loops are written under in the root.
@@ -177,7 +198,14 @@ class RunRecord(NamedTuple):
     raw_calls: list[tuple[int, int]]
 
 
-# Makes a scratch directory in `build/` with a root holding the settings.
+# Writes the text as the provider file of the root.
+def _info_write(root: str, text: str) -> None:
+    path = os.path.join(root, _PROVIDER_NAME)
+    with open(path, "w", encoding="utf-8") as file:
+        file.write(text)
+
+
+# Makes a scratch root: the settings, and unless scripted the provider file.
 def _root_make(
     case: unittest.TestCase, debug: bool, scripted: bool = True
 ) -> ScratchRoot:
@@ -193,6 +221,8 @@ def _root_make(
     path = os.path.join(root, "settings.json")
     with open(path, "w", encoding="utf-8") as file:
         json.dump(loaded, file)
+    if not scripted:
+        _info_write(root, json.dumps(_PROVIDER_INFO))
     return ScratchRoot(scratch.name, root, loaded)
 
 
@@ -464,13 +494,16 @@ class TestLock(unittest.TestCase):
         self.assertEqual(taken, b"taken")
 
 
-# Tests the `hello` line, the provider key and the main loop calls around it.
+# Tests the `hello` line, its provider fields and the main loop calls.
 class TestHello(unittest.TestCase):
-    # Checks the payload of `hello` and the calls of the test main loop.
+    # Checks `hello`, its provider fields last, and the test main loop's calls.
     def hello_check(
-        self, made: ScratchRoot, hello: dict[str, Any], key: str
+        self,
+        made: ScratchRoot,
+        hello: dict[str, Any],
+        provider: dict[str, Any],
     ) -> None:
-        self.assertEqual(list(hello), _HELLO_KEYS)
+        self.assertEqual(list(hello), _HELLO_KEYS + list(provider))
         self.assertEqual(hello["bootstrap"], _BOOTSTRAP_PATH)
         with open(_BOOTSTRAP_PATH, "rb") as file:
             digest = hashlib.sha256(file.read()).hexdigest()
@@ -480,7 +513,7 @@ class TestHello(unittest.TestCase):
         self.assertEqual(hello["settings"], made.settings)
         self.assertEqual(list(hello["settings"]), list(made.settings))
         self.assertEqual(hello["seq"], _LOOP_SEQ)
-        self.assertEqual(hello["provider_key"], key)
+        self.assertEqual({name: hello[name] for name in provider}, provider)
         self.assertEqual(_marker_read(made.root, _PREPARE_NAME), [made.root])
         self.assertEqual(
             _marker_read(made.root, _RUN_NAME),
@@ -502,6 +535,19 @@ class TestHello(unittest.TestCase):
         prepared = os.path.join(made.root, _PREPARE_NAME)
         self.assertFalse(os.path.exists(prepared))
 
+    # Runs a provider that is not scripted and checks its file is refused.
+    def info_refused(
+        self, made: ScratchRoot, kind: str, expected: str
+    ) -> None:
+        _loop_write(made.root, _LOOP_TEXT)
+        argv = _engine_argv(made.root)
+        record = _run_captured(made, argv, _REPLY_FULL, _ENGINE_ENVIRONMENT)
+        self.assertEqual(record.code, 1)
+        (line,) = _lines_parse(record.output)
+        self.assertEqual(_raised_check(self, line, kind), expected)
+        prepared = os.path.join(made.root, _PREPARE_NAME)
+        self.assertFalse(os.path.exists(prepared))
+
     # Outside debug mode `hello` has short names, with the test's stock file.
     def test_hello_short(self) -> None:
         made = _root_make(self, False, scripted=False)
@@ -515,7 +561,7 @@ class TestHello(unittest.TestCase):
         _raw_check(self, record)
         (hello,) = _lines_parse(record.output)
         self.assertEqual(hello["0"], {"t": "hello", "i": _HELLO_ID})
-        self.hello_check(made, hello, _PROVIDER_KEY)
+        self.hello_check(made, hello, _FIELDS_FILLED)
 
     # In debug mode `hello` has full names.
     def test_hello_full(self) -> None:
@@ -528,7 +574,7 @@ class TestHello(unittest.TestCase):
         _raw_check(self, record)
         (hello,) = _lines_parse(record.output)
         self.assertEqual(hello["0"], {"type": "hello", "id": _HELLO_ID})
-        self.hello_check(made, hello, _PROVIDER_KEY)
+        self.hello_check(made, hello, _FIELDS_SCRIPTED)
 
     # A scripted provider with no key variable sends the empty key.
     def test_provider_scripted(self) -> None:
@@ -539,7 +585,7 @@ class TestHello(unittest.TestCase):
         record = _run_captured(made, argv, given, {})
         self.assertEqual(record.code, 0)
         (hello,) = _lines_parse(record.output)
-        self.hello_check(made, hello, "")
+        self.hello_check(made, hello, {"provider_key": ""})
 
     # An empty key is refused when the provider is not scripted.
     def test_provider_empty(self) -> None:
@@ -548,6 +594,63 @@ class TestHello(unittest.TestCase):
     # No key variable is refused when the provider is not scripted.
     def test_provider_unset(self) -> None:
         self.provider_refused({})
+
+    # A provider that is not scripted sends the file's values beside the key.
+    def test_info_sent(self) -> None:
+        made = _root_make(self, True, scripted=False)
+        _loop_write(made.root, _LOOP_TEXT)
+        given = _REPLY_FULL + _AFTER_REPLY
+        argv = _engine_argv(made.root)
+        record = _run_captured(made, argv, given, _ENGINE_ENVIRONMENT)
+        self.assertEqual(record.code, 0)
+        _raw_check(self, record)
+        (hello,) = _lines_parse(record.output)
+        self.assertEqual(hello["0"], {"type": "hello", "id": _HELLO_ID})
+        self.hello_check(made, hello, _FIELDS_FILLED)
+
+    # A scripted provider never reads the provider file, here not JSON.
+    def test_info_unread(self) -> None:
+        made = _root_make(self, True)
+        _info_write(made.root, "not JSON")
+        _loop_write(made.root, _LOOP_TEXT)
+        given = _REPLY_FULL + _AFTER_REPLY
+        argv = _engine_argv(made.root)
+        record = _run_captured(made, argv, given, _ENGINE_ENVIRONMENT)
+        self.assertEqual(record.code, 0)
+        (hello,) = _lines_parse(record.output)
+        self.hello_check(made, hello, _FIELDS_SCRIPTED)
+
+    # A provider that is not scripted and has no provider file is refused.
+    def test_info_missing(self) -> None:
+        made = _root_make(self, True, scripted=False)
+        path = os.path.join(made.root, _PROVIDER_NAME)
+        os.remove(path)
+        expected = i18n("bootstrap.provider_missing", path)
+        self.info_refused(made, "FileNotFoundError", expected)
+
+    # A file that is not an object with exactly the three keys is refused.
+    def test_info_keys(self) -> None:
+        missing = dict(_PROVIDER_INFO)
+        del missing["image_model"]
+        extra = {**_PROVIDER_INFO, "other": "the other value of the test"}
+        keys = ", ".join(_PROVIDER_INFO)
+        for text in (json.dumps(missing), json.dumps(extra), "[]", '"text"'):
+            made = _root_make(self, True, scripted=False)
+            _info_write(made.root, text)
+            path = os.path.join(made.root, _PROVIDER_NAME)
+            expected = i18n("bootstrap.provider_keys", path, keys)
+            self.info_refused(made, "ValueError", expected)
+
+    # A value that is empty or not text is refused, naming its key.
+    def test_info_empty(self) -> None:
+        for key in _PROVIDER_INFO:
+            for value in _INFO_EMPTY:
+                made = _root_make(self, True, scripted=False)
+                info: dict[str, object] = {**_PROVIDER_INFO, key: value}
+                _info_write(made.root, json.dumps(info))
+                path = os.path.join(made.root, _PROVIDER_NAME)
+                expected = i18n("bootstrap.provider_empty", path, key)
+                self.info_refused(made, "ValueError", expected)
 
 
 # Tests the reply to `hello`, which must be the empty reply in either form.

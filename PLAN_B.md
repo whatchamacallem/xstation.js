@@ -266,6 +266,77 @@ gets its writer's sane value, listed in the handoff.
 2.6.3 The provider request uses `provider.timeout_seconds` (plan 4.1), and
 `console_run` its `timeout_seconds` argument (plan 5.5).
 
+### 2.7 System initialization
+
+2.7.1 The maintainer, verbatim: "System initialization does not have to
+abide by the rules for how the system it is used unless it is reasonably
+convinent for it to do so." The rule is in the project rules.
+
+2.7.2 The worker's initialization (`sqlite3InitModule`,
+`installOpfsSAHPoolVfs` and its capacity, the OPFS directory, file handles
+and `createSyncAccessHandle` for the cache slots) uses promises directly,
+in one module that the synchronization audit of plan 8.6 exempts by name.
+No platform port is built in `queue.ts`. Once initialization has handed the
+objects over, the system runs under plan 1.3 as before.
+
+### 2.8 No refusal between the AI API and the databases
+
+2.8.1 The maintainer, verbatim: "i injected an article into your context
+about how things that were never a requirement become requirements
+incorrectly and then the user is refused when he tries to lifer the
+requirement. this is a violation of the API agreemend between the AI API
+and the databases. If the databases get trashed that is OK and part of the
+AI API development process, where recovery will be included later." The
+rule is in the project rules. It extends 2.3.
+
+2.8.2 `source_put` and `system_restart` are not permit tools: the AI calls
+them without asking, over the line and over stdio. The stdio refusal of a
+permit tool has no case left on the server and is removed. The plan's
+permit set, Unconfirmed in plan 5.5, becomes `console_run` alone, which
+gates the host's shell, not a database (plan 4.6).
+
+2.8.3 Proposed edits for the maintainer: in `API/mcp/tools.json` delete
+the `"_meta": {"xsjs": {"permit": true}}` of `source_put` and
+`system_restart`; plan 5.5 reads "`source_put {name}`, debug, and
+`system_restart {main_loop}`, debug" and "the permit set is
+`console_run`"; plan 8.6 names the initialization module beside the four.
+
+### 2.9 DATA deleted
+
+2.9.1 The maintainer, verbatim: "delete the data dir, it is an obsolete a
+planning tool." `DATA/` is deleted. No code or test reads or cites it; a
+test builds its own expectation. Every mention of `DATA/` elsewhere in this
+file names a directory that no longer exists, kept as the record of what was
+decided at the time.
+
+### 2.10 Provider information
+
+2.10.1 The maintainer, verbatim: "provider info will be provided later, for
+now we depend on the test driver. just have a file that needs to be filled
+out with the info and is not used during testing."
+
+2.10.2 Default for the maintainer to confirm: `provider.json` beside
+`settings.json` holds `base_url`, `chat_model` and `image_model`, empty
+strings to be filled out. These three keys leave `settings.json`, the
+settings checks and the `Settings` interface; `provider.scripted` (true)
+and `provider.timeout_seconds` stay. When `provider.scripted` is false the
+server reads `provider.json`, an empty value is an error, and `hello`
+carries `provider_info {base_url, chat_model, image_model}` beside
+`provider_key` (D8 unchanged). When it is true the file is never read and
+`hello` carries no `provider_info`. Testing is always scripted.
+
+### 2.11 Invisibility
+
+2.11.1 Project rule: unintentional invisibility is always a bug, not a style
+issue. `#debug` (the console and the overlays) under the fixed `#image`
+(record 3.79 of `tmp/tasks_19_2016.md`) is such a bug.
+
+### 2.12 Formatter
+
+2.12.1 The maintainer, verbatim: "add a formatter for .ts, .js, and .html.
+using the tools we have." `prettier` 3.9.8 is installed and formats all
+three; `python/reformat.py` runs it for those extensions.
+
 ## 3 Rules for all code
 
 These came out of the review and stay in force.
@@ -545,50 +616,104 @@ maintainer's commit 168ac16. Updating it (old task 1.9.3) is held.
 
 7.1 Plan, sizes:
 - 3.7: "`blob_max`, 10 MiB, and `message_max`, 10 MiB, a line and its
-  blobs together".
-- 3.8: "Memory per connection is bounded by `message_max`".
-- 6.9: add `message_max`, `queue_max` and `db_soft_bytes`.
-- 8.4, 8.7.3 and 8.7.6: the sizes of 2.1.8.
+  blobs together". Applied by task 1.16.10.
+- 3.8: "Memory per connection is bounded by `message_max`". Applied by
+  task 1.16.10 as "Memory per message", the words of 2.1.7, with the
+  `queue_max` bound of 2.1.3 and 2.1.6 beside it.
+- 6.9: add `message_max`, `queue_max` and `db_soft_bytes`. Applied by
+  task 1.16.10.
+- 8.4, 8.7.3 and 8.7.6: the sizes of 2.1.8. Applied by task 1.16.10,
+  with 3.10 and the 128 MiB rendering of 2.6.
 
 7.2 Plan, protections:
 - 5.5: delete "The substrate's own tables and `_settings` refuse writes."
-- 6.2: delete "`_settings` is immutable" as an enforced rule.
+  Applied by task 1.16.10, replaced by "SQL rules are not a security
+  boundary: no table or database refuses a write."
+- 6.2: delete "`_settings` is immutable" as an enforced rule. Applied by
+  task 1.16.10.
 - 8.7.4: delete "a write to a `_` table or to `_settings` refused".
-- 11: delete the `sql_run` guarding item.
+  Applied by task 1.16.10.
+- 11: delete the `sql_run` guarding item. Applied by task 1.16.10 as a
+  rewrite, not a deletion: the item now records that both the `EXPLAIN`
+  guard and the refusal by name are decided against, so neither returns.
 
-7.3 Plan 2.3 and 7.2: `verbose.exec(level, argv, argv_verbose)`.
+7.3 Plan 2.3 and 7.2: `verbose.exec(level, argv, argv_verbose)`. Applied
+by task 1.16.10, with the reading of 2.5.2 marked Unconfirmed.
 
-7.4 Plan 7.2, 7.3, 8.1 and 8.7.1: the TAP modules of 2.4.
+7.4 Plan 7.2, 7.3, 8.1 and 8.7.1: the TAP modules of 2.4. Applied by
+task 1.16.10, with 0.4, 7.4 and 8.2, and the readings of 2.4.2 and 2.4.3
+marked Unconfirmed.
 
-7.5 Plan 3.9: ids per thread queue (D2).
+7.5 Plan 3.9: ids per thread queue (D2). Not applied by task 1.16.10: D2
+is a default of section 4, not a decision of the maintainer.
 
 7.6 Plan 6.8: `since` on `db.create` and `db.drop`, and a new database at
-`seq` 0 (D1).
+`seq` 0 (D1). Not applied by task 1.16.10: D1 is a default of section 4.
 
-7.7 Plan 9: the root layout of 5.18.
+7.7 Plan 9: the root layout of 5.18. Not applied by task 1.16.10: 5.18 is
+a departure awaiting acceptance.
 
-7.8 Plan 10: a section with the design of 2.2.
+7.8 Plan 10: a section with the design of 2.2. Applied by task 1.16.10 as
+plan 6.10, not in plan 10: plan 10 holds what is not built, and 2.2 is
+built.
 
 7.9 `API/`:
-- `python/verbose.pyi`: `exec`.
+- `python/verbose.pyi`: `exec`. Applied by task 1.16.10, with
+  `python/bootstrap.pyi`'s comment.
 - `python/jslb.pyi` and `ts/jslb.d.ts`: `message_max`, `idle()`, `size`.
-- `python/main_loop.pyi`: `loop_prepare`.
-- `python/substrate.pyi`: `seq_get`.
-- `python/engine_db.pyi`: `since`.
+  Not applied by task 1.16.10: 5.12 and 5.15 await acceptance.
+- `python/main_loop.pyi`: `loop_prepare`. Not applied by task 1.16.10:
+  5.1 awaits acceptance.
+- `python/substrate.pyi`: `seq_get`. Not applied by task 1.16.10: 5.4
+  awaits acceptance. Its `sql_run` refusal comment is removed (2.3).
+- `python/engine_db.pyi`: `since`. Not applied by task 1.16.10: D1.
 - `ts/lines.d.ts`:
   - `DbName` gets `since`;
   - `ConsoleOpenReply { token: string; }`;
   - `replicate.*` and `ui.console_reply`;
   - the `http.request` reply comment.
-- `settings.json`: the sizes and new keys of 2.1 and 2.2.
-- `mcp/tools.json`: `sql_run`'s description without the refusal, and the
-  four tools of 2.2.3.
-- `ts/tap.d.ts` and `ts/unittest.d.ts`: 2.4.
-- `ts/boot.d.ts`: "`self.name` is empty on the main thread".
-- `ts/utility.d.ts`: `json_text` is `JSON.stringify` with number checks.
-- `ts/media.d.ts` and `ts/console_view.d.ts`: 5.13 and 5.14.
 
-7.10 `DATA/`: the regenerations of 6.2.
+  Not applied by task 1.16.10: D1, D23, 5.17, 5.14 and a rule of the
+  review, none a decision of the maintainer. `Hello` gains
+  `provider_info` and `ProviderInfo` (2.10).
+- `settings.json`: the sizes and new keys of 2.1 and 2.2. Applied by
+  task 1.16.10, with the three provider keys removed (2.10), and the
+  same in `ts/settings.d.ts`.
+- `mcp/tools.json`: `sql_run`'s description without the refusal, and the
+  four tools of 2.2.3. The description applied by task 1.16.10; the four
+  tools not: 5.19 lists them for acceptance and 2.2.3 states their names
+  and arguments, not their descriptions and schemas.
+- `ts/tap.d.ts` and `ts/unittest.d.ts`: 2.4. `ts/tap.d.ts` applied by
+  task 1.16.10 as `ts/tap_producer.d.ts`, with `python/tap/producer.pyi`
+  and `python/tap/consumer.pyi` moved to `python/tap_producer.pyi` and
+  `python/tap_consumer.pyi`; `ts/unittest.d.ts` not: its run methods are
+  5.10, awaiting acceptance.
+- `ts/boot.d.ts`: "`self.name` is empty on the main thread". Not applied
+  by task 1.16.10: a finding of the code, not a decision.
+- `ts/utility.d.ts`: `json_text` is `JSON.stringify` with number checks.
+  Not applied by task 1.16.10: D26.
+- `ts/media.d.ts` and `ts/console_view.d.ts`: 5.13 and 5.14. Not
+  applied by task 1.16.10: awaiting acceptance.
+
+7.10 `DATA/`: the regenerations of 6.2. Not applied by task 1.16.10:
+`DATA/` is deleted (2.9).
+
+7.11 Applied by task 1.16.10 beyond 7.1 to 7.10:
+- the edits of 2.8.3: `API/mcp/tools.json` without the `_meta` of
+  `source_put` and `system_restart`, plan 4.6 and 5.5 with the permit
+  set `console_run`, plan 1.3 and 8.6 naming `boot.ts` (2.7);
+- plan 5.5's Unconfirmed tool limits on `db_create` replaced by the
+  decision that no tool limit refuses it (2.2.6, 2.8);
+- every mention of `DATA/` in the plan and the whitelist removed, and
+  the plan's "recorded" operation sequences made sequences the test
+  builds (2.9);
+- the provider file in the plan (5.2, 6.9, 9), `API/settings.json`,
+  `API/ts/settings.d.ts`, `API/ts/lines.d.ts`, and the `info` parameter
+  in `API/ts/agent.d.ts` and `API/ts/tools_browser.d.ts` (2.10);
+- the timers in plan 4.7 (2.6), invisibility in plan 2.6 (2.11), the
+  formatter in plan 0.4 (2.12), MB as MiB in plan 0.5;
+- `API/sql/substrate.sql`'s refusal sentence removed (2.3);
+- the whitelist lines `API/python/tap/*.pyi` and `DATA/*.py` removed.
 
 ## 8 Work remaining in this job, in order
 

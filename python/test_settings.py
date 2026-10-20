@@ -40,9 +40,6 @@ _GOOD_SETTINGS: dict[str, Any] = {
     "long_task_ms": 5,
     "provider": {
         "scripted": True,
-        "base_url": "https://api.x.ai/v1",
-        "chat_model": "grok-4",
-        "image_model": "grok-2-image",
         "timeout_seconds": 120,
     },
 }
@@ -74,8 +71,8 @@ _INT_PATHS = (
     "provider.timeout_seconds",
 )
 
-# The paths of the values that are strings.
-_STR_PATHS = (
+# The paths of the provider values that the provider file holds instead.
+_MOVED_PATHS = (
     "provider.base_url",
     "provider.chat_model",
     "provider.image_model",
@@ -89,9 +86,6 @@ _NOT_BOOL: tuple[Any, ...] = (None, 0, 1, 1.5, "true", [], {})
 
 # Values that are not an int. A bool is not an int and nor is a float.
 _NOT_INT: tuple[Any, ...] = (None, False, True, 1.0, 1.5, "1", [], {})
-
-# Values that are not a string.
-_NOT_STR: tuple[Any, ...] = (None, False, 0, 1.5, [], {})
 
 # Values that are not an object.
 _NOT_OBJECT: tuple[Any, ...] = (None, False, 0, 1.5, "text", [])
@@ -173,9 +167,9 @@ class TestCheck(unittest.TestCase):
     def test_int_wrong(self) -> None:
         self.values_refuse(_INT_PATHS, "int", _NOT_INT)
 
-    # An extra key at the top level or in the provider object is refused.
+    # An extra key, the provider file's keys among them, is refused.
     def test_key_extra(self) -> None:
-        for path in ("extra", "provider.extra"):
+        for path in ("extra", "provider.extra") + _MOVED_PATHS:
             bad = _wire_make()
             holder, name = _holder_find(bad, path)
             holder[name] = 0
@@ -184,7 +178,7 @@ class TestCheck(unittest.TestCase):
 
     # Each missing key, at the top level or in the provider object, is refused.
     def test_key_missing(self) -> None:
-        paths = _BOOL_PATHS + _INT_PATHS + _STR_PATHS + _OBJECT_PATHS
+        paths = _BOOL_PATHS + _INT_PATHS + _OBJECT_PATHS
         for path in paths:
             bad = _wire_make()
             holder, name = _holder_find(bad, path)
@@ -202,10 +196,6 @@ class TestCheck(unittest.TestCase):
     # A value that is not an object is refused where the provider belongs.
     def test_object_wrong(self) -> None:
         self.values_refuse(_OBJECT_PATHS, "dict", _NOT_OBJECT)
-
-    # A value that is not a string is refused where a string belongs.
-    def test_str_wrong(self) -> None:
-        self.values_refuse(_STR_PATHS, "str", _NOT_STR)
 
 
 # Tests of the load on scratch files and on the checkout's file.
@@ -265,9 +255,9 @@ class TestLoad(unittest.TestCase):
     # A file with a missing key is refused.
     def test_load_missing(self) -> None:
         bad = _good_make()
-        del bad["provider"]["chat_model"]
+        del bad["provider"]["timeout_seconds"]
         self.text_write(json.dumps(bad))
-        path = "provider.chat_model"
+        path = "provider.timeout_seconds"
         self.load_fails(i18n("settings.key_missing", path), path)
 
     # A file whose JSON is not an object is refused naming the file.

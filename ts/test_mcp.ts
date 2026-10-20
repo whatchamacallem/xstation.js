@@ -4,11 +4,11 @@
 //
 // Tests of the Model Context Protocol of the AI worker: the methods, errors
 // and sleeping tools of the server, the requests of the client and the
-// reading of its replies, and the set of clients, compared with the recorded
-// transcripts where they hold the value.
+// reading of its replies, and the set of clients, compared with the exact
+// texts of the boot's handshake and of a stdio session where they apply.
 
 namespace test_mcp {
-  // The test type prefix, the identities and the texts the transcripts hold.
+  // The test type prefix, the identities and the exact texts of messages.
   const constants = Object.freeze({
     type_prefix: "mcp_test.",
     client_name: "hyperposition-engine",
@@ -50,20 +50,16 @@ namespace test_mcp {
       'directory for system_restart to serve. Debug mode.",' +
       '"inputSchema":{"type":"object","properties":{' +
       '"name":{"type":"string"},"text":{"type":"string"}},' +
-      '"required":["name","text"]},"_meta":{"xsjs":{"permit":true}}},' +
+      '"required":["name","text"]}},' +
       '{"name":"system_restart","description":"Restart the server process ' +
       "in place, keeping its pid, serving the named main loop file. " +
       'Debug mode.","inputSchema":{"type":"object","properties":{' +
-      '"main_loop":{"type":"string"}},"required":["main_loop"]},' +
-      '"_meta":{"xsjs":{"permit":true}}}]}}',
+      '"main_loop":{"type":"string"}},"required":["main_loop"]}}]}}',
     stdio_ping: '{"jsonrpc":"2.0","id":3,"method":"ping"}',
     stdio_pong: '{"jsonrpc":"2.0","id":3,"result":{}}',
     stdio_restart:
       '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{' +
       '"name":"system_restart","arguments":{"main_loop":"main_loop.py"}}}',
-    stdio_refusal:
-      '{"jsonrpc":"2.0","id":4,"error":{"code":-32000,"message":' +
-      '"system_restart needs a permit and stdio has no UI to ask"}}',
     script_text:
       '{"sha256":"dbc909cf0e2e7954d586c06b3291728e527d5dee4c109409fcb501e' +
       '200756626","seq":5}',
@@ -159,12 +155,12 @@ namespace test_mcp {
     );
   }
 
-  // A server with the name the boot transcript gives the browser's.
+  // A server with the name of the browser's server, `xsjs-browser`.
   function browser_make(): mcp.Server {
     return new mcp.Server(constants.browser_name, constants.version);
   }
 
-  // A server with the name the stdio transcript gives the Python server.
+  // A server with the name of the Python server, `xsjs-server`.
   function server_make(): mcp.Server {
     return new mcp.Server(constants.server_name, constants.version);
   }
@@ -223,12 +219,12 @@ namespace test_mcp {
     throw new Error("Nothing was thrown.");
   }
 
-  // A recorded message or tool read back from its JSON text.
+  // A message or tool read back from its JSON text.
   function text_read(text: string): Fields {
     return JSON.parse(text) as Fields;
   }
 
-  // A recorded line read back from its JSON text.
+  // A line read back from its JSON text.
   function line_read(text: string): lines.Line {
     return JSON.parse(text) as lines.Line;
   }
@@ -302,15 +298,15 @@ namespace test_mcp {
       ]);
     }
 
-    // The revision is the one the boot transcript records.
+    // The revision of the protocol is `2025-06-18`.
     test_version_pinned(): void {
       this.assertEqual(mcp.constants.protocol_version, "2025-06-18");
     }
   }
 
-  // The methods of the server, compared with the recorded answers.
+  // The methods of the server, compared with exact answers.
   export class TestServerMethods extends unittest.TestCase {
-    // `initialize` on the line and on stdio answers as recorded.
+    // `initialize` on the line and on stdio answers with the exact text.
     test_initialize_recorded(): void {
       const browser = browser_make();
       const reply = browser.line_handle(line_read(constants.boot_initialize));
@@ -325,7 +321,7 @@ namespace test_mcp {
       );
     }
 
-    // `ping` answers an empty result as the stdio session records.
+    // `ping` answers an empty result.
     test_ping_recorded(): void {
       const server = server_make();
       this.assertEqual(
@@ -334,7 +330,7 @@ namespace test_mcp {
       );
     }
 
-    // `tools/list` lists the tools in order, `_meta` kept, as recorded.
+    // `tools/list` lists the tools in the order they were registered.
     test_list_recorded(): void {
       const server = server_make();
       const recorded = text_read(constants.stdio_tools);
@@ -348,7 +344,7 @@ namespace test_mcp {
       );
     }
 
-    // `tools/call` runs the tool on its arguments and answers as recorded.
+    // `tools/call` runs the tool on its arguments and answers its result.
     test_call_recorded(): void {
       const server = browser_make();
       const args = { ref: "/_files/script/step_tide.js" };
@@ -545,7 +541,7 @@ namespace test_mcp {
       this.assertEqual(held.state, { n: 1 });
     }
 
-    // The wake answers the request on its port in its name form, as recorded.
+    // The wake answers the request on its port in its name form.
     test_wake_answers(): void {
       const bench = bench_make();
       const server = browser_make();
@@ -668,9 +664,9 @@ namespace test_mcp {
     }
   }
 
-  // The requests of the client as the recorded boot sends them.
+  // The requests of the client as the boot sends them.
   export class TestClientRequests extends unittest.TestCase {
-    // The handshake and the tool list go out and come back as recorded.
+    // The handshake and the tool list go out and come back as exact texts.
     test_handshake_recorded(): void {
       const bench = bench_make();
       const client = client_make(bench, "server");
@@ -869,14 +865,17 @@ namespace test_mcp {
       const id = request_run(bench, () =>
         client.tool_call("system_restart", args),
       );
-      const recorded = text_read(constants.stdio_refusal);
-      const payload = { jsonrpc: "2.0", id: 1, error: recorded.error };
+      const refusal = {
+        code: -32602,
+        message: i18n("mcp.tool_unknown", "system_restart"),
+      };
+      const payload = { jsonrpc: "2.0", id: 1, error: refusal };
       const error = thrown_get(() =>
         client.result_of(reply_build(id, payload)),
       );
       this.assertEqual(
         error.message,
-        i18n("mcp.reply_error", id, utility.json_text(recorded.error)),
+        i18n("mcp.reply_error", id, utility.json_text(refusal)),
       );
     }
 
@@ -967,14 +966,17 @@ namespace test_mcp {
       tools.tool_register(tool_make("kv_get"), () => result);
       const answer = tools.line_handle(sent) as lines.Line;
       this.assertEqual(set.result_of(answer), result);
-      const refusal = text_read(constants.stdio_refusal);
-      const payload = { jsonrpc: "2.0", id: 1, error: refusal.error };
+      const refusal = {
+        code: -32602,
+        message: i18n("mcp.tool_unknown", "system_restart"),
+      };
+      const payload = { jsonrpc: "2.0", id: 1, error: refusal };
       const error = thrown_get(() =>
         set.result_of(reply_build(ids[1], payload)),
       );
       this.assertEqual(
         error.message,
-        i18n("mcp.reply_error", ids[1], utility.json_text(refusal.error)),
+        i18n("mcp.reply_error", ids[1], utility.json_text(refusal)),
       );
     }
 

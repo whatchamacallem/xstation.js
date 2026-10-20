@@ -42,7 +42,7 @@ namespace console_view {
     input_type: "console.input",
     wake_type: "ui.console_reply",
     owner: "ai" as const,
-    // The size of the terminal, as the recorded console session shows it.
+    // The size of the terminal in characters, its columns and its rows.
     columns: 120,
     rows: 40,
     names_full: true,

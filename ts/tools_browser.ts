@@ -62,8 +62,6 @@ namespace tools_browser {
     image_count: 1,
     // The form an image request asks the images in.
     image_format: "b64_json" as const,
-    // The setting of the provider's url.
-    url_setting: "provider.base_url",
     // The setting of the soft limit of the databases' bytes.
     soft_setting: "db_soft_bytes",
     // The choices of a permit that do not simply accept.
@@ -370,7 +368,8 @@ namespace tools_browser {
     readonly store: substrate.Store;
     readonly tasks: queue.TaskQueue;
     readonly provider_owner: queue.ThreadName;
-    readonly image_model: string;
+    // The provider's address and the model every image request names.
+    readonly info: lines.ProviderInfo;
     readonly settings_get: (id: string) => unknown;
     // The name the permit request shows for the permit tool.
     readonly permit_name: string;
@@ -384,13 +383,13 @@ namespace tools_browser {
       store: substrate.Store,
       tasks: queue.TaskQueue,
       provider_owner: queue.ThreadName,
-      image_model: string,
+      info: lines.ProviderInfo,
       settings_get: (id: string) => unknown,
     ) {
       this.store = store;
       this.tasks = tasks;
       this.provider_owner = provider_owner;
-      this.image_model = image_model;
+      this.info = info;
       this.settings_get = settings_get;
       this.permit_name = constants.tool_prefix + constants.permit_tool;
     }
@@ -505,9 +504,9 @@ namespace tools_browser {
       },
       // Asks the provider for an image and sleeps on its reply.
       image_make: (args) => {
-        const url = context.settings_get(constants.url_setting) as string;
-        const request = provider.image_request(url, provider.key_get(), {
-          model: context.image_model,
+        const { base_url, image_model } = context.info;
+        const request = provider.image_request(base_url, provider.key_get(), {
+          model: image_model,
           prompt: args.prompt as string,
           n: constants.image_count,
           response_format: constants.image_format,
@@ -694,14 +693,14 @@ namespace tools_browser {
     store: substrate.Store,
     tasks: queue.TaskQueue,
     provider_owner: queue.ThreadName,
-    image_model: string,
+    info: lines.ProviderInfo,
     settings_get: (id: string) => unknown,
   ): void {
     const context = new ToolContext(
       store,
       tasks,
       provider_owner,
-      image_model,
+      info,
       settings_get,
     );
     const runs = runs_make(context);

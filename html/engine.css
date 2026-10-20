@@ -23,7 +23,7 @@ body {
   object-fit: contain;
 }
 
-/* The subtitle is one centred line at the bottom of the viewport. */
+/* The subtitle, centred at the bottom, on black so it shows over any image. */
 #subtitle {
   position: fixed;
   right: 0;
@@ -31,4 +31,12 @@ body {
   left: 0;
   margin: 0;
   text-align: center;
+  background: black;
+}
+
+/* The debug views, drawn over the image on black, long lines scrolled. */
+#debug {
+  position: relative;
+  overflow: auto;
+  background: black;
 }

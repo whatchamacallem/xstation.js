@@ -4,8 +4,8 @@ The external API of every module hyperposition-plan.md names, before
 any is written. Nothing here runs. A file changes only when
 hyperposition-plan.md changes with it.
 
-- `python/*.pyi` and `python/tap/*.pyi`: the public names of each
-  Python module, as stub files. A handler module lists one function per
+- `python/*.pyi`: the public names of each Python module, as stub
+  files. A handler module lists one function per
   JSLB line type it serves, with the payload as keyword parameters,
   which is how `dispatch` calls it.
 - `ts/*.d.ts`: the public surface of each TypeScript module. Each module

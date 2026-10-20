@@ -5,7 +5,7 @@
 # Tests of the server substrate on scratch roots under build/: the tables on
 # first use, both ref forms, documents and heads, overflow to the cache, a
 # kill between a cache file and its row, snapshots, turns, SQL, the rules of
-# `seq` and the recorded forwarded operations of the transcripts replayed.
+# `seq` and a recorded sequence of forwarded operations replayed.
 
 import base64, hashlib, jslb, json, math, os, signal, sqlite3, substrate
 import tempfile, unittest, unittest.mock
@@ -33,13 +33,13 @@ _VALUE_EXACT = bytes(range(256)) * (_OVERFLOW_BYTES // 256)
 # A value one byte over `overflow_bytes`, which goes to the cache.
 _VALUE_OVER = _VALUE_EXACT + bytes(1)
 
-# The map the sync transcript puts, 204800 bytes, over `overflow_bytes`.
+# A map of 204800 bytes, over `overflow_bytes`.
 _MAP_BYTES = bytes(range(256)) * 800
 
 # The real `os.replace`, which the patched one of the forked child calls.
 _OS_REPLACE = os.replace
 
-# The subtitle of the arrival scene of the turn transcript.
+# The subtitle of the arrival scene.
 _ARRIVAL_SUBTITLE = (
     "Mind the moat. The gatehouse keeper has been expecting someone,"
     " though not necessarily you."
@@ -53,7 +53,7 @@ _ARRIVAL_BODY: dict[int | str, Any] = {
     "image": {"$ref": 1},
 }
 
-# The stored text of the arrival scene, as the turn transcript sends it.
+# The stored text of the arrival scene, its canonical JSON.
 _ARRIVAL_TEXT = (
     '{"0":{"t":"scene"},"1":"/_files/gatehouse/arrival.png","subtitle":"'
     + _ARRIVAL_SUBTITLE
@@ -85,30 +85,30 @@ _UNIVERSE_SQL = (
     " player TEXT NOT NULL, world TEXT NOT NULL) WITHOUT ROWID, STRICT"
 )
 
-# The world table of the castle universe, from the turn transcript.
+# The world table of the castle universe database.
 _WORLD_SQL = (
     "CREATE TABLE world (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT"
 )
 
-# The region table of the castle world, from the turn transcript.
+# The region table of the castle world database.
 _REGION_SQL = (
     "CREATE TABLE region"
     " (name TEXT PRIMARY KEY, tide INTEGER NOT NULL DEFAULT 0) STRICT"
 )
 
-# Each database at the hello of the boot transcript: its `seq`, its tables.
+# Each database the replay starts from: its `seq` and its tables.
 _HELLO_DATABASES: dict[str, tuple[int, list[str]]] = {
     "_files": (1, []),
     "metaverse": (5, [_UNIVERSE_SQL]),
 }
 
-# The arguments of the first tool call of the turn transcript.
+# The arguments of the first tool call, the bootstrap script run.
 _SCRIPT_ARGUMENTS = (
     '{"name":"bootstrap","args":{"universe":"castle","title":"The castle",'
     '"world":"castle_world","region":"castle_gatehouse"}}'
 )
 
-# The prompt of the image the turn transcript makes.
+# The prompt of the image of the arrival scene.
 _IMAGE_PROMPT = (
     "A rain dark castle gatehouse at dusk seen from the far side of a moat,"
     " one lantern lit, painted, wide still frame, no people"
@@ -138,16 +138,16 @@ _RENDER_ARGUMENTS = (
     + '"}'
 )
 
-# The image the provider answered in the turn transcript, its `b64_json`.
+# A small PNG image as a provider answers it, its `b64_json`.
 _IMAGE_BASE64 = (
     "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAH0lEQVR42mP4jwQYkAAuc"
     "YZBqGGQO48oDaPxMCg0AADZV36QzYI8swAAAABJRU5ErkJggg=="
 )
 
-# The bytes of that image, which the turn transcript puts in `_files`.
+# The bytes of that image, which the replay puts in `_files`.
 _IMAGE_BYTES = base64.b64decode(_IMAGE_BASE64)
 
-# The script the sync transcript puts, from the transcripts' generator.
+# A script that advances the tide in the region table of the world.
 _STEP_SCRIPT = (
     "// Advances the tide by args.hours in the region table of the world.\n"
     'const results = engine.store.sql_run("castle_world", [\n'
@@ -158,7 +158,7 @@ _STEP_SCRIPT = (
     "return {changes: results[0].changes};\n"
 )
 
-# The user's answer of the turn transcript, its first message.
+# The user's first message.
 _MESSAGE_USER: dict[str, Any] = {"role": "user", "content": "1"}
 
 # The assistant's message with the first tool call, the bootstrap script.
@@ -231,7 +231,7 @@ _MESSAGE_FINAL: dict[str, Any] = {
     "content": _ARRIVAL_SUBTITLE,
 }
 
-# The forwarded operations of the turn and sync transcripts, as recorded.
+# The forwarded operations to replay: each type, `since`, fields and `seq`.
 _RECORDED: list[tuple[str, int, dict[str, Any], int]] = [
     (
         "turn.append",
@@ -358,7 +358,7 @@ _RECORDED: list[tuple[str, int, dict[str, Any], int]] = [
     ("kv.put", 2, {"k": "/_files/maps/castle.bin", "data": _MAP_BYTES}, 3),
 ]
 
-# The put of the sync transcript that finds the server's `seq` one ahead.
+# A put that finds the server's `seq` one ahead.
 _DESYNC: tuple[str, int, dict[str, Any], int] = (
     "kv.put",
     3,
@@ -366,7 +366,7 @@ _DESYNC: tuple[str, int, dict[str, Any], int] = (
     4,
 )
 
-# The message of the error line the sync transcript records for that put.
+# The English text of the desync message for that put.
 _DESYNC_MESSAGE = "kv.put: since 3 is not seq 4 of _files"
 
 
@@ -456,7 +456,7 @@ def _names_read(path: str) -> list[str]:
     return [row[0] for row in rows]
 
 
-# Makes the databases of the boot transcript's hello at their recorded `seq`.
+# Makes the databases the replay starts from, each at its `seq`.
 def _hello_make(root: str) -> None:
     for name, (seq, tables) in _HELLO_DATABASES.items():
         statements = [_statement_make(sql) for sql in tables]
@@ -1708,7 +1708,7 @@ class TestReplay(unittest.TestCase):
         )
         self.assertEqual(store.seq_get("alpha"), 0)
 
-    # A delete, a compaction and a drop, which no transcript records, apply.
+    # A delete, a compaction and a drop, which the replay lacks, apply.
     def test_operations_unrecorded(self) -> None:
         store = _store_make(self, _root_make(self))
         scene = "/alpha/scene/1"

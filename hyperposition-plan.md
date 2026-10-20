@@ -115,28 +115,27 @@ Current state, not design (1.5): this plan chooses what is reused.
   The tool clones and builds `../ttyd` when missing; 2.7 replaces that
   build.
 - `python/test_posix.py` formats and checks the whitelisted files with
-  ruff, shfmt and a comment lexer; `python/reformat.py`,
-  `python/reformat_whitelist.txt` and `python/pyproject.toml` support
-  it. A new source file is added to the whitelist when it is created.
-  The whitelist covers `API/python/**/*.pyi` and `DATA/*.py`.
+  ruff, shfmt, prettier for `.ts`, `.js` and `.html`, and a comment
+  lexer; `python/reformat.py`, `python/reformat_whitelist.txt` and
+  `python/pyproject.toml` support it. A new source file is added to the
+  whitelist when it is created. The whitelist covers the `API/` stubs.
 - `xsjs_install.ps1`, `xsjs_start.ps1`, `xsjs_stop.ps1`,
   `xsjs_status.ps1` and `powershell/` are the Windows administration
   scripts. ttyd listens on 127.0.0.1:5769 inside WSL and a `netsh` port
   proxy forwards 5768 to it. They change as 7.5 says.
-- `API/` holds the external API of every module and `DATA/` synthetic
-  transcripts of the standard communication, both written from this
-  plan before any code. Nothing in them runs, and they follow the plan;
-  `DATA/transcripts_make.py` regenerates the transcripts.
+- `API/` holds the external API of every module, written from this
+  plan before any code. Nothing in it runs, and it follows the plan.
 - Nothing of the design in sections 1 to 9 is implemented. `ts/`,
-  `html/`, `i18n/`, `third_party/`, `python/tap/`, the substrate and the
-  page do not exist.
+  `html/`, `i18n/`, `third_party/`, the substrate and the page do not
+  exist.
 - Toolchain in the maintainer's WSL account, Ubuntu 26.04: Python 3.14.4
   with SQLite 3.46.1, so `Connection.serialize` and `os.unshare` exist;
   Node 22.22.1 and npm with no `tsc`, which stage 0 needs and the
-  maintainer must be asked to install; ruff, pyright, shfmt and
-  mdformat; docker, unused; Windows Chrome or Edge for the browser
-  tests. `json.dumps` with `allow_nan=False` refuses NaN and writes
-  integers past 2^53 unchanged, so the encoder checks them itself (3.6).
+  maintainer must be asked to install; ruff, pyright, shfmt, prettier
+  3.9.8 and mdformat; docker, unused; Windows Chrome or Edge for the
+  browser tests. `json.dumps` with `allow_nan=False` refuses NaN and
+  writes integers past 2^53 unchanged, so the encoder checks them
+  itself (3.6).
 - ttyd: the latest release is 1.7.7 of 2024-03-30. The apt package,
   1.7.7-4build1 at `/usr/bin/ttyd`, and the release offer `--url-arg`
   and not `--srv-buf-size`; upstream commit db77fde of 2025-01-31 adds
@@ -175,6 +174,7 @@ Current state, not design (1.5): this plan chooses what is reused.
 - Door: a capability the design keeps open without building it. Section
   10 holds each with its design.
 - Permit tool: a tool that runs only after the player accepts it (4.6).
+- MB means MiB, KB KiB and GB GiB, always.
 
 ### 0.6 Using this plan
 
@@ -182,8 +182,7 @@ Current state, not design (1.5): this plan chooses what is reused.
   built, each with its design; 11 what was decided against.
 - Build in the stage order of 8.7. A stage starts only when the previous
   stage's exit criterion holds.
-- API/ and DATA/ follow this plan: a change here changes them in the
-  same pass.
+- API/ follows this plan: a change here changes it in the same pass.
 - The record of the planning process, every question and the
   maintainer's literal answer, was removed from this file on 2026-10-19.
   Every decision it produced is carried below. Do not reconstruct it
@@ -220,6 +219,14 @@ Current state, not design (1.5): this plan chooses what is reused.
   manager, which wakes it with the replies as a new task. No promise,
   lock, shared buffer or `Atomics` exists outside the task manager and
   the ports it owns; the audit in 8.6 enforces it.
+- System initialization need not abide by the rules for how the system
+  is used unless it is reasonably convenient. The AI worker's
+  initialization, `sqlite3InitModule`, `installOpfsSAHPoolVfs` and its
+  capacity, the OPFS directory, its file handles and
+  `createSyncAccessHandle` for the cache files, uses promises directly
+  in one module, `boot.ts`, which the audit of 8.6 exempts by name; no
+  port turns them into lines. Once it has handed the objects over, the
+  system runs under the rule above.
 - In synchronous mode, a debug setting, a queue runs every task it holds
   to completion before it reads the next input from any port, so a run
   is deterministic.
@@ -300,13 +307,14 @@ ttyd --url-arg, one per machine, one program per WebSocket
   `<root>/engine.lock` with `flock`, and when it cannot, writes `error`
   and exits 1.
 - tty 0, the console: bootstrap.py with role `console`, when the setting
-  `debug` is true, runs `/bin/dash` through `verbose.call` with a
-  scrubbed environment and the root as working directory, and exits with
-  its code; when `debug` is false it exits 1 and ttyd closes the
-  connection. Its pty stays cooked, so it echoes. The page's console
-  module speaks ttyd's own client protocol to it, which is ttyd's dash
-  and xterm.js recycled. The user opens it with ctrl-0 or the AI opens
-  it with permission. No log-in beyond ttyd's own.
+  `debug` is true, runs `/bin/dash` through `verbose.exec`, `[dash,
+  "-v"]` its level 2 form, with a scrubbed environment and the root as
+  working directory, and exits with its code; when `debug` is false it
+  exits 1 and ttyd closes the connection. Its pty stays cooked, so it
+  echoes. The page's console module speaks ttyd's own client protocol
+  to it, which is ttyd's dash and xterm.js recycled. The user opens it
+  with ctrl-0 or the AI opens it with permission. No log-in beyond
+  ttyd's own.
 - Unconfirmed: ttyd runs one command and the role rides `--url-arg`; the
   AI worker owns the console socket and relays it to the UI (4.7), so
   the AI worker is the only owner of sockets. Rework if ttyd should run
@@ -381,7 +389,9 @@ ttyd --url-arg, one per machine, one program per WebSocket
   wire traffic and the page's `console.*` output goes to the server as
   `verbose.put`, so `_verbose` holds the page's view. Unconfirmed:
   verbose level 2 and `verbose_forward` gate it; a 128 MiB upload
-  renders as one line, a turn as many.
+  renders as one line per message, a turn as many.
+- The console view and the overlays show above the scene's image.
+  Unintentional invisibility is always a bug, not a style issue.
 
 ### 2.7 ttyd
 
@@ -495,8 +505,10 @@ default values should not be stored, but be implicit by omission.
 - No 0, no `t`, `b` not matching the headers present, a gap in 1 to
   `b`, a non-integer or negative `s`, a payload key that is decimal
   digits, both name forms, an unknown field in the line header.
-- A line over `line_max` or a blob over `blob_max`, refused before the
-  bytes are buffered.
+- A line over `line_max` or a blob over `blob_max`, 10 MiB, refused
+  before the bytes are buffered. A message, a line with its CR plus the
+  `s` of every blob, over `message_max`, 10 MiB, refused when the line
+  ends, before any blob byte is buffered.
 - The decoder raises on the first error and the port that fed it
   closes. No resynchronization on a byte stream.
 
@@ -505,8 +517,13 @@ default values should not be stored, but be implicit by omission.
 - A blob of `s` at most `overflow_bytes` is collected in memory. A
   larger blob is written to a new file in the cache directory as it
   arrives, hashed on the way, and `d` is that path; the handler moves or
-  links it. Memory per connection is bounded by `line_max` plus
-  `overflow_bytes`.
+  links it. Memory per message is bounded by `message_max`.
+- Any JSLB queue holds at most `queue_max`, 100 MiB, a held line
+  counting its JSON text in UTF-8 plus its blob sizes; a line that would
+  exceed it is a fault. The task manager's queues, the wire's and the AI
+  worker's replication queue are bounded so, and `wire.ts` refuses to
+  post a message over `message_max`. The server holds no queue: it
+  dispatches one line at a time.
 - The encoder yields the JSON bytes, then each `d` as is, bytes or
   file. It never copies blob bytes.
 
@@ -534,9 +551,11 @@ default values should not be stored, but be implicit by omission.
   `--srv-buf-size 1048576`; `chunk_bytes` is 1 MiB; `wire.ts` waits for
   `bufferedAmount` under one chunk before the next; the server streams
   big blobs to the cache file so libuv's queue stays short. ttyd's
-  resident size during a 128 MiB upload is measured in stage 2; only if
-  the measurement demands it is a credit line added (10.11) or ttyd
-  patched to bound the queue (2.7).
+  resident size during a 128 MiB upload, sent as messages that each fit
+  `message_max`, one after another, never holding more than
+  `queue_max`, is measured in stage 2; only if the measurement demands
+  it is a credit line added (10.11) or ttyd patched to bound the queue
+  (2.7).
 - ttyd may end a connection without delivering a program's last output,
   and Linux ttyd closes with no close frame, code 1006, when the program
   exits. The page treats a close with no `error` line as the fault
@@ -547,9 +566,8 @@ default values should not be stored, but be implicit by omission.
 ### 3.11 Debug rendering
 
 - A line is rendered for a human as its JSON text followed by one `<blob
-  "n"=K>` tag per blob, K the header key from 1. The overlays (2.6),
-  `verbose.put` of wire traffic and the transcripts in DATA/ use this
-  form.
+  "n"=K>` tag per blob, K the header key from 1. The overlays (2.6) and
+  `verbose.put` of wire traffic use this form.
 
 ## 4 Communication patterns
 
@@ -623,7 +641,8 @@ http     agent      <->  provider      HTTPS, one request per line
   message, skips title and preferences, waits for `hello`.
 - `hello` is the server's request with `i` 1: `bootstrap`, `sha256`,
   `pid`, `root`, `settings`, `seq` per server database and
-  `provider_key`. The worker posts `settings.set` to the UI, answers
+  `provider_key`, and `provider_info` when `provider.scripted` is false
+  (6.9). The worker posts `settings.set` to the UI, answers
   with an empty reply, then posts `boot.hello`.
 - Then, as tasks: for each engine database and the metaverse, compare
   `seq` and replace the browser's file from the server where they
@@ -654,6 +673,10 @@ http     agent      <->  provider      HTTPS, one request per line
   Accept, Deny and Always Allow below it. Accept runs it once; Deny
   returns an error to the model; Always Allow lasts the tab and is not
   stored.
+- The permit set is `console_run` alone, which gates the host's shell,
+  not a database. Nothing between the AI API and the databases asks
+  permission or refuses: the AI calls `source_put` and `system_restart`
+  without asking, over the line and over stdio.
 - The tool submits `permit.ask` to the UI and sleeps. The UI's handler
   shows the buttons, submits `dom.choice` to the DOM port of `page.ts`,
   which answers when a button is clicked, and sleeps; its wake replies
@@ -680,7 +703,10 @@ http     agent      <->  provider      HTTPS, one request per line
   enables the input again.
 - Timers exist wherever a wait can fail: the provider request (4.1), the
   console command, every test rung (8.2). The agent sets no game timers
-  (5.3).
+  (5.3). The provider request waits `provider.timeout_seconds` and the
+  console command `console_run`'s `timeout_seconds` argument; every
+  other timer is a named constant holding a sane default, its one line
+  comment saying its writer chose it.
 
 ## 5 The AI
 
@@ -705,7 +731,9 @@ http     agent      <->  provider      HTTPS, one request per line
   key in `Authorization`; the caller submits it and sleeps. The key is
   read by the server from the environment variable `XSJS_PROVIDER_KEY`,
   a name that is Unconfirmed, and sent in `hello`; it lives in the AI
-  worker's memory only.
+  worker's memory only. The provider's address and model names are in
+  `provider.json` (6.9), filled out by the maintainer later; until then
+  the engine depends on the scripted provider below.
 - `provider_script.ts` answers the same lines with no network: a script
   is a table of nodes; the player's message is one integer that selects
   the node's reply, which may carry tool calls; a tool result advances
@@ -748,11 +776,13 @@ http     agent      <->  provider      HTTPS, one request per line
 Browser, in the AI worker; each names its request:
 
 - `sql_run {db, statements}`: the single door to SQL; DDL allowed, the
-  AI is the database administrator. The substrate's own tables and
-  `_settings` refuse writes.
+  AI is the database administrator. SQL rules are not a security
+  boundary: no table or database refuses a write.
 - `db_create {db}`, `db_drop {db}`: the AI adds and removes databases.
-  Unconfirmed: the AI may create a database outside the universe, world
-  and region ones; rework is tool limits.
+  The AI may create a database outside the universe, world and region
+  ones; no tool limit refuses it, and nothing limits their number.
+- `db_stats {}`, `db_compact {db}`, `db_unload {db}`, `db_load {db}`:
+  the database administration of 6.10.
 - `kv_get {ref}`, `kv_put {ref, text}`, `kv_delete {ref}`, `kv_list {db,
   prefix}`: the KV accessor on Key-Value-Refs.
 - `doc_get {ref}`, `doc_put {db, id, body}`, `doc_head {db, id}`.
@@ -764,12 +794,10 @@ Browser, in the AI worker; each names its request:
 
 Server, in Python:
 
-- `source_put {name}`, permit, debug, and `system_restart {main_loop}`,
-  permit, debug.
+- `source_put {name}`, debug, and `system_restart {main_loop}`, debug.
 
-API/mcp/tools.json is the list as `tools/list` returns it. Unconfirmed:
-the permit set is `console_run`, `source_put` and `system_restart`;
-rework is the tool metadata and the stub conversations.
+API/mcp/tools.json is the list as `tools/list` returns it. The permit
+set is `console_run` (4.6).
 
 ### 5.6 Scripts: the AI's JavaScript and the database administration
 
@@ -822,7 +850,7 @@ rework is the tool metadata and the stub conversations.
 
 ```text
 name          holds                                       schema
-_settings     settings.json loaded, key to JSON text       immutable
+_settings     settings.json loaded, key to JSON text       fixed
 _preferences  the user's preferences, key to JSON text     fixed
 _files        media, scripts and blobs by key              fixed
 _verbose      the server's verbose lines (server only)     fixed
@@ -834,9 +862,11 @@ metaverse     the universe table; the hyperposition        universe fixed
 
 - The three browser databases, settings, preferences and files, are
   these, on the AI thread, named with a leading underscore. `_settings`
-  is immutable; `_preferences` and `_files` have an immutable schema.
-  `_preferences` exists with its schema and nothing writes it yet, as
-  Always Allow lasts the tab (4.6). Unconfirmed.
+  holds the settings file as the server loaded it; `_preferences` and
+  `_files` have the engine's schema. A fixed schema is not enforced and
+  no table or database refuses a write: SQL rules are not a security
+  boundary. Unconfirmed: `_preferences` exists with its schema and
+  nothing writes it yet, as Always Allow lasts the tab (4.6).
 - The substrate's tables (6.3) are created on first use in every
   database the substrate opens, so a Key-Value-Ref resolves in any
   database and a blob is stored in a given database. They are the
@@ -989,38 +1019,83 @@ _files (server)   server      everything ever stored       never, v0
   UI thread, which holds no SQLite, submits its modifications as tasks
   to the AI worker's database, which forwards them; rework if the UI
   must hold a table of its own: a UI side substrate.
-- The forwarded operations are a test driver: a recorded sequence of
-  them replayed into `test_wire.py` drives the server substrate before
-  the page exists, and replayed into the browser drives the page without
-  a provider.
+- The forwarded operations are a test driver: a sequence of them that
+  the test builds, replayed into `test_wire.py`, drives the server
+  substrate before the page exists, and replayed into the browser drives
+  the page without a provider.
 - Direction: during play the browser writes and the server backs up;
   nothing is pushed from the server while a tab is open (one way). The
   server is the source of truth.
 - Start: `hello` carries `seq` per database. Where the browser's `seq`
   differs, its file is invalidated and replaced by the server's:
   `db.snapshot` yields `Connection.serialize` bytes as one blob and
-  `db.restore` writes a temp file and renames it.
+  `db.restore` writes a temp file and renames it. Only the databases the
+  browser holds are replaced; the others stay unloaded until `db_load`
+  (6.10).
 - Desync: a refused push, or a reply whose `seq` is not the browser's,
   is a fault; the page reloads and the reload replaces the file. That
   path is unit tested in stage 6, early. Content divergence with equal
   `seq` is a door (10.9).
 - `_verbose` is server only. `_settings` is written by the server from
-  the file and never by the browser.
+  the file and never by the browser, which nothing enforces.
 
 ### 6.9 Settings
 
 - `settings.json` holds constants only, each with a sane default:
   `debug`, `queue_synchronous`, `verbose_level`, `verbose_ring`,
-  `verbose_forward`, `line_max`, `blob_max`, `overflow_bytes`,
-  `chunk_bytes`, `srv_buf_size`, `media_db_bytes`,
-  `files_browser_bytes`, `turn_compact_tokens`, `long_task_ms`, and
-  `provider` with `scripted`, `base_url`, `chat_model`, `image_model`
-  and `timeout_seconds`. Never a password or a key. A constant no module
-  reads is not there. `grok-4` and `grok-2-image` in API/settings.json
-  are placeholders: the maintainer named xAI and no model.
+  `verbose_forward`, `line_max`, `blob_max`, `message_max`, `queue_max`,
+  `overflow_bytes`, `chunk_bytes`, `srv_buf_size`, `media_db_bytes`,
+  `files_browser_bytes`, `db_soft_bytes`, `turn_compact_tokens`,
+  `long_task_ms`, and `provider` with `scripted` and `timeout_seconds`.
+  Never a password or a key. A constant no module reads is not there.
 - The server loads it into `_settings` at start, so the AI can query it,
   and sends it in `hello` (2.4). `settings.put` in debug mode rewrites
   the file; the server rereads it at the next `hello`.
+- `provider.json` beside `settings.json` holds the provider's
+  `base_url`, `chat_model` and `image_model`, empty strings until the
+  maintainer fills them out, and is not used during testing. When
+  `provider.scripted` is false the server reads it, an empty value is
+  an error, and `hello` carries it as `provider_info` beside
+  `provider_key`; when it is true, as in every test, the file is never
+  read and `hello` carries no `provider_info`. Unconfirmed: the file's
+  name, place and keys; rework is the server's reading of it and
+  `hello`.
+
+### 6.10 Database administration
+
+- The AI is the database administrator of the set of databases it
+  operates on, and keeps the browser's working set in OPFS small enough
+  for fast MCP operations. The server keeps every database as the source
+  of truth (6.7, 6.8), so the browser's set shrinks without losing
+  anything. Nothing limits the number of databases.
+- Measurement is by heuristics, never by a quota call:
+  `navigator.storage.estimate()` is asynchronous and would break the one
+  synchronization tool (1.3). A database's size is `page_count` times
+  `page_size`, plus the `size` of its `_kv` rows whose value is in the
+  cache (`data` NULL); its reclaimable space is `freelist_count` times
+  `page_size`; the total is the sum over the databases open in the AI
+  worker. `db_soft_bytes`, 1 GiB, is a soft limit and refuses nothing.
+- Four browser tools, each one substrate operation behind one MCP tool:
+  `db_stats {}`, read only, returns for each open database `name`,
+  `bytes`, `free_bytes`, `cache_bytes` and `seq`, then `total_bytes`,
+  `soft_bytes` and `over`. `db_compact {db}` runs `VACUUM` on the
+  browser's copy and returns the bytes before and after; content and
+  `seq` are unchanged, so it is not a modifying operation and nothing is
+  forwarded. `db_unload {db}` closes the browser's copy and deletes its
+  OPFS file and the cache files only it references; the server's copy
+  stays, nothing is forwarded, and a later operation on that database is
+  an error naming `db_load`. `db_load {db}` fetches the server's copy
+  with `db.snapshot` and opens it as the start replacement does (6.8).
+- After each turn the agent compares `total_bytes` with
+  `db_soft_bytes`. When over, it adds one system message holding the
+  `db_stats` result to the next provider request, and the AI decides
+  what to unload, compact, drop or `turn_compact`. There is no timer,
+  because time stops. Nothing is evicted automatically but the `_files`
+  browser tier (6.7).
+- The server side is unchanged: the server evicts nothing (6.7).
+- Unconfirmed: the request for "the db admin design/MVC" is read as the
+  minimal code of this design, not a model, view and controller split
+  (5.1); rework is that split.
 
 ## 7 Modules
 
@@ -1028,7 +1103,7 @@ _files (server)   server      everything ever stored       never, v0
 
 - Functions and classes carry two English names; modules and test
   modules are the exception; the maintainer's own identifiers override
-  the rule, as `verbose.log` does.
+  the rule, as `verbose.log` and `verbose.exec` do.
 - Constants are `_UPPER_NAME` at the top of each Python file; TypeScript
   has one frozen `constants` object per module.
 - `i18n("name", ...args)` in both languages; `from i18n import i18n` is
@@ -1045,19 +1120,45 @@ classes. API/python holds the stubs.
 
 - `i18n.py`: raises on a missing name or a placeholder count that
   differs from the argument count.
-- `tap/producer.py`: a `unittest` runner writing TAP with one plan per
-  run and one indented subtest block per module. `tap/consumer.py`:
+- `tap_producer.py`: a `unittest` runner writing TAP with one plan per
+  run and one indented subtest block per module. `tap_consumer.py`:
   takes a document, returns stats: plan, pass, fail, skip, and whether
   the stream is well formed.
+- Both are written for the engine, following tappy's API and
+  implementing only what the engine needs: the producer's
+  `TAPTestRunner`, a `unittest.TextTestRunner` with the setters the
+  engine needs, such as `set_stream`, and `Tracker` with `add_ok`,
+  `add_not_ok`, `add_skip`, `set_plan` and `generate_tap_reports`; the
+  consumer's `Parser` with `parse_text` and `parse_line`, yielding the
+  line kinds `Result`, `Plan`, `Diagnostic`, `Bail`, `Version` and
+  `Unknown`. tappy is not downloaded; compatibility with it is tested
+  later. Unconfirmed: the names are recalled from tappy's documentation;
+  rework is the names once checked against tappy. Unconfirmed: the
+  request's "tap-producer/tap_producer tap-consumer/tap_consumer" is
+  read as these module names, a hyphen being no legal module name;
+  rework if directories `tap-producer/` and `tap-consumer/` are meant.
+- Their own tests, `test_tap_producer.py` and `test_tap_consumer.py`,
+  run before every other test. A test can declare that a suite must
+  fail in a stated way, and passes when the suite fails exactly that
+  way. The producer is exercised so on every way a run can fail: a
+  failing assertion and an exception raised in a test; a failing
+  `subTest`; errors in `setUp`, in `tearDown`, and in `tearDown` after a
+  failure; errors in `setUpClass`, `tearDownClass` and `setUpModule`;
+  `expectedFailure` and an unexpected success; a skip; failfast ending
+  the run with `Bail out!`; a module that does not load.
 - `jslb.py`: `Object`, `header_make`, `blob_make`, `line_make`,
   `field_get`, `headers_of`, `payload_of`, `line_encode`,
   `LineDecoder` with `bytes_feed`, `line_render` (3.11), `WireError`.
   Headers are the `int` keys of the decoded `dict` (3.2).
 - `verbose.py`: `level_set`, `log(level, text)`, `history_get(count)`,
-  `call(level, argv)`, the one place an external program is started, at
-  level 0 quietly with output passed through, at level 1 with Markdown
-  formatted progress, at level 2 raw with verbose flags passed on. Lines
-  go to `_verbose` and the ring.
+  `exec(level, argv, argv_verbose)`, the one place an external program
+  is started: level 0 runs `argv` quietly with its output passed
+  through, level 1 runs `argv` with Markdown formatted progress, level 2
+  runs `argv_verbose`, the caller's command line carrying that program's
+  own verbose flags, raw, its output passed through. Lines go to
+  `_verbose` and the ring. Unconfirmed: level 2 takes a whole
+  `argv_verbose` from the caller; rework if the flags are inserted after
+  `argv[0]` or appended.
 - `settings.py`: `settings_load(path)`, `settings_check(settings)`.
 - `substrate.py`: `Store` with `db_open`, `db_close`, `db_list`,
   `db_create`, `db_drop`, `ref_split`, `kv_get`, `kv_put`, `kv_delete`,
@@ -1094,7 +1195,10 @@ Each is `ts/<name>.ts` with `ts/test_<name>.ts`. API/ts holds the
 declarations.
 
 - `error_overlay.ts`, `utility.ts`, `ui_strings.ts`, `settings.ts`,
-  `i18n.ts`, `tap.ts` (the producer), `unittest.ts` (`TestCase`,
+  `i18n.ts`, `tap_producer.ts` (the producer, with the Python
+  producer's names in the namespace `tap_producer`, exercised on the
+  same ways to fail but `subTest` and the class and module fixtures its
+  harness lacks), `unittest.ts` (`TestCase`,
   `TestSuite`, `TestLoader`, the asserts used; output identical to
   Python's), `verbose.ts`, `jslb.ts`, `dispatch.ts`, `queue.ts`,
   `wire.ts`, `http.ts`.
@@ -1109,7 +1213,7 @@ declarations.
 ### 7.4 Dependency graph
 
 ```text
-PY  i18n  tap/producer  tap/consumer
+PY  i18n  tap_producer  tap_consumer
       |
     jslb  verbose  settings  substrate  mcp
        \     |        |         |        |
@@ -1122,7 +1226,7 @@ PY  i18n  tap/producer  tap/consumer
             |
         bootstrap          mcp_stdio
 
-TS  error_overlay  utility  ui_strings  settings  i18n  tap  unittest
+TS  error_overlay  utility  ui_strings  settings  i18n  tap_producer  unittest
       |
     verbose  jslb   substrate(sqlite3.wasm)   provider  provider_script
       |       |          |                        |
@@ -1160,11 +1264,12 @@ harness.
   per language per run; each module's suite is one subtest block
   indented four spaces with its own plan, then a parent `ok N -
   <module>` line.
-- Every stream is checked by `tap.consumer` on the server: `test_all.py`
+- Every stream is checked by `tap_consumer` on the server: `test_all.py`
   parses its own output; the page sends each TAP line as its own
   `tap.line` as it is produced, and further debug lines ad hoc, and the
   server appends each to `<root>/tap/<language>.tap` unbuffered, so a
-  hang leaves the lines before it on disk. Unconfirmed: `tap.line
+  hang leaves the lines before it on disk. The consumer follows tappy's
+  `Parser` and returns the stats of 7.2. Unconfirmed: `tap.line
   {language, text}` carries the TAP text, and the consumer returns plan,
   pass, fail, skip and whether the stream is well formed; rework if a
   structured result is wanted: the consumer and the test page.
@@ -1176,10 +1281,12 @@ harness.
 
 ### 8.2 Runners
 
-- `python3 python/test_all.py`: the Python suites in dependency order,
-  then `test_wire.py`.
+- `python3 python/test_all.py`: the tests of `tap_producer` and
+  `tap_consumer` first, then the Python suites in dependency order, then
+  `test_wire.py`.
 - `python3 python/test_browser.py`: builds `test.html`, serves it
-  through ttyd, runs the TypeScript suites in headless Chrome, reads the
+  through ttyd, runs the TypeScript suites in headless Chrome, the
+  `tap_producer` tests first in the page's `test_all.ts`, reads the
   `tap.line` stream from the file of 8.1, checks it with the consumer,
   saves a PNG. The one JavaScript runner is a browser. `devtools.py` is
   `page_open(url)`, `script_evaluate(text)`, `console_follow(fn)`,
@@ -1203,8 +1310,10 @@ harness.
 
 ### 8.4 The UI thread stress test
 
-- A long task observer on the UI thread during a 16 MiB `kv.put` and
-  `kv.get`, a 128 MiB upload and a scripted turn with an image requires
+- A long task observer on the UI thread during a `kv.put` and a
+  `kv.get` each of the largest message that fits `message_max`, a 128
+  MiB upload sent as messages that each fit, one after another within
+  `queue_max`, and a scripted turn with an image requires
   no task over `long_task_ms`, 5 ms, a soft target reported as a
   measurement, and no synchronous I/O on the main thread, a hard failure
   found by tracing.
@@ -1224,7 +1333,7 @@ harness.
   or `SharedArrayBuffer` in any `ts/*.ts` other than `queue.ts`,
   `wire.ts`, `http.ts` and `media.ts`, the four modules that turn an
   event of the platform, a socket, a response, an image decoded, into a
-  reply line.
+  reply line, and `boot.ts`, the one initialization module (1.3).
 
 ### 8.7 Stages
 
@@ -1234,16 +1343,19 @@ one's exit criterion holds.
 
 8.7.1 Stage 0, the harness: ttyd built from the pinned release with its
 patches (2.7), which `test_browser.py` serves through;
-`third_party_fetch.py`, `tap/`, `i18n`, `test_all.py`, `tap.ts`,
-`unittest.ts`, `devtools.py`, `test_browser.py`, `page_build.py` for the
-test page, tsc in the build, `error_overlay.ts`, `utility.ts`,
-`ui_strings.ts`, `settings.ts`. Proves one passing, one failing, one
-raising and one skipped method yield identical TAP in both languages as
-one subtest block, accepted by the consumer; `failfast`; `i18n` raises
-in both; a thrown error in the test page ends in the `<pre>` screen;
-`settings_get` of an unknown id throws and the frozen object refuses a
-write. Survey: the TAP text; the PNG. Exit: both runners exit 0 on the
-real suites and 1 on the nested class.
+`third_party_fetch.py`, `tap_producer.py`, `tap_consumer.py`, `i18n`,
+`test_all.py`, `tap_producer.ts`, `unittest.ts`, `devtools.py`,
+`test_browser.py`, `page_build.py` for the test page, tsc in the build,
+`error_overlay.ts`, `utility.ts`, `ui_strings.ts`, `settings.ts`. The
+TAP modules' own tests run first in each runner. Proves one passing,
+one failing, one raising and one skipped method yield identical TAP in
+both languages as one subtest block, accepted by the consumer; every
+way a run can fail, each an expected failure of a suite (7.2);
+`failfast`; `i18n` raises in both; a thrown error in the test page ends
+in the `<pre>` screen; `settings_get` of an unknown id throws and the
+frozen object refuses a write. Survey: the TAP text; the PNG. Exit:
+both runners exit 0 on the real suites, whose expected failures prove
+each way a run fails.
 
 8.7.2 Stage 1, JSLB: `jslb.py`, `jslb.ts`, the vectors, streaming over
 `overflow_bytes`, header probing, rendering. Exit: both suites pass;
@@ -1251,22 +1363,22 @@ each reads all the vectors of the other.
 
 8.7.3 Stage 2, the raw wire: `bootstrap.py` with raw mode, the lock and
 `hello`, an `echo` handler; `test_wire.py` rungs `hello`, `echo`, `echo
-1 MiB with control bytes`, `echo 128 MiB` with ttyd's resident size
-printed, `second connection refused`, `ttyd killed`, and the last line
-regression of the rules' Project Direction 1.1, the old test that keys
-on the last line of a process that exits right after printing it, kept
-as it is: a lone loss there is a ttyd fault, reported with the ttyd
-version and not retried. Each rung runs under a timer. Exit: all rungs
-pass twice.
+1 MiB with control bytes`, `echo 128 MiB` as messages that each fit
+`message_max`, sent one after another within `queue_max`, with ttyd's
+resident size printed, `second connection refused`, `ttyd killed`, and
+the last line regression of the rules' Project Direction 1.1, the old
+test that keys on the last line of a process that exits right after
+printing it, kept as it is: a lone loss there is a ttyd fault, reported
+with the ttyd version and not retried. Each rung runs under a timer.
+Exit: all rungs pass twice.
 
 8.7.4 Stage 3, the server substrate: `substrate.py`, `settings.py`,
 `verbose.py`. Proves the tables created on first use in a new database,
 KV on both ref forms, documents, heads, the document round trip of 6.4,
 `seq` across reopen, overflow at exactly `overflow_bytes`, snapshot and
 restore, a `SIGKILL` between file and row, `kv_check`,
-`operation_apply` of a recorded sequence, `turn_compact`, a write to a
-`_` table or to `_settings` refused. Exit: passes under `python3 -X
-dev`.
+`operation_apply` of a sequence the test builds, `turn_compact`. Exit:
+passes under `python3 -X dev`.
 
 8.7.5 Stage 4, dispatch and the main loop: `dispatch.py`, `engine_*`,
 `main_loop.py`, `mcp.py`, `mcp_stdio.py`, the main loop download and
@@ -1275,16 +1387,17 @@ in the test: `kv.put` and `kv.get` byte identical, `doc.put` and
 `doc.head`, `verbose.tail`, `tools/list` and `tools/call` over stdio
 and over the `mcp` line, an unknown type giving `error` then exit 1,
 `system.restart` serving a second main loop after `source.put` in debug
-mode and the same refused without it, a recorded operation sequence
-replayed over the wire (6.8). Exit: rungs pass; pyright clean.
+mode and the same refused without it, an operation sequence the test
+builds replayed over the wire (6.8). Exit: rungs pass; pyright clean.
 
 8.7.6 Stage 5, the page reaches the server: `dispatch.ts`, `queue.ts`
 with sleep, wake and synchronous mode, `wire.ts`, `http.ts` against a
 local stub, `verbose.ts`, `overlay.ts`, `worker_ai.ts` without
-databases, `page.ts` showing `hello`. Proves the hello relay, a 16 MiB
-round trip equal by SHA-256, a `verbose.put` forwarded from the UI
-through the AI worker to the server unchanged, a sleeping task woken by
-two replies in either order, the same run identical twice in
+databases, `page.ts` showing `hello`. Proves the hello relay, a round
+trip of the largest message that fits `message_max` equal by SHA-256
+and a message one byte larger refused, a `verbose.put` forwarded from
+the UI through the AI worker to the server unchanged, a sleeping task
+woken by two replies in either order, the same run identical twice in
 synchronous mode, the stress test of 8.4, a fault ending in the `<pre>`
 screen and Reload, a close without an `error` line reported as such.
 Survey: a PNG with ctrl-1 open. Exit: `test_browser.py` exits 0.
@@ -1293,9 +1406,9 @@ Survey: a PNG with ctrl-1 open. Exit: `test_browser.py` exits 0.
 the AI worker, the forwarded operations both sides. Proves the stage 3
 suite ported, a second load finding the rows, overflow files in OPFS,
 the string to string table replicated from the UI and from the AI (6.8),
-the start replacement of a differing file, the desync reload, a recorded
-sequence replayed into the page. Exit: identical counts to the Python
-suite; the reload test passes.
+the start replacement of a differing file, the desync reload, an
+operation sequence the test builds replayed into the page. Exit:
+identical counts to the Python suite; the reload test passes.
 
 8.7.8 Stage 7, the console tty: `console_view.ts`, the console lane,
 the permission flow, bootstrap.py's `console` role. Proves `echo`
@@ -1322,11 +1435,11 @@ test plan run by hand. Exit: the maintainer's sign-off.
   account on WSL, started by the Windows scripts, nothing as root, no
   service manager, no container.
 - Server root `~/.cache/xsjs/`: `ttyd`, `bootstrap.py`, the Python
-  package, `main_loop/`, the page, `settings.json`, `ttyd.log`,
-  `engine.lock`, `tap/`, the databases and `cache/`. Start copies the
-  built ttyd (2.7), the package, the page, the settings and the seeds
-  there. The provider key is `XSJS_PROVIDER_KEY` in the environment of
-  the ttyd process.
+  package, `main_loop/`, the page, `settings.json`, `provider.json`,
+  `ttyd.log`, `engine.lock`, `tap/`, the databases and `cache/`. Start
+  copies the built ttyd (2.7), the package, the page, the settings,
+  `provider.json` beside them, and the seeds there. The provider key is
+  `XSJS_PROVIDER_KEY` in the environment of the ttyd process.
 - Certificate, boot and checkout decisions of the rules' Project
   Direction stand unchanged.
 - An audit of the key in `hello` and of the dispatcher's single door
@@ -1529,8 +1642,9 @@ request.
 - Compaction decided by the agent from a token estimate in `agent.ts`:
   inside the wrapper.
 - `sql_run` guarding the engine's tables by parsing statements with
-  `EXPLAIN`: the substrate's tables are prefixed and refuse writes by
-  name.
+  `EXPLAIN`, and the refusal of writes to `_` tables and to `_settings`
+  by name that replaced it: no protections. SQL rules are not a security
+  boundary, and nothing refuses the AI API access to the databases.
 - A console log-in and a player account: none; ownership of the server
   is the account.
 - `settings.ts` generated from settings.json at build time, and a

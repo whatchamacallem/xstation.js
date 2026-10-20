@@ -221,11 +221,11 @@ def system_restart(line: jslb.Object, *, main_loop: str) -> None:
 # Registers the two tools of the server on the MCP server.
 def tools_register(server: mcp.Server, root: str, debug: bool) -> None:
     server.tool_register(
-        mcp.Tool(_SOURCE_TOOL, _SOURCE_DESCRIPTION, _SOURCE_SCHEMA, True),
+        mcp.Tool(_SOURCE_TOOL, _SOURCE_DESCRIPTION, _SOURCE_SCHEMA, False),
         functools.partial(_source_tool, root, debug),
     )
     server.tool_register(
-        mcp.Tool(_RESTART_TOOL, _RESTART_DESCRIPTION, _RESTART_SCHEMA, True),
+        mcp.Tool(_RESTART_TOOL, _RESTART_DESCRIPTION, _RESTART_SCHEMA, False),
         functools.partial(_restart_tool, root, debug),
     )
 

@@ -111,8 +111,14 @@ _SHELL_HEREDOC = re.compile(r"<<(-?)[ \t]*(['\"]?)(\w+)\2")
 # What the shell can have before a comment.
 _SHELL_WORD_BREAK = " \t\n;&|()<>"
 
-# The TypeScript modules that may hold a synchronization token.
-_SYNCHRONIZATION_MODULES = ("queue.ts", "wire.ts", "http.ts", "media.ts")
+# The modules that may hold a synchronization token, initialization exempt.
+_SYNCHRONIZATION_MODULES = (
+    "queue.ts",
+    "wire.ts",
+    "http.ts",
+    "media.ts",
+    "boot.ts",
+)
 
 # The tokens that only the synchronization modules may hold.
 _SYNCHRONIZATION_TOKEN = re.compile(

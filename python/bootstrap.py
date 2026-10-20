@@ -8,17 +8,19 @@
 #     python3 python/bootstrap.py --root ROOT [console] [--main-loop NAME]
 #
 # With no role it is the engine: it puts its pty in raw mode, takes the
-# engine.lock file of the root, loads the main loop file, has it prepare the
-# databases, writes hello, reads and checks the reply and runs the loop.
-# --main-loop is served only to the engine role with the setting debug true,
-# and neither option may be given twice. With the role console it runs dash in
-# the root with a scrubbed environment when the setting debug is true, and
-# exits 1 otherwise. Any exception writes one error line, which jslb encodes,
-# and exits 1. The modules beside this file are imported inside the functions
-# that use them, after their bytecode has been sent to build/.
+# engine.lock file of the root, reads the settings, the provider key and,
+# when the setting provider.scripted is false, provider.json, loads the main
+# loop file, has it prepare the databases, writes hello, reads and checks the
+# reply and runs the loop. --main-loop is served only to the engine role with
+# the setting debug true, and neither option may be given twice. With the role
+# console it runs dash in the root with a scrubbed environment when the
+# setting debug is true, and exits 1 otherwise. Any exception writes one error
+# line, which jslb encodes, and exits 1. The modules beside this file are
+# imported inside the functions that use them, after their bytecode has been
+# sent to build/.
 
-import argparse, fcntl, hashlib, importlib.machinery, importlib.util, os, sys
-import termios, traceback, tty, types
+import argparse, fcntl, hashlib, importlib.machinery, importlib.util, json, os
+import sys, termios, traceback, tty, types
 from collections.abc import Iterator
 from typing import Any, NamedTuple, NoReturn, cast
 
@@ -72,6 +74,12 @@ _CONSOLE_VARIABLES = ("HOME", "LANG", "PATH", "TERM")
 
 # The environment variable that holds the provider key.
 _PROVIDER_VARIABLE = "XSJS_PROVIDER_KEY"
+
+# The file in the root that holds the provider's address and model names.
+_PROVIDER_NAME = "provider.json"
+
+# The keys of that file, each needing text when the provider is not scripted.
+_PROVIDER_KEYS = ("base_url", "chat_model", "image_model")
 
 # The descriptor the engine reads its lines from, its pty.
 _READ_FD = 0
@@ -182,6 +190,38 @@ def _provider_get(scripted: bool) -> str:
     return key
 
 
+# Reads the provider file of the root, refusing a missing file or value.
+def _provider_read(root: str) -> dict[str, str]:
+    from i18n import i18n
+
+    path = os.path.join(root, _PROVIDER_NAME)
+    try:
+        file = open(path, encoding="utf-8")
+    except FileNotFoundError as error:
+        raise FileNotFoundError(
+            i18n("bootstrap.provider_missing", path)
+        ) from error
+    with file:
+        data: object = json.load(file)
+    info = cast(dict[str, object], data)
+    if not isinstance(data, dict) or set(info) != set(_PROVIDER_KEYS):
+        keys = ", ".join(_PROVIDER_KEYS)
+        raise ValueError(i18n("bootstrap.provider_keys", path, keys))
+    for key in _PROVIDER_KEYS:
+        value = info[key]
+        if type(value) is not str or value == "":
+            raise ValueError(i18n("bootstrap.provider_empty", path, key))
+    return cast(dict[str, str], info)
+
+
+# Returns `hello`'s provider fields: the key, and the file unless scripted.
+def _provider_fields(root: str, scripted: bool) -> dict[str, Any]:
+    fields: dict[str, Any] = {"provider_key": _provider_get(scripted)}
+    if not scripted:
+        fields["provider_info"] = _provider_read(root)
+    return fields
+
+
 # Returns the main loop file: the stock one, or in debug mode a named one.
 def _loop_path(root: str, name: str | None, debug: bool) -> str:
     from i18n import i18n
@@ -228,7 +268,7 @@ def _hello_encode(
     root: str,
     loaded: dict[str, Any],
     seq: dict[str, int],
-    provider_key: str,
+    provider: dict[str, Any],
     full: bool,
 ) -> bytes:
     import jslb
@@ -245,7 +285,7 @@ def _hello_encode(
         root=root,
         settings=loaded,
         seq=seq,
-        provider_key=provider_key,
+        **provider,
     )
     return _text_bytes(jslb.line_encode(line))
 
@@ -305,10 +345,10 @@ def _engine_run(root: str, main_loop: str | None) -> int:
     _lock_take(root)
     loaded = _settings_read(root)
     debug: bool = loaded["debug"]
-    provider_key = _provider_get(loaded["provider"]["scripted"])
+    provider = _provider_fields(root, loaded["provider"]["scripted"])
     module = _loop_load(_loop_path(root, main_loop, debug))
     seq: dict[str, int] = module.loop_prepare(root)
-    _bytes_write(_hello_encode(root, loaded, seq, provider_key, debug))
+    _bytes_write(_hello_encode(root, loaded, seq, provider, debug))
     _reply_read(loaded)
     module.loop_run(_READ_FD, _WRITE_FD, root)
     return 0

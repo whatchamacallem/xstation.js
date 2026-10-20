@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests the `mcp` line through the dispatcher: the exchange of the transcript
-# `DATA/01_boot.txt` between the AI worker and the server replayed against the
-# tools of `API/mcp/tools.json`, the members of a message handed to the MCP
-# server as they came, its response put in the payload of the reply and
-# nothing replied when it gives none. No process is started.
+# Tests the `mcp` line through the dispatcher: the exchange that opens a
+# session between the AI worker and the server, against the tools of
+# `API/mcp/tools.json`, the members of a message handed to the MCP server as
+# they came, its response put in the payload of the reply and nothing replied
+# when it gives none. No process is started.
 
 import dispatch, engine_mcp, jslb, json, mcp, os, unittest, unittest.mock
 from collections.abc import Callable
@@ -19,14 +19,47 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # The API file that holds the tools as `tools/list` returns them.
 _TOOLS_PATH = os.path.join(_ROOT_PATH, "API", "mcp", "tools.json")
 
-# The transcript of a new tab, which holds the `mcp` lines of the server.
-_TRANSCRIPT_PATH = os.path.join(_ROOT_PATH, "DATA", "01_boot.txt")
+# The `initialize` request the AI worker's MCP client sends the server.
+_INITIALIZE_MESSAGE: dict[str, Any] = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "hyperposition-engine", "version": "0"},
+    },
+}
 
-# The start of the JSON text of a transcript line of the type `mcp`.
-_MCP_START = '{"0":{"t":"mcp"'
+# The notification the client sends once the `initialize` reply is in.
+_INITIALIZED_MESSAGE: dict[str, Any] = {
+    "jsonrpc": "2.0",
+    "method": "notifications/initialized",
+}
 
-# The two directions of the transcript between the AI worker and the server.
-_DIRECTIONS = ("AI->SERVER", "SERVER->AI")
+# The `tools/list` request the client sends after the notification.
+_LIST_MESSAGE: dict[str, Any] = {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/list",
+}
+
+# The response to `initialize`: the pinned revision, `tools`, the server.
+_INITIALIZE_RESPONSE: dict[str, Any] = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {"tools": {}},
+        "serverInfo": {"name": "xsjs-server", "version": "0"},
+    },
+}
+
+# The wire id of the line that carries `initialize`.
+_INITIALIZE_WIRE = 7
+
+# The wire id of the line that carries `tools/list`.
+_LIST_WIRE = 8
 
 # The dotted name of the handler table that the tests patch.
 _HANDLERS_TARGET = "dispatch._HANDLERS"
@@ -67,12 +100,24 @@ def _entries_read() -> list[dict[str, Any]]:
     return data["server"]["result"]["tools"]
 
 
-# Builds a tool from an entry of the API file.
+# Builds a tool from an entry of the API file, never a permit tool.
 def _tool_make(entry: dict[str, Any]) -> mcp.Tool:
-    permit = entry.get("_meta", {}).get("xsjs", {}).get("permit", False)
     return mcp.Tool(
-        entry["name"], entry["description"], entry["inputSchema"], permit
+        entry["name"], entry["description"], entry["inputSchema"], False
     )
+
+
+# The response to `tools/list`: each tool of the API file, with no permit.
+def _list_response() -> dict[str, Any]:
+    tools = [
+        {
+            "name": entry["name"],
+            "description": entry["description"],
+            "inputSchema": entry["inputSchema"],
+        }
+        for entry in _entries_read()
+    ]
+    return {"jsonrpc": "2.0", "id": 2, "result": {"tools": tools}}
 
 
 # Stands for the function of a tool that the test never calls.
@@ -85,29 +130,12 @@ def _tool_echo(arguments: dict[str, Any]) -> mcp.ToolResult:
     return mcp.ToolResult([{"type": "text", "text": "hi"}], False)
 
 
-# Makes the server of the transcript with the tools of the API file.
+# Makes the server's MCP server with the tools of the API file.
 def _server_make() -> mcp.Server:
     server = mcp.Server("xsjs-server", "0")
     for entry in _entries_read():
         server.tool_register(_tool_make(entry), _tool_refuse)
     return server
-
-
-# Reads the `mcp` lines of the transcript: direction, wire id and message.
-def _transcript_read() -> list[tuple[str, int | None, dict[str, Any]]]:
-    exchange: list[tuple[str, int | None, dict[str, Any]]] = []
-    with open(_TRANSCRIPT_PATH, encoding="utf-8") as file:
-        for line in file.read().splitlines():
-            if _MCP_START not in line:
-                continue
-            _, direction, text = line.split(" ", 2)
-            if direction not in _DIRECTIONS:
-                continue
-            message: dict[str, Any] = json.loads(text)
-            header: dict[str, Any] = message.pop("0")
-            number = header.get("r" if direction == "SERVER->AI" else "i")
-            exchange.append((direction, number, message))
-    return exchange
 
 
 # Gives each test an empty handler table and no registration.
@@ -131,23 +159,23 @@ class IsolatedCase(unittest.TestCase):
 
 # Tests the exchange with a real MCP server.
 class TestExchange(IsolatedCase):
-    # The transcript replays: each request gets the reply it shows.
-    def test_transcript_replay(self) -> None:
+    # Opening a session answers `initialize` and `tools/list` only.
+    def test_session_opened(self) -> None:
         engine_mcp.handlers_register(_server_make())
-        exchange = _transcript_read()
+        lines = [
+            _line_make(_INITIALIZE_WIRE, **_INITIALIZE_MESSAGE),
+            _line_make(None, **_INITIALIZED_MESSAGE),
+            _line_make(_LIST_WIRE, **_LIST_MESSAGE),
+        ]
         replies: list[tuple[int | None, dict[str, Any]]] = []
-        for direction, number, message in exchange:
-            if direction != "AI->SERVER":
-                continue
-            reply = dispatch.line_dispatch(_line_make(number, **message))
+        for line in lines:
+            reply = dispatch.line_dispatch(line)
             if reply is not None:
                 replies.append((reply[0]["r"], jslb.payload_of(reply)))
         expected = [
-            (number, message)
-            for direction, number, message in exchange
-            if direction == "SERVER->AI"
+            (_INITIALIZE_WIRE, _INITIALIZE_RESPONSE),
+            (_LIST_WIRE, _list_response()),
         ]
-        self.assertEqual(len(expected), 2)
         self.assertEqual(replies, expected)
 
     # A tool call runs the tool and its result is the payload of the reply.

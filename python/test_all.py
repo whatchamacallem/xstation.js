@@ -8,8 +8,9 @@
 # goes to stdout a line at a time, then checks that stream with the TAP
 # consumer and exits 1 unless it is well formed and holds no failing point. It
 # stops at the first module that fails, and every module has a timer. When the
-# stream is clean it runs the wire test in this process and exits with its
-# code. Standard library only:
+# stream is clean it runs the wire test in this process, then, when that exits
+# 0, the browser test, and exits with the code of the last one run. Standard
+# library only:
 #
 #     python3 python/test_all.py
 #     python3 python/test_all.py --failfast
@@ -98,14 +99,14 @@ def timer_stop() -> None:
     signal.setitimer(signal.ITIMER_REAL, 0)
 
 
-# Runs the modules, checks the stream, then runs the wire test.
+# Runs the modules, checks the stream, then the wire and browser tests.
 def main() -> int:
     import tap_consumer, tap_producer
 
     parser = argparse.ArgumentParser(
         description="Run the tests of the TAP modules, then the other Python"
         " test modules in dependency order, as one TAP stream on stdout,"
-        " check the stream, then run the wire test."
+        " check the stream, then run the wire test and the browser test."
     )
     parser.add_argument(
         "--failfast",
@@ -135,7 +136,14 @@ def main() -> int:
 
     # The wire test parses `sys.argv` itself, so it is given no options.
     del sys.argv[1:]
-    return test_wire.main()
+    code = test_wire.main()
+    if code != 0:
+        return code
+    # The browser test parses `sys.argv` itself, so it too gets no options.
+    del sys.argv[1:]
+    import test_browser
+
+    return test_browser.main()
 
 
 if __name__ == "__main__":

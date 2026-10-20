@@ -22,14 +22,44 @@ _SETTINGS_PATH = os.path.join(_ROOT_PATH, "settings.json")
 # The seed files that the main loop reads for a new metaverse.
 _SEED_PATH = os.path.join(_ROOT_PATH, "python", "seed")
 
-# The recorded transcripts of the standard traffic.
-_DATA_PATH = os.path.join(_ROOT_PATH, "DATA")
+# The API file that holds the tools as `tools/list` returns them.
+_TOOLS_PATH = os.path.join(_ROOT_PATH, "API", "mcp", "tools.json")
 
-# The transcript of a boot, which holds the server's MCP exchange.
-_BOOT_NAME = "01_boot.txt"
+# The `initialize` request the AI worker's MCP client sends the server.
+_INITIALIZE_MESSAGE: dict[str, Any] = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "hyperposition-engine", "version": "0"},
+    },
+}
 
-# The transcript of a turn, which holds a `doc.put` and its reply.
-_TURN_NAME = "02_turn.txt"
+# The notification the client sends once the `initialize` reply is in.
+_INITIALIZED_MESSAGE: dict[str, Any] = {
+    "jsonrpc": "2.0",
+    "method": "notifications/initialized",
+}
+
+# The `tools/list` request the client sends after the notification.
+_LIST_MESSAGE: dict[str, Any] = {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/list",
+}
+
+# The response to `initialize`: the pinned revision, `tools`, the server.
+_INITIALIZE_RESPONSE: dict[str, Any] = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {"tools": {}},
+        "serverInfo": {"name": "xsjs-server", "version": "0"},
+    },
+}
 
 # The size over which a blob streams to the cache, small for the loop tests.
 _OVERFLOW_BYTES = 4096
@@ -101,8 +131,17 @@ _HASH_NAME = r"^[0-9a-f]{64}$"
 # A line whose header has no type, which the decoder refuses.
 _BAD_LINE = b'{"0":{"i":3}}\r'
 
-# The database a script makes in the reopening test.
+# The database the reopening test and the document test make.
 _CASTLE_DB = "castle"
+
+# The id of the document the document test puts.
+_NOTE_ID = "note"
+
+# The document the document test puts: its header and a text.
+_NOTE_BODY: dict[int | str, Any] = {0: {"t": "note"}, "text": "A note."}
+
+# The version the first put of a document writes.
+_NOTE_VERSION = 1
 
 # The main loop file that the refused `source.put` would write.
 _SOURCE_NAME = "loop_test.py"
@@ -113,6 +152,21 @@ def _settings_read() -> dict[str, Any]:
     with open(_SETTINGS_PATH, encoding="utf-8") as file:
         data: dict[str, Any] = json.load(file)
     return data
+
+
+# The response to `tools/list`: each server tool of the API file, no permit.
+def _list_response() -> dict[str, Any]:
+    with open(_TOOLS_PATH, encoding="utf-8") as file:
+        data: dict[str, Any] = json.load(file)
+    tools = [
+        {
+            "name": entry["name"],
+            "description": entry["description"],
+            "inputSchema": entry["inputSchema"],
+        }
+        for entry in data["server"]["result"]["tools"]
+    ]
+    return {"jsonrpc": "2.0", "id": 2, "result": {"tools": tools}}
 
 
 # Reads a seed file of the checkout.
@@ -293,17 +347,6 @@ class ScratchCase(unittest.TestCase):
             self.fail(ending)
         answers: dict[str, int] = json.loads(ending)
         return answers
-
-    # Decodes lines of a transcript in `DATA/`, each named by its number.
-    def recorded_read(
-        self, name: str, numbers: list[str]
-    ) -> list[jslb.Object]:
-        with open(os.path.join(_DATA_PATH, name), encoding="utf-8") as file:
-            rows = {row[:4]: row for row in file.read().splitlines()}
-        texts = [rows[number].split(" ", 2)[2] for number in numbers]
-        lines = _lines_decode("".join(text + "\r" for text in texts).encode())
-        self.assertEqual(len(lines), len(numbers))
-        return lines
 
 
 # `loop_prepare`: the databases made, seeded and counted, in each process.
@@ -534,34 +577,49 @@ class TestLoop(ScratchCase):
         message = i18n("main_loop.not_prepared")
         self.assertEqual(last, f"RuntimeError: {message}")
 
-    # The server's MCP server answers as the boot transcript records it.
+    # The server's MCP server answers `initialize` and `tools/list` only.
     def test_mcp_tools(self) -> None:
-        requests = self.recorded_read(_BOOT_NAME, ["0025", "0027", "0028"])
-        expected = self.recorded_read(_BOOT_NAME, ["0026", "0029"])
-        _, replies = self.served_read(requests)
-        self.assertEqual(len(replies), len(expected))
-        answered = [requests[0], requests[2]]
-        for reply, request, recorded in zip(
-            replies, answered, expected, strict=True
-        ):
-            self.reply_check(reply, "mcp", jslb.field_get(request[0], "id"))
-            self.assertEqual(jslb.payload_of(reply), jslb.payload_of(recorded))
+        notice = jslb.line_make(
+            jslb.header_make("mcp"), [], **_INITIALIZED_MESSAGE
+        )
+        lines = [
+            _request_make("mcp", 1, **_INITIALIZE_MESSAGE),
+            notice,
+            _request_make("mcp", 2, **_LIST_MESSAGE),
+        ]
+        _, replies = self.served_read(lines)
+        self.assertEqual(len(replies), 2)
+        first, second = replies
+        self.reply_check(first, "mcp", 1)
+        self.assertEqual(jslb.payload_of(first), _INITIALIZE_RESPONSE)
+        self.reply_check(second, "mcp", 2)
+        self.assertEqual(jslb.payload_of(second), _list_response())
 
-    # A `doc.put` replies as the turn transcript records, and `doc.head` too.
+    # `doc.put` replies the first version's ref and `seq`, `doc.head` the ref.
     def test_doc_head(self) -> None:
-        [put] = self.recorded_read(_TURN_NAME, ["0050"])
-        [stored] = self.recorded_read(_TURN_NAME, ["0051"])
-        db: str = put["db"]
-        create = _request_make("db.create", 1, db=db, since=_SEQ_CREATED)
-        head = _request_make("doc.head", 2, db=db, id=put["id"])
+        create = _request_make(
+            "db.create", 1, db=_CASTLE_DB, since=_SEQ_CREATED
+        )
+        put = _request_make(
+            "doc.put",
+            2,
+            db=_CASTLE_DB,
+            id=_NOTE_ID,
+            body=_NOTE_BODY,
+            since=_SEQ_CREATED,
+        )
+        head = _request_make("doc.head", 3, db=_CASTLE_DB, id=_NOTE_ID)
         _, replies = self.served_read([create, put, head])
         self.assertEqual(len(replies), 3)
         created, written, current = replies
+        ref = f"/{_CASTLE_DB}/{_NOTE_ID}/{_NOTE_VERSION}"
         self.reply_check(created, "db.create", 1)
-        self.reply_check(written, "doc.put", jslb.field_get(put[0], "id"))
-        self.assertEqual(jslb.payload_of(written), jslb.payload_of(stored))
-        self.reply_check(current, "doc.head", 2)
-        self.assertEqual(jslb.payload_of(current), {"ref": stored["ref"]})
+        self.reply_check(written, "doc.put", 2)
+        self.assertEqual(
+            jslb.payload_of(written), {"ref": ref, "seq": _SEQ_CREATED + 1}
+        )
+        self.reply_check(current, "doc.head", 3)
+        self.assertEqual(jslb.payload_of(current), {"ref": ref})
 
     # `verbose.tail` gives the server's ring, empty here, and the page's lines.
     def test_verbose_tail(self) -> None:

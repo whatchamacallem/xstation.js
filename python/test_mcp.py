@@ -118,12 +118,13 @@ class DirectLink:
 
 # Tests the server on messages handed to it directly.
 class TestServer(unittest.TestCase):
-    # Registers the server tools and one browser tool of the API file.
+    # Registers the server tools and two browser tools of the API file.
     def setUp(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.server = mcp.Server("xsjs-test", "1")
         self.entries = _entries_read("server")
         self.entries.append(_entry_find("browser", "kv_get"))
+        self.entries.append(_entry_find("browser", "console_run"))
         for entry in self.entries:
             self.server.tool_register(
                 _tool_make(entry),
@@ -181,7 +182,7 @@ class TestServer(unittest.TestCase):
         response = _response_get(self.server, _request_make(2, "tools/list"))
         tools = response["result"]["tools"]
         self.assertEqual(_text_make(tools), _text_make(self.entries))
-        self.assertEqual(len(tools), 3)
+        self.assertEqual(len(tools), 4)
 
     # Only a permit tool carries `_meta`.
     def test_tools_list_permit(self) -> None:
@@ -189,9 +190,9 @@ class TestServer(unittest.TestCase):
         tools = response["result"]["tools"]
         self.assertEqual(
             [tool["name"] for tool in tools if "_meta" in tool],
-            ["source_put", "system_restart"],
+            ["console_run"],
         )
-        self.assertEqual(tools[0]["_meta"], {"xsjs": {"permit": True}})
+        self.assertEqual(tools[3]["_meta"], {"xsjs": {"permit": True}})
 
     # A call passes the arguments to the function and returns its result.
     def test_call_result(self) -> None:
@@ -214,12 +215,13 @@ class TestServer(unittest.TestCase):
 
     # The server only lists the permit flag: it runs a permit tool called.
     def test_call_permit(self) -> None:
-        params = {"name": "system_restart", "arguments": {"main_loop": "m"}}
+        arguments = {"text": "ls", "timeout_seconds": 1}
+        params = {"name": "console_run", "arguments": arguments}
         response = _response_get(
             self.server, _request_make(5, "tools/call", params)
         )
         self.assertEqual(response["result"]["isError"], False)
-        self.assertEqual(self.calls, [("system_restart", {"main_loop": "m"})])
+        self.assertEqual(self.calls, [("console_run", arguments)])
 
     # A result flagged as an error is still a result, not an error response.
     def test_call_flagged(self) -> None:
@@ -357,6 +359,7 @@ class TestClient(unittest.TestCase):
         self.server = mcp.Server("xsjs-test", "1")
         self.entries = _entries_read("server")
         self.entries.append(_entry_find("browser", "kv_get"))
+        self.entries.append(_entry_find("browser", "console_run"))
         for entry in self.entries:
             self.server.tool_register(
                 _tool_make(entry),
@@ -410,7 +413,7 @@ class TestClient(unittest.TestCase):
             [[_tool_make(entry) for entry in self.entries]],
         )
         permits = [tool.permit for tool in self.rig.results[0]]
-        self.assertEqual(permits, [True, True, False])
+        self.assertEqual(permits, [False, False, False, True])
 
     # The result passed on is the tool's content and error flag.
     def test_tool_call(self) -> None:

@@ -294,7 +294,7 @@ namespace test_console_view {
       this.assertEqual(FakeTerminal.made.length, 2);
     }
 
-    // The terminal is made at the size of the recorded console session.
+    // The terminal is made 120 columns wide and 40 rows high.
     test_made_size(): void {
       const rig = rig_make();
       this.assertEqual(rig.terminal.cols, 120);
@@ -456,7 +456,7 @@ namespace test_console_view {
       this.assertEqual(open.ai.posted.length, 2);
     }
 
-    // The wake sends ttyd's first message, the recorded one for no token.
+    // The wake sends ttyd's first message, the one for an empty token.
     test_first_message(): void {
       const rig = rig_make();
       start_run(rig);

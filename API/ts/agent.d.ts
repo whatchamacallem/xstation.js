@@ -11,7 +11,7 @@ declare namespace agent {
     clients: mcp.ClientSet,
     tasks: queue.TaskQueue,
     provider_owner: queue.ThreadName,
-    chat_model: string
+    info: lines.ProviderInfo
   ): void;
 
   // The system prompt: the analyst's prompt document, then the current

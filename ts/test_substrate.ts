@@ -3,11 +3,12 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // Tests of substrate.ts: refs, the document encoding, the sink's incremental
-// hash against the digests the transcripts record, the cache over slot files
-// kept in memory, and the store on the sqlite3.wasm module and OPFS pool the
-// test page sets as globals: databases, values, documents, turns, SQL, seq,
-// snapshots, forwarded lines, the recorded sequences of the transcripts
-// replayed, the administration of the databases and the handlers.
+// hash against known digests, the cache over slot files kept in memory, and
+// the store on the sqlite3.wasm module and OPFS pool the test page sets as
+// globals: databases, values, documents, turns, SQL, seq, snapshots,
+// forwarded lines, the operations of the castle turn and two later ones
+// replayed on a second store, the administration of the databases and the
+// handlers.
 namespace test_substrate {
   // The initialized sqlite3.wasm module, a global the test page sets.
   declare const test_sqlite3: substrate.SqliteModule;
@@ -31,19 +32,19 @@ namespace test_substrate {
     piece_bytes: 4096,
     // The hyperposition scene, whose conversation the turn tests append to.
     scene: "/metaverse/hyperposition/1",
-    // The subtitle of the arrival scene of the turn transcript.
+    // The subtitle of the arrival scene the castle turn builds.
     arrival_subtitle:
       "Mind the moat. The gatehouse keeper has been expecting someone," +
       " though not necessarily you.",
-    // The prompt of the image the turn transcript makes.
+    // The prompt of the arrival scene's image.
     image_prompt:
       "A rain dark castle gatehouse at dusk seen from the far side of a" +
       " moat, one lantern lit, painted, wide still frame, no people",
-    // The image the provider answered in the turn transcript, its base64.
+    // The arrival scene's image, a checkerboard PNG of 88 bytes, in base64.
     image_base64:
       "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAH0lEQVR42mP4jwQYkAAuc" +
       "YZBqGGQO48oDaPxMCg0AADZV36QzYI8swAAAABJRU5ErkJggg==",
-    // The script the sync and script transcripts put, 322 bytes.
+    // The step script that advances the tide of a region, 322 bytes.
     step_script:
       "// Advances the tide by args.hours in the region table" +
       " of the world.\n" +
@@ -53,32 +54,32 @@ namespace test_substrate {
       "]);\n" +
       'engine.log(1, "tide advanced by " + args.hours);\n' +
       "return {changes: results[0].changes};\n",
-    // The digest the turn transcript records for the text `castle_world`.
+    // The `SHA-256` of the text `castle_world`.
     world_sha256:
       "6d0be246127ef7993924a9ce127c6fa6c093dca368163093ab31c80273336ecd",
-    // The digest the turn transcript records for the arrival scene's ref.
+    // The `SHA-256` of the arrival scene's ref as text.
     scene_sha256:
       "1e2806a1029564579de9739ef0014f0332c5a8026bca9373e473224a3b094d8b",
-    // The digest the turn transcript records for the image.
+    // The `SHA-256` of the image.
     image_sha256:
       "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0",
-    // The digest the sync transcript records for the map of 204800 bytes.
+    // The `SHA-256` of the map, its bytes counting 0 to 255 over and over.
     map_sha256:
       "8c6627e25bfbdef2bba5abc03123ea8e9b60d892f7f180a8b9b5079fb3233c54",
-    // The digest the script transcript records for the step script.
+    // The `SHA-256` of the step script.
     script_sha256:
       "dbc909cf0e2e7954d586c06b3291728e527d5dee4c109409fcb501e200756626",
-    // The bytes of the map the sync transcript puts.
+    // The size of the map in bytes, past `overflow_bytes` so it streams.
     map_bytes: 204800,
     // The universe table, as the metaverse SQL file creates it.
     universe_sql:
       "CREATE TABLE universe (name TEXT PRIMARY KEY, title TEXT NOT NULL," +
       " player TEXT NOT NULL, world TEXT NOT NULL) WITHOUT ROWID, STRICT",
-    // The world table of the castle universe, from the turn transcript.
+    // The world table of the castle universe.
     world_sql:
       "CREATE TABLE world" +
       " (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT",
-    // The region table of the castle world, from the turn transcript.
+    // The region table of the castle world.
     region_sql:
       "CREATE TABLE region" +
       " (name TEXT PRIMARY KEY, tide INTEGER NOT NULL DEFAULT 0) STRICT",
@@ -86,7 +87,7 @@ namespace test_substrate {
     meta_sql:
       "CREATE TABLE _meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)" +
       " WITHOUT ROWID, STRICT",
-    // The message of the error line the sync transcript records.
+    // The message of the server's error for a `kv.put` one behind its `seq`.
     desync_message: "kv.put: since 3 is not seq 4 of _files",
     // The first bytes of a database file.
     file_magic: "SQLite format 3",
@@ -95,7 +96,7 @@ namespace test_substrate {
   // Text beyond ASCII for keys and values, built from its code points.
   const text_wide = String.fromCodePoint(0x4e2d, 0x6587, 0x1f600);
 
-  // The stored text of the arrival scene, as the turn transcript sends it.
+  // The stored text of the arrival scene, its encoded document as JSON.
   const arrival_text =
     '{"0":{"t":"scene"},"1":"/_files/gatehouse/arrival.png","subtitle":"' +
     constants.arrival_subtitle +
@@ -104,7 +105,7 @@ namespace test_substrate {
   // The number of the last root a test made, so that each store has its own.
   let root_count = 0;
 
-  // One recorded forwarded operation: its fields, `seq` after, and records.
+  // One forwarded operation: its fields, the `seq` after, its line and digest.
   interface Recorded {
     type: string;
     since: number;
@@ -350,7 +351,7 @@ namespace test_substrate {
     };
   }
 
-  // The database a recorded operation modifies.
+  // The database a forwarded operation modifies.
   function target_database(record: Recorded): string {
     const fields = record.fields;
     if (Object.hasOwn(fields, "db")) {
@@ -455,7 +456,7 @@ namespace test_substrate {
     };
   }
 
-  // The forwarded operations of the turn and sync transcripts, recorded.
+  // The forwarded operations of the castle turn and two later ones, in order.
   function recorded_make(): Recorded[] {
     const scene = constants.scene;
     const subtitle = constants.arrival_subtitle;
@@ -1043,9 +1044,9 @@ namespace test_substrate {
     }
   }
 
-  // The sink's incremental `SHA-256`, against recorded and one shot digests.
+  // The sink's incremental `SHA-256`, against known and one shot digests.
   export class TestHash extends RefusalCase {
-    // Streamed values give the digests the transcripts record.
+    // Streamed values give their known digests.
     test_digest_recorded(): void {
       const cases: [Uint8Array, string][] = [
         [bytes_text("castle_world"), constants.world_sha256],
@@ -2168,9 +2169,9 @@ namespace test_substrate {
     }
   }
 
-  // Replication: the recorded sequences replayed, stale lines, bad lines.
+  // Replication: known sequences replayed, stale lines, bad lines.
   export class TestReplay extends StoreCase {
-    // The recorded operations give the recorded lines and `seq`.
+    // The castle turn's operations and two more give their lines and `seq`.
     test_recorded_replay(): void {
       const first_root = this.root_make();
       const second_root = this.root_make();
@@ -2311,7 +2312,7 @@ namespace test_substrate {
       this.assertEqual(store.seq_get("alpha"), 0);
     }
 
-    // A delete, a compaction and a drop, which no transcript records, apply.
+    // A delete, a compaction and a drop, which the replay lacks, apply.
     test_operations_unrecorded(): void {
       const store = this.store_fresh();
       const scene = "/alpha/scene/1";
@@ -2387,7 +2388,7 @@ namespace test_substrate {
       this.assertEqual(store.seq_get("alpha"), 0);
     }
 
-    // Makes the databases of the boot transcript's hello at their `seq`.
+    // Makes `_files` at `seq` 1 and `metaverse` at 5, as a hello names them.
     hello_make(store: substrate.Store, root: string): void {
       const hello: [string, number, string[]][] = [
         ["_files", 1, []],
@@ -2409,7 +2410,7 @@ namespace test_substrate {
       this.lines_of(store).splice(0);
     }
 
-    // Makes a recorded operation's call and returns the one line it forwarded.
+    // Makes a forwarded operation's call and returns the one line it sent.
     modifier_call(store: substrate.Store, record: Recorded): lines.Line {
       const fields = record.fields;
       const calls: { [type: string]: () => unknown } = {
@@ -2637,7 +2638,7 @@ namespace test_substrate {
       ]);
     }
 
-    // `kv.put` and `kv.get` answer with the recorded digest and the bytes.
+    // `kv.put` and `kv.get` answer with the known digest and the bytes.
     test_values_answered(): void {
       const store = this.store_fresh();
       const table = this.handlers_get(store);
@@ -2679,7 +2680,7 @@ namespace test_substrate {
       this.assertEqual((big[1] as lines.BlobHeader).d, value_over);
     }
 
-    // `sql.run`, `kv.list` and `kv.delete` answer as the transcripts show.
+    // `sql.run`, `kv.list` and `kv.delete` answer their results and `seq`.
     test_rows_answered(): void {
       const store = this.store_fresh();
       const table = this.handlers_get(store);

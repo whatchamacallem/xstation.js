@@ -3,7 +3,7 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // Tests of script.ts on a store of the sqlite3.wasm module and OPFS pool the
-// test page sets as globals: the step script the script transcript records,
+// test page sets as globals: the step script that advances a region's tide,
 // run and traced, the lines a run keeps at each level, a script read from the
 // cache, the engine object, the exceptions a run returns and the errors it
 // throws.
@@ -15,7 +15,7 @@ namespace test_script {
   // Its installed OPFS SAH pool, a global the test page sets.
   declare const test_pool: substrate.SqlitePool;
 
-  // The settings, names and recorded texts the tests use.
+  // The settings, names, texts and digests the tests use.
   const constants = Object.freeze({
     // The `overflow_bytes` of `settings.json`, 128 KiB.
     overflow_bytes: 131072,
@@ -25,9 +25,9 @@ namespace test_script {
     slot_count: 8,
     // The highest verbose level.
     level_max: 2,
-    // The ref of the step script the script transcript puts.
+    // The ref of the step script, which advances the tide of a region.
     step_ref: "/_files/script/step_tide.js",
-    // The step script the script transcript puts, 322 bytes.
+    // The step script, 322 bytes.
     step_script:
       "// Advances the tide by args.hours in the region table" +
       " of the world.\n" +
@@ -37,18 +37,18 @@ namespace test_script {
       "]);\n" +
       'engine.log(1, "tide advanced by " + args.hours);\n' +
       "return {changes: results[0].changes};\n",
-    // The size the script transcript records for the step script.
+    // The size of the step script in bytes.
     step_size: 322,
-    // The digest the script transcript records for the step script.
+    // The `SHA-256` of the step script.
     step_sha256:
       "dbc909cf0e2e7954d586c06b3291728e527d5dee4c109409fcb501e200756626",
-    // The line the step script logs, as the script transcript records it.
+    // The line the step script logs when it advances the tide by 1.
     step_line: "tide advanced by 1",
     // The arguments of the step script's call of the store, as JSON.
     step_arguments:
       '["castle_world",[{"sql":"UPDATE region SET tide = tide + ?' +
       ' WHERE name = ?","params":[1,"castle_gatehouse"]}]]',
-    // The region table of the castle world, from the turn transcript.
+    // The region table of the castle world.
     region_sql:
       "CREATE TABLE region" +
       " (name TEXT PRIMARY KEY, tide INTEGER NOT NULL DEFAULT 0) STRICT",
@@ -206,7 +206,7 @@ namespace test_script {
 
   // Runs of a script: the value, the kept lines, the trace and the engine.
   export class TestRun extends ScriptCase {
-    // The recorded step script returns its change and logs its line.
+    // The step script returns its change and logs its line.
     test_step_recorded(): void {
       const store = this.store_fresh();
       castle_make(store);
