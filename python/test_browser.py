@@ -854,8 +854,7 @@ return { made: made.length, error: null, listed: false };
 
 # The table of rows that makes the bulk root's `_files` over the old window.
 _BULK_DDL = (
-    "CREATE TABLE rung_bulk"
-    " (n INTEGER PRIMARY KEY, data BLOB NOT NULL) STRICT"
+    "CREATE TABLE rung_bulk (n INTEGER PRIMARY KEY, data BLOB NOT NULL) STRICT"
 )
 
 # The statement that puts one row of that table.
@@ -2627,7 +2626,9 @@ class PageSession:
             "Input.dispatchKeyEvent",
             {"type": "keyDown", "text": stroke.text, **fields},
         )
-        client.method_call("Input.dispatchKeyEvent", {"type": "keyUp", **fields})
+        client.method_call(
+            "Input.dispatchKeyEvent", {"type": "keyUp", **fields}
+        )
 
     # Types text into the focused element, as an input method sends it.
     def text_insert(self, text: str) -> None:
@@ -2641,7 +2642,13 @@ class PageSession:
         for kind in ("mousePressed", "mouseReleased"):
             client.method_call(
                 "Input.dispatchMouseEvent",
-                {"type": kind, "x": x, "y": y, "button": "left", "clickCount": 1},
+                {
+                    "type": kind,
+                    "x": x,
+                    "y": y,
+                    "button": "left",
+                    "clickCount": 1,
+                },
             )
 
     # Clicks the middle of the box of an element's view.
@@ -3026,7 +3033,10 @@ def calls_make(values: dict[str, Any]) -> dict[str, ScriptCall]:
         ),
         _INPUT_PAIRS: ScriptCall(
             _RUN_TOOL,
-            {"name": _PAIRS_NAME, "args": {"db": _PAIRS_DB, "rows": _PAIRS_ROWS}},
+            {
+                "name": _PAIRS_NAME,
+                "args": {"db": _PAIRS_DB, "rows": _PAIRS_ROWS},
+            },
             _ENDING_PAIRS,
         ),
         _INPUT_OVERFLOW: ScriptCall(
@@ -3256,7 +3266,9 @@ def scripts_place(root: str, values: dict[str, Any]) -> None:
         _AI_SCRIPT_PREFIX
         + _CACHE_NAME
         + _AI_SCRIPT_EXTENSION: _CACHE_SCRIPT.encode(),
-        _AI_SCRIPT_PREFIX + _POOL_NAME + _AI_SCRIPT_EXTENSION: _POOL_SCRIPT.encode(),
+        _AI_SCRIPT_PREFIX
+        + _POOL_NAME
+        + _AI_SCRIPT_EXTENSION: _POOL_SCRIPT.encode(),
         _AI_SCRIPT_PREFIX
         + _HELD_NAME
         + _AI_SCRIPT_EXTENSION: _HELD_SCRIPT.encode(),
@@ -3483,7 +3495,9 @@ def verbose_read(session: PageSession, thread: str) -> list[VerboseRow]:
 
 # The AI's lines after the seq through the first of a rendered start.
 def rendered_rows(session: PageSession, after: int) -> list[VerboseRow] | None:
-    rows = [row for row in verbose_read(session, _AI_THREAD) if row.seq > after]
+    rows = [
+        row for row in verbose_read(session, _AI_THREAD) if row.seq > after
+    ]
     for index, row in enumerate(rows):
         if _RENDERED_MARK in row.text:
             return rows[: index + 1]
@@ -3690,7 +3704,9 @@ def rung_first(session: PageSession) -> str:
 
 # The fault screen's Reload starts the page again from the server.
 def rung_reload(session: PageSession, subtitle: str) -> str:
-    button = json_object(session.probe_wait("the Reload button", "reload_button"))
+    button = json_object(
+        session.probe_wait("the Reload button", "reload_button")
+    )
     if button["onclick"] != _RELOAD_CALL or not button["view"]["center_hit"]:
         raise CheckFailed(f"the Reload button is {button}")
     session.reload_click(json_object(button["view"]))
@@ -3787,9 +3803,7 @@ def rung_load(session: PageSession) -> str:
 # A fault while the parser runs a script is appended, not replacing the page.
 def rung_append(session: PageSession) -> str:
     session.page_leave()
-    source = _WORKER_THROW.replace(
-        "XSJS_MESSAGE", json.dumps(_APPEND_MESSAGE)
-    )
+    source = _WORKER_THROW.replace("XSJS_MESSAGE", json.dumps(_APPEND_MESSAGE))
     identifier = session.preload_add(source)
     session.page_open()
     text = session.fault_wait("the fault of the start script")
@@ -4066,7 +4080,11 @@ def rung_preflight(stub: StubServer) -> str:
     method = asked.headers.get("access-control-request-method")
     named = asked.headers.get("access-control-request-headers", "")
     headers = {name.strip() for name in named.split(",")}
-    if asked_at > posted_at or method != "POST" or not set(_POST_HEADERS) <= headers:
+    if (
+        asked_at > posted_at
+        or method != "POST"
+        or not set(_POST_HEADERS) <= headers
+    ):
         raise CheckFailed(
             f"the preflight came at {asked_at}, the POST at {posted_at},"
             f" asking {method} with {named!r}"
@@ -4145,9 +4163,10 @@ def rung_never(session: PageSession, stub: StubServer) -> str:
     get_send(session, "silent", 1, url)
     line = port_lines(session, "silent", 1)[0]
     due = i18n.i18n("http.timeout_expired", url, _HTTP_SECONDS)
-    if line["header"] != {"t": "error", "r": 1} or line["payload"][
-        "message"
-    ] != due:
+    if (
+        line["header"] != {"t": "error", "r": 1}
+        or line["payload"]["message"] != due
+    ):
         raise CheckFailed(f"the silent server gave {line}, not {due!r}")
     return f"a server that never answered gave {due!r}"
 
@@ -4161,9 +4180,10 @@ def rung_stall(session: PageSession, stub: StubServer) -> str:
     get_send(session, "stall", 1, url)
     line = port_lines(session, "stall", 1)[0]
     due = i18n.i18n("http.timeout_expired", url, _HTTP_SECONDS)
-    if line["header"] != {"t": "error", "r": 1} or line["payload"][
-        "message"
-    ] != due:
+    if (
+        line["header"] != {"t": "error", "r": 1}
+        or line["payload"]["message"] != due
+    ):
         raise CheckFailed(f"the stalled body gave {line}, not {due!r}")
     return (
         f"a body stalled after {len(_PLAIN_TEXT)} of {_STALL_LENGTH} bytes"
@@ -4192,7 +4212,9 @@ def rung_order(session: PageSession, stub: StubServer) -> str:
         url = stub.url_make(f"{_ORDER_PREFIX}{number}")
         get_send(session, "order", number + 1, url)
     lines = port_lines(session, "order", _ORDER_COUNT)
-    came = [(line["header"]["r"], line["payload"]["json"]["n"]) for line in lines]
+    came = [
+        (line["header"]["r"], line["payload"]["json"]["n"]) for line in lines
+    ]
     due = [(number + 1, number) for number in reversed(range(_ORDER_COUNT))]
     answered = stub.answers_list(_ORDER_PREFIX)
     sent = [
@@ -4248,7 +4270,9 @@ def rung_receiver(session: PageSession, stub: StubServer) -> str:
     text = session.fault_wait("the fault of the throwing receiver")
     if _RECEIVER_MESSAGE not in text:
         raise CheckFailed(f"the fault screen shows {text!r}")
-    return f"a receiver that threw {_RECEIVER_MESSAGE!r} reached the fault screen"
+    return (
+        f"a receiver that threw {_RECEIVER_MESSAGE!r} reached the fault screen"
+    )
 
 
 # A queue in its normal mode runs one item per task, after the notify.
@@ -4267,7 +4291,9 @@ def rung_schedule(session: PageSession) -> str:
 # A ThreadPort carries a request and its reply across a real worker.
 def rung_thread(session: PageSession) -> str:
     session.probe_call("thread_run", "rung_thread.begin", "rung_thread.done")
-    replies = json_list(session.probe_wait("the worker's reply", "thread_when"))
+    replies = json_list(
+        session.probe_wait("the worker's reply", "thread_when")
+    )
     due = [
         {
             "header": {"t": "probe.ask", "r": 1},
@@ -4291,7 +4317,10 @@ def rung_pair(session: PageSession, stub: StubServer) -> str:
     )
     replies = json_list(session.probe_wait("the wake of two", "pair_when"))
     came = [
-        (json_object(reply)["header"]["r"], json_object(reply)["payload"]["json"])
+        (
+            json_object(reply)["header"]["r"],
+            json_object(reply)["payload"]["json"],
+        )
         for reply in replies
     ]
     due = [(1, {"name": "first"}), (2, {"name": "second"})]
@@ -4312,7 +4341,9 @@ def rung_handler(session: PageSession) -> str:
     text = session.fault_wait("the fault of the throwing handler")
     if _HANDLER_MESSAGE not in text:
         raise CheckFailed(f"the fault screen shows {text!r}")
-    return f"a handler that threw {_HANDLER_MESSAGE!r} reached the fault screen"
+    return (
+        f"a handler that threw {_HANDLER_MESSAGE!r} reached the fault screen"
+    )
 
 
 # Polls the record of the probe's console port until `test` holds.
@@ -4523,7 +4554,9 @@ def png_size(png: bytes) -> tuple[int, int]:
 
 
 # A download is kept and replied with its bytes as blob 1.
-def rung_fetch(session: PageSession, stub: StubServer, png: bytes, budget: int) -> str:
+def rung_fetch(
+    session: PageSession, stub: StubServer, png: bytes, budget: int
+) -> str:
     key = "/_files/rung/fetched.png"
     session.probe_call("media_port", "fetch", budget, _MEDIA_SECONDS)
     payload = {"url": stub.url_make(_PNG_STUB_PATH), "k": key}
@@ -4572,13 +4605,16 @@ def rung_missing(session: PageSession, stub: StubServer, budget: int) -> str:
     url = stub.url_make(f"{_STATUS_PREFIX}{_MISSING_STATUS}")
     session.probe_call("media_port", "missing", budget, _MEDIA_SECONDS)
     payload = {"url": url, "k": key}
-    session.probe_call("request_send", "missing", "media.fetch", 1, payload, [])
+    session.probe_call(
+        "request_send", "missing", "media.fetch", 1, payload, []
+    )
     line = port_lines(session, "missing", 1)[0]
     cause = "Error: " + i18n.i18n("media.status_failed", url, _MISSING_STATUS)
     due = i18n.i18n("media.download_failed", url, key, cause)
-    if line["header"] != {"t": "error", "r": 1} or line["payload"][
-        "message"
-    ] != due:
+    if (
+        line["header"] != {"t": "error", "r": 1}
+        or line["payload"]["message"] != due
+    ):
         raise CheckFailed(f"the missing download gave {line}, not {due!r}")
     return f"a download answered {_MISSING_STATUS} gave {due!r}"
 
@@ -4594,9 +4630,10 @@ def rung_late(session: PageSession, stub: StubServer, budget: int) -> str:
     session.probe_call("request_send", "late", "media.fetch", 1, payload, [])
     line = port_lines(session, "late", 1)[0]
     due = i18n.i18n("media.download_expired", url, key, _MEDIA_SECONDS)
-    if line["header"] != {"t": "error", "r": 1} or line["payload"][
-        "message"
-    ] != due:
+    if (
+        line["header"] != {"t": "error", "r": 1}
+        or line["payload"]["message"] != due
+    ):
         raise CheckFailed(f"the late download gave {line}, not {due!r}")
     return f"a download that never came gave {due!r}"
 
@@ -4676,14 +4713,18 @@ def rung_relay(session: PageSession, subtitle: str) -> str:
     rows = server_wait(
         session,
         "the UI's hello line on the server",
-        lambda: [
-            row
-            for row in verbose_read(session, _UI_THREAD)
-            if pattern.fullmatch(row.text)
-        ]
-        or None,
+        lambda: (
+            [
+                row
+                for row in verbose_read(session, _UI_THREAD)
+                if pattern.fullmatch(row.text)
+            ]
+            or None
+        ),
     )
-    ring = [json_object(line) for line in json_list(session.probe_call("history"))]
+    ring = [
+        json_object(line) for line in json_list(session.probe_call("history"))
+    ]
     kept = [line for line in ring if line["text"] == rows[0].text]
     if len(kept) != 1 or kept[0]["at"] != rows[0].at:
         raise CheckFailed(
@@ -4746,8 +4787,9 @@ def rung_keys(session: PageSession) -> str:
             session,
             f"the overlay of tty {digit} after control {digit}",
             _OVERLAY_SELECTOR,
-            lambda views: len(views) == count
-            and views[digit - 1]["hidden"] == hidden,
+            lambda views: (
+                len(views) == count and views[digit - 1]["hidden"] == hidden
+            ),
         )
     return (
         "control 1 showed and hid the overlay of tty 1, control 2 made, showed"
@@ -4809,12 +4851,14 @@ def rung_batch(session: PageSession) -> str:
     rows = server_wait(
         session,
         "the batched line on the server",
-        lambda: [
-            row
-            for row in verbose_read(session, _UI_THREAD)
-            if row.text == _BATCH_MARK
-        ]
-        or None,
+        lambda: (
+            [
+                row
+                for row in verbose_read(session, _UI_THREAD)
+                if row.text == _BATCH_MARK
+            ]
+            or None
+        ),
     )
     if rows[0].at != line["at"]:
         raise CheckFailed(f"the server holds {rows[0]} for {line}")
@@ -4911,7 +4955,9 @@ def rung_console(session: PageSession) -> str:
     )
     overlays = json_list(session.probe_call("views", _OVERLAY_SELECTOR))
     terminal = json_object(session.probe_call("view", _TERMINAL_SELECTOR))
-    inside = session.probe_call("center_inside", _TERMINAL_SELECTOR, _DEBUG_SELECTOR)
+    inside = session.probe_call(
+        "center_inside", _TERMINAL_SELECTOR, _DEBUG_SELECTOR
+    )
     if len(overlays) != 2 or terminal["width"] <= 0 or inside is not True:
         raise CheckFailed(
             f"after control 0 there are {len(overlays)} overlays and the"
@@ -4931,8 +4977,9 @@ def rung_echo(session: PageSession) -> str:
     rows_wait(
         session,
         "the echo in the console",
-        lambda rows: _MARK_TYPED in rows_filled(rows)
-        and row_last(rows) == _PROMPT_ROW,
+        lambda rows: (
+            _MARK_TYPED in rows_filled(rows) and row_last(rows) == _PROMPT_ROW
+        ),
     )
     return f"echo {_MARK_TYPED} typed into the terminal printed {_MARK_TYPED}"
 
@@ -5083,7 +5130,9 @@ def permit_take(
     shown = json_object(permit["text"])
     buttons = [json_object(button) for button in permit["buttons"]]
     viewport = json_object(session.probe_call("viewport"))
-    due = i18n.i18n("page.permit_text", _PERMIT_TOOL, json_text(call.arguments))
+    due = i18n.i18n(
+        "page.permit_text", _PERMIT_TOOL, json_text(call.arguments)
+    )
     labels = [
         i18n.i18n("page.choice_accept"),
         i18n.i18n("page.choice_deny"),
@@ -5096,12 +5145,16 @@ def permit_take(
         or not all(box_inside(button, viewport) for button in buttons)
         or not all(button["center_hit"] for button in buttons)
     ):
-        raise CheckFailed(f"the permit request is {permit}, its text due {due!r}")
+        raise CheckFailed(
+            f"the permit request is {permit}, its text due {due!r}"
+        )
     return buttons
 
 
 # Accept runs the console command and returns its output.
-def rung_run(session: PageSession, scene: str, calls: dict[str, ScriptCall]) -> str:
+def rung_run(
+    session: PageSession, scene: str, calls: dict[str, ScriptCall]
+) -> str:
     call = calls[_INPUT_RUN]
     console_check(session, "before the console run")
     buttons = permit_take(session, _INPUT_RUN, call)
@@ -5121,7 +5174,9 @@ def rung_run(session: PageSession, scene: str, calls: dict[str, ScriptCall]) -> 
 
 
 # Deny returns an error to the caller.
-def rung_deny(session: PageSession, scene: str, calls: dict[str, ScriptCall]) -> str:
+def rung_deny(
+    session: PageSession, scene: str, calls: dict[str, ScriptCall]
+) -> str:
     import i18n
 
     call = calls[_INPUT_DENY]
@@ -5235,7 +5290,9 @@ def rung_interrupt(session: PageSession) -> str:
         "dash's prompt after the interrupt",
         lambda rows: row_last(rows) == _PROMPT_ROW,
     )
-    return f"control C in the terminal ended {_SLEEP_COMMAND} and dash prompted"
+    return (
+        f"control C in the terminal ended {_SLEEP_COMMAND} and dash prompted"
+    )
 
 
 # The console is fed while hidden and shows the output once shown again.
@@ -5261,7 +5318,9 @@ def rung_hidden(
 
 
 # A table of strings made by the AI's script is replicated to the server.
-def rung_pairs(session: PageSession, scene: str, calls: dict[str, ScriptCall]) -> str:
+def rung_pairs(
+    session: PageSession, scene: str, calls: dict[str, ScriptCall]
+) -> str:
     call = calls[_INPUT_PAIRS]
     session.turn_run(_INPUT_PAIRS, call.ending)
     value = script_value(session, scene, call.ending)
@@ -5304,7 +5363,9 @@ def rung_overflow(
 
 
 # Writing values until the cache is full is an error the script sees.
-def rung_cache(session: PageSession, scene: str, calls: dict[str, ScriptCall]) -> str:
+def rung_cache(
+    session: PageSession, scene: str, calls: dict[str, ScriptCall]
+) -> str:
     import i18n
 
     call = calls[_INPUT_CACHE]
@@ -5313,16 +5374,24 @@ def rung_cache(session: PageSession, scene: str, calls: dict[str, ScriptCall]) -
     value = json_object(script_value(session, scene, call.ending))
     written = cast(int, value["written"])
     full = pattern_make("Error: " + i18n.i18n("substrate.cache_full", _ANY))
-    if written < 1 or value["error"] is None or not full.fullmatch(value["error"]):
+    if (
+        written < 1
+        or value["error"] is None
+        or not full.fullmatch(value["error"])
+    ):
         raise CheckFailed(f"the script returned {value}")
     server_wait(
         session,
         "the puts and deletes on the server",
-        lambda: True
-        if seq_read(session, _FILES_DB) == before + 2 * written
-        else None,
+        lambda: (
+            True
+            if seq_read(session, _FILES_DB) == before + 2 * written
+            else None
+        ),
     )
-    left = keys_read(session, _FILES_DB, _CACHE_PREFIX.removeprefix("/_files/"))
+    left = keys_read(
+        session, _FILES_DB, _CACHE_PREFIX.removeprefix("/_files/")
+    )
     if left:
         raise CheckFailed(f"the server still holds {left}")
     return (
@@ -5333,11 +5402,17 @@ def rung_cache(session: PageSession, scene: str, calls: dict[str, ScriptCall]) -
 
 
 # Creating databases until the pool is full is an error the script sees.
-def rung_pool(session: PageSession, scene: str, calls: dict[str, ScriptCall]) -> str:
+def rung_pool(
+    session: PageSession, scene: str, calls: dict[str, ScriptCall]
+) -> str:
     call = calls[_INPUT_POOL]
     session.turn_run(_INPUT_POOL, call.ending)
     value = json_object(script_value(session, scene, call.ending))
-    if value["made"] < 1 or value["error"] is None or value["listed"] is not False:
+    if (
+        value["made"] < 1
+        or value["error"] is None
+        or value["listed"] is not False
+    ):
         raise CheckFailed(f"the script returned {value}")
     made = cast(int, value["made"])
     names = [f"{_POOL_PREFIX}{count}" for count in range(made + 1)]
@@ -5362,9 +5437,9 @@ def rung_turn(session: PageSession, scene: str, png: bytes) -> str:
     session.turn_run(_INPUT_TURN, _SCENE_SUBTITLE)
     canvas = json_object(session.probe_call("canvas"))
     width, height = png_size(png)
-    if (
-        canvas["view"]["hidden"]
-        or (canvas["width"], canvas["height"]) != (width, height)
+    if canvas["view"]["hidden"] or (canvas["width"], canvas["height"]) != (
+        width,
+        height,
     ):
         raise CheckFailed(f"the image after the turn is {canvas}")
     player = server_wait(
@@ -5384,7 +5459,10 @@ def rung_turn(session: PageSession, scene: str, png: bytes) -> str:
         (
             "the scene's head",
             lambda: rows_read(
-                session, _REGION, "SELECT version FROM _head WHERE id = ?", [_SCENE_ID]
+                session,
+                _REGION,
+                "SELECT version FROM _head WHERE id = ?",
+                [_SCENE_ID],
             ),
             [[1]],
         ),
@@ -5470,7 +5548,9 @@ def rung_image(session: PageSession) -> str:
     ):
         raise CheckFailed(f"#image is {canvas}")
     png = session.shot_save("stage8_image_visible")
-    return f"#image is shown, its box the viewport, its centre hits it; PNG {png}"
+    return (
+        f"#image is shown, its box the viewport, its centre hits it; PNG {png}"
+    )
 
 
 # The subtitle shows its text inside the viewport on black, the console shown.
@@ -5511,9 +5591,13 @@ def rung_input(session: PageSession) -> str:
 def rung_terminal(session: PageSession) -> str:
     console_show(session)
     terminal = json_object(session.probe_call("view", _TERMINAL_SELECTOR))
-    inside = session.probe_call("center_inside", _TERMINAL_SELECTOR, _DEBUG_SELECTOR)
+    inside = session.probe_call(
+        "center_inside", _TERMINAL_SELECTOR, _DEBUG_SELECTOR
+    )
     if terminal["width"] <= 0 or terminal["height"] <= 0 or inside is not True:
-        raise CheckFailed(f"the terminal is {terminal}, inside #debug {inside}")
+        raise CheckFailed(
+            f"the terminal is {terminal}, inside #debug {inside}"
+        )
     png = session.shot_save("stage8_console_visible")
     return (
         "over the image the terminal's box is"
@@ -5603,7 +5687,10 @@ def rung_wide(session: PageSession) -> str:
 
 # The long tasks the UI thread ran since the observer started.
 def rung_long(session: PageSession) -> str:
-    durations = [cast(float, value) for value in json_list(session.probe_call("long_list"))]
+    durations = [
+        cast(float, value)
+        for value in json_list(session.probe_call("long_list"))
+    ]
     target = session.values["long_task_ms"]
     longest = max(durations, default=0.0)
     return (
@@ -5618,7 +5705,9 @@ def rung_exit(session: PageSession) -> str:
     console_check(session, "before exit")
     mark = len(session.ttyd.lines)
     session.command_type(_EXIT_COMMAND)
-    _, found = session.ttyd.line_wait(_ENDED_PATTERN, "the console's end", mark)
+    _, found = session.ttyd.line_wait(
+        _ENDED_PATTERN, "the console's end", mark
+    )
     if found.group(1, 2) != (_EXITED_WORDS, "0"):
         raise CheckFailed(f"{session.ttyd.version} logged: {found.string}")
     session.turn_run(_INPUT_PLAIN, _ENDING_PLAIN)
@@ -5728,8 +5817,12 @@ def rung_refused_role(session: PageSession) -> str:
     mark = len(session.ttyd.lines)
     session.probe_call("console_open", session.url)
     console_first(session, 1, 0)
-    record = json_object(session.probe_wait("the console's close", "console_when"))
-    _, found = session.ttyd.line_wait(_ENDED_PATTERN, "the console's end", mark)
+    record = json_object(
+        session.probe_wait("the console's close", "console_when")
+    )
+    _, found = session.ttyd.line_wait(
+        _ENDED_PATTERN, "the console's end", mark
+    )
     lines = [json_object(line) for line in json_list(record["lines"])]
     opened = [
         line
@@ -5798,7 +5891,9 @@ def rung_twice(
             f" {len(first)}, unequal from line {index}:"
             f" {texts[index : index + 1]} where {first[index : index + 1]}"
         )
-    return f"a second root's synchronous start logged the same {len(texts)} lines"
+    return (
+        f"a second root's synchronous start logged the same {len(texts)} lines"
+    )
 
 
 # A second load opens the browser's copies with no snapshot.
@@ -5872,11 +5967,15 @@ def rung_desync(session: PageSession) -> str:
     seq = seq_bump(session, _DESYNC_REF)
     session.turn_send(_INPUT_PLAIN)
     text = session.fault_wait("the fault of the refused push")
-    due = i18n.i18n("substrate.since_stale", "turn.append", seq - 1, seq, _METAVERSE_DB)
+    due = i18n.i18n(
+        "substrate.since_stale", "turn.append", seq - 1, seq, _METAVERSE_DB
+    )
     if due not in text:
         raise CheckFailed(f"the fault screen shows {text!r}, not {due!r}")
     session.programs_wait(1, "the stop function to end the engine")
-    button = json_object(session.probe_wait("the Reload button", "reload_button"))
+    button = json_object(
+        session.probe_wait("the Reload button", "reload_button")
+    )
     session.reload_click(json_object(button["view"]))
     session.outcome_wait(_REPLACED_SUBTITLE)
     return (
@@ -6054,9 +6153,13 @@ def rung_level_two(session: PageSession, subtitle: str) -> str:
     views = json_list(session.probe_call("views", _OVERLAY_SELECTOR))
     text = cast(str, json_object(views[0])["text"])
     if _VERBOSE_TYPE in text:
-        raise CheckFailed(f"the overlay of tty 1 shows {_VERBOSE_TYPE}: {text}")
+        raise CheckFailed(
+            f"the overlay of tty 1 shows {_VERBOSE_TYPE}: {text}"
+        )
     before = server_wait(
-        session, "the server's log to come to rest", lambda: count_settled(session)
+        session,
+        "the server's log to come to rest",
+        lambda: count_settled(session),
     )
     time.sleep(_QUIET_SECONDS)
     after = verbose_count(session)
@@ -6105,9 +6208,13 @@ def trace_check(lines: list[dict[str, Any]], count: int) -> tuple[int, int]:
                 raise CheckFailed(f"the ring ends with {texts[-1]!r}")
         else:
             answer = replied.fullmatch(texts[index])
-            if answer is None or jslb.field_get(
-                jslb.Object(json.loads(answer.group(1))), "reply"
-            ) != request:
+            if (
+                answer is None
+                or jslb.field_get(
+                    jslb.Object(json.loads(answer.group(1))), "reply"
+                )
+                != request
+            ):
                 raise CheckFailed(
                     f"line {index} of the ring is {texts[index]!r}, not the"
                     f" reply to {texts[index - 1]!r}"
@@ -6157,12 +6264,14 @@ def rung_console_verbose(session: PageSession) -> str:
     rows = server_wait(
         session,
         "the console's start in the server's log",
-        lambda: [
-            row
-            for row in verbose_read(session, _SERVER_THREAD)
-            if row.text == text
-        ]
-        or None,
+        lambda: (
+            [
+                row
+                for row in verbose_read(session, _SERVER_THREAD)
+                if row.text == text
+            ]
+            or None
+        ),
     )
     return (
         f"control 0 opened the console and {command!r} typed into it showed"
@@ -6199,14 +6308,16 @@ def rung_console_reopen(session: PageSession) -> str:
     server_wait(
         session,
         "the console's end handled on the UI thread",
-        lambda: [
-            row
-            for row in verbose_read(session, _UI_THREAD)
-            if row.seq > after
-            and _EXIT_MARK in row.text
-            and dispatched.fullmatch(row.text)
-        ]
-        or None,
+        lambda: (
+            [
+                row
+                for row in verbose_read(session, _UI_THREAD)
+                if row.seq > after
+                and _EXIT_MARK in row.text
+                and dispatched.fullmatch(row.text)
+            ]
+            or None
+        ),
     )
     console_hide(session)
     console_show(session)
@@ -6220,8 +6331,9 @@ def rung_console_reopen(session: PageSession) -> str:
     rows_wait(
         session,
         f"{_MARK_REOPEN} in the console opened again",
-        lambda rows: _MARK_REOPEN in rows_filled(rows)
-        and row_last(rows) == _PROMPT_ROW,
+        lambda rows: (
+            _MARK_REOPEN in rows_filled(rows) and row_last(rows) == _PROMPT_ROW
+        ),
     )
     session.fault_none("the console opened again")
     return (
@@ -6294,7 +6406,9 @@ def rung_tool_failed(session: PageSession, subtitle: str) -> str:
     if due not in text:
         raise CheckFailed(f"the fault screen shows {text!r}, not {due!r}")
     session.programs_wait(1, "the stop function to end the engine")
-    button = json_object(session.probe_wait("the Reload button", "reload_button"))
+    button = json_object(
+        session.probe_wait("the Reload button", "reload_button")
+    )
     if not button["view"]["center_hit"]:
         raise CheckFailed(f"the Reload button is {button}")
     session.reload_click(json_object(button["view"]))
@@ -6343,12 +6457,14 @@ def rung_crash_logged(session: PageSession, subtitle: str) -> str:
     rows = server_wait(
         session,
         "the crash in the server's log",
-        lambda: [
-            row
-            for row in verbose_read(session, _SERVER_THREAD)
-            if row.text == due
-        ]
-        or None,
+        lambda: (
+            [
+                row
+                for row in verbose_read(session, _SERVER_THREAD)
+                if row.text == due
+            ]
+            or None
+        ),
     )
     _, ended = session.ttyd.line_wait(
         _ENDED_PATTERN, "the engine's end", session.mark
@@ -6951,9 +7067,7 @@ def rung_page_replay(session: PageSession, subtitle: str) -> str:
         lambda: True if drop_replies(session) >= len(dropped) else None,
     )
     left = [
-        db
-        for db in dropped
-        if os.path.exists(database_path(session.root, db))
+        db for db in dropped if os.path.exists(database_path(session.root, db))
     ]
     if left:
         raise CheckFailed(f"the server still holds the dropped {left}")

@@ -385,10 +385,7 @@ namespace test_provider_script {
       this.assertEqual(bench.received.length, 1);
       const reply = bench.received[0];
       this.assertEqual(reply[0], { t: constants.request_type, r: 7 });
-      this.assertEqual(
-        Object.keys(reply).join(","),
-        "0,status,headers,json",
-      );
+      this.assertEqual(Object.keys(reply).join(","), "0,status,headers,json");
       this.assertEqual(reply.status, 200);
       this.assertEqual(reply.headers, { "content-type": "application/json" });
       const json = reply.json as provider.ChatResponse;

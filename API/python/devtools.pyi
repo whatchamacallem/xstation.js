@@ -42,5 +42,6 @@ class Browser:
 
 # Returns the trace categories that hold what `blocking_find` looks for.
 def blocking_categories() -> list[str]: ...
+
 # Returns the trace's synchronous loads on the main thread of a renderer.
 def blocking_find(events: list[dict[str, Any]]) -> list[dict[str, Any]]: ...

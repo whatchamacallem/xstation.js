@@ -35,7 +35,7 @@ namespace test_utility {
     test_empty_input(): void {
       this.assertEqual(
         utility.sha256_hex(new Uint8Array(0)),
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       );
     }
 
@@ -43,7 +43,7 @@ namespace test_utility {
     test_short_text(): void {
       this.assertEqual(
         utility.sha256_hex(ascii_bytes("abc")),
-        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
       );
     }
 
@@ -53,7 +53,7 @@ namespace test_utility {
       this.assertEqual(text.length, 56);
       this.assertEqual(
         utility.sha256_hex(ascii_bytes(text)),
-        "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+        "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
       );
     }
 
@@ -65,7 +65,7 @@ namespace test_utility {
       this.assertEqual(text.length, 112);
       this.assertEqual(
         utility.sha256_hex(ascii_bytes(text)),
-        "cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1"
+        "cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1",
       );
     }
 
@@ -73,7 +73,7 @@ namespace test_utility {
     test_million_bytes(): void {
       this.assertEqual(
         utility.sha256_hex(new Uint8Array(1000000).fill(0x61)),
-        "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"
+        "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0",
       );
     }
 
@@ -82,7 +82,7 @@ namespace test_utility {
       const padded = Uint8Array.of(0, 0x61, 0x62, 0x63, 0);
       this.assertEqual(
         utility.sha256_hex(padded.subarray(1, 4)),
-        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
       );
     }
   }
@@ -94,7 +94,7 @@ namespace test_utility {
       this.assertEqual(
         message_thrown(this, () => utility.utf8_decode(bytes)),
         i18n("utility.bytes_refused"),
-        bytes_text(bytes)
+        bytes_text(bytes),
       );
     }
 
@@ -124,7 +124,7 @@ namespace test_utility {
       this.assertEqual(bytes_text(utility.utf8_encode(middle)), "228,184,173");
       this.assertEqual(
         utility.utf8_decode(Uint8Array.of(0xe2, 0x82, 0xac)),
-        euro
+        euro,
       );
     }
 
@@ -133,11 +133,11 @@ namespace test_utility {
       const text = String.fromCodePoint(0x1f600);
       this.assertEqual(
         bytes_text(utility.utf8_encode(text)),
-        "240,159,152,128"
+        "240,159,152,128",
       );
       this.assertEqual(
         utility.utf8_decode(Uint8Array.of(0xf0, 0x9f, 0x98, 0x80)),
-        text
+        text,
       );
     }
 
@@ -172,7 +172,7 @@ namespace test_utility {
         this.assertEqual(
           message_thrown(this, () => utility.utf8_encode(text)),
           i18n("utility.text_refused"),
-          String(index)
+          String(index),
         );
       }
     }
@@ -216,7 +216,7 @@ namespace test_utility {
         this.assertEqual(
           message_thrown(this, () => utility.base64_decode(text)),
           i18n("utility.base64_refused"),
-          codes_text(text)
+          codes_text(text),
         );
       }
     }
@@ -236,7 +236,7 @@ namespace test_utility {
         this.assertEqual(
           bytes_text(utility.base64_decode(encoded)),
           codes_text(plain),
-          encoded
+          encoded,
         );
       }
     }
@@ -280,7 +280,7 @@ namespace test_utility {
     number_refused(value: unknown, number: number): void {
       this.assertEqual(
         message_thrown(this, () => utility.json_text(value)),
-        i18n("utility.number_refused", number)
+        i18n("utility.number_refused", number),
       );
     }
 
@@ -289,7 +289,7 @@ namespace test_utility {
       const value = { list: [1, 2, 3], text: "a b", flag: true, none: null };
       this.assertEqual(
         utility.json_text(value),
-        '{"list":[1,2,3],"text":"a b","flag":true,"none":null}'
+        '{"list":[1,2,3],"text":"a b","flag":true,"none":null}',
       );
     }
 
@@ -297,7 +297,7 @@ namespace test_utility {
     test_key_order(): void {
       this.assertEqual(
         utility.json_text({ b: 1, 2: "x", a: 2, 1: "y" }),
-        '{"1":"y","2":"x","b":1,"a":2}'
+        '{"1":"y","2":"x","b":1,"a":2}',
       );
     }
 
@@ -329,7 +329,7 @@ namespace test_utility {
       this.assertEqual(utility.json_text({ big: -1e300 }), '{"big":-1e+300}');
       this.assertEqual(
         utility.json_text(Number.MAX_VALUE),
-        "1.7976931348623157e+308"
+        "1.7976931348623157e+308",
       );
     }
 
@@ -339,7 +339,7 @@ namespace test_utility {
       for (const value of values) {
         this.assertEqual(
           message_thrown(this, () => utility.json_text(value)),
-          i18n("utility.value_refused")
+          i18n("utility.value_refused"),
         );
       }
     }
@@ -365,7 +365,7 @@ namespace test_utility {
     test_fail_now(): void {
       this.assertEqual(
         message_thrown(this, () => utility.fail_now("boom")),
-        "boom"
+        "boom",
       );
     }
   }

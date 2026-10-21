@@ -59,9 +59,9 @@ declare namespace mcp {
 
   // A tool function runs inside the `mcp` line's handler: it returns the
   // result, or a sleep whose wake produces the result.
-  type ToolFn = (
-    args: { [key: string]: unknown }
-  ) => ToolResult | dispatch.Sleep;
+  type ToolFn = (args: {
+    [key: string]: unknown;
+  }) => ToolResult | dispatch.Sleep;
 
   class Server {
     constructor(name: string, version: string);
@@ -77,7 +77,7 @@ declare namespace mcp {
       name: string,
       version: string,
       tasks: queue.TaskQueue,
-      owner: queue.ThreadName
+      owner: queue.ThreadName,
     );
     // Submits `initialize`; the wake carries the server's capabilities,
     // after which `notifications/initialized` is sent.

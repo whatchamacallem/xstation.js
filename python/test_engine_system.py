@@ -90,9 +90,7 @@ def _wire_pass(
     sink_make: Callable[[jslb.Object], str],
 ) -> jslb.Object:
     data = b"".join(cast(bytes, piece) for piece in jslb.line_encode(line))
-    decoder = jslb.LineDecoder(
-        _LINE_MAX, _BLOB_MAX, overflow_bytes, sink_make
-    )
+    decoder = jslb.LineDecoder(_LINE_MAX, _BLOB_MAX, overflow_bytes, sink_make)
     (decoded,) = decoder.bytes_feed(data)
     return decoded
 

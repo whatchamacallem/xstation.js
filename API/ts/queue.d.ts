@@ -2,13 +2,7 @@ declare namespace queue {
   // The owners a line can have: the two threads, the server, and the
   // ports that turn a platform event into a reply line.
   type ThreadName =
-    | "ui"
-    | "ai"
-    | "server"
-    | "http"
-    | "media"
-    | "console"
-    | "dom";
+    "ui" | "ai" | "server" | "http" | "media" | "console" | "dom";
 
   // A port carries lines one way each direction, in order.
   interface Port {

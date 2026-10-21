@@ -8,7 +8,7 @@ declare namespace wire {
     constructor(
       base_url: string,
       chunk_bytes: number,
-      decoder: jslb.LineDecoder
+      decoder: jslb.LineDecoder,
     );
     // Opens the socket; `fn` gets `hello` once it arrives.
     wire_open(fn: (hello: lines.Line) => void): void;

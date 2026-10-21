@@ -25,13 +25,13 @@ namespace utility {
   const surrogate_lone = new RegExp(
     `[${String.fromCharCode(constants.surrogate_first)}-` +
       `${String.fromCharCode(constants.surrogate_last)}]`,
-    "u"
+    "u",
   );
 
   // Matches strict base64: padded, no white space, zero unused bits.
   const base64_form = new RegExp(
     "^(?:[A-Za-z0-9+/]{4})*" +
-      "(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$"
+      "(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$",
   );
 
   // The first prime numbers, as many as asked for.
@@ -53,13 +53,13 @@ namespace utility {
   // The round constants: cube root fractions of the first 64 primes.
   const round_table = Uint32Array.from(
     primes_first(constants.round_count),
-    (prime) => fraction_bits(Math.cbrt(prime))
+    (prime) => fraction_bits(Math.cbrt(prime)),
   );
 
   // The first hash state: square root fractions of the first 8 primes.
   const hash_start = Uint32Array.from(
     primes_first(constants.hash_words),
-    (prime) => fraction_bits(Math.sqrt(prime))
+    (prime) => fraction_bits(Math.sqrt(prime)),
   );
 
   // The strict `UTF-8` decoder, which keeps a leading byte order mark.
@@ -81,7 +81,7 @@ namespace utility {
     state: Uint32Array,
     schedule: Uint32Array,
     view: DataView,
-    offset: number
+    offset: number,
   ): void {
     const { block_words, round_count, word_bytes } = constants;
     for (let index = 0; index < block_words; index += 1) {

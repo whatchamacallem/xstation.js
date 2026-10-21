@@ -5,13 +5,13 @@ declare namespace tap_producer {
       class_name: string,
       description: string,
       directive?: string,
-      diagnostics?: string
+      diagnostics?: string,
     ): void;
     add_not_ok(
       class_name: string,
       description: string,
       directive?: string,
-      diagnostics?: string
+      diagnostics?: string,
     ): void;
     add_skip(class_name: string, description: string, reason: string): void;
     // Sets the number of points the plan line announces.

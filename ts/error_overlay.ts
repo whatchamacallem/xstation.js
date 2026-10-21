@@ -8,7 +8,7 @@
 namespace error_overlay {
   // The texts of this module, plain English as it depends on no other module.
   const constants = Object.freeze({
-    reload_button: "<button onclick=\"location.reload()\">Reload</button>",
+    reload_button: '<button onclick="location.reload()">Reload</button>',
     resource_failure: "Failed to load ",
     address_names: Object.freeze(["src", "href"]),
     address_missing: "Neither src nor href names what failed to load in ",

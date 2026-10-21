@@ -75,10 +75,10 @@ namespace test_i18n {
     test_gap_index(): void {
       const text = "{0} {2}";
       this.assertRaises(Error, () =>
-        i18n_format("test.name", text, ["a", "b"])
+        i18n_format("test.name", text, ["a", "b"]),
       );
       this.assertRaises(Error, () =>
-        i18n_format("test.name", text, ["a", "b", "c"])
+        i18n_format("test.name", text, ["a", "b", "c"]),
       );
     }
 
@@ -91,7 +91,7 @@ namespace test_i18n {
     test_count_mismatch(): void {
       this.assertRaises(Error, () => i18n_format("test.name", "{0}", []));
       this.assertRaises(Error, () =>
-        i18n_format("test.name", "{0}", ["a", "b"])
+        i18n_format("test.name", "{0}", ["a", "b"]),
       );
       this.assertRaises(Error, () => i18n_format("test.name", "text", ["a"]));
     }

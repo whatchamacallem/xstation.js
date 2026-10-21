@@ -254,7 +254,7 @@ namespace test_tools_browser {
       '{"type":"number"}},"required":["text","timeout_seconds"]},' +
       '"_meta":{"xsjs":{"permit":true}}}',
     '{"name":"verbose_tail","description":"The last lines of a' +
-      " thread's verbose ring: ui, ai or server.\",\"inputSchema\":" +
+      ' thread\'s verbose ring: ui, ai or server.","inputSchema":' +
       '{"type":"object","properties":{"thread":{"type":"string"},' +
       '"count":{"type":"integer"}},"required":["thread","count"]}}',
   ];

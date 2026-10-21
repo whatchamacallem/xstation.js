@@ -26,13 +26,7 @@ namespace queue {
 
   // The owners a line can have: the threads, the server and the ports.
   export type ThreadName =
-    | "ui"
-    | "ai"
-    | "server"
-    | "http"
-    | "media"
-    | "console"
-    | "dom";
+    "ui" | "ai" | "server" | "http" | "media" | "console" | "dom";
 
   // A port carries lines one way each direction, in order.
   export interface Port {
@@ -345,11 +339,7 @@ namespace queue {
     private fault: Error | undefined;
 
     // Takes the thread, its owner table and the mode, and adds its own port.
-    constructor(
-      thread: ThreadName,
-      owners: OwnerTable,
-      synchronous: boolean,
-    ) {
+    constructor(thread: ThreadName, owners: OwnerTable, synchronous: boolean) {
       this.thread = thread;
       this.owners = owners;
       this.synchronous = synchronous;

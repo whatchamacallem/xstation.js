@@ -24,7 +24,7 @@ declare namespace jslb {
       reply?: number;
       key?: string;
       full?: boolean;
-    }
+    },
   ): LineHeader;
 
   // Builds a blob header with `d` set and `s` measured; other fields are
@@ -32,7 +32,7 @@ declare namespace jslb {
   function blob_make(
     data: Uint8Array | string,
     key?: string,
-    fields?: { [field: string]: unknown }
+    fields?: { [field: string]: unknown },
   ): BlobHeader;
 
   // Builds a line from its header, blob headers and payload, numbering
@@ -40,7 +40,7 @@ declare namespace jslb {
   function line_make(
     header: LineHeader,
     blobs: BlobHeader[],
-    payload: { [key: string]: unknown }
+    payload: { [key: string]: unknown },
   ): Line;
 
   // Resolves a short or full field name on a header and its default.
@@ -65,7 +65,7 @@ declare namespace jslb {
       line_max: number,
       blob_max: number,
       overflow_bytes: number,
-      sink: BlobSink
+      sink: BlobSink,
     );
     // Returns the complete lines the bytes finish, zero or more. Throws
     // WireError at the first fault; the decoder is then unusable.

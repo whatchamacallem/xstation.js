@@ -15,7 +15,7 @@ declare namespace dispatch {
   function task_sleep(
     state: unknown,
     wait_ids: number[],
-    then_type: string
+    then_type: string,
   ): Sleep;
 
   type Handler = (line: lines.Line) => Reply | Sleep;
@@ -31,7 +31,7 @@ declare namespace dispatch {
   function reply_make(
     line: lines.Line,
     payload: { [key: string]: unknown },
-    blobs?: lines.BlobHeader[]
+    blobs?: lines.BlobHeader[],
   ): lines.Line;
 
   // The one `error` line for a throw: `message`, `stack`, `r` when the

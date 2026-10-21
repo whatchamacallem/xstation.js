@@ -56,9 +56,7 @@ def verbose_put(
 
 
 # Replies with the last `count` lines of the thread, oldest first.
-def verbose_tail(
-    line: jslb.Object, *, thread: str, count: int
-) -> jslb.Object:
+def verbose_tail(line: jslb.Object, *, thread: str, count: int) -> jslb.Object:
     if thread == _SERVER_THREAD:
         entries = verbose.history_get(count)
     else:

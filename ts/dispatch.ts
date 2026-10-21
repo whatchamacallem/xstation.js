@@ -138,9 +138,7 @@ namespace dispatch {
     }
     if (id === undefined) {
       if (typeof jslb.field_get(result[0], "reply") !== "number") {
-        throw new Error(
-          i18n("dispatch.notification_replied", type, version),
-        );
+        throw new Error(i18n("dispatch.notification_replied", type, version));
       }
       return result;
     }

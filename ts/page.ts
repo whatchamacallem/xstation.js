@@ -130,7 +130,7 @@ namespace page {
   export function owners_make(test: boolean): queue.OwnerTable {
     const owners: queue.OwnerTable = {
       "ui.": "ui",
-      "render": "ui",
+      render: "ui",
       "media.": "ui",
       "permit.": "ui",
       "boot.": "ui",

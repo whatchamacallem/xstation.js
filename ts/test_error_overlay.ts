@@ -72,7 +72,7 @@ namespace test_error_overlay {
       this.assertEqual(this.written.length, 1);
       const html = this.written[0];
       this.assertTrue(
-        html.startsWith("<pre>a&lt;b&gt;&amp;c\nd&gt;e&amp;amp;</pre>")
+        html.startsWith("<pre>a&lt;b&gt;&amp;c\nd&gt;e&amp;amp;</pre>"),
       );
       this.assertFalse(html.includes("<b>"));
     }
@@ -95,7 +95,7 @@ namespace test_error_overlay {
       fault_screen.stop_register(() => {});
       this.assertEqual(
         message_thrown(this, () => fault_screen.stop_register(() => {})),
-        "The stop function was registered twice"
+        "The stop function was registered twice",
       );
     }
   }
@@ -113,7 +113,7 @@ namespace test_error_overlay {
       this.assertTrue(Object.isFrozen(error_overlay));
       this.assertEqual(
         Object.keys(error_overlay).sort().join(","),
-        names.join(",")
+        names.join(","),
       );
     }
   }

@@ -23,11 +23,11 @@ function i18n_format(name: string, text: string, args: unknown[]): string {
   if (indices.size !== count || Math.max(...indices) >= count) {
     throw new Error(
       `The string ${name} has the placeholder indices ` +
-        `[${[...indices].join(", ")}] but ${count} arguments were given.`
+        `[${[...indices].join(", ")}] but ${count} arguments were given.`,
     );
   }
   return text.replace(placeholder, (_match: string, digits: string) =>
-    String(args[Number(digits)])
+    String(args[Number(digits)]),
   );
 }
 

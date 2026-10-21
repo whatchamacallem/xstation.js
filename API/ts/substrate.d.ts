@@ -38,7 +38,7 @@ declare namespace substrate {
       sqlite3: unknown,
       root: string,
       overflow_bytes: number,
-      compact_turns: number
+      compact_turns: number,
     );
     db_open(name: string): number;
     db_close(name: string): void;
@@ -49,7 +49,7 @@ declare namespace substrate {
     kv_put(
       ref: lines.KvRef,
       data: Uint8Array | string,
-      db?: string
+      db?: string,
     ): { row: lines.KvRow; seq: number };
     kv_delete(ref: lines.KvRef, db?: string): number;
     kv_list(db: string, prefix: string): lines.KvRow[];
@@ -61,13 +61,13 @@ declare namespace substrate {
     turn_append(
       scene: lines.DocRef,
       role: provider.Role,
-      content: provider.ChatMessage
+      content: provider.ChatMessage,
     ): lines.TurnAppendReply;
     turn_list(scene: lines.DocRef): TurnRow[];
     turn_compact(
       scene: lines.DocRef,
       through: number,
-      summary: string
+      summary: string,
     ): number;
     sql_run(db: string, statements: lines.SqlStatement[]): lines.SqlResult[];
     db_snapshot(db: string): { data: Uint8Array; seq: number };
@@ -81,7 +81,7 @@ declare namespace substrate {
     operation_apply(
       type: string,
       since: number,
-      payload: { [key: string]: unknown }
+      payload: { [key: string]: unknown },
     ): number;
     transaction_run<T>(fn: () => T): T;
     // The emitting side of replication: after every committed modifying

@@ -1640,10 +1640,12 @@ def rung_lines(ttyd: TtydServer, values: dict[str, Any]) -> str:
     client.input_send(typed.encode())
     client_wait(
         client,
-        lambda: client.ended
-        or (
-            len(client.output) - mark >= len(expected)
-            and client.output.endswith(_PROMPT)
+        lambda: (
+            client.ended
+            or (
+                len(client.output) - mark >= len(expected)
+                and client.output.endswith(_PROMPT)
+            )
         ),
         "the lines and the prompt after them",
     )
@@ -1790,10 +1792,9 @@ def rung_kv(client: WireClient) -> str:
     reply = exchange_run(client, get, "the reply to kv.get")
     due = {"size": len(_CONTROL_BYTES), "sha256": digest}
     blobs = blobs_of(reply)
-    if (
-        jslb.payload_of(cast(jslb.Object, reply)) != due
-        or blobs != [_CONTROL_BYTES]
-    ):
+    if jslb.payload_of(cast(jslb.Object, reply)) != due or blobs != [
+        _CONTROL_BYTES
+    ]:
         raise CheckFailed(
             f"kv.get: the server wrote {line_text(reply)} with blobs of"
             f" {[len(blob) for blob in blobs]} bytes where {json.dumps(due)}"
@@ -2122,9 +2123,7 @@ def rung_refused(ttyd: TtydServer, values: dict[str, Any]) -> str:
 
 
 # Makes a root as the start script does, its setting debug as given.
-def root_make(
-    work: str, name: str, debug: bool
-) -> tuple[str, dict[str, Any]]:
+def root_make(work: str, name: str, debug: bool) -> tuple[str, dict[str, Any]]:
     root = os.path.join(work, name)
     python_path = os.path.join(root, "python")
     os.makedirs(python_path)

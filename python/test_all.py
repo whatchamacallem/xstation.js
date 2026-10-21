@@ -28,8 +28,8 @@
 #
 #     python3 python/test_all.py [--smoke-test | --normal-test] [--failfast]
 #
-# --smoke-test is the default. With --failfast the first failing test ends
-# the stream.
+# --smoke-test is the default. In a smoke-test run, or with --failfast, the
+# first failing test ends the stream.
 
 import argparse, functools, importlib, os, signal, sys, time, types, unittest
 
@@ -152,7 +152,7 @@ def main() -> int:
     started = time.monotonic()
     limit = category.limit_seconds(chosen)
     stream = StreamWriter()
-    runner = tap_producer.TAPTestRunner(failfast)
+    runner = tap_producer.TAPTestRunner(failfast or limit is not None)
     runner.set_stream(stream.line_write)
     loader = unittest.TestLoader()
     for name, label in _MODULES:

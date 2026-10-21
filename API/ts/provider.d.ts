@@ -63,12 +63,12 @@ declare namespace provider {
   function chat_request(
     base_url: string,
     key: string,
-    request: ChatRequest
+    request: ChatRequest,
   ): lines.Line;
   function image_request(
     base_url: string,
     key: string,
-    request: ImageRequest
+    request: ImageRequest,
   ): lines.Line;
 
   // Read the reply line of a wake. A body that isn't the shape above

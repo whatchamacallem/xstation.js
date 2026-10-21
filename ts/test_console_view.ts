@@ -56,8 +56,7 @@ namespace test_console_view {
     screen: HTMLElement | undefined = undefined;
     data_listener: ((data: string) => void) | undefined = undefined;
     resize_listener:
-      | ((size: { cols: number; rows: number }) => void)
-      | undefined = undefined;
+      ((size: { cols: number; rows: number }) => void) | undefined = undefined;
 
     // Records the terminal as made, with its size and its input option.
     constructor(options: TerminalOptions) {
@@ -105,7 +104,7 @@ namespace test_console_view {
 
     // Keeps the listener of the resize events.
     onResize = (
-      listener: (size: { cols: number; rows: number }) => void
+      listener: (size: { cols: number; rows: number }) => void,
     ): void => {
       this.resize_listener = listener;
     };
@@ -308,7 +307,7 @@ namespace test_console_view {
   // The lines of a type the view posted to the AI worker, in order.
   function posted_of(rig: Rig, type: string): lines.Line[] {
     return rig.ai.posted.filter(
-      (line) => jslb.field_get(line[0], "type") === type
+      (line) => jslb.field_get(line[0], "type") === type,
     );
   }
 
@@ -477,7 +476,7 @@ namespace test_console_view {
       this.assertEqual(rig.ai.posted.length, 3);
       this.assertEqual(
         blob_bytes(inputs_of(rig)[1]),
-        message_bytes(0x31, '{"columns":120,"rows":20}')
+        message_bytes(0x31, '{"columns":120,"rows":20}'),
       );
       this.assertFalse(rig.terminal.options.disableStdin);
     }
@@ -547,7 +546,7 @@ namespace test_console_view {
       const error = thrown_get(() => rig.view.open_request());
       this.assertEqual(
         error.message,
-        i18n("queue.submit_outside", "ui", constants.open_type)
+        i18n("queue.submit_outside", "ui", constants.open_type),
       );
       this.assertEqual(rig.ai.posted.length, 0);
       start_run(rig);
@@ -565,7 +564,7 @@ namespace test_console_view {
       const error = thrown_get(() => rig.tasks.line_notify(line_build(drop)));
       this.assertEqual(
         error.message,
-        i18n("queue.wait_missing", drop, "ui", 1)
+        i18n("queue.wait_missing", drop, "ui", 1),
       );
     }
 
@@ -576,7 +575,7 @@ namespace test_console_view {
       const early = thrown_get(() => start_run(opening));
       this.assertEqual(
         early.message,
-        i18n("console_view.open_phase", "opening")
+        i18n("console_view.open_phase", "opening"),
       );
       this.assertEqual(opening.ai.posted.length, 1);
       const open = rig_make();
@@ -599,7 +598,7 @@ namespace test_console_view {
       this.assertEqual(bytes.length, 40);
       this.assertEqual(
         utility.utf8_decode(bytes),
-        '{"AuthToken":"","columns":120,"rows":40}'
+        '{"AuthToken":"","columns":120,"rows":40}',
       );
       this.assertFalse(rig.terminal.options.disableStdin);
       this.assertEqual(rig.tasks.depth(), 0);
@@ -611,7 +610,7 @@ namespace test_console_view {
       rig_start(rig);
       this.assertEqual(
         utility.utf8_decode(blob_bytes(inputs_of(rig)[0])),
-        '{"AuthToken":"dXNlcjpwYXNz","columns":120,"rows":40}'
+        '{"AuthToken":"dXNlcjpwYXNz","columns":120,"rows":40}',
       );
     }
 
@@ -626,7 +625,7 @@ namespace test_console_view {
       this.assertEqual(bytes[0], 0x7b);
       this.assertEqual(
         utility.utf8_decode(bytes),
-        '{"AuthToken":"","columns":100,"rows":30}'
+        '{"AuthToken":"","columns":100,"rows":30}',
       );
     }
 
@@ -637,7 +636,7 @@ namespace test_console_view {
       const error = thrown_get(() => rig.view.open_done(wake));
       this.assertEqual(
         error.message,
-        i18n("console_view.reply_phase", "idle")
+        i18n("console_view.reply_phase", "idle"),
       );
       this.assertEqual(rig.ai.posted.length, 0);
       this.assertTrue(rig.terminal.options.disableStdin);
@@ -651,7 +650,7 @@ namespace test_console_view {
       const error = thrown_get(() => rig.view.open_done(wake));
       this.assertEqual(
         error.message,
-        i18n("console_view.reply_phase", "open")
+        i18n("console_view.reply_phase", "open"),
       );
       this.assertEqual(inputs_of(rig).length, 1);
     }
@@ -664,7 +663,7 @@ namespace test_console_view {
       const error = thrown_get(() => rig.ai.line_send(reply));
       this.assertEqual(
         error.message,
-        i18n("console_view.reply_type", "console.close", "console.open")
+        i18n("console_view.reply_type", "console.close", "console.open"),
       );
       this.assertEqual(inputs_of(rig).length, 0);
       this.assertTrue(rig.terminal.options.disableStdin);
@@ -690,7 +689,7 @@ namespace test_console_view {
       const error = thrown_get(() => rig.ai.line_send(reply));
       this.assertEqual(
         error.message,
-        i18n("console_view.token_invalid", "undefined")
+        i18n("console_view.token_invalid", "undefined"),
       );
       this.assertEqual(inputs_of(rig).length, 0);
       this.assertTrue(rig.terminal.options.disableStdin);
@@ -709,7 +708,7 @@ namespace test_console_view {
       this.assertEqual(jslb.field_get(inputs[1][0], "blobs"), 1);
       this.assertEqual(
         blob_bytes(inputs[1]),
-        Uint8Array.of(0x30, 0x6c, 0x73, 0x0d)
+        Uint8Array.of(0x30, 0x6c, 0x73, 0x0d),
       );
     }
 
@@ -732,7 +731,7 @@ namespace test_console_view {
       rig.terminal.text_type(String.fromCodePoint(0xe9));
       this.assertEqual(
         blob_bytes(inputs_of(rig)[1]),
-        Uint8Array.of(0x30, 0xc3, 0xa9)
+        Uint8Array.of(0x30, 0xc3, 0xa9),
       );
     }
 
@@ -743,7 +742,7 @@ namespace test_console_view {
       rig.terminal.text_type(String.fromCodePoint(0x4e2d));
       this.assertEqual(
         blob_bytes(inputs_of(rig)[1]),
-        Uint8Array.of(0x30, 0xe4, 0xb8, 0xad)
+        Uint8Array.of(0x30, 0xe4, 0xb8, 0xad),
       );
     }
 
@@ -754,7 +753,7 @@ namespace test_console_view {
       rig.terminal.text_type(String.fromCodePoint(0x1f600));
       this.assertEqual(
         blob_bytes(inputs_of(rig)[1]),
-        Uint8Array.of(0x30, 0xf0, 0x9f, 0x98, 0x80)
+        Uint8Array.of(0x30, 0xf0, 0x9f, 0x98, 0x80),
       );
     }
 
@@ -783,8 +782,8 @@ namespace test_console_view {
           0xf0,
           0x9f,
           0x98,
-          0x80
-        )
+          0x80,
+        ),
       );
     }
 
@@ -795,7 +794,7 @@ namespace test_console_view {
       rig.terminal.text_type(String.fromCharCode(0x03));
       this.assertEqual(
         blob_bytes(inputs_of(rig)[1]),
-        Uint8Array.of(0x30, 0x03)
+        Uint8Array.of(0x30, 0x03),
       );
     }
 
@@ -807,7 +806,7 @@ namespace test_console_view {
       const error = thrown_get(() => rig.terminal.text_force("x"));
       this.assertEqual(
         error.message,
-        i18n("console_view.input_phase", "idle")
+        i18n("console_view.input_phase", "idle"),
       );
       this.assertEqual(rig.ai.posted.length, 0);
     }
@@ -821,7 +820,7 @@ namespace test_console_view {
       const error = thrown_get(() => rig.terminal.text_force("x"));
       this.assertEqual(
         error.message,
-        i18n("console_view.input_phase", "opening")
+        i18n("console_view.input_phase", "opening"),
       );
       this.assertEqual(inputs_of(rig).length, 0);
     }
@@ -839,7 +838,7 @@ namespace test_console_view {
       this.assertEqual(jslb.field_get(inputs[1][0], "blobs"), 1);
       this.assertEqual(
         blob_bytes(inputs[1]),
-        message_bytes(0x31, '{"columns":100,"rows":30}')
+        message_bytes(0x31, '{"columns":100,"rows":30}'),
       );
     }
 
@@ -855,7 +854,7 @@ namespace test_console_view {
       this.assertEqual(blob_bytes(inputs[1]), message_bytes(0x30, "a"));
       this.assertEqual(
         blob_bytes(inputs[2]),
-        message_bytes(0x31, '{"columns":90,"rows":20}')
+        message_bytes(0x31, '{"columns":90,"rows":20}'),
       );
       this.assertEqual(blob_bytes(inputs[3]), message_bytes(0x30, "b"));
     }
@@ -870,7 +869,7 @@ namespace test_console_view {
       this.assertEqual(inputs.length, 1);
       this.assertEqual(
         utility.utf8_decode(blob_bytes(inputs[0])),
-        '{"AuthToken":"dXNlcjpwYXNz","columns":100,"rows":30}'
+        '{"AuthToken":"dXNlcjpwYXNz","columns":100,"rows":30}',
       );
     }
 
@@ -885,7 +884,7 @@ namespace test_console_view {
       this.assertEqual(inputs.length, 1);
       this.assertEqual(
         utility.utf8_decode(blob_bytes(inputs[0])),
-        '{"AuthToken":"","columns":100,"rows":30}'
+        '{"AuthToken":"","columns":100,"rows":30}',
       );
     }
 
@@ -915,14 +914,14 @@ namespace test_console_view {
       const container = rig.container;
       this.assertTrue(
         container.scrollHeight <= container.clientHeight,
-        `${container.scrollHeight} px of rows in ${container.clientHeight} px`
+        `${container.scrollHeight} px of rows in ${container.clientHeight} px`,
       );
       const placed = rig.terminal.screen as HTMLElement;
       const screen = placed.getBoundingClientRect();
       const band = rig.band.getBoundingClientRect();
       this.assertTrue(
         screen.bottom <= band.top,
-        `rows end at ${screen.bottom}, the band at ${band.top}`
+        `rows end at ${screen.bottom}, the band at ${band.top}`,
       );
     }
 
@@ -936,7 +935,7 @@ namespace test_console_view {
       this.assertEqual(inputs.length, 1);
       this.assertEqual(
         utility.utf8_decode(blob_bytes(inputs[0])),
-        '{"AuthToken":"dXNlcjpwYXNz","columns":120,"rows":20}'
+        '{"AuthToken":"dXNlcjpwYXNz","columns":120,"rows":20}',
       );
     }
 
@@ -964,7 +963,7 @@ namespace test_console_view {
       this.assertTrue(container.scrollWidth > container.clientWidth);
       this.assertTrue(
         container.scrollHeight <= container.clientHeight,
-        `${container.scrollHeight} px of rows in ${container.clientHeight} px`
+        `${container.scrollHeight} px of rows in ${container.clientHeight} px`,
       );
     }
 
@@ -975,7 +974,7 @@ namespace test_console_view {
       const error = thrown_get(() => rig.view.view_show());
       this.assertEqual(
         error.message,
-        i18n("console_view.rows_unfit", 0, constants.cell_height)
+        i18n("console_view.rows_unfit", 0, constants.cell_height),
       );
       this.assertEqual(rig.terminal.rows, 40);
     }
@@ -1025,11 +1024,11 @@ namespace test_console_view {
       rig_start(rig);
       for (const kind of [0x2f, 0x33, 0x7b, 0x00, 0xff]) {
         const error = thrown_get(() =>
-          rig.view.output_feed(message_bytes(kind, "x"))
+          rig.view.output_feed(message_bytes(kind, "x")),
         );
         this.assertEqual(
           error.message,
-          i18n("console_view.kind_unknown", kind)
+          i18n("console_view.kind_unknown", kind),
         );
       }
       this.assertEqual(rig.terminal.written.length, 0);
@@ -1130,12 +1129,12 @@ namespace test_console_view {
       const typed = thrown_get(() => rig.terminal.text_force("x"));
       this.assertEqual(
         typed.message,
-        i18n("console_view.input_phase", "closing")
+        i18n("console_view.input_phase", "closing"),
       );
       const again = thrown_get(() => start_run(rig));
       this.assertEqual(
         again.message,
-        i18n("console_view.open_phase", "closing")
+        i18n("console_view.open_phase", "closing"),
       );
       this.assertEqual(rig.ai.posted.length, 3);
     }
@@ -1146,7 +1145,7 @@ namespace test_console_view {
       const first = thrown_get(() => stop_run(idle));
       this.assertEqual(
         first.message,
-        i18n("console_view.close_phase", "idle")
+        i18n("console_view.close_phase", "idle"),
       );
       this.assertEqual(idle.ai.posted.length, 0);
       const opening = rig_make();
@@ -1154,7 +1153,7 @@ namespace test_console_view {
       const early = thrown_get(() => stop_run(opening));
       this.assertEqual(
         early.message,
-        i18n("console_view.close_phase", "opening")
+        i18n("console_view.close_phase", "opening"),
       );
       this.assertEqual(opening.ai.posted.length, 1);
       const closing = rig_make();
@@ -1163,7 +1162,7 @@ namespace test_console_view {
       const twice = thrown_get(() => stop_run(closing));
       this.assertEqual(
         twice.message,
-        i18n("console_view.close_phase", "closing")
+        i18n("console_view.close_phase", "closing"),
       );
       this.assertEqual(closing.ai.posted.length, 3);
     }
@@ -1176,7 +1175,7 @@ namespace test_console_view {
       const error = thrown_get(() => rig.view.close_done(wake));
       this.assertEqual(
         error.message,
-        i18n("console_view.closed_phase", "open")
+        i18n("console_view.closed_phase", "open"),
       );
     }
 
@@ -1192,8 +1191,8 @@ namespace test_console_view {
         i18n(
           "console_view.reply_type",
           constants.open_type,
-          constants.close_type
-        )
+          constants.close_type,
+        ),
       );
       const stray = wake_build(reply_build(constants.close_type, 1));
       const wrong = thrown_get(() => rig.view.close_done(stray));
@@ -1243,7 +1242,7 @@ namespace test_console_view {
       const opening = thrown_get(() => rig.view.exit_done());
       this.assertEqual(
         opening.message,
-        i18n("console_view.exit_phase", "opening")
+        i18n("console_view.exit_phase", "opening"),
       );
     }
 
@@ -1253,10 +1252,7 @@ namespace test_console_view {
       rig_start(rig);
       rig.view.exit_done();
       const error = thrown_get(() => rig.view.exit_done());
-      this.assertEqual(
-        error.message,
-        i18n("console_view.exit_phase", "idle")
-      );
+      this.assertEqual(error.message, i18n("console_view.exit_phase", "idle"));
     }
 
     // Text that reaches the view after the end is refused and sends nothing.
@@ -1267,7 +1263,7 @@ namespace test_console_view {
       const error = thrown_get(() => rig.terminal.text_force("x"));
       this.assertEqual(
         error.message,
-        i18n("console_view.input_phase", "idle")
+        i18n("console_view.input_phase", "idle"),
       );
       this.assertEqual(inputs_of(rig).length, 1);
     }
@@ -1288,7 +1284,7 @@ namespace test_console_view {
       this.assertEqual(inputs.length, 2);
       this.assertEqual(
         utility.utf8_decode(blob_bytes(inputs[1])),
-        '{"AuthToken":"dXNlcjpwYXNz","columns":120,"rows":40}'
+        '{"AuthToken":"dXNlcjpwYXNz","columns":120,"rows":40}',
       );
       this.assertFalse(rig.terminal.options.disableStdin);
       this.assertEqual(rig.tasks.depth(), 0);

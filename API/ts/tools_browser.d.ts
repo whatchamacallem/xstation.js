@@ -9,6 +9,6 @@ declare namespace tools_browser {
     store: substrate.Store,
     tasks: queue.TaskQueue,
     provider_owner: queue.ThreadName,
-    info: lines.ProviderInfo
+    info: lines.ProviderInfo,
   ): void;
 }

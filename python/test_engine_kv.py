@@ -153,9 +153,7 @@ def _decoder_make(root: str) -> jslb.LineDecoder:
     def sink_make(header: jslb.Object) -> str:
         return os.path.join(cache, "sink" + uuid.uuid4().hex)
 
-    return jslb.LineDecoder(
-        _LINE_MAX, _BLOB_MAX, _OVERFLOW_BYTES, sink_make
-    )
+    return jslb.LineDecoder(_LINE_MAX, _BLOB_MAX, _OVERFLOW_BYTES, sink_make)
 
 
 # Decodes the one line the bytes hold, streaming a big blob to the cache.

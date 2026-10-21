@@ -439,11 +439,7 @@ namespace test_mcp {
       const message = { jsonrpc: "2.0", id: 6, method: "resources/list" };
       this.assertEqual(
         handled_text(server, message),
-        refusal_text(
-          6,
-          -32601,
-          i18n("mcp.method_unknown", "resources/list"),
-        ),
+        refusal_text(6, -32601, i18n("mcp.method_unknown", "resources/list")),
       );
     }
 

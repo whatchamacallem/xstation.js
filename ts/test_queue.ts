@@ -130,7 +130,7 @@ namespace test_queue {
     return {
       debug,
       queue_synchronous: true,
-      verbose_level: 2,
+      verbose_level: 1,
       verbose_ring: 1000,
       line_max: 1048576,
       blob_max: 2147483391,
@@ -1181,12 +1181,9 @@ namespace test_queue {
       const ai = new PortDouble("ai", []);
       tasks.port_add("ai", ai);
       const ring = new verbose.LineRing(() => 10);
-      tasks.sink_attach(
-        (fn) => {
-          ring.sink_set(fn);
-        },
-        reader_make(true),
-      );
+      tasks.sink_attach((fn) => {
+        ring.sink_set(fn);
+      }, reader_make(true));
       ring.log("before");
       this.assertEqual(ai.posted.length, 0);
       const note = handler_fresh(() => {
@@ -1212,12 +1209,9 @@ namespace test_queue {
       const ai = new PortDouble("ai", []);
       tasks.port_add("ai", ai);
       const ring = new verbose.LineRing(() => 10);
-      tasks.sink_attach(
-        (fn) => {
-          ring.sink_set(fn);
-        },
-        reader_make(true),
-      );
+      tasks.sink_attach((fn) => {
+        ring.sink_set(fn);
+      }, reader_make(true));
       const failure = new Error("The handler failed.");
       const boom = handler_fresh(() => {
         ring.log("during");
@@ -1233,12 +1227,9 @@ namespace test_queue {
       const ring = new verbose.LineRing(() => 10);
       const reader = reader_make(true);
       const tasks = new queue.TaskQueue("ui", { "verbose.": "ai" }, true);
-      tasks.sink_attach(
-        (fn) => {
-          ring.sink_set(fn);
-        },
-        reader,
-      );
+      tasks.sink_attach((fn) => {
+        ring.sink_set(fn);
+      }, reader);
       const twice = thrown_get(() => tasks.sink_attach(() => {}, reader));
       this.assertEqual(twice.message, i18n("queue.sink_twice", "ui"));
       const own = new queue.TaskQueue("ai", { "verbose.": "ai" }, true);

@@ -38,6 +38,10 @@ namespace test_agent {
     overflow_bytes: 131072,
     // The `turn_compact_turns` of `settings.json`, 64.
     compact_turns: 64,
+    // A count chosen by its writer: a threshold one exchange reaches.
+    compact_reached: 2,
+    // A count chosen by its writer: a threshold one exchange stays under.
+    compact_unreached: 3,
     // The owner whose port answers the provider's requests.
     provider_owner: "http" as const,
     // The owner whose port answers the tool calls in these tests.
@@ -311,16 +315,14 @@ namespace test_agent {
 
   // The function tools the castle turn's requests list for those tools.
   function functions_recorded(): provider.FunctionTool[] {
-    return tools_listed().map(
-      (tool: mcp.Tool): provider.FunctionTool => ({
-        type: "function",
-        function: {
-          name: tool.name,
-          description: tool.description,
-          parameters: tool.inputSchema,
-        },
-      }),
-    );
+    return tools_listed().map((tool: mcp.Tool): provider.FunctionTool => ({
+      type: "function",
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.inputSchema,
+      },
+    }));
   }
 
   // The system message of the text.
@@ -586,8 +588,7 @@ namespace test_agent {
   function systems_counted(bench: Bench): number[] {
     return requests_of(bench).map(
       (request: provider.ChatRequest) =>
-        request.messages.filter((message) => message.role === "system")
-          .length,
+        request.messages.filter((message) => message.role === "system").length,
     );
   }
 
@@ -1142,7 +1143,7 @@ namespace test_agent {
     // At the threshold the player's next message follows one summary turn.
     test_request_compacted(): void {
       const value = settings_make();
-      value.turn_compact_turns = 2;
+      value.turn_compact_turns = constants.compact_reached;
       const script = new provider_script.ScriptPort(script_recorded());
       const bench = this.bench_recorded(script, value);
       say_send(bench, 1, "2");
@@ -1163,7 +1164,7 @@ namespace test_agent {
     // Below the threshold the next request carries the whole conversation.
     test_request_whole(): void {
       const value = settings_make();
-      value.turn_compact_turns = 3;
+      value.turn_compact_turns = constants.compact_unreached;
       const script = new provider_script.ScriptPort(script_recorded());
       const bench = this.bench_recorded(script, value);
       say_send(bench, 1, "2");
@@ -1498,10 +1499,7 @@ namespace test_agent {
       const number = prompt_doc("prompt", 5);
       const untexted = store.doc_put("metaverse", "prompt", number).ref;
       const second = thrown_get(() => agent.prompt_build(store));
-      this.assertEqual(
-        second.message,
-        i18n("agent.prompt_invalid", untexted),
-      );
+      this.assertEqual(second.message, i18n("agent.prompt_invalid", untexted));
     }
 
     // Two universes of the current world make the universe prompt ambiguous.

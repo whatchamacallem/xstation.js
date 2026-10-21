@@ -1011,8 +1011,10 @@ the tree. Kept as built. Question 10.4.37.
   A deadline already passed before a suite starts raises at once. The
   alarm raises naming the suite it stopped, so the run fails loud the
   moment it passes 120 s, with the lines measured so far printed above.
+  As built, a `smoke-test` run stops at its first failing test, so the
+  deadline's error ends it (question 10.4.54).
 - A `normal-test` run has no limit of its own; every suite keeps its
-  timer.
+  timer. It stops at its first failing test only with `--failfast`.
 
 The maintainer confirms the fit from a `normal-test` run, whose lines give
 every `smoke-test` suite's seconds, and from a `smoke-test` run that
@@ -1293,7 +1295,7 @@ the code 1.20.8 removed is not recovered.
 - `'...'`: a single quoted string, in which `''` is one quote and nothing
   else escapes, read whole by `_POWERSHELL_SINGLE`, `'(?:[^']|'')*'`; with
   no closing quote it fails as `<path>:<line>: unterminated string`.
-- `"..."`: `powershell_double_scan(path, text, i, comments) -> int`, the
+- `"..."`: `powershell_quoted(path, text, i, comments) -> int`, the
   shape of `shell_double_scan`: a backtick or `""` skips two characters,
   and `$(` reads code to its `)` with `powershell_scan` and `closer` true,
   so a comment inside it is found; with no closing quote it fails as an
@@ -1417,7 +1419,7 @@ files; Linux checks every whitelisted file and formats and lints the rest.
 2.21.12 Names and rules. New Python names, two words each:
 `reformat.FileType`, `reformat.table_read`, `reformat.type_find`,
 `reformat.paths_match`, `test_posix.powershell_scan` and
-`test_posix.powershell_double_scan`, the last in the shape of
+`test_posix.powershell_quoted`, the last in the shape of
 `shell_double_scan`. Constants at the top: `_SYSTEM`, `_TABLE_PATH` and
 `_WHITELIST_LINE` in `reformat.py`; `_POWERSHELL_HERE`,
 `_POWERSHELL_SINGLE` and `_POWERSHELL_TOKEN_BREAK` in `test_posix.py`.
@@ -2870,3 +2872,9 @@ so that its tests stay.
   `TestAlarm` alone;
 - c) as a), with the tests of `tap_producer` and `tap_consumer` joined too,
   `test_test` then run first.
+
+10.4.54 A smoke-test run ends at its first failure (log 3.62.2):
+- a) any failure ends a `smoke-test` run, the deadline's among them (built);
+- b) only the deadline ends it at once; other failures run the module out,
+  as a `normal-test` run does;
+- c) every run ends at its first failure, as the first-failure rule asks.

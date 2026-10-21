@@ -6,11 +6,12 @@
 // hash against known digests, the cache over slot files kept in memory, and
 // the store on the sqlite3.wasm module and OPFS pool the test page sets as
 // globals: databases, values, documents, turns, compaction at the threshold,
-// SQL, seq, snapshots, forwarded lines, the operations of the castle turn and two later ones
-// replayed on a second store, the administration of the databases, cached
-// values filled back and freed by budget, a put stopped between its cache
-// file and its row, and the handlers. It also holds the pause point of that
-// stop, which a browser rung uses to kill a worker of the test page there.
+// SQL, seq, snapshots, forwarded lines, the operations of the castle turn and
+// two later ones replayed on a second store, the administration of the
+// databases, cached values filled back and freed by budget, a put stopped
+// between its cache file and its row, and the handlers. It also holds the
+// pause point of that stop, which a browser rung uses to kill a worker of the
+// test page there.
 namespace test_substrate {
   // The initialized sqlite3.wasm module, a global the test page sets.
   declare const test_sqlite3: substrate.SqliteModule;
@@ -26,7 +27,7 @@ namespace test_substrate {
     soft_bytes: 1073741824,
     // The `turn_compact_turns` of `settings.json`, 64.
     compact_turns: 64,
-    // A threshold of compaction that a test reaches in a few turns.
+    // A count chosen by its writer: a threshold a test reaches in a few turns.
     compact_small: 3,
     // The start of the root of each store a test makes in the pool.
     root_prefix: "/test_substrate/",
@@ -467,13 +468,11 @@ namespace test_substrate {
     return {
       role: "assistant",
       content: null,
-      tool_calls: calls.map(
-        ([id, name, args]): provider.ToolCall => ({
-          id,
-          type: "function",
-          function: { name, arguments: args },
-        }),
-      ),
+      tool_calls: calls.map(([id, name, args]): provider.ToolCall => ({
+        id,
+        type: "function",
+        function: { name, arguments: args },
+      })),
     };
   }
 
@@ -1079,10 +1078,7 @@ namespace test_substrate {
           { 0: { t: "scene" }, 1: "/a/b" },
           i18n("substrate.header_normal", "1"),
         ],
-        [
-          { 0: { t: "scene" }, "07": "x" },
-          i18n("substrate.key_digits", "07"),
-        ],
+        [{ 0: { t: "scene" }, "07": "x" }, i18n("substrate.key_digits", "07")],
         [
           { 0: { t: "scene" }, x: { $ref: 1 } },
           i18n("substrate.ref_shape", '{"$ref":1}'),
@@ -1330,13 +1326,10 @@ namespace test_substrate {
         "_turn",
       ]);
       const meta = "SELECT name, value FROM _meta ORDER BY name";
-      this.assertEqual(
-        rows_query(store, "alpha", meta),
-        [
-          ["schema", "1"],
-          ["seq", "0"],
-        ],
-      );
+      this.assertEqual(rows_query(store, "alpha", meta), [
+        ["schema", "1"],
+        ["seq", "0"],
+      ]);
       this.assertEqual(store.db_list(), ["alpha"]);
       this.assertEqual(store.seq_get("alpha"), 0);
     }
@@ -2804,9 +2797,7 @@ namespace test_substrate {
       store.kv_put("/alpha/b", bytes_text("two"));
       const pending = i18n("substrate.forward_pending", "alpha", 1);
       this.raised_assert(pending, () => store.db_unload("alpha"));
-      this.raised_assert(pending, () =>
-        store.db_load("alpha", snapshot.data),
-      );
+      this.raised_assert(pending, () => store.db_load("alpha", snapshot.data));
       this.lines_answer(store);
       store.db_unload("alpha");
       this.assertEqual(store.db_load("alpha", snapshot.data), 1);
@@ -3169,10 +3160,7 @@ namespace test_substrate {
           `"sha256":"${utility.sha256_hex(data)}","seq":0}<blob "n"=1>`,
       );
       this.assertEqual((snapshot[1] as lines.BlobHeader).d, data);
-      this.assertEqual(
-        data.subarray(0, 15),
-        bytes_text(constants.file_magic),
-      );
+      this.assertEqual(data.subarray(0, 15), bytes_text(constants.file_magic));
       this.assertFalse(table.has("db.chunk"));
       const dropped = this.answer_get(
         table,

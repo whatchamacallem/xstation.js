@@ -6,13 +6,12 @@
 // sqlite3.wasm connection for each database file of the OPFS pool under a
 // root, the substrate's tables in each, values with overflow to a cache of
 // OPFS files held open for synchronous access, documents, turns that compact
-// themselves when a `user` turn finds `compact_turns` of them, SQL,
-// snapshots sent as one blob, the measurement and administration of the
-// databases,
+// themselves when a `user` turn finds `compact_turns` of them, SQL, snapshots
+// sent as one blob, the measurement and administration of the databases,
 // cached values filled back from the server and freed by budget, and the
 // emitting side of replication, which hands on each committed modifying
-// operation as the line the server applies. It is given an initialized
-// module, an installed pool and open cache files, and waits on nothing.
+// operation as the line the server applies. It is given an initialized module,
+// an installed pool and open cache files, and waits on nothing.
 namespace substrate {
   // The ranges of the code points Python's `str.isspace` holds, ends kept.
   const space_ranges: readonly (readonly [number, number])[] = [
@@ -2098,11 +2097,9 @@ namespace substrate {
       );
       const version = rows.length === 0 ? 1 : (rows[0][0] as number) + 1;
       const key = `${id}/${String(version)}`;
-      const exists = rows_select(
-        database,
-        "SELECT 1 FROM _kv WHERE key = ?",
-        [key],
-      );
+      const exists = rows_select(database, "SELECT 1 FROM _kv WHERE key = ?", [
+        key,
+      ]);
       if (exists.length > 0) {
         throw new Error(i18n("substrate.version_exists", key, db));
       }

@@ -23,6 +23,6 @@ declare namespace script {
     store: substrate.Store,
     name: string,
     args: unknown,
-    trace: boolean
+    trace: boolean,
   ): ScriptResult;
 }

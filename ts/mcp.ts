@@ -180,11 +180,7 @@ namespace mcp {
 
   // The error response to a message that is not a valid request.
   function invalid_make(id: Id | null): ErrorResponse {
-    return error_make(
-      id,
-      constants.code_invalid,
-      i18n("mcp.request_invalid"),
-    );
+    return error_make(id, constants.code_invalid, i18n("mcp.request_invalid"));
   }
 
   // The error response to a throw: a protocol error's code, else the stack.

@@ -493,8 +493,7 @@ namespace wire {
     private hello_fn: ((hello: lines.Line) => void) | undefined = undefined;
     private line_fn: ((line: lines.Line) => void) | undefined = undefined;
     private close_fn:
-      | ((code: number, had_error: boolean) => void)
-      | undefined = undefined;
+      ((code: number, had_error: boolean) => void) | undefined = undefined;
     private hello_seen = false;
     private error_seen = false;
     // Set once this side closes the socket, on request or on a fault.

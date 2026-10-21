@@ -75,108 +75,112 @@ namespace test_unittest {
   // Tests the unittest subset on the fixtures nested here.
   export class TestUnittest extends unittest.TestCase {
     // A pass, a failure, an error and a skip, recording the parts that ran.
-    static readonly NestedFixture =
-      class NestedFixture extends unittest.TestCase {
-        // The parts of the test that ran, in order.
-        readonly calls: string[] = [];
+    static readonly NestedFixture = class NestedFixture
+      extends unittest.TestCase
+    {
+      // The parts of the test that ran, in order.
+      readonly calls: string[] = [];
 
-        // Records that `setUp` ran.
-        override setUp(): void {
-          this.calls.push("setUp");
-        }
+      // Records that `setUp` ran.
+      override setUp(): void {
+        this.calls.push("setUp");
+      }
 
-        // Records that `tearDown` ran.
-        override tearDown(): void {
-          this.calls.push("tearDown");
-        }
+      // Records that `tearDown` ran.
+      override tearDown(): void {
+        this.calls.push("tearDown");
+      }
 
-        // Passes.
-        test_alpha_passes(): void {
-          this.calls.push("test_alpha_passes");
-        }
+      // Passes.
+      test_alpha_passes(): void {
+        this.calls.push("test_alpha_passes");
+      }
 
-        // Fails an assertion.
-        test_bravo_fails(): void {
-          this.calls.push("test_bravo_fails");
-          this.assertEqual(1, 2);
-        }
+      // Fails an assertion.
+      test_bravo_fails(): void {
+        this.calls.push("test_bravo_fails");
+        this.assertEqual(1, 2);
+      }
 
-        // Throws an error that is not an assertion's.
-        test_charlie_raises(): void {
-          this.calls.push("test_charlie_raises");
-          throw new Error("fixture error");
-        }
+      // Throws an error that is not an assertion's.
+      test_charlie_raises(): void {
+        this.calls.push("test_charlie_raises");
+        throw new Error("fixture error");
+      }
 
-        // Skips itself.
-        test_delta_skips(): void {
-          this.calls.push("test_delta_skips");
-          this.skipTest("fixture skip");
-        }
-      };
+      // Skips itself.
+      test_delta_skips(): void {
+        this.calls.push("test_delta_skips");
+        this.skipTest("fixture skip");
+      }
+    };
 
     // Test methods defined out of name order, and a method that is no test.
-    static readonly OrderFixture =
-      class OrderFixture extends unittest.TestCase {
-        // Defined first.
-        test_zulu_first(): void {}
+    static readonly OrderFixture = class OrderFixture
+      extends unittest.TestCase
+    {
+      // Defined first.
+      test_zulu_first(): void {}
 
-        // Defined second.
-        test_alpha_second(): void {}
+      // Defined second.
+      test_alpha_second(): void {}
 
-        // Not a test.
-        helper_method(): void {}
-      };
+      // Not a test.
+      helper_method(): void {}
+    };
 
     // Tests expected to fail: one fails, one throws, one passes, one skips.
-    static readonly ExpectedFixture =
-      class ExpectedFixture extends unittest.TestCase {
-        // Fails an assertion.
-        test_assertion_fails(): void {
-          this.assertEqual(1, 2);
-        }
+    static readonly ExpectedFixture = class ExpectedFixture
+      extends unittest.TestCase
+    {
+      // Fails an assertion.
+      test_assertion_fails(): void {
+        this.assertEqual(1, 2);
+      }
 
-        // Throws an error that is not an assertion's.
-        test_error_thrown(): void {
-          throw new Error("fixture error");
-        }
+      // Throws an error that is not an assertion's.
+      test_error_thrown(): void {
+        throw new Error("fixture error");
+      }
 
-        // Passes.
-        test_values_equal(): void {
-          this.assertEqual(1, 1);
-        }
+      // Passes.
+      test_values_equal(): void {
+        this.assertEqual(1, 1);
+      }
 
-        // Skips itself.
-        test_skip_self(): void {
-          this.skipTest("fixture skip");
-        }
+      // Skips itself.
+      test_skip_self(): void {
+        this.skipTest("fixture skip");
+      }
 
-        // Marks every test of the class as expected to fail.
-        static {
-          unittest.expectedFailure(this.prototype.test_assertion_fails);
-          unittest.expectedFailure(this.prototype.test_error_thrown);
-          unittest.expectedFailure(this.prototype.test_values_equal);
-          unittest.expectedFailure(this.prototype.test_skip_self);
-        }
-      };
+      // Marks every test of the class as expected to fail.
+      static {
+        unittest.expectedFailure(this.prototype.test_assertion_fails);
+        unittest.expectedFailure(this.prototype.test_error_thrown);
+        unittest.expectedFailure(this.prototype.test_values_equal);
+        unittest.expectedFailure(this.prototype.test_skip_self);
+      }
+    };
 
     // A test expected to fail whose `setUp` throws.
-    static readonly SetupFixture =
-      class SetupFixture extends unittest.TestCase {
-        // Throws before the test.
-        override setUp(): void {
-          throw new Error("fixture error");
-        }
+    static readonly SetupFixture = class SetupFixture
+      extends unittest.TestCase
+    {
+      // Throws before the test.
+      override setUp(): void {
+        throw new Error("fixture error");
+      }
 
-        // Never runs.
-        test_values_differ(): void {
-          this.assertEqual(1, 2);
-        }
+      // Never runs.
+      test_values_differ(): void {
+        this.assertEqual(1, 2);
+      }
 
-        // Marks the test as expected to fail.
-        static {
-          unittest.expectedFailure(this.prototype.test_values_differ);
-        }
-      };
+      // Marks the test as expected to fail.
+      static {
+        unittest.expectedFailure(this.prototype.test_values_differ);
+      }
+    };
 
     // Each kind of test reports the outcome Python reports.
     test_outcome_events(): void {

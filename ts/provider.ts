@@ -301,16 +301,14 @@ namespace provider {
 
   // Converts MCP tools to function tools, keeping the order and dotted names.
   export function tools_convert(tools: mcp.Tool[]): FunctionTool[] {
-    return tools.map(
-      (tool: mcp.Tool): FunctionTool => ({
-        type: constants.function_type,
-        function: {
-          name: tool.name,
-          description: tool.description,
-          parameters: tool.inputSchema,
-        },
-      }),
-    );
+    return tools.map((tool: mcp.Tool): FunctionTool => ({
+      type: constants.function_type,
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.inputSchema,
+      },
+    }));
   }
 
   // The provider key as set, or `undefined` before that.

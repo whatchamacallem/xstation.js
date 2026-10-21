@@ -162,8 +162,7 @@ class TestMatch(unittest.TestCase):
             with self.assertRaises(RuntimeError) as caught:
                 reformat.paths_match(root, ["x/*.py"])
             expected = (
-                "whitelist line 'x/*.py' matches 'x/e.py', which is not a"
-                " file"
+                "whitelist line 'x/*.py' matches 'x/e.py', which is not a file"
             )
             self.assertEqual(caught.exception.args, (expected,))
 

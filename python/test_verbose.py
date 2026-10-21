@@ -144,9 +144,7 @@ def _progress_texts(argv: list[str], code: int) -> tuple[str, str]:
 
 
 # Runs `fn` with the output descriptors of this process set to files.
-def _output_captured(
-    path: str, fn: Callable[[], int]
-) -> tuple[int, str, str]:
+def _output_captured(path: str, fn: Callable[[], int]) -> tuple[int, str, str]:
     out_path = os.path.join(path, "out.txt")
     err_path = os.path.join(path, "err.txt")
     sys.stdout.flush()

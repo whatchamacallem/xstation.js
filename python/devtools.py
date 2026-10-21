@@ -498,9 +498,7 @@ class Browser:
     # Navigates to the URL, again while refused, and returns once it loads.
     def page_open(self, url: str) -> None:
         client = self.client_get()
-        timer = WaitTimer(
-            f"{url} to accept connections", _SERVER_WAIT_SECONDS
-        )
+        timer = WaitTimer(f"{url} to accept connections", _SERVER_WAIT_SECONDS)
         navigated = client.method_call("Page.navigate", {"url": url})
         while navigated.get("errorText") == _REFUSED_ERROR_TEXT:
             time.sleep(min(_POLL_SECONDS, timer.seconds_left()))

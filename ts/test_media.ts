@@ -145,7 +145,10 @@ namespace test_media {
       this.assertEqual(cache.image_get("a"), undefined);
       this.assertTrue(cache.image_get("b") === images[1]);
       this.assertTrue(cache.image_get("c") === images[2]);
-      this.assertEqual(images.map((image) => image.closes), [1, 0, 0]);
+      this.assertEqual(
+        images.map((image) => image.closes),
+        [1, 0, 0],
+      );
     }
 
     // Eviction stops as soon as the total fits, so the younger images stay.
@@ -162,7 +165,10 @@ namespace test_media {
       });
       this.assertEqual(cache.keys_list(), ["b", "c", "d"]);
       this.assertEqual(cache.total_bytes(), 1000);
-      this.assertEqual(images.map((image) => image.closes), [1, 0, 0, 0]);
+      this.assertEqual(
+        images.map((image) => image.closes),
+        [1, 0, 0, 0],
+      );
     }
 
     // One large image evicts every older image, oldest first.
@@ -179,7 +185,10 @@ namespace test_media {
       });
       this.assertEqual(cache.keys_list(), ["d"]);
       this.assertEqual(cache.total_bytes(), 1000);
-      this.assertEqual(images.map((image) => image.closes), [1, 1, 1, 0]);
+      this.assertEqual(
+        images.map((image) => image.closes),
+        [1, 1, 1, 0],
+      );
     }
 
     // The newest image is kept alone though it is over the budget.

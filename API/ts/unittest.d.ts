@@ -9,7 +9,7 @@ declare namespace unittest {
     assertFalse(value: unknown, message?: string): void;
     assertRaises(
       error: new (...args: never[]) => Error,
-      fn: () => unknown
+      fn: () => unknown,
     ): void;
     assertIn(member: unknown, container: unknown, message?: string): void;
     skipTest(reason: string): never;

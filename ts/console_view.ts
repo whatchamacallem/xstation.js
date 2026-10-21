@@ -32,7 +32,7 @@ declare class Terminal {
   readonly onData: (listener: (data: string) => void) => unknown;
   // Registers a listener for a change of the size in character cells.
   readonly onResize: (
-    listener: (size: { cols: number; rows: number }) => void
+    listener: (size: { cols: number; rows: number }) => void,
   ) => unknown;
 }
 
@@ -251,7 +251,7 @@ namespace console_view {
       this.terminal.open(this.child);
       this.placed = true;
       const screen = this.child.querySelector<HTMLElement>(
-        constants.screen_selector
+        constants.screen_selector,
       ) as HTMLElement;
       this.cell = screen.getBoundingClientRect().height / this.terminal.rows;
       const band = this.band_get();
@@ -289,7 +289,7 @@ namespace console_view {
     private reply_take(
       wake: lines.Line,
       type: string,
-      id: number | undefined
+      id: number | undefined,
     ): lines.Line {
       const replies = jslb.payload_of(wake).replies as lines.Line[];
       const reply = replies[0];

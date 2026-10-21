@@ -393,9 +393,7 @@ def _log_read(root: str) -> list[tuple[str, str]]:
     if not os.path.exists(path):
         raise AssertionError(f"the root has no log: {path}")
     with contextlib.closing(sqlite3.connect(path)) as connection:
-        rows: list[tuple[str, str]] = connection.execute(
-            _LOG_QUERY
-        ).fetchall()
+        rows: list[tuple[str, str]] = connection.execute(_LOG_QUERY).fetchall()
     return rows
 
 
@@ -411,9 +409,7 @@ def _failure_line(message: str) -> tuple[str, str]:
 
 
 # Checks the root's log holds one line, the failure's message.
-def _failure_logged(
-    case: unittest.TestCase, root: str, message: str
-) -> None:
+def _failure_logged(case: unittest.TestCase, root: str, message: str) -> None:
     case.assertEqual(_log_read(root), [_failure_line(message)])
 
 

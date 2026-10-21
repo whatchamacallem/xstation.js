@@ -301,12 +301,8 @@ def _log_read(root: str) -> list[tuple[str, str]]:
 
 
 # The trace texts of a line dispatched and of its reply, if any, in order.
-def _trace_texts(
-    request: jslb.Object, reply: jslb.Object | None
-) -> list[str]:
-    texts = [
-        i18n("main_loop.line_dispatch", _json_bytes(request[0]).decode())
-    ]
+def _trace_texts(request: jslb.Object, reply: jslb.Object | None) -> list[str]:
+    texts = [i18n("main_loop.line_dispatch", _json_bytes(request[0]).decode())]
     if reply is not None:
         texts.append(
             i18n("main_loop.line_reply", _json_bytes(reply[0]).decode())

@@ -70,7 +70,7 @@ namespace verbose {
 
   // The lines of this thread, whose ring size is the `verbose_ring` setting.
   const thread_ring = new LineRing(() =>
-    settings.settings_get(constants.ring_setting)
+    settings.settings_get(constants.ring_setting),
   );
 
   // Writes one line to the ring and hands it to the sink.

@@ -425,7 +425,7 @@ def offset_line(text: str, i: int) -> int:
 
 
 # Returns the offset past the double quoted PowerShell string at the offset.
-def powershell_double_scan(
+def powershell_quoted(
     path: str, text: str, i: int, comments: list[Comment]
 ) -> int:
     start = i
@@ -461,7 +461,7 @@ def powershell_scan(
                 )
             i = single.end()
         elif character == '"':
-            i = powershell_double_scan(path, text, i, comments)
+            i = powershell_quoted(path, text, i, comments)
         elif here := _POWERSHELL_HERE.match(text, i):
             i = end_find(path, text, here.end() - 1, f"\n{here.group(1)}@")
         elif text.startswith("<#", i):
@@ -639,9 +639,7 @@ def main(arguments: list[str]) -> None:
         ]
         # With no files, ruff checks the directory.
         if matched and row.linter:
-            subprocess.run(
-                [*row.linter, *matched], check=True, cwd=_ROOT_PATH
-            )
+            subprocess.run([*row.linter, *matched], check=True, cwd=_ROOT_PATH)
 
 
 if __name__ == "__main__":

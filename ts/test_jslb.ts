@@ -897,10 +897,8 @@ namespace test_jslb {
       const header = jslb.header_make("echo");
       const blob = { ...jslb.blob_make(bytes_of("abc")), s: 4 };
       const differs = jslb.line_make(header, [blob], {});
-      this.raised_assert(
-        Error,
-        i18n("jslb.blob_size_differs", 1, 4, 3),
-        () => jslb.line_encode(differs),
+      this.raised_assert(Error, i18n("jslb.blob_size_differs", 1, 4, 3), () =>
+        jslb.line_encode(differs),
       );
       const bare: jslb.BlobHeader = { s: 3 };
       const missing = jslb.line_make(header, [bare], {});

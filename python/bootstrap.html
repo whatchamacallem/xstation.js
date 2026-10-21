@@ -1,230 +1,285 @@
-<!DOCTYPE html>
+<!doctype html>
 <!--
 SPDX-FileCopyrightText: © 2026 Adrian Johnston.
 SPDX-License-Identifier: MIT
 This file is licensed under the terms of the LICENSE.md file.
 -->
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<title>xstation.js</title>
-<style>
-html, body { height: 100%; margin: 0; }
-body { display: flex; flex-direction: column; font: 12px monospace; }
-pre, textarea, button { font: inherit; }
-pre { margin: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
-#output { flex: 1; min-height: 0; overflow-y: auto; }
-.row { display: flex; gap: 8px; margin: 8px; align-items: flex-end; }
-#input { flex: 1; resize: none; }
-</style>
-</head>
-<body>
-<pre id="status"></pre>
-<pre id="output"></pre>
-<div class="row">
-<textarea id="input" rows="4" spellcheck="false" disabled></textarea>
-<button id="interrupt" disabled>^C</button>
-<button id="eof" disabled>^D</button>
-<button id="close" disabled>Close</button>
-</div>
-<script>
-'use strict';
+  <head>
+    <meta charset="utf-8" />
+    <title>xstation.js</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        font: 12px monospace;
+      }
+      pre,
+      textarea,
+      button {
+        font: inherit;
+      }
+      pre {
+        margin: 8px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      #output {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        margin: 8px;
+        align-items: flex-end;
+      }
+      #input {
+        flex: 1;
+        resize: none;
+      }
+    </style>
+  </head>
+  <body>
+    <pre id="status"></pre>
+    <pre id="output"></pre>
+    <div class="row">
+      <textarea id="input" rows="4" spellcheck="false" disabled></textarea>
+      <button id="interrupt" disabled>^C</button>
+      <button id="eof" disabled>^D</button>
+      <button id="close" disabled>Close</button>
+    </div>
+    <script>
+      "use strict";
 
-const CONTROL_IDS = ['close', 'eof', 'input', 'interrupt'];
-const ELEMENT_IDS = [...CONTROL_IDS, 'output', 'status'];
-// What the terminal reads as `^C` and as `^D`.
-const INTERRUPT_TEXT = '\x03';
-const END_OF_INPUT_TEXT = '\x04';
-// The most bytes a line can hold before its newline in the terminal.
-const LINE_BYTES_MAX = 4095;
-const READY_STATES = ['connecting', 'open', 'closing', 'closed'];
-// ttyd's first two messages, by type: the title, then the preferences.
-const TTYD_FIRST_TYPES = [0x31, 0x32];
-const TTYD_INPUT_TYPE = 0x30;
-const TTYD_OUTPUT_TYPE = 0x30;
+      const CONTROL_IDS = ["close", "eof", "input", "interrupt"];
+      const ELEMENT_IDS = [...CONTROL_IDS, "output", "status"];
+      // What the terminal reads as `^C` and as `^D`.
+      const INTERRUPT_TEXT = "\x03";
+      const END_OF_INPUT_TEXT = "\x04";
+      // The most bytes a line can hold before its newline in the terminal.
+      const LINE_BYTES_MAX = 4095;
+      const READY_STATES = ["connecting", "open", "closing", "closed"];
+      // ttyd's first two messages, by type: the title, then the preferences.
+      const TTYD_FIRST_TYPES = [0x31, 0x32];
+      const TTYD_INPUT_TYPE = 0x30;
+      const TTYD_OUTPUT_TYPE = 0x30;
 
-// What the automated driver reads.
-const boot = {
-  ttyd: {title: null, preferences: null},
-  output: '', closed: null, failure: null,
-};
-window.boot = boot;
+      // What the automated driver reads.
+      const boot = {
+        ttyd: { title: null, preferences: null },
+        output: "",
+        closed: null,
+        failure: null,
+      };
+      window.boot = boot;
 
-const encoder = new TextEncoder();
-const elements = Object.fromEntries(
-  ELEMENT_IDS.map(id => [id, document.getElementById(id)]));
-const state = {
-  token: null,
-  socket: null,
-  ttydMessages: 0,
-  // One stream decoder, as ttyd splits output frames inside characters.
-  decoder: new TextDecoder('utf-8', {fatal: true}),
-};
+      const encoder = new TextEncoder();
+      const elements = Object.fromEntries(
+        ELEMENT_IDS.map((id) => [id, document.getElementById(id)]),
+      );
+      const state = {
+        token: null,
+        socket: null,
+        ttydMessages: 0,
+        // One stream decoder, as ttyd splits output frames inside characters.
+        decoder: new TextDecoder("utf-8", { fatal: true }),
+      };
 
-// Records the first failure only, and closes the socket on it.
-function record(detail) {
-  if (boot.failure !== null) {
-    return;
-  }
-  boot.failure = detail;
-  controlsEnable(false);
-  if (state.socket !== null) {
-    state.socket.close(1000, 'failure');
-  }
-  render();
-}
+      // Records the first failure only, and closes the socket on it.
+      function record(detail) {
+        if (boot.failure !== null) {
+          return;
+        }
+        boot.failure = detail;
+        controlsEnable(false);
+        if (state.socket !== null) {
+          state.socket.close(1000, "failure");
+        }
+        render();
+      }
 
-// Records the failure and throws, ending the handler that found it.
-function fail(detail) {
-  record(detail);
-  throw new Error(detail);
-}
+      // Records the failure and throws, ending the handler that found it.
+      function fail(detail) {
+        record(detail);
+        throw new Error(detail);
+      }
 
-// Enables the input and its buttons, or disables them.
-function controlsEnable(enabled) {
-  for (const id of CONTROL_IDS) {
-    elements[id].disabled = !enabled;
-  }
-}
+      // Enables the input and its buttons, or disables them.
+      function controlsEnable(enabled) {
+        for (const id of CONTROL_IDS) {
+          elements[id].disabled = !enabled;
+        }
+      }
 
-// Sends the text to the terminal as ttyd input, type 0, in `UTF-8`.
-function sendText(text) {
-  for (const line of text.split('\n')) {
-    const length = encoder.encode(line).length;
-    if (length > LINE_BYTES_MAX) {
-      fail(`a line of ${length} bytes is over the terminal's ` +
-        `${LINE_BYTES_MAX}: ${line.slice(0, 40)}`);
-    }
-  }
-  const bytes = encoder.encode(text);
-  const frame = new Uint8Array(bytes.length + 1);
-  frame[0] = TTYD_INPUT_TYPE;
-  frame.set(bytes, 1);
-  state.socket.send(frame);
-}
+      // Sends the text to the terminal as ttyd input, type 0, in `UTF-8`.
+      function sendText(text) {
+        for (const line of text.split("\n")) {
+          const length = encoder.encode(line).length;
+          if (length > LINE_BYTES_MAX) {
+            fail(
+              `a line of ${length} bytes is over the terminal's ` +
+                `${LINE_BYTES_MAX}: ${line.slice(0, 40)}`,
+            );
+          }
+        }
+        const bytes = encoder.encode(text);
+        const frame = new Uint8Array(bytes.length + 1);
+        frame[0] = TTYD_INPUT_TYPE;
+        frame.set(bytes, 1);
+        state.socket.send(frame);
+      }
 
-// Sends ttyd the token and a size, which ttyd's protocol puts in JSON.
-function onOpen() {
-  state.socket.send(encoder.encode(JSON.stringify(
-    {AuthToken: state.token, columns: 80, rows: 24})));
-  controlsEnable(true);
-  elements.input.focus();
-  render();
-}
+      // Sends ttyd the token and a size, which ttyd's protocol puts in JSON.
+      function onOpen() {
+        state.socket.send(
+          encoder.encode(
+            JSON.stringify({ AuthToken: state.token, columns: 80, rows: 24 }),
+          ),
+        );
+        controlsEnable(true);
+        elements.input.focus();
+        render();
+      }
 
-// Returns ttyd's message after its type as text, failing unless `UTF-8`.
-function ttydText(bytes) {
-  try {
-    return new TextDecoder('utf-8', {fatal: true}).decode(bytes.subarray(1));
-  } catch (error) {
-    fail(`ttyd message type ${bytes[0]} is not UTF-8: ${error.message}`);
-  }
-}
+      // Returns ttyd's message after its type as text, failing unless `UTF-8`.
+      function ttydText(bytes) {
+        try {
+          return new TextDecoder("utf-8", { fatal: true }).decode(
+            bytes.subarray(1),
+          );
+        } catch (error) {
+          fail(`ttyd message type ${bytes[0]} is not UTF-8: ${error.message}`);
+        }
+      }
 
-// Keeps ttyd's title and preferences as text, then shows the output.
-function onMessage(event) {
-  const bytes = new Uint8Array(event.data);
-  state.ttydMessages += 1;
-  const due = state.ttydMessages <= TTYD_FIRST_TYPES.length ?
-    TTYD_FIRST_TYPES[state.ttydMessages - 1] : TTYD_OUTPUT_TYPE;
-  if (bytes[0] !== due) {
-    fail(`ttyd message ${state.ttydMessages} has type ${bytes[0]} where ` +
-      `${due} was due`);
-  }
-  if (state.ttydMessages === 1) {
-    boot.ttyd.title = ttydText(bytes);
-    render();
-    return;
-  }
-  if (state.ttydMessages === 2) {
-    boot.ttyd.preferences = ttydText(bytes);
-    render();
-    return;
-  }
-  let text;
-  try {
-    text = state.decoder.decode(bytes.subarray(1), {stream: true});
-  } catch (error) {
-    fail(`not UTF-8: ${error.message}`);
-  }
-  // The terminal ends lines with CR LF, and a page of lines needs only LF.
-  text = text.replaceAll('\r', '');
-  boot.output += text;
-  elements.output.append(text);
-  elements.output.scrollTop = elements.output.scrollHeight;
-}
+      // Keeps ttyd's title and preferences as text, then shows the output.
+      function onMessage(event) {
+        const bytes = new Uint8Array(event.data);
+        state.ttydMessages += 1;
+        const due =
+          state.ttydMessages <= TTYD_FIRST_TYPES.length
+            ? TTYD_FIRST_TYPES[state.ttydMessages - 1]
+            : TTYD_OUTPUT_TYPE;
+        if (bytes[0] !== due) {
+          fail(
+            `ttyd message ${state.ttydMessages} has type ${bytes[0]} where ` +
+              `${due} was due`,
+          );
+        }
+        if (state.ttydMessages === 1) {
+          boot.ttyd.title = ttydText(bytes);
+          render();
+          return;
+        }
+        if (state.ttydMessages === 2) {
+          boot.ttyd.preferences = ttydText(bytes);
+          render();
+          return;
+        }
+        let text;
+        try {
+          text = state.decoder.decode(bytes.subarray(1), { stream: true });
+        } catch (error) {
+          fail(`not UTF-8: ${error.message}`);
+        }
+        // The terminal ends lines with CR LF, and a page of lines needs only LF.
+        text = text.replaceAll("\r", "");
+        boot.output += text;
+        elements.output.append(text);
+        elements.output.scrollTop = elements.output.scrollHeight;
+      }
 
-// Records the close and disables everything.
-function onClose(event) {
-  boot.closed = {
-    code: event.code, reason: event.reason, wasClean: event.wasClean,
-  };
-  controlsEnable(false);
-  render();
-}
+      // Records the close and disables everything.
+      function onClose(event) {
+        boot.closed = {
+          code: event.code,
+          reason: event.reason,
+          wasClean: event.wasClean,
+        };
+        controlsEnable(false);
+        render();
+      }
 
-// Sends the input and a newline on Enter, as Shift Enter adds a line.
-function onInputKey(event) {
-  if (event.key !== 'Enter' || event.shiftKey) {
-    return;
-  }
-  event.preventDefault();
-  sendText(elements.input.value + '\n');
-  elements.input.value = '';
-}
+      // Sends the input and a newline on Enter, as Shift Enter adds a line.
+      function onInputKey(event) {
+        if (event.key !== "Enter" || event.shiftKey) {
+          return;
+        }
+        event.preventDefault();
+        sendText(elements.input.value + "\n");
+        elements.input.value = "";
+      }
 
-// Closes the socket with code 1000, which makes ttyd end the program.
-function onClosePressed() {
-  controlsEnable(false);
-  state.socket.close(1000);
-  render();
-}
+      // Closes the socket with code 1000, which makes ttyd end the program.
+      function onClosePressed() {
+        controlsEnable(false);
+        state.socket.close(1000);
+        render();
+      }
 
-// Writes the socket's state, ttyd's title and preferences, and any failure.
-function render() {
-  const socket = state.socket;
-  const lines = [
-    `socket ${socket === null ? 'fetching token' :
-      READY_STATES[socket.readyState]}` + (boot.closed === null ? '' :
-      ` code ${boot.closed.code} reason '${boot.closed.reason}' wasClean ` +
-      `${boot.closed.wasClean}`),
-    `ttyd title ${boot.ttyd.title === null ? '-' : boot.ttyd.title}`,
-    'ttyd preferences ' +
-      (boot.ttyd.preferences === null ? '-' : boot.ttyd.preferences),
-  ];
-  if (boot.failure !== null) {
-    lines.push(`failure ${boot.failure}`);
-  }
-  elements.status.textContent = lines.join('\n');
-}
+      // Writes the socket's state, ttyd's title and preferences, and any failure.
+      function render() {
+        const socket = state.socket;
+        const lines = [
+          `socket ${
+            socket === null
+              ? "fetching token"
+              : READY_STATES[socket.readyState]
+          }` +
+            (boot.closed === null
+              ? ""
+              : ` code ${boot.closed.code} reason '${boot.closed.reason}' wasClean ` +
+                `${boot.closed.wasClean}`),
+          `ttyd title ${boot.ttyd.title === null ? "-" : boot.ttyd.title}`,
+          "ttyd preferences " +
+            (boot.ttyd.preferences === null ? "-" : boot.ttyd.preferences),
+        ];
+        if (boot.failure !== null) {
+          lines.push(`failure ${boot.failure}`);
+        }
+        elements.status.textContent = lines.join("\n");
+      }
 
-// Fetches the token, then opens the WebSocket to ttyd.
-async function start() {
-  const path = window.location.pathname.replace(/[/]+$/, '');
-  const response = await fetch(
-    `${window.location.protocol}//${window.location.host}${path}/token`);
-  if (!response.ok) {
-    throw new Error(`GET token: HTTP ${response.status}`);
-  }
-  state.token = (await response.json()).token;
-  const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  state.socket = new WebSocket(
-    `${scheme}//${window.location.host}${path}/ws`, ['tty']);
-  state.socket.binaryType = 'arraybuffer';
-  state.socket.addEventListener('open', onOpen);
-  state.socket.addEventListener('message', onMessage);
-  state.socket.addEventListener('close', onClose);
-  render();
-}
+      // Fetches the token, then opens the WebSocket to ttyd.
+      async function start() {
+        const path = window.location.pathname.replace(/[/]+$/, "");
+        const response = await fetch(
+          `${window.location.protocol}//${window.location.host}${path}/token`,
+        );
+        if (!response.ok) {
+          throw new Error(`GET token: HTTP ${response.status}`);
+        }
+        state.token = (await response.json()).token;
+        const scheme = window.location.protocol === "https:" ? "wss:" : "ws:";
+        state.socket = new WebSocket(
+          `${scheme}//${window.location.host}${path}/ws`,
+          ["tty"],
+        );
+        state.socket.binaryType = "arraybuffer";
+        state.socket.addEventListener("open", onOpen);
+        state.socket.addEventListener("message", onMessage);
+        state.socket.addEventListener("close", onClose);
+        render();
+      }
 
-window.addEventListener('error', event => record(event.message));
-elements.input.addEventListener('keydown', onInputKey);
-elements.interrupt.addEventListener('click',
-  () => sendText(INTERRUPT_TEXT));
-elements.eof.addEventListener('click', () => sendText(END_OF_INPUT_TEXT));
-elements.close.addEventListener('click', onClosePressed);
-start().catch(error => record(String(error)));
-render();
-</script>
-</body>
+      window.addEventListener("error", (event) => record(event.message));
+      elements.input.addEventListener("keydown", onInputKey);
+      elements.interrupt.addEventListener("click", () =>
+        sendText(INTERRUPT_TEXT),
+      );
+      elements.eof.addEventListener("click", () =>
+        sendText(END_OF_INPUT_TEXT),
+      );
+      elements.close.addEventListener("click", onClosePressed);
+      start().catch((error) => record(String(error)));
+      render();
+    </script>
+  </body>
 </html>

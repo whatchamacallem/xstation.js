@@ -44,9 +44,7 @@ namespace http {
       typeof value === "object" &&
       value !== null &&
       !Array.isArray(value) &&
-      Object.values(value).every(
-        (entry: unknown) => typeof entry === "string",
-      )
+      Object.values(value).every((entry: unknown) => typeof entry === "string")
     );
   }
 

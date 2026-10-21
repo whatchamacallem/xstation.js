@@ -97,9 +97,7 @@ namespace agent {
   function result_text(result: mcp.ToolResult, call_id: string): string {
     const texts = result.content.map((part: mcp.Content): string => {
       if (part.type !== "text") {
-        throw new Error(
-          i18n("agent.content_unsupported", call_id, part.type),
-        );
+        throw new Error(i18n("agent.content_unsupported", call_id, part.type));
       }
       return part.text;
     });

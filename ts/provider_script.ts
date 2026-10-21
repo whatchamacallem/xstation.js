@@ -453,9 +453,7 @@ namespace provider_script {
         return after;
       }
       if (role !== constants.user_role) {
-        throw new Error(
-          i18n("provider_script.role_unexpected", String(role)),
-        );
+        throw new Error(i18n("provider_script.role_unexpected", String(role)));
       }
       if (pending !== undefined) {
         throw new Error(

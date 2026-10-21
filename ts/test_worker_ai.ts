@@ -632,9 +632,13 @@ namespace test_worker_ai {
       const tap = new worker_ai.WireTap(inner, (text) => {
         notes.push(text);
       });
-      const sent = line_short("kv.list", { db: "castle", prefix: "" }, {
-        id: 1,
-      });
+      const sent = line_short(
+        "kv.list",
+        { db: "castle", prefix: "" },
+        {
+          id: 1,
+        },
+      );
       tap.line_post(sent, []);
       this.assertTrue(inner.posted[0] === sent);
       const taken: lines.Line[] = [];
@@ -658,15 +662,23 @@ namespace test_worker_ai {
         notes.push(text);
       });
       for (const full of [true, false]) {
-        const put = line_short("verbose.put", { thread: "ui", lines: [] }, {
-          full,
-        });
+        const put = line_short(
+          "verbose.put",
+          { thread: "ui", lines: [] },
+          {
+            full,
+          },
+        );
         tap.line_post(put, []);
         this.assertTrue(inner.posted[inner.posted.length - 1] === put);
       }
-      const sent = line_short("kv.list", { db: "castle", prefix: "" }, {
-        id: 2,
-      });
+      const sent = line_short(
+        "kv.list",
+        { db: "castle", prefix: "" },
+        {
+          id: 2,
+        },
+      );
       tap.line_post(sent, []);
       this.assertEqual(inner.posted.length, 3);
       this.assertEqual(notes, [
