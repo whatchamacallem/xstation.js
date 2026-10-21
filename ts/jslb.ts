@@ -92,8 +92,6 @@ namespace jslb {
     }),
     // The fields a header of their kind must hold, by short name.
     field_required: Object.freeze<readonly string[]>(["t", "s"]),
-    // The largest integer magnitude the encoder writes, `2 ** 53`.
-    integer_limit: 2 ** 53,
     // A key of the decimal digits of a non negative integer, no leading zero.
     number_key: /^(?:0|[1-9][0-9]*)$/,
     // A key of decimal digits, which a payload key must not be.
@@ -435,9 +433,6 @@ namespace jslb {
     if (typeof value === "number") {
       if (!Number.isFinite(value)) {
         throw new Error(i18n("jslb.number_refused", value));
-      }
-      if (Math.abs(value) > constants.integer_limit) {
-        throw new Error(i18n("jslb.integer_refused", value));
       }
       return utility.json_text(value);
     }

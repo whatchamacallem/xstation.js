@@ -1,5 +1,5 @@
 declare namespace provider_script {
-  // A scripted provider for tests and transcripts: no network, no AI. A
+  // A scripted provider for tests: no network, no AI. A
   // port that answers the `http.request` lines of provider.ts. The
   // latest user message is one integer that picks a reply from the
   // current node; a tool result moves to the node the reply names.

@@ -5,10 +5,13 @@
 // Tests of substrate.ts: refs, the document encoding, the sink's incremental
 // hash against known digests, the cache over slot files kept in memory, and
 // the store on the sqlite3.wasm module and OPFS pool the test page sets as
-// globals: databases, values, documents, turns, SQL, seq, snapshots,
-// forwarded lines, the operations of the castle turn and two later ones
-// replayed on a second store, the administration of the databases and the
-// handlers.
+// globals: databases, values, documents, turns, SQL, seq, snapshots, a
+// snapshot fetched in pieces from the store that keeps it, forwarded lines,
+// the operations of the castle turn and two later ones replayed on a second
+// store, the administration of the databases, cached values filled back and
+// freed by budget, a put stopped between its cache file and its row, and the
+// handlers. It also holds the pause point of that stop, which a browser rung
+// uses to kill a worker of the test page there.
 namespace test_substrate {
   // The initialized sqlite3.wasm module, a global the test page sets.
   declare const test_sqlite3: substrate.SqliteModule;
@@ -91,6 +94,16 @@ namespace test_substrate {
     desync_message: "kv.put: since 3 is not seq 4 of _files",
     // The first bytes of a database file.
     file_magic: "SQLite format 3",
+    // The `line_max` and `message_max` of a fetch, which leave pieces of 4096.
+    piece_line: 1024,
+    piece_message: 5120,
+    // The database and key of the put that a kill stops.
+    kill_db: "alpha",
+    kill_key: "big",
+    // The start of the SQL that writes a row to `_kv`.
+    row_insert: "INSERT INTO _kv ",
+    // The message of the stop that stands for the kill in the unit test.
+    kill_message: "The put stopped between its cache file and its row.",
   });
 
   // Text beyond ASCII for keys and values, built from its code points.
@@ -289,6 +302,23 @@ namespace test_substrate {
     blobs: lines.BlobHeader[] = [],
   ): lines.Line {
     return jslb.line_make(jslb.header_make(type, { id, key }), blobs, payload);
+  }
+
+  // A reply line of a type to request 1, with its payload.
+  function reply_of(
+    type: string,
+    payload: { [key: string]: unknown },
+  ): lines.Line {
+    return jslb.line_make(jslb.header_make(type, { reply: 1 }), [], payload);
+  }
+
+  // The handlers a store registers for the UI thread's lines, by type.
+  function handlers_of(store: substrate.Store): Map<string, dispatch.Handler> {
+    const table = new Map<string, dispatch.Handler>();
+    store.handlers_register((type, _version, fn) => {
+      table.set(type, fn);
+    });
+    return table;
   }
 
   // The rows of one statement a store runs.
@@ -708,6 +738,97 @@ namespace test_substrate {
     ];
   }
 
+  // A database of the pool that runs `stop` before it writes a row to `_kv`.
+  class StoppedDatabase implements substrate.SqliteDatabase {
+    // The database of the pool.
+    readonly #inner: substrate.SqliteDatabase;
+    // What runs in place of a write of a row to `_kv`.
+    readonly #stop: () => never;
+
+    // Takes the database it wraps and the stop.
+    constructor(inner: substrate.SqliteDatabase, stop: () => never) {
+      this.#inner = inner;
+      this.#stop = stop;
+    }
+
+    // The `sqlite3` pointer of the connection.
+    get pointer(): number {
+      return this.#inner.pointer;
+    }
+
+    // Runs the SQL, stopping before it when it writes a row to `_kv`.
+    exec(options: substrate.ExecOptions): unknown {
+      if (options.sql.startsWith(constants.row_insert)) {
+        this.#stop();
+      }
+      return this.#inner.exec(options);
+    }
+
+    // The first column of the first row the SQL returns.
+    selectValue(sql: string, bind?: unknown[]): unknown {
+      return this.#inner.selectValue(sql, bind);
+    }
+
+    // Prepares the first statement of the SQL.
+    prepare(sql: string): substrate.SqliteStatement {
+      return this.#inner.prepare(sql);
+    }
+
+    // The rows the last statement changed, or all since opening when total.
+    changes(total: boolean): number {
+      return this.#inner.changes(total);
+    }
+
+    // Closes the connection.
+    close(): void {
+      this.#inner.close();
+    }
+  }
+
+  // The pause point: the pool's files, its databases stopping before a row.
+  export function kill_pool(
+    pool: substrate.SqlitePool,
+    stop: () => never,
+  ): substrate.SqlitePool {
+    // The pool's database class, its databases wrapped to stop.
+    class PausedDatabase extends StoppedDatabase {
+      // Opens the file as the pool's own class does.
+      constructor(options: { filename: string; flags: string }) {
+        super(new pool.OpfsSAHPoolDb(options), stop);
+      }
+    }
+    return {
+      OpfsSAHPoolDb: PausedDatabase,
+      getFileNames: () => pool.getFileNames(),
+      importDb: (name, bytes) => pool.importDb(name, bytes),
+      unlink: (name) => pool.unlink(name),
+    };
+  }
+
+  // Creates `alpha` and puts a value over `overflow_bytes` under `big` in it.
+  export function kill_put(store: substrate.Store): void {
+    store.db_create(constants.kill_db);
+    store.kv_put(`/${constants.kill_db}/${constants.kill_key}`, value_over);
+  }
+
+  // Says it is paused, then holds the worker in a loop until it is killed.
+  export function kill_hold(paused: () => void): never {
+    paused();
+    for (;;) {}
+  }
+
+  // Opens `alpha` after the kill: the rows of `big`, the files then removed.
+  export function kill_check(store: substrate.Store): {
+    rows: number;
+    removed: number;
+  } {
+    store.db_open(constants.kill_db);
+    return {
+      rows: store.kv_list(constants.kill_db, constants.kill_key).length,
+      removed: store.kv_check(constants.kill_db),
+    };
+  }
+
   // A test case with the asserts of a refusal and its message.
   class RefusalCase extends unittest.TestCase {
     // Asserts the call throws a plain `Error` with exactly the message.
@@ -797,10 +918,11 @@ namespace test_substrate {
       root: string,
       cache: substrate.CacheFiles,
       forwards: boolean,
+      pool: substrate.SqlitePool = this.pool_get(),
     ): substrate.Store {
       const store = new substrate.Store(
         this.sqlite_get(),
-        this.pool_get(),
+        pool,
         cache,
         root,
         constants.overflow_bytes,
@@ -1978,6 +2100,182 @@ namespace test_substrate {
     }
   }
 
+  // A snapshot fetched in pieces from the store that keeps it.
+  export class TestFetch extends StoreCase {
+    // A fetch whose pieces are 4096 bytes, in short names.
+    fetch_make(): substrate.SnapshotFetch {
+      return new substrate.SnapshotFetch(
+        "alpha",
+        constants.piece_message,
+        constants.piece_line,
+        false,
+      );
+    }
+
+    // Fetches a snapshot through the owner's handlers. Returns the requests.
+    fetch_through(
+      table: Map<string, dispatch.Handler>,
+      fetch: substrate.SnapshotFetch,
+    ): lines.Line[] {
+      const asked: lines.Line[] = [];
+      // Sends a request with the next id and returns the handler's reply.
+      const answer = (line: lines.Line): lines.Line => {
+        Object.assign(line[0], { i: asked.length + 1 });
+        asked.push(line);
+        const type = jslb.field_get(line[0], "type") as string;
+        const fn = table.get(type) as dispatch.Handler;
+        return fn(line) as lines.Line;
+      };
+      let next: lines.Line | undefined = fetch.head_take(
+        answer(fetch.head_line()),
+      );
+      while (next !== undefined) {
+        const blob = answer(next)[1] as lines.BlobHeader;
+        next = fetch.piece_take(blob.d as Uint8Array);
+      }
+      return asked;
+    }
+
+    // A snapshot comes whole in pieces of the size the limits leave.
+    test_pieces_whole(): void {
+      const owner = this.store_fresh();
+      owner.db_create("alpha");
+      owner.kv_put("/alpha/exact", value_exact);
+      this.lines_answer(owner);
+      const data = owner.db_snapshot("alpha").data;
+      const fetch = this.fetch_make();
+      const asked = this.fetch_through(handlers_of(owner), fetch);
+      const piece = constants.piece_message - constants.piece_line;
+      const count = Math.ceil(data.length / piece);
+      this.assertTrue(count > 2);
+      this.assertEqual(asked.length, count + 1);
+      this.assertEqual(
+        jslb.line_render(asked[0]),
+        '{"0":{"t":"db.snapshot","i":1},"db":"alpha"}',
+      );
+      this.assertEqual(jslb.payload_of(asked[1]), {
+        snapshot: 1,
+        offset: 0,
+        size: piece,
+      });
+      const last = (count - 1) * piece;
+      this.assertEqual(jslb.payload_of(asked[count]), {
+        snapshot: 1,
+        offset: last,
+        size: data.length - last,
+      });
+      this.assertEqual(fetch.bytes_get(), data);
+      this.assertEqual(fetch.seq_sent(), 1);
+      this.raised_assert(i18n("substrate.snapshot_unknown", 1), () =>
+        owner.snapshot_read(1, 0, 1),
+      );
+      const second = this.store_fresh();
+      this.assertEqual(second.db_restore("alpha", fetch.bytes_get()), 1);
+      this.assertEqual(second.kv_get("/alpha/exact").data, value_exact);
+    }
+
+    // A piece of the wrong size, or a whole of the wrong digest, throws.
+    test_pieces_checked(): void {
+      const data = bytes_pattern(6000);
+      const head = {
+        snapshot: 4,
+        size: data.length,
+        sha256: utility.sha256_hex(data),
+        seq: 2,
+      };
+      const fetch = this.fetch_make();
+      const first = fetch.head_take(reply_of("db.snapshot", head));
+      this.assertEqual(jslb.payload_of(first), {
+        snapshot: 4,
+        offset: 0,
+        size: 4096,
+      });
+      this.raised_assert(
+        i18n("substrate.piece_size", "alpha", 0, 4095, 4096),
+        () => fetch.piece_take(data.subarray(0, 4095)),
+      );
+      const second = fetch.piece_take(data.subarray(0, 4096)) as lines.Line;
+      this.assertEqual(jslb.payload_of(second), {
+        snapshot: 4,
+        offset: 4096,
+        size: 1904,
+      });
+      this.assertEqual(fetch.piece_take(data.subarray(4096)), undefined);
+      this.assertEqual(fetch.bytes_get(), data);
+      this.assertEqual(fetch.seq_sent(), 2);
+      const other = this.fetch_make();
+      const wrong = { ...head, sha256: utility.sha256_hex(bytes_text("x")) };
+      other.head_take(reply_of("db.snapshot", wrong));
+      other.piece_take(data.subarray(0, 4096));
+      this.raised_assert(
+        i18n("substrate.snapshot_digest", "alpha", head.sha256, wrong.sha256),
+        () => other.piece_take(data.subarray(4096)),
+      );
+    }
+
+    // Limits that leave no room for a piece throw, and full names are kept.
+    test_limits_names(): void {
+      this.raised_assert(i18n("substrate.piece_none", 1024, 1024), () =>
+        new substrate.SnapshotFetch("alpha", 1024, 1024, false),
+      );
+      const fetch = new substrate.SnapshotFetch("alpha", 5120, 1024, true);
+      this.assertEqual(
+        jslb.line_render(fetch.head_line()),
+        '{"0":{"type":"db.snapshot"},"db":"alpha"}',
+      );
+      const head = { snapshot: 1, size: 1, sha256: "", seq: 0 };
+      this.assertEqual(
+        jslb.line_render(fetch.head_take(reply_of("db.snapshot", head))),
+        '{"0":{"type":"db.chunk"},"snapshot":1,"offset":0,"size":1}',
+      );
+    }
+
+    // A piece of no kept snapshot or outside one throws, and the rest reads.
+    test_kept_range(): void {
+      const owner = this.store_fresh();
+      owner.db_create("alpha");
+      const head = owner.snapshot_keep("alpha");
+      const size = head.size;
+      this.assertEqual(head.snapshot, 1);
+      this.assertEqual(head.seq, 0);
+      const cases: [number, number][] = [
+        [-1, 1],
+        [0, 0],
+        [0, size + 1],
+        [size, 1],
+        [size - 1, 2],
+      ];
+      for (const [offset, length] of cases) {
+        this.raised_assert(
+          i18n("substrate.snapshot_range", 1, offset, length, size),
+          () => owner.snapshot_read(1, offset, length),
+        );
+      }
+      this.raised_assert(i18n("substrate.snapshot_unknown", 2), () =>
+        owner.snapshot_read(2, 0, 1),
+      );
+      const data = owner.snapshot_read(1, 0, size);
+      this.assertEqual(data, owner.db_snapshot("alpha").data);
+      this.assertEqual(utility.sha256_hex(data), head.sha256);
+    }
+
+    // A blob's bytes come as they are, a streamed one's read and freed.
+    test_blob_take(): void {
+      const cache = cache_make();
+      const store = this.store_make(this.root_make(), cache, true);
+      const data = bytes_text("piece");
+      this.assertEqual(store.blob_take(data), data);
+      const free = cache.slots_free();
+      const handle = sink_fill(cache, value_over);
+      this.assertEqual(cache.slots_free(), free - 1);
+      this.assertEqual(store.blob_take(handle), value_over);
+      this.assertEqual(cache.slots_free(), free);
+      this.raised_assert(i18n("substrate.cache_unknown", handle), () =>
+        cache.cache_read(handle, 0, 1),
+      );
+    }
+  }
+
   // Forwarded lines: after the commit, in order, with `since`, held files.
   export class TestForward extends StoreCase {
     // Each modifying operation forwards its line, a copy of its bytes.
@@ -2615,6 +2913,128 @@ namespace test_substrate {
       this.assertEqual(second.db_list(), ["alpha", "beta"]);
       this.assertEqual(this.lines_of(second), []);
     }
+
+    // Cached values an unload freed are held again once filled after a load.
+    test_value_filled(): void {
+      const cache = cache_make();
+      const store = this.store_make(this.root_make(), cache, true);
+      const other = bytes_reversed(value_over);
+      store.db_create("alpha");
+      store.kv_put("/alpha/big", value_over);
+      store.kv_put("/alpha/other", other);
+      store.kv_put("/alpha/small", bytes_text("small"));
+      this.lines_answer(store);
+      const snapshot = store.db_snapshot("alpha");
+      store.db_unload("alpha");
+      this.assertEqual(store.db_load("alpha", snapshot.data), 3);
+      this.assertFalse(store.kv_held("/alpha/big"));
+      this.assertFalse(store.kv_held("/alpha/other"));
+      this.assertTrue(store.kv_held("/alpha/small"));
+      const name = utility.sha256_hex(value_over);
+      this.raised_assert(i18n("substrate.cache_unknown", name), () =>
+        cache.cache_read(name, 0, 1),
+      );
+      const wrong = utility.sha256_hex(other);
+      this.raised_assert(
+        i18n("substrate.fill_desync", "/alpha/big", wrong, name),
+        () => store.cache_fill("/alpha/big", other),
+      );
+      this.assertFalse(store.kv_held("/alpha/big"));
+      store.cache_fill("/alpha/big", sink_fill(cache, value_over));
+      store.cache_fill("/alpha/other", other.slice());
+      this.assertTrue(store.kv_held("/alpha/big"));
+      this.assertTrue(store.kv_held("/alpha/other"));
+      const size = value_over.length;
+      this.assertEqual(cache.cache_read(name, 0, size), value_over);
+      this.assertEqual(cache.cache_read(wrong, 0, size), other);
+      this.assertEqual(store.seq_get("alpha"), 3);
+      this.assertEqual(this.lines_of(store), []);
+    }
+  }
+
+  // The cached values of a database freed by key until they fit a budget.
+  export class TestEvict extends StoreCase {
+    // Values go by key until the rest fit, the kept ones and the rows staying.
+    test_evict_budget(): void {
+      const store = this.store_fresh();
+      store.db_create("_files");
+      const values: [string, Uint8Array][] = [
+        ["a", value_over],
+        ["b", bytes_reversed(value_over)],
+        ["c", bytes_pattern(constants.overflow_bytes + 2)],
+      ];
+      for (const [key, data] of values) {
+        store.kv_put(`/_files/${key}`, data);
+      }
+      this.lines_answer(store);
+      // The kept refs: one of `_files`, one of another database, one internal.
+      const keep = ["/_files/b", "/metaverse/c", "c"];
+      const each = constants.overflow_bytes + 1;
+      // Whether each value is held, in the order of their keys.
+      const held = (): boolean[] =>
+        values.map(([key]) => store.kv_held(`/_files/${key}`));
+      this.assertEqual(store.cache_evict("_files", keep, 3 * each + 1), 0);
+      this.assertEqual(held(), [true, true, true]);
+      this.assertEqual(store.cache_evict("_files", keep, 2 * each + 1), 1);
+      this.assertEqual(held(), [false, true, true]);
+      this.assertEqual(store.cache_evict("_files", keep, 0), 1);
+      this.assertEqual(held(), [false, true, false]);
+      this.assertEqual(store.kv_list("_files", "").length, 3);
+      this.assertEqual(store.seq_get("_files"), 3);
+      this.assertEqual(this.lines_of(store), []);
+    }
+
+    // A value another database names or a line in flight holds stays.
+    test_evict_named(): void {
+      const store = this.store_fresh();
+      store.db_create("_files");
+      store.db_create("beta");
+      store.kv_put("/_files/shared", value_over);
+      store.kv_put("/beta/shared", value_over);
+      store.kv_put("/_files/alone", bytes_reversed(value_over));
+      this.lines_answer(store);
+      const flying = bytes_pattern(constants.overflow_bytes + 2);
+      store.kv_put("/_files/flying", flying);
+      this.assertEqual(store.cache_evict("_files", [], 0), 1);
+      this.assertFalse(store.kv_held("/_files/alone"));
+      this.assertTrue(store.kv_held("/_files/flying"));
+      this.assertTrue(store.kv_held("/_files/shared"));
+      this.lines_answer(store);
+      this.assertEqual(store.cache_evict("_files", [], 0), 1);
+      this.assertFalse(store.kv_held("/_files/flying"));
+      this.assertTrue(store.kv_held("/_files/shared"));
+      this.assertTrue(store.kv_held("/beta/shared"));
+    }
+  }
+
+  // A put stopped between its cache file and its row, as a kill stops it.
+  export class TestCrash extends StoreCase {
+    // The stopped put leaves a file and no row, and `kv_check` removes it.
+    test_kill_between(): void {
+      const root = this.root_make();
+      const slots = slots_make(constants.slot_count);
+      // The stop that stands for the kill: it throws where the rung kills.
+      const stop = (): never => {
+        throw new Error(constants.kill_message);
+      };
+      const pool = kill_pool(this.pool_get(), stop);
+      const cache = new substrate.CacheFiles(slots);
+      const paused = this.store_make(root, cache, true, pool);
+      this.raised_assert(constants.kill_message, () => kill_put(paused));
+      paused.db_close(constants.kill_db);
+      const name = utility.sha256_hex(value_over);
+      const after = new substrate.CacheFiles(slots);
+      this.assertEqual(
+        after.cache_read(name, 0, 8),
+        value_over.subarray(0, 8),
+      );
+      const checked = this.store_make(root, after, true);
+      this.assertEqual(kill_check(checked), { rows: 0, removed: 1 });
+      this.raised_assert(i18n("substrate.cache_unknown", name), () =>
+        after.cache_read(name, 0, 1),
+      );
+      this.assertEqual(checked.kv_check(constants.kill_db), 0);
+    }
   }
 
   // The handlers of the lines the UI thread submits to the AI thread.
@@ -2623,6 +3043,7 @@ namespace test_substrate {
     test_types_registered(): void {
       const table = this.handlers_get(this.store_fresh());
       this.assertEqual([...table.keys()].sort(), [
+        "db.chunk",
         "db.create",
         "db.drop",
         "db.snapshot",
@@ -2776,7 +3197,7 @@ namespace test_substrate {
       );
     }
 
-    // Databases are created, serialized and dropped by their lines.
+    // Databases are created, kept, read in a piece and dropped by their lines.
     test_databases_answered(): void {
       const store = this.store_fresh();
       const table = this.handlers_get(store);
@@ -2789,28 +3210,49 @@ namespace test_substrate {
         '{"0":{"t":"db.create","r":17}}',
       );
       this.assertEqual(store.db_list(), ["alpha"]);
-      const snapshot = this.answer_get(
+      const data = store.db_snapshot("alpha").data;
+      const head = this.answer_get(
         table,
         request_make("db.snapshot", 18, { db: "alpha" }),
       );
-      const blob = snapshot[1] as lines.BlobHeader;
-      const data = blob.d as Uint8Array;
-      this.assertEqual(blob.s, data.length);
-      this.assertEqual(
-        jslb.payload_of(snapshot),
-        { sha256: utility.sha256_hex(data), seq: 0 },
+      this.assertEqual(head[0], { t: "db.snapshot", r: 18 });
+      this.assertEqual(jslb.payload_of(head), {
+        snapshot: 1,
+        size: data.length,
+        sha256: utility.sha256_hex(data),
+        seq: 0,
+      });
+      const piece = this.answer_get(
+        table,
+        request_make("db.chunk", 19, {
+          snapshot: 1,
+          offset: 0,
+          size: data.length,
+        }),
       );
+      const size = String(data.length);
+      this.assertEqual(
+        jslb.line_render(piece),
+        `{"0":{"t":"db.chunk","r":19,"b":1},"1":{"s":${size}}}<blob "n"=1>`,
+      );
+      this.assertEqual((piece[1] as lines.BlobHeader).d, data);
       this.assertEqual(
         data.subarray(0, 15),
         bytes_text(constants.file_magic),
       );
+      this.raised_assert(i18n("substrate.snapshot_unknown", 1), () =>
+        this.answer_get(
+          table,
+          request_make("db.chunk", 20, { snapshot: 1, offset: 0, size: 1 }),
+        ),
+      );
       const dropped = this.answer_get(
         table,
-        request_make("db.drop", 19, { db: "alpha" }),
+        request_make("db.drop", 21, { db: "alpha" }),
       );
       this.assertEqual(
         jslb.line_render(dropped),
-        '{"0":{"t":"db.drop","r":19}}',
+        '{"0":{"t":"db.drop","r":21}}',
       );
       this.assertEqual(store.db_list(), []);
     }
@@ -2843,6 +3285,7 @@ namespace test_substrate {
       this.assertTrue(Object.isFrozen(substrate));
       this.assertEqual(Object.keys(substrate).sort(), [
         "CacheFiles",
+        "SnapshotFetch",
         "Store",
         "doc_decode",
         "doc_encode",
@@ -2851,6 +3294,9 @@ namespace test_substrate {
       this.assertEqual(
         Object.getOwnPropertyNames(substrate.Store.prototype).sort(),
         [
+          "blob_take",
+          "cache_evict",
+          "cache_fill",
           "constructor",
           "db_close",
           "db_compact",
@@ -2872,11 +3318,14 @@ namespace test_substrate {
           "kv_check",
           "kv_delete",
           "kv_get",
+          "kv_held",
           "kv_list",
           "kv_put",
           "operation_apply",
           "seq_get",
           "sink",
+          "snapshot_keep",
+          "snapshot_read",
           "sql_run",
           "start_open",
           "transaction_run",
@@ -2895,6 +3344,17 @@ namespace test_substrate {
           "sink_open",
           "slot_add",
           "slots_free",
+        ],
+      );
+      this.assertEqual(
+        Object.getOwnPropertyNames(substrate.SnapshotFetch.prototype).sort(),
+        [
+          "bytes_get",
+          "constructor",
+          "head_line",
+          "head_take",
+          "piece_take",
+          "seq_sent",
         ],
       );
     }

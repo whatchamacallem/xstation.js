@@ -175,8 +175,23 @@ def _output_captured(
     return code, out_text, err_text
 
 
-# Runs at level 0 with text held in the buffers of both Python streams.
-def _buffered_run(argv: list[str]) -> int:
+# Runs `fn` with descriptor 0 of this process reading the bytes from a pipe.
+def _input_given(data: bytes, fn: Callable[[], int]) -> int:
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, data)
+    os.close(write_fd)
+    saved = os.dup(0)
+    try:
+        os.dup2(read_fd, 0)
+        return fn()
+    finally:
+        os.dup2(saved, 0)
+        os.close(saved)
+        os.close(read_fd)
+
+
+# Runs at the level with text held in the buffers of both Python streams.
+def _buffered_run(level: int, argv: list[str]) -> int:
     with (
         open(1, "w", encoding="utf-8", closefd=False) as out,
         open(2, "w", encoding="utf-8", closefd=False) as err,
@@ -185,7 +200,7 @@ def _buffered_run(argv: list[str]) -> int:
     ):
         out.write("before ")
         err.write("before ")
-        return verbose.exec(0, argv, argv)
+        return verbose.exec(level, argv, argv)
 
 
 # Tests which lines the level lets through and what the log refuses.
@@ -557,36 +572,43 @@ class TestCommand(unittest.TestCase):
         self.assertEqual(_ring_texts(), [])
         self.assertEqual(_rows_read(path), [])
 
-    # Level 0 writes what Python holds for both streams before it runs.
+    # Every level writes what Python holds for both streams before it runs.
     def test_command_flushed(self) -> None:
-        path = _scratch_make(self)
+        path = _log_ready(self, 10, 2)
         argv = [sys.executable, "-c", _OUTPUT_PROGRAM]
-        code, out, err = _output_captured(path, lambda: _buffered_run(argv))
-        self.assertEqual(
-            (code, out, err), (3, "before alpha\n", "before beta\n")
-        )
+        for level in range(3):
+            code, out, err = _output_captured(
+                path, lambda: _buffered_run(level, argv)
+            )
+            self.assertEqual(
+                (code, out, err), (3, "before alpha\n", "before beta\n")
+            )
 
-    # Level 1 logs Markdown progress with the output in a text block.
+    # Level 1 passes the output through and logs its start and its exit.
     def test_command_markdown(self) -> None:
         path = _log_ready(self, 10, 1)
         argv = [sys.executable, "-c", _OUTPUT_PROGRAM]
-        self.assertEqual(verbose.exec(1, argv, argv), 3)
+        code, out, err = _output_captured(
+            path, lambda: verbose.exec(1, argv, argv)
+        )
+        self.assertEqual((code, out, err), (3, "alpha\n", "beta\n"))
         lines = verbose.history_get(_HISTORY_ALL)
-        self.assertEqual([line.level for line in lines], [1] * 6)
-        started, ended = _progress_texts(argv, 3)
-        texts = [started, "```text", "alpha", "beta", "```", ended]
+        self.assertEqual([line.level for line in lines], [1, 1])
+        texts = list(_progress_texts(argv, 3))
         self.assertEqual(_texts_get(lines), texts)
         self.assertEqual([row[4] for row in _rows_read(path)], texts)
 
-    # Level 2 logs the output raw, with no block around it.
+    # Level 2 passes the output through raw and logs its start and exit at 2.
     def test_command_raw(self) -> None:
         path = _log_ready(self, 10, 2)
         argv = [sys.executable, "-c", _OUTPUT_PROGRAM]
-        self.assertEqual(verbose.exec(2, argv, argv), 3)
+        code, out, err = _output_captured(
+            path, lambda: verbose.exec(2, argv, argv)
+        )
+        self.assertEqual((code, out, err), (3, "alpha\n", "beta\n"))
         lines = verbose.history_get(_HISTORY_ALL)
-        self.assertEqual([line.level for line in lines], [2] * 4)
-        started, ended = _progress_texts(argv, 3)
-        texts = [started, "alpha", "beta", ended]
+        self.assertEqual([line.level for line in lines], [2, 2])
+        texts = list(_progress_texts(argv, 3))
         self.assertEqual(_texts_get(lines), texts)
         self.assertEqual([row[4] for row in _rows_read(path)], texts)
 
@@ -596,48 +618,42 @@ class TestCommand(unittest.TestCase):
         program = [sys.executable, "-c", _ARGS_PROGRAM]
         argv = [*program, "plain"]
         argv_verbose = [*program, "--verbose", "x y"]
-        listed = str(["plain"])
-        listed_verbose = str(["--verbose", "x y"])
-        self.assertEqual(verbose.exec(2, argv, argv_verbose), 0)
-        started, ended = _progress_texts(argv_verbose, 0)
-        self.assertEqual(_ring_texts(), [started, listed_verbose, ended])
-        self.assertEqual(verbose.exec(1, argv, argv_verbose), 0)
-        started, ended = _progress_texts(argv, 0)
+        listed = str(["plain"]) + "\n"
+        listed_verbose = str(["--verbose", "x y"]) + "\n"
+        printed = {0: listed, 1: listed, 2: listed_verbose}
+        for level, expected in printed.items():
+            code, out, _ = _output_captured(
+                path, lambda: verbose.exec(level, argv, argv_verbose)
+            )
+            self.assertEqual((code, out), (0, expected))
+        plain_run, plain_exit = _progress_texts(argv, 0)
+        verbose_run, verbose_exit = _progress_texts(argv_verbose, 0)
         self.assertEqual(
-            _ring_texts()[3:], [started, "```text", listed, "```", ended]
+            _ring_texts(), [plain_run, plain_exit, verbose_run, verbose_exit]
         )
-        code, out, _ = _output_captured(
-            path, lambda: verbose.exec(0, argv, argv_verbose)
-        )
-        self.assertEqual((code, out), (0, listed + "\n"))
 
-    # Levels 1 and 2 give the program no input, so it cannot read the wire.
+    # Every level passes the input through, so a console reads its terminal.
     def test_command_input(self) -> None:
-        _log_ready(self, 10, 2)
+        path = _log_ready(self, 10, 2)
         argv = [sys.executable, "-c", _INPUT_PROGRAM]
-        read_fd, write_fd = os.pipe()
-        os.write(write_fd, b"wire")
-        os.close(write_fd)
-        saved = os.dup(0)
-        try:
-            os.dup2(read_fd, 0)
-            for level in (1, 2):
-                self.assertEqual(verbose.exec(level, argv, argv), 0)
-        finally:
-            os.dup2(saved, 0)
-            os.close(saved)
-            os.close(read_fd)
-        texts = _ring_texts()
-        self.assertEqual(texts.count(repr("")), 2)
-        self.assertNotIn(repr("wire"), texts)
+        for level in range(3):
+            code, out, _ = _output_captured(
+                path,
+                lambda: _input_given(
+                    b"typed", lambda: verbose.exec(level, argv, argv)
+                ),
+            )
+            self.assertEqual((code, out), (0, repr("typed") + "\n"))
 
     # A run above the level of the log writes nothing and still runs.
     def test_command_gated(self) -> None:
         path = _log_ready(self, 10, 1)
         argv = [sys.executable, "-c", _OUTPUT_PROGRAM]
-        self.assertEqual(verbose.exec(2, argv, argv), 3)
+        ran = _output_captured(path, lambda: verbose.exec(2, argv, argv))
+        self.assertEqual(ran, (3, "alpha\n", "beta\n"))
         verbose.level_set(0)
-        self.assertEqual(verbose.exec(1, argv, argv), 3)
+        ran = _output_captured(path, lambda: verbose.exec(1, argv, argv))
+        self.assertEqual(ran, (3, "alpha\n", "beta\n"))
         self.assertEqual(_ring_texts(), [])
         self.assertEqual(_rows_read(path), [])
 

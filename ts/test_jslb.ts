@@ -5,7 +5,7 @@
 // Tests of jslb.ts: the builders, field access, the encoder and its refusals,
 // the debug rendering, the decoder, its limits, its deferred fault and every
 // hard error, each refusal compared with its message, blobs streamed into a
-// sink kept in memory, and the vectors of python/vectors, which the test page
+// sink kept in memory, and the vectors of build/vectors, which the test page
 // carries as test_vectors, each read with the limits its sidecar names, whole,
 // by single bytes and split at every offset.
 namespace test_jslb {
@@ -801,33 +801,32 @@ namespace test_jslb {
       this.assertEqual(encoded.split("\r").length, 2);
     }
 
-    // Integers within `2 ** 53` either way are written, larger ones refused.
-    test_integer_limits(): void {
+    // Doubles beyond `2 ** 53` are written as JSON writes them, and read back.
+    test_double_range(): void {
       const header = jslb.header_make("echo");
       const line = jslb.line_make(header, [], {
         high: 2 ** 53,
         low: -(2 ** 53),
+        above: 2 ** 53 + 2,
+        tenth: 1e16,
+        large: [-1e300],
+        top: { a: Number.MAX_VALUE },
       });
-      this.assertEqual(
-        encoded_text(line),
+      const text =
         '{"0":{"t":"echo"},"high":9007199254740992,' +
-          '"low":-9007199254740992}\r',
+        '"low":-9007199254740992,"above":9007199254740994,' +
+        '"tenth":10000000000000000,"large":[-1e+300],' +
+        '"top":{"a":1.7976931348623157e+308}}';
+      this.assertEqual(encoded_text(line), text + "\r");
+      this.assertEqual(jslb.line_render(line), text);
+      const sent = bytes_of('{"0":{"t":"echo"},"n":1e+16,"m":-1e+300}\r');
+      const found = pieces_decode(decoder_make(new MemorySink()), [sent]);
+      this.assertEqual(found.length, 1);
+      this.assertEqual(jslb.payload_of(found[0]), { n: 1e16, m: -1e300 });
+      this.assertEqual(
+        encoded_text(found[0]),
+        '{"0":{"t":"echo"},"n":10000000000000000,"m":-1e+300}\r',
       );
-      const cases: [unknown, number][] = [
-        [2 ** 53 + 2, 2 ** 53 + 2],
-        [-(2 ** 53) - 2, -(2 ** 53) - 2],
-        [[2 ** 60], 2 ** 60],
-        [{ a: 2 ** 60 }, 2 ** 60],
-        [1e300, 1e300],
-      ];
-      for (const [value, refused] of cases) {
-        const line = jslb.line_make(header, [], { value });
-        this.raised_assert(
-          Error,
-          i18n("jslb.integer_refused", refused),
-          () => jslb.line_encode(line),
-        );
-      }
     }
 
     // `NaN` and the infinities are refused.

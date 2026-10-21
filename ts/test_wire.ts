@@ -204,6 +204,14 @@ namespace test_wire {
     });
   }
 
+  // The server's `error` line in place of hello, which answers nothing.
+  function refusal_make(): lines.Line {
+    return jslb.line_make(jslb.header_make("error"), [], {
+      message: "The engine lock /home/t/.cache/xsjs/engine.lock is held.",
+      stack: "Traceback (most recent call last):",
+    });
+  }
+
   // A `console.read` request in full names, with its payload as given.
   function read_make(
     id: number,
@@ -782,26 +790,49 @@ namespace test_wire {
       this.assertEqual(received.map(type_of), ["error"]);
     }
 
-    // An error line in place of hello, a refused lock, reaches the receiver.
+    // An error line in place of hello, a refused lock, throws its message.
     test_error_first(): void {
       const port = port_make(settings_make());
       const closes: unknown[] = [];
       const hellos: lines.Line[] = [];
-      const received: lines.Line[] = [];
       port.hello_receive((line) => {
         hellos.push(line);
-      });
-      port.line_receive((line) => {
-        received.push(line);
       });
       port.close_receive((code, had_error) => {
         closes.push([code, had_error]);
       });
-      port.message_take(output_lines(error_make()));
+      const refusal = refusal_make();
+      const payload = jslb.payload_of(refusal);
+      const message = message_thrown(this, () =>
+        port.message_take(output_lines(refusal)),
+      );
+      this.assertEqual(
+        message,
+        i18n("wire.error_first", payload.message, payload.stack),
+      );
       port.close_take(1006);
       this.assertEqual(hellos.length, 0);
-      this.assertEqual(received.map(type_of), ["error"]);
       this.assertEqual(closes, [[1006, true]]);
+    }
+
+    // An error line before hello is not passed on, though a receiver is set.
+    test_error_unpassed(): void {
+      const port = port_make(settings_make());
+      const received: lines.Line[] = [];
+      port.hello_receive(() => {});
+      port.line_receive((line) => {
+        received.push(line);
+      });
+      const refusal = refusal_make();
+      const payload = jslb.payload_of(refusal);
+      const message = message_thrown(this, () =>
+        port.message_take(output_lines(refusal)),
+      );
+      this.assertEqual(
+        message,
+        i18n("wire.error_first", payload.message, payload.stack),
+      );
+      this.assertEqual(received.length, 0);
     }
 
     // A close with no receiver set is still the fault, naming its code.

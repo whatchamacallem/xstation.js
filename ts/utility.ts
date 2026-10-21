@@ -17,7 +17,6 @@ namespace utility {
     byte_bits: 8,
     padding_marker: 0x80,
     word_range: 2 ** 32,
-    integer_limit: 2 ** 53,
     surrogate_first: 0xd800,
     surrogate_last: 0xdfff,
   });
@@ -196,12 +195,9 @@ namespace utility {
     return bytes;
   }
 
-  // A JSON replacer that throws on a number the wire cannot carry exactly.
+  // A JSON replacer that throws on `NaN` and the infinities, which JSON lacks.
   function number_check(_key: string, value: unknown): unknown {
-    if (
-      typeof value === "number" &&
-      (!Number.isFinite(value) || Math.abs(value) > constants.integer_limit)
-    ) {
+    if (typeof value === "number" && !Number.isFinite(value)) {
       fail_now(i18n("utility.number_refused", value));
     }
     return value;

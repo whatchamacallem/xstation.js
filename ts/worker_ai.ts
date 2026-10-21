@@ -22,15 +22,18 @@ namespace worker_ai {
     synchronous_setting: "queue_synchronous",
     overflow_setting: "overflow_bytes",
     limit_setting: "queue_max",
+    message_setting: "message_max",
+    line_setting: "line_max",
     scripted_setting: "provider.scripted",
     timeout_setting: "provider.timeout_seconds",
     settings_type: "settings.set",
     hello_type: "boot.hello",
     put_type: "settings.put",
     open_type: "console.open",
+    close_type: "console.close",
     exit_type: "console.exit",
     overlay_type: "overlay.line",
-    snapshot_type: "db.snapshot",
+    verbose_type: "verbose.put",
     get_type: "kv.get",
     store_type: "media.store",
     render_type: "render",
@@ -38,8 +41,8 @@ namespace worker_ai {
     next_type: "replicate.next",
     done_type: "replicate.done",
     start_type: "worker.start",
-    restored_type: "worker.restored",
-    loaded_type: "worker.loaded",
+    head_type: "worker.snapshot_head",
+    piece_type: "worker.snapshot_piece",
     initialized_type: "worker.initialized",
     listed_type: "worker.listed",
     fetched_type: "worker.fetched",
@@ -116,6 +119,7 @@ namespace worker_ai {
     start_open(server: { [db: string]: number }): string[];
     db_restore(db: string, data: Uint8Array | string): number;
     db_load(db: string, data: Uint8Array | string): number;
+    blob_take(data: Uint8Array | string): Uint8Array;
     db_list(): string[];
     kv_get(ref: lines.KvRef): substrate.KvValue;
     kv_put(
@@ -140,6 +144,7 @@ namespace worker_ai {
     server: mcp.Client;
     hello: lines.Hello;
     full: boolean;
+    settings_get: (id: string) => unknown;
     provider_attach: () => void;
   }
 
@@ -160,9 +165,11 @@ namespace worker_ai {
     request: lines.Line;
   }
 
-  // The databases a wake opens from the snapshots it waited for, in order.
-  interface SnapshotState {
-    names: string[];
+  // A snapshot the start fetches: whether it restores, what restores follow.
+  interface FetchState {
+    fetch: substrate.SnapshotFetch;
+    restore: boolean;
+    rest: string[];
   }
 
   // The scene the start shows: its ref, its subtitle and its image if any.
@@ -373,7 +380,7 @@ namespace worker_ai {
     });
   }
 
-  // A port that shows each line it carries in the overlay of the wire's tty.
+  // A port that shows the lines it carries in the overlay of the wire's tty.
   export class WireTap implements queue.Port {
     private readonly inner: queue.Port;
     private readonly note: (text: string) => void;
@@ -384,9 +391,12 @@ namespace worker_ai {
       this.note = note;
     }
 
-    // Shows the line as sent, then posts it.
+    // Shows the line as sent unless it forwards the view, then posts it.
     line_post(line: lines.Line, transfer: ArrayBuffer[]): void {
-      this.note(i18n("worker_ai.overlay_sent", jslb.line_render(line)));
+      // Shown, a `verbose.put` would be forwarded and shown again, forever.
+      if (jslb.field_get(line[0], "type") !== constants.verbose_type) {
+        this.note(i18n("worker_ai.overlay_sent", jslb.line_render(line)));
+      }
       this.inner.line_post(line, transfer);
     }
 
@@ -420,21 +430,37 @@ namespace worker_ai {
       const notice = line_build(constants.hello_type, full, shown);
       tasks.line_notify(notice, constants.ui_owner);
       const names = store.start_open(hello.seq);
-      return this.snapshots_ask(names, constants.restored_type);
+      return this.restore_next(names);
     }
 
-    // Restores what differed from the server, then loads what is lacking.
-    restored_take(wake: lines.Line): dispatch.Sleep {
-      const store = this.parts.store;
-      this.snapshots_open(wake, (db, data) => store.db_restore(db, data));
-      return this.load_next();
+    // Takes the head of a snapshot and asks for its first piece.
+    head_take(wake: lines.Line): dispatch.Sleep {
+      const state = wake.state as FetchState;
+      const replies = wake.replies as lines.Line[];
+      return this.piece_ask(state, state.fetch.head_take(replies[0]));
     }
 
-    // Loads one database the start needs, then looks for the next.
-    loaded_take(wake: lines.Line): dispatch.Sleep {
-      const store = this.parts.store;
-      this.snapshots_open(wake, (db, data) => store.db_load(db, data));
-      return this.load_next();
+    // Takes a piece and asks the next, or opens the snapshot and goes on.
+    piece_take(wake: lines.Line): dispatch.Sleep {
+      const state = wake.state as FetchState;
+      const replies = wake.replies as lines.Line[];
+      const { store } = this.parts;
+      const { fetch } = state;
+      const piece = store.blob_take(blob_data(replies[0]));
+      const next = fetch.piece_take(piece);
+      if (next !== undefined) {
+        return this.piece_ask(state, next);
+      }
+      const db = fetch.db;
+      const data = fetch.bytes_get();
+      const seq = state.restore
+        ? store.db_restore(db, data)
+        : store.db_load(db, data);
+      const sent = fetch.seq_sent();
+      if (seq !== sent) {
+        throw new Error(i18n("worker_ai.snapshot_desync", db, seq, sent));
+      }
+      return state.restore ? this.restore_next(state.rest) : this.load_next();
     }
 
     // Ends both initializations and asks both servers for their tools.
@@ -475,35 +501,36 @@ namespace worker_ai {
       return undefined;
     }
 
-    // Asks the server for the snapshot of each database and sleeps on them.
-    private snapshots_ask(names: string[], then_type: string): dispatch.Sleep {
-      const { tasks, full } = this.parts;
-      const ids = names.map((db) =>
-        tasks.task_submit(
-          line_build(constants.snapshot_type, full, { db }),
-          constants.server_owner,
-        ),
-      );
-      const state: SnapshotState = { names };
-      return dispatch.task_sleep(state, ids, then_type);
+    // Fetches the first database left to restore, or loads what is lacking.
+    private restore_next(names: string[]): dispatch.Sleep {
+      if (names.length === 0) {
+        return this.load_next();
+      }
+      return this.fetch_start(names[0], true, names.slice(1));
     }
 
-    // Opens each snapshot of a wake and checks its `seq` against the server's.
-    private snapshots_open(
-      wake: lines.Line,
-      open: (db: string, data: Uint8Array | string) => number,
-    ): void {
-      const { names } = wake.state as SnapshotState;
-      const replies = wake.replies as lines.Line[];
-      for (let index = 0; index < names.length; index += 1) {
-        const reply = replies[index];
-        const db = names[index];
-        const seq = open(db, blob_data(reply));
-        const sent = jslb.payload_of(reply).seq;
-        if (seq !== sent) {
-          throw new Error(i18n("worker_ai.snapshot_desync", db, seq, sent));
-        }
-      }
+    // Asks the server for the head of a database's snapshot, one at a time.
+    private fetch_start(
+      db: string,
+      restore: boolean,
+      rest: string[],
+    ): dispatch.Sleep {
+      const { tasks, full, settings_get } = this.parts;
+      const fetch = new substrate.SnapshotFetch(
+        db,
+        settings_get(constants.message_setting) as number,
+        settings_get(constants.line_setting) as number,
+        full,
+      );
+      const id = tasks.task_submit(fetch.head_line(), constants.server_owner);
+      const state: FetchState = { fetch, restore, rest };
+      return dispatch.task_sleep(state, [id], constants.head_type);
+    }
+
+    // Asks the server for the next piece of a snapshot and sleeps on it.
+    private piece_ask(state: FetchState, line: lines.Line): dispatch.Sleep {
+      const id = this.parts.tasks.task_submit(line, constants.server_owner);
+      return dispatch.task_sleep(state, [id], constants.piece_type);
     }
 
     // Asks for the next database the start lacks, or starts the handshakes.
@@ -512,7 +539,7 @@ namespace worker_ai {
       if (missing === undefined) {
         return this.handshake_start();
       }
-      return this.snapshots_ask([missing], constants.loaded_type);
+      return this.fetch_start(missing, false, []);
     }
 
     // The first database the first turn needs that is not open, if any.
@@ -628,12 +655,8 @@ namespace worker_ai {
   ): void {
     const version = constants.handler_version;
     register(constants.start_type, version, () => chain.start_take());
-    register(constants.restored_type, version, (line) =>
-      chain.restored_take(line),
-    );
-    register(constants.loaded_type, version, (line) =>
-      chain.loaded_take(line),
-    );
+    register(constants.head_type, version, (line) => chain.head_take(line));
+    register(constants.piece_type, version, (line) => chain.piece_take(line));
     register(constants.initialized_type, version, (line) =>
       chain.initialized_take(line),
     );
@@ -691,10 +714,11 @@ namespace worker_ai {
     tasks.port_add(constants.provider_owner, port);
   }
 
-  // Registers the relay of the UI's `console.open` to the console port.
+  // Registers the relays of the UI's `console.open` and `console.close`.
   export function console_register(
     tasks: queue.TaskQueue,
     register: HandlerRegister,
+    close: () => void,
   ): void {
     const version = constants.handler_version;
     // Opens tty 0 through the console port and sleeps until it is open.
@@ -713,6 +737,11 @@ namespace worker_ai {
       const replies = line.replies as lines.Line[];
       const token = jslb.payload_of(replies[0]).token;
       return dispatch.reply_make(request, { token });
+    });
+    // Closes tty 0 through the console port, whose end follows as the exit.
+    register(constants.close_type, version, (line) => {
+      close();
+      return dispatch.reply_make(line, {});
     });
   }
 
@@ -815,11 +844,11 @@ namespace worker_ai {
       ? new WireTap(start.wire, (text) => overlay_post(tasks, full, text))
       : start.wire;
     tasks.port_add(constants.server_owner, server);
-    tasks.port_add(
-      constants.console_owner,
-      console_make(tasks, start.base_url, full),
+    const console_port = console_make(tasks, start.base_url, full);
+    tasks.port_add(constants.console_owner, console_port);
+    console_register(tasks, dispatch.handler_register, () =>
+      console_port.console_close(),
     );
-    console_register(tasks, dispatch.handler_register);
     provider.key_set(hello.provider_key);
     const store = new substrate.Store(
       start.sqlite3,
@@ -892,6 +921,7 @@ namespace worker_ai {
       server: server_client,
       hello,
       full,
+      settings_get: settings.settings_get,
       provider_attach: () => provider_attach(tasks, store, start.cache),
     });
     chain_register(chain, dispatch.handler_register);
@@ -900,7 +930,7 @@ namespace worker_ai {
     tasks.line_notify(begin, constants.thread);
   }
 
-  // Runs the test page's worker: the queue, then the tests in a task.
+  // Runs the test page's worker: the queue, then the tests when the UI asks.
   export function test_start(
     start: TestStart,
     run: (tasks: queue.TaskQueue) => void,
@@ -916,8 +946,6 @@ namespace worker_ai {
       },
     );
     hello_answer(tasks, start.hello, start.wire);
-    const begin = line_build(constants.tests_type, names_full(), {});
-    tasks.line_notify(begin, constants.thread);
   }
 }
 

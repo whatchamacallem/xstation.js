@@ -4,8 +4,8 @@
 //
 // Tests of the UI thread on the test page's document: the owner table, the
 // reading of the worker's first line and faults, the DOM port's listeners
-// and permit buttons, and the handlers on a synchronous queue with port,
-// image, console and overlay doubles.
+// and permit buttons, the handlers on a synchronous queue with port, image,
+// console and overlay doubles, and the column the style lays the page out in.
 
 namespace test_page {
   // The types the page registers, routed by the tests, and the values used.
@@ -134,20 +134,31 @@ namespace test_page {
     readonly fed: Uint8Array[] = [];
     readonly wakes: lines.Line[] = [];
     private readonly tasks: queue.TaskQueue;
+    // Whether the double is shown, which each toggle changes.
+    private shown = false;
+    // Whether tty 0 was asked for and has not ended since.
+    private asked = false;
 
     // Takes the queue the opening is submitted on.
     constructor(tasks: queue.TaskQueue) {
       this.tasks = tasks;
     }
 
-    // Records a toggle.
+    // Records a toggle and shows or hides the double.
     view_toggle(): void {
       this.calls.push("toggle");
+      this.shown = !this.shown;
+    }
+
+    // Whether the double is shown and tty 0 is not asked for.
+    open_wanted(): boolean {
+      return this.shown && !this.asked;
     }
 
     // Submits `console.open` to the AI worker and returns the sleep on it.
     open_request(): dispatch.Sleep {
       this.calls.push("open");
+      this.asked = true;
       const line = jslb.line_make(jslb.header_make("console.open"), [], {});
       const id = this.tasks.task_submit(line, "ai");
       return dispatch.task_sleep(null, [id], "ui.console_reply");
@@ -159,9 +170,16 @@ namespace test_page {
       this.wakes.push(wake);
     }
 
-    // Records the end of tty 0.
+    // Records the wake of the close.
+    close_done(wake: lines.Line): void {
+      this.calls.push("closed");
+      this.wakes.push(wake);
+    }
+
+    // Records the end of tty 0, after which it can be asked for again.
     exit_done(): void {
       this.calls.push("exit");
+      this.asked = false;
     }
 
     // Keeps the bytes fed.
@@ -703,7 +721,7 @@ namespace test_page {
       this.assertEqual(jslb.payload_of(click), { x: 3, y: 4 });
     }
 
-    // Control 0 toggles the console, asking for tty 0 once, 2 its overlay.
+    // Control 0 toggles the console and asks for tty 0, 2 toggles its overlay.
     test_keys_debug(): void {
       const bench = bench_make(this.elements_get(), true);
       for (const digit of [0, 0, 2]) {
@@ -713,6 +731,29 @@ namespace test_page {
       this.assertEqual(bench.overlays.calls, ["toggle 2"]);
       this.assertEqual(bench.ai.posted.length, 1);
       this.assertEqual(type_of(bench.ai.posted[0]), "console.open");
+    }
+
+    // After the end of tty 0, the next show by control 0 asks for it again.
+    test_keys_reopen(): void {
+      const bench = bench_make(this.elements_get(), true);
+      bench.dom.line_send(line_short("ui.control_key", { digit: 0 }));
+      bench.ai.line_send(line_short("console.exit", { code: 0 }));
+      for (let count = 0; count < 2; count += 1) {
+        bench.dom.line_send(line_short("ui.control_key", { digit: 0 }));
+      }
+      this.assertEqual(bench.view.calls, [
+        "toggle",
+        "open",
+        "exit",
+        "toggle",
+        "toggle",
+        "open",
+      ]);
+      const opened = bench.ai.posted.filter(
+        (line) => type_of(line) === "console.open",
+      );
+      this.assertEqual(opened.length, 2);
+      this.assertEqual(jslb.field_get(opened[1][0], "id"), 2);
     }
 
     // Outside debug mode the keys toggle nothing.
@@ -726,7 +767,7 @@ namespace test_page {
       this.assertEqual(bench.ai.posted.length, 0);
     }
 
-    // The console's output, end and opening, and the overlay's lines arrive.
+    // The console's output, end, opening and close, and overlay lines arrive.
     test_debug_lines(): void {
       const bench = bench_make(this.elements_get(), true);
       const bytes = new Uint8Array([0x30, 0x24]);
@@ -741,8 +782,12 @@ namespace test_page {
       const wake = line_short("ui.console_reply", woken);
       const done = routed.get("ui.console_reply") as dispatch.Handler;
       this.assertEqual(done(wake), undefined);
-      this.assertEqual(bench.view.calls, ["exit", "done"]);
+      const closed = line_short("ui.console_closed", woken);
+      const close = routed.get("ui.console_closed") as dispatch.Handler;
+      this.assertEqual(close(closed), undefined);
+      this.assertEqual(bench.view.calls, ["exit", "done", "closed"]);
       this.assertTrue(bench.view.wakes[0] === wake);
+      this.assertTrue(bench.view.wakes[1] === closed);
       this.assertEqual(bench.overlays.calls, ["line 1 > x"]);
     }
 
@@ -764,6 +809,65 @@ namespace test_page {
         constants.root,
       );
       this.assertEqual(bench.logs, [[1, text]]);
+    }
+  }
+
+  // The page's column of the style: the debug views never cover the band.
+  export class TestLayout extends unittest.TestCase {
+    // The debug area and the subtitle band, made in `setUp`.
+    #parts: HTMLElement[] = [];
+
+    // Puts a debug area twice the viewport's height above a subtitle band.
+    setUp(): void {
+      const debug = document.createElement("div");
+      debug.id = "debug";
+      const tall = document.createElement("div");
+      tall.style.height = `${2 * innerHeight}px`;
+      debug.append(tall);
+      const area = document.createElement("div");
+      area.id = "subtitle";
+      const text = document.createElement("p");
+      text.textContent = constants.greeting;
+      const permit = document.createElement("div");
+      permit.id = "permit";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = i18n("page.choice_accept");
+      permit.append(button);
+      const form = document.createElement("form");
+      const input = document.createElement("input");
+      input.id = "input";
+      form.append(input);
+      area.append(text, permit, form);
+      document.body.append(debug, area);
+      this.#parts = [debug, area, text, button, input];
+    }
+
+    // Takes the debug area and the band out of the document.
+    tearDown(): void {
+      this.#parts[0].remove();
+      this.#parts[1].remove();
+    }
+
+    // A tall debug view covers no part of the band: text, button, input.
+    test_band_uncovered(): void {
+      const [debug, area, ...shown] = this.#parts;
+      const debug_box = debug.getBoundingClientRect();
+      const area_box = area.getBoundingClientRect();
+      this.assertTrue(
+        debug_box.bottom <= area_box.top,
+        `#debug ends at ${debug_box.bottom}, the band at ${area_box.top}`,
+      );
+      this.assertTrue(debug.scrollHeight > debug.clientHeight);
+      for (const element of shown) {
+        const box = element.getBoundingClientRect();
+        const x = box.left + box.width / 2;
+        const y = box.top + box.height / 2;
+        this.assertTrue(
+          document.elementFromPoint(x, y) === element,
+          `the ${element.localName} at ${x}, ${y} is covered or unseen`,
+        );
+      }
     }
   }
 }

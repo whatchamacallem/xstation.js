@@ -3,9 +3,10 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the parts of page_build.py that start no program: the strings table
-# substitution, the archive member lookup by path suffix, the base64 of the
-# vectors and the wasm, the template markers and the check of each piece, and
-# the hash of the page written. No test starts tsc.
+# substitution, the archive member lookup by path suffix, the vectors written
+# anew, the base64 of the vectors and the wasm, the template markers and the
+# check of each piece, the template read before anything is compiled, and the
+# hash of the page written. No test starts tsc.
 
 import base64, hashlib, io, json, os, page_build, tarfile, tempfile, unittest
 import zipfile
@@ -24,7 +25,7 @@ _ABC_SHA256 = (
     "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
 )
 
-# The markers both templates hold.
+# The markers every template holds.
 _PAGE_MARKERS = [
     "XSJS_BUILD_BUNDLE",
     "XSJS_BUILD_ENGINE_CSS",
@@ -34,8 +35,11 @@ _PAGE_MARKERS = [
     "XSJS_BUILD_XTERM_JS",
 ]
 
-# The marker only the test template holds.
+# The marker only the templates of the test bundle hold.
 _VECTORS_MARKER = "XSJS_BUILD_TEST_VECTORS"
+
+# The entry script of the test engine template.
+_HOOK_SCRIPT = "<script data-worker>test_hook.engine_run();</script>"
 
 
 # Writes a gzipped tar of each member, a name ending in a slash being a folder.
@@ -205,6 +209,18 @@ class TestVectors(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
             self.assertEqual(page_build.vectors_json(scratch), "{}")
 
+    # The piece carries the vectors written anew, not a file left before.
+    def test_vectors_built(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
+            with open(os.path.join(scratch, "stale.jslb"), "wb") as file:
+                file.write(b'{"0":{"t":"x"}}\r')
+            text = page_build.vectors_build(scratch)
+            names = sorted(os.listdir(scratch))
+        vectors: dict[str, str] = json.loads(text)
+        self.assertTrue(names)
+        self.assertEqual(list(vectors), names)
+        self.assertNotIn("stale.jslb", vectors)
+
 
 # The build markers of the templates, each replaced once in one pass.
 class TestMarkers(unittest.TestCase):
@@ -285,6 +301,24 @@ class TestMarkers(unittest.TestCase):
         pieces = {marker: "" for marker in [*_PAGE_MARKERS, _VECTORS_MARKER]}
         page = page_build.markers_fill(page_build.text_read(path), pieces)
         self.assertNotIn("XSJS_BUILD_", page)
+
+    # The test engine template holds the markers of the test bundle once.
+    def test_template_hooked(self) -> None:
+        path = os.path.join(_HTML_PATH, "test_engine.html")
+        pieces = {marker: "" for marker in [*_PAGE_MARKERS, _VECTORS_MARKER]}
+        page = page_build.markers_fill(page_build.text_read(path), pieces)
+        self.assertNotIn("XSJS_BUILD_", page)
+        self.assertEqual(page.count(_HOOK_SCRIPT), 1)
+
+
+# The template the caller names, read before anything is compiled.
+class TestTemplate(unittest.TestCase):
+    # A template that `html/` lacks is refused before `tsc` starts.
+    def test_template_absent(self) -> None:
+        path = os.path.join(_HTML_PATH, "absent.html")
+        with self.assertRaises(FileNotFoundError) as caught:
+            page_build.page_build("absent", False, "absent.html")
+        self.assertEqual(caught.exception.filename, path)
 
 
 # Pieces that would change meaning as the raw text of their element.

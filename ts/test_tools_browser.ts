@@ -9,7 +9,9 @@
 // every tool, the requests of the tools that sleep and the results of their
 // wakes on the values of the castle turn, which builds the gatehouse scene,
 // of a console command and of the step script, the administration of the
-// databases, and every error.
+// databases with a snapshot loaded in pieces, values asked of the server
+// again after an unload and a load, the values of `_files` freed when a
+// render leaves its scene, and every error.
 
 namespace test_tools_browser {
   // The initialized sqlite3.wasm module, a global the test page sets.
@@ -76,7 +78,12 @@ namespace test_tools_browser {
       "tools.console_reply",
       "tools.tail_reply",
       "tools.snapshot_reply",
+      "tools.piece_reply",
+      "tools.value_reply",
     ],
+    // The `line_max` and `message_max` of a bench whose pieces are 4096 bytes.
+    piece_line: 1024,
+    piece_message: 5120,
     // The world table of the castle universe.
     world_sql:
       "CREATE TABLE world" +
@@ -386,10 +393,12 @@ namespace test_tools_browser {
     };
   }
 
-  // The reader of a settings store holding the values of `settings.json`.
-  function reader_make(): (id: string) => unknown {
+  // The reader of a settings store: the values of `settings.json`, changed.
+  function reader_make(
+    changes: Partial<settings.Settings>,
+  ): (id: string) => unknown {
     const values = new settings.ValueStore();
-    values.value_set(settings_make());
+    values.value_set({ ...settings_make(), ...changes });
     return (id: string) => values.value_get(id);
   }
 
@@ -480,7 +489,7 @@ namespace test_tools_browser {
     }
 
     // A store on a new root, with the tools registered on new doubles.
-    bench_make(): ToolBench {
+    bench_make(changes: Partial<settings.Settings> = {}): ToolBench {
       root_count += 1;
       const root = constants.root_prefix + String(root_count);
       this.#roots.push(root);
@@ -508,7 +517,7 @@ namespace test_tools_browser {
         tasks as unknown as queue.TaskQueue,
         constants.provider_owner,
         constants.info,
-        reader_make(),
+        reader_make(changes),
       );
       return { store, server, tasks };
     }
@@ -1021,6 +1030,55 @@ namespace test_tools_browser {
       const render = bench.tasks.sent[0];
       this.assertEqual(payload_text(render.line), constants.black_payload);
     }
+
+    // Leaving a scene frees the `_files` values the new one does not name.
+    test_render_evicts(): void {
+      const each = constants.overflow_bytes + 1;
+      const bench = this.bench_make({ files_browser_bytes: each });
+      const store = bench.store;
+      store.db_create("metaverse");
+      store.db_create("_files");
+      store.kv_put("/metaverse/world", utility.utf8_encode("metaverse"));
+      const scenes: string[] = [];
+      for (const name of ["a", "b"]) {
+        const body = {
+          0: { t: "scene" },
+          1: `/_files/${name}.png`,
+          subtitle: name,
+          image: { $ref: 1 },
+        };
+        scenes.push(store.doc_put("metaverse", `scene/${name}`, body).ref);
+      }
+      for (const [index, name] of ["a", "b", "c", "d"].entries()) {
+        const data = new Uint8Array(each).fill(index + 1);
+        store.kv_put(`/_files/${name}.png`, data);
+      }
+      this.lines_answer(store);
+      // Whether each image is held, in the order of their keys.
+      const held = (): boolean[] =>
+        ["a", "b", "c", "d"].map((name) =>
+          store.kv_held(`/_files/${name}.png`),
+        );
+      // Makes the scene current and renders the image in it.
+      const show = (scene: string, image: string): void => {
+        store.kv_put("/metaverse/scene", utility.utf8_encode(scene));
+        this.lines_answer(store);
+        this.tool_run(bench, "render", { image, subtitle: "" });
+      };
+      show(scenes[0], "/_files/d.png");
+      this.assertEqual(held(), [true, false, false, true]);
+      store.kv_put("/_files/c.png", new Uint8Array(each).fill(9));
+      this.lines_answer(store);
+      show(scenes[0], "/_files/d.png");
+      this.assertEqual(held(), [true, false, true, true]);
+      show(scenes[1], "/_files/c.png");
+      this.assertEqual(held(), [false, false, true, false]);
+      this.assertEqual(store.kv_list("_files", "").length, 4);
+      const renders = bench.tasks.sent.filter(
+        (entry) => type_of(entry.line) === "render",
+      );
+      this.assertEqual(renders.length, 3);
+    }
   }
 
   // The tool that runs a command line in the debug console.
@@ -1245,7 +1303,7 @@ namespace test_tools_browser {
       );
     }
 
-    // `db_load` asks the server's snapshot and opens it at its `seq`.
+    // `db_load` asks the head of the server's snapshot, then its one piece.
     test_load_snapshot(): void {
       const bench = this.bench_make();
       const snapshot = this.snapshot_unloaded(bench);
@@ -1259,8 +1317,22 @@ namespace test_tools_browser {
       this.assertEqual(request.owner, "server");
       this.assertEqual(type_of(request.line), "db.snapshot");
       this.assertEqual(payload_text(request.line), '{"db":"alpha"}');
-      const reply = this.snapshot_reply(request, snapshot, snapshot.seq);
-      const result = this.wake_run(bench, asked, [reply]);
+      const head = this.head_reply(request, snapshot.data, snapshot.seq);
+      const piecing = this.sleep_check(
+        bench,
+        this.wake_run(bench, asked, [head]),
+        1,
+        "tools.piece_reply",
+      );
+      const piece = bench.tasks.sent[1];
+      this.assertEqual(piece.owner, "server");
+      const size = String(snapshot.data.length);
+      this.assertEqual(
+        payload_text(piece.line),
+        `{"snapshot":7,"offset":0,"size":${size}}`,
+      );
+      const reply = this.piece_reply(piece, snapshot.data);
+      const result = this.wake_run(bench, piecing, [reply]);
       const expected = utility.json_text({ seq: snapshot.seq });
       this.assertEqual(this.text_of(result), expected);
       this.assertEqual(bench.store.db_list(), ["alpha"]);
@@ -1268,22 +1340,90 @@ namespace test_tools_browser {
       this.assertEqual(this.text_of(read), "one");
     }
 
-    // A snapshot whose `seq` is not the reply's throws.
+    // A snapshot past the limits of one reply comes in pieces that each fit.
+    test_load_pieces(): void {
+      const bench = this.bench_make({
+        line_max: constants.piece_line,
+        message_max: constants.piece_message,
+      });
+      bench.store.db_create("alpha");
+      const text = "y".repeat(constants.overflow_bytes);
+      bench.store.kv_put("/alpha/text", utility.utf8_encode(text));
+      const snapshot = bench.store.db_snapshot("alpha");
+      this.lines_answer(bench.store);
+      bench.store.db_unload("alpha");
+      const result = this.load_run(bench, snapshot.data, snapshot.seq);
+      this.assertEqual(this.text_of(result), utility.json_text({ seq: 1 }));
+      const piece = constants.piece_message - constants.piece_line;
+      const offsets = bench.tasks.sent
+        .filter((entry) => type_of(entry.line) === "db.chunk")
+        .map((entry) => jslb.payload_of(entry.line).offset);
+      const count = Math.ceil(snapshot.data.length / piece);
+      this.assertTrue(count > 2);
+      this.assertEqual(
+        offsets,
+        Array.from({ length: count }, (_value, index) => index * piece),
+      );
+      const read = this.tool_run(bench, "kv_get", { ref: "/alpha/text" });
+      this.assertEqual(this.text_of(read), text);
+    }
+
+    // A snapshot that opens at another `seq` than its head's throws.
     test_load_desync(): void {
       const bench = this.bench_make();
       const snapshot = this.snapshot_unloaded(bench);
-      const asked = this.sleep_check(
-        bench,
-        this.tool_run(bench, "db_load", { db: "alpha" }),
-        0,
-        "tools.snapshot_reply",
-      );
       const sent = snapshot.seq + 1;
-      const reply = this.snapshot_reply(bench.tasks.sent[0], snapshot, sent);
       this.raised_assert(
         i18n("tools_browser.load_desync", "alpha", snapshot.seq, sent),
-        () => this.wake_run(bench, asked, [reply]),
+        () => this.load_run(bench, snapshot.data, sent),
       );
+    }
+
+    // A cached value or document the unload freed is asked of the server.
+    test_value_fetched(): void {
+      const bench = this.bench_make();
+      const store = bench.store;
+      store.db_create("alpha");
+      const text = "x".repeat(constants.overflow_bytes + 1);
+      store.kv_put("/alpha/big", utility.utf8_encode(text));
+      const body = { 0: { t: "note" }, text };
+      const ref = store.doc_put("alpha", "note", body).ref;
+      this.lines_answer(store);
+      const snapshot = store.db_snapshot("alpha");
+      store.db_unload("alpha");
+      this.load_run(bench, snapshot.data, snapshot.seq);
+      this.assertFalse(store.kv_held("/alpha/big"));
+      this.assertFalse(store.kv_held(ref));
+      const cases: [string, string, string][] = [
+        ["kv_get", "/alpha/big", text],
+        ["doc_get", ref, utility.json_text(body)],
+      ];
+      for (const [tool, asked_ref, expected] of cases) {
+        const start = bench.tasks.sent.length;
+        const asking = this.sleep_check(
+          bench,
+          this.tool_run(bench, tool, { ref: asked_ref }),
+          start,
+          "tools.value_reply",
+        );
+        const request = bench.tasks.sent[start];
+        this.assertEqual(request.owner, "server");
+        this.assertEqual(type_of(request.line), "kv.get");
+        this.assertEqual(jslb.field_get(request.line[0], "key"), asked_ref);
+        const value = store.kv_get(asked_ref);
+        const reply = reply_build(
+          "kv.get",
+          request.id as number,
+          { size: value.size, sha256: value.sha256 },
+          [jslb.blob_make(utility.utf8_encode(expected))],
+        );
+        const result = this.wake_run(bench, asking, [reply]);
+        this.assertEqual(this.text_of(result), expected);
+        this.assertTrue(store.kv_held(asked_ref));
+        const again = this.tool_run(bench, tool, { ref: asked_ref });
+        this.assertEqual(this.text_of(again), expected);
+      }
+      this.assertEqual(store.seq_get("alpha"), snapshot.seq);
     }
 
     // The snapshot of a database `alpha` with one value, then unloaded.
@@ -1296,18 +1436,44 @@ namespace test_tools_browser {
       return snapshot;
     }
 
-    // The server's reply to a snapshot request, saying the `seq` given.
-    snapshot_reply(
-      request: SentLine,
-      snapshot: { data: Uint8Array; seq: number },
-      seq: number,
-    ): lines.Line {
-      return reply_build(
-        "db.snapshot",
-        request.id as number,
-        { sha256: utility.sha256_hex(snapshot.data), seq },
-        [jslb.blob_make(snapshot.data)],
+    // Runs `db_load` of `alpha` against bytes as the server sends them.
+    load_run(bench: ToolBench, data: Uint8Array, seq: number): mcp.ToolResult {
+      const start = bench.tasks.sent.length;
+      const asked = this.sleep_check(
+        bench,
+        this.tool_run(bench, "db_load", { db: "alpha" }),
+        start,
+        "tools.snapshot_reply",
       );
+      const head = this.head_reply(bench.tasks.sent[start], data, seq);
+      let value = this.wake_run(bench, asked, [head]);
+      while ("then_type" in value) {
+        const request = bench.tasks.sent[bench.tasks.sent.length - 1];
+        value = this.wake_run(bench, value, [this.piece_reply(request, data)]);
+      }
+      return this.result_of(value);
+    }
+
+    // The server's head of the snapshot of the bytes, saying the `seq` given.
+    head_reply(request: SentLine, data: Uint8Array, seq: number): lines.Line {
+      return reply_build("db.snapshot", request.id as number, {
+        snapshot: 7,
+        size: data.length,
+        sha256: utility.sha256_hex(data),
+        seq,
+      });
+    }
+
+    // The server's reply holding the piece of the bytes a request asks for.
+    piece_reply(request: SentLine, data: Uint8Array): lines.Line {
+      this.assertEqual(type_of(request.line), "db.chunk");
+      const asked = jslb.payload_of(request.line);
+      this.assertEqual(asked.snapshot, 7);
+      const offset = asked.offset as number;
+      const piece = data.slice(offset, offset + (asked.size as number));
+      return reply_build("db.chunk", request.id as number, {}, [
+        jslb.blob_make(piece),
+      ]);
     }
   }
 

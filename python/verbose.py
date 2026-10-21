@@ -4,12 +4,13 @@
 #
 # The server's verbose log: a level, a ring of the latest lines, the `_verbose`
 # database in the root that holds every line the moment it is logged, and the
-# one place the engine starts an external program. It depends on no other
-# engine module but the strings.
+# one place the engine starts an external program, whose input and output it
+# passes through at every level. It depends on no other engine module but the
+# strings.
 
 import collections, os, shlex, sqlite3, subprocess, sys, time
 from i18n import i18n
-from typing import IO, NamedTuple, cast
+from typing import NamedTuple
 
 # The file in the root that holds the lines.
 _FILE_NAME = "_verbose.sqlite"
@@ -53,12 +54,6 @@ _TAIL_SELECT = (
     "SELECT at, level, text FROM line WHERE thread = ? ORDER BY seq DESC"
     " LIMIT ?"
 )
-
-# The line that opens the Markdown code block of a level 1 run's output.
-_FENCE_OPEN = "```text"
-
-# The line that closes the Markdown code block of a level 1 run's output.
-_FENCE_CLOSE = "```"
 
 
 # One line: milliseconds since the epoch, its level, its text.
@@ -176,24 +171,18 @@ def tail_get(thread: str, count: int) -> list[LogLine]:
     return [LogLine(at, level, text) for at, level, text in reversed(rows)]
 
 
-# Runs the program with no input and its output logged, in a block at level 1.
+# Runs the program on this process's input and output, after a flush of both.
+def _run_through(argv: list[str]) -> int:
+    sys.stdout.flush()
+    sys.stderr.flush()
+    return subprocess.run(argv).returncode
+
+
+# Runs the program passed through, its start and its exit logged at the level.
 def _run_logged(level: int, argv: list[str]) -> int:
     command = shlex.join(argv)
     log(level, i18n("verbose.exec_run", command))
-    with subprocess.Popen(
-        argv,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        encoding="utf-8",
-    ) as process:
-        if level == 1:
-            log(level, _FENCE_OPEN)
-        for output in cast(IO[str], process.stdout):
-            log(level, output.rstrip("\n"))
-        if level == 1:
-            log(level, _FENCE_CLOSE)
-    code: int = process.returncode
+    code = _run_through(argv)
     log(level, i18n("verbose.exec_exit", command, code))
     return code
 
@@ -202,9 +191,7 @@ def _run_logged(level: int, argv: list[str]) -> int:
 def exec(level: int, argv: list[str], argv_verbose: list[str]) -> int:
     _level_check(level)
     if level == 0:
-        sys.stdout.flush()
-        sys.stderr.flush()
-        return subprocess.run(argv).returncode
+        return _run_through(argv)
     if level == 1:
         return _run_logged(level, argv)
     return _run_logged(level, argv_verbose)

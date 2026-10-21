@@ -4,15 +4,17 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Builds the one file page build/<name>.html. tsc compiles ts/ into one
-# bundle, the text of i18n/en-US.json takes the place of the bundle's strings
-# table identifier, and the page template of html/ receives html/engine.css,
-# the bundle, SQLite's JavaScript glue, its wasm as base64, and xterm.js and
-# its css, read from the archives third_party_fetch.py places in
-# third_party/. The test page also carries every file of python/vectors/ as
-# base64. Prints the SHA-256 of the page.
+# bundle, the engine's or the test bundle, the text of i18n/en-US.json takes
+# the place of the bundle's strings table identifier, and the page template
+# of html/ the caller names receives html/engine.css, the bundle, SQLite's
+# JavaScript glue, its wasm as base64, and xterm.js and its css, read from the
+# archives third_party_fetch.py places in third_party/. A page of the test
+# bundle, the test page or the test engine page, also carries every file of
+# build/vectors/ as base64, written anew by vectors_make.py first. Prints the
+# SHA-256 of the page.
 
-import argparse, base64, hashlib, json, os, re, shutil, subprocess, tarfile
-import zipfile
+import argparse, base64, hashlib, json, os, re, shutil, subprocess, sys
+import tarfile, zipfile
 
 # The public name of this module, as its stub declares it.
 __all__ = ["page_build"]
@@ -38,8 +40,8 @@ _THIRD_PARTY_PATH = os.path.join(_ROOT_PATH, "third_party")
 # The TypeScript sources and their two `tsc` configurations.
 _TS_PATH = os.path.join(_ROOT_PATH, "ts")
 
-# The files the test page carries as `test_vectors`.
-_VECTORS_PATH = os.path.join(_ROOT_PATH, "python", "vectors")
+# The vectors written for the test page, which carries them as `test_vectors`.
+_VECTORS_PATH = os.path.join(_BUILD_PATH, "vectors")
 
 # The SQLite release archive.
 _SQLITE_ARCHIVE = "sqlite-wasm-3460100.zip"
@@ -75,6 +77,9 @@ _MARKER_ELEMENTS = {
 
 # The identifier the strings table stands for in the compiled bundle.
 _TABLE_TOKEN = re.compile(r"(?<![\w$])I18N_TABLE_JSON(?![\w$])")
+
+# Bytecode of `vectors_make` and of what it imports goes in `build`.
+sys.pycache_prefix = os.path.join(_BUILD_PATH, "pycache")
 
 
 # Compiles the project the `tsc` config names, returning the bundle written.
@@ -125,10 +130,11 @@ def member_find(names: list[str], suffix: str) -> str:
     return matches[0]
 
 
-# Builds `build/<name>.html`, the test page when `test`, prints its hash.
-def page_build(name: str, test: bool) -> str:
+# Builds `build/<name>.html` from the template, the test bundle when `test`.
+def page_build(name: str, test: bool, template: str) -> str:
+    # Read first, so a template `html/` lacks fails before `tsc` starts.
+    shell = text_read(os.path.join(_HTML_PATH, template))
     config = "tsconfig.test.json" if test else "tsconfig.json"
-    template = "test.html" if test else "engine.html"
     bundle = bundle_compile(os.path.join(_TS_PATH, config))
     sqlite_js, sqlite_wasm = zip_read(
         os.path.join(_THIRD_PARTY_PATH, _SQLITE_ARCHIVE),
@@ -148,8 +154,8 @@ def page_build(name: str, test: bool) -> str:
         "XSJS_BUILD_XTERM_JS": xterm_js.decode("utf-8"),
     }
     if test:
-        pieces["XSJS_BUILD_TEST_VECTORS"] = vectors_json(_VECTORS_PATH)
-    page = page_merge(text_read(os.path.join(_HTML_PATH, template)), pieces)
+        pieces["XSJS_BUILD_TEST_VECTORS"] = vectors_build(_VECTORS_PATH)
+    page = page_merge(shell, pieces)
     digest = page_write(os.path.join(_BUILD_PATH, f"{name}.html"), page)
     print(digest)
     return digest
@@ -203,6 +209,15 @@ def text_read(path: str) -> str:
         return file.read().decode("utf-8")
 
 
+# Writes the vectors into the folder anew, then returns them as base64 JSON.
+def vectors_build(path: str) -> str:
+    # Imported here so its bytecode goes under the prefix set above.
+    import vectors_make
+
+    vectors_make.vectors_write(path)
+    return vectors_json(path)
+
+
 # Returns a JSON object of each file in the folder, by name, as base64.
 def vectors_json(path: str) -> str:
     vectors: dict[str, str] = {}
@@ -235,10 +250,11 @@ def main() -> None:
         "--test",
         action="store_true",
         help="build the test page from html/test.html, the test bundle and"
-        " the files of python/vectors/",
+        " the vectors, written anew into build/vectors/",
     )
     arguments = parser.parse_args()
-    page_build(arguments.name, arguments.test)
+    template = "test.html" if arguments.test else "engine.html"
+    page_build(arguments.name, arguments.test, template)
 
 
 if __name__ == "__main__":

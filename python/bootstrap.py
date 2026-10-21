@@ -8,20 +8,23 @@
 #     python3 python/bootstrap.py --root ROOT [console] [--main-loop NAME]
 #
 # With no role it is the engine: it puts its pty in raw mode, takes the
-# engine.lock file of the root, reads the settings, the provider key and,
-# when the setting provider.scripted is false, provider.json, loads the main
-# loop file, has it prepare the databases, writes hello, reads and checks the
-# reply and runs the loop. --main-loop is served only to the engine role with
-# the setting debug true, and neither option may be given twice. With the role
-# console it runs dash in the root with a scrubbed environment when the
-# setting debug is true, and exits 1 otherwise. Any exception writes one error
-# line, which jslb encodes, and exits 1. The modules beside this file are
-# imported inside the functions that use them, after their bytecode has been
-# sent to build/.
+# engine.lock file of the root, reads the settings and opens the root's log,
+# then reads the provider key and, when the setting provider.scripted is
+# false, provider.json, loads the main loop file, has it prepare the
+# databases, writes hello, reads and checks the reply and runs the loop.
+# --main-loop is served only to the engine role with the setting debug true,
+# and neither option may be given twice. With the role console, when the
+# setting debug is true, it opens the root's log and runs dash in the root
+# with a scrubbed environment through verbose.exec at the setting
+# verbose_level, and it exits 1 otherwise. Any exception writes one error
+# line, which jslb encodes, and exits 1; once the log is open the exception's
+# message is logged before its error line is written. At verbose level 2 the
+# log traces hello. The modules beside this file are imported inside the
+# functions that use them, after their bytecode has been sent to build/.
 
 import argparse, fcntl, hashlib, importlib.machinery, importlib.util, json, os
 import sys, termios, traceback, tty, types
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any, NamedTuple, NoReturn, cast
 
 # The directory that holds this file and the modules it imports.
@@ -104,6 +107,12 @@ _EXIT_FAILURE = 1
 
 # A shell's exit code for a program a signal ended is this plus the signal.
 _SIGNAL_BASE = 128
+
+# The verbose level of the line that logs a failure, so it is always written.
+_FAILURE_LEVEL = 0
+
+# The verbose level of the lines that trace the server's timeline.
+_TRACE_LEVEL = 2
 
 # Bytecode of the modules the functions below import goes in `build/pycache`.
 sys.pycache_prefix = os.path.join(
@@ -263,15 +272,24 @@ def _text_bytes(pieces: Iterator[bytes | str]) -> bytes:
     return cast(bytes, piece)
 
 
-# Encodes `hello`, the engine's first request, in the names `full` selects.
-def _hello_encode(
+# Writes all the bytes to the engine's output, with no buffer between.
+def _bytes_write(data: bytes) -> None:
+    view = memoryview(data)
+    while len(view) > 0:
+        written = os.write(_WRITE_FD, view)
+        view = view[written:]
+
+
+# Traces `hello`, the engine's first request, then writes it in `full` names.
+def _hello_write(
     root: str,
     loaded: dict[str, Any],
     seq: dict[str, int],
     provider: dict[str, Any],
     full: bool,
-) -> bytes:
-    import jslb
+) -> None:
+    import jslb, verbose
+    from i18n import i18n
 
     with open(_BOOTSTRAP_PATH, "rb") as file:
         digest = hashlib.file_digest(file, "sha256").hexdigest()
@@ -287,15 +305,9 @@ def _hello_encode(
         seq=seq,
         **provider,
     )
-    return _text_bytes(jslb.line_encode(line))
-
-
-# Writes all the bytes to the engine's output, with no buffer between.
-def _bytes_write(data: bytes) -> None:
-    view = memoryview(data)
-    while len(view) > 0:
-        written = os.write(_WRITE_FD, view)
-        view = view[written:]
+    text = json.dumps(line[0], ensure_ascii=False, separators=(",", ":"))
+    verbose.log(_TRACE_LEVEL, i18n("bootstrap.hello_submit", text))
+    _bytes_write(_text_bytes(jslb.line_encode(line)))
 
 
 # Reads the reply to `hello` a byte at a time, so no byte after it is taken.
@@ -339,25 +351,49 @@ def _reply_read(loaded: dict[str, Any]) -> None:
         )
 
 
-# Runs the engine: raw mode, the lock, `hello` and its reply, then the loop.
-def _engine_run(root: str, main_loop: str | None) -> int:
-    tty.setraw(_READ_FD, termios.TCSANOW)
-    _lock_take(root)
-    loaded = _settings_read(root)
+# Opens the root's log at the set level, then runs `serve`, logging a failure.
+def _logged_run(
+    root: str, loaded: dict[str, Any], serve: Callable[[], int]
+) -> int:
+    import verbose
+    from i18n import i18n
+
+    verbose.log_open(root, loaded["verbose_ring"])
+    verbose.level_set(loaded["verbose_level"])
+    try:
+        return serve()
+    except Exception as error:
+        text = i18n("bootstrap.run_failed", str(error))
+        verbose.log(_FAILURE_LEVEL, text)
+        raise
+
+
+# Serves the engine: the provider, the main loop, `hello`, its reply, the loop.
+def _engine_serve(
+    root: str, main_loop: str | None, loaded: dict[str, Any]
+) -> int:
     debug: bool = loaded["debug"]
     provider = _provider_fields(root, loaded["provider"]["scripted"])
     module = _loop_load(_loop_path(root, main_loop, debug))
     seq: dict[str, int] = module.loop_prepare(root)
-    _bytes_write(_hello_encode(root, loaded, seq, provider, debug))
+    _hello_write(root, loaded, seq, provider, debug)
     _reply_read(loaded)
     module.loop_run(_READ_FD, _WRITE_FD, root)
     return 0
 
 
-# Runs dash in the root with a scrubbed environment, in debug mode only.
-def _console_run(root: str, debug: bool) -> int:
-    if not debug:
-        return _EXIT_FAILURE
+# Runs the engine: raw mode, the lock, the settings, then with the log open.
+def _engine_run(root: str, main_loop: str | None) -> int:
+    tty.setraw(_READ_FD, termios.TCSANOW)
+    _lock_take(root)
+    loaded = _settings_read(root)
+    return _logged_run(
+        root, loaded, lambda: _engine_serve(root, main_loop, loaded)
+    )
+
+
+# Runs dash through `verbose.exec` at the level, and returns the shell's code.
+def _dash_run(root: str, level: int) -> int:
     import verbose
 
     kept = {
@@ -368,8 +404,16 @@ def _console_run(root: str, debug: bool) -> int:
     os.environ.clear()
     os.environ.update(kept)
     os.chdir(root)
-    code = verbose.exec(0, [_DASH_PATH], [_DASH_PATH, _DASH_VERBOSE])
+    code = verbose.exec(level, [_DASH_PATH], [_DASH_PATH, _DASH_VERBOSE])
     return code if code >= 0 else _SIGNAL_BASE - code
+
+
+# Runs dash in the root with a scrubbed environment, in debug mode only.
+def _console_run(root: str, loaded: dict[str, Any]) -> int:
+    if not loaded["debug"]:
+        return _EXIT_FAILURE
+    level: int = loaded["verbose_level"]
+    return _logged_run(root, loaded, lambda: _dash_run(root, level))
 
 
 # Writes the one `error` line for an exception: `message` and `stack`, no `r`.
@@ -387,8 +431,8 @@ def bootstrap_run(argv: list[str]) -> int:
     try:
         arguments = _arguments_parse(argv)
         if arguments.role == _CONSOLE_ROLE:
-            debug: bool = _settings_read(arguments.root)["debug"]
-            return _console_run(arguments.root, debug)
+            loaded = _settings_read(arguments.root)
+            return _console_run(arguments.root, loaded)
         return _engine_run(arguments.root, arguments.main_loop)
     except Exception as error:
         _error_write(error)

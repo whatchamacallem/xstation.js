@@ -2,8 +2,15 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the debug overlays, run on containers that are not in the page.
+// Tests of the debug overlays, run on containers that are not in the page,
+// and of the scrolling that keeps a shown overlay's newest line in view, run
+// on a container of a fixed size put in the page and taken out after.
 namespace test_overlay {
+  // The lines the scrolling tests add to a tty, enough to overflow.
+  const constants = Object.freeze({
+    tall_count: 50,
+  });
+
   // A container that is not in the page, so the live page is not touched.
   function container_make(): HTMLElement {
     return document.createElement("div");
@@ -12,6 +19,20 @@ namespace test_overlay {
   // The `pre` elements of a container, in document order.
   function pre_list(container: HTMLElement): HTMLPreElement[] {
     return Array.from(container.querySelectorAll("pre"));
+  }
+
+  // How far the end of a `pre` lies below its container's visible bottom.
+  function end_below(container: HTMLElement, pre: HTMLPreElement): number {
+    const box = container.getBoundingClientRect();
+    const bottom = box.top + container.clientTop + container.clientHeight;
+    return pre.getBoundingClientRect().bottom - bottom;
+  }
+
+  // Adds the lines of a tall overlay to a tty.
+  function lines_add(instance: overlay.Overlay, tty: number): void {
+    for (let index = 0; index < constants.tall_count; index += 1) {
+      instance.line_add(tty, `tty ${tty} line ${index}`);
+    }
   }
 
   // The ring of an overlay, the order of its lines and the elements it makes.
@@ -250,6 +271,92 @@ namespace test_overlay {
       this.assertTrue(pre_list(first)[0].hidden);
       this.assertEqual(pre_list(second)[0].textContent, "");
       this.assertFalse(pre_list(second)[0].hidden);
+    }
+  }
+
+  // The newest line of a shown overlay, kept at the bottom of the view.
+  export class TestScroll extends unittest.TestCase {
+    // The container of a fixed size, made in `setUp`.
+    #container: HTMLElement | undefined = undefined;
+
+    // Puts in the page a container 100 pixels high that scrolls.
+    setUp(): void {
+      const container = document.createElement("div");
+      Object.assign(container.style, {
+        position: "fixed",
+        top: "0px",
+        left: "0px",
+        width: "400px",
+        height: "100px",
+        overflow: "auto",
+      });
+      document.body.append(container);
+      this.#container = container;
+    }
+
+    // Takes the container out of the page.
+    tearDown(): void {
+      this.container_get().remove();
+    }
+
+    // The container of this test.
+    container_get(): HTMLElement {
+      return this.#container as HTMLElement;
+    }
+
+    // Asserts that the end of the `pre` is at the container's visible bottom.
+    end_assert(pre: HTMLPreElement): void {
+      const below = end_below(this.container_get(), pre);
+      this.assertTrue(Math.abs(below) < 1, `the pre ends ${below} px below`);
+    }
+
+    // Lines added while hidden scroll nothing, the toggle shows the newest.
+    test_toggle_scrolls(): void {
+      const container = this.container_get();
+      const instance = new overlay.Overlay(container, constants.tall_count);
+      lines_add(instance, 1);
+      this.assertEqual(container.scrollTop, 0);
+      instance.overlay_toggle(1);
+      this.assertTrue(container.scrollTop > 0);
+      this.end_assert(pre_list(container)[0]);
+    }
+
+    // Each line added to a shown overlay brings its newest line into view.
+    test_line_scrolls(): void {
+      const container = this.container_get();
+      const instance = new overlay.Overlay(container, constants.tall_count);
+      instance.overlay_toggle(1);
+      lines_add(instance, 1);
+      const pre = pre_list(container)[0];
+      this.end_assert(pre);
+      container.scrollTop = 0;
+      instance.line_add(1, "newest");
+      this.end_assert(pre);
+    }
+
+    // A line added to a hidden overlay leaves the view where it is.
+    test_hidden_still(): void {
+      const container = this.container_get();
+      const instance = new overlay.Overlay(container, constants.tall_count);
+      lines_add(instance, 1);
+      instance.overlay_toggle(1);
+      container.scrollTop = 0;
+      lines_add(instance, 2);
+      this.assertEqual(container.scrollTop, 0);
+    }
+
+    // A line added to the upper of two shown overlays brings it into view.
+    test_upper_overlay(): void {
+      const container = this.container_get();
+      const instance = new overlay.Overlay(container, constants.tall_count);
+      instance.overlay_toggle(1);
+      instance.overlay_toggle(2);
+      lines_add(instance, 1);
+      lines_add(instance, 2);
+      const [upper, lower] = pre_list(container);
+      this.end_assert(lower);
+      instance.line_add(1, "newest");
+      this.end_assert(upper);
     }
   }
 

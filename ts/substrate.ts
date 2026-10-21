@@ -6,7 +6,9 @@
 // sqlite3.wasm connection for each database file of the OPFS pool under a
 // root, the substrate's tables in each, values with overflow to a cache of
 // OPFS files held open for synchronous access, documents, turns, SQL,
-// snapshots, the measurement and administration of the databases, and the
+// snapshots kept for their pieces and the fetch of one in pieces that each
+// fit `message_max`, the measurement and administration of the databases,
+// cached values filled back from the server and freed by budget, and the
 // emitting side of replication, which hands on each committed modifying
 // operation as the line the server applies. It is given an initialized
 // module, an installed pool and open cache files, and waits on nothing.
@@ -133,6 +135,9 @@ namespace substrate {
     statement_fields: Object.freeze<readonly string[]>(["params", "sql"]),
     // The forwarded operations whose replies carry no `seq`.
     seqless_types: Object.freeze<readonly string[]>(["db.create", "db.drop"]),
+    // The line types of a snapshot's head and of its pieces.
+    snapshot_type: "db.snapshot",
+    chunk_type: "db.chunk",
   });
 
   // The first prime numbers, as many as asked for.
@@ -399,6 +404,21 @@ namespace substrate {
   export interface CompactBytes {
     before: number;
     after: number;
+  }
+
+  // The head of a snapshot kept for its pieces: number, size, digest, `seq`.
+  export interface SnapshotHead {
+    snapshot: number;
+    size: number;
+    sha256: lines.Sha256;
+    seq: number;
+  }
+
+  // The piece a `db.chunk` asks of a kept snapshot: its number and range.
+  interface ChunkAsk {
+    snapshot: number;
+    offset: number;
+    size: number;
   }
 
   // Registers the handler of one line type and version.
@@ -1044,6 +1064,11 @@ namespace substrate {
       return [...this.#stored.keys()].sort();
     }
 
+    // Whether a file holds the stored value of the name.
+    name_held(name: string): boolean {
+      return this.#stored.has(name);
+    }
+
     // Frees the file of a stored value.
     name_remove(name: string): void {
       const slot = this.#stored.get(name);
@@ -1178,6 +1203,116 @@ namespace substrate {
     }
   }
 
+  // A snapshot asked of the owner that keeps it, its pieces taken in order.
+  export class SnapshotFetch {
+    // The database whose snapshot this is.
+    readonly db: string;
+    // The largest piece asked for, so that its reply fits `message_max`.
+    readonly #piece_max: number;
+    // Whether the lines use full names.
+    readonly #full: boolean;
+    // The head the owner replied, once it came.
+    #head: SnapshotHead | undefined = undefined;
+    // The bytes of the snapshot, filled in order.
+    #data = new Uint8Array(0);
+    // The number of bytes filled.
+    #filled = 0;
+    // The hash of the bytes filled.
+    readonly #hash = new HashStream();
+
+    // Takes the database, the limits each reply keeps within, the name form.
+    constructor(
+      db: string,
+      message_max: number,
+      line_max: number,
+      full: boolean,
+    ) {
+      const piece_max = message_max - line_max;
+      if (piece_max < 1) {
+        throw new Error(i18n("substrate.piece_none", message_max, line_max));
+      }
+      this.db = db;
+      this.#piece_max = piece_max;
+      this.#full = full;
+    }
+
+    // The request of the snapshot's head.
+    head_line(): lines.Line {
+      const header = jslb.header_make(constants.snapshot_type, {
+        full: this.#full,
+      });
+      return jslb.line_make(header, [], { db: this.db });
+    }
+
+    // Takes the head the owner replied and returns the first piece's request.
+    head_take(reply: lines.Line): lines.Line {
+      const { snapshot, size, sha256, seq } =
+        payload_read<SnapshotHead>(reply);
+      this.#head = { snapshot, size, sha256, seq };
+      this.#data = new Uint8Array(size);
+      return this.#piece_line();
+    }
+
+    // Adds the next piece and returns the next request, none once all is in.
+    piece_take(data: Uint8Array): lines.Line | undefined {
+      const head = this.#head as SnapshotHead;
+      const due = this.#piece_size();
+      if (data.length !== due) {
+        throw new Error(
+          i18n(
+            "substrate.piece_size",
+            this.db,
+            this.#filled,
+            data.length,
+            due,
+          ),
+        );
+      }
+      this.#data.set(data, this.#filled);
+      this.#hash.bytes_add(data);
+      this.#filled += data.length;
+      if (this.#filled < head.size) {
+        return this.#piece_line();
+      }
+      const sha256 = this.#hash.digest_hex();
+      if (sha256 !== head.sha256) {
+        throw new Error(
+          i18n("substrate.snapshot_digest", this.db, sha256, head.sha256),
+        );
+      }
+      return undefined;
+    }
+
+    // The `seq` of the database that the head gave.
+    seq_sent(): number {
+      return (this.#head as SnapshotHead).seq;
+    }
+
+    // The bytes of the whole snapshot, once its last piece is in.
+    bytes_get(): Uint8Array {
+      return this.#data;
+    }
+
+    // The size of the next piece: the bytes due, at most `piece_max`.
+    #piece_size(): number {
+      const head = this.#head as SnapshotHead;
+      return Math.min(this.#piece_max, head.size - this.#filled);
+    }
+
+    // The request of the next piece of the kept snapshot.
+    #piece_line(): lines.Line {
+      const head = this.#head as SnapshotHead;
+      const header = jslb.header_make(constants.chunk_type, {
+        full: this.#full,
+      });
+      return jslb.line_make(header, [], {
+        snapshot: head.snapshot,
+        offset: this.#filled,
+        size: this.#piece_size(),
+      });
+    }
+  }
+
   // One owner's databases under one root in the pool, the single door.
   export class Store {
     // The sqlite3.wasm module.
@@ -1210,6 +1345,10 @@ namespace substrate {
     #forward: ((line: lines.Line) => void) | undefined = undefined;
     // Whether forwarded lines use full names.
     #full = false;
+    // The snapshots the UI thread asked for, kept by number for their pieces.
+    readonly #kept = new Map<number, Uint8Array>();
+    // The number of the last snapshot kept.
+    #kept_last = 0;
 
     // Takes the initialized module, the installed pool, the cache, the root.
     constructor(
@@ -1689,6 +1828,132 @@ namespace substrate {
         }
       }
       return replace;
+    }
+
+    // Keeps a snapshot under the next number for its pieces. Returns its head.
+    snapshot_keep(db: string): SnapshotHead {
+      const snapshot = this.db_snapshot(db);
+      this.#kept_last += 1;
+      this.#kept.set(this.#kept_last, snapshot.data);
+      return {
+        snapshot: this.#kept_last,
+        size: snapshot.data.length,
+        sha256: utility.sha256_hex(snapshot.data),
+        seq: snapshot.seq,
+      };
+    }
+
+    // The piece of a kept snapshot at `offset`; its last piece lets it go.
+    snapshot_read(snapshot: number, offset: number, size: number): Uint8Array {
+      const data = this.#kept.get(snapshot);
+      if (data === undefined) {
+        throw new Error(i18n("substrate.snapshot_unknown", snapshot));
+      }
+      const end = offset + size;
+      if (offset < 0 || size < 1 || end > data.length) {
+        throw new Error(
+          i18n(
+            "substrate.snapshot_range",
+            snapshot,
+            offset,
+            size,
+            data.length,
+          ),
+        );
+      }
+      if (end === data.length) {
+        this.#kept.delete(snapshot);
+      }
+      return data.slice(offset, end);
+    }
+
+    // The bytes of a blob the decoder took, a streamed one read and freed.
+    blob_take(data: Uint8Array | string): Uint8Array {
+      if (typeof data !== "string") {
+        return data;
+      }
+      const bytes = this.#slots.handle_bytes(data);
+      this.#slots.handle_discard(data);
+      return bytes;
+    }
+
+    // Whether this side holds the bytes of a value, in its row or a file.
+    kv_held(ref: lines.KvRef, db?: string): boolean {
+      const value = this.kv_get(ref, db);
+      return (
+        typeof value.data !== "string" || this.#slots.name_held(value.data)
+      );
+    }
+
+    // Puts back the file of a cached value from bytes with the row's digest.
+    cache_fill(
+      ref: lines.KvRef,
+      data: Uint8Array | string,
+      db?: string,
+    ): void {
+      const value = this.kv_get(ref, db);
+      const handle = typeof data === "string";
+      const sha256 = handle
+        ? this.#slots.handle_hash(data)
+        : utility.sha256_hex(data);
+      if (sha256 !== value.sha256) {
+        throw new Error(
+          i18n("substrate.fill_desync", ref, sha256, value.sha256),
+        );
+      }
+      if (handle) {
+        this.#slots.handle_store(data, sha256);
+      } else {
+        this.#slots.bytes_store(sha256, data);
+      }
+    }
+
+    // Frees a database's cached values by key until they fit the budget.
+    cache_evict(db: string, keep: readonly string[], budget: number): number {
+      const database = this.#connection_get(db);
+      // The names that other databases' rows and the kept refs hold stay.
+      const kept = this.#hashes_named(db);
+      for (const ref of keep) {
+        const parts = ref_split(ref);
+        if (parts.db === db) {
+          const rows = rows_select(
+            database,
+            "SELECT sha256 FROM _kv WHERE key = ? AND data IS NULL",
+            [parts.key],
+          );
+          for (const row of rows) {
+            kept.add(hex_of(row[0] as Uint8Array));
+          }
+        }
+      }
+      const cached = rows_select(
+        database,
+        "SELECT sha256, size FROM _kv WHERE data IS NULL ORDER BY key",
+        [],
+      );
+      const sizes = new Map<string, number>();
+      for (const row of cached) {
+        const name = hex_of(row[0] as Uint8Array);
+        if (this.#slots.name_held(name)) {
+          sizes.set(name, row[1] as number);
+        }
+      }
+      let held = 0;
+      for (const size of sizes.values()) {
+        held += size;
+      }
+      let freed = 0;
+      for (const [name, size] of sizes) {
+        if (held <= budget) {
+          break;
+        }
+        if (!kept.has(name) && !this.#holds.has(name)) {
+          this.#slots.name_remove(name);
+          held -= size;
+          freed += 1;
+        }
+      }
+      return freed;
     }
 
     // Opens a database file with the flags, applying the schema.
@@ -2231,10 +2496,13 @@ namespace substrate {
       }
     }
 
-    // The cache names the rows of every database file under the root hold.
-    #hashes_named(): Set<string> {
+    // The cache names the rows of each database file but the skipped one hold.
+    #hashes_named(skip?: string): Set<string> {
       const named = new Set<string>();
       for (const name of this.#files_held()) {
+        if (name === skip) {
+          continue;
+        }
         const open = this.#connections.get(name);
         if (open !== undefined) {
           for (const hash of hashes_read(open)) {
@@ -2333,15 +2601,16 @@ namespace substrate {
           this.db_drop(payload_read<lines.DbName>(line).db);
           return dispatch.reply_make(line, {});
         },
-        // Serializes a database, its bytes as blob 1.
+        // Keeps a snapshot of a database for its pieces and answers its head.
         "db.snapshot": (line) => {
           const { db } = payload_read<lines.DbName>(line);
-          const snapshot = this.db_snapshot(db);
-          return dispatch.reply_make(
-            line,
-            { sha256: utility.sha256_hex(snapshot.data), seq: snapshot.seq },
-            [jslb.blob_make(snapshot.data)],
-          );
+          return dispatch.reply_make(line, { ...this.snapshot_keep(db) });
+        },
+        // Answers a piece of a kept snapshot as blob 1.
+        "db.chunk": (line) => {
+          const { snapshot, offset, size } = payload_read<ChunkAsk>(line);
+          const data = this.snapshot_read(snapshot, offset, size);
+          return dispatch.reply_make(line, {}, [jslb.blob_make(data)]);
         },
         // Appends a turn.
         "turn.append": (line) => {

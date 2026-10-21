@@ -4,11 +4,14 @@
 //
 // The agent loop on the AI thread, a turn as a chain of tasks. The player's
 // text or click joins the conversation of the scene on screen and goes to the
-// provider after the system prompt. Each reply is stored and its tool calls
-// go to the MCP clients, whose results are stored and go back to the
-// provider. The reply with no tool calls ends the turn with its text as the
-// subtitle. After each turn the open databases are measured against the soft
-// limit, and a measurement over it goes to the provider with the next request.
+// provider after the system prompt. A reply's tool calls go to the MCP
+// clients, and once every result is in the reply and its results are stored
+// together, so that no stored call lacks its answer, and go back to the
+// provider. The reply with no tool calls is stored and ends the turn with its
+// text as the subtitle. After each turn the open databases are measured
+// against the soft limit and the scene's turns are estimated against
+// `turn_compact_tokens`, and each one over its limit goes to the provider with
+// the next request.
 
 namespace agent {
   // The line types, refs, ids, settings and statements the loop uses.
@@ -26,6 +29,7 @@ namespace agent {
     part_separator: "\n",
     tool_choice: "auto" as const,
     soft_setting: "db_soft_bytes",
+    compact_setting: "turn_compact_tokens",
     // The universes whose row names a world.
     universe_sql: "SELECT name FROM universe WHERE world = ?",
     // The version of the head of a document id, in the substrate's own table.
@@ -42,11 +46,23 @@ namespace agent {
     fn: dispatch.Handler,
   ) => void;
 
-  // What a sleeping turn keeps: the request it owes, its scene, the call ids.
+  // What a turn waiting on the model keeps: the request it owes, its scene.
   interface TurnState {
     request: lines.Line;
     scene: lines.DocRef;
-    calls: string[];
+  }
+
+  // What a turn waiting on tools keeps besides: the reply that called them.
+  interface CallState extends TurnState {
+    asked: provider.ChatMessage;
+  }
+
+  // The estimate of a scene's turns over `turn_compact_tokens`, for the model.
+  interface TurnEstimate {
+    scene: lines.DocRef;
+    last: number;
+    tokens: number;
+    turn_compact_tokens: number;
   }
 
   // The text of a value held in its row, as a small value is.
@@ -140,6 +156,8 @@ namespace agent {
     readonly #settings_get: SettingsRead;
     // The measurement over the soft limit that the next request carries.
     #stats_pending: substrate.StoreStats | undefined = undefined;
+    // The estimate over `turn_compact_tokens` that the next request carries.
+    #estimate_pending: TurnEstimate | undefined = undefined;
 
     // Takes what the handlers work with.
     constructor(
@@ -168,21 +186,19 @@ namespace agent {
       return this.turn_start(line, i18n("agent.click_text", line.x, line.y));
     }
 
-    // Stores the model's reply, then calls its tools or ends the turn.
+    // Calls the reply's tools, keeping it unstored, or stores it as the end.
     model_handle(line: lines.Line): lines.Line | dispatch.Sleep {
       const state = line.state as TurnState;
       const [reply] = line.replies as lines.Line[];
       const response = provider.chat_response(reply);
       const message = response.choices[0].message;
-      const store = this.#store;
-      const appended = store.turn_append(state.scene, message.role, message);
       const calls = message.tool_calls ?? [];
       if (calls.length > 0) {
         const ids = calls.map((call) => this.call_submit(call));
-        const next: TurnState = {
+        const next: CallState = {
           request: state.request,
           scene: state.scene,
-          calls: calls.map((call) => call.id),
+          asked: message,
         };
         return dispatch.task_sleep(next, ids, constants.tool_type);
       }
@@ -190,8 +206,11 @@ namespace agent {
       if (subtitle === null) {
         throw new Error(i18n("agent.reply_empty", response.id));
       }
+      const store = this.#store;
+      const appended = store.turn_append(state.scene, message.role, message);
       const scene = scene_current(store);
       this.limit_check();
+      this.estimate_check(state.scene);
       return dispatch.reply_make(state.request, {
         turn: appended.n,
         scene,
@@ -199,20 +218,28 @@ namespace agent {
       });
     }
 
-    // Stores the tool results in call order and asks the model again.
+    // Stores the reply that called the tools and their results, then asks.
     tool_handle(line: lines.Line): dispatch.Sleep {
-      const state = line.state as TurnState;
+      const state = line.state as CallState;
       const replies = line.replies as lines.Line[];
-      for (let index = 0; index < replies.length; index += 1) {
-        const call_id = state.calls[index];
-        const result = this.#clients.result_of(replies[index]);
-        const message: provider.ChatMessage = {
-          role: "tool",
-          tool_call_id: call_id,
-          content: result_text(result, call_id),
-        };
-        this.#store.turn_append(state.scene, message.role, message);
-      }
+      const calls = state.asked.tool_calls as provider.ToolCall[];
+      const answers = replies.map(
+        (reply: lines.Line, index: number): provider.ChatMessage => {
+          const call_id = calls[index].id;
+          const result = this.#clients.result_of(reply);
+          return {
+            role: "tool",
+            tool_call_id: call_id,
+            content: result_text(result, call_id),
+          };
+        },
+      );
+      const store = this.#store;
+      store.transaction_run(() => {
+        for (const message of [state.asked, ...answers]) {
+          store.turn_append(state.scene, message.role, message);
+        }
+      });
       return this.request_submit(state.request, state.scene);
     }
 
@@ -233,6 +260,14 @@ namespace agent {
         messages.push({ role: "system", content: utility.json_text(stats) });
         this.#stats_pending = undefined;
       }
+      const estimate = this.#estimate_pending;
+      if (estimate !== undefined) {
+        messages.push({
+          role: "system",
+          content: utility.json_text(estimate),
+        });
+        this.#estimate_pending = undefined;
+      }
       for (const row of store.turn_list(scene)) {
         messages.push(row.content);
       }
@@ -244,7 +279,7 @@ namespace agent {
         tool_choice: constants.tool_choice,
       });
       const id = this.#tasks.task_submit(line, this.#provider_owner);
-      const state: TurnState = { request, scene, calls: [] };
+      const state: TurnState = { request, scene };
       return dispatch.task_sleep(state, [id], constants.model_type);
     }
 
@@ -273,6 +308,24 @@ namespace agent {
       const stats = this.#store.db_stats(soft_bytes);
       if (stats.over) {
         this.#stats_pending = stats;
+      }
+    }
+
+    // Estimates the scene's turns by their bytes, which bound their tokens.
+    estimate_check(scene: lines.DocRef): void {
+      const limit = this.#settings_get(constants.compact_setting) as number;
+      const rows = this.#store.turn_list(scene);
+      let tokens = 0;
+      for (const row of rows) {
+        tokens += utility.utf8_encode(utility.json_text(row.content)).length;
+      }
+      if (tokens > limit) {
+        this.#estimate_pending = {
+          scene,
+          last: rows[rows.length - 1].n,
+          tokens,
+          turn_compact_tokens: limit,
+        };
       }
     }
   }

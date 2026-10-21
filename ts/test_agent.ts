@@ -7,8 +7,9 @@
 // scripted provider and a double of the MCP clients whose tools answer at
 // once: the castle turn, in which the player answers 1 and the analyst builds
 // the castle's gatehouse scene, the turn after it, short turns and a click,
-// the system prompt, the measurement over the soft limit, and every error
-// the agent throws.
+// the system prompt, the measurement over the soft limit, the estimate of the
+// turns over `turn_compact_tokens`, failed tool calls that store no reply
+// without its results, and every error the agent throws.
 
 namespace test_agent {
   // The initialized sqlite3.wasm module, a global the test page sets.
@@ -99,6 +100,8 @@ namespace test_agent {
     answer_id: "chatcmpl-answer",
     // The arguments of the render calls of the error tests.
     render_arguments: '{"subtitle":"Fog."}',
+    // The arguments of the image calls of the tests of failed calls.
+    image_arguments: '{"prompt":"Fog.","key":"/_files/fog.png"}',
     // A prompt of the castle universe, for the tests of the system prompt.
     castle_prompt: "The castle is cold, and its keeper is patient.",
     // The line types the agent registers, in its order.
@@ -594,6 +597,25 @@ namespace test_agent {
     return bench.forwarded
       .filter((line) => jslb.field_get(line[0], "type") === "turn.append")
       .map((line) => jslb.payload_of(line));
+  }
+
+  // The bytes of the JSON text of each message, summed, as the agent counts.
+  function bytes_counted(messages: provider.ChatMessage[]): number {
+    let total = 0;
+    for (const message of messages) {
+      total += new TextEncoder().encode(JSON.stringify(message)).length;
+    }
+    return total;
+  }
+
+  // Tool doubles: a render that answers, an image the agent refuses.
+  function tools_failing(): ToolTable {
+    return {
+      "browser.render": () => text_result(constants.render_result),
+      "browser.image_make": () => ({
+        content: [{ type: "image", data: "", mimeType: "image/png" }],
+      }),
+    };
   }
 
   // A port double: it keeps what the queue posts and hands it lines.
@@ -1120,6 +1142,249 @@ namespace test_agent {
     }
   }
 
+  // The estimate of the scene's turns against `turn_compact_tokens`.
+  export class TestEstimate extends AgentCase {
+    // Over the setting, the next request carries it after the system prompt.
+    test_estimate_over(): void {
+      const value = settings_make();
+      value.turn_compact_tokens = 0;
+      const script = new provider_script.ScriptPort(script_recorded());
+      const bench = this.bench_recorded(script, value);
+      say_send(bench, 1, "2");
+      const rows = bench.store.turn_list(constants.scene);
+      const estimate = {
+        scene: constants.scene,
+        last: rows[rows.length - 1].n,
+        tokens: bytes_counted(rows.map((row) => row.content)),
+        turn_compact_tokens: 0,
+      };
+      say_send(bench, 2, "2");
+      const requests = requests_of(bench);
+      this.assertEqual(requests[0].messages, [
+        system_said(constants.analyst),
+        user_said("2"),
+      ]);
+      this.assertEqual(requests[1].messages, [
+        system_said(constants.analyst),
+        system_said(utility.json_text(estimate)),
+        user_said("2"),
+        assistant_said(constants.nothing_reply),
+        user_said("2"),
+      ]);
+    }
+
+    // An estimate equal to the setting is not over it; one byte less is.
+    test_estimate_boundary(): void {
+      const turn = [user_said("2"), assistant_said(constants.nothing_reply)];
+      const bytes = bytes_counted(turn);
+      const equal = settings_make();
+      equal.turn_compact_tokens = bytes;
+      const first = new provider_script.ScriptPort(script_recorded());
+      const at_limit = this.bench_recorded(first, equal);
+      say_send(at_limit, 1, "2");
+      say_send(at_limit, 2, "2");
+      this.assertEqual(systems_counted(at_limit), [1, 1]);
+      const below = settings_make();
+      below.turn_compact_tokens = bytes - 1;
+      const second = new provider_script.ScriptPort(script_recorded());
+      const past_limit = this.bench_recorded(second, below);
+      say_send(past_limit, 1, "2");
+      say_send(past_limit, 2, "2");
+      this.assertEqual(systems_counted(past_limit), [1, 2]);
+    }
+
+    // Only the first request after the turn carries it, not the later ones.
+    test_estimate_once(): void {
+      const value = settings_make();
+      value.turn_compact_tokens = 0;
+      const script = new provider_script.ScriptPort(script_recorded());
+      const bench = this.bench_recorded(script, value);
+      say_send(bench, 1, "2");
+      say_send(bench, 2, "1");
+      this.assertEqual(systems_counted(bench), [1, 2, 1, 1, 1]);
+    }
+
+    // With both over, the measurement comes first and the estimate after it.
+    test_estimate_both(): void {
+      const value = settings_make();
+      value.db_soft_bytes = 0;
+      value.turn_compact_tokens = 0;
+      const script = new provider_script.ScriptPort(script_recorded());
+      const bench = this.bench_recorded(script, value);
+      say_send(bench, 1, "2");
+      const stats = bench.store.db_stats(0);
+      const rows = bench.store.turn_list(constants.scene);
+      const estimate = {
+        scene: constants.scene,
+        last: rows[rows.length - 1].n,
+        tokens: bytes_counted(rows.map((row) => row.content)),
+        turn_compact_tokens: 0,
+      };
+      say_send(bench, 2, "2");
+      this.assertEqual(requests_of(bench)[1].messages.slice(0, 3), [
+        system_said(constants.analyst),
+        system_said(utility.json_text(stats)),
+        system_said(utility.json_text(estimate)),
+      ]);
+    }
+  }
+
+  // A failed tool call leaves no stored reply that calls tools unanswered.
+  export class TestFailure extends AgentCase {
+    // A failed result stores neither the reply nor the results of its round.
+    test_result_failed(): void {
+      const calls = [
+        call_make("call_1", "browser.render", constants.render_arguments),
+        call_make("call_2", "browser.image_make", constants.image_arguments),
+      ];
+      const script = script_one(
+        { content: null, tool_calls: calls, next: "after" },
+        { replies: {} },
+      );
+      const port = new provider_script.ScriptPort(script);
+      const bench = this.bench_make(
+        port,
+        settings_make(),
+        tools_failing,
+        constants.info,
+      );
+      const error = thrown_get(() => say_send(bench, 1, "1"));
+      this.assertEqual(
+        error.message,
+        i18n("agent.content_unsupported", "call_2", "image"),
+      );
+      this.assertEqual(bench.tools_tap.posted.length, 2);
+      const rows = bench.store.turn_list(constants.scene);
+      this.assertEqual(
+        rows.map((row) => row.content),
+        [user_said("1")],
+      );
+      this.assertEqual(
+        appends_of(bench).map((payload) => payload.content),
+        [user_said("1")],
+      );
+    }
+
+    // A call that cannot be made leaves the reply that names it unstored.
+    test_call_unmade(): void {
+      const call = call_make("call_1", "browser.render", "{");
+      const script = script_one(
+        { content: null, tool_calls: [call], next: "after" },
+        { replies: {} },
+      );
+      const port = new provider_script.ScriptPort(script);
+      const bench = this.bench_recorded(port, settings_make());
+      const error = thrown_get(() => say_send(bench, 1, "1"));
+      this.assertEqual(
+        error.message,
+        i18n("agent.arguments_invalid", "call_1", "browser.render", "{"),
+      );
+      const rows = bench.store.turn_list(constants.scene);
+      this.assertEqual(
+        rows.map((row) => row.content),
+        [user_said("1")],
+      );
+      this.assertEqual(
+        appends_of(bench).map((payload) => payload.content),
+        [user_said("1")],
+      );
+    }
+
+    // An answered round stays stored with its results; the failed one not.
+    test_round_answered(): void {
+      const render = call_make(
+        "call_1",
+        "browser.render",
+        constants.render_arguments,
+      );
+      const image = call_make(
+        "call_2",
+        "browser.image_make",
+        constants.image_arguments,
+      );
+      const script = script_one(
+        { content: null, tool_calls: [render], next: "after" },
+        {
+          replies: {},
+          after_tools: { content: null, tool_calls: [image], next: "after" },
+        },
+      );
+      const port = new provider_script.ScriptPort(script);
+      const bench = this.bench_make(
+        port,
+        settings_make(),
+        tools_failing,
+        constants.info,
+      );
+      const error = thrown_get(() => say_send(bench, 1, "1"));
+      this.assertEqual(
+        error.message,
+        i18n("agent.content_unsupported", "call_2", "image"),
+      );
+      const expected = [
+        user_said("1"),
+        assistant_calls([render]),
+        tool_said(render, constants.render_result),
+      ];
+      const rows = bench.store.turn_list(constants.scene);
+      this.assertEqual(
+        rows.map((row) => row.content),
+        expected,
+      );
+      this.assertEqual(
+        appends_of(bench).map((payload) => payload.content),
+        expected,
+      );
+    }
+
+    // The reply that calls a tool is stored with its result, after it ran.
+    test_round_stored(): void {
+      const render = call_make(
+        "call_1",
+        "browser.render",
+        constants.render_arguments,
+      );
+      const script = script_one(
+        { content: null, tool_calls: [render], next: "after" },
+        {
+          replies: {},
+          after_tools: { content: constants.nothing_reply, next: "after" },
+        },
+      );
+      const seen: number[] = [];
+      const tools = (store: substrate.Store): ToolTable => ({
+        "browser.render": () => {
+          seen.push(store.turn_list(constants.scene).length);
+          return text_result(constants.render_result);
+        },
+      });
+      const port = new provider_script.ScriptPort(script);
+      const bench = this.bench_make(
+        port,
+        settings_make(),
+        tools,
+        constants.info,
+      );
+      const since = bench.store.seq_get("metaverse");
+      say_send(bench, 1, "1");
+      this.assertEqual(seen, [1]);
+      const appends = appends_of(bench);
+      this.assertEqual(
+        appends.map((payload) => payload.since),
+        [since, since + 1, since + 2, since + 3],
+      );
+      this.assertEqual(
+        appends.map((payload) => payload.content),
+        [
+          user_said("1"),
+          assistant_calls([render]),
+          tool_said(render, constants.render_result),
+          assistant_said(constants.nothing_reply),
+        ],
+      );
+    }
+  }
+
   // The system prompt `prompt_build` makes.
   export class TestPrompt extends AgentCase {
     // In the hyperposition the system prompt is the analyst's alone.
@@ -1236,6 +1501,11 @@ namespace test_agent {
       const answer = provider.chat_response(bench.provider_tap.received[0]);
       this.assertEqual(error.message, i18n("agent.reply_empty", answer.id));
       this.assertEqual(bench.ui.posted.length, 0);
+      const rows = bench.store.turn_list(constants.scene);
+      this.assertEqual(
+        rows.map((row) => row.content),
+        [user_said("1")],
+      );
     }
 
     // A tool result holding an image ends the turn.

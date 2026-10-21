@@ -3,13 +3,16 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # The server's main loop, which `bootstrap.py` loads and a main loop file can
-# replace in debug mode. `loop_prepare` runs before `hello`: it loads the
-# settings into `_settings`, opens the log and every database under the root,
-# creating the fixed ones that are missing, seeds the metaverse while its `seq`
-# is 0, and returns the `seq` of each database. `loop_run` registers the stock
-# handlers and runs the select loop on the engine tty: it decodes each line,
-# refuses any reply, dispatches every other line and writes each reply. A
-# failure writes one `error` line and exits 1.
+# replace in debug mode. `bootstrap.py` has opened the log before either
+# function runs. `loop_prepare` runs before `hello`: it loads the settings into
+# `_settings`, opens every database under the root, creating the fixed ones
+# that are missing, seeds the scripted provider's script when `_files` lacks
+# it and the metaverse while its `seq` is 0, and returns the `seq` of each
+# database. `loop_run` registers the stock handlers and runs the select loop
+# on the engine tty: it decodes each line, refuses any reply, dispatches every
+# other line and writes each reply, and at verbose level 2 the log traces each
+# line dispatched and each reply. A failure logs its message, then writes one
+# `error` line and exits 1.
 
 import dispatch, engine_db, engine_doc, engine_kv, engine_mcp, engine_sql
 import engine_system, engine_tap, engine_turn, engine_verbose, functools, jslb
@@ -67,6 +70,12 @@ _SCRIPT_NAME = "bootstrap.js"
 # The key of the bootstrap script in `_files`.
 _SCRIPT_KEY = "script/bootstrap.js"
 
+# The seed file of the scripted provider's script.
+_PROVIDER_SCRIPT_NAME = "provider_script.json"
+
+# The key of the scripted provider's script in `_files`.
+_PROVIDER_SCRIPT_KEY = "provider/script.json"
+
 # The key in the metaverse of the player in use.
 _PLAYER_KEY = "player"
 
@@ -98,6 +107,12 @@ _SERVER_VERSION = "0"
 
 # The exit code of a failure.
 _EXIT_FAILED = 1
+
+# The verbose level of the line that logs a failure, so it is always written.
+_FAILURE_LEVEL = 0
+
+# The verbose level of the lines that trace the server's timeline.
+_TRACE_LEVEL = 2
 
 
 # What `loop_prepare` opened for the root: its settings and its store.
@@ -204,11 +219,19 @@ def _metaverse_seed(store: substrate.Store, seed: _SeedFiles) -> None:
     store.transaction_run(lambda: _metaverse_write(store, seed))
 
 
-# Loads the settings, opens the log and every database, seeding what is new.
+# Seeds the scripted provider's script in `_files` when its row is missing.
+def _provider_seed(store: substrate.Store) -> None:
+    rows = store.kv_list(_FILES_DB, _PROVIDER_SCRIPT_KEY)
+    if any(row.key == _PROVIDER_SCRIPT_KEY for row in rows):
+        return
+    path = os.path.join(_SEED_DIRECTORY, _PROVIDER_SCRIPT_NAME)
+    with open(path, "rb") as file:
+        store.kv_put(_PROVIDER_SCRIPT_KEY, file.read(), _FILES_DB)
+
+
+# Loads the settings and opens every database, seeding what is new.
 def _prepare_run(root: str) -> _PreparedRoot:
     values = settings.settings_load(os.path.join(root, _SETTINGS_NAME))
-    verbose.log_open(root, values["verbose_ring"])
-    verbose.level_set(values["verbose_level"])
     store = substrate.Store(root, values["overflow_bytes"])
     for name in _DATABASES:
         if os.path.exists(_database_path(root, name)):
@@ -218,6 +241,7 @@ def _prepare_run(root: str) -> _PreparedRoot:
     for name in _databases_found(root):
         store.db_open(name)
     _settings_write(store, values)
+    _provider_seed(store)
     if store.seq_get(_METAVERSE_DB) == 0:
         _metaverse_seed(store, _seed_read())
     return _PreparedRoot(values, store)
@@ -275,10 +299,11 @@ def _line_write(line: jslb.Object, write_fd: int, chunk: int) -> None:
             _file_copy(piece, write_fd, chunk)
 
 
-# Writes the one `error` line of a failure and exits 1.
+# Logs the message of a failure, then writes its one `error` line and exits 1.
 def _failure_exit(
     line: jslb.Object | None, error: Exception, write_fd: int, chunk: int
 ) -> NoReturn:
+    verbose.log(_FAILURE_LEVEL, i18n("main_loop.serve_failed", str(error)))
     _line_write(dispatch.error_make(line, error), write_fd, chunk)
     raise SystemExit(_EXIT_FAILED) from error
 
@@ -290,8 +315,12 @@ def _line_serve(line: jslb.Object, write_fd: int, chunk: int) -> None:
         raise LookupError(
             i18n("main_loop.reply_unknown", jslb.line_render(line))
         )
+    dispatched = _json_text(line[0])
+    verbose.log(_TRACE_LEVEL, i18n("main_loop.line_dispatch", dispatched))
     reply = dispatch.line_dispatch(line)
     if reply is not None:
+        replied = _json_text(reply[0])
+        verbose.log(_TRACE_LEVEL, i18n("main_loop.line_reply", replied))
         _line_write(reply, write_fd, chunk)
 
 

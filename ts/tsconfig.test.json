@@ -31,6 +31,7 @@
     "page.ts",
     "worker_ai.ts",
     "boot.ts",
+    "test_hook.ts",
     "test_error_overlay.ts",
     "test_utility.ts",
     "test_ui_strings.ts",

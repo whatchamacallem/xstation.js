@@ -50,7 +50,7 @@ _FIELD_DEFAULTS = {"v": 0, "b": 0}
 # The fields a header of their kind must hold, by short name.
 _FIELD_REQUIRED = frozenset(("t", "s"))
 
-# The largest integer magnitude the encoder writes, `2**53`.
+# The largest magnitude of an `int` the encoder writes and the decoder reads.
 _INTEGER_LIMIT = 2**53
 
 # A key of the decimal digits of a non negative integer, no leading zero.
@@ -330,6 +330,14 @@ def _constant_refuse(name: str) -> NoReturn:
     raise WireError(i18n("jslb.line_not_json", name))
 
 
+# Reads a JSON integer as an `int` within `2**53` either way, else a double.
+def _integer_parse(text: str) -> int | float:
+    number = int(text)
+    if abs(number) > _INTEGER_LIMIT:
+        return float(text)
+    return number
+
+
 # Parses line bytes as strict `UTF-8` JSON into an `Object`.
 def _line_decode(text: bytes) -> Object:
     try:
@@ -341,6 +349,7 @@ def _line_decode(text: bytes) -> Object:
             string,
             object_pairs_hook=_object_make,
             parse_constant=_constant_refuse,
+            parse_int=_integer_parse,
         )
     except json.JSONDecodeError as error:
         raise WireError(i18n("jslb.line_not_json", error.msg)) from error

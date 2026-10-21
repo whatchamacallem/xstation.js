@@ -14,9 +14,10 @@
 # one byte over message_max refused; then the last line regression on the
 # console role, and ttyd killed. On the stock main loop: the mcp lines that
 # open a session and a tools/call, kv.put and kv.get, doc.put and doc.head,
-# verbose.tail, an unknown type, and system.restart serving the echo main
-# loop after source.put; on a root whose setting debug is false, the same
-# refused. Where a program writes its last line and exits, a lone loss of
+# verbose.tail, an unknown type, a sequence of forwarded operations the test
+# builds replayed, read back by a new program and a stale since refused, and
+# system.restart serving the echo main loop after source.put; on a root whose
+# setting debug is false, the same refused. Where a program writes its last line and exits, a lone loss of
 # that line is a ttyd fault, reported with ttyd's version and never retried.
 # It prints one line per rung and exits 0, or stops at the first failed
 # check, names its rung and exits 1. ttyd's log is copied to stderr. Standard
@@ -259,6 +260,74 @@ _LEVELS = (0, 1, 2)
 
 # How many of those lines the verbose rung reads back.
 _TAIL_COUNT = 2
+
+# The database the replay creates and fills, which no new root has.
+_REPLAY_DB = "replay"
+
+# The database the replay creates, writes in and drops again.
+_DROPPED_DB = "replay_dropped"
+
+# The table of text to text that the replay makes with `sql.run`.
+_PAIR_DDL = (
+    "CREATE TABLE pair (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT"
+)
+
+# The statement that fills the replay's table with its two rows.
+_PAIR_INSERT = "INSERT INTO pair (key, value) VALUES (?, ?), (?, ?)"
+
+# The statement that gives a row of the replay's table a new value.
+_PAIR_UPDATE = "UPDATE pair SET value = ? WHERE key = ?"
+
+# The statement that reads the replay's table back, by key.
+_PAIR_SELECT = "SELECT key, value FROM pair ORDER BY key"
+
+# The columns that statement reads.
+_PAIR_COLUMNS = ("key", "value")
+
+# The rows the replay puts in its table, each a key and a value.
+_PAIR_ROWS = (("first", _WIDE_TEXT), ("second", "two"))
+
+# The value the replay's update gives the second row.
+_PAIR_VALUE = "three"
+
+# The key in the replay's database of the value it puts, then deletes.
+_SMALL_KEY = "blob/small"
+
+# The key in the replay's database of the value over `overflow_bytes`.
+_LARGE_KEY = "blob/large"
+
+# The start of both of those keys, which `kv.list` reads back.
+_BLOB_PREFIX = "blob/"
+
+# The key the replay puts in the database it drops.
+_DROPPED_KEY = "note"
+
+# The id of the scene document the replay writes and gives its turns.
+_SCENE_ID = "scene"
+
+# The ref of that document's first version, the scene of the turns.
+_SCENE_REF = f"/{_REPLAY_DB}/{_SCENE_ID}/{_DOCUMENT_VERSION}"
+
+# The scene document the replay writes: its header and a text.
+_SCENE_BODY: dict[int | str, Any] = {0: {"t": "scene"}, "text": _WIDE_TEXT}
+
+# The turns the replay appends to its scene, each a role and a text.
+_TURNS = (("user", _WIDE_TEXT), ("assistant", "two"))
+
+# The summary that replaces the replay's turns, text JSON writes as it is.
+_SUMMARY_TEXT = "the first two turns in one"
+
+# Reads the scene's turns back: each number, and whether the summary is in it.
+_TURN_SELECT = (
+    "SELECT n, instr(content, ?) > 0 AS summarized FROM _turn"
+    " WHERE scene = ? ORDER BY n"
+)
+
+# The columns that statement reads.
+_TURN_COLUMNS = ("n", "summarized")
+
+# The one turn compaction leaves: number 1, the summary in it, true as 1.
+_TURN_ROWS = ((1, 1),)
 
 # How many nanoseconds the clock counts in a millisecond.
 _NANOSECONDS_PER_MILLISECOND = 1_000_000
@@ -802,6 +871,100 @@ class EchoStream:
                 f" {sha256_text(blobs[0])}, where {digest} went"
             )
         self.held -= total
+
+
+# A forwarded operation of the replay: its request's parts, and the reply due.
+class ReplayStep(NamedTuple):
+    line_type: str
+    key: str | None
+    blobs: list[bytes]
+    payload: dict[str, Any]
+    due: dict[str, Any]
+
+
+# The forwarded operations the test builds, each with the `since` it carries.
+class ReplaySequence:
+    # Starts with no step, and no database the replay made.
+    def __init__(self) -> None:
+        self.steps: list[ReplayStep] = []
+        self.seq: dict[str, int] = {}
+
+    # Adds a step that modifies a database: its `since`, and the `seq` after.
+    def step_count(
+        self,
+        db: str,
+        line_type: str,
+        key: str | None,
+        blobs: list[bytes],
+        payload: dict[str, Any],
+        due: dict[str, Any],
+    ) -> None:
+        since = self.seq[db]
+        self.seq[db] = since + 1
+        sent: dict[str, Any] = {**payload, "since": since}
+        replied: dict[str, Any] = {**due, "seq": since + 1}
+        self.steps.append(ReplayStep(line_type, key, blobs, sent, replied))
+
+    # Creates a database, whose `seq` is 0 before it exists and after.
+    def database_create(self, db: str) -> None:
+        payload: dict[str, Any] = {"db": db, "since": 0}
+        self.steps.append(ReplayStep("db.create", None, [], payload, {}))
+        self.seq[db] = 0
+
+    # Drops a database, its `since` the `seq` it has.
+    def database_drop(self, db: str) -> None:
+        payload: dict[str, Any] = {"db": db, "since": self.seq.pop(db)}
+        self.steps.append(ReplayStep("db.drop", None, [], payload, {}))
+
+    # Puts a value under a key of a database.
+    def value_put(self, db: str, key: str, data: bytes) -> None:
+        due: dict[str, Any] = {"sha256": sha256_text(data)}
+        self.step_count(db, "kv.put", f"/{db}/{key}", [data], {}, due)
+
+    # Deletes the value under a key of a database.
+    def value_delete(self, db: str, key: str) -> None:
+        self.step_count(db, "kv.delete", f"/{db}/{key}", [], {}, {})
+
+    # Writes the first version of a document, whose ref the reply gives.
+    def document_put(
+        self, db: str, name: str, body: dict[int | str, Any], ref: str
+    ) -> None:
+        payload: dict[str, Any] = {"db": db, "id": name, "body": body}
+        self.step_count(db, "doc.put", None, [], payload, {"ref": ref})
+
+    # Appends a turn to a scene of a database, `n` the number it is given.
+    def turn_append(
+        self, db: str, scene: str, role: str, text: str, n: int
+    ) -> None:
+        content = {"role": role, "content": text}
+        payload: dict[str, Any] = {
+            "scene": scene,
+            "role": role,
+            "content": content,
+        }
+        self.step_count(db, "turn.append", None, [], payload, {"n": n})
+
+    # Replaces turns 1 to `through` of a scene by one summary turn.
+    def turns_compact(
+        self, db: str, scene: str, through: int, summary: str
+    ) -> None:
+        payload: dict[str, Any] = {
+            "scene": scene,
+            "through": through,
+            "summary": summary,
+        }
+        self.step_count(db, "turn.compact", None, [], payload, {})
+
+    # Runs statements that modify a database, with the results due.
+    def statements_run(
+        self,
+        db: str,
+        statements: list[dict[str, Any]],
+        results: list[dict[str, Any]],
+    ) -> None:
+        payload: dict[str, Any] = {"db": db, "statements": statements}
+        due: dict[str, Any] = {"results": results}
+        self.step_count(db, "sql.run", None, [], payload, due)
 
 
 # Refuses a blob the client would stream, as it keeps each message in memory.
@@ -1772,6 +1935,154 @@ def rung_unknown(client: WireClient) -> str:
     )
 
 
+# A statement as `sql.run` carries it: its text and its bound parameters.
+def statement_make(sql: str, params: list[Any]) -> dict[str, Any]:
+    return {"sql": sql, "params": params}
+
+
+# The result of one statement as the reply to `sql.run` gives it.
+def result_make(
+    columns: list[str], rows: list[list[Any]], changes: int
+) -> dict[str, Any]:
+    return {"columns": columns, "rows": rows, "changes": changes}
+
+
+# Builds the replay: new databases written by each forwarded operation.
+def replay_build(large: bytes) -> ReplaySequence:
+    sequence = ReplaySequence()
+    db = _REPLAY_DB
+    sequence.database_create(db)
+    sequence.statements_run(
+        db, [statement_make(_PAIR_DDL, [])], [result_make([], [], 0)]
+    )
+    values: list[Any] = [value for row in _PAIR_ROWS for value in row]
+    sequence.statements_run(
+        db,
+        [statement_make(_PAIR_INSERT, values)],
+        [result_make([], [], len(_PAIR_ROWS))],
+    )
+    sequence.value_put(db, _SMALL_KEY, _SMALL_BYTES)
+    sequence.value_put(db, _LARGE_KEY, large)
+    sequence.value_delete(db, _SMALL_KEY)
+    sequence.document_put(db, _SCENE_ID, _SCENE_BODY, _SCENE_REF)
+    for n, (role, text) in enumerate(_TURNS, 1):
+        sequence.turn_append(db, _SCENE_REF, role, text, n)
+    sequence.turns_compact(db, _SCENE_REF, len(_TURNS), _SUMMARY_TEXT)
+    updated = [_PAIR_VALUE, _PAIR_ROWS[1][0]]
+    sequence.statements_run(
+        db,
+        [statement_make(_PAIR_UPDATE, updated)],
+        [result_make([], [], 1)],
+    )
+    sequence.database_create(_DROPPED_DB)
+    sequence.value_put(_DROPPED_DB, _DROPPED_KEY, _SMALL_BYTES)
+    sequence.database_drop(_DROPPED_DB)
+    return sequence
+
+
+# Reads the replay back on a new program: its value, keys, head and rows.
+def replay_read(client: WireClient, large: bytes, seq: int) -> None:
+    import jslb
+
+    digest = sha256_text(large)
+    ref = f"/{_REPLAY_DB}/{_LARGE_KEY}"
+    get = request_make(client, client.full, "kv.get", [], ref, {})
+    reply = exchange_run(client, get, "the reply to kv.get")
+    due: dict[str, Any] = {"size": len(large), "sha256": digest}
+    blobs = blobs_of(reply)
+    if jslb.payload_of(cast(jslb.Object, reply)) != due or blobs != [large]:
+        raise CheckFailed(
+            f"kv.get: the server wrote {line_text(reply)} with blobs of"
+            f" {[len(blob) for blob in blobs]} bytes where {json.dumps(due)}"
+            " and the bytes the replay put were due"
+        )
+    asked: dict[str, Any] = {"db": _REPLAY_DB, "prefix": _BLOB_PREFIX}
+    listed = request_make(client, client.full, "kv.list", [], None, asked)
+    reply = exchange_run(client, listed, "the reply to kv.list")
+    row = {"k": _LARGE_KEY, "size": len(large), "sha256": digest}
+    payload_check(reply, {"keys": [row]}, "kv.list")
+    names: dict[str, Any] = {"db": _REPLAY_DB, "id": _SCENE_ID}
+    head = request_make(client, client.full, "doc.head", [], None, names)
+    reply = exchange_run(client, head, "the reply to doc.head")
+    payload_check(reply, {"ref": _SCENE_REF}, "doc.head")
+    statements = [
+        statement_make(_PAIR_SELECT, []),
+        statement_make(_TURN_SELECT, [_SUMMARY_TEXT, _SCENE_REF]),
+    ]
+    first, second = _PAIR_ROWS
+    pairs: list[list[Any]] = [list(first), [second[0], _PAIR_VALUE]]
+    turns: list[list[Any]] = [list(row) for row in _TURN_ROWS]
+    results = [
+        result_make(list(_PAIR_COLUMNS), pairs, 0),
+        result_make(list(_TURN_COLUMNS), turns, 0),
+    ]
+    read: dict[str, Any] = {
+        "db": _REPLAY_DB,
+        "statements": statements,
+        "since": seq,
+    }
+    run = request_make(client, client.full, "sql.run", [], None, read)
+    reply = exchange_run(client, run, "the reply to sql.run")
+    payload_check(reply, {"results": results, "seq": seq}, "sql.run")
+
+
+# Replays the sequence the test builds, then reads it back on a new program.
+def rung_replay(ttyd: TtydServer, values: dict[str, Any]) -> str:
+    from i18n import i18n
+
+    large = os.urandom(values["overflow_bytes"] + 1)
+    sequence = replay_build(large)
+    first = websocket_open(ttyd, _STOCK_ARGS, values, False)
+    hello_take(first, values, _STOCK_ARGS, "hello")
+    started = time.monotonic()
+    for number, step in enumerate(sequence.steps, 1):
+        what = f"the reply to operation {number}, {step.line_type}"
+        request = request_make(
+            first,
+            first.full,
+            step.line_type,
+            step.blobs,
+            step.key,
+            step.payload,
+        )
+        payload_check(exchange_run(first, request, what), step.due, what)
+    seconds = time.monotonic() - started
+    session_close(first)
+    ttyd.end_wait(first.pid, "ttyd's log of the first program's end")
+    second = websocket_open(ttyd, _STOCK_ARGS, values, False)
+    hello_take(second, values, _STOCK_ARGS, "hello after the replay")
+    seq_due = {**first.seq, **sequence.seq}
+    if second.seq != seq_due:
+        raise CheckFailed(
+            f"hello after the replay gave seq {second.seq}, where {seq_due}"
+            " was due"
+        )
+    seq = sequence.seq[_REPLAY_DB]
+    replay_read(second, large, seq)
+    stale = seq - 1
+    ref = f"/{_REPLAY_DB}/{_SMALL_KEY}"
+    put = request_make(
+        second, second.full, "kv.put", [_SMALL_BYTES], ref, {"since": stale}
+    )
+    line_send(second, put)
+    message = i18n("substrate.since_stale", "kv.put", stale, seq, _REPLAY_DB)
+    what = "the error line of the stale since"
+    error_check(line_last(second, what), second.id_last, message, what)
+    exit_check(ttyd, second.pid, "ttyd's log of the second program's end")
+    types = dict.fromkeys(step.line_type for step in sequence.steps)
+    kinds = ", ".join(types)
+    return (
+        f"{len(sequence.steps)} forwarded operations the test built, {kinds},"
+        f" each with the since of its database, replayed on pid {first.pid}"
+        f" in {seconds:.3f} s, each reply the one due; after a reconnect,"
+        f" hello from pid {second.pid} gave {_REPLAY_DB} seq {seq} and no"
+        f" {_DROPPED_DB}; kv.get, kv.list, doc.head and a sql.run read gave"
+        " back what the replay put, deleted, appended and compacted; a kv.put"
+        f" with the stale since {stale} got the error {message!r} and pid"
+        f" {second.pid} exited with code {_PROGRAM_FAILED} as ttyd logged"
+    )
+
+
 # Puts the echo main loop with `source.put`, then `system.restart` serves it.
 def rung_restart(ttyd: TtydServer, values: dict[str, Any]) -> str:
     client = websocket_open(ttyd, _STOCK_ARGS, values, False)
@@ -1931,6 +2242,9 @@ def stage_stock(log: RungLog, work: str) -> None:
         log.rung_run("doc.put and doc.head", lambda: rung_doc(client))
         log.rung_run("verbose.tail", lambda: rung_verbose(client))
         log.rung_run("unknown type", lambda: rung_unknown(client))
+        log.rung_run(
+            "operation sequence replayed", lambda: rung_replay(ttyd, values)
+        )
         log.rung_run("system.restart", lambda: rung_restart(ttyd, values))
 
 

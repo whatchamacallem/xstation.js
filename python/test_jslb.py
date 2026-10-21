@@ -19,9 +19,7 @@ _BUILD_PATH = os.path.join(
 )
 
 # The vectors and their sidecars, as `vectors_make.py` writes them.
-_VECTORS_PATH = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "vectors"
-)
+_VECTORS_PATH = os.path.join(_BUILD_PATH, "vectors")
 
 # The longest line the decoders here read, its CR included.
 _LINE_MAX = 4096
@@ -503,6 +501,18 @@ class TestEncode(_ScratchCase):
                 ValueError, message, lambda: jslb.line_encode(line)
             )
 
+    # Doubles past `2**53` either way are written as Python writes a float.
+    def test_double_range(self) -> None:
+        header = jslb.header_make("echo")
+        line = jslb.line_make(
+            header, [], tenth=1e16, low=-1e300, top=1.7976931348623157e308
+        )
+        self.assertEqual(
+            _pieces_join(jslb.line_encode(line)),
+            b'{"0":{"t":"echo"},"tenth":1e+16,"low":-1e+300,'
+            b'"top":1.7976931348623157e+308}\r',
+        )
+
     # `NaN` and the infinities are refused.
     def test_float_refused(self) -> None:
         header = jslb.header_make("echo")
@@ -642,6 +652,33 @@ class TestDecode(_ScratchCase):
         self.assertEqual(line[2].d, b"")
         self.assertEqual(
             list(line[3].items()), [("s", 0), ("k", "z"), ("d", b"")]
+        )
+
+    # An integer past `2**53` either way is read as the double it stands for.
+    def test_integer_large(self) -> None:
+        lines = self.pieces_decode(
+            self.decoder_make(),
+            [
+                b'{"0":{"t":"echo"},"high":9007199254740992,'
+                b'"above":9007199254740993,"tenth":10000000000000000,'
+                b'"low":-9007199254740994}\r'
+            ],
+        )
+        self.assertEqual(len(lines), 1)
+        line = lines[0]
+        for name, value in (
+            ("high", 2**53),
+            ("above", float(2**53)),
+            ("tenth", 1e16),
+            ("low", -float(2**53 + 2)),
+        ):
+            self.assertIs(type(line[name]), type(value))
+            self.assertEqual(line[name], value)
+        self.assertEqual(
+            next(jslb.line_encode(line)),
+            b'{"0":{"t":"echo"},"high":9007199254740992,'
+            b'"above":9007199254740992.0,"tenth":1e+16,'
+            b'"low":-9007199254740994.0}\r',
         )
 
     # A line whose blobs are all empty is complete at its CR.

@@ -3,11 +3,16 @@ SPDX-FileCopyrightText: © 2026 Adrian Johnston.
 SPDX-License-Identifier: MIT
 This file is licensed under the terms of the LICENSE.md file.
 The engine page's style: a black page, white text, the image filling the
-viewport and a subtitle line.
+viewport, the debug views at the top and the subtitle band at the bottom,
+which never overlap.
 */
 
-/* A black page with white text and no margin. */
+/* A black page, white text, no margin, one column as tall as the viewport. */
 body {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100vh;
   margin: 0;
   background: black;
   color: white;
@@ -23,20 +28,19 @@ body {
   object-fit: contain;
 }
 
-/* The subtitle, centred at the bottom, on black so it shows over any image. */
+/* The subtitle band at the bottom, on black so it shows over any image. */
 #subtitle {
-  position: fixed;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  position: relative;
+  flex-shrink: 0;
   margin: 0;
   text-align: center;
   background: black;
 }
 
-/* The debug views, drawn over the image on black, long lines scrolled. */
+/* The debug views over the image on black, shrunk to fit and scrolled. */
 #debug {
   position: relative;
+  min-height: 0;
   overflow: auto;
   background: black;
 }

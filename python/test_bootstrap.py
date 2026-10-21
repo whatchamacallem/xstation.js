@@ -4,13 +4,14 @@
 #
 # Tests the platform services without a pty: the arguments, the engine lock,
 # the hello line, the provider file and the reply, the choice and loading of
-# the main loop file, the console role and the error line. Each run has
-# descriptors 0 and 1 set to files and raw mode patched to record its calls,
-# and the test main loop files write their calls to files in the root. The
-# scratch directories go under build/.
+# the main loop file, the console role, the error line and the server's log.
+# Each run has descriptors 0 and 1 set to files and raw mode patched to record
+# its calls, and the test main loop files write their calls to files in the
+# root. A run that opens the log has it closed when it returns. The scratch
+# directories go under build/.
 
-import bootstrap, fcntl, hashlib, json, os, signal, sys, tempfile, unittest
-import unittest.mock
+import bootstrap, contextlib, fcntl, hashlib, json, os, signal, sqlite3, sys
+import tempfile, unittest, unittest.mock, verbose
 from typing import Any, NamedTuple
 from i18n import i18n
 
@@ -183,6 +184,15 @@ _REPLY_GARBLED = b"not a line\r"
 # The reason the JSON parser of Python gives for that reply.
 _GARBLED_REASON = "Expecting value"
 
+# The file in the root that holds the server's log.
+_LOG_NAME = "_verbose.sqlite"
+
+# The query of the thread, level and text of each line of the log, in order.
+_LOG_QUERY = "SELECT thread, level, text FROM line ORDER BY seq"
+
+# The thread the server's own lines are stored under in the log.
+_SERVER_THREAD = "server"
+
 
 # A scratch directory and the root made in it, with the settings it holds.
 class ScratchRoot(NamedTuple):
@@ -226,6 +236,15 @@ def _root_make(
     return ScratchRoot(scratch.name, root, loaded)
 
 
+# Rewrites the settings of a scratch root with the verbose level set.
+def _level_write(made: ScratchRoot, level: int) -> ScratchRoot:
+    loaded = {**made.settings, "verbose_level": level}
+    path = os.path.join(made.root, "settings.json")
+    with open(path, "w", encoding="utf-8") as file:
+        json.dump(loaded, file)
+    return ScratchRoot(made.scratch, made.root, loaded)
+
+
 # Writes a main loop file into the root's `main_loop` directory.
 def _loop_write(root: str, text: str) -> str:
     directory = os.path.join(root, "main_loop")
@@ -259,13 +278,21 @@ def _run_captured(
 ) -> RunRecord:
     in_path, out_path = _files_make(made, given)
     raw_calls: list[tuple[int, int]] = []
+    opened: list[str] = []
+    log_open = verbose.log_open
 
     # Records the descriptor of a raw mode call and the output size before it.
     def raw_record(descriptor: int, when: int) -> None:
         raw_calls.append((descriptor, os.fstat(1).st_size))
 
+    # Opens the log the run asks for and notes it, so the run's end closes it.
+    def open_record(root: str, ring: int) -> None:
+        log_open(root, ring)
+        opened.append(root)
+
     scrubbed = unittest.mock.patch.dict(os.environ, environment, clear=True)
     raw = unittest.mock.patch("tty.setraw", side_effect=raw_record)
+    logged = unittest.mock.patch("verbose.log_open", side_effect=open_record)
     modules = unittest.mock.patch.dict(sys.modules)
     sys.stdout.flush()
     saved_in = os.dup(0)
@@ -275,11 +302,13 @@ def _run_captured(
             os.dup2(source.fileno(), 0)
             os.dup2(sink.fileno(), 1)
             try:
-                with scrubbed, raw, modules:
+                with scrubbed, raw, logged, modules:
                     code = bootstrap.bootstrap_run(argv)
             finally:
                 os.dup2(saved_in, 0)
                 os.dup2(saved_out, 1)
+                if opened:
+                    verbose.log_close()
     finally:
         os.close(saved_in)
         os.close(saved_out)
@@ -358,6 +387,31 @@ def _raw_check(case: unittest.TestCase, record: RunRecord) -> None:
     case.assertEqual(record.raw_calls, [(0, 0)])
 
 
+# Reads the thread, level and text of each line of the root's log, in order.
+def _log_read(root: str) -> list[tuple[str, int, str]]:
+    path = os.path.join(root, _LOG_NAME)
+    if not os.path.exists(path):
+        raise AssertionError(f"the root has no log: {path}")
+    with contextlib.closing(sqlite3.connect(path)) as connection:
+        rows: list[tuple[str, int, str]] = connection.execute(
+            _LOG_QUERY
+        ).fetchall()
+    return rows
+
+
+# Checks the root's log holds one line, the failure's message at level 0.
+def _failure_logged(
+    case: unittest.TestCase, root: str, message: str
+) -> None:
+    text = i18n("bootstrap.run_failed", message)
+    case.assertEqual(_log_read(root), [(_SERVER_THREAD, 0, text)])
+
+
+# Checks a run that failed before it could open the root's log made none.
+def _log_absent(case: unittest.TestCase, root: str) -> None:
+    case.assertFalse(os.path.exists(os.path.join(root, _LOG_NAME)))
+
+
 # Returns what a child process found when it tried the root's engine lock.
 def _lock_tried(root: str) -> bytes:
     found_read, found_write = os.pipe()
@@ -426,6 +480,7 @@ class TestArguments(unittest.TestCase):
             self.assertEqual(record.raw_calls, [])
             (line,) = _lines_parse(record.output)
             _raised_check(self, line, "argparse.ArgumentError")
+        _log_absent(self, made.root)
 
     # A repeated `--root` or `--main-loop` is refused before raw mode.
     def test_option_repeated(self) -> None:
@@ -479,6 +534,7 @@ class TestLock(unittest.TestCase):
         )
         prepared = os.path.join(made.root, _PREPARE_NAME)
         self.assertFalse(os.path.exists(prepared))
+        _log_absent(self, made.root)
         self.assertEqual(_lock_tried(made.root), b"taken")
 
     # The lock closes at `exec`, so the probe the main loop becomes takes it.
@@ -528,12 +584,11 @@ class TestHello(unittest.TestCase):
         record = _run_captured(made, argv, _REPLY_FULL, environment)
         self.assertEqual(record.code, 1)
         (line,) = _lines_parse(record.output)
-        self.assertEqual(
-            _error_check(self, line),
-            i18n("bootstrap.provider_unset", _PROVIDER_VARIABLE),
-        )
+        message = i18n("bootstrap.provider_unset", _PROVIDER_VARIABLE)
+        self.assertEqual(_error_check(self, line), message)
         prepared = os.path.join(made.root, _PREPARE_NAME)
         self.assertFalse(os.path.exists(prepared))
+        _failure_logged(self, made.root, message)
 
     # Runs a provider that is not scripted and checks its file is refused.
     def info_refused(
@@ -547,6 +602,7 @@ class TestHello(unittest.TestCase):
         self.assertEqual(_raised_check(self, line, kind), expected)
         prepared = os.path.join(made.root, _PREPARE_NAME)
         self.assertFalse(os.path.exists(prepared))
+        _failure_logged(self, made.root, expected)
 
     # Outside debug mode `hello` has short names, with the test's stock file.
     def test_hello_short(self) -> None:
@@ -667,6 +723,7 @@ class TestReply(unittest.TestCase):
         self.assertEqual(hello["0"], {"type": "hello", "id": _HELLO_ID})
         self.assertEqual(_error_check(self, line), expected)
         self.assertFalse(os.path.exists(os.path.join(made.root, _RUN_NAME)))
+        _failure_logged(self, made.root, expected)
 
     # Each reply that is not the empty reply is refused, showing what came.
     def test_reply_wrong(self) -> None:
@@ -787,7 +844,8 @@ class TestMainLoop(unittest.TestCase):
         self.assertIn("substrate", message)
         self.assertIn(f'File "{_STOCK_PATH}"', line["stack"])
         names = sorted(os.listdir(made.root))
-        self.assertEqual(names, ["engine.lock", "settings.json"])
+        self.assertEqual(names, [_LOG_NAME, "engine.lock", "settings.json"])
+        _failure_logged(self, made.root, message)
 
 
 # Tests the console role, which runs dash in debug mode only.
@@ -803,6 +861,7 @@ class TestConsole(unittest.TestCase):
         executed.assert_not_called()
         self.assertEqual(record, RunRecord(1, b"", []))
         self.assertEqual(os.getcwd(), before)
+        _log_absent(self, made.root)
 
     # In debug mode dash runs in the root with only the kept variables.
     def test_console_scrubbed(self) -> None:
@@ -823,12 +882,44 @@ class TestConsole(unittest.TestCase):
             record = _run_captured(made, argv, b"", _CONSOLE_ENVIRONMENT)
         self.assertEqual(record, RunRecord(3, b"", []))
         ((level, called, called_verbose, environment, directory),) = seen
+        expected: int = made.settings["verbose_level"]
         self.assertEqual(
             (level, called, called_verbose),
-            (0, ["/bin/dash"], ["/bin/dash", "-v"]),
+            (expected, ["/bin/dash"], ["/bin/dash", "-v"]),
         )
         self.assertEqual(environment, _CONSOLE_KEPT)
         self.assertTrue(os.path.samefile(directory, made.root))
+
+    # Dash runs at the verbose level of the settings, and its verbose form.
+    def test_console_level(self) -> None:
+        before = os.getcwd()
+        self.addCleanup(os.chdir, before)
+        for level in range(3):
+            made = _level_write(_root_make(self, True), level)
+            argv = ["--root", made.root, "console"]
+            with unittest.mock.patch("verbose.exec", return_value=0) as run:
+                record = _run_captured(made, argv, b"", _CONSOLE_ENVIRONMENT)
+            os.chdir(before)
+            self.assertEqual(record, RunRecord(0, b"", []))
+            run.assert_called_once_with(
+                level, ["/bin/dash"], ["/bin/dash", "-v"]
+            )
+            self.assertEqual(_log_read(made.root), [])
+
+    # A dash that cannot start is logged, then is one error line and exit 1.
+    def test_console_failed(self) -> None:
+        made = _root_make(self, True)
+        self.addCleanup(os.chdir, os.getcwd())
+        argv = ["--root", made.root, "console"]
+        missing = FileNotFoundError(2, "No such file or directory", "dash")
+        with unittest.mock.patch("verbose.exec", side_effect=missing):
+            record = _run_captured(made, argv, b"", _CONSOLE_ENVIRONMENT)
+        self.assertEqual(record.code, 1)
+        self.assertEqual(record.raw_calls, [])
+        (line,) = _lines_parse(record.output)
+        message = _raised_check(self, line, "FileNotFoundError")
+        self.assertEqual(message, str(missing))
+        _failure_logged(self, made.root, message)
 
     # A dash a signal ended gives the shell's code, 128 plus the signal.
     def test_console_signal(self) -> None:
@@ -870,3 +961,30 @@ class TestError(unittest.TestCase):
         (line,) = _lines_parse(record.output)
         message = _raised_check(self, line, "FileNotFoundError")
         self.assertIn(path, message)
+        _log_absent(self, made.root)
+
+
+# Tests the lines the engine role writes to the server's log.
+class TestLog(unittest.TestCase):
+    # At verbose level 2 the log traces `hello` as the server submits it.
+    def test_hello_traced(self) -> None:
+        made = _level_write(_root_make(self, True), 2)
+        _loop_write(made.root, _LOOP_TEXT)
+        given = _REPLY_FULL + _AFTER_REPLY
+        argv = _engine_argv(made.root)
+        record = _run_captured(made, argv, given, _ENGINE_ENVIRONMENT)
+        self.assertEqual(record.code, 0)
+        (hello,) = _lines_parse(record.output)
+        header = json.dumps(hello["0"], separators=(",", ":"))
+        text = i18n("bootstrap.hello_submit", header)
+        self.assertEqual(_log_read(made.root), [(_SERVER_THREAD, 2, text)])
+
+    # Below verbose level 2 a run that does not fail logs nothing.
+    def test_hello_quiet(self) -> None:
+        made = _level_write(_root_make(self, True), 1)
+        _loop_write(made.root, _LOOP_TEXT)
+        given = _REPLY_FULL + _AFTER_REPLY
+        argv = _engine_argv(made.root)
+        record = _run_captured(made, argv, given, _ENGINE_ENVIRONMENT)
+        self.assertEqual(record.code, 0)
+        self.assertEqual(_log_read(made.root), [])

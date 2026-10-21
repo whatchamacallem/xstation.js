@@ -320,13 +320,17 @@ namespace test_utility {
       this.number_refused({ nested: [1, NaN] }, NaN);
     }
 
-    // Integers up to 2 to the 53 are written, larger ones throw.
-    test_integer_limit(): void {
+    // Every finite double is written, those beyond 2 to the 53 too.
+    test_double_range(): void {
       this.assertEqual(utility.json_text(2 ** 53), "9007199254740992");
       this.assertEqual(utility.json_text(-(2 ** 53)), "-9007199254740992");
-      this.number_refused(2 ** 53 + 2, 2 ** 53 + 2);
-      this.number_refused(-(2 ** 53) - 2, -(2 ** 53) - 2);
-      this.number_refused({ big: 1e300 }, 1e300);
+      this.assertEqual(utility.json_text(2 ** 53 + 2), "9007199254740994");
+      this.assertEqual(utility.json_text(1e16), "10000000000000000");
+      this.assertEqual(utility.json_text({ big: -1e300 }), '{"big":-1e+300}');
+      this.assertEqual(
+        utility.json_text(Number.MAX_VALUE),
+        "1.7976931348623157e+308"
+      );
     }
 
     // A value with no JSON text throws and does not give undefined.

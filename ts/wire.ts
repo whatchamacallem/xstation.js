@@ -599,7 +599,7 @@ namespace wire {
       if (fn !== undefined) {
         fn(code, this.error_seen);
       }
-      // The error line is the fault, which the queue raises, so none is added.
+      // The error line is the fault, which the queue or this port raised.
       if (this.error_seen) {
         return;
       }
@@ -663,11 +663,18 @@ namespace wire {
       }
     }
 
-    // Passes the first line to the hello receiver and the rest on.
+    // Passes hello to its receiver, the rest on, and throws an early error.
     private line_take(line: lines.Line): void {
       const type = jslb.field_get(line[0], "type");
       if (type === constants.error_type) {
         this.error_seen = true;
+        // Before hello no queue reads lines, so the port raises the message.
+        if (!this.hello_seen) {
+          const payload = jslb.payload_of(line);
+          throw new Error(
+            i18n("wire.error_first", payload.message, payload.stack),
+          );
+        }
       } else if (!this.hello_seen) {
         if (type !== constants.hello_type) {
           throw new Error(i18n("wire.hello_missing", type));

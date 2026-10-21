@@ -13,7 +13,7 @@
 # lints the Python ones with ruff check. Below a file's header, the comment at
 # its top, a comment must be one line, not be a <# #> comment, and outside its
 # Doxygen `code` spans hold nothing but letters, digits, white space and
-# _ENGLISH_PUNCT.
+# _ENGLISH_PUNCT. A .ps1 or .psd1 file may start with a UTF-8 byte order mark.
 
 import argparse, glob, io, os, re, subprocess, sys, tempfile, tokenize
 from typing import NamedTuple
@@ -47,6 +47,9 @@ _AUDIT_REFUSED = (
     "new SharedArrayBuffer(8);\n",
     "const t = `${await x}`;\n",
 )
+
+# The extensions of the PowerShell files, which start with a byte order mark.
+_BOM_EXTENSIONS = (".ps1", ".psd1")
 
 # A Doxygen code span, cut from a comment before its punctuation is checked.
 _CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
@@ -400,12 +403,14 @@ def javascript_template_scan(
     )
 
 
-# Fails on the first character beyond ASCII that the file may not hold.
+# Fails on the first disallowed character beyond ASCII, past a PowerShell BOM.
 def non_ascii_check(path: str) -> None:
     with open(path, "rb") as file:
         data = file.read()
+    # The `utf-8-sig` codec drops one byte order mark at the start, if any.
+    codec = "utf-8-sig" if path.endswith(_BOM_EXTENSIONS) else "utf-8"
     try:
-        text = data.decode("utf-8")
+        text = data.decode(codec)
     except UnicodeDecodeError as error:
         raise RuntimeError(f"{path}: not UTF-8: {error}") from error
     for line_number, line in enumerate(text.split("\n"), 1):

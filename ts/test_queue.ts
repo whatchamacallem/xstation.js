@@ -976,6 +976,20 @@ namespace test_queue {
       this.assertEqual(seen.join(","), "ab,cd");
     }
 
+    // Doubles past `2 ** 53`, which Python sends, are counted, held and run.
+    test_double_held(): void {
+      const seen: unknown[] = [];
+      const note = handler_fresh((line) => {
+        seen.push(line.n);
+        return undefined;
+      });
+      const line = line_build(note, {}, { n: 1e16, m: -1e300 });
+      const bench = bench_bounded({}, text_bytes(line));
+      bench.server.line_send(line);
+      this.assertEqual(seen, [1e16]);
+      this.assertEqual(bench.tasks.depth(), 0);
+    }
+
     // A reply stays held until its wake runs, and then its bytes are free.
     test_replies_held(): void {
       const far = type_fresh();

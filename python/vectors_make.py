@@ -4,7 +4,9 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Writes the JSLB vectors that the Python and the TypeScript decoders read
-# into python/vectors. NAME.jslb holds a stream of messages that jslb.py
+# into build/vectors, an intermediate made anew by test_all.py and by the test
+# page's build before their tests read it, the files an earlier run left
+# removed first. NAME.jslb holds a stream of messages that jslb.py
 # encodes or bytes made by hand, which the encoder would write otherwise or
 # refuse. NAME.json beside it holds the limits its decoder is built with, the
 # messages that decoder returns, every key a string and each blob's d in
@@ -20,8 +22,8 @@ from typing import Any, NamedTuple
 # The checkout's `python` directory.
 _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
 
-# Where the vectors and their sidecars go.
-_VECTORS_PATH = os.path.join(_PYTHON_PATH, "vectors")
+# Where the command line writes the vectors and their sidecars.
+_VECTORS_PATH = os.path.join(os.path.dirname(_PYTHON_PATH), "build", "vectors")
 
 # The longest line a vector's decoder reads, its CR included.
 _LINE_MAX = 4096
@@ -171,6 +173,11 @@ def _success_vectors() -> list[tuple[str, list[_EncodedMessage]]]:
         empty="",
     )
     vectors.append(("payload_values", [values]))
+    # Doubles past `2**53`, which both languages write as the same text.
+    doubles = echo_make(
+        [], large=1e300, low=-2.5e21, top=1.7976931348623157e308
+    )
+    vectors.append(("payload_doubles", [doubles]))
     document = {
         0: {"t": "scene", "v": 1},
         1: "/metaverse/castle/1",
@@ -382,22 +389,22 @@ def _messages_join(messages: list[_EncodedMessage]) -> bytes:
     )
 
 
-# Writes a vector's bytes and its sidecar into the vectors directory.
-def _vector_write(name: str, data: bytes, sidecar: dict[str, Any]) -> None:
-    with open(os.path.join(_VECTORS_PATH, name + ".jslb"), "wb") as file:
+# Writes a vector's bytes and its sidecar into the directory.
+def _vector_write(
+    directory: str, name: str, data: bytes, sidecar: dict[str, Any]
+) -> None:
+    with open(os.path.join(directory, name + ".jslb"), "wb") as file:
         file.write(data)
-    path = os.path.join(_VECTORS_PATH, name + ".json")
+    path = os.path.join(directory, name + ".json")
     with open(path, "w", encoding="utf-8", newline="\n") as file:
         file.write(json.dumps(sidecar, allow_nan=False, indent=2) + "\n")
 
 
-# Writes every vector and its sidecar.
-def main() -> None:
-    argparse.ArgumentParser(
-        description="Write the JSLB vectors and their sidecars into"
-        " python/vectors/."
-    ).parse_args()
-    os.makedirs(_VECTORS_PATH, exist_ok=True)
+# Writes every vector and its sidecar into the directory, emptied first.
+def vectors_write(directory: str) -> None:
+    os.makedirs(directory, exist_ok=True)
+    for stale in os.listdir(directory):
+        os.remove(os.path.join(directory, stale))
     made = ((True, _success_vectors()), (False, _loose_vectors()))
     for canonical, vectors in made:
         for name, messages in vectors:
@@ -406,7 +413,7 @@ def main() -> None:
                 "canonical": canonical,
                 "limits": _LIMITS,
             }
-            _vector_write(name, _messages_join(messages), sidecar)
+            _vector_write(directory, name, _messages_join(messages), sidecar)
     for vector in _error_vectors():
         sidecar = {
             "error": vector.slug,
@@ -414,7 +421,16 @@ def main() -> None:
             "limits": _LIMITS,
         }
         data = _messages_join(vector.before) + vector.fault
-        _vector_write(vector.name, data, sidecar)
+        _vector_write(directory, vector.name, data, sidecar)
+
+
+# Writes every vector and its sidecar into `build/vectors`.
+def main() -> None:
+    argparse.ArgumentParser(
+        description="Write the JSLB vectors and their sidecars into"
+        " build/vectors/, removing what an earlier run left there."
+    ).parse_args()
+    vectors_write(_VECTORS_PATH)
 
 
 if __name__ == "__main__":

@@ -3,9 +3,10 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the main loop in forked children over pipes, with roots in `build/`.
+# Each child opens the root's log first, as `bootstrap.py` does.
 
 import contextlib, functools, hashlib, jslb, json, main_loop, os, signal
-import sqlite3, tempfile, traceback, unittest
+import sqlite3, tempfile, traceback, unittest, verbose
 from collections.abc import Callable
 from i18n import i18n
 from typing import Any, NoReturn
@@ -76,8 +77,11 @@ _READ_BYTES = 65536
 # The `seq` of a new database, which its creation leaves as it was.
 _SEQ_CREATED = 0
 
-# The `seq` of `_files` on a new root, the seeded script, as `hello` records.
-_FILES_SEQ = 1
+# The `seq` of `_files` on a new root: the provider's script, then bootstrap's.
+_FILES_SEQ = 2
+
+# The key of the scripted provider's script in `_files`.
+_PROVIDER_KEY = "provider/script.json"
 
 # The `seq` of `_preferences` on a new root, which nothing writes.
 _PREFERENCES_SEQ = 0
@@ -145,6 +149,15 @@ _NOTE_VERSION = 1
 
 # The main loop file that the refused `source.put` would write.
 _SOURCE_NAME = "loop_test.py"
+
+# The database of the server's log, under the root.
+_LOG_DB = "_verbose"
+
+# The query of the thread, level and text of each line of the log, in order.
+_LOG_QUERY = "SELECT thread, level, text FROM line ORDER BY seq"
+
+# The thread the server's own lines are stored under in the log.
+_SERVER_THREAD = "server"
 
 
 # Reads the settings file of the checkout as an object.
@@ -273,13 +286,30 @@ def _child_end(
     os.kill(os.getpid(), signal.SIGKILL)
 
 
+# Opens the root's log with the ring and the level of its settings.
+def _log_open(root: str) -> None:
+    path = os.path.join(root, "settings.json")
+    with open(path, encoding="utf-8") as file:
+        values: dict[str, Any] = json.load(file)
+    verbose.log_open(root, values["verbose_ring"])
+    verbose.level_set(values["verbose_level"])
+
+
+# The thread, level and text of each line of the root's log, in order.
+def _log_read(root: str) -> list[tuple[str, int, str]]:
+    rows: list[tuple[str, int, str]] = _rows_read(root, _LOG_DB, _LOG_QUERY)
+    return rows
+
+
 # The work of a child that prepares the root and says the `seq` it returned.
 def _prepare_once(root: str, read_fd: int, write_fd: int) -> str:
+    _log_open(root)
     return json.dumps(main_loop.loop_prepare(root))
 
 
 # The work of a child that prepares the root and serves the pipes to the end.
 def _loop_serve(root: str, read_fd: int, write_fd: int) -> str:
+    _log_open(root)
     answers = main_loop.loop_prepare(root)
     main_loop.loop_run(read_fd, write_fd, root)
     return json.dumps(answers)
@@ -368,10 +398,16 @@ class TestPrepare(ScratchCase):
         self.assertEqual(stored, expected)
         preferences = _rows_read(self.root, "_preferences", _ROWS_QUERY)
         self.assertEqual(preferences, [])
-        script = _seed_read("bootstrap.js")
+        seeded_files = (
+            (_PROVIDER_KEY, _seed_read("provider_script.json")),
+            ("script/bootstrap.js", _seed_read("bootstrap.js")),
+        )
         files = _rows_read(self.root, "_files", _HASHES_QUERY)
-        digest = hashlib.sha256(script).digest()
-        self.assertEqual(files, [("script/bootstrap.js", len(script), digest)])
+        expected = [
+            (key, len(data), hashlib.sha256(data).digest())
+            for key, data in seeded_files
+        ]
+        self.assertEqual(sorted(files), expected)
         heads = _rows_read(self.root, "metaverse", _HEADS_QUERY)
         self.assertEqual(heads, _SEED_HEADS)
         for name in _SEED_IDS:
@@ -417,6 +453,33 @@ class TestPrepare(ScratchCase):
         self.assertEqual(heads, _SEED_HEADS)
         columns = _rows_read(self.root, "metaverse", _COLUMNS_QUERY)
         self.assertEqual(columns, _UNIVERSE_COLUMNS)
+
+    # A provider script in `_files` is kept, and a missing one seeded again.
+    def test_provider_kept(self) -> None:
+        self.settings_write()
+        first = self.prepare_read()
+        path = os.path.join(self.root, "_files.sqlite")
+        own = b'{"start":"own","nodes":{"own":{"replies":{}}}}'
+        digest = hashlib.sha256(own).digest()
+        with contextlib.closing(sqlite3.connect(path)) as connection:
+            with connection:
+                connection.execute(
+                    "UPDATE _kv SET size = ?, sha256 = ?, data = ?"
+                    " WHERE key = ?",
+                    (len(own), digest, own, _PROVIDER_KEY),
+                )
+        self.assertEqual(self.prepare_read(), first)
+        kept = _value_read(self.root, "_files", _PROVIDER_KEY)
+        self.assertEqual(kept, own)
+        with contextlib.closing(sqlite3.connect(path)) as connection:
+            with connection:
+                connection.execute(
+                    "DELETE FROM _kv WHERE key = ?", (_PROVIDER_KEY,)
+                )
+        again = {**first, "_files": first["_files"] + 1}
+        self.assertEqual(self.prepare_read(), again)
+        seeded = _value_read(self.root, "_files", _PROVIDER_KEY)
+        self.assertEqual(seeded, _seed_read("provider_script.json"))
 
 
 # `loop_run` over pipes: the replies, a streamed blob, failures and the end.
@@ -521,6 +584,42 @@ class TestLoop(ScratchCase):
         self.assertEqual(len(replies), 1)
         message = i18n("dispatch.handler_unknown", "no.such", 0)
         self.error_check(replies[0], 1, message)
+
+    # A failure's message is in the log, and its `error` line is still sent.
+    def test_failure_logged(self) -> None:
+        unknown = _request_make("no.such", 1)
+        replies = self.failure_read(_lines_encode([unknown]))
+        message = i18n("dispatch.handler_unknown", "no.such", 0)
+        self.error_check(replies[0], 1, message)
+        text = i18n("main_loop.serve_failed", message)
+        self.assertEqual(_log_read(self.root), [(_SERVER_THREAD, 0, text)])
+
+    # A fault of the input with no line is logged the same way.
+    def test_fault_logged(self) -> None:
+        replies = self.failure_read(_BAD_LINE)
+        message = i18n("jslb.no_type")
+        self.error_check(replies[0], None, message)
+        text = i18n("main_loop.serve_failed", message)
+        self.assertEqual(_log_read(self.root), [(_SERVER_THREAD, 0, text)])
+
+    # At verbose level 2 the log traces each line dispatched and each reply.
+    def test_trace_logged(self) -> None:
+        self.settings_write(
+            overflow_bytes=_OVERFLOW_BYTES,
+            chunk_bytes=_CHUNK_BYTES,
+            verbose_level=2,
+        )
+        request = _get_make(1, "/metaverse/world")
+        _, replies = self.served_read([request])
+        self.assertEqual(len(replies), 1)
+        dispatched = _json_bytes(request[0]).decode("utf-8")
+        replied = _json_bytes(replies[0][0]).decode("utf-8")
+        traced = [
+            i18n("main_loop.line_dispatch", dispatched),
+            i18n("main_loop.line_reply", replied),
+        ]
+        expected = [(_SERVER_THREAD, 2, text) for text in traced]
+        self.assertEqual(_log_read(self.root), expected)
 
     # A reply, to `hello` or to any other id, gets an `error` line with no id.
     def test_reply_unknown(self) -> None:

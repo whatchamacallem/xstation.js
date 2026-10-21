@@ -5,7 +5,8 @@
 # Headless Chrome, or else Edge, on Windows, driven from WSL over the DevTools
 # protocol. A Browser starts it with a profile of its own that goes when it
 # does, and drives one page of it: opens a URL, evaluates JavaScript, follows
-# the console, saves a screenshot and closes the page. WSL's NAT networking
+# the console, saves a screenshot, traces it and closes the page, and picks
+# out a trace's synchronous loads on the page's UI thread. WSL's NAT networking
 # can't reach Windows' 127.0.0.1, where Chrome serves DevTools, so a relay in
 # `powershell.exe` carries the WebSocket over its stdin and stdout. Standard
 # library only, and `powershell.exe` and `wslpath` are the programs it starts.
@@ -17,6 +18,18 @@ from typing import IO, Any, NamedTuple, Self, cast
 
 # The public name of this module, as its stub declares it.
 __all__ = ["Browser"]
+
+# The trace categories of the synchronous loads and of the thread names.
+_BLOCKING_CATEGORIES = ("loading", "__metadata")
+
+# The trace events of a synchronous load, as Chrome's versions name them.
+_BLOCKING_EVENT_NAMES = frozenset(
+    (
+        "URLLoader::loadSynchronously",
+        "WebURLLoader::loadSynchronously",
+        "WebURLLoaderImpl::loadSynchronously",
+    )
+)
 
 # Where to look for a browser, in order: a Windows variable and a path in it.
 _BROWSER_LOCATIONS: tuple[tuple[str, str], ...] = (
@@ -137,6 +150,9 @@ while ($true) {
 
 # Seconds for a stopped process to be gone, a default chosen by its writer.
 _STOP_WAIT_SECONDS = 5
+
+# The name Chrome gives a renderer's main thread, where the page's UI runs.
+_UI_THREAD_NAME = "CrRendererMain"
 
 # What RFC 6455 appends to the key before it is hashed into the accept value.
 _WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"

@@ -8,7 +8,8 @@
 // and keys and of the permit buttons, the media port, the console view, the
 // overlays, and the handlers that paint renders, keep media, ask permits and
 // carry the player's turns. The test page's UI thread runs its tests on the
-// same queue.
+// same queue, and the test engine page hands the engine's live queue to the
+// caller once it is made.
 
 namespace page {
   // The owners, ids, line types, settings and texts of the page.
@@ -38,6 +39,7 @@ namespace page {
     permit_wake: "ui.permit_reply",
     media_wake: "ui.media_reply",
     console_wake: "ui.console_reply",
+    closed_wake: "ui.console_closed",
     render_type: "render",
     store_type: "media.store",
     fetch_type: "media.fetch",
@@ -77,8 +79,10 @@ namespace page {
   // The console view as the handlers drive it.
   export interface ConsoleControl {
     view_toggle(): void;
+    open_wanted(): boolean;
     open_request(): dispatch.Sleep;
     open_done(wake: lines.Line): void;
+    close_done(wake: lines.Line): void;
     exit_done(): void;
     output_feed(data: Uint8Array): void;
   }
@@ -336,8 +340,6 @@ namespace page {
     readonly #parts: PageParts;
     // Whether the first render came, which ends the start.
     #ready = false;
-    // Whether the console was asked for, which happens once a page load.
-    #console_asked = false;
 
     // Takes what the handlers work with.
     constructor(parts: PageParts) {
@@ -441,7 +443,7 @@ namespace page {
       return undefined;
     }
 
-    // In debug mode toggles the console or an overlay, asking for tty 0 once.
+    // In debug mode toggles an overlay or the console, which asks for tty 0.
     key_take(line: lines.Line): dispatch.Sleep | undefined {
       const { debug, view, overlays } = this.#parts;
       const digit = jslb.payload_of(line).digit as number;
@@ -454,16 +456,19 @@ namespace page {
         return undefined;
       }
       view.view_toggle();
-      if (this.#console_asked) {
-        return undefined;
-      }
-      this.#console_asked = true;
-      return view.open_request();
+      // Shown and idle, at first or after its end, the view asks for tty 0.
+      return view.open_wanted() ? view.open_request() : undefined;
     }
 
     // Gives the view the answer to its opening.
     console_done(wake: lines.Line): undefined {
       this.#parts.view.open_done(wake);
+      return undefined;
+    }
+
+    // Gives the view the answer to its close, after which its end arrives.
+    closed_take(wake: lines.Line): undefined {
+      this.#parts.view.close_done(wake);
       return undefined;
     }
 
@@ -530,6 +535,9 @@ namespace page {
     register(constants.console_wake, version, (line) =>
       handlers.console_done(line),
     );
+    register(constants.closed_wake, version, (line) =>
+      handlers.closed_take(line),
+    );
     register(constants.output_type, version, (line) =>
       handlers.output_take(line),
     );
@@ -561,7 +569,8 @@ namespace page {
     area.append(subtitle, permit, form);
     const debug = document_of.createElement("div");
     debug.id = constants.debug_id;
-    body.append(canvas, area, debug);
+    // In the column of the style the debug views are above the subtitle band.
+    body.append(canvas, debug, area);
     return { canvas, subtitle, input, permit, debug };
   }
 
@@ -631,7 +640,7 @@ namespace page {
     elements: PageElements,
     port: MessagePort,
     value: settings.Settings,
-  ): void {
+  ): queue.TaskQueue {
     const tasks = thread_open(port, value, false);
     const images = new media.MediaPort(
       settings.settings_get(constants.media_setting) as number,
@@ -656,10 +665,11 @@ namespace page {
       },
       dispatch.handler_register,
     );
+    return tasks;
   }
 
-  // The UI thread of the engine page: the elements, the worker, the channel.
-  export function page_main(): void {
+  // The engine's elements, worker and channel, its queue given to `run`.
+  function engine_start(run: (tasks: queue.TaskQueue) => void): void {
     error_overlay.overlay_install();
     const body = document.body;
     const elements = page_build(body);
@@ -667,9 +677,20 @@ namespace page {
     error_overlay.stop_register(() => worker.terminate());
     const channel = new MessageChannel();
     channel.port1.onmessage = (event: MessageEvent<unknown>) => {
-      engine_open(body, elements, channel.port1, settings_take(event.data));
+      const value = settings_take(event.data);
+      run(engine_open(body, elements, channel.port1, value));
     };
     worker_post(worker, channel.port2);
+  }
+
+  // The UI thread of the engine page, whose queue nothing outside it takes.
+  export function page_main(): void {
+    engine_start(() => undefined);
+  }
+
+  // The UI thread of the engine page, its live queue given to `run` when made.
+  export function test_engine(run: (tasks: queue.TaskQueue) => void): void {
+    engine_start(run);
   }
 
   // The UI thread of the test page: the worker, then the tests on the queue.

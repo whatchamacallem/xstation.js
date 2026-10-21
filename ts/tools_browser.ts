@@ -6,10 +6,13 @@
 // through the store inside the task of the `mcp` line: SQL, databases, values,
 // documents, scripts, images, the render, the debug console after the
 // player's permit, the verbose level and tail, and the measurement and
-// administration of the databases against their soft limit. A tool that
-// waits submits its one request to an explicit owner and sleeps, and its
-// wake, registered on the server beside the tools, finishes the result or
-// sleeps again.
+// administration of the databases against their soft limit. A value this
+// side no longer holds is asked of the server before it is read, a snapshot
+// comes in pieces that each fit `message_max`, and a render that leaves a
+// scene frees the cached values of `_files` the new scene does not name
+// until they fit `files_browser_bytes`. A tool that waits submits its one
+// request to an explicit owner and sleeps, and its wake, registered on the
+// server beside the tools, finishes the result or sleeps again.
 
 namespace tools_browser {
   // Finishes a tool's result from the state and replies of its wake.
@@ -29,9 +32,10 @@ namespace tools_browser {
     timeout_seconds: number;
   }
 
-  // The state of a wake that loads a database.
-  interface DatabaseState {
-    db: string;
+  // The state of a wake that fills a value back: its ref, whether a document.
+  interface ValueState {
+    ref: string;
+    document: boolean;
   }
 
   // The names, refs, texts, owners, line types and tools of the tools.
@@ -64,6 +68,13 @@ namespace tools_browser {
     image_format: "b64_json" as const,
     // The setting of the soft limit of the databases' bytes.
     soft_setting: "db_soft_bytes",
+    // The settings a reply of a piece of a snapshot keeps within.
+    message_setting: "message_max",
+    line_setting: "line_max",
+    // The setting of the budget of the browser's tier of `_files`.
+    files_setting: "files_browser_bytes",
+    // The database of media, scripts and blobs, the tier the render frees.
+    files_db: "_files",
     // The choices of a permit that do not simply accept.
     deny_choice: "deny",
     always_choice: "always",
@@ -79,7 +90,7 @@ namespace tools_browser {
     input_type: "console.input",
     read_type: "console.read",
     tail_type: "verbose.tail",
-    snapshot_type: "db.snapshot",
+    get_type: "kv.get",
     // The wake types of the tools, one per reply they sleep on.
     image_wake: "tools.image_reply",
     media_wake: "tools.media_reply",
@@ -89,6 +100,8 @@ namespace tools_browser {
     console_wake: "tools.console_reply",
     tail_wake: "tools.tail_reply",
     snapshot_wake: "tools.snapshot_reply",
+    piece_wake: "tools.piece_reply",
+    value_wake: "tools.value_reply",
     // The tools of this server, in the order `tools/list` lists them.
     tools: Object.freeze<readonly mcp.Tool[]>([
       {
@@ -377,6 +390,8 @@ namespace tools_browser {
     readonly allowed = new Set<string>();
     // The number of the last permit asked.
     permit_count = 0;
+    // The scene the last render showed, none before the first.
+    scene_shown: string | undefined = undefined;
 
     // Keeps what the tools use, one context per server.
     constructor(
@@ -414,6 +429,38 @@ namespace tools_browser {
     ): dispatch.Sleep {
       const id = this.tasks.task_submit(line, owner);
       return dispatch.task_sleep(state, [id], then_type);
+    }
+
+    // Asks the server for a value this side does not hold and sleeps on it.
+    value_fetch(ref: string, document: boolean): dispatch.Sleep {
+      const header = jslb.header_make(constants.get_type, { key: ref });
+      const state: ValueState = { ref, document };
+      return this.request_sleep(
+        jslb.line_make(header, [], {}),
+        constants.server_owner,
+        state,
+        constants.value_wake,
+      );
+    }
+
+    // Frees the cached values of `_files` the scene does not name, to fit.
+    files_evict(scene: lines.DocRef, image: string | undefined): void {
+      const open = this.store.db_list();
+      // An unloaded `_files` holds no values to free.
+      if (!open.includes(constants.files_db)) {
+        return;
+      }
+      const keep: string[] = [];
+      // The scene's refs are its headers, read when its database is open.
+      if (open.includes(substrate.ref_split(scene).db as string)) {
+        const document = this.store.doc_get(scene);
+        keep.push(...(jslb.headers_of(document).slice(1) as string[]));
+      }
+      if (image !== undefined) {
+        keep.push(image);
+      }
+      const budget = this.settings_get(constants.files_setting) as number;
+      this.store.cache_evict(constants.files_db, keep, budget);
     }
 
     // Types a command line into the console and sleeps on reading its output.
@@ -459,8 +506,14 @@ namespace tools_browser {
         store.db_drop(args.db as string);
         return result_json({});
       },
-      // Reads a value as text.
-      kv_get: (args) => result_text(context.text_read(args.ref as string)),
+      // Reads a value as text, asking the server first when it is not held.
+      kv_get: (args) => {
+        const ref = args.ref as string;
+        if (!store.kv_held(ref)) {
+          return context.value_fetch(ref, false);
+        }
+        return result_text(context.text_read(ref));
+      },
       // Writes text as its bytes and returns their digest and the `seq`.
       kv_put: (args) => {
         const data = utility.utf8_encode(args.text as string);
@@ -475,8 +528,14 @@ namespace tools_browser {
         const keys = store.kv_list(args.db as string, args.prefix as string);
         return result_json({ keys });
       },
-      // Reads a document in its encoded form.
-      doc_get: (args) => result_json(store.doc_get(args.ref as string)),
+      // Reads a document encoded, asking the server first when it is not held.
+      doc_get: (args) => {
+        const ref = args.ref as string;
+        if (!store.kv_held(ref)) {
+          return context.value_fetch(ref, true);
+        }
+        return result_json(store.doc_get(ref));
+      },
       // Writes the next version of a document and returns its ref.
       doc_put: (args) => {
         const body = args.body as lines.Document;
@@ -525,12 +584,18 @@ namespace tools_browser {
       render: (args) => {
         const world = context.text_read(constants.world_ref);
         const scene = context.text_read(`/${world}/${constants.scene_key}`);
+        const image = args.image as string | undefined;
+        // A render of another scene than the last one shown leaves that one.
+        if (scene !== context.scene_shown) {
+          context.files_evict(scene, image);
+          context.scene_shown = scene;
+        }
         const payload: { [key: string]: unknown } = {
           scene,
           subtitle: args.subtitle,
         };
-        if (args.image !== undefined) {
-          payload.image = args.image;
+        if (image !== undefined) {
+          payload.image = image;
         }
         return context.request_sleep(
           line_build(constants.render_type, payload),
@@ -590,13 +655,18 @@ namespace tools_browser {
         store.db_unload(args.db as string);
         return result_json({});
       },
-      // Asks the server for the snapshot of a database and sleeps on it.
+      // Asks the server for the head of a database's snapshot, asleep on it.
       db_load: (args) => {
-        const state: DatabaseState = { db: args.db as string };
+        const fetch = new substrate.SnapshotFetch(
+          args.db as string,
+          context.settings_get(constants.message_setting) as number,
+          context.settings_get(constants.line_setting) as number,
+          false,
+        );
         return context.request_sleep(
-          line_build(constants.snapshot_type, { db: state.db }),
+          fetch.head_line(),
           constants.server_owner,
-          state,
+          fetch,
           constants.snapshot_wake,
         );
       },
@@ -674,15 +744,44 @@ namespace tools_browser {
       // Returns the lines the server sent.
       [constants.tail_wake]: (_state, replies) =>
         result_json({ lines: reply_payload(replies).lines }),
-      // Opens the snapshot and checks its `seq` against the server's reply.
+      // Takes the head of the snapshot and asks for its first piece.
       [constants.snapshot_wake]: (state, replies) => {
-        const { db } = state as DatabaseState;
-        const seq = store.db_load(db, reply_data(replies));
-        const sent = reply_payload(replies).seq;
+        const fetch = state as substrate.SnapshotFetch;
+        return context.request_sleep(
+          fetch.head_take(replies[0]),
+          constants.server_owner,
+          fetch,
+          constants.piece_wake,
+        );
+      },
+      // Takes a piece and asks the next, or opens the snapshot at its `seq`.
+      [constants.piece_wake]: (state, replies) => {
+        const fetch = state as substrate.SnapshotFetch;
+        const next = fetch.piece_take(store.blob_take(reply_data(replies)));
+        if (next !== undefined) {
+          return context.request_sleep(
+            next,
+            constants.server_owner,
+            fetch,
+            constants.piece_wake,
+          );
+        }
+        const db = fetch.db;
+        const seq = store.db_load(db, fetch.bytes_get());
+        const sent = fetch.seq_sent();
         if (seq !== sent) {
           throw new Error(i18n("tools_browser.load_desync", db, seq, sent));
         }
         return result_json({ seq });
+      },
+      // Fills back the value the server sent, then reads it as asked.
+      [constants.value_wake]: (state, replies) => {
+        const { ref, document } = state as ValueState;
+        store.cache_fill(ref, reply_data(replies));
+        if (document) {
+          return result_json(store.doc_get(ref));
+        }
+        return result_text(context.text_read(ref));
       },
     };
   }

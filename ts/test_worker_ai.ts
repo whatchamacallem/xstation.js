@@ -15,9 +15,10 @@ namespace test_worker_ai {
       "replicate.done",
       "console.open",
       "worker.console_opened",
+      "console.close",
       "worker.start",
-      "worker.restored",
-      "worker.loaded",
+      "worker.snapshot_head",
+      "worker.snapshot_piece",
       "worker.initialized",
       "worker.listed",
       "worker.fetched",
@@ -311,6 +312,11 @@ namespace test_worker_ai {
       return this.snapshot_open("db_load", db, data);
     }
 
+    // The bytes of a piece, which the tests send as bytes.
+    blob_take(data: Uint8Array | string): Uint8Array {
+      return data as Uint8Array;
+    }
+
     // The open databases.
     db_list(): string[] {
       return [...this.open];
@@ -413,6 +419,7 @@ namespace test_worker_ai {
     store: StoreDouble,
     cache: CacheDouble,
     attached: string[],
+    changes: Partial<settings.Settings> = {},
   ): void {
     const browser = new mcp.Client(
       "hyperposition-engine",
@@ -436,6 +443,7 @@ namespace test_worker_ai {
       server,
       hello: hello_make(),
       full: false,
+      settings_get: reader_from({ ...settings_make(), ...changes }),
       provider_attach: () => {
         attached.push("provider");
       },
@@ -448,11 +456,26 @@ namespace test_worker_ai {
     bench.tasks.line_notify(line_short("worker.start"), "ai");
   }
 
-  // Answers the last snapshot request of the server double.
+  // The head of a snapshot of the bytes that the server keeps as number 3.
+  function head_make(data: Uint8Array, seq: number): Fields {
+    const sha256 = utility.sha256_hex(data);
+    return { snapshot: 3, size: data.length, sha256, seq };
+  }
+
+  // Answers the last snapshot request of the server double: head, one piece.
   function snapshot_answer(bench: Bench, seq: number): void {
+    const data = new Uint8Array([7]);
     const ask = bench.server.last_of("db.snapshot");
-    const blob = jslb.blob_make(new Uint8Array([7]));
-    bench.server.line_send(reply_to(ask, { sha256: "", seq }, [blob]));
+    bench.server.line_send(reply_to(ask, head_make(data, seq)));
+    const piece = bench.server.last_of("db.chunk");
+    bench.server.line_send(reply_to(piece, {}, [jslb.blob_make(data)]));
+  }
+
+  // The payloads of the piece requests the server double was asked.
+  function pieces_asked(bench: Bench): Fields[] {
+    return bench.server.posted
+      .filter((line) => type_of(line) === "db.chunk")
+      .map((line) => jslb.payload_of(line));
   }
 
   // The `JSON-RPC` response to an `mcp` request a double received.
@@ -659,14 +682,41 @@ namespace test_worker_ai {
         i18n("worker_ai.overlay_received", jslb.line_render(received)),
       ]);
     }
+
+    // The page's view forwarded as `verbose.put` passes and is not shown.
+    test_forward_unshown(): void {
+      const inner = new PortDouble();
+      const notes: string[] = [];
+      const tap = new worker_ai.WireTap(inner, (text) => {
+        notes.push(text);
+      });
+      for (const full of [true, false]) {
+        const put = line_short("verbose.put", { thread: "ui", lines: [] }, {
+          full,
+        });
+        tap.line_post(put, []);
+        this.assertTrue(inner.posted[inner.posted.length - 1] === put);
+      }
+      const sent = line_short("kv.list", { db: "castle", prefix: "" }, {
+        id: 2,
+      });
+      tap.line_post(sent, []);
+      this.assertEqual(inner.posted.length, 3);
+      this.assertEqual(notes, [
+        i18n("worker_ai.overlay_sent", jslb.line_render(sent)),
+      ]);
+    }
   }
 
-  // The relays of the UI's console opening and of the settings.
+  // The relays of the UI's console opening and close, and of the settings.
   export class TestRelays extends unittest.TestCase {
     // The UI's opening goes to the console port, and its token comes back.
     test_console_opened(): void {
       const bench = bench_make();
-      worker_ai.console_register(bench.tasks, register_route);
+      let closes = 0;
+      worker_ai.console_register(bench.tasks, register_route, () => {
+        closes += 1;
+      });
       const request = line_short("console.open", {}, { id: 7, full: true });
       bench.ui.line_send(request);
       const opening = bench.console.posted[0];
@@ -677,6 +727,27 @@ namespace test_worker_ai {
       const answer = bench.ui.posted[0];
       this.assertEqual(jslb.field_get(answer[0], "reply"), 7);
       this.assertEqual(answer.token, "abc");
+      this.assertEqual(bench.tasks.depth(), 0);
+      this.assertEqual(closes, 0);
+    }
+
+    // The UI's close closes the console port once and is answered at once.
+    test_console_closed(): void {
+      const bench = bench_make();
+      let closes = 0;
+      worker_ai.console_register(bench.tasks, register_route, () => {
+        closes += 1;
+      });
+      const request = line_short("console.close", {}, { id: 8, full: true });
+      bench.ui.line_send(request);
+      this.assertEqual(closes, 1);
+      this.assertEqual(bench.console.posted.length, 0);
+      this.assertEqual(bench.ui.posted.length, 1);
+      const answer = bench.ui.posted[0];
+      this.assertEqual(type_of(answer), "console.close");
+      this.assertEqual(jslb.field_get(answer[0], "reply"), 8);
+      this.assertTrue(Object.hasOwn(answer[0], "type"));
+      this.assertEqual(jslb.payload_of(answer), {});
       this.assertEqual(bench.tasks.depth(), 0);
     }
 
@@ -764,6 +835,54 @@ namespace test_worker_ai {
         error.message,
         i18n("worker_ai.snapshot_desync", "metaverse", 5, 6),
       );
+    }
+
+    // The databases to restore are fetched one after another, in order.
+    test_restores_turns(): void {
+      const bench = bench_make();
+      const store = store_seeded();
+      store.replace = ["_files", "metaverse"];
+      chain_make(bench, store, new CacheDouble(), []);
+      chain_start(bench);
+      this.assertEqual(snapshots_asked(bench), ["_files"]);
+      snapshot_answer(bench, 1);
+      this.assertEqual(snapshots_asked(bench), ["_files", "metaverse"]);
+      snapshot_answer(bench, 5);
+      this.assertEqual(store.calls.slice(1, 3), [
+        "db_restore _files bytes",
+        "db_restore metaverse bytes",
+      ]);
+      this.assertEqual(snapshots_asked(bench), ["_files", "metaverse"]);
+      this.assertEqual(type_of(bench.http.posted[0]), "mcp");
+    }
+
+    // A snapshot's pieces are asked one at a time, each once the last came.
+    test_pieces_turns(): void {
+      const bench = bench_make();
+      const store = store_seeded();
+      chain_make(bench, store, new CacheDouble(), [], {
+        line_max: 1024,
+        message_max: 1026,
+      });
+      chain_start(bench);
+      const data = new Uint8Array([7, 8, 9]);
+      const ask = bench.server.last_of("db.snapshot");
+      bench.server.line_send(reply_to(ask, head_make(data, 5)));
+      const first = { snapshot: 3, offset: 0, size: 2 };
+      this.assertEqual(pieces_asked(bench), [first]);
+      const piece = jslb.blob_make(data.slice(0, 2));
+      bench.server.line_send(
+        reply_to(bench.server.last_of("db.chunk"), {}, [piece]),
+      );
+      const second = { snapshot: 3, offset: 2, size: 1 };
+      this.assertEqual(pieces_asked(bench), [first, second]);
+      this.assertEqual(store.open, []);
+      const rest = jslb.blob_make(data.slice(2));
+      bench.server.line_send(
+        reply_to(bench.server.last_of("db.chunk"), {}, [rest]),
+      );
+      this.assertEqual(store.calls.slice(1), ["db_load metaverse bytes"]);
+      this.assertEqual(snapshots_asked(bench), ["metaverse", "_files"]);
     }
 
     // The world, universe and scene load in turn, then the image is fetched.

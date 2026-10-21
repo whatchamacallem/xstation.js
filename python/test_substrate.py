@@ -4,8 +4,9 @@
 #
 # Tests of the server substrate on scratch roots under build/: the tables on
 # first use, both ref forms, documents and heads, overflow to the cache, a
-# kill between a cache file and its row, snapshots, turns, SQL, the rules of
-# `seq` and a recorded sequence of forwarded operations replayed.
+# kill between a cache file and its row, snapshots and the pieces of a kept
+# one, turns, SQL, the rules of `seq` and a recorded sequence of forwarded
+# operations replayed.
 
 import base64, hashlib, jslb, json, math, os, signal, sqlite3, substrate
 import tempfile, unittest, unittest.mock
@@ -35,6 +36,9 @@ _VALUE_OVER = _VALUE_EXACT + bytes(1)
 
 # A map of 204800 bytes, over `overflow_bytes`.
 _MAP_BYTES = bytes(range(256)) * 800
+
+# The bytes of a piece that the tests ask of a kept snapshot.
+_PIECE_BYTES = 4096
 
 # The real `os.replace`, which the patched one of the forked child calls.
 _OS_REPLACE = os.replace
@@ -482,6 +486,17 @@ def _json_text(value: object) -> str:
 # The path of the cache file of a value under a root.
 def _cache_file(root: str, value: bytes) -> str:
     return os.path.join(root, "cache", hashlib.sha256(value).hexdigest())
+
+
+# Reads a kept snapshot whole in pieces of `_PIECE_BYTES`, the last shorter.
+def _pieces_read(
+    store: substrate.Store, head: substrate.SnapshotHead
+) -> bytes:
+    data = b""
+    while len(data) < head.size:
+        size = min(_PIECE_BYTES, head.size - len(data))
+        data += store.snapshot_read(head.snapshot, len(data), size)
+    return data
 
 
 # Every statement of the dump of a database file: its schema and its rows.
@@ -1516,6 +1531,80 @@ class TestSnapshot(unittest.TestCase):
         self.assertEqual(store.kv_get("/alpha/a").data, b"one")
         self.assertEqual(store.seq_get("alpha"), 1)
         self.assertEqual(sorted(os.listdir(root)), listed)
+
+    # A kept snapshot reads back in pieces as its serialized bytes, then goes.
+    def test_pieces_kept(self) -> None:
+        store = _store_make(self, _root_make(self))
+        store.db_create("alpha")
+        store.kv_put("/alpha/exact", _VALUE_EXACT)
+        data, seq = store.db_snapshot("alpha")
+        head = store.snapshot_keep("alpha")
+        digest = hashlib.sha256(data).digest()
+        self.assertEqual(
+            head, substrate.SnapshotHead(1, len(data), digest, seq)
+        )
+        self.assertEqual(seq, 1)
+        self.assertGreater(head.size, 2 * _PIECE_BYTES)
+        self.assertEqual(_pieces_read(store, head), data)
+        message = i18n("substrate.snapshot_unknown", 1)
+        _error_check(
+            self, LookupError, message, lambda: store.snapshot_read(1, 0, 1)
+        )
+
+    # A piece outside the snapshot or of no bytes raises, and the rest reads.
+    def test_pieces_bad(self) -> None:
+        store = _store_make(self, _root_make(self))
+        store.db_create("alpha")
+        head = store.snapshot_keep("alpha")
+        size = head.size
+        cases = [(-1, 1), (0, 0), (0, size + 1), (size, 1), (size - 1, 2)]
+        for offset, length in cases:
+            message = i18n("substrate.snapshot_range", 1, offset, length, size)
+            _error_check(
+                self,
+                ValueError,
+                message,
+                lambda: store.snapshot_read(1, offset, length),
+            )
+        message = i18n("substrate.snapshot_unknown", 2)
+        _error_check(
+            self, LookupError, message, lambda: store.snapshot_read(2, 0, 1)
+        )
+        data, _ = store.db_snapshot("alpha")
+        self.assertEqual(_pieces_read(store, head), data)
+
+    # Two kept snapshots of one database read apart, each its own bytes.
+    def test_snapshots_apart(self) -> None:
+        store = _store_make(self, _root_make(self))
+        store.db_create("alpha")
+        first_data, _ = store.db_snapshot("alpha")
+        first = store.snapshot_keep("alpha")
+        store.kv_put("/alpha/a", b"one")
+        second_data, _ = store.db_snapshot("alpha")
+        second = store.snapshot_keep("alpha")
+        self.assertEqual((first.snapshot, first.seq), (1, 0))
+        self.assertEqual((second.snapshot, second.seq), (2, 1))
+        self.assertNotEqual(first.sha256, second.sha256)
+        self.assertEqual(_pieces_read(store, first), first_data)
+        self.assertEqual(_pieces_read(store, second), second_data)
+
+    # A cached value stays held through the pieces of a snapshot and a restore.
+    def test_value_held(self) -> None:
+        root = _root_make(self)
+        store = _store_make(self, root)
+        store.db_create("alpha")
+        store.kv_put("/alpha/big", _VALUE_OVER)
+        head = store.snapshot_keep("alpha")
+        data = _pieces_read(store, head)
+        self.assertEqual(store.db_restore("alpha", data), head.seq)
+        path = _cache_file(root, _VALUE_OVER)
+        digest = hashlib.sha256(_VALUE_OVER).digest()
+        self.assertEqual(
+            store.kv_get("/alpha/big"),
+            substrate.KvValue(path, len(_VALUE_OVER), digest),
+        )
+        with open(path, "rb") as file:
+            self.assertEqual(file.read(), _VALUE_OVER)
 
 
 # A kill between a cache file and its row.

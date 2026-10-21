@@ -199,6 +199,9 @@ namespace boot {
   // The UI thread of the test page, which runs the tests it is given.
   export const test_page = page.test_page;
 
+  // The UI thread of the engine page, which gives its live queue to a caller.
+  export const test_engine = page.test_engine;
+
   // The AI worker of the engine page: faults first, then the page's message.
   export function worker_ai_main(): void {
     error_overlay.overlay_install();

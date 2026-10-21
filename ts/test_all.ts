@@ -8,7 +8,11 @@
 // then the others in the order of the test bundle, those that need the
 // document on the UI thread only. Each line goes out as a `tap.line` the
 // moment it is made, and the stream stops after the first module that fails.
-// The UI thread also shows its own stream with the failed lines marked.
+// The UI thread also shows its own stream with the failed lines marked. The
+// UI thread runs first: once its stream has ended it sends the AI worker the
+// `worker.tests` line that starts the worker's stream, so every UI line is
+// ahead of the worker's suite on the way to the server, and a hang or fault of
+// that suite loses none of them.
 
 namespace test_all {
   // The name of the UI thread, the TAP line, and the element of the stream.
@@ -19,6 +23,10 @@ namespace test_all {
     output_id: "tap_output",
     // Whether a failing test ends the stream: off, as Python's default.
     failfast: false,
+    // The line that starts the AI worker's stream, sent when the UI's ends.
+    tests_type: "worker.tests",
+    // The owner of that line, the AI worker.
+    tests_owner: "ai" as const,
   });
 
   // A reader of a test module's object, called when its block starts.
@@ -97,7 +105,7 @@ namespace test_all {
     runner.run_end();
   }
 
-  // Runs the UI thread's stream, then shows it with its failed lines marked.
+  // Runs the UI thread's stream and shows it, then starts the worker's stream.
   function page_run(tasks: queue.TaskQueue): void {
     const output = document.getElementById(constants.output_id);
     if (output === null) {
@@ -109,6 +117,11 @@ namespace test_all {
       texts.push(text);
     });
     output.innerHTML = tap_producer.report_html(texts.join("\n"));
+    const header = jslb.header_make(constants.tests_type, {
+      full: worker_ai.names_full(),
+    });
+    // Behind every line of this stream, so none waits for the worker's suite.
+    tasks.line_notify(jslb.line_make(header, [], {}), constants.tests_owner);
   }
 
   // Runs the AI worker's stream.

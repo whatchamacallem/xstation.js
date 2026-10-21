@@ -7,9 +7,10 @@
 # test modules in dependency order, each as one block of one TAP stream that
 # goes to stdout a line at a time, then checks that stream with the TAP
 # consumer and exits 1 unless it is well formed and holds no failing point. It
-# stops at the first module that fails, and every module has a timer. When the
-# stream is clean it runs the wire test in this process, then, when that exits
-# 0, the browser test, and exits with the code of the last one run. Standard
+# stops at the first module that fails, and every module has a timer. The JSLB
+# vectors are written anew into build/vectors as test_jslb loads, inside its
+# block. When the stream is clean it runs the wire test in this process and
+# exits with its code; the browser test is a runner of its own. Standard
 # library only:
 #
 #     python3 python/test_all.py
@@ -33,6 +34,7 @@ _MODULES = [
     "test_tap_producer",
     "test_tap_consumer",
     "test_i18n",
+    "test_vectors_make",
     "test_jslb",
     "test_verbose",
     "test_settings",
@@ -54,7 +56,14 @@ _MODULES = [
     "test_third_party_fetch",
     "test_devtools",
     "test_page_build",
+    "test_test_posix",
 ]
+
+# The one test module that reads the vectors, which are written as it loads.
+_VECTORS_READER = "test_jslb"
+
+# Where the vectors are written, an intermediate under `build`.
+_VECTORS_PATH = os.path.join(_BUILD_PATH, "vectors")
 
 # Bytecode of the modules imported from the python directory goes in `build`.
 sys.pycache_prefix = os.path.join(_BUILD_PATH, "pycache")
@@ -77,8 +86,12 @@ class StreamWriter:
         sys.stdout.flush()
 
 
-# Imports the test module and returns its tests.
+# Writes the vectors if the module reads them, then imports it, returns tests.
 def suite_load(loader: unittest.TestLoader, name: str) -> unittest.TestSuite:
+    if name == _VECTORS_READER:
+        import vectors_make
+
+        vectors_make.vectors_write(_VECTORS_PATH)
     return loader.loadTestsFromModule(importlib.import_module(name))
 
 
@@ -99,14 +112,14 @@ def timer_stop() -> None:
     signal.setitimer(signal.ITIMER_REAL, 0)
 
 
-# Runs the modules, checks the stream, then the wire and browser tests.
+# Runs the modules, checks the stream, then runs the wire test.
 def main() -> int:
     import tap_consumer, tap_producer
 
     parser = argparse.ArgumentParser(
         description="Run the tests of the TAP modules, then the other Python"
         " test modules in dependency order, as one TAP stream on stdout,"
-        " check the stream, then run the wire test and the browser test."
+        " check the stream, then run the wire test."
     )
     parser.add_argument(
         "--failfast",
@@ -136,14 +149,7 @@ def main() -> int:
 
     # The wire test parses `sys.argv` itself, so it is given no options.
     del sys.argv[1:]
-    code = test_wire.main()
-    if code != 0:
-        return code
-    # The browser test parses `sys.argv` itself, so it too gets no options.
-    del sys.argv[1:]
-    import test_browser
-
-    return test_browser.main()
+    return test_wire.main()
 
 
 if __name__ == "__main__":

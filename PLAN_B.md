@@ -14,8 +14,8 @@ true after the job is carried.
 code for `hyperposition-plan.md`.
 
 0.3 Order of authority: the maintainer's words in section 1, then this
-file's section 2, then `hyperposition-plan.md`, then `API/`, then `DATA/`.
-Agents do not edit the plan, `API/` or `DATA/`; section 7 lists the edits
+file's section 2, then `hyperposition-plan.md`, then `API/`.
+Agents do not edit the plan or `API/`; section 7 lists the edits
 the maintainer is asked to make so those files agree with this one.
 
 0.4 Section 4 holds defaults the maintainer has not confirmed. They are used
@@ -301,14 +301,6 @@ the `"_meta": {"xsjs": {"permit": true}}` of `source_put` and
 `system_restart {main_loop}`, debug" and "the permit set is
 `console_run`"; plan 8.6 names the initialization module beside the four.
 
-### 2.9 DATA deleted
-
-2.9.1 The maintainer, verbatim: "delete the data dir, it is an obsolete a
-planning tool." `DATA/` is deleted. No code or test reads or cites it; a
-test builds its own expectation. Every mention of `DATA/` elsewhere in this
-file names a directory that no longer exists, kept as the record of what was
-decided at the time.
-
 ### 2.10 Provider information
 
 2.10.1 The maintainer, verbatim: "provider info will be provided later, for
@@ -433,7 +425,7 @@ role. A repeated `--root` or `--main-loop` is an error.
 
 4.10 D11: the API additions and plan departures of section 5 stay.
 
-4.11 D12: TAP line grammar of `DATA/06_tap.txt`:
+4.11 D12: TAP line grammar:
 - the block plan `    1..N` comes first;
 - no `# Subtest` line;
 - bare method names;
@@ -542,7 +534,7 @@ wake type `ui.console_reply`.
 - the explicit owner route, which plan 10.10 lists as not built.
 
 5.18 The server root layout `<root>/python/bootstrap.py` and
-`<root>/i18n/`; plan 9 and `DATA/01` show `bootstrap.py` at the root.
+`<root>/i18n/`; plan 9 shows `bootstrap.py` at the root.
 
 5.19 The settings `message_max`, `queue_max` and `db_soft_bytes`; the tools
 `db_stats`, `db_compact`, `db_unload` and `db_load`.
@@ -555,26 +547,6 @@ wake type `ui.console_reply`.
 `console_view.*` phase names.
 
 ## 6 Open questions found while writing the code
-
-6.1 The `seq` of `metaverse` on a new root. `DATA/01` records 5: two
-documents and three rows. The plan's rule also counts the `universe`
-table's DDL, so the code gives 6, and the replay of the recorded sequences
-desyncs on `metaverse`. Options:
-- a) regenerate DATA with 6;
-- b) an API addition that applies a fixed schema at `seq` 0;
-- c) the `universe` DDL moves into the bootstrap script.
-
-6.2 DATA files to regenerate with `DATA/transcripts_make.py`:
-- 01: the name form with debug true; `seq`.
-- 02:
-  - ids per queue;
-  - the prompt id `prompt`, not `prompt/analyst`;
-  - `since` on `db.create`, and `seq`;
-  - turn numbers: the generator counts `sql.run` and `kv.put` as turns;
-  - the stored-block PNG (6.10).
-- 04: the error text.
-- 05: `since` and `seq`.
-- 06: the TAP grammar, after 2.4.
 
 6.3 The console opens once per page load in `console_view.ts`, while
 `ConsolePort` is being made reopenable for open, close, exit, open.
@@ -596,9 +568,6 @@ substrate's private check that integers stay within 2^53.
 
 6.9 `engine_sql` and `engine_turn` read `seq` before the lazily taken write
 lock. This is sound only under the single process model.
-
-6.10 The scripted provider's stored-block PNG is 852 bytes. `DATA/02`
-records an 88 byte zlib level 9 PNG.
 
 6.11 argparse still accepts `-h`, so a client `--url-arg -h` prints help to
 the pty and exits 0.
@@ -695,25 +664,21 @@ built.
 - `ts/media.d.ts` and `ts/console_view.d.ts`: 5.13 and 5.14. Not
   applied by task 1.16.10: awaiting acceptance.
 
-7.10 `DATA/`: the regenerations of 6.2. Not applied by task 1.16.10:
-`DATA/` is deleted (2.9).
-
-7.11 Applied by task 1.16.10 beyond 7.1 to 7.10:
+7.11 Applied by task 1.16.10 beyond 7.1 to 7.9:
 - the edits of 2.8.3: `API/mcp/tools.json` without the `_meta` of
   `source_put` and `system_restart`, plan 4.6 and 5.5 with the permit
   set `console_run`, plan 1.3 and 8.6 naming `boot.ts` (2.7);
 - plan 5.5's Unconfirmed tool limits on `db_create` replaced by the
   decision that no tool limit refuses it (2.2.6, 2.8);
-- every mention of `DATA/` in the plan and the whitelist removed, and
-  the plan's "recorded" operation sequences made sequences the test
-  builds (2.9);
+- the plan's "recorded" operation sequences made sequences the test
+  builds;
 - the provider file in the plan (5.2, 6.9, 9), `API/settings.json`,
   `API/ts/settings.d.ts`, `API/ts/lines.d.ts`, and the `info` parameter
   in `API/ts/agent.d.ts` and `API/ts/tools_browser.d.ts` (2.10);
 - the timers in plan 4.7 (2.6), invisibility in plan 2.6 (2.11), the
   formatter in plan 0.4 (2.12), MB as MiB in plan 0.5;
 - `API/sql/substrate.sql`'s refusal sentence removed (2.3);
-- the whitelist lines `API/python/tap/*.pyi` and `DATA/*.py` removed.
+- the whitelist line `API/python/tap/*.pyi` removed.
 
 ## 8 Work remaining in this job, in order
 
@@ -842,7 +807,7 @@ built now and are reworked if the answer differs.
 - c) another layout.
 
 10.4.3 The TAP line grammar:
-- a) `DATA/06_tap.txt`, plan first with bare names (built);
+- a) D12, plan first with bare names (built);
 - b) tappy's default output, with a `# TAP results for` header and the plan
   last;
 - c) the earlier writers' `# Subtest` grammar.
@@ -857,16 +822,9 @@ built now and are reworked if the answer differs.
 - b) flags inserted after `argv[0]`;
 - c) flags appended.
 
-10.4.6 The `metaverse` `seq` on a new root: a), b) or c) of 6.1.
-
 10.4.7 The console after `console.exit`:
 - a) closed until the next page load (built);
 - b) reopenable from ctrl-0.
-
-10.4.8 The scripted PNG:
-- a) regenerate `DATA/02` from stored blocks;
-- b) the runner ignores the PNG's size and digest;
-- c) another way.
 
 10.4.9 The Lookup Accelerator:
 - a) stays removed (held);
