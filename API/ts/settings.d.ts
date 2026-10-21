@@ -5,18 +5,15 @@ declare namespace settings {
     queue_synchronous: boolean;
     verbose_level: number;
     verbose_ring: number;
-    verbose_forward: boolean;
     line_max: number;
     blob_max: number;
-    message_max: number;
-    queue_max: number;
     overflow_bytes: number;
     chunk_bytes: number;
     srv_buf_size: number;
     media_db_bytes: number;
     files_browser_bytes: number;
     db_soft_bytes: number;
-    turn_compact_tokens: number;
+    turn_compact_turns: number;
     long_task_ms: number;
     provider: {
       scripted: boolean;

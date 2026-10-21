@@ -4,9 +4,8 @@
 #
 # The server substrate, the single door to SQLite: one connection for each
 # database file under a root, the substrate's tables in each, rows of values
-# with overflow to a cache directory, documents, turns, SQL, snapshots kept
-# for the pieces a reader asks of them, and the forwarded operations of
-# replication, `seq` counting each.
+# with overflow to a cache directory, documents, turns, SQL, snapshots, and
+# the forwarded operations of replication, `seq` counting each.
 
 import hashlib, json, math, os, re, sqlite3, tempfile, urllib.parse
 from collections.abc import Callable, Iterable
@@ -124,14 +123,6 @@ class RefParts(NamedTuple):
     db: str | None
     key: str
     version: int | None
-
-
-# A snapshot kept for its pieces: its number, size, digest and `seq`.
-class SnapshotHead(NamedTuple):
-    snapshot: int
-    size: int
-    sha256: bytes
-    seq: int
 
 
 # Raises unless the name is a C identifier, as a database name must be.
@@ -456,8 +447,6 @@ class Store:
         self._connections: dict[str, sqlite3.Connection] = {}
         self._joined: list[sqlite3.Connection] | None = None
         self._unlinks: set[str] = set()
-        self._snapshots: dict[int, bytes] = {}
-        self._snapshot_last = 0
         os.makedirs(self._cache, exist_ok=True)
 
     # Opens `<root>/<name>.sqlite`, applying the schema. Returns its `seq`.
@@ -635,34 +624,6 @@ class Store:
     def db_snapshot(self, db: str) -> tuple[bytes, int]:
         connection = self._connection_get(db)
         return self.transaction_run(lambda: self._snapshot_take(connection))
-
-    # Keeps a snapshot under the next number for its pieces. Returns its head.
-    def snapshot_keep(self, db: str) -> SnapshotHead:
-        data, seq = self.db_snapshot(db)
-        self._snapshot_last += 1
-        self._snapshots[self._snapshot_last] = data
-        digest = hashlib.sha256(data).digest()
-        return SnapshotHead(self._snapshot_last, len(data), digest, seq)
-
-    # The piece of a kept snapshot at `offset`; its last piece lets it go.
-    def snapshot_read(self, snapshot: int, offset: int, size: int) -> bytes:
-        if snapshot not in self._snapshots:
-            raise LookupError(i18n("substrate.snapshot_unknown", snapshot))
-        data = self._snapshots[snapshot]
-        end = offset + size
-        if offset < 0 or size < 1 or end > len(data):
-            raise ValueError(
-                i18n(
-                    "substrate.snapshot_range",
-                    snapshot,
-                    offset,
-                    size,
-                    len(data),
-                )
-            )
-        if end == len(data):
-            del self._snapshots[snapshot]
-        return data[offset:end]
 
     # Replaces the database file by a temp file and a rename. Returns `seq`.
     def db_restore(self, db: str, data: bytes | str) -> int:

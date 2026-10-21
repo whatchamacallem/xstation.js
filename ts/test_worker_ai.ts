@@ -17,8 +17,7 @@ namespace test_worker_ai {
       "worker.console_opened",
       "console.close",
       "worker.start",
-      "worker.snapshot_head",
-      "worker.snapshot_piece",
+      "worker.snapshot_reply",
       "worker.initialized",
       "worker.listed",
       "worker.fetched",
@@ -210,18 +209,15 @@ namespace test_worker_ai {
       queue_synchronous: false,
       verbose_level: 1,
       verbose_ring: 1000,
-      verbose_forward: true,
       line_max: 1048576,
-      blob_max: 10485760,
-      message_max: 10485760,
-      queue_max: 104857600,
+      blob_max: 2147483391,
       overflow_bytes: 131072,
       chunk_bytes: 1048576,
       srv_buf_size: 1048576,
       media_db_bytes: 268435456,
       files_browser_bytes: 1073741824,
       db_soft_bytes: 1073741824,
-      turn_compact_tokens: 65536,
+      turn_compact_turns: 64,
       long_task_ms: 5,
       provider: {
         scripted: true,
@@ -271,11 +267,6 @@ namespace test_worker_ai {
     });
   }
 
-  // The bytes the replication counts for a line without blobs.
-  function text_bytes(line: lines.Line): number {
-    return utility.utf8_encode(utility.json_text(line)).length;
-  }
-
   // A store double for replication: it keeps each line and reply it gets.
   class ForwardDouble implements worker_ai.ForwardStore {
     readonly done: [lines.Line, lines.Line][] = [];
@@ -310,11 +301,6 @@ namespace test_worker_ai {
     // Opens a database from a snapshot and returns its `seq`.
     db_load(db: string, data: Uint8Array | string): number {
       return this.snapshot_open("db_load", db, data);
-    }
-
-    // The bytes of a piece, which the tests send as bytes.
-    blob_take(data: Uint8Array | string): Uint8Array {
-      return data as Uint8Array;
     }
 
     // The open databases.
@@ -419,7 +405,6 @@ namespace test_worker_ai {
     store: StoreDouble,
     cache: CacheDouble,
     attached: string[],
-    changes: Partial<settings.Settings> = {},
   ): void {
     const browser = new mcp.Client(
       "hyperposition-engine",
@@ -443,7 +428,6 @@ namespace test_worker_ai {
       server,
       hello: hello_make(),
       full: false,
-      settings_get: reader_from({ ...settings_make(), ...changes }),
       provider_attach: () => {
         attached.push("provider");
       },
@@ -456,26 +440,13 @@ namespace test_worker_ai {
     bench.tasks.line_notify(line_short("worker.start"), "ai");
   }
 
-  // The head of a snapshot of the bytes that the server keeps as number 3.
-  function head_make(data: Uint8Array, seq: number): Fields {
-    const sha256 = utility.sha256_hex(data);
-    return { snapshot: 3, size: data.length, sha256, seq };
-  }
-
-  // Answers the last snapshot request of the server double: head, one piece.
+  // Answers the last snapshot request of the server double with one blob.
   function snapshot_answer(bench: Bench, seq: number): void {
     const data = new Uint8Array([7]);
     const ask = bench.server.last_of("db.snapshot");
-    bench.server.line_send(reply_to(ask, head_make(data, seq)));
-    const piece = bench.server.last_of("db.chunk");
-    bench.server.line_send(reply_to(piece, {}, [jslb.blob_make(data)]));
-  }
-
-  // The payloads of the piece requests the server double was asked.
-  function pieces_asked(bench: Bench): Fields[] {
-    return bench.server.posted
-      .filter((line) => type_of(line) === "db.chunk")
-      .map((line) => jslb.payload_of(line));
+    const sha256 = utility.sha256_hex(data);
+    const blobs = [jslb.blob_make(data)];
+    bench.server.line_send(reply_to(ask, { sha256, seq }, blobs));
   }
 
   // The `JSON-RPC` response to an `mcp` request a double received.
@@ -564,7 +535,7 @@ namespace test_worker_ai {
       );
       worker_ai.forwards_register(forwards, register_route);
       const first = sql_line("castle", 0);
-      const second = sql_line("castle", 1);
+      const second = kv_line("/castle/k");
       const other = sql_line("castle_world", 0);
       forwards.line_add(first);
       forwards.line_add(second);
@@ -572,7 +543,7 @@ namespace test_worker_ai {
       this.assertEqual(bench.server.posted.length, 2);
       this.assertTrue(bench.server.posted[0] === first);
       this.assertTrue(bench.server.posted[1] === other);
-      this.assertEqual(forwards.held_bytes(), text_bytes(second));
+      this.assertEqual(forwards.held_bytes(), 3);
       const reply = reply_to(first, { results: [], seq: 1 });
       bench.server.line_send(reply);
       this.assertEqual(store.done.length, 1);
@@ -610,12 +581,11 @@ namespace test_worker_ai {
       this.assertEqual(bench.tasks.depth(), 0);
     }
 
-    // Holding a line over `queue_max` throws and holds nothing more.
+    // Holding blobs over `blob_max` throws, lines without blobs count none.
     test_queue_over(): void {
       const bench = bench_make();
-      const bytes = text_bytes(sql_line("castle", 0));
       const value = settings_make();
-      value.queue_max = bytes;
+      value.blob_max = 6;
       const forwards = new worker_ai.ForwardQueue(
         new ForwardDouble(),
         bench.tasks,
@@ -623,21 +593,18 @@ namespace test_worker_ai {
         false,
       );
       worker_ai.forwards_register(forwards, register_route);
-      forwards.line_add(sql_line("castle", 0));
+      forwards.line_add(kv_line("/castle/a"));
       forwards.line_add(sql_line("castle", 1));
-      const over = sql_line("castle", 2);
+      forwards.line_add(kv_line("/castle/b"));
+      forwards.line_add(kv_line("/castle/c"));
+      this.assertEqual(forwards.held_bytes(), 6);
+      const over = kv_line("/castle/d");
       const error = thrown_get(() => forwards.line_add(over));
       this.assertEqual(
         error.message,
-        i18n(
-          "worker_ai.queue_over",
-          utility.json_text(over[0]),
-          bytes,
-          bytes,
-          bytes,
-        ),
+        i18n("worker_ai.queue_over", utility.json_text(over[0]), 3, 6, 6),
       );
-      this.assertEqual(forwards.held_bytes(), bytes);
+      this.assertEqual(forwards.held_bytes(), 6);
     }
 
     // A line of a type that writes no database is refused.
@@ -856,33 +823,52 @@ namespace test_worker_ai {
       this.assertEqual(type_of(bench.http.posted[0]), "mcp");
     }
 
-    // A snapshot's pieces are asked one at a time, each once the last came.
-    test_pieces_turns(): void {
+    // A snapshot comes in one reply, asks no piece and opens with its bytes.
+    test_snapshot_whole(): void {
       const bench = bench_make();
       const store = store_seeded();
-      chain_make(bench, store, new CacheDouble(), [], {
-        line_max: 1024,
-        message_max: 1026,
-      });
+      chain_make(bench, store, new CacheDouble(), []);
       chain_start(bench);
-      const data = new Uint8Array([7, 8, 9]);
       const ask = bench.server.last_of("db.snapshot");
-      bench.server.line_send(reply_to(ask, head_make(data, 5)));
-      const first = { snapshot: 3, offset: 0, size: 2 };
-      this.assertEqual(pieces_asked(bench), [first]);
-      const piece = jslb.blob_make(data.slice(0, 2));
-      bench.server.line_send(
-        reply_to(bench.server.last_of("db.chunk"), {}, [piece]),
-      );
-      const second = { snapshot: 3, offset: 2, size: 1 };
-      this.assertEqual(pieces_asked(bench), [first, second]);
-      this.assertEqual(store.open, []);
-      const rest = jslb.blob_make(data.slice(2));
-      bench.server.line_send(
-        reply_to(bench.server.last_of("db.chunk"), {}, [rest]),
-      );
+      this.assertEqual(jslb.payload_of(ask), { db: "metaverse" });
+      snapshot_answer(bench, 5);
+      const types = bench.server.posted.map((line) => type_of(line));
+      this.assertEqual(types, ["db.snapshot", "db.snapshot"]);
       this.assertEqual(store.calls.slice(1), ["db_load metaverse bytes"]);
       this.assertEqual(snapshots_asked(bench), ["metaverse", "_files"]);
+    }
+
+    // A snapshot whose bytes are not those of its `sha256` opens nothing.
+    test_snapshot_digest(): void {
+      const bench = bench_make();
+      const store = store_seeded();
+      chain_make(bench, store, new CacheDouble(), []);
+      chain_start(bench);
+      const data = new Uint8Array([7]);
+      const wrong = utility.sha256_hex(new Uint8Array([8]));
+      const ask = bench.server.last_of("db.snapshot");
+      const blobs = [jslb.blob_make(data)];
+      const reply = reply_to(ask, { sha256: wrong, seq: 5 }, blobs);
+      const error = thrown_get(() => bench.server.line_send(reply));
+      const sha256 = utility.sha256_hex(data);
+      this.assertEqual(
+        error.message,
+        i18n("substrate.snapshot_digest", "metaverse", sha256, wrong),
+      );
+      this.assertEqual(store.open, []);
+    }
+
+    // A streamed snapshot is checked by its cache digest, opened by handle.
+    test_snapshot_streamed(): void {
+      const bench = bench_make();
+      const store = store_seeded();
+      chain_make(bench, store, new CacheDouble(), []);
+      chain_start(bench);
+      const sha256 = utility.sha256_hex(new Uint8Array([7]));
+      const blob = jslb.blob_make("cache/0001", undefined, { sha256 }, 1);
+      const ask = bench.server.last_of("db.snapshot");
+      bench.server.line_send(reply_to(ask, { sha256, seq: 5 }, [blob]));
+      this.assertEqual(store.calls.slice(1), ["db_load metaverse cache/0001"]);
     }
 
     // The world, universe and scene load in turn, then the image is fetched.

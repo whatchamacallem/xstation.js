@@ -2,11 +2,12 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# The server's verbose log: a level, a ring of the latest lines, the `_verbose`
-# database in the root that holds every line the moment it is logged, and the
-# one place the engine starts an external program, whose input and output it
-# passes through at every level. It depends on no other engine module but the
-# strings.
+# The server's verbose log: a ring of the latest lines and the `_verbose`
+# database in the root that holds every line the moment it is logged, with no
+# level; and the shell's runner, the one place the engine starts an external
+# program, whose levels are the only verbose levels the server has and whose
+# input and output it passes through at every level. It depends on no other
+# engine module but the strings.
 
 import collections, os, shlex, sqlite3, subprocess, sys, time
 from i18n import i18n
@@ -15,7 +16,7 @@ from typing import NamedTuple
 # The file in the root that holds the lines.
 _FILE_NAME = "_verbose.sqlite"
 
-# The highest level, the one that says everything.
+# The highest level of the runner, the one that runs the verbose command line.
 _LEVEL_MAX = 2
 
 # The thread that a line from the server itself is stored under.
@@ -41,33 +42,29 @@ CREATE TABLE line (
     seq    INTEGER PRIMARY KEY,
     at     INTEGER NOT NULL,
     thread TEXT    NOT NULL,
-    level  INTEGER NOT NULL,
     text   TEXT    NOT NULL
 ) STRICT;
 """
 
 # The statement that stores one line.
-_LINE_INSERT = "INSERT INTO line (at, thread, level, text) VALUES (?, ?, ?, ?)"
+_LINE_INSERT = "INSERT INTO line (at, thread, text) VALUES (?, ?, ?)"
 
 # The statement that reads the newest lines of one thread, newest first.
 _TAIL_SELECT = (
-    "SELECT at, level, text FROM line WHERE thread = ? ORDER BY seq DESC"
-    " LIMIT ?"
+    "SELECT at, text FROM line WHERE thread = ? ORDER BY seq DESC LIMIT ?"
 )
 
 
-# One line: milliseconds since the epoch, its level, its text.
+# One line: milliseconds since the epoch and its text.
 class LogLine(NamedTuple):
     at: int
-    level: int
     text: str
 
 
 # The state of the log, which is empty until the log is opened.
 class _LogState:
-    # Starts with no level, no ring and no file.
+    # Starts with no ring and no file.
     def __init__(self) -> None:
-        self.level: int | None = None
         self.ring: collections.deque[LogLine] | None = None
         self.connection: sqlite3.Connection | None = None
 
@@ -76,7 +73,7 @@ class _LogState:
 _STATE = _LogState()
 
 
-# Raises unless the level is 0, 1 or 2.
+# Raises unless the runner's level is 0, 1 or 2.
 def _level_check(level: int) -> None:
     if not 0 <= level <= _LEVEL_MAX:
         raise ValueError(i18n("verbose.level_invalid", level, _LEVEL_MAX))
@@ -107,31 +104,17 @@ def log_open(root: str, ring: int) -> None:
 def log_close() -> None:
     connection, _ = _open_get()
     connection.close()
-    _STATE.level = None
     _STATE.ring = None
     _STATE.connection = None
 
 
-# Sets the level: 0 only what must be said, 1 Markdown progress, 2 everything.
-def level_set(level: int) -> None:
-    _level_check(level)
-    _STATE.level = level
-
-
 # Writes one line to `_verbose`, unbuffered, and to the ring of `verbose_ring`.
-def log(level: int, text: str) -> None:
-    _level_check(level)
+def log(text: str) -> None:
     connection, ring = _open_get()
-    if _STATE.level is None:
-        raise RuntimeError(i18n("verbose.level_unset"))
-    if level > _STATE.level:
-        return
     at = time.time_ns() // _NANOSECONDS_PER_MILLISECOND
-    line = LogLine(at, level, text)
+    line = LogLine(at, text)
     with connection:
-        connection.execute(
-            _LINE_INSERT, (line.at, _SERVER_THREAD, line.level, line.text)
-        )
+        connection.execute(_LINE_INSERT, (line.at, _SERVER_THREAD, line.text))
     ring.append(line)
 
 
@@ -148,13 +131,10 @@ def history_get(count: int) -> list[LogLine]:
 def lines_put(thread: str, lines: list[LogLine]) -> None:
     if thread not in _PAGE_THREADS:
         raise ValueError(i18n("verbose.thread_unknown", thread))
-    for line in lines:
-        _level_check(line.level)
     connection, _ = _open_get()
     with connection:
         connection.executemany(
-            _LINE_INSERT,
-            [(line.at, thread, line.level, line.text) for line in lines],
+            _LINE_INSERT, [(line.at, thread, line.text) for line in lines]
         )
 
 
@@ -165,10 +145,10 @@ def tail_get(thread: str, count: int) -> list[LogLine]:
     if count < 0:
         raise ValueError(i18n("verbose.count_invalid", count))
     connection, _ = _open_get()
-    rows: list[tuple[int, int, str]] = connection.execute(
+    rows: list[tuple[int, str]] = connection.execute(
         _TAIL_SELECT, (thread, count)
     ).fetchall()
-    return [LogLine(at, level, text) for at, level, text in reversed(rows)]
+    return [LogLine(at, text) for at, text in reversed(rows)]
 
 
 # Runs the program on this process's input and output, after a flush of both.
@@ -178,12 +158,12 @@ def _run_through(argv: list[str]) -> int:
     return subprocess.run(argv).returncode
 
 
-# Runs the program passed through, its start and its exit logged at the level.
-def _run_logged(level: int, argv: list[str]) -> int:
+# Runs the program passed through, its start and its exit logged.
+def _run_logged(argv: list[str]) -> int:
     command = shlex.join(argv)
-    log(level, i18n("verbose.exec_run", command))
+    log(i18n("verbose.exec_run", command))
     code = _run_through(argv)
-    log(level, i18n("verbose.exec_exit", command, code))
+    log(i18n("verbose.exec_exit", command, code))
     return code
 
 
@@ -193,5 +173,5 @@ def exec(level: int, argv: list[str], argv_verbose: list[str]) -> int:
     if level == 0:
         return _run_through(argv)
     if level == 1:
-        return _run_logged(level, argv)
-    return _run_logged(level, argv_verbose)
+        return _run_logged(argv)
+    return _run_logged(argv_verbose)

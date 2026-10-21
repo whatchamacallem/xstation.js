@@ -5,6 +5,5 @@ CREATE TABLE line (
     seq    INTEGER PRIMARY KEY,
     at     INTEGER NOT NULL,
     thread TEXT    NOT NULL,
-    level  INTEGER NOT NULL,
     text   TEXT    NOT NULL
 ) STRICT;

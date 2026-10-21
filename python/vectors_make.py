@@ -28,11 +28,8 @@ _VECTORS_PATH = os.path.join(os.path.dirname(_PYTHON_PATH), "build", "vectors")
 # The longest line a vector's decoder reads, its CR included.
 _LINE_MAX = 4096
 
-# The largest blob a vector's decoder reads.
-_BLOB_MAX = 65536
-
-# The largest message a vector's decoder reads, small so splits run fast.
-_MESSAGE_MAX = 8192
+# The most bytes a message's blobs come to, small so splits run fast.
+_BLOB_MAX = 8192
 
 # The largest blob a vector's decoder keeps in memory.
 _OVERFLOW_BYTES = 1024
@@ -41,7 +38,6 @@ _OVERFLOW_BYTES = 1024
 _LIMITS = {
     "line_max": _LINE_MAX,
     "blob_max": _BLOB_MAX,
-    "message_max": _MESSAGE_MAX,
     "overflow_bytes": _OVERFLOW_BYTES,
 }
 
@@ -194,11 +190,10 @@ def _success_vectors() -> list[tuple[str, list[_EncodedMessage]]]:
     length = len(next(jslb.line_encode(echo_make([], pad=""))))
     padded = echo_make([], pad="a" * (_LINE_MAX - length))
     vectors.append(("line_at_max", [padded]))
-    # A line of half `line_max` and a blob of the rest of `message_max`.
-    largest = _pattern_make(_MESSAGE_MAX - _LINE_MAX // 2)
-    length = len(next(jslb.line_encode(echo_make([largest], pad=""))))
-    at_max = echo_make([largest], pad="a" * (_LINE_MAX // 2 - length))
-    vectors.append(("message_at_max", [at_max]))
+    # Two blobs whose sizes come to `blob_max`.
+    half = _BLOB_MAX // 2
+    at_max = echo_make([_pattern_make(half), _pattern_make(_BLOB_MAX - half)])
+    vectors.append(("blobs_at_max", [at_max]))
     return [
         (name, [_pieces_split(list(jslb.line_encode(line))) for line in lines])
         for name, lines in vectors
@@ -216,10 +211,12 @@ def _error_vectors() -> list[_ErrorVector]:
     prefix = b'{"0":{"t":"echo"},"pad":"'
     suffix = b'"}\r'
     pad = b"a" * (_LINE_MAX + 1 - len(prefix) - len(suffix))
-    # A line of half `line_max` and a blob one byte past `message_max`.
-    blob = _pattern_make(_MESSAGE_MAX - _LINE_MAX // 2 + 1)
-    head = b'{"0":{"t":"echo","b":1},"1":{"s":%d},"pad":"' % len(blob)
-    filler = b"a" * (_LINE_MAX // 2 - len(head) - len(suffix))
+    # Two blobs whose sizes come to one byte past `blob_max`.
+    half = _BLOB_MAX // 2
+    over = b'{"0":{"t":"echo","b":2},"1":{"s":%d},"2":{"s":%d}}\r' % (
+        half,
+        _BLOB_MAX - half + 1,
+    )
     faults = [
         ("error_no_header_zero", "no_header_zero", b'{"t":"echo"}\r'),
         ("error_no_type", "no_type", b'{"0":{"i":1}}\r'),
@@ -292,14 +289,10 @@ def _error_vectors() -> list[_ErrorVector]:
         ("error_line_over_max", "line_over_max", prefix + pad + suffix),
         (
             "error_blob_over_max",
-            "blob_over_max",
+            "blobs_over",
             b'{"0":{"t":"echo","b":1},"1":{"s":%d}}\r' % (_BLOB_MAX + 1),
         ),
-        (
-            "error_message_over",
-            "message_over",
-            head + filler + suffix + blob,
-        ),
+        ("error_blobs_over", "blobs_over", over),
         (
             "error_utf8_overlong",
             "line_not_utf8",

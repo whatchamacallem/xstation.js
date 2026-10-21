@@ -32,11 +32,8 @@ _OVERFLOW_BYTES = 131072
 # The `line_max` of the settings, 1 MiB.
 _LINE_MAX = 1048576
 
-# The `blob_max` of the settings, 10 MiB.
-_BLOB_MAX = 10485760
-
-# The `message_max` of the settings, 10 MiB.
-_MESSAGE_MAX = 10485760
+# The `blob_max` of the settings, the largest database.
+_BLOB_MAX = 2147483391
 
 # The universe database that the tests create.
 _UNIVERSE = "castle"
@@ -148,7 +145,7 @@ def _wire_bytes(line: jslb.Object) -> bytes:
 # Decodes the one line the bytes hold.
 def _line_decode(wire: bytes) -> jslb.Object:
     decoder = jslb.LineDecoder(
-        _LINE_MAX, _BLOB_MAX, _MESSAGE_MAX, _OVERFLOW_BYTES, _sink_refuse
+        _LINE_MAX, _BLOB_MAX, _OVERFLOW_BYTES, _sink_refuse
     )
     (line,) = decoder.bytes_feed(wire)
     return line

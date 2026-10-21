@@ -5,19 +5,20 @@
 # Headless Chrome, or else Edge, on Windows, driven from WSL over the DevTools
 # protocol. A Browser starts it with a profile of its own that goes when it
 # does, and drives one page of it: opens a URL, evaluates JavaScript, follows
-# the console, saves a screenshot, traces it and closes the page, and picks
-# out a trace's synchronous loads on the page's UI thread. WSL's NAT networking
-# can't reach Windows' 127.0.0.1, where Chrome serves DevTools, so a relay in
-# `powershell.exe` carries the WebSocket over its stdin and stdout. Standard
-# library only, and `powershell.exe` and `wslpath` are the programs it starts.
+# the console, saves a screenshot, traces it, pauses one of its workers in the
+# debugger and closes the page, and picks out a trace's synchronous loads on
+# the page's UI thread. WSL's NAT networking can't reach Windows' 127.0.0.1,
+# where Chrome serves DevTools, so a relay in `powershell.exe` carries the
+# WebSocket over its stdin and stdout. Standard library only, and
+# `powershell.exe` and `wslpath` are the programs it starts.
 
 import base64, errno, functools, hashlib, json, os, select, shutil
 import subprocess, time, types, uuid
 from collections.abc import Callable
 from typing import IO, Any, NamedTuple, Self, cast
 
-# The public name of this module, as its stub declares it.
-__all__ = ["Browser"]
+# The public names of this module, as its stub declares them.
+__all__ = ["Browser", "blocking_categories", "blocking_find"]
 
 # The trace categories of the synchronous loads and of the thread names.
 _BLOCKING_CATEGORIES = ("loading", "__metadata")
@@ -204,14 +205,19 @@ class WaitTimer:
         return left
 
 
-# Collects page loads and passes console messages to the followers.
+# Keeps page loads, trace events, workers and pauses, and passes console on.
 class PageEvents:
-    # Starts with no followers and no page loads seen.
+    # Starts with no followers and nothing seen.
     def __init__(self) -> None:
         self.followers: list[Callable[[str], None]] = []
         self.lifecycle: set[tuple[str, str]] = set()
+        self.trace: list[dict[str, Any]] = []
+        self.trace_done = False
+        self.trace_lost = False
+        self.workers: dict[str, str] = {}
+        self.paused: set[str] = set()
 
-    # Records a page lifecycle event or passes a console message on.
+    # Records a load, trace, worker or pause event, or passes console text on.
     def message_handle(self, message: dict[str, Any]) -> None:
         method = message["method"]
         if method == "Page.lifecycleEvent":
@@ -221,6 +227,26 @@ class PageEvents:
             text = console_text(message["params"]["args"])
             for follower in self.followers:
                 follower(text)
+        elif method == "Tracing.dataCollected":
+            self.trace += message["params"]["value"]
+        elif method == "Tracing.tracingComplete":
+            self.trace_done = True
+            self.trace_lost = message["params"]["dataLossOccurred"]
+        elif method == "Target.attachedToTarget":
+            params = message["params"]
+            target = params["targetInfo"]
+            if target["type"] == "worker":
+                self.workers[target["title"]] = params["sessionId"]
+        elif method == "Target.detachedFromTarget":
+            gone = message["params"]["sessionId"]
+            self.workers = {
+                title: session
+                for title, session in self.workers.items()
+                if session != gone
+            }
+            self.paused.discard(gone)
+        elif method == "Debugger.paused":
+            self.paused.add(message["sessionId"])
 
 
 # Speaks the DevTools protocol over a WebSocket on a byte channel.
@@ -275,14 +301,26 @@ class ProtocolClient:
     def method_call(
         self, method: str, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:
+        browser = method.startswith(("Browser.", "Target."))
+        return self.session_call(
+            "" if browser else self.session_id, method, params
+        )
+
+    # Returns the result of a method on the session, the browser's when empty.
+    def session_call(
+        self,
+        session_id: str,
+        method: str,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         self.call_id += 1
         request: dict[str, Any] = {
             "id": self.call_id,
             "method": method,
             "params": params or {},
         }
-        if self.session_id and not method.startswith(("Browser.", "Target.")):
-            request["sessionId"] = self.session_id
+        if session_id:
+            request["sessionId"] = session_id
         self.frame_send(_WEBSOCKET_OPCODE_TEXT, json.dumps(request).encode())
         timer = WaitTimer(f"the reply to {method}", self.wait_seconds)
         while True:
@@ -590,6 +628,56 @@ class Browser:
             },
         )
 
+    # Ends the trace and returns its events once DevTools has sent them all.
+    def trace_end(self) -> list[dict[str, Any]]:
+        client = self.client_get()
+        client.method_call("Tracing.end")
+        client.events_pump(
+            "the trace to complete", lambda: self.events.trace_done
+        )
+        if self.events.trace_lost:
+            raise RuntimeError(
+                "the trace lost events, so it can't show everything that ran"
+            )
+        return self.events.trace
+
+    # Starts a trace of the categories on the page, its events sent as events.
+    def trace_start(self, categories: list[str]) -> None:
+        self.events.trace = []
+        self.events.trace_done = False
+        self.events.trace_lost = False
+        self.client_get().method_call(
+            "Tracing.start",
+            {
+                "transferMode": "ReportEvents",
+                "traceConfig": {"includedCategories": categories},
+            },
+        )
+
+    # Pauses the page's worker of that name in its debugger, waiting for it.
+    def worker_pause(self, name: str) -> None:
+        client = self.client_get()
+        client.session_call(
+            client.session_id,
+            "Target.setAutoAttach",
+            {
+                "autoAttach": True,
+                "waitForDebuggerOnStart": False,
+                "flatten": True,
+            },
+        )
+        client.events_pump(
+            f"the worker {name} to attach",
+            lambda: name in self.events.workers,
+        )
+        session_id = self.events.workers[name]
+        client.session_call(session_id, "Debugger.enable")
+        client.session_call(session_id, "Debugger.pause")
+        client.events_pump(
+            f"the worker {name} to pause",
+            lambda: session_id in self.events.paused,
+        )
+
 
 # Returns the accept value DevTools must answer the WebSocket key with.
 def accept_key(key: str) -> str:
@@ -605,6 +693,29 @@ def address_parse(text: str) -> EndpointAddress:
             f"{_DEVTOOLS_PORT_FILE_NAME} holds {text!r}, not a port and a path"
         )
     return EndpointAddress(int(fields[0]), fields[1])
+
+
+# Returns the trace categories that hold what `blocking_find` looks for.
+def blocking_categories() -> list[str]:
+    return list(_BLOCKING_CATEGORIES)
+
+
+# Returns the trace's synchronous loads on the main thread of a renderer.
+def blocking_find(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    threads = {
+        (event["pid"], event["tid"])
+        for event in events
+        if event["name"] == "thread_name"
+        and event["args"]["name"] == _UI_THREAD_NAME
+    }
+    if not threads:
+        raise RuntimeError(f"the trace names no {_UI_THREAD_NAME} thread")
+    return [
+        event
+        for event in events
+        if event["name"] in _BLOCKING_EVENT_NAMES
+        and (event["pid"], event["tid"]) in threads
+    ]
 
 
 # Returns exactly count bytes from the reader, failing if it runs dry first.

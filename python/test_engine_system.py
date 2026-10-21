@@ -32,11 +32,8 @@ _TOOLS_PATH = os.path.join(_ROOT_PATH, "API", "mcp", "tools.json")
 # The longest line the test decoder takes, the size of the setting.
 _LINE_MAX = 1048576
 
-# The largest blob the test decoder takes, the size of the setting.
-_BLOB_MAX = 10485760
-
-# The largest message the test decoder takes, the size of the setting.
-_MESSAGE_MAX = 10485760
+# The most bytes the blobs of a message come to, the size of the setting.
+_BLOB_MAX = 2147483391
 
 # The size above which the test decoder streams a blob, from the setting.
 _OVERFLOW_BYTES = 131072
@@ -94,7 +91,7 @@ def _wire_pass(
 ) -> jslb.Object:
     data = b"".join(cast(bytes, piece) for piece in jslb.line_encode(line))
     decoder = jslb.LineDecoder(
-        _LINE_MAX, _BLOB_MAX, _MESSAGE_MAX, overflow_bytes, sink_make
+        _LINE_MAX, _BLOB_MAX, overflow_bytes, sink_make
     )
     (decoded,) = decoder.bytes_feed(data)
     return decoded

@@ -2,49 +2,33 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// The verbose lines of one thread: the level, the ring of the latest lines
-// and the one sink that receives each line the level keeps.
+// The verbose lines of one thread, which has no verbose level: the ring of
+// the latest lines, trimmed to the `verbose_ring` setting from the first line
+// on, and the one sink that receives every line.
 
 namespace verbose {
   // The constants of this module.
   const constants = Object.freeze({
-    level_max: 2,
     ring_setting: "verbose_ring",
   });
 
-  // The level, the ring and the sink of the verbose lines of one thread.
+  // The ring and the sink of the verbose lines of one thread.
   export class LineRing {
-    private level: number | undefined;
     private readonly ring: lines.VerboseLine[] = [];
     private sink: ((line: lines.VerboseLine) => void) | undefined;
     private readonly size_get: () => unknown;
 
-    // Takes the reader of the ring size, which is used once a level is set.
+    // Takes the reader of the ring size, which is read again for each line.
     constructor(size_get: () => unknown) {
       this.size_get = size_get;
     }
 
-    // Sets the level and trims the ring to the size the settings give.
-    level_set(level: number): void {
-      this.level_check(level);
+    // Writes a line to the ring, trimmed to the size, then to the sink.
+    log(text: string): void {
       const size = this.ring_size();
-      this.level = level;
-      this.ring_trim(size);
-    }
-
-    // Writes a line to the ring and the sink unless it is above the level.
-    log(level: number, text: string): void {
-      this.level_check(level);
-      const current = this.level;
-      if (current !== undefined && level > current) {
-        return;
-      }
-      const size = current === undefined ? undefined : this.ring_size();
-      const line = Object.freeze({ at: utility.time_now(), level, text });
+      const line = Object.freeze({ at: utility.time_now(), text });
       this.ring.push(line);
-      if (size !== undefined) {
-        this.ring_trim(size);
-      }
+      this.ring_trim(size);
       const sink = this.sink;
       if (sink !== undefined) {
         sink(line);
@@ -65,19 +49,6 @@ namespace verbose {
         throw new Error(i18n("verbose.sink_twice"));
       }
       this.sink = fn;
-    }
-
-    // Throws unless the level is a whole number from 0 to the highest.
-    private level_check(level: number): void {
-      if (
-        !Number.isInteger(level) ||
-        level < 0 ||
-        level > constants.level_max
-      ) {
-        throw new Error(
-          i18n("verbose.level_invalid", level, constants.level_max)
-        );
-      }
     }
 
     // The ring size from the settings, which must be a whole number of lines.
@@ -102,14 +73,9 @@ namespace verbose {
     settings.settings_get(constants.ring_setting)
   );
 
-  // Sets the level: 0 only what must be said, 1 progress, 2 everything.
-  export function level_set(level: number): void {
-    thread_ring.level_set(level);
-  }
-
-  // Writes one line to the ring and the sink unless it is above the level.
-  export function log(level: number, text: string): void {
-    thread_ring.log(level, text);
+  // Writes one line to the ring and hands it to the sink.
+  export function log(text: string): void {
+    thread_ring.log(text);
   }
 
   // The last `count` lines of the ring, oldest first.

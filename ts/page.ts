@@ -55,9 +55,7 @@ namespace page {
     turn_state: Object.freeze({ input: "enabled" }),
     key_digit: /^[0-9]$/,
     console_digit: 0,
-    hello_level: 1,
     debug_setting: "debug",
-    level_setting: "verbose_level",
     synchronous_setting: "queue_synchronous",
     media_setting: "media_db_bytes",
     timeout_setting: "provider.timeout_seconds",
@@ -105,7 +103,7 @@ namespace page {
     overlays: OverlayControl;
     debug: boolean;
     full: boolean;
-    log: (level: number, text: string) => void;
+    log: (text: string) => void;
   }
 
   // The elements the page makes once.
@@ -492,12 +490,11 @@ namespace page {
       return undefined;
     }
 
-    // Writes what the hello says of the server as a line of progress.
+    // Writes what the hello says of the server as a verbose line.
     hello_take(line: lines.Line): undefined {
       const hello = jslb.payload_of(line) as unknown as lines.BootHello;
       const { bootstrap, sha256, pid, root } = hello;
-      const text = i18n("page.hello_shown", bootstrap, sha256, pid, root);
-      this.#parts.log(constants.hello_level, text);
+      this.#parts.log(i18n("page.hello_shown", bootstrap, sha256, pid, root));
       return undefined;
     }
   }
@@ -613,8 +610,6 @@ namespace page {
     test: boolean,
   ): queue.TaskQueue {
     settings.settings_set(value);
-    const level = settings.settings_get(constants.level_setting) as number;
-    verbose.level_set(level);
     const synchronous = settings.settings_get(
       constants.synchronous_setting,
     ) as boolean;
@@ -661,7 +656,7 @@ namespace page {
         overlays: new overlay.Overlay(elements.debug, ring),
         debug: settings.settings_get(constants.debug_setting) === true,
         full: names_full(),
-        log: (level: number, text: string) => verbose.log(level, text),
+        log: (text: string) => verbose.log(text),
       },
       dispatch.handler_register,
     );

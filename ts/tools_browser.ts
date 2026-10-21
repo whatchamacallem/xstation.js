@@ -5,10 +5,10 @@
 // The browser's MCP tools, registered on the AI worker's server and run
 // through the store inside the task of the `mcp` line: SQL, databases, values,
 // documents, scripts, images, the render, the debug console after the
-// player's permit, the verbose level and tail, and the measurement and
+// player's permit, the verbose tail, and the measurement and
 // administration of the databases against their soft limit. A value this
 // side no longer holds is asked of the server before it is read, a snapshot
-// comes in pieces that each fit `message_max`, and a render that leaves a
+// comes as one blob whose digest is checked, and a render that leaves a
 // scene frees the cached values of `_files` the new scene does not name
 // until they fit `files_browser_bytes`. A tool that waits submits its one
 // request to an explicit owner and sleeps, and its wake, registered on the
@@ -38,6 +38,11 @@ namespace tools_browser {
     document: boolean;
   }
 
+  // The state of a wake that opens a snapshot: its database.
+  interface LoadState {
+    db: string;
+  }
+
   // The names, refs, texts, owners, line types and tools of the tools.
   const constants = Object.freeze({
     // The prefix the agent lists this server's tools under.
@@ -58,19 +63,12 @@ namespace tools_browser {
     line_end: "\n",
     // The end of a line as the console's pty writes it.
     pty_end: "\r\n",
-    // The level of a script run.
-    run_level: 1,
-    // The level of a script run that traces the store's calls.
-    debug_level: 2,
     // The number of images an image request asks for.
     image_count: 1,
     // The form an image request asks the images in.
     image_format: "b64_json" as const,
     // The setting of the soft limit of the databases' bytes.
     soft_setting: "db_soft_bytes",
-    // The settings a reply of a piece of a snapshot keeps within.
-    message_setting: "message_max",
-    line_setting: "line_max",
     // The setting of the budget of the browser's tier of `_files`.
     files_setting: "files_browser_bytes",
     // The database of media, scripts and blobs, the tier the render frees.
@@ -91,6 +89,7 @@ namespace tools_browser {
     read_type: "console.read",
     tail_type: "verbose.tail",
     get_type: "kv.get",
+    snapshot_type: "db.snapshot",
     // The wake types of the tools, one per reply they sleep on.
     image_wake: "tools.image_reply",
     media_wake: "tools.media_reply",
@@ -100,7 +99,6 @@ namespace tools_browser {
     console_wake: "tools.console_reply",
     tail_wake: "tools.tail_reply",
     snapshot_wake: "tools.snapshot_reply",
-    piece_wake: "tools.piece_reply",
     value_wake: "tools.value_reply",
     // The tools of this server, in the order `tools/list` lists them.
     tools: Object.freeze<readonly mcp.Tool[]>([
@@ -207,8 +205,8 @@ namespace tools_browser {
       {
         name: "script_debug",
         description:
-          "Run the script as script_run does at verbose level 2, which" +
-          " traces every substrate call it makes.",
+          "Run the script as script_run does, tracing every substrate call" +
+          " it makes first.",
         inputSchema: {
           type: "object",
           properties: { name: { type: "string" }, args: { type: "object" } },
@@ -250,15 +248,6 @@ namespace tools_browser {
           required: ["text", "timeout_seconds"],
         },
         _meta: { xsjs: { permit: true } },
-      },
-      {
-        name: "verbose_level",
-        description: "Set this worker's verbose level: 0, 1 or 2.",
-        inputSchema: {
-          type: "object",
-          properties: { level: { type: "integer" } },
-          required: ["level"],
-        },
       },
       {
         name: "verbose_tail",
@@ -356,6 +345,25 @@ namespace tools_browser {
   function reply_data(replies: lines.Line[]): Uint8Array | string {
     const blob = replies[0][1] as lines.BlobHeader;
     return jslb.field_get(blob, "data") as Uint8Array | string;
+  }
+
+  // Blob 1 of a `db.snapshot` reply, checked against the `sha256` it sent.
+  function snapshot_data(
+    db: string,
+    replies: lines.Line[],
+  ): Uint8Array | string {
+    const blob = replies[0][1] as lines.BlobHeader;
+    const data = reply_data(replies);
+    // A streamed blob's digest is the one its cache file took as it came.
+    const sha256 =
+      typeof data === "string"
+        ? (blob.sha256 as lines.Sha256)
+        : utility.sha256_hex(data);
+    const sent = reply_payload(replies).sha256 as lines.Sha256;
+    if (sha256 !== sent) {
+      throw new Error(i18n("substrate.snapshot_digest", db, sha256, sent));
+    }
+    return data;
   }
 
   // A command's output with LF line ends, its echo and its prompt cut off.
@@ -547,18 +555,16 @@ namespace tools_browser {
         const ref = store.doc_head(args.db as string, args.id as string);
         return result_json({ ref });
       },
-      // Runs a script at the run level.
+      // Runs a script untraced.
       script_run: (args) => {
         const name = args.name as string;
-        const level = constants.run_level;
-        const run = script.script_run(store, name, args.args, level);
+        const run = script.script_run(store, name, args.args, false);
         return script_result(run);
       },
-      // Runs a script at the level that traces its calls of the store.
+      // Runs a script with its calls of the store traced first.
       script_debug: (args) => {
         const name = args.name as string;
-        const level = constants.debug_level;
-        const run = script.script_run(store, name, args.args, level);
+        const run = script.script_run(store, name, args.args, true);
         return script_result(run);
       },
       // Asks the provider for an image and sleeps on its reply.
@@ -625,11 +631,6 @@ namespace tools_browser {
           constants.permit_wake,
         );
       },
-      // Sets this thread's verbose level.
-      verbose_level: (args) => {
-        verbose.level_set(args.level as number);
-        return result_json({});
-      },
       // Asks the server for the last lines of a thread and sleeps on them.
       verbose_tail: (args) => {
         const tail = line_build(constants.tail_type, {
@@ -655,18 +656,13 @@ namespace tools_browser {
         store.db_unload(args.db as string);
         return result_json({});
       },
-      // Asks the server for the head of a database's snapshot, asleep on it.
+      // Asks the server for a database's snapshot and sleeps on it.
       db_load: (args) => {
-        const fetch = new substrate.SnapshotFetch(
-          args.db as string,
-          context.settings_get(constants.message_setting) as number,
-          context.settings_get(constants.line_setting) as number,
-          false,
-        );
+        const state: LoadState = { db: args.db as string };
         return context.request_sleep(
-          fetch.head_line(),
+          line_build(constants.snapshot_type, { db: state.db }),
           constants.server_owner,
-          fetch,
+          state,
           constants.snapshot_wake,
         );
       },
@@ -744,31 +740,11 @@ namespace tools_browser {
       // Returns the lines the server sent.
       [constants.tail_wake]: (_state, replies) =>
         result_json({ lines: reply_payload(replies).lines }),
-      // Takes the head of the snapshot and asks for its first piece.
+      // Checks the snapshot's digest and opens it at the `seq` it gave.
       [constants.snapshot_wake]: (state, replies) => {
-        const fetch = state as substrate.SnapshotFetch;
-        return context.request_sleep(
-          fetch.head_take(replies[0]),
-          constants.server_owner,
-          fetch,
-          constants.piece_wake,
-        );
-      },
-      // Takes a piece and asks the next, or opens the snapshot at its `seq`.
-      [constants.piece_wake]: (state, replies) => {
-        const fetch = state as substrate.SnapshotFetch;
-        const next = fetch.piece_take(store.blob_take(reply_data(replies)));
-        if (next !== undefined) {
-          return context.request_sleep(
-            next,
-            constants.server_owner,
-            fetch,
-            constants.piece_wake,
-          );
-        }
-        const db = fetch.db;
-        const seq = store.db_load(db, fetch.bytes_get());
-        const sent = fetch.seq_sent();
+        const { db } = state as LoadState;
+        const seq = store.db_load(db, snapshot_data(db, replies));
+        const sent = reply_payload(replies).seq as number;
         if (seq !== sent) {
           throw new Error(i18n("tools_browser.load_desync", db, seq, sent));
         }

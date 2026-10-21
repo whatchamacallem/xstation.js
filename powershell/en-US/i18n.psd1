@@ -163,10 +163,14 @@
     task_removed            = 'Removed scheduled task {0}.'
     task_stopped            = 'Stopped scheduled task {0}.'
     test_expected           = 'Expected "{0}", got "{1}".'
-    test_failed_steps       = 'Failed steps: {0}. Log: `{1}`'
+    test_failed_step        = 'Step {0} failed. Log: `{1}`'
     test_lint_failed        = 'Fix what test_lint.ps1 found, then rerun.'
-    test_passed             = 'The lifecycle ran without failures.'
+    test_passed             = (
+        'The lint, the lifecycle and `python/test_all.py {0}` ran ' +
+        'without failures.'
+    )
     test_step_failed        = 'Step {0} failed.'
+    test_usage              = 'Usage: {0} [--smoke-test][--normal-test]'
     ttyd_build_failed       = 'Building ttyd failed.'
     ttyd_configure_failed   = 'Configuring the ttyd build failed.'
     ttyd_fetch_failed       = 'Fetching the third party files failed.'

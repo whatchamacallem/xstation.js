@@ -187,8 +187,8 @@ _GARBLED_REASON = "Expecting value"
 # The file in the root that holds the server's log.
 _LOG_NAME = "_verbose.sqlite"
 
-# The query of the thread, level and text of each line of the log, in order.
-_LOG_QUERY = "SELECT thread, level, text FROM line ORDER BY seq"
+# The query of the thread and text of each line of the log, in order.
+_LOG_QUERY = "SELECT thread, text FROM line ORDER BY seq"
 
 # The thread the server's own lines are stored under in the log.
 _SERVER_THREAD = "server"
@@ -236,7 +236,7 @@ def _root_make(
     return ScratchRoot(scratch.name, root, loaded)
 
 
-# Rewrites the settings of a scratch root with the verbose level set.
+# Rewrites the settings of a scratch root with the shell's verbose level set.
 def _level_write(made: ScratchRoot, level: int) -> ScratchRoot:
     loaded = {**made.settings, "verbose_level": level}
     path = os.path.join(made.root, "settings.json")
@@ -387,24 +387,34 @@ def _raw_check(case: unittest.TestCase, record: RunRecord) -> None:
     case.assertEqual(record.raw_calls, [(0, 0)])
 
 
-# Reads the thread, level and text of each line of the root's log, in order.
-def _log_read(root: str) -> list[tuple[str, int, str]]:
+# Reads the thread and text of each line of the root's log, in order.
+def _log_read(root: str) -> list[tuple[str, str]]:
     path = os.path.join(root, _LOG_NAME)
     if not os.path.exists(path):
         raise AssertionError(f"the root has no log: {path}")
     with contextlib.closing(sqlite3.connect(path)) as connection:
-        rows: list[tuple[str, int, str]] = connection.execute(
+        rows: list[tuple[str, str]] = connection.execute(
             _LOG_QUERY
         ).fetchall()
     return rows
 
 
-# Checks the root's log holds one line, the failure's message at level 0.
+# The log line of the trace of a `hello` the run wrote, as it was parsed.
+def _hello_trace(hello: dict[str, Any]) -> tuple[str, str]:
+    header = json.dumps(hello["0"], separators=(",", ":"))
+    return _SERVER_THREAD, i18n("bootstrap.hello_submit", header)
+
+
+# The log line of a failure with the message.
+def _failure_line(message: str) -> tuple[str, str]:
+    return _SERVER_THREAD, i18n("bootstrap.run_failed", message)
+
+
+# Checks the root's log holds one line, the failure's message.
 def _failure_logged(
     case: unittest.TestCase, root: str, message: str
 ) -> None:
-    text = i18n("bootstrap.run_failed", message)
-    case.assertEqual(_log_read(root), [(_SERVER_THREAD, 0, text)])
+    case.assertEqual(_log_read(root), [_failure_line(message)])
 
 
 # Checks a run that failed before it could open the root's log made none.
@@ -723,7 +733,10 @@ class TestReply(unittest.TestCase):
         self.assertEqual(hello["0"], {"type": "hello", "id": _HELLO_ID})
         self.assertEqual(_error_check(self, line), expected)
         self.assertFalse(os.path.exists(os.path.join(made.root, _RUN_NAME)))
-        _failure_logged(self, made.root, expected)
+        self.assertEqual(
+            _log_read(made.root),
+            [_hello_trace(hello), _failure_line(expected)],
+        )
 
     # Each reply that is not the empty reply is refused, showing what came.
     def test_reply_wrong(self) -> None:
@@ -966,25 +979,29 @@ class TestError(unittest.TestCase):
 
 # Tests the lines the engine role writes to the server's log.
 class TestLog(unittest.TestCase):
-    # At verbose level 2 the log traces `hello` as the server submits it.
+    # In debug mode the log traces `hello`, whatever the shell's level.
     def test_hello_traced(self) -> None:
-        made = _level_write(_root_make(self, True), 2)
-        _loop_write(made.root, _LOOP_TEXT)
-        given = _REPLY_FULL + _AFTER_REPLY
-        argv = _engine_argv(made.root)
-        record = _run_captured(made, argv, given, _ENGINE_ENVIRONMENT)
-        self.assertEqual(record.code, 0)
-        (hello,) = _lines_parse(record.output)
-        header = json.dumps(hello["0"], separators=(",", ":"))
-        text = i18n("bootstrap.hello_submit", header)
-        self.assertEqual(_log_read(made.root), [(_SERVER_THREAD, 2, text)])
+        for level in range(3):
+            made = _level_write(_root_make(self, True), level)
+            _loop_write(made.root, _LOOP_TEXT)
+            given = _REPLY_FULL + _AFTER_REPLY
+            argv = _engine_argv(made.root)
+            record = _run_captured(made, argv, given, _ENGINE_ENVIRONMENT)
+            self.assertEqual(record.code, 0)
+            (hello,) = _lines_parse(record.output)
+            self.assertEqual(_log_read(made.root), [_hello_trace(hello)])
 
-    # Below verbose level 2 a run that does not fail logs nothing.
+    # Outside debug mode a run that does not fail logs nothing, at any level.
     def test_hello_quiet(self) -> None:
-        made = _level_write(_root_make(self, True), 1)
-        _loop_write(made.root, _LOOP_TEXT)
-        given = _REPLY_FULL + _AFTER_REPLY
-        argv = _engine_argv(made.root)
-        record = _run_captured(made, argv, given, _ENGINE_ENVIRONMENT)
-        self.assertEqual(record.code, 0)
-        self.assertEqual(_log_read(made.root), [])
+        for level in range(3):
+            made = _level_write(_root_make(self, False), level)
+            path = _loop_write(made.root, _LOOP_TEXT)
+            given = _REPLY_SHORT + _AFTER_REPLY
+            argv = ["--root", made.root]
+            stock = unittest.mock.patch.object(
+                bootstrap, "_MAIN_LOOP_STOCK", path
+            )
+            with stock:
+                record = _run_captured(made, argv, given, _ENGINE_ENVIRONMENT)
+            self.assertEqual(record.code, 0)
+            self.assertEqual(_log_read(made.root), [])

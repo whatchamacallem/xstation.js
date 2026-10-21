@@ -3,22 +3,35 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Runs the tests of the TAP producer and consumer first, then the other Python
-# test modules in dependency order, each as one block of one TAP stream that
-# goes to stdout a line at a time, then checks that stream with the TAP
-# consumer and exits 1 unless it is well formed and holds no failing point. It
-# stops at the first module that fails, and every module has a timer. The JSLB
-# vectors are written anew into build/vectors as test_jslb loads, inside its
-# block. When the stream is clean it runs the wire test in this process and
-# exits with its code; the browser test is a runner of its own. Standard
+# The one runner of every test suite, by category. A smoke-test run runs the
+# suites labelled smoke-test, the important ones that fit in 2 minutes; a
+# normal-test run runs the suites of both labels. Each suite's label is
+# written beside it, and category.py holds the labels, the options and their
+# checks. It runs the tests of the TAP producer and consumer first, then the
+# other Python test modules in dependency order, each as one block of one TAP
+# stream that goes to stdout a line at a time, then checks that stream with
+# the TAP consumer and exits 1 unless it is well formed and holds no failing
+# point. When the stream is clean it runs, in this process and given the
+# category, the checks of test_posix.py, the wire test and the browser test,
+# and ends at the first that fails, with its exit code. Every module has a
+# timer. The JSLB vectors are written anew into build/vectors as test_jslb
+# loads, inside its block.
+#
+# After each module it writes "<module>: <label>, <s> s" to stderr, so that
+# stdout stays the TAP stream. After the checks of test_posix.py it prints
+# "test_posix.py: smoke-test, <s> s", and a passing run ends with "the
+# <category> run took <s> s". A smoke-test run has 120 s in all from its
+# start: each alarm ends at that deadline at the latest, a deadline passed
+# before a suite starts raises at once, and passing it fails naming the
+# suite it stopped. A normal-test run has no limit of its own. Standard
 # library only:
 #
-#     python3 python/test_all.py
-#     python3 python/test_all.py --failfast
+#     python3 python/test_all.py [--smoke-test | --normal-test] [--failfast]
 #
-# With --failfast the first failing test ends the stream.
+# --smoke-test is the default. With --failfast the first failing test ends
+# the stream.
 
-import argparse, functools, importlib, os, signal, sys, types, unittest
+import argparse, functools, importlib, os, signal, sys, time, types, unittest
 
 # The python directory of the checkout, which holds this script.
 _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -29,34 +42,36 @@ _BUILD_PATH = os.path.join(os.path.dirname(_PYTHON_PATH), "build")
 # A default chosen by its writer: the seconds a module runs before it fails.
 _MODULE_SECONDS = 120.0
 
-# The test modules, the TAP ones first, then in dependency order.
-_MODULES = [
-    "test_tap_producer",
-    "test_tap_consumer",
-    "test_i18n",
-    "test_vectors_make",
-    "test_jslb",
-    "test_verbose",
-    "test_settings",
-    "test_substrate",
-    "test_dispatch",
-    "test_mcp",
-    "test_engine_kv",
-    "test_engine_doc",
-    "test_engine_db",
-    "test_engine_turn",
-    "test_engine_sql",
-    "test_engine_verbose",
-    "test_engine_tap",
-    "test_engine_mcp",
-    "test_engine_system",
-    "test_main_loop",
-    "test_bootstrap",
-    "test_mcp_stdio",
-    "test_third_party_fetch",
-    "test_devtools",
-    "test_page_build",
-    "test_test_posix",
+# The test modules and their labels, the TAP ones first, then by dependency.
+_MODULES: list[tuple[str, str]] = [
+    ("test_tap_producer", "smoke-test"),
+    ("test_tap_consumer", "smoke-test"),
+    ("test_i18n", "smoke-test"),
+    ("test_vectors_make", "smoke-test"),
+    ("test_jslb", "smoke-test"),
+    ("test_verbose", "smoke-test"),
+    ("test_settings", "smoke-test"),
+    ("test_substrate", "smoke-test"),
+    ("test_dispatch", "smoke-test"),
+    ("test_mcp", "smoke-test"),
+    ("test_engine_kv", "smoke-test"),
+    ("test_engine_doc", "smoke-test"),
+    ("test_engine_db", "smoke-test"),
+    ("test_engine_turn", "smoke-test"),
+    ("test_engine_sql", "smoke-test"),
+    ("test_engine_verbose", "smoke-test"),
+    ("test_engine_tap", "smoke-test"),
+    ("test_engine_mcp", "smoke-test"),
+    ("test_engine_system", "smoke-test"),
+    ("test_main_loop", "smoke-test"),
+    ("test_bootstrap", "smoke-test"),
+    ("test_mcp_stdio", "smoke-test"),
+    ("test_third_party_fetch", "smoke-test"),
+    ("test_devtools", "smoke-test"),
+    ("test_page_build", "smoke-test"),
+    ("test_reformat", "smoke-test"),
+    ("test_test_posix", "smoke-test"),
+    ("test_test", "smoke-test"),
 ]
 
 # The one test module that reads the vectors, which are written as it loads.
@@ -95,48 +110,65 @@ def suite_load(loader: unittest.TestLoader, name: str) -> unittest.TestSuite:
     return loader.loadTestsFromModule(importlib.import_module(name))
 
 
-# Arms a repeating alarm so that `module` fails if it runs longer than allowed.
-def timer_start(module: str) -> None:
-    # Raises the failure of the module that ran out of time.
+# Arms a repeating alarm that raises the plan's message, or none for no plan.
+def timer_start(plan: tuple[float, str] | None) -> None:
+    if plan is None:
+        return
+    seconds, message = plan
+
+    # Raises the failure of the suite that ran out of time.
     def alarm_raise(signal_number: int, frame: types.FrameType | None) -> None:
-        raise RuntimeError(
-            f"module {module} ran longer than {_MODULE_SECONDS} s"
-        )
+        raise RuntimeError(message)
 
     signal.signal(signal.SIGALRM, alarm_raise)
-    signal.setitimer(signal.ITIMER_REAL, _MODULE_SECONDS, _MODULE_SECONDS)
+    signal.setitimer(signal.ITIMER_REAL, seconds, seconds)
 
 
-# Cancels the alarm of a module that finished in time.
+# Cancels the alarm of a suite that finished in time.
 def timer_stop() -> None:
     signal.setitimer(signal.ITIMER_REAL, 0)
 
 
-# Runs the modules, checks the stream, then runs the wire test.
+# Runs the modules of the category, checks the stream, then runs the rest.
 def main() -> int:
-    import tap_consumer, tap_producer
+    import category, tap_consumer, tap_producer
 
     parser = argparse.ArgumentParser(
-        description="Run the tests of the TAP modules, then the other Python"
-        " test modules in dependency order, as one TAP stream on stdout,"
-        " check the stream, then run the wire test."
+        description="Run the suites of a category: the tests of the TAP"
+        " modules, then the other Python test modules in dependency order,"
+        " as one TAP stream on stdout, check the stream, then run the checks"
+        " of test_posix.py, the wire test and the browser test.",
+        allow_abbrev=False,
     )
     parser.add_argument(
         "--failfast",
         action="store_true",
         help="end the stream at the first failing test",
     )
+    category.options_add(parser)
     arguments = parser.parse_args()
     failfast: bool = arguments.failfast
+    chosen: str = arguments.category
+    started = time.monotonic()
+    limit = category.limit_seconds(chosen)
     stream = StreamWriter()
     runner = tap_producer.TAPTestRunner(failfast)
     runner.set_stream(stream.line_write)
     loader = unittest.TestLoader()
-    for name in _MODULES:
-        timer_start(name)
+    for name, label in _MODULES:
+        if not category.suite_runs(label, chosen):
+            continue
+        begun = time.monotonic()
+        what = f"module {name}"
+        timer_start(
+            category.alarm_plan(what, _MODULE_SECONDS, limit, begun - started)
+        )
         load = functools.partial(suite_load, loader, name)
         passed = runner.module_run(name, load)
         timer_stop()
+        seconds = time.monotonic() - begun
+        sys.stderr.write(f"{name}: {label}, {seconds:.3f} s\n")
+        sys.stderr.flush()
         if not passed:
             break
     runner.run_end()
@@ -145,11 +177,40 @@ def main() -> int:
         raise RuntimeError("the TAP stream is not well formed")
     if stats.failed:
         return 1
+    posix_label = "smoke-test"
+    if category.suite_runs(posix_label, chosen):
+        import test_posix
+
+        begun = time.monotonic()
+        timer_start(
+            category.alarm_plan("test_posix.py", None, limit, begun - started)
+        )
+        test_posix.main([])
+        timer_stop()
+        seconds = time.monotonic() - begun
+        print(f"test_posix.py: {posix_label}, {seconds:.3f} s", flush=True)
     import test_wire
 
-    # The wire test parses `sys.argv` itself, so it is given no options.
-    del sys.argv[1:]
-    return test_wire.main()
+    elapsed = time.monotonic() - started
+    timer_start(category.alarm_plan("test_wire.py", None, limit, elapsed))
+    code = test_wire.main([f"--{chosen}"])
+    timer_stop()
+    if code:
+        return code
+    import test_browser
+
+    elapsed = time.monotonic() - started
+    timer_start(category.alarm_plan("test_browser.py", None, limit, elapsed))
+    code = test_browser.main([f"--{chosen}"])
+    timer_stop()
+    if code:
+        return code
+    elapsed = time.monotonic() - started
+    total = f"the {chosen} run took {elapsed:.3f} s"
+    if limit is not None:
+        total += f" of its {limit:g} s"
+    print(total, flush=True)
+    return 0
 
 
 if __name__ == "__main__":

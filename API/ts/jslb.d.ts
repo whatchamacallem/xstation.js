@@ -59,6 +59,7 @@ declare namespace jslb {
   // The JSON text followed by one `<blob "n"=K>` tag per blob.
   function line_render(line: Line): string;
 
+  // WireError: a line over `line_max`, or blobs over `blob_max` in all.
   class LineDecoder {
     constructor(
       line_max: number,

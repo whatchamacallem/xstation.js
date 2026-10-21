@@ -6,19 +6,18 @@
 // KV row `/_files/script/<name>.js`, run inside the calling task as the body
 // of a `new Function` taking `engine`, the frozen object of the store, the
 // verbose log and `i18n`, and `args`. A run returns the value, or the
-// exception with its stack, and the verbose lines it wrote at its level. At
-// level 2 each call the script makes through the store is traced first.
+// exception with its stack, and every verbose line it wrote. A traced run,
+// as `script_debug` asks for, traces each call the script makes through the
+// store first.
 
 namespace script {
-  // The row of a script, the highest run level and the level of a trace.
+  // The row of a script: the prefix and the suffix around its name.
   const constants = Object.freeze({
     script_prefix: "/_files/script/",
     script_suffix: ".js",
-    level_max: 2,
-    trace_level: 2,
   });
 
-  // What a run returned: the value or the exception, and the lines it kept.
+  // What a run returned: the value or the exception, and the lines it wrote.
   export interface ScriptResult {
     value?: unknown;
     error?: string;
@@ -29,7 +28,7 @@ namespace script {
   // The frozen object a script gets as `engine`: the store, the log, `i18n`.
   export interface Engine {
     store: substrate.Store;
-    log(level: number, text: string): void;
+    log(text: string): void;
     i18n(name: string, ...args: unknown[]): string;
   }
 
@@ -65,7 +64,7 @@ namespace script {
   // The store seen through a proxy that traces each method call first.
   function store_traced(
     store: substrate.Store,
-    line_write: (level: number, text: string) => void,
+    line_write: (text: string) => void,
   ): substrate.Store {
     return new Proxy(store, {
       // A method of the store, wrapped to write its trace line first.
@@ -77,44 +76,29 @@ namespace script {
         return (...values: unknown[]): unknown => {
           const call = String(property);
           const shown = arguments_text(values);
-          line_write(
-            constants.trace_level,
-            i18n("script.trace_call", call, shown),
-          );
+          line_write(i18n("script.trace_call", call, shown));
           return Reflect.apply(member, target, values);
         };
       },
     });
   }
 
-  // Runs the script of the name on the arguments at the verbose level given.
+  // Runs the script of the name on the arguments, traced when asked.
   export function script_run(
     store: substrate.Store,
     name: string,
     args: unknown,
-    level: number,
+    trace: boolean,
   ): ScriptResult {
-    if (!Number.isInteger(level) || level < 0 || level > constants.level_max) {
-      throw new Error(
-        i18n("script.level_invalid", level, constants.level_max),
-      );
-    }
     const ref = constants.script_prefix + name + constants.script_suffix;
     const text = value_text(store, ref);
     const kept: lines.VerboseLine[] = [];
-    // Logs on the thread, and keeps the line when the run's level allows.
-    const line_write = (line_level: number, line_text: string): void => {
-      verbose.log(line_level, line_text);
-      if (line_level <= level) {
-        kept.push({
-          at: utility.time_now(),
-          level: line_level,
-          text: line_text,
-        });
-      }
+    // Logs on the thread and keeps every line for the result.
+    const line_write = (line_text: string): void => {
+      verbose.log(line_text);
+      kept.push({ at: utility.time_now(), text: line_text });
     };
-    const door =
-      level < constants.trace_level ? store : store_traced(store, line_write);
+    const door = trace ? store_traced(store, line_write) : store;
     const engine: Engine = Object.freeze({
       store: door,
       log: line_write,

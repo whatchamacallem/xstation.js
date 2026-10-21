@@ -2,13 +2,12 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests `db.create`, `db.drop`, `db.snapshot` and `db.chunk` through the
-# dispatcher on a real store under `build/`: databases made and dropped by
-# forwarded lines, a new database at `seq` 0, a stale `since`, the head of a
-# kept snapshot, its pieces as blob 1 in memory and streamed to the cache, a
-# database over `message_max` read in pieces whose replies each fit, a
-# snapshot restored into a second store, and a recorded sequence of creates
-# and drops replayed to a second store.
+# Tests `db.create`, `db.drop` and `db.snapshot` through the dispatcher on a
+# real store under `build/`: databases made and dropped by forwarded lines, a
+# new database at `seq` 0, a stale `since`, a snapshot as one blob in memory
+# and streamed to the cache, a database past 10 MiB as one blob, a snapshot
+# restored into a second store, and a recorded sequence of creates and drops
+# replayed to a second store.
 
 import dispatch, engine_db, hashlib, jslb, os, sqlite3, substrate, tempfile
 import unittest, unittest.mock, uuid
@@ -33,16 +32,13 @@ _OVERFLOW_BYTES = 131072
 # The `line_max` of the settings, 1 MiB.
 _LINE_MAX = 1048576
 
-# The `blob_max` of the settings, 10 MiB.
-_BLOB_MAX = 10485760
+# The `blob_max` of the settings, the largest database.
+_BLOB_MAX = 2147483391
 
-# The `message_max` of the settings, 10 MiB.
-_MESSAGE_MAX = 10485760
+# The 10 MiB a snapshot once had to fit in each of its pieces.
+_OLD_WINDOW = 10485760
 
-# The largest piece a reader asks for, so that its reply fits `message_max`.
-_PIECE_MAX = _MESSAGE_MAX - _LINE_MAX
-
-# The bytes of each row of the database over `message_max`, 1 MiB.
+# The bytes of each row of the database past that size, 1 MiB.
 _ROW_BYTES = 1048576
 
 # The rows of that database, 11 MiB together.
@@ -113,7 +109,7 @@ def _decoder_make(root: str) -> jslb.LineDecoder:
         return os.path.join(cache, "sink" + uuid.uuid4().hex)
 
     return jslb.LineDecoder(
-        _LINE_MAX, _BLOB_MAX, _MESSAGE_MAX, _OVERFLOW_BYTES, sink_make
+        _LINE_MAX, _BLOB_MAX, _OVERFLOW_BYTES, sink_make
     )
 
 
@@ -271,7 +267,7 @@ class TestDrop(IsolatedCase):
         self.dispatch_check(LookupError, message, line)
 
 
-# Tests the handlers of `db.snapshot` and `db.chunk`.
+# Tests the handler of `db.snapshot`.
 class TestSnapshot(IsolatedCase):
     # Makes the database with a table and one row of the text: `seq` 1.
     def database_fill(self, text: str) -> None:
@@ -282,7 +278,7 @@ class TestSnapshot(IsolatedCase):
         ]
         self.store.sql_run(_DATABASE, statements)
 
-    # Makes the database with rows of zero bytes past `message_max`: `seq` 1.
+    # Makes the database with rows of zero bytes past 10 MiB: `seq` 1.
     def database_over(self) -> None:
         self.store.db_create(_DATABASE)
         statements = [
@@ -304,84 +300,47 @@ class TestSnapshot(IsolatedCase):
         statement = _statement_make("SELECT x FROM t")
         return second.sql_run(_DATABASE, [statement])[0].rows
 
-    # The head holds the number, size, hash and `seq` of the kept snapshot.
-    def test_head_replied(self) -> None:
+    # The reply holds the hash and `seq`, and the database file as blob 1.
+    def test_snapshot_replied(self) -> None:
         engine_db.handlers_register(self.store)
         self.database_fill(_WIDE_TEXT)
         data, _ = self.store.db_snapshot(_DATABASE)
         reply = _reply_get(_line_make("db.snapshot", 9, db=_DATABASE))
-        self.assertEqual(reply[0], {"t": "db.snapshot", "r": 9})
-        payload = {
-            "snapshot": 1,
-            "size": len(data),
-            "sha256": hashlib.sha256(data).hexdigest(),
-            "seq": 1,
-        }
+        self.assertEqual(reply[0], {"t": "db.snapshot", "r": 9, "b": 1})
+        self.assertEqual(reply[1], {"s": len(data), "d": data})
+        payload = {"sha256": hashlib.sha256(data).hexdigest(), "seq": 1}
         self.assertEqual(jslb.payload_of(reply), payload)
         self.assertEqual(data[:16], _FILE_MAGIC)
-        piece = _line_make(
-            "db.chunk", 10, snapshot=1, offset=0, size=len(data)
-        )
-        self.assertEqual(_reply_get(piece)[1]["d"], data)
         self.assertEqual(self.row_restored(data), [[_WIDE_TEXT]])
 
-    # A piece is blob 1, streamed over `overflow_bytes`, and the last one goes.
-    def test_pieces_replied(self) -> None:
+    # A blob over `overflow_bytes` streams to the reader's cache, hash kept.
+    def test_blob_streamed(self) -> None:
         engine_db.handlers_register(self.store)
         self.database_fill(_BIG_TEXT)
         data, _ = self.store.db_snapshot(_DATABASE)
-        head = _reply_get(_line_make("db.snapshot", 1, db=_DATABASE))
-        line = _line_make("db.chunk", 2, snapshot=1, offset=0, size=len(data))
-        reply = _reply_get(line)
-        self.assertEqual(reply[0], {"t": "db.chunk", "r": 2, "b": 1})
-        self.assertEqual(reply[1], {"s": len(data), "d": data})
-        self.assertEqual(jslb.payload_of(reply), {})
+        reply = _reply_get(_line_make("db.snapshot", 1, db=_DATABASE))
         self.assertGreater(len(data), _OVERFLOW_BYTES)
         decoded = _line_decode(self.root, _wire_bytes(reply))
-        self.assertEqual(decoded[1]["sha256"], head["sha256"])
+        self.assertIsInstance(decoded[1]["d"], str)
+        self.assertEqual(decoded[1]["sha256"], reply["sha256"])
         self.assertEqual(_blob_read(decoded, 1), data)
         self.assertEqual(self.row_restored(data), [[_BIG_TEXT]])
-        message = i18n("substrate.snapshot_unknown", 1)
-        self.dispatch_check(LookupError, message, line)
 
-    # A database over `message_max` comes in pieces whose replies each fit.
-    def test_over_message(self) -> None:
+    # A database past the old 10 MiB window comes whole, as one blob.
+    def test_past_window(self) -> None:
         engine_db.handlers_register(self.store)
         self.database_over()
-        head = _reply_get(_line_make("db.snapshot", 1, db=_DATABASE))
-        size: int = head["size"]
-        self.assertGreater(size, _MESSAGE_MAX)
-        data = b""
-        while len(data) < size:
-            line = _line_make(
-                "db.chunk",
-                2,
-                snapshot=head["snapshot"],
-                offset=len(data),
-                size=min(_PIECE_MAX, size - len(data)),
-            )
-            wire = _wire_bytes(_reply_get(line))
-            self.assertLessEqual(len(wire), _MESSAGE_MAX)
-            data += _blob_read(_line_decode(self.root, wire), 1)
-        self.assertEqual(hashlib.sha256(data).hexdigest(), head["sha256"])
+        reply = _reply_get(_line_make("db.snapshot", 1, db=_DATABASE))
+        self.assertEqual(jslb.field_get(reply[0], "blobs"), 1)
+        decoded = _line_decode(self.root, _wire_bytes(reply))
+        data = _blob_read(decoded, 1)
+        self.assertGreater(len(data), _OLD_WINDOW)
+        self.assertEqual(hashlib.sha256(data).hexdigest(), reply["sha256"])
         second = self.store_make(self.root_make())
         self.assertEqual(second.db_restore(_DATABASE, data), 1)
         statement = _statement_make("SELECT count(*), sum(length(x)) FROM b")
         rows = second.sql_run(_DATABASE, [statement])[0].rows
         self.assertEqual(rows, [[_ROW_COUNT, _ROW_COUNT * _ROW_BYTES]])
-
-    # A piece of no kept snapshot, or one outside it, raises.
-    def test_chunk_refused(self) -> None:
-        engine_db.handlers_register(self.store)
-        self.store.db_create(_DATABASE)
-        line = _line_make("db.chunk", 1, snapshot=1, offset=0, size=1)
-        message = i18n("substrate.snapshot_unknown", 1)
-        self.dispatch_check(LookupError, message, line)
-        head = _reply_get(_line_make("db.snapshot", 2, db=_DATABASE))
-        size: int = head["size"]
-        line = _line_make("db.chunk", 3, snapshot=1, offset=size, size=1)
-        message = i18n("substrate.snapshot_range", 1, size, 1, size)
-        self.dispatch_check(ValueError, message, line)
 
     # The `seq` of the reply is the `seq` of the database at that moment.
     def test_seq_replied(self) -> None:
@@ -448,6 +407,14 @@ class TestRegister(IsolatedCase):
             lambda: engine_db.handlers_register(self.store),
         )
 
+    # No `db.chunk` handler is registered, as a snapshot comes whole.
+    def test_chunk_unknown(self) -> None:
+        engine_db.handlers_register(self.store)
+        self.store.db_create(_DATABASE)
+        line = _line_make("db.chunk", 1, snapshot=1, offset=0, size=1)
+        message = i18n("dispatch.handler_unknown", "db.chunk", 0)
+        self.dispatch_check(LookupError, message, line)
+
     # Called before the registration each handler raises.
     def test_unregistered(self) -> None:
         line = _line_make("db.create", 1)
@@ -456,7 +423,6 @@ class TestRegister(IsolatedCase):
             lambda: engine_db.db_create(line, db=_DATABASE, since=0),
             lambda: engine_db.db_drop(line, db=_DATABASE, since=0),
             lambda: engine_db.db_snapshot(line, db=_DATABASE),
-            lambda: engine_db.db_chunk(line, snapshot=1, offset=0, size=1),
         ]
         for call in calls:
             self.raise_check(RuntimeError, message, call)

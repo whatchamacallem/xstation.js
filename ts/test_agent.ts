@@ -7,9 +7,9 @@
 // scripted provider and a double of the MCP clients whose tools answer at
 // once: the castle turn, in which the player answers 1 and the analyst builds
 // the castle's gatehouse scene, the turn after it, short turns and a click,
-// the system prompt, the measurement over the soft limit, the estimate of the
-// turns over `turn_compact_tokens`, failed tool calls that store no reply
-// without its results, and every error the agent throws.
+// the system prompt, the measurement over the soft limit, the request after
+// the store compacted a scene at `turn_compact_turns`, failed tool calls that
+// store no reply without its results, and every error the agent throws.
 
 namespace test_agent {
   // The initialized sqlite3.wasm module, a global the test page sets.
@@ -36,6 +36,8 @@ namespace test_agent {
     }),
     // The `overflow_bytes` of `settings.json`, 128 KiB.
     overflow_bytes: 131072,
+    // The `turn_compact_turns` of `settings.json`, 64.
+    compact_turns: 64,
     // The owner whose port answers the provider's requests.
     provider_owner: "http" as const,
     // The owner whose port answers the tool calls in these tests.
@@ -178,18 +180,15 @@ namespace test_agent {
       queue_synchronous: false,
       verbose_level: 1,
       verbose_ring: 1000,
-      verbose_forward: true,
       line_max: 1048576,
-      blob_max: 10485760,
-      message_max: 10485760,
-      queue_max: 104857600,
+      blob_max: 2147483391,
       overflow_bytes: 131072,
       chunk_bytes: 1048576,
       srv_buf_size: 1048576,
       media_db_bytes: 268435456,
       files_browser_bytes: 1073741824,
       db_soft_bytes: 1073741824,
-      turn_compact_tokens: 65536,
+      turn_compact_turns: 64,
       long_task_ms: 5,
       provider: {
         scripted: true,
@@ -599,15 +598,6 @@ namespace test_agent {
       .map((line) => jslb.payload_of(line));
   }
 
-  // The bytes of the JSON text of each message, summed, as the agent counts.
-  function bytes_counted(messages: provider.ChatMessage[]): number {
-    let total = 0;
-    for (const message of messages) {
-      total += new TextEncoder().encode(JSON.stringify(message)).length;
-    }
-    return total;
-  }
-
   // Tool doubles: a render that answers, an image the agent refuses.
   function tools_failing(): ToolTable {
     return {
@@ -778,7 +768,11 @@ namespace test_agent {
     }
 
     // A store on a new root whose metaverse holds what the agent reads.
-    store_make(forwarded: lines.Line[], prompt: boolean): substrate.Store {
+    store_make(
+      forwarded: lines.Line[],
+      prompt: boolean,
+      compact_turns: number = constants.compact_turns,
+    ): substrate.Store {
       root_count += 1;
       const root = constants.root_prefix + String(root_count);
       this.#roots.push(root);
@@ -788,6 +782,7 @@ namespace test_agent {
         new substrate.CacheFiles([]),
         root,
         constants.overflow_bytes,
+        compact_turns,
       );
       this.#stores.push(store);
       store.forward_set((line: lines.Line) => {
@@ -815,7 +810,7 @@ namespace test_agent {
       info: lines.ProviderInfo,
     ): Bench {
       const forwarded: lines.Line[] = [];
-      const store = this.store_make(forwarded, true);
+      const store = this.store_make(forwarded, true, value.turn_compact_turns);
       const tasks = new queue.TaskQueue("ai", { "ai.": "ai" }, true);
       const ui = new PortDouble();
       const provider_tap = new PortTap(provider_port);
@@ -1142,89 +1137,42 @@ namespace test_agent {
     }
   }
 
-  // The estimate of the scene's turns against `turn_compact_tokens`.
-  export class TestEstimate extends AgentCase {
-    // Over the setting, the next request carries it after the system prompt.
-    test_estimate_over(): void {
+  // The request after the store compacted a scene at `turn_compact_turns`.
+  export class TestCompacted extends AgentCase {
+    // At the threshold the player's next message follows one summary turn.
+    test_request_compacted(): void {
       const value = settings_make();
-      value.turn_compact_tokens = 0;
+      value.turn_compact_turns = 2;
       const script = new provider_script.ScriptPort(script_recorded());
       const bench = this.bench_recorded(script, value);
       say_send(bench, 1, "2");
-      const rows = bench.store.turn_list(constants.scene);
-      const estimate = {
-        scene: constants.scene,
-        last: rows[rows.length - 1].n,
-        tokens: bytes_counted(rows.map((row) => row.content)),
-        turn_compact_tokens: 0,
-      };
+      bench.forwarded.splice(0);
       say_send(bench, 2, "2");
-      const requests = requests_of(bench);
-      this.assertEqual(requests[0].messages, [
+      const summary = i18n("substrate.turns_compacted", 2, 2);
+      this.assertEqual(requests_of(bench)[1].messages, [
         system_said(constants.analyst),
+        system_said(summary),
         user_said("2"),
       ]);
-      this.assertEqual(requests[1].messages, [
+      this.assertEqual(
+        bench.forwarded.map((line) => jslb.field_get(line[0], "type")),
+        ["turn.compact", "turn.append", "turn.append"],
+      );
+    }
+
+    // Below the threshold the next request carries the whole conversation.
+    test_request_whole(): void {
+      const value = settings_make();
+      value.turn_compact_turns = 3;
+      const script = new provider_script.ScriptPort(script_recorded());
+      const bench = this.bench_recorded(script, value);
+      say_send(bench, 1, "2");
+      say_send(bench, 2, "2");
+      this.assertEqual(requests_of(bench)[1].messages, [
         system_said(constants.analyst),
-        system_said(utility.json_text(estimate)),
         user_said("2"),
         assistant_said(constants.nothing_reply),
         user_said("2"),
-      ]);
-    }
-
-    // An estimate equal to the setting is not over it; one byte less is.
-    test_estimate_boundary(): void {
-      const turn = [user_said("2"), assistant_said(constants.nothing_reply)];
-      const bytes = bytes_counted(turn);
-      const equal = settings_make();
-      equal.turn_compact_tokens = bytes;
-      const first = new provider_script.ScriptPort(script_recorded());
-      const at_limit = this.bench_recorded(first, equal);
-      say_send(at_limit, 1, "2");
-      say_send(at_limit, 2, "2");
-      this.assertEqual(systems_counted(at_limit), [1, 1]);
-      const below = settings_make();
-      below.turn_compact_tokens = bytes - 1;
-      const second = new provider_script.ScriptPort(script_recorded());
-      const past_limit = this.bench_recorded(second, below);
-      say_send(past_limit, 1, "2");
-      say_send(past_limit, 2, "2");
-      this.assertEqual(systems_counted(past_limit), [1, 2]);
-    }
-
-    // Only the first request after the turn carries it, not the later ones.
-    test_estimate_once(): void {
-      const value = settings_make();
-      value.turn_compact_tokens = 0;
-      const script = new provider_script.ScriptPort(script_recorded());
-      const bench = this.bench_recorded(script, value);
-      say_send(bench, 1, "2");
-      say_send(bench, 2, "1");
-      this.assertEqual(systems_counted(bench), [1, 2, 1, 1, 1]);
-    }
-
-    // With both over, the measurement comes first and the estimate after it.
-    test_estimate_both(): void {
-      const value = settings_make();
-      value.db_soft_bytes = 0;
-      value.turn_compact_tokens = 0;
-      const script = new provider_script.ScriptPort(script_recorded());
-      const bench = this.bench_recorded(script, value);
-      say_send(bench, 1, "2");
-      const stats = bench.store.db_stats(0);
-      const rows = bench.store.turn_list(constants.scene);
-      const estimate = {
-        scene: constants.scene,
-        last: rows[rows.length - 1].n,
-        tokens: bytes_counted(rows.map((row) => row.content)),
-        turn_compact_tokens: 0,
-      };
-      say_send(bench, 2, "2");
-      this.assertEqual(requests_of(bench)[1].messages.slice(0, 3), [
-        system_said(constants.analyst),
-        system_said(utility.json_text(stats)),
-        system_said(utility.json_text(estimate)),
       ]);
     }
   }

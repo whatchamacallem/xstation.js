@@ -9,7 +9,7 @@
 // every tool, the requests of the tools that sleep and the results of their
 // wakes on the values of the castle turn, which builds the gatehouse scene,
 // of a console command and of the step script, the administration of the
-// databases with a snapshot loaded in pieces, values asked of the server
+// databases with a snapshot loaded as one blob, values asked of the server
 // again after an unload and a load, the values of `_files` freed when a
 // render leaves its scene, and every error.
 
@@ -46,12 +46,12 @@ namespace test_tools_browser {
     overflow_bytes: 131072,
     // The `db_soft_bytes` of `settings.json`, 1 GiB.
     soft_bytes: 1073741824,
+    // The `turn_compact_turns` of `settings.json`, 64.
+    compact_turns: 64,
     // The start of the root of each store a test makes in the pool.
     root_prefix: "/test_tools_browser/",
     // The files of the cache of each store a test makes.
     slot_count: 8,
-    // The highest verbose level.
-    level_max: 2,
     // A synthetic provider key, which every image request carries.
     key: "xai-SYNTHETIC-KEY",
     // The provider's address and models a hello carries when not scripted.
@@ -78,12 +78,8 @@ namespace test_tools_browser {
       "tools.console_reply",
       "tools.tail_reply",
       "tools.snapshot_reply",
-      "tools.piece_reply",
       "tools.value_reply",
     ],
-    // The `line_max` and `message_max` of a bench whose pieces are 4096 bytes.
-    piece_line: 1024,
-    piece_message: 5120,
     // The world table of the castle universe.
     world_sql:
       "CREATE TABLE world" +
@@ -112,7 +108,7 @@ namespace test_tools_browser {
       "1e2806a1029564579de9739ef0014f0332c5a8026bca9373e473224a3b094d8b",
     // The ref of the step script, which advances the tide of a region.
     step_ref: "/_files/script/step_tide.js",
-    // The step script, 322 bytes.
+    // The step script, 319 bytes.
     step_script:
       "// Advances the tide by args.hours in the region table" +
       " of the world.\n" +
@@ -120,11 +116,8 @@ namespace test_tools_browser {
       '  {sql: "UPDATE region SET tide = tide + ? WHERE name = ?",\n' +
       '    params: [args.hours, "castle_gatehouse"]},\n' +
       "]);\n" +
-      'engine.log(1, "tide advanced by " + args.hours);\n' +
+      'engine.log("tide advanced by " + args.hours);\n' +
       "return {changes: results[0].changes};\n",
-    // The `SHA-256` of the step script.
-    step_sha256:
-      "dbc909cf0e2e7954d586c06b3291728e527d5dee4c109409fcb501e200756626",
     // The line the step script logs when it advances the tide by 1.
     step_line: "tide advanced by 1",
     // The arguments of the step script's call of the store, as JSON.
@@ -187,7 +180,7 @@ namespace test_tools_browser {
     // The result of `console_run` for that output, trimmed.
     console_result: '{"output":"hi\\n","timed_out":false}',
     // A verbose line the step script logs, with a time.
-    verbose_line: { at: 1760800000000, level: 1, text: "tide advanced by 1" },
+    verbose_line: { at: 1760800000000, text: "tide advanced by 1" },
   });
 
   // The first tools of `tools/list` as JSON text, `sql_run` with its old text.
@@ -241,8 +234,8 @@ namespace test_tools_browser {
       '{"type":"string"},"args":{"type":"object"}},"required":' +
       '["name","args"]}}',
     '{"name":"script_debug","description":"Run the script as script_run' +
-      " does at verbose level 2, which traces every substrate call it" +
-      ' makes.","inputSchema":{"type":"object","properties":{"name":' +
+      " does, tracing every substrate call it makes" +
+      ' first.","inputSchema":{"type":"object","properties":{"name":' +
       '{"type":"string"},"args":{"type":"object"}},"required":' +
       '["name","args"]}}',
     '{"name":"image_make","description":"Generate an image from a prompt' +
@@ -260,9 +253,6 @@ namespace test_tools_browser {
       '"properties":{"text":{"type":"string"},"timeout_seconds":' +
       '{"type":"number"}},"required":["text","timeout_seconds"]},' +
       '"_meta":{"xsjs":{"permit":true}}}',
-    '{"name":"verbose_level","description":"Set this worker\'s verbose' +
-      ' level: 0, 1 or 2.","inputSchema":{"type":"object","properties":' +
-      '{"level":{"type":"integer"}},"required":["level"]}}',
     '{"name":"verbose_tail","description":"The last lines of a' +
       " thread's verbose ring: ui, ai or server.\",\"inputSchema\":" +
       '{"type":"object","properties":{"thread":{"type":"string"},' +
@@ -373,18 +363,15 @@ namespace test_tools_browser {
       queue_synchronous: false,
       verbose_level: 1,
       verbose_ring: 1000,
-      verbose_forward: true,
       line_max: 1048576,
-      blob_max: 10485760,
-      message_max: 10485760,
-      queue_max: 104857600,
+      blob_max: 2147483391,
       overflow_bytes: 131072,
       chunk_bytes: 1048576,
       srv_buf_size: 1048576,
       media_db_bytes: 268435456,
       files_browser_bytes: 1073741824,
       db_soft_bytes: 1073741824,
-      turn_compact_tokens: 65536,
+      turn_compact_turns: 64,
       long_task_ms: 5,
       provider: {
         scripted: true,
@@ -434,11 +421,9 @@ namespace test_tools_browser {
     return utility.json_text(jslb.payload_of(line));
   }
 
-  // The level and text of each line, which leave out the time.
-  function lines_shown(
-    kept: lines.VerboseLine[],
-  ): { level: number; text: string }[] {
-    return kept.map((line) => ({ level: line.level, text: line.text }));
+  // The text of each line, which leaves out the time.
+  function lines_shown(kept: lines.VerboseLine[]): string[] {
+    return kept.map((line) => line.text);
   }
 
   // Makes the castle world database, its region table and one region.
@@ -503,6 +488,7 @@ namespace test_tools_browser {
         new substrate.CacheFiles(slots),
         root,
         constants.overflow_bytes,
+        constants.compact_turns,
       );
       const forwarded: lines.Line[] = [];
       store.forward_set((line) => {
@@ -698,10 +684,13 @@ namespace test_tools_browser {
       for (const db of ["metaverse", "castle_world", "_files"]) {
         bench.store.db_create(db);
       }
+      const step_sha256 = utility.sha256_hex(
+        utility.utf8_encode(constants.step_script),
+      );
       const cases: [string, string, string][] = [
         ["/metaverse/world", "castle_world", constants.world_sha256],
         ["/castle_world/scene", constants.arrival_ref, constants.scene_sha256],
-        [constants.step_ref, constants.step_script, constants.step_sha256],
+        [constants.step_ref, constants.step_script, step_sha256],
       ];
       for (const [ref, text, sha256] of cases) {
         const db = substrate.ref_split(ref).db as string;
@@ -817,9 +806,7 @@ namespace test_tools_browser {
       const run = JSON.parse(this.text_of(result)) as script.ScriptResult;
       this.assertEqual(Object.keys(run), ["value", "lines"]);
       this.assertEqual(run.value, { changes: 1 });
-      this.assertEqual(lines_shown(run.lines), [
-        { level: 1, text: constants.step_line },
-      ]);
+      this.assertEqual(lines_shown(run.lines), [constants.step_line]);
     }
 
     // `script_debug` traces the store's call before the script's line.
@@ -842,10 +829,7 @@ namespace test_tools_browser {
         "sql_run",
         constants.step_arguments,
       );
-      this.assertEqual(lines_shown(run.lines), [
-        { level: 2, text: trace },
-        { level: 1, text: constants.step_line },
-      ]);
+      this.assertEqual(lines_shown(run.lines), [trace, constants.step_line]);
     }
 
     // A script that throws gives a result marked as an error.
@@ -1210,15 +1194,15 @@ namespace test_tools_browser {
     }
   }
 
-  // The tools of the verbose level and tail.
+  // The verbose tail, the one verbose tool, as the runtime has no level.
   export class TestVerbose extends ToolCase {
-    // A level above 2 throws the verbose module's error.
-    test_level_refused(): void {
+    // No tool sets a verbose level, and none is registered to run one.
+    test_level_gone(): void {
       const bench = this.bench_make();
-      this.raised_assert(
-        i18n("verbose.level_invalid", 3, constants.level_max),
-        () => this.tool_run(bench, "verbose_level", { level: 3 }),
-      );
+      const names = bench.server.tools.map((tool) => tool.name);
+      this.assertFalse(names.includes("verbose_level"));
+      this.assertFalse(bench.server.runs.has("verbose_level"));
+      this.assertTrue(names.includes("verbose_tail"));
     }
 
     // The tail is asked of the server and its lines are returned.
@@ -1303,7 +1287,7 @@ namespace test_tools_browser {
       );
     }
 
-    // `db_load` asks the head of the server's snapshot, then its one piece.
+    // `db_load` asks the server's snapshot and opens its one blob.
     test_load_snapshot(): void {
       const bench = this.bench_make();
       const snapshot = this.snapshot_unloaded(bench);
@@ -1317,22 +1301,14 @@ namespace test_tools_browser {
       this.assertEqual(request.owner, "server");
       this.assertEqual(type_of(request.line), "db.snapshot");
       this.assertEqual(payload_text(request.line), '{"db":"alpha"}');
-      const head = this.head_reply(request, snapshot.data, snapshot.seq);
-      const piecing = this.sleep_check(
-        bench,
-        this.wake_run(bench, asked, [head]),
-        1,
-        "tools.piece_reply",
+      const reply = this.snapshot_reply(
+        request,
+        jslb.blob_make(snapshot.data),
+        utility.sha256_hex(snapshot.data),
+        snapshot.seq,
       );
-      const piece = bench.tasks.sent[1];
-      this.assertEqual(piece.owner, "server");
-      const size = String(snapshot.data.length);
-      this.assertEqual(
-        payload_text(piece.line),
-        `{"snapshot":7,"offset":0,"size":${size}}`,
-      );
-      const reply = this.piece_reply(piece, snapshot.data);
-      const result = this.wake_run(bench, piecing, [reply]);
+      const result = this.wake_run(bench, asked, [reply]);
+      this.assertEqual(bench.tasks.sent.length, 1);
       const expected = utility.json_text({ seq: snapshot.seq });
       this.assertEqual(this.text_of(result), expected);
       this.assertEqual(bench.store.db_list(), ["alpha"]);
@@ -1340,35 +1316,43 @@ namespace test_tools_browser {
       this.assertEqual(this.text_of(read), "one");
     }
 
-    // A snapshot past the limits of one reply comes in pieces that each fit.
-    test_load_pieces(): void {
-      const bench = this.bench_make({
-        line_max: constants.piece_line,
-        message_max: constants.piece_message,
-      });
+    // A snapshot streamed to the cache opens from its handle, sink digest kept.
+    test_load_streamed(): void {
+      const bench = this.bench_make();
       bench.store.db_create("alpha");
       const text = "y".repeat(constants.overflow_bytes);
       bench.store.kv_put("/alpha/text", utility.utf8_encode(text));
       const snapshot = bench.store.db_snapshot("alpha");
       this.lines_answer(bench.store);
       bench.store.db_unload("alpha");
-      const result = this.load_run(bench, snapshot.data, snapshot.seq);
+      const size = snapshot.data.length;
+      this.assertTrue(size > constants.overflow_bytes);
+      const sink = bench.store.sink();
+      const handle = sink.sink_open({ s: size });
+      sink.sink_append(handle, snapshot.data);
+      const sha256 = sink.sink_close(handle);
+      const blob = jslb.blob_make(handle, undefined, { sha256 }, size);
+      const result = this.blob_load(bench, blob, sha256, snapshot.seq);
       this.assertEqual(this.text_of(result), utility.json_text({ seq: 1 }));
-      const piece = constants.piece_message - constants.piece_line;
-      const offsets = bench.tasks.sent
-        .filter((entry) => type_of(entry.line) === "db.chunk")
-        .map((entry) => jslb.payload_of(entry.line).offset);
-      const count = Math.ceil(snapshot.data.length / piece);
-      this.assertTrue(count > 2);
-      this.assertEqual(
-        offsets,
-        Array.from({ length: count }, (_value, index) => index * piece),
-      );
       const read = this.tool_run(bench, "kv_get", { ref: "/alpha/text" });
       this.assertEqual(this.text_of(read), text);
     }
 
-    // A snapshot that opens at another `seq` than its head's throws.
+    // A snapshot whose bytes are not those of the digest it came with throws.
+    test_load_digest(): void {
+      const bench = this.bench_make();
+      const snapshot = this.snapshot_unloaded(bench);
+      const sha256 = utility.sha256_hex(snapshot.data);
+      const wrong = "0".repeat(64);
+      const blob = jslb.blob_make(snapshot.data);
+      this.raised_assert(
+        i18n("substrate.snapshot_digest", "alpha", sha256, wrong),
+        () => this.blob_load(bench, blob, wrong, snapshot.seq),
+      );
+      this.assertEqual(bench.store.db_list(), []);
+    }
+
+    // A snapshot that opens at another `seq` than its reply's throws.
     test_load_desync(): void {
       const bench = this.bench_make();
       const snapshot = this.snapshot_unloaded(bench);
@@ -1438,6 +1422,17 @@ namespace test_tools_browser {
 
     // Runs `db_load` of `alpha` against bytes as the server sends them.
     load_run(bench: ToolBench, data: Uint8Array, seq: number): mcp.ToolResult {
+      const sha256 = utility.sha256_hex(data);
+      return this.blob_load(bench, jslb.blob_make(data), sha256, seq);
+    }
+
+    // Runs `db_load` of `alpha` against a reply of the blob, digest and `seq`.
+    blob_load(
+      bench: ToolBench,
+      blob: lines.BlobHeader,
+      sha256: lines.Sha256,
+      seq: number,
+    ): mcp.ToolResult {
       const start = bench.tasks.sent.length;
       const asked = this.sleep_check(
         bench,
@@ -1445,35 +1440,21 @@ namespace test_tools_browser {
         start,
         "tools.snapshot_reply",
       );
-      const head = this.head_reply(bench.tasks.sent[start], data, seq);
-      let value = this.wake_run(bench, asked, [head]);
-      while ("then_type" in value) {
-        const request = bench.tasks.sent[bench.tasks.sent.length - 1];
-        value = this.wake_run(bench, value, [this.piece_reply(request, data)]);
-      }
-      return this.result_of(value);
+      const request = bench.tasks.sent[start];
+      const reply = this.snapshot_reply(request, blob, sha256, seq);
+      return this.result_of(this.wake_run(bench, asked, [reply]));
     }
 
-    // The server's head of the snapshot of the bytes, saying the `seq` given.
-    head_reply(request: SentLine, data: Uint8Array, seq: number): lines.Line {
-      return reply_build("db.snapshot", request.id as number, {
-        snapshot: 7,
-        size: data.length,
-        sha256: utility.sha256_hex(data),
-        seq,
-      });
-    }
-
-    // The server's reply holding the piece of the bytes a request asks for.
-    piece_reply(request: SentLine, data: Uint8Array): lines.Line {
-      this.assertEqual(type_of(request.line), "db.chunk");
-      const asked = jslb.payload_of(request.line);
-      this.assertEqual(asked.snapshot, 7);
-      const offset = asked.offset as number;
-      const piece = data.slice(offset, offset + (asked.size as number));
-      return reply_build("db.chunk", request.id as number, {}, [
-        jslb.blob_make(piece),
-      ]);
+    // The server's `db.snapshot` reply: the digest and `seq` given, the blob.
+    snapshot_reply(
+      request: SentLine,
+      blob: lines.BlobHeader,
+      sha256: lines.Sha256,
+      seq: number,
+    ): lines.Line {
+      this.assertEqual(type_of(request.line), "db.snapshot");
+      const payload = { sha256, seq };
+      return reply_build("db.snapshot", request.id as number, payload, [blob]);
     }
   }
 

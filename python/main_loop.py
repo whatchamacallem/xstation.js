@@ -10,9 +10,9 @@
 # it and the metaverse while its `seq` is 0, and returns the `seq` of each
 # database. `loop_run` registers the stock handlers and runs the select loop
 # on the engine tty: it decodes each line, refuses any reply, dispatches every
-# other line and writes each reply, and at verbose level 2 the log traces each
-# line dispatched and each reply. A failure logs its message, then writes one
-# `error` line and exits 1.
+# other line and writes each reply, and in debug mode the log traces each line
+# dispatched and each reply. A failure always logs its message, then writes
+# one `error` line and exits 1.
 
 import dispatch, engine_db, engine_doc, engine_kv, engine_mcp, engine_sql
 import engine_system, engine_tap, engine_turn, engine_verbose, functools, jslb
@@ -107,12 +107,6 @@ _SERVER_VERSION = "0"
 
 # The exit code of a failure.
 _EXIT_FAILED = 1
-
-# The verbose level of the line that logs a failure, so it is always written.
-_FAILURE_LEVEL = 0
-
-# The verbose level of the lines that trace the server's timeline.
-_TRACE_LEVEL = 2
 
 
 # What `loop_prepare` opened for the root: its settings and its store.
@@ -303,30 +297,38 @@ def _line_write(line: jslb.Object, write_fd: int, chunk: int) -> None:
 def _failure_exit(
     line: jslb.Object | None, error: Exception, write_fd: int, chunk: int
 ) -> NoReturn:
-    verbose.log(_FAILURE_LEVEL, i18n("main_loop.serve_failed", str(error)))
+    verbose.log(i18n("main_loop.serve_failed", str(error)))
     _line_write(dispatch.error_make(line, error), write_fd, chunk)
     raise SystemExit(_EXIT_FAILED) from error
 
 
-# Refuses a reply, as the server has no request open, and dispatches the rest.
-def _line_serve(line: jslb.Object, write_fd: int, chunk: int) -> None:
+# Refuses a reply, dispatches the rest, and traces both ends in debug mode.
+def _line_serve(
+    line: jslb.Object, write_fd: int, chunk: int, debug: bool
+) -> None:
     # A first server request must take its ids after the 1 that `hello` used.
     if jslb.field_get(line[0], "reply") is not None:
         raise LookupError(
             i18n("main_loop.reply_unknown", jslb.line_render(line))
         )
-    dispatched = _json_text(line[0])
-    verbose.log(_TRACE_LEVEL, i18n("main_loop.line_dispatch", dispatched))
+    if debug:
+        dispatched = _json_text(line[0])
+        verbose.log(i18n("main_loop.line_dispatch", dispatched))
     reply = dispatch.line_dispatch(line)
     if reply is not None:
-        replied = _json_text(reply[0])
-        verbose.log(_TRACE_LEVEL, i18n("main_loop.line_reply", replied))
+        if debug:
+            replied = _json_text(reply[0])
+            verbose.log(i18n("main_loop.line_reply", replied))
         _line_write(reply, write_fd, chunk)
 
 
 # Serves the lines one read finished, then feeds no bytes to raise a fault.
 def _bytes_serve(
-    decoder: jslb.LineDecoder, data: bytes, write_fd: int, chunk: int
+    decoder: jslb.LineDecoder,
+    data: bytes,
+    write_fd: int,
+    chunk: int,
+    debug: bool,
 ) -> None:
     line: jslb.Object | None = None
     try:
@@ -334,7 +336,7 @@ def _bytes_serve(
             raise jslb.WireError(i18n("main_loop.input_partial"))
         for piece in (data, b""):
             for line in decoder.bytes_feed(piece):
-                _line_serve(line, write_fd, chunk)
+                _line_serve(line, write_fd, chunk, debug)
             line = None
     except Exception as error:
         _failure_exit(line, error, write_fd, chunk)
@@ -346,11 +348,11 @@ def loop_run(read_fd: int, write_fd: int, root: str) -> None:
     if prepared is None:
         raise RuntimeError(i18n("main_loop.not_prepared"))
     values = prepared.values
-    _handlers_register(prepared.store, root, values["debug"])
+    debug: bool = values["debug"]
+    _handlers_register(prepared.store, root, debug)
     decoder = jslb.LineDecoder(
         values["line_max"],
         values["blob_max"],
-        values["message_max"],
         values["overflow_bytes"],
         functools.partial(_sink_make, os.path.join(root, _CACHE_DIRECTORY)),
     )
@@ -358,6 +360,6 @@ def loop_run(read_fd: int, write_fd: int, root: str) -> None:
     while True:
         select.select([read_fd], [], [])
         data = os.read(read_fd, chunk)
-        _bytes_serve(decoder, data, write_fd, chunk)
+        _bytes_serve(decoder, data, write_fd, chunk, debug)
         if not data:
             return

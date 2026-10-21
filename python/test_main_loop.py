@@ -153,8 +153,8 @@ _SOURCE_NAME = "loop_test.py"
 # The database of the server's log, under the root.
 _LOG_DB = "_verbose"
 
-# The query of the thread, level and text of each line of the log, in order.
-_LOG_QUERY = "SELECT thread, level, text FROM line ORDER BY seq"
+# The query of the thread and text of each line of the log, in order.
+_LOG_QUERY = "SELECT thread, text FROM line ORDER BY seq"
 
 # The thread the server's own lines are stored under in the log.
 _SERVER_THREAD = "server"
@@ -258,7 +258,7 @@ def _sink_refuse(header: jslb.Object) -> NoReturn:
 # Decodes bytes of whole lines whose blobs all stay in memory.
 def _lines_decode(data: bytes) -> list[jslb.Object]:
     size = len(data)
-    decoder = jslb.LineDecoder(size + 1, size, size, size, _sink_refuse)
+    decoder = jslb.LineDecoder(size + 1, size, size, _sink_refuse)
     return decoder.bytes_feed(data)
 
 
@@ -286,19 +286,32 @@ def _child_end(
     os.kill(os.getpid(), signal.SIGKILL)
 
 
-# Opens the root's log with the ring and the level of its settings.
+# Opens the root's log with the ring of its settings.
 def _log_open(root: str) -> None:
     path = os.path.join(root, "settings.json")
     with open(path, encoding="utf-8") as file:
         values: dict[str, Any] = json.load(file)
     verbose.log_open(root, values["verbose_ring"])
-    verbose.level_set(values["verbose_level"])
 
 
-# The thread, level and text of each line of the root's log, in order.
-def _log_read(root: str) -> list[tuple[str, int, str]]:
-    rows: list[tuple[str, int, str]] = _rows_read(root, _LOG_DB, _LOG_QUERY)
+# The thread and text of each line of the root's log, in order.
+def _log_read(root: str) -> list[tuple[str, str]]:
+    rows: list[tuple[str, str]] = _rows_read(root, _LOG_DB, _LOG_QUERY)
     return rows
+
+
+# The trace texts of a line dispatched and of its reply, if any, in order.
+def _trace_texts(
+    request: jslb.Object, reply: jslb.Object | None
+) -> list[str]:
+    texts = [
+        i18n("main_loop.line_dispatch", _json_bytes(request[0]).decode())
+    ]
+    if reply is not None:
+        texts.append(
+            i18n("main_loop.line_reply", _json_bytes(reply[0]).decode())
+        )
+    return texts
 
 
 # The work of a child that prepares the root and says the `seq` it returned.
@@ -585,14 +598,37 @@ class TestLoop(ScratchCase):
         message = i18n("dispatch.handler_unknown", "no.such", 0)
         self.error_check(replies[0], 1, message)
 
-    # A failure's message is in the log, and its `error` line is still sent.
+    # Outside debug mode a failure's message is logged, its `error` line sent.
     def test_failure_logged(self) -> None:
+        self.settings_write(
+            debug=False,
+            overflow_bytes=_OVERFLOW_BYTES,
+            chunk_bytes=_CHUNK_BYTES,
+        )
         unknown = _request_make("no.such", 1)
         replies = self.failure_read(_lines_encode([unknown]))
         message = i18n("dispatch.handler_unknown", "no.such", 0)
         self.error_check(replies[0], 1, message)
         text = i18n("main_loop.serve_failed", message)
-        self.assertEqual(_log_read(self.root), [(_SERVER_THREAD, 0, text)])
+        self.assertEqual(_log_read(self.root), [(_SERVER_THREAD, text)])
+
+    # In debug mode a failure is logged after the trace of its line.
+    def test_failure_traced(self) -> None:
+        self.settings_write(
+            debug=True,
+            overflow_bytes=_OVERFLOW_BYTES,
+            chunk_bytes=_CHUNK_BYTES,
+        )
+        unknown = _request_make("no.such", 1)
+        replies = self.failure_read(_lines_encode([unknown]))
+        message = i18n("dispatch.handler_unknown", "no.such", 0)
+        self.error_check(replies[0], 1, message)
+        texts = [
+            *_trace_texts(unknown, None),
+            i18n("main_loop.serve_failed", message),
+        ]
+        expected = [(_SERVER_THREAD, text) for text in texts]
+        self.assertEqual(_log_read(self.root), expected)
 
     # A fault of the input with no line is logged the same way.
     def test_fault_logged(self) -> None:
@@ -600,26 +636,34 @@ class TestLoop(ScratchCase):
         message = i18n("jslb.no_type")
         self.error_check(replies[0], None, message)
         text = i18n("main_loop.serve_failed", message)
-        self.assertEqual(_log_read(self.root), [(_SERVER_THREAD, 0, text)])
+        self.assertEqual(_log_read(self.root), [(_SERVER_THREAD, text)])
 
-    # At verbose level 2 the log traces each line dispatched and each reply.
+    # In debug mode the log traces each line and reply, at the shell's level 0.
     def test_trace_logged(self) -> None:
         self.settings_write(
+            debug=True,
             overflow_bytes=_OVERFLOW_BYTES,
             chunk_bytes=_CHUNK_BYTES,
-            verbose_level=2,
+            verbose_level=0,
         )
         request = _get_make(1, "/metaverse/world")
         _, replies = self.served_read([request])
         self.assertEqual(len(replies), 1)
-        dispatched = _json_bytes(request[0]).decode("utf-8")
-        replied = _json_bytes(replies[0][0]).decode("utf-8")
-        traced = [
-            i18n("main_loop.line_dispatch", dispatched),
-            i18n("main_loop.line_reply", replied),
-        ]
-        expected = [(_SERVER_THREAD, 2, text) for text in traced]
+        texts = _trace_texts(request, replies[0])
+        expected = [(_SERVER_THREAD, text) for text in texts]
         self.assertEqual(_log_read(self.root), expected)
+
+    # Outside debug mode nothing is traced, whatever the shell's level.
+    def test_trace_quiet(self) -> None:
+        self.settings_write(
+            debug=False,
+            overflow_bytes=_OVERFLOW_BYTES,
+            chunk_bytes=_CHUNK_BYTES,
+            verbose_level=2,
+        )
+        _, replies = self.served_read([_get_make(1, "/metaverse/world")])
+        self.assertEqual(len(replies), 1)
+        self.assertEqual(_log_read(self.root), [])
 
     # A reply, to `hello` or to any other id, gets an `error` line with no id.
     def test_reply_unknown(self) -> None:
@@ -720,17 +764,20 @@ class TestLoop(ScratchCase):
         self.reply_check(current, "doc.head", 3)
         self.assertEqual(jslb.payload_of(current), {"ref": ref})
 
-    # `verbose.tail` gives the server's ring, empty here, and the page's lines.
+    # `verbose.tail` gives the server's ring, its own trace, and the page's.
     def test_verbose_tail(self) -> None:
-        entries = [
-            {"at": 1, "level": 0, "text": "first"},
-            {"at": 2, "level": 1, "text": "second"},
-        ]
+        self.settings_write(
+            debug=True,
+            overflow_bytes=_OVERFLOW_BYTES,
+            chunk_bytes=_CHUNK_BYTES,
+        )
+        entries = [{"at": 1, "text": "first"}, {"at": 2, "text": "second"}]
         put = jslb.line_make(
             jslb.header_make("verbose.put"), [], thread="ui", lines=entries
         )
+        tail = _request_make("verbose.tail", 1, thread="server", count=10)
         lines = [
-            _request_make("verbose.tail", 1, thread="server", count=10),
+            tail,
             put,
             _request_make("verbose.tail", 2, thread="ui", count=10),
         ]
@@ -738,7 +785,8 @@ class TestLoop(ScratchCase):
         self.assertEqual(len(replies), 2)
         server, page = replies
         self.reply_check(server, "verbose.tail", 1)
-        self.assertEqual(jslb.payload_of(server), {"lines": []})
+        texts = [entry["text"] for entry in server["lines"]]
+        self.assertEqual(texts, _trace_texts(tail, None))
         self.reply_check(page, "verbose.tail", 2)
         self.assertEqual(jslb.payload_of(page), {"lines": entries})
 

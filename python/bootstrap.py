@@ -16,11 +16,11 @@
 # and neither option may be given twice. With the role console, when the
 # setting debug is true, it opens the root's log and runs dash in the root
 # with a scrubbed environment through verbose.exec at the setting
-# verbose_level, and it exits 1 otherwise. Any exception writes one error
-# line, which jslb encodes, and exits 1; once the log is open the exception's
-# message is logged before its error line is written. At verbose level 2 the
-# log traces hello. The modules beside this file are imported inside the
-# functions that use them, after their bytecode has been sent to build/.
+# verbose_level, the shell's level, and it exits 1 otherwise. Any exception
+# writes one error line, which jslb encodes, and exits 1; once the log is open
+# the exception's message is logged before its error line is written. In debug
+# mode the log traces hello. The modules beside this file are imported inside
+# the functions that use them, after their bytecode has been sent to build/.
 
 import argparse, fcntl, hashlib, importlib.machinery, importlib.util, json, os
 import sys, termios, traceback, tty, types
@@ -107,12 +107,6 @@ _EXIT_FAILURE = 1
 
 # A shell's exit code for a program a signal ended is this plus the signal.
 _SIGNAL_BASE = 128
-
-# The verbose level of the line that logs a failure, so it is always written.
-_FAILURE_LEVEL = 0
-
-# The verbose level of the lines that trace the server's timeline.
-_TRACE_LEVEL = 2
 
 # Bytecode of the modules the functions below import goes in `build/pycache`.
 sys.pycache_prefix = os.path.join(
@@ -280,7 +274,7 @@ def _bytes_write(data: bytes) -> None:
         view = view[written:]
 
 
-# Traces `hello`, the engine's first request, then writes it in `full` names.
+# Traces `hello` in debug mode, then writes it in `full` names.
 def _hello_write(
     root: str,
     loaded: dict[str, Any],
@@ -305,8 +299,9 @@ def _hello_write(
         seq=seq,
         **provider,
     )
-    text = json.dumps(line[0], ensure_ascii=False, separators=(",", ":"))
-    verbose.log(_TRACE_LEVEL, i18n("bootstrap.hello_submit", text))
+    if loaded["debug"]:
+        text = json.dumps(line[0], ensure_ascii=False, separators=(",", ":"))
+        verbose.log(i18n("bootstrap.hello_submit", text))
     _bytes_write(_text_bytes(jslb.line_encode(line)))
 
 
@@ -323,7 +318,6 @@ def _reply_read(loaded: dict[str, Any]) -> None:
     decoder = jslb.LineDecoder(
         loaded["line_max"],
         loaded["blob_max"],
-        loaded["message_max"],
         loaded["overflow_bytes"],
         sink_refuse,
     )
@@ -351,7 +345,7 @@ def _reply_read(loaded: dict[str, Any]) -> None:
         )
 
 
-# Opens the root's log at the set level, then runs `serve`, logging a failure.
+# Opens the root's log, then runs `serve`, always logging a failure.
 def _logged_run(
     root: str, loaded: dict[str, Any], serve: Callable[[], int]
 ) -> int:
@@ -359,12 +353,10 @@ def _logged_run(
     from i18n import i18n
 
     verbose.log_open(root, loaded["verbose_ring"])
-    verbose.level_set(loaded["verbose_level"])
     try:
         return serve()
     except Exception as error:
-        text = i18n("bootstrap.run_failed", str(error))
-        verbose.log(_FAILURE_LEVEL, text)
+        verbose.log(i18n("bootstrap.run_failed", str(error)))
         raise
 
 

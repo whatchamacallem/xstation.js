@@ -367,13 +367,11 @@ class LineDecoder:
         self,
         line_max: int,
         blob_max: int,
-        message_max: int,
         overflow_bytes: int,
         sink_make: Callable[[Object], str],
     ) -> None:
         self._line_max = line_max
         self._blob_max = blob_max
-        self._message_max = message_max
         self._overflow_bytes = overflow_bytes
         self._sink_make = sink_make
         self._failed = False
@@ -459,23 +457,14 @@ class LineDecoder:
         if len(self._text) + more + 1 > self._line_max:
             raise WireError(i18n("jslb.line_over_max", self._line_max))
 
-    # Parses and checks the line read, refusing a blob or a message too large.
+    # Parses and checks the line read, refusing blobs over `blob_max` in all.
     def _line_parse(self) -> Object:
-        length = len(self._text) + 1
         line = _line_decode(bytes(self._text))
         self._text.clear()
         sizes = _line_check(line, True)
-        for number, size in enumerate(sizes, 1):
-            if size > self._blob_max:
-                raise WireError(
-                    i18n("jslb.blob_over_max", number, size, self._blob_max)
-                )
-        total = length + sum(sizes)
-        # Memory per message is bounded here by `message_max`, a settled limit.
-        if total > self._message_max:
-            raise WireError(
-                i18n("jslb.message_over", total, self._message_max)
-            )
+        total = sum(sizes)
+        if total > self._blob_max:
+            raise WireError(i18n("jslb.blobs_over", total, self._blob_max))
         self._sizes = sizes
         return line
 

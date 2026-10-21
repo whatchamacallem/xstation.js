@@ -34,7 +34,12 @@ declare namespace substrate {
   // parameters are those of API/python/substrate.pyi; every method is
   // synchronous and runs inside the task that called it.
   class Store {
-    constructor(sqlite3: unknown, root: string, overflow_bytes: number);
+    constructor(
+      sqlite3: unknown,
+      root: string,
+      overflow_bytes: number,
+      compact_turns: number
+    );
     db_open(name: string): number;
     db_close(name: string): void;
     db_list(): string[];
@@ -52,6 +57,7 @@ declare namespace substrate {
     doc_get(ref: lines.DocRef, db?: string): lines.Document;
     doc_put(db: string, id: string, body: lines.Document): lines.DocPutReply;
     doc_head(db: string, id: string): lines.DocRef;
+    // A `user` turn on a scene of `compact_turns` turns first compacts them.
     turn_append(
       scene: lines.DocRef,
       role: provider.Role,
@@ -66,6 +72,12 @@ declare namespace substrate {
     sql_run(db: string, statements: lines.SqlStatement[]): lines.SqlResult[];
     db_snapshot(db: string): { data: Uint8Array; seq: number };
     db_restore(db: string, data: Uint8Array | string): number;
+    // Whether this side holds a value's bytes, in its row or a file.
+    kv_held(ref: lines.KvRef, db?: string): boolean;
+    // Puts back a value's cache file from bytes with the row's digest.
+    cache_fill(ref: lines.KvRef, data: Uint8Array | string, db?: string): void;
+    // Frees a database's unkept cache files to the budget; their count.
+    cache_evict(db: string, keep: readonly string[], budget: number): number;
     operation_apply(
       type: string,
       since: number,

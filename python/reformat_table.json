@@ -1,0 +1,65 @@
+{
+  ".html": {
+    "comments": "html",
+    "encoding": "utf-8",
+    "formatter": ["prettier", "--write", "--no-config", "--print-width", "79"],
+    "linter": [],
+    "system": "linux"
+  },
+  ".js": {
+    "comments": "javascript",
+    "encoding": "utf-8",
+    "formatter": ["prettier", "--write", "--no-config", "--print-width", "79"],
+    "linter": [],
+    "system": "linux"
+  },
+  ".md": {
+    "comments": "none",
+    "encoding": "utf-8",
+    "formatter": ["mdformat", "--check"],
+    "linter": [],
+    "system": "linux"
+  },
+  ".ps1": {
+    "comments": "powershell",
+    "encoding": "utf-8-sig",
+    "formatter": [],
+    "linter": [],
+    "system": "windows"
+  },
+  ".psd1": {
+    "comments": "powershell",
+    "encoding": "utf-8-sig",
+    "formatter": [],
+    "linter": [],
+    "system": "windows"
+  },
+  ".py": {
+    "comments": "python",
+    "encoding": "utf-8",
+    "formatter": ["ruff", "format", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
+    "linter": ["ruff", "check", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
+    "system": "linux"
+  },
+  ".pyi": {
+    "comments": "python",
+    "encoding": "utf-8",
+    "formatter": ["ruff", "format", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
+    "linter": ["ruff", "check", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
+    "system": "linux"
+  },
+  ".sh": {
+    "comments": "shell",
+    "encoding": "utf-8",
+    "formatter": ["shfmt", "--list", "--write"],
+    "linter": [],
+    "system": "linux"
+  },
+  ".ts": {
+    "comments": "javascript",
+    "encoding": "utf-8",
+    "formatter": ["prettier", "--write", "--no-config", "--print-width", "79"],
+    "linter": [],
+    "system": "linux"
+  }
+}

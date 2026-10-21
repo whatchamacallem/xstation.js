@@ -12,11 +12,10 @@ namespace test_jslb {
   // The vector files by name, as base64 text, a global the test page sets.
   declare const test_vectors: { readonly [name: string]: string };
 
-  // The limits of the decoders here, room for two largest blobs, and texts.
+  // The limits of the decoders here, and texts.
   const constants = Object.freeze({
     line_max: 4096,
     blob_max: 65536,
-    message_max: 131072,
     overflow_bytes: 1024,
     echo_text: '{"0":{"t":"echo"}}',
     echo_line: '{"0":{"t":"echo"}}\r',
@@ -29,7 +28,6 @@ namespace test_jslb {
   interface VectorLimits {
     line_max: number;
     blob_max: number;
-    message_max: number;
     overflow_bytes: number;
   }
 
@@ -210,7 +208,6 @@ namespace test_jslb {
     return new jslb.LineDecoder(
       constants.line_max,
       constants.blob_max,
-      constants.message_max,
       constants.overflow_bytes,
       sink,
     );
@@ -225,7 +222,6 @@ namespace test_jslb {
     return new jslb.LineDecoder(
       limits.line_max,
       limits.blob_max,
-      limits.message_max,
       limits.overflow_bytes,
       sink,
     );
@@ -355,7 +351,11 @@ namespace test_jslb {
 
   // Each error vector's slug and its message under the limits, by name.
   function errors_expected(limits: VectorLimits): FaultTable {
-    const { line_max, blob_max, message_max } = limits;
+    const { line_max, blob_max } = limits;
+    const over: FaultExpected = [
+      "blobs_over",
+      i18n("jslb.blobs_over", blob_max + 1, blob_max),
+    ];
     const start = bytes_of('{"0":{"t":"');
     const end = bytes_of('"}}');
     const overlong = bytes_join([start, Uint8Array.of(0xc0, 0x80), end]);
@@ -384,10 +384,7 @@ namespace test_jslb {
       error_blob_data: ["blob_data_field", i18n("jslb.blob_data_field", 1)],
       error_blob_gap: ["blob_gap", i18n("jslb.blob_gap", 2, 3)],
       error_blob_gap_first: ["blob_gap", i18n("jslb.blob_gap", 1, 2)],
-      error_blob_over_max: [
-        "blob_over_max",
-        i18n("jslb.blob_over_max", 1, blob_max + 1, blob_max),
-      ],
+      error_blob_over_max: over,
       error_blobs_mismatch: [
         "blobs_mismatch",
         i18n("jslb.blobs_mismatch", 2, 1),
@@ -396,6 +393,7 @@ namespace test_jslb {
         "blobs_mismatch",
         i18n("jslb.blobs_mismatch", 0, 1),
       ],
+      error_blobs_over: over,
       error_both_name_forms: forms,
       error_both_name_forms_blob: forms,
       error_header_not_object: [
@@ -409,10 +407,6 @@ namespace test_jslb {
       error_line_over_max: [
         "line_over_max",
         i18n("jslb.line_over_max", line_max),
-      ],
-      error_message_over: [
-        "message_over",
-        i18n("jslb.message_over", message_max + 1, message_max),
       ],
       error_nan: [
         "line_not_json",
@@ -1127,7 +1121,7 @@ namespace test_jslb {
       const largest = constants.blob_max;
       const head = `{"0":{"t":"echo","b":1},"1":{"s":${largest + 1}}}\r`;
       const over = bytes_join([bytes_of(head), new Uint8Array(largest + 1)]);
-      const message = i18n("jslb.blob_over_max", 1, largest + 1, largest);
+      const message = i18n("jslb.blobs_over", largest + 1, largest);
       const sink = this.refused_assert(over, message);
       this.assertEqual(sink.headers.length, 0);
       const text = `{"0":{"t":"echo","b":1},"1":{"s":${largest}}}\r`;
@@ -1138,20 +1132,17 @@ namespace test_jslb {
       this.assertEqual(found.length, 1);
     }
 
-    // A message of `message_max` bytes is read, one more refused at its CR.
-    test_message_max(): void {
-      const { line_max, blob_max, message_max } = constants;
-      const first = new Uint8Array(blob_max);
-      const rest = message_max - blob_max - line_max / 2;
-      const over = message_padded(line_max / 2, [
-        first,
-        new Uint8Array(rest + 1),
-      ]);
-      const message = i18n("jslb.message_over", message_max + 1, message_max);
+    // Blobs of `blob_max` in all pass with a longest line, one byte more not.
+    test_blobs_summed(): void {
+      const { line_max, blob_max } = constants;
+      const first = new Uint8Array(blob_max / 2);
+      const rest = blob_max - first.length;
+      const over = message_padded(line_max, [first, new Uint8Array(rest + 1)]);
+      const message = i18n("jslb.blobs_over", blob_max + 1, blob_max);
       const sink = this.refused_assert(over, message);
       this.assertEqual(sink.headers.length, 0);
-      const data = message_padded(line_max / 2, [first, new Uint8Array(rest)]);
-      this.assertEqual(data.length, message_max);
+      const data = message_padded(line_max, [first, new Uint8Array(rest)]);
+      this.assertEqual(data.length, line_max + blob_max);
       const found = pieces_decode(decoder_make(new MemorySink()), [data]);
       this.assertEqual(found.length, 1);
     }

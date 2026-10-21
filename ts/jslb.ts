@@ -5,10 +5,10 @@
 // JSLB, the wire format: a line is one JSON object ending in CR, its headers
 // at the integer keys 0, 1, ... and its payload at the other keys, followed
 // by the bytes of each blob the line header counts. The builders, field
-// access, the encoder, the debug rendering, and the decoder, which bounds a
-// message by message_max, streams a blob over overflow_bytes into a sink that
-// hashes it on the way, and holds a fault met after finished lines for the
-// next feed.
+// access, the encoder, the debug rendering, and the decoder, which bounds the
+// blobs of a message by blob_max, streams a blob over overflow_bytes into a
+// sink that hashes it on the way, and holds a fault met after finished lines
+// for the next feed.
 namespace jslb {
   // A line: header 0, blob headers 1 on, the payload at the other keys.
   export type Line = lines.Line;
@@ -509,10 +509,8 @@ namespace jslb {
   export class LineDecoder {
     // The longest line read, its CR included.
     readonly #line_max: number;
-    // The largest blob read.
+    // The most bytes the blobs of one message come to.
     readonly #blob_max: number;
-    // The largest message read: its line, CR included, and all its blobs.
-    readonly #message_max: number;
     // The largest blob kept in memory, larger ones stream to the sink.
     readonly #overflow_bytes: number;
     // Where a blob over `overflow_bytes` streams.
@@ -544,13 +542,11 @@ namespace jslb {
     constructor(
       line_max: number,
       blob_max: number,
-      message_max: number,
       overflow_bytes: number,
       sink: BlobSink,
     ) {
       this.#line_max = line_max;
       this.#blob_max = blob_max;
-      this.#message_max = message_max;
       this.#overflow_bytes = overflow_bytes;
       this.#sink = sink;
     }
@@ -649,9 +645,8 @@ namespace jslb {
       this.#length += piece.length;
     }
 
-    // Parses and checks the line read, refusing a blob or a message too large.
+    // Parses and checks the line read, refusing blobs over `blob_max` in all.
     #line_parse(): { [key: string]: unknown } {
-      const length = this.#length + 1;
       const text = new Uint8Array(this.#length);
       let offset = 0;
       for (const piece of this.#pieces) {
@@ -662,20 +657,9 @@ namespace jslb {
       this.#length = 0;
       const line = line_decode(text);
       const sizes = line_check(line, true);
-      let total = length;
-      for (let number = 1; number <= sizes.length; number += 1) {
-        const size = sizes[number - 1];
-        if (size > this.#blob_max) {
-          throw new WireError(
-            i18n("jslb.blob_over_max", number, size, this.#blob_max),
-          );
-        }
-        total += size;
-      }
-      if (total > this.#message_max) {
-        throw new WireError(
-          i18n("jslb.message_over", total, this.#message_max),
-        );
+      const total = sizes.reduce((sum, size) => sum + size, 0);
+      if (total > this.#blob_max) {
+        throw new WireError(i18n("jslb.blobs_over", total, this.#blob_max));
       }
       this.#sizes = sizes;
       return line;

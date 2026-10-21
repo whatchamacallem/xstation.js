@@ -9,21 +9,25 @@
 # WebSocket client speaks ttyd's protocol and JSLB to them as the page does,
 # rung by rung, each rung under a timer. On the echo main loop file, which
 # --main-loop names in the query: hello, echo, echo 1 MiB with control bytes,
-# a message of exactly message_max echoed, echo 128 MiB as messages that each
-# fit with ttyd's resident size, a second connection refused and a message
-# one byte over message_max refused; then the last line regression on the
+# a blob of exactly blob_max echoed, echo 128 MiB as one message with ttyd's
+# resident size, a second connection refused and a line announcing blobs one
+# byte over blob_max refused; then the last line regression on the
 # console role, and ttyd killed. On the stock main loop: the mcp lines that
 # open a session and a tools/call, kv.put and kv.get, doc.put and doc.head,
 # verbose.tail, an unknown type, a sequence of forwarded operations the test
 # builds replayed, read back by a new program and a stale since refused, and
 # system.restart serving the echo main loop after source.put; on a root whose
-# setting debug is false, the same refused. Where a program writes its last line and exits, a lone loss of
-# that line is a ttyd fault, reported with ttyd's version and never retried.
-# It prints one line per rung and exits 0, or stops at the first failed
-# check, names its rung and exits 1. ttyd's log is copied to stderr. Standard
-# library only, and ttyd is the one program it starts:
+# setting debug is false, the same refused. Where a program writes its last
+# line and exits, a lone loss of that line is a ttyd fault, reported with
+# ttyd's version and never retried. Each stage and each rung is labelled
+# smoke-test or normal-test: a smoke-test run, the default, runs the rungs
+# labelled smoke-test and starts no ttyd for a stage with none, a normal-test
+# run runs every rung, and a mislabel fails the run. It prints one line per
+# rung that runs, ending with its label and seconds, and exits 0, or stops at
+# the first failed check, names its rung and exits 1. ttyd's log is copied to
+# stderr. Standard library only, and ttyd is the one program it starts:
 #
-#     python3 python/test_wire.py
+#     python3 python/test_wire.py [--smoke-test | --normal-test]
 
 import argparse, base64, collections, hashlib, http.client, json, os, re
 import select, shutil, signal, socket, subprocess, sys, tempfile, time, types
@@ -204,8 +208,8 @@ _LINE_VERSION = 0
 # The CR that ends a JSLB line.
 _LINE_END = b"\r"
 
-# The tag `line_render` writes after the JSON text for blob 1.
-_BLOB_TAG = '<blob "n"=1>'
+# The tag `line_render` writes after the JSON text for each blob, by number.
+_BLOB_TAG = '<blob "n"={}>'
 
 # Text of 2, 3 and 4 byte characters for payloads, built from code points.
 _WIDE_TEXT = (
@@ -255,8 +259,8 @@ _PAGE_THREAD = "ai"
 # The server's own thread, whose ring the verbose rung reads.
 _SERVER_THREAD = "server"
 
-# The levels of the lines the verbose rung puts, one line each.
-_LEVELS = (0, 1, 2)
+# How many lines the verbose rung puts, which carry no level.
+_PUT_COUNT = 3
 
 # How many of those lines the verbose rung reads back.
 _TAIL_COUNT = 2
@@ -440,26 +444,45 @@ class RungTimer:
         return left
 
 
-# The rung that runs, its timer, and the line each rung prints.
+# The rung that runs, its timer and start, the labels, and each rung's line.
 class RungLog:
-    # Starts on ttyd, before any rung.
-    def __init__(self) -> None:
+    # Starts on ttyd, before any rung, checking the labels of the category.
+    def __init__(self, chosen: str) -> None:
+        import category
+
+        self.book = category.LabelBook(chosen)
         self.rung = "ttyd"
         self.timer = RungTimer(self.rung, _RUNG_SECONDS)
+        self.started = time.monotonic()
 
-    # Names the rung that runs now and starts its timer.
+    # Names the rung that runs now and starts its timer and its seconds.
     def rung_start(self, rung: str) -> None:
         self.rung = rung
         self.timer = RungTimer(rung, _RUNG_SECONDS)
+        self.started = time.monotonic()
 
-    # Prints the summary of the rung that ran.
-    def rung_print(self, summary: str) -> None:
-        print(f"{self.rung}: {summary}", flush=True)
+    # Prints the summary of the rung that ran, its label and its seconds.
+    def rung_print(self, summary: str, label: str) -> None:
+        seconds = time.monotonic() - self.started
+        print(f"{self.rung}: {summary} ({label}, {seconds:.3f} s)", flush=True)
 
-    # Runs a rung under its timer and prints its summary.
-    def rung_run(self, rung: str, check: Callable[[], str]) -> None:
+    # Starts the opening rung of a stage, which runs whenever its stage does.
+    def rung_open(self, rung: str, label: str) -> None:
+        if not self.book.rung_enter(rung, label):
+            raise CheckFailed(
+                f"the opening rung {rung} does not run in this run, but its"
+                " stage does"
+            )
         self.rung_start(rung)
-        self.rung_print(check())
+
+    # Runs a rung of the category under its timer and prints its summary.
+    def rung_run(
+        self, rung: str, label: str, check: Callable[[], str]
+    ) -> None:
+        if not self.book.rung_enter(rung, label):
+            return
+        self.rung_start(rung)
+        self.rung_print(check(), label)
 
 
 # ttyd serving one root, in a session of its own, its log read from a pipe.
@@ -638,8 +661,7 @@ class WireClient:
         self.decoder = jslb.LineDecoder(
             values["line_max"],
             values["blob_max"],
-            values["message_max"],
-            values["message_max"],
+            values["blob_max"],
             blob_refuse,
         )
         self.lines: collections.deque[LineObject] = collections.deque()
@@ -811,66 +833,6 @@ class WireClient:
                 f"the program's output through {self.ttyd.version} is not"
                 f" JSLB: {error}"
             ) from error
-
-
-# The large echo: messages that each fit, in flight within `queue_max`.
-class EchoStream:
-    # Starts with nothing sent.
-    def __init__(self, client: WireClient, values: dict[str, Any]) -> None:
-        self.client = client
-        self.message_max: int = values["message_max"]
-        self.queue_max: int = values["queue_max"]
-        self.left = _LARGE_BYTES
-        self.held = 0
-        self.held_peak = 0
-        self.sent = 0
-        self.waiting: dict[int, tuple[int, str]] = {}
-
-    # Checks the replies in, sends what fits, says whether all came back.
-    def stream_step(self) -> bool:
-        client = self.client
-        while client.lines:
-            self.reply_check(client.lines.popleft())
-        while self.left > 0:
-            request_id = client.id_last + 1
-            fit = blob_fit(False, request_id, self.message_max)
-            size = min(self.left, fit)
-            total = len(echo_text(False, request_id, size)) + size
-            if self.held + total > self.queue_max:
-                break
-            data = os.urandom(size)
-            request = request_make(client, False, _ECHO_TYPE, [data], None, {})
-            line_send(client, request)
-            self.waiting[request_id] = (total, sha256_text(data))
-            self.held += total
-            self.held_peak = max(self.held_peak, self.held)
-            self.left -= size
-            self.sent += 1
-        return self.left == 0 and not self.waiting
-
-    # Checks one reply against the request it answers and frees its bytes.
-    def reply_check(self, reply: LineObject) -> None:
-        import jslb
-
-        header: Any = reply[0]
-        reply_id = jslb.field_get(header, "reply")
-        blobs = blobs_of(reply)
-        if (
-            jslb.field_get(header, "type") != _ECHO_TYPE
-            or reply_id not in self.waiting
-            or len(blobs) != 1
-            or jslb.payload_of(cast(jslb.Object, reply))
-        ):
-            raise CheckFailed(
-                f"the large echo: the server wrote {line_text(reply)}"
-            )
-        total, digest = self.waiting.pop(reply_id)
-        if sha256_text(blobs[0]) != digest:
-            raise CheckFailed(
-                f"the large echo: the blob of reply {reply_id} has sha256"
-                f" {sha256_text(blobs[0])}, where {digest} went"
-            )
-        self.held -= total
 
 
 # A forwarded operation of the replay: its request's parts, and the reply due.
@@ -1176,27 +1138,21 @@ def message_bytes(line: LineObject) -> int:
     return sum(len(cast(bytes, piece)) for piece in pieces)
 
 
-# The text and CR of an echo request with no payload and one blob of the size.
-def echo_text(full: bool, request_id: int, size: int) -> bytes:
+# The text and CR of an echo request with no payload and blobs of the sizes.
+def echo_text(full: bool, request_id: int, sizes: list[int]) -> bytes:
     import jslb
 
     header = jslb.header_make(_ECHO_TYPE, id=request_id, full=full)
-    blob = jslb.Object()
-    blob["s"] = size
-    line = jslb.line_make(header, [blob])
-    text = jslb.line_render(line).removesuffix(_BLOB_TAG)
+    blobs: list[jslb.Object] = []
+    for size in sizes:
+        blob = jslb.Object()
+        blob["s"] = size
+        blobs.append(blob)
+    line = jslb.line_make(header, blobs)
+    numbers = range(1, len(sizes) + 1)
+    tags = "".join(_BLOB_TAG.format(number) for number in numbers)
+    text = jslb.line_render(line).removesuffix(tags)
     return text.encode("utf-8") + _LINE_END
-
-
-# The size of the blob that makes an echo request exactly `limit` bytes.
-def blob_fit(full: bool, request_id: int, limit: int) -> int:
-    length = len(echo_text(full, request_id, limit))
-    size = limit - length
-    if len(echo_text(full, request_id, size)) != length:
-        raise CheckFailed(
-            f"no blob makes echo request {request_id} exactly {limit} bytes"
-        )
-    return size
 
 
 # Builds a request of the connection with the next id, its blobs and payload.
@@ -1571,48 +1527,45 @@ def rung_control(client: WireClient, values: dict[str, Any]) -> str:
     )
 
 
-# Echoes a request of exactly `message_max` bytes, in short names.
+# Echoes a request whose one blob is exactly `blob_max` bytes, short names.
 def rung_fit(client: WireClient, values: dict[str, Any]) -> str:
-    what = "the echo of message_max bytes"
-    message_max: int = values["message_max"]
-    size = blob_fit(False, client.id_last + 1, message_max)
+    what = "the echo of a blob of blob_max bytes"
+    blob_max: int = values["blob_max"]
     request = request_make(
-        client, False, _ECHO_TYPE, [os.urandom(size)], None, {}
+        client, False, _ECHO_TYPE, [os.urandom(blob_max)], None, {}
     )
     sent = message_bytes(request)
-    if sent != message_max:
-        raise CheckFailed(
-            f"the request takes {sent} bytes, not message_max {message_max}"
-        )
     started = time.monotonic()
     reply = exchange_run(client, request, what)
     seconds = time.monotonic() - started
     echo_check(request, reply, what)
     return (
-        f"a request in short names of {sent} bytes, message_max, its line and"
-        f" a blob of {size} random bytes, came back equal in a reply of"
-        f" {message_bytes(reply)} bytes, {seconds:.3f} s"
+        f"a request in short names with one blob of blob_max {blob_max}"
+        f" random bytes, {sent} bytes with its line, came back equal in a"
+        f" reply of {message_bytes(reply)} bytes, {seconds:.3f} s"
     )
 
 
-# Echoes 128 MiB as messages that each fit, measuring ttyd's resident size.
+# Echoes 128 MiB as one message, measuring ttyd's resident size.
 def rung_large(client: WireClient, values: dict[str, Any]) -> str:
+    what = "the large echo"
     ttyd = client.ttyd
     before = memory_read(ttyd.process.pid)
-    stream = EchoStream(client, values)
+    request = request_make(
+        client, False, _ECHO_TYPE, [os.urandom(_LARGE_BYTES)], None, {}
+    )
     started = time.monotonic()
-    client_wait(client, stream.stream_step, "the large echo")
+    reply = exchange_run(client, request, what)
     seconds = time.monotonic() - started
+    echo_check(request, reply, what)
     after = memory_read(ttyd.process.pid)
     rate = _LARGE_BYTES / _MIB / seconds
     return (
-        f"{_LARGE_BYTES} bytes of random blobs in {stream.sent} requests in"
-        f" short names of at most message_max {stream.message_max} bytes"
-        " each, line and blob, sent while the bytes not yet echoed stayed"
-        f" within queue_max {stream.queue_max}, at most {stream.held_peak};"
-        f" every reply equal by sha256; {seconds:.2f} s, {rate:.1f} MiB/s"
-        f" each way; ttyd's resident size {before.resident} KiB before and"
-        f" {after.resident} KiB after, its peak {after.peak} KiB"
+        f"one request in short names with a blob of {_LARGE_BYTES} random"
+        f" bytes, within blob_max {values['blob_max']}, came back equal;"
+        f" {seconds:.2f} s, {rate:.1f} MiB/s each way; ttyd's resident size"
+        f" {before.resident} KiB before and {after.resident} KiB after, its"
+        f" peak {after.peak} KiB"
     )
 
 
@@ -1643,31 +1596,25 @@ def rung_second(client: WireClient, values: dict[str, Any]) -> str:
     )
 
 
-# Sends a line announcing one byte over `message_max`, refused at its CR.
+# Sends a line announcing blobs one byte over `blob_max`, refused at its CR.
 def rung_over(client: WireClient, values: dict[str, Any]) -> str:
     from i18n import i18n
 
-    message_max: int = values["message_max"]
-    request_id = client.id_next()
-    size = blob_fit(False, request_id, message_max) + 1
-    text = echo_text(False, request_id, size)
-    length = len(text)
-    if length + size != message_max + 1:
-        raise CheckFailed(
-            f"no echo request {request_id} is one byte over message_max"
-            f" {message_max}"
-        )
+    blob_max: int = values["blob_max"]
+    half = blob_max // 2
+    sizes = [half, blob_max - half + 1]
+    text = echo_text(False, client.id_next(), sizes)
     client.input_send(text)
-    message = i18n("jslb.message_over", message_max + 1, message_max)
-    what = "the error line of the message over message_max"
+    message = i18n("jslb.blobs_over", blob_max + 1, blob_max)
+    what = "the error line of the blobs over blob_max"
     error_check(line_last(client, what), None, message, what)
     exit_check(client.ttyd, client.pid, "ttyd's log of the program's end")
     return (
-        f"a line of {length} bytes announcing a blob of {size} bytes,"
-        f" {message_max + 1} bytes in all, sent without the blob: the server"
-        f" wrote the error {message!r} with no r at the line's CR, before any"
-        f" blob byte, and exited with code {_PROGRAM_FAILED} as ttyd logged;"
-        f" {connection_end(client)}"
+        f"a line of {len(text)} bytes announcing blobs of {sizes[0]} and"
+        f" {sizes[1]} bytes, {blob_max + 1} in all, sent without the blobs:"
+        f" the server wrote the error {message!r} with no r at the line's CR,"
+        f" before any blob byte, and exited with code {_PROGRAM_FAILED} as"
+        f" ttyd logged; {connection_end(client)}"
     )
 
 
@@ -1890,8 +1837,8 @@ def rung_verbose(client: WireClient) -> str:
 
     at = time.time_ns() // _NANOSECONDS_PER_MILLISECOND
     lines = [
-        {"at": at, "level": level, "text": f"{_WIDE_TEXT} {level}"}
-        for level in _LEVELS
+        {"at": at, "text": f"{_WIDE_TEXT} {number}"}
+        for number in range(_PUT_COUNT)
     ]
     put = {"thread": _PAGE_THREAD, "lines": lines}
     line_send(client, notice_make(client, "verbose.put", put))
@@ -2204,59 +2151,94 @@ def root_make(
 
 # The rungs on a root whose `--main-loop` serves the echo main loop file.
 def stage_echo(log: RungLog, work: str) -> None:
+    if not log.book.root_enter("echo", "smoke-test"):
+        return
     root, values = root_make(work, "echo", True)
     directory = os.path.join(root, _MAIN_LOOP_DIRECTORY)
     os.makedirs(directory)
     shutil.copyfile(_ECHO_PATH, os.path.join(directory, _ECHO_NAME))
     log.rung_start("ttyd")
     with TtydServer(root, values, log) as ttyd:
-        log.rung_start("hello")
+        log.rung_open("hello", "smoke-test")
         client, summary = rung_hello(ttyd, values)
-        log.rung_print(summary)
-        log.rung_run("echo", lambda: rung_echo(client))
+        log.rung_print(summary, "smoke-test")
+        log.rung_run("echo", "smoke-test", lambda: rung_echo(client))
         log.rung_run(
             "echo 1 MiB with control bytes",
+            "smoke-test",
             lambda: rung_control(client, values),
         )
-        log.rung_run("echo message_max", lambda: rung_fit(client, values))
-        log.rung_run("echo 128 MiB", lambda: rung_large(client, values))
         log.rung_run(
-            "second connection refused", lambda: rung_second(client, values)
+            "echo blob_max", "normal-test", lambda: rung_fit(client, values)
         )
         log.rung_run(
-            "message_max plus one refused", lambda: rung_over(client, values)
+            "echo 128 MiB", "normal-test", lambda: rung_large(client, values)
         )
-        log.rung_run("last line", lambda: rung_lines(ttyd, values))
-        log.rung_run("ttyd killed", lambda: rung_killed(ttyd, values))
+        log.rung_run(
+            "second connection refused",
+            "smoke-test",
+            lambda: rung_second(client, values),
+        )
+        log.rung_run(
+            "blob_max plus one refused",
+            "smoke-test",
+            lambda: rung_over(client, values),
+        )
+        log.rung_run(
+            "last line", "smoke-test", lambda: rung_lines(ttyd, values)
+        )
+        log.rung_run(
+            "ttyd killed", "smoke-test", lambda: rung_killed(ttyd, values)
+        )
+    log.book.root_leave()
 
 
 # The rungs on a root that serves the stock main loop in debug mode.
 def stage_stock(log: RungLog, work: str) -> None:
+    if not log.book.root_enter("stock", "smoke-test"):
+        return
     root, values = root_make(work, "stock", True)
     log.rung_start("ttyd")
     with TtydServer(root, values, log) as ttyd:
-        log.rung_start("mcp line")
+        log.rung_open("mcp line", "smoke-test")
         client, summary = rung_mcp(ttyd, values)
-        log.rung_print(summary)
-        log.rung_run("kv.put and kv.get", lambda: rung_kv(client))
-        log.rung_run("doc.put and doc.head", lambda: rung_doc(client))
-        log.rung_run("verbose.tail", lambda: rung_verbose(client))
-        log.rung_run("unknown type", lambda: rung_unknown(client))
+        log.rung_print(summary, "smoke-test")
         log.rung_run(
-            "operation sequence replayed", lambda: rung_replay(ttyd, values)
+            "kv.put and kv.get", "smoke-test", lambda: rung_kv(client)
         )
-        log.rung_run("system.restart", lambda: rung_restart(ttyd, values))
+        log.rung_run(
+            "doc.put and doc.head", "smoke-test", lambda: rung_doc(client)
+        )
+        log.rung_run(
+            "verbose.tail", "smoke-test", lambda: rung_verbose(client)
+        )
+        log.rung_run(
+            "unknown type", "smoke-test", lambda: rung_unknown(client)
+        )
+        log.rung_run(
+            "operation sequence replayed",
+            "smoke-test",
+            lambda: rung_replay(ttyd, values),
+        )
+        log.rung_run(
+            "system.restart", "smoke-test", lambda: rung_restart(ttyd, values)
+        )
+    log.book.root_leave()
 
 
 # The rung on a root whose setting debug is false.
 def stage_release(log: RungLog, work: str) -> None:
+    if not log.book.root_enter("release", "smoke-test"):
+        return
     root, values = root_make(work, "release", False)
     log.rung_start("ttyd")
     with TtydServer(root, values, log) as ttyd:
         log.rung_run(
             "system.restart refused without debug",
+            "smoke-test",
             lambda: rung_refused(ttyd, values),
         )
+    log.book.root_leave()
 
 
 # Exits with 128 plus the signal's number, so the blocks stop ttyd.
@@ -2264,17 +2246,21 @@ def signal_exit(number: int, frame: types.FrameType | None) -> None:
     sys.exit(_SIGNAL_BASE + number)
 
 
-# Runs the rungs in order, printing a line each, and returns the exit code.
-def main() -> int:
-    argparse.ArgumentParser(
+# Runs the rungs of the chosen category in order and returns the exit code.
+def main(arguments: list[str]) -> int:
+    import category
+
+    parser = argparse.ArgumentParser(
         prog=_PROGRAM_NAME,
         description="Run the wire test: the server in roots under build/,"
         " through the ttyd the install script builds, from a standard"
         " library WebSocket client.",
-    ).parse_args(sys.argv[1:])
+    )
+    category.options_add(parser)
+    chosen: str = parser.parse_args(arguments).category
     for number in (signal.SIGHUP, signal.SIGTERM):
         signal.signal(number, signal_exit)
-    log = RungLog()
+    log = RungLog(chosen)
     try:
         if not os.path.isfile(_TTYD_PATH):
             raise CheckFailed(
@@ -2295,4 +2281,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

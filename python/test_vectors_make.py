@@ -4,9 +4,11 @@
 #
 # Tests of vectors_make: what vectors_write puts in a scratch directory under
 # build/, each vector beside its sidecar, success and error vectors both, the
-# directory made when it is missing, and a file an earlier run left removed.
+# directory made when it is missing, a file an earlier run left removed, and
+# the two vectors at the edge of blob_max.
 
 import json, os, tempfile, unittest, vectors_make
+from typing import Any
 
 # The checkout's build directory, where each test makes its scratch directory.
 _BUILD_PATH = os.path.join(
@@ -60,3 +62,22 @@ class TestVectorsWrite(unittest.TestCase):
                 file.write(b'{"t":"echo"}\r')
             vectors_make.vectors_write(scratch)
             self.assertFalse(os.path.exists(stale))
+
+    # Blobs of `blob_max` in all make a success vector, one byte more a fault.
+    def test_window_edge(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
+            vectors_make.vectors_write(scratch)
+            path = os.path.join(scratch, "blobs_at_max.json")
+            with open(path, encoding="utf-8") as file:
+                sidecar: dict[str, Any] = json.load(file)
+            path = os.path.join(scratch, "error_blobs_over.jslb")
+            with open(path, "rb") as file:
+                over: dict[str, Any] = json.loads(file.read().split(b"\r")[0])
+        limits: dict[str, int] = sidecar["limits"]
+        self.assertEqual(
+            sorted(limits), ["blob_max", "line_max", "overflow_bytes"]
+        )
+        (message,) = sidecar["messages"]
+        at_max = message["1"]["s"] + message["2"]["s"]
+        self.assertEqual(at_max, limits["blob_max"])
+        self.assertEqual(over["1"]["s"] + over["2"]["s"], at_max + 1)

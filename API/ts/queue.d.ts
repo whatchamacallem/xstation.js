@@ -35,8 +35,8 @@ declare namespace queue {
 
   // The task manager of one thread: one line dispatched at a time, a
   // handler run to completion, sleeping tasks woken by a line of their
-  // `then_type` once every awaited reply is in. Every submit, dispatch,
-  // sleep, wake and reply is a verbose line at level 2.
+  // `then_type` once every awaited reply is in. In debug mode every
+  // submit, dispatch, sleep, wake and reply is a verbose line.
   class TaskQueue {
     // `synchronous` is the debug mode of 4.2: the queue runs every task
     // it holds to completion before reading the next input from a port.

@@ -115,7 +115,6 @@ def loop_run(read_fd: int, write_fd: int, root: str) -> None:
     decoder = jslb.LineDecoder(
         values["line_max"],
         values["blob_max"],
-        values["message_max"],
         values["overflow_bytes"],
         functools.partial(_sink_make, os.path.join(root, _CACHE_DIRECTORY)),
     )

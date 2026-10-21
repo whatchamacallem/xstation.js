@@ -5,8 +5,10 @@
 # Tests the parts of devtools.py that need no browser: WebSocket frames with
 # and without masks, the handshake, joining a message from its fragments, the
 # relay script, the DevTools address, the timers, a client reading canned
-# bytes or an empty pipe, and a browser's page calls and waits with canned
-# bytes, a scratch profile and a patched removal. No process is started.
+# bytes or an empty pipe, the synchronous loads picked out of a trace, the
+# workers and pauses kept, and a browser's page, trace and worker calls and
+# waits with canned bytes, a scratch profile and a patched removal. No
+# process is started.
 
 import devtools, errno, functools, io, json, os, subprocess, tempfile
 import unittest.mock
@@ -95,6 +97,25 @@ class RunningProcess:
         return None
 
 
+# Returns the event of a target attached from the page, with its session.
+def attach_event(kind: str, session_id: str, title: str) -> dict[str, Any]:
+    return {
+        "method": "Target.attachedToTarget",
+        "sessionId": "P",
+        "params": {
+            "sessionId": session_id,
+            "targetInfo": {
+                "targetId": "T" + session_id,
+                "type": kind,
+                "title": title,
+                "url": "blob:http://x/1",
+                "attached": True,
+            },
+            "waitingForDebugger": False,
+        },
+    }
+
+
 # Returns a browser that starts nothing and whose client reads the bytes.
 def browser_make(data: bytes, writes: list[bytes]) -> devtools.Browser:
     with unittest.mock.patch("shutil.which", return_value="/w/ps.exe"):
@@ -114,11 +135,60 @@ def message_frame(message: dict[str, Any]) -> bytes:
     return devtools.frame_encode(0x1, payload, _ZERO_MASK)
 
 
+# Returns the event of a debugger paused on the session.
+def paused_event(session_id: str) -> dict[str, Any]:
+    return {
+        "method": "Debugger.paused",
+        "sessionId": session_id,
+        "params": {"callFrames": [], "reason": "other"},
+    }
+
+
 # Returns the DevTools request inside a frame the client wrote.
 def request_decode(frame: bytes) -> dict[str, Any]:
     decoded = devtools.frame_decode(io.BytesIO(frame).read)
     request: dict[str, Any] = json.loads(decoded.payload)
     return request
+
+
+# Returns the metadata event that names a thread of a process.
+def thread_metadata(pid: int, tid: int, name: str) -> dict[str, Any]:
+    return {
+        "args": {"name": name},
+        "cat": "__metadata",
+        "name": "thread_name",
+        "ph": "M",
+        "pid": pid,
+        "tid": tid,
+        "ts": 0,
+    }
+
+
+# Returns a complete trace event of the name, run on a thread of a process.
+def thread_span(pid: int, tid: int, name: str) -> dict[str, Any]:
+    return {
+        "args": {},
+        "cat": "loading",
+        "dur": 5,
+        "name": name,
+        "ph": "X",
+        "pid": pid,
+        "tid": tid,
+        "ts": 100,
+    }
+
+
+# Returns the event that ends a trace, saying whether it lost events.
+def trace_complete(lost: bool) -> dict[str, Any]:
+    return {
+        "method": "Tracing.tracingComplete",
+        "params": {"dataLossOccurred": lost},
+    }
+
+
+# Returns the event that carries some of a trace's events.
+def trace_data(values: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"method": "Tracing.dataCollected", "params": {"value": values}}
 
 
 # Frames encode and decode as RFC 6455 says, with and without masks.
@@ -422,6 +492,27 @@ class TestClient(unittest.TestCase):
         self.assertEqual(request_decode(rig.writes[0])["sessionId"], "S")
         self.assertNotIn("sessionId", request_decode(rig.writes[1]))
 
+    # A call on a named session carries it, even for a target method.
+    def test_call_named(self) -> None:
+        rig = ClientRig(
+            message_frame({"id": 1, "result": {}})
+            + message_frame({"id": 2, "result": {}}),
+            60,
+        )
+        rig.client.session_id = "P"
+        rig.client.session_call("W", "Target.setAutoAttach", {"flatten": True})
+        rig.client.session_call("", "Runtime.enable")
+        self.assertEqual(
+            request_decode(rig.writes[0]),
+            {
+                "id": 1,
+                "method": "Target.setAutoAttach",
+                "params": {"flatten": True},
+                "sessionId": "W",
+            },
+        )
+        self.assertNotIn("sessionId", request_decode(rig.writes[1]))
+
     # An error reply fails loud with the method and DevTools' message.
     def test_call_error(self) -> None:
         error = {"code": -32601, "message": "nope"}
@@ -612,6 +703,111 @@ class TestPage(unittest.TestCase):
         )
 
 
+# The synchronous loads picked out of a trace, and the trace's events kept.
+class TestTrace(unittest.TestCase):
+    # A load on a renderer's main thread is found, on any other it is not.
+    def test_find_main(self) -> None:
+        events = [
+            thread_metadata(1, 10, "CrRendererMain"),
+            thread_metadata(1, 11, "DedicatedWorker thread"),
+            thread_metadata(2, 20, "CrBrowserMain"),
+            thread_span(1, 10, "URLLoader::loadSynchronously"),
+            thread_span(1, 11, "URLLoader::loadSynchronously"),
+            thread_span(2, 20, "URLLoader::loadSynchronously"),
+            thread_span(1, 10, "ResourceSendRequest"),
+        ]
+        self.assertEqual(devtools.blocking_find(events), [events[3]])
+
+    # Each name Chrome's versions give a synchronous load is found.
+    def test_find_names(self) -> None:
+        names = (
+            "URLLoader::loadSynchronously",
+            "WebURLLoader::loadSynchronously",
+            "WebURLLoaderImpl::loadSynchronously",
+        )
+        for name in names:
+            load = thread_span(1, 10, name)
+            events = [thread_metadata(1, 10, "CrRendererMain"), load]
+            self.assertEqual(devtools.blocking_find(events), [load], msg=name)
+
+    # The main threads of two renderers both count.
+    def test_find_renderers(self) -> None:
+        events = [
+            thread_metadata(1, 10, "CrRendererMain"),
+            thread_metadata(3, 30, "CrRendererMain"),
+            thread_span(1, 10, "URLLoader::loadSynchronously"),
+            thread_span(3, 30, "URLLoader::loadSynchronously"),
+        ]
+        self.assertEqual(devtools.blocking_find(events), events[2:])
+
+    # A main thread that ran no synchronous load gives nothing.
+    def test_find_none(self) -> None:
+        events = [
+            thread_metadata(1, 10, "CrRendererMain"),
+            thread_span(1, 10, "ResourceSendRequest"),
+        ]
+        self.assertEqual(devtools.blocking_find(events), [])
+
+    # A trace that names no renderer's main thread fails loud.
+    def test_find_unnamed(self) -> None:
+        events = [
+            thread_metadata(2, 20, "CrBrowserMain"),
+            thread_span(2, 20, "URLLoader::loadSynchronously"),
+        ]
+        with self.assertRaises(RuntimeError) as caught:
+            devtools.blocking_find(events)
+        self.assertEqual(
+            str(caught.exception), "the trace names no CrRendererMain thread"
+        )
+
+    # Trace data is joined in order, and its end is kept with its loss.
+    def test_data_joined(self) -> None:
+        events = devtools.PageEvents()
+        first = thread_metadata(1, 10, "CrRendererMain")
+        second = thread_span(1, 10, "ResourceSendRequest")
+        third = thread_span(1, 10, "ResourceFinish")
+        events.message_handle(trace_data([first, second]))
+        events.message_handle(trace_data([third]))
+        self.assertFalse(events.trace_done)
+        events.message_handle(trace_complete(True))
+        self.assertEqual(events.trace, [first, second, third])
+        self.assertTrue(events.trace_done)
+        self.assertTrue(events.trace_lost)
+
+
+# The workers attached from the page and the pauses of their debuggers.
+class TestWorkers(unittest.TestCase):
+    # An attached worker is kept by its title, and an attached page is not.
+    def test_worker_attached(self) -> None:
+        events = devtools.PageEvents()
+        events.message_handle(attach_event("page", "Q", "about:blank"))
+        events.message_handle(attach_event("worker", "W", "ai"))
+        self.assertEqual(events.workers, {"ai": "W"})
+
+    # A pause is kept by the session it came on.
+    def test_pause_kept(self) -> None:
+        events = devtools.PageEvents()
+        events.message_handle(paused_event("W"))
+        self.assertEqual(events.paused, {"W"})
+
+    # A detached worker is forgotten with its pause, and the others stay.
+    def test_worker_detached(self) -> None:
+        events = devtools.PageEvents()
+        events.message_handle(attach_event("worker", "W", "ai"))
+        events.message_handle(attach_event("worker", "V", "other"))
+        events.message_handle(paused_event("W"))
+        events.message_handle(paused_event("V"))
+        events.message_handle(
+            {
+                "method": "Target.detachedFromTarget",
+                "sessionId": "P",
+                "params": {"sessionId": "W", "targetId": "TW"},
+            }
+        )
+        self.assertEqual(events.workers, {"other": "V"})
+        self.assertEqual(events.paused, {"V"})
+
+
 # A browser's page calls and waits, on canned bytes and a scratch profile.
 class TestBrowser(unittest.TestCase):
     # Makes the scratch directory a profile is in.
@@ -772,3 +968,110 @@ class TestBrowser(unittest.TestCase):
             browser.profile_remove()
         self.assertIs(caught.exception, failed)
         self.assertEqual(rmtree.call_count, 1)
+
+    # A trace starts afresh on the page, its categories reported as events.
+    def test_trace_start(self) -> None:
+        writes: list[bytes] = []
+        browser = browser_make(message_frame({"id": 1, "result": {}}), writes)
+        browser.client_get().session_id = "P"
+        browser.events.trace = [thread_metadata(1, 10, "CrRendererMain")]
+        browser.events.trace_done = True
+        browser.events.trace_lost = True
+        browser.trace_start(devtools.blocking_categories())
+        self.assertEqual(
+            request_decode(writes[0]),
+            {
+                "id": 1,
+                "method": "Tracing.start",
+                "params": {
+                    "transferMode": "ReportEvents",
+                    "traceConfig": {
+                        "includedCategories": ["loading", "__metadata"],
+                    },
+                },
+                "sessionId": "P",
+            },
+        )
+        self.assertEqual(browser.events.trace, [])
+        self.assertFalse(browser.events.trace_done)
+        self.assertFalse(browser.events.trace_lost)
+
+    # Ending a trace returns every event sent until the trace completed.
+    def test_trace_end(self) -> None:
+        name = thread_metadata(1, 10, "CrRendererMain")
+        load = thread_span(1, 10, "URLLoader::loadSynchronously")
+        writes: list[bytes] = []
+        browser = browser_make(
+            message_frame({"id": 1, "result": {}})
+            + message_frame(trace_data([name]))
+            + message_frame(trace_data([load]))
+            + message_frame(trace_complete(False)),
+            writes,
+        )
+        browser.client_get().session_id = "P"
+        self.assertEqual(browser.trace_end(), [name, load])
+        self.assertEqual(
+            request_decode(writes[0]),
+            {
+                "id": 1,
+                "method": "Tracing.end",
+                "params": {},
+                "sessionId": "P",
+            },
+        )
+
+    # A trace that lost events fails loud.
+    def test_trace_lost(self) -> None:
+        browser = browser_make(
+            message_frame({"id": 1, "result": {}})
+            + message_frame(trace_complete(True)),
+            [],
+        )
+        with self.assertRaises(RuntimeError) as caught:
+            browser.trace_end()
+        self.assertEqual(
+            str(caught.exception),
+            "the trace lost events, so it can't show everything that ran",
+        )
+
+    # The worker is attached from the page, its debugger enabled and paused.
+    def test_worker_pause(self) -> None:
+        writes: list[bytes] = []
+        browser = browser_make(
+            message_frame(attach_event("worker", "V", "other"))
+            + message_frame({"id": 1, "result": {}})
+            + message_frame(attach_event("worker", "W", "ai"))
+            + message_frame({"id": 2, "result": {"debuggerId": "D"}})
+            + message_frame({"id": 3, "result": {}})
+            + message_frame(paused_event("W")),
+            writes,
+        )
+        browser.client_get().session_id = "P"
+        browser.worker_pause("ai")
+        self.assertEqual(
+            [request_decode(write) for write in writes],
+            [
+                {
+                    "id": 1,
+                    "method": "Target.setAutoAttach",
+                    "params": {
+                        "autoAttach": True,
+                        "waitForDebuggerOnStart": False,
+                        "flatten": True,
+                    },
+                    "sessionId": "P",
+                },
+                {
+                    "id": 2,
+                    "method": "Debugger.enable",
+                    "params": {},
+                    "sessionId": "W",
+                },
+                {
+                    "id": 3,
+                    "method": "Debugger.pause",
+                    "params": {},
+                    "sessionId": "W",
+                },
+            ],
+        )

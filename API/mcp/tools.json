@@ -134,7 +134,7 @@
         },
         {
           "name": "script_debug",
-          "description": "Run the script as script_run does at verbose level 2, which traces every substrate call it makes.",
+          "description": "Run the script as script_run does, tracing every substrate call it makes first.",
           "inputSchema": {
             "type": "object",
             "properties": {
@@ -180,15 +180,6 @@
             "required": ["text", "timeout_seconds"]
           },
           "_meta": {"xsjs": {"permit": true}}
-        },
-        {
-          "name": "verbose_level",
-          "description": "Set this worker's verbose level: 0, 1 or 2.",
-          "inputSchema": {
-            "type": "object",
-            "properties": {"level": {"type": "integer"}},
-            "required": ["level"]
-          }
         },
         {
           "name": "verbose_tail",

@@ -259,7 +259,6 @@ declare namespace lines {
 
   interface VerboseLine {
     at: number;
-    level: number;
     text: string;
   }
 

@@ -4,9 +4,8 @@
 //
 // Tests of script.ts on a store of the sqlite3.wasm module and OPFS pool the
 // test page sets as globals: the step script that advances a region's tide,
-// run and traced, the lines a run keeps at each level, a script read from the
-// cache, the engine object, the exceptions a run returns and the errors it
-// throws.
+// run and traced, every line a run keeps, a script read from the cache, the
+// engine object, the exceptions a run returns and the errors it throws.
 
 namespace test_script {
   // The initialized sqlite3.wasm module, a global the test page sets.
@@ -19,15 +18,15 @@ namespace test_script {
   const constants = Object.freeze({
     // The `overflow_bytes` of `settings.json`, 128 KiB.
     overflow_bytes: 131072,
+    // The `turn_compact_turns` of `settings.json`, 64.
+    compact_turns: 64,
     // The start of the root of each store a test makes in the pool.
     root_prefix: "/test_script/",
     // The files of the cache of each store a test makes.
     slot_count: 8,
-    // The highest verbose level.
-    level_max: 2,
     // The ref of the step script, which advances the tide of a region.
     step_ref: "/_files/script/step_tide.js",
-    // The step script, 322 bytes.
+    // The step script, 319 bytes.
     step_script:
       "// Advances the tide by args.hours in the region table" +
       " of the world.\n" +
@@ -35,13 +34,10 @@ namespace test_script {
       '  {sql: "UPDATE region SET tide = tide + ? WHERE name = ?",\n' +
       '    params: [args.hours, "castle_gatehouse"]},\n' +
       "]);\n" +
-      'engine.log(1, "tide advanced by " + args.hours);\n' +
+      'engine.log("tide advanced by " + args.hours);\n' +
       "return {changes: results[0].changes};\n",
     // The size of the step script in bytes.
-    step_size: 322,
-    // The `SHA-256` of the step script.
-    step_sha256:
-      "dbc909cf0e2e7954d586c06b3291728e527d5dee4c109409fcb501e200756626",
+    step_size: 319,
     // The line the step script logs when it advances the tide by 1.
     step_line: "tide advanced by 1",
     // The arguments of the step script's call of the store, as JSON.
@@ -126,11 +122,9 @@ namespace test_script {
     ]);
   }
 
-  // The level and text of each line, which leave out the time.
-  function lines_shown(
-    kept: lines.VerboseLine[],
-  ): { level: number; text: string }[] {
-    return kept.map((line) => ({ level: line.level, text: line.text }));
+  // The text of each line, which leaves out the time.
+  function lines_shown(kept: lines.VerboseLine[]): string[] {
+    return kept.map((line) => line.text);
   }
 
   // A script test: the module and pool read in `setUp`, its roots removed.
@@ -182,6 +176,7 @@ namespace test_script {
         new substrate.CacheFiles(slots),
         root,
         constants.overflow_bytes,
+        constants.compact_turns,
       );
       store.forward_set(() => undefined, false);
       this.#stores.push(store);
@@ -213,22 +208,26 @@ namespace test_script {
       const data = utility.utf8_encode(constants.step_script);
       const put = store.kv_put(constants.step_ref, data);
       this.assertEqual(put.row.size, constants.step_size);
-      this.assertEqual(put.row.sha256, constants.step_sha256);
-      const result = script.script_run(store, "step_tide", { hours: 1 }, 1);
+      this.assertEqual(put.row.sha256, utility.sha256_hex(data));
+      const result = script.script_run(
+        store,
+        "step_tide",
+        { hours: 1 },
+        false,
+      );
       this.assertEqual(Object.keys(result), ["value", "lines"]);
       this.assertEqual(result.value, { changes: 1 });
-      this.assertEqual(lines_shown(result.lines), [
-        { level: 1, text: constants.step_line },
-      ]);
+      this.assertEqual(lines_shown(result.lines), [constants.step_line]);
+      this.assertEqual(Object.keys(result.lines[0]), ["at", "text"]);
       this.assertEqual(typeof result.lines[0].at, "number");
     }
 
-    // At level 2 the call of the store is traced before the script's line.
+    // A traced run traces the call of the store before the script's line.
     test_step_traced(): void {
       const store = this.store_fresh();
       castle_make(store);
       script_put(store, "step_tide", constants.step_script);
-      const result = script.script_run(store, "step_tide", { hours: 1 }, 2);
+      const result = script.script_run(store, "step_tide", { hours: 1 }, true);
       this.assertEqual(result.value, { changes: 1 });
       const trace = i18n(
         "script.trace_call",
@@ -236,51 +235,47 @@ namespace test_script {
         constants.step_arguments,
       );
       this.assertEqual(lines_shown(result.lines), [
-        { level: 2, text: trace },
-        { level: 1, text: constants.step_line },
+        trace,
+        constants.step_line,
       ]);
     }
 
-    // A run keeps the lines at or below its level, in order.
-    test_levels_kept(): void {
+    // A run keeps every line it logs, in order, traced or not.
+    test_lines_kept(): void {
       const store = this.store_fresh();
       script_put(
         store,
-        "levels",
-        'engine.log(0, "zero");\n' +
-          'engine.log(1, "one");\n' +
-          'engine.log(2, "two");\n' +
+        "lines",
+        'engine.log("zero");\n' +
+          'engine.log("one");\n' +
+          'engine.log("two");\n' +
           "return null;\n",
       );
-      const texts = ["zero", "one", "two"];
-      for (let level = 0; level <= constants.level_max; level += 1) {
-        const result = script.script_run(store, "levels", {}, level);
+      for (const trace of [false, true]) {
+        const result = script.script_run(store, "lines", {}, trace);
         this.assertEqual(result.value, null);
-        const kept = texts
-          .slice(0, level + 1)
-          .map((text, index) => ({ level: index, text }));
-        this.assertEqual(lines_shown(result.lines), kept);
+        this.assertEqual(lines_shown(result.lines), ["zero", "one", "two"]);
       }
     }
 
     // A line the script logs also reaches the thread's verbose ring.
     test_thread_logged(): void {
       const store = this.store_fresh();
-      script_put(store, "thread", 'engine.log(0, "to the thread");\n');
-      script.script_run(store, "thread", {}, 0);
+      script_put(store, "thread", 'engine.log("to the thread");\n');
+      script.script_run(store, "thread", {}, false);
       this.assertEqual(verbose.history_get(1)[0].text, "to the thread");
     }
 
-    // Only a run at level 2 traces the calls of the store.
-    test_trace_level(): void {
+    // Only a traced run traces the calls of the store.
+    test_trace_only(): void {
       const store = this.store_fresh();
       script_put(store, "list", "return engine.store.db_list();\n");
-      const plain = script.script_run(store, "list", {}, 1);
+      const plain = script.script_run(store, "list", {}, false);
       this.assertEqual(plain, { value: ["_files"], lines: [] });
-      const traced = script.script_run(store, "list", {}, 2);
+      const traced = script.script_run(store, "list", {}, true);
       this.assertEqual(traced.value, ["_files"]);
       const trace = i18n("script.trace_call", "db_list", "[]");
-      this.assertEqual(lines_shown(traced.lines), [{ level: 2, text: trace }]);
+      this.assertEqual(lines_shown(traced.lines), [trace]);
     }
 
     // A trace shows the bytes an argument holds by their count.
@@ -292,10 +287,10 @@ namespace test_script {
         'const data = new TextEncoder().encode("abc");\n' +
           'engine.store.kv_put("/_files/note", data);\n',
       );
-      const result = script.script_run(store, "note", {}, 2);
+      const result = script.script_run(store, "note", {}, true);
       const shown = '["/_files/note",{"bytes":3}]';
       const trace = i18n("script.trace_call", "kv_put", shown);
-      this.assertEqual(lines_shown(result.lines), [{ level: 2, text: trace }]);
+      this.assertEqual(lines_shown(result.lines), [trace]);
       const value = store.kv_get("/_files/note").data;
       this.assertEqual(value, utility.utf8_encode("abc"));
     }
@@ -305,7 +300,8 @@ namespace test_script {
       const store = this.store_fresh();
       script_put(store, "echo", "return args;\n");
       const args = { list: [1, "two"], flag: true };
-      this.assertEqual(script.script_run(store, "echo", args, 1).value, args);
+      const result = script.script_run(store, "echo", args, false);
+      this.assertEqual(result.value, args);
     }
 
     // The engine is frozen and holds the store, the log and `i18n`.
@@ -317,7 +313,7 @@ namespace test_script {
         "return [Object.isFrozen(engine), Object.keys(engine)," +
           " typeof engine.i18n];\n",
       );
-      this.assertEqual(script.script_run(store, "engine", {}, 1).value, [
+      this.assertEqual(script.script_run(store, "engine", {}, false).value, [
         true,
         ["store", "log", "i18n"],
         "function",
@@ -331,7 +327,7 @@ namespace test_script {
       script_put(store, "large", `// ${padding}\nreturn 7;\n`);
       const value = store.kv_get("/_files/script/large.js");
       this.assertEqual(typeof value.data, "string");
-      this.assertEqual(script.script_run(store, "large", {}, 1).value, 7);
+      this.assertEqual(script.script_run(store, "large", {}, false).value, 7);
     }
   }
 
@@ -341,7 +337,7 @@ namespace test_script {
     test_error_returned(): void {
       const store = this.store_fresh();
       script_put(store, "far", 'throw new RangeError("far");\n');
-      const result = script.script_run(store, "far", {}, 1);
+      const result = script.script_run(store, "far", {}, false);
       this.assertEqual(Object.keys(result), ["error", "stack", "lines"]);
       this.assertEqual(result.error, "RangeError: far");
       this.assertIn("RangeError: far", result.stack);
@@ -352,7 +348,7 @@ namespace test_script {
     test_value_thrown(): void {
       const store = this.store_fresh();
       script_put(store, "plain", 'throw "plain";\n');
-      this.assertEqual(script.script_run(store, "plain", {}, 1), {
+      this.assertEqual(script.script_run(store, "plain", {}, false), {
         error: "plain",
         lines: [],
       });
@@ -362,7 +358,7 @@ namespace test_script {
     test_syntax_returned(): void {
       const store = this.store_fresh();
       script_put(store, "broken", "return (;\n");
-      const result = script.script_run(store, "broken", {}, 1);
+      const result = script.script_run(store, "broken", {}, false);
       this.assertTrue(String(result.error).startsWith("SyntaxError: "));
       this.assertFalse("value" in result);
     }
@@ -373,22 +369,11 @@ namespace test_script {
       script_put(
         store,
         "late",
-        'engine.log(1, "before");\nthrow new Error("after");\n',
+        'engine.log("before");\nthrow new Error("after");\n',
       );
-      const result = script.script_run(store, "late", {}, 1);
+      const result = script.script_run(store, "late", {}, false);
       this.assertEqual(result.error, "Error: after");
-      this.assertEqual(lines_shown(result.lines), [
-        { level: 1, text: "before" },
-      ]);
-    }
-
-    // A log above level 2 is the script's exception, with verbose's text.
-    test_log_refused(): void {
-      const store = this.store_fresh();
-      script_put(store, "high", 'engine.log(3, "high");\n');
-      const result = script.script_run(store, "high", {}, 2);
-      const message = i18n("verbose.level_invalid", 3, constants.level_max);
-      this.assertEqual(result.error, `Error: ${message}`);
+      this.assertEqual(lines_shown(result.lines), ["before"]);
     }
 
     // A call of the store that fails is the script's exception.
@@ -399,7 +384,7 @@ namespace test_script {
         "absent",
         'return engine.store.kv_get("/_files/absent");\n',
       );
-      const result = script.script_run(store, "absent", {}, 1);
+      const result = script.script_run(store, "absent", {}, false);
       const message = i18n("substrate.key_missing", "absent", "_files");
       this.assertEqual(result.error, `Error: ${message}`);
     }
@@ -409,19 +394,8 @@ namespace test_script {
       const store = this.store_fresh();
       this.raised_assert(
         i18n("substrate.key_missing", "script/missing.js", "_files"),
-        () => script.script_run(store, "missing", {}, 1),
+        () => script.script_run(store, "missing", {}, false),
       );
-    }
-
-    // A level outside 0 to 2 throws before anything is read.
-    test_level_refused(): void {
-      const store = this.store_fresh();
-      for (const level of [-1, 3, 1.5]) {
-        this.raised_assert(
-          i18n("script.level_invalid", level, constants.level_max),
-          () => script.script_run(store, "missing", {}, level),
-        );
-      }
     }
   }
 

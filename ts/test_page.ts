@@ -239,7 +239,7 @@ namespace test_page {
     images: ImageDouble;
     view: ViewDouble;
     overlays: OverlayDouble;
-    logs: [number, string][];
+    logs: string[];
   }
 
   // Makes a bench whose handlers work on the elements, in debug mode or not.
@@ -272,8 +272,8 @@ namespace test_page {
         overlays: bench.overlays,
         debug,
         full: false,
-        log: (level: number, text: string) => {
-          bench.logs.push([level, text]);
+        log: (text: string) => {
+          bench.logs.push(text);
         },
       },
       register_route,
@@ -321,18 +321,15 @@ namespace test_page {
       queue_synchronous: false,
       verbose_level: 1,
       verbose_ring: 1000,
-      verbose_forward: true,
       line_max: 1048576,
-      blob_max: 10485760,
-      message_max: 10485760,
-      queue_max: 104857600,
+      blob_max: 2147483391,
       overflow_bytes: 131072,
       chunk_bytes: 1048576,
       srv_buf_size: 1048576,
       media_db_bytes: 268435456,
       files_browser_bytes: 1073741824,
       db_soft_bytes: 1073741824,
-      turn_compact_tokens: 65536,
+      turn_compact_turns: 64,
       long_task_ms: 5,
       provider: {
         scripted: true,
@@ -791,7 +788,7 @@ namespace test_page {
       this.assertEqual(bench.overlays.calls, ["line 1 > x"]);
     }
 
-    // What the hello says of the server is written as progress.
+    // What the hello says of the server is written as a verbose line.
     test_hello_logged(): void {
       const bench = bench_make(this.elements_get(), true);
       const hello = {
@@ -808,7 +805,7 @@ namespace test_page {
         constants.pid,
         constants.root,
       );
-      this.assertEqual(bench.logs, [[1, text]]);
+      this.assertEqual(bench.logs, [text]);
     }
   }
 

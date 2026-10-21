@@ -59,18 +59,15 @@ namespace test_wire {
       queue_synchronous: false,
       verbose_level: 1,
       verbose_ring: 1000,
-      verbose_forward: true,
       line_max: 1048576,
-      blob_max: 10485760,
-      message_max: 10485760,
-      queue_max: 104857600,
+      blob_max: 2147483391,
       overflow_bytes: 131072,
       chunk_bytes: 1048576,
       srv_buf_size: 1048576,
       media_db_bytes: 268435456,
       files_browser_bytes: 1073741824,
       db_soft_bytes: 1073741824,
-      turn_compact_tokens: 65536,
+      turn_compact_turns: 64,
       long_task_ms: 5,
       provider: {
         scripted: true,
@@ -112,7 +109,7 @@ namespace test_wire {
   // A frame queue with the chunk given and the limits of the settings.
   function frames_make(chunk: number): wire.FrameQueue {
     const value = settings_make();
-    return new wire.FrameQueue(chunk, value.message_max, value.queue_max);
+    return new wire.FrameQueue(chunk, value.line_max, value.blob_max);
   }
 
   // The parts joined into one array of bytes.
@@ -334,49 +331,60 @@ namespace test_wire {
       ]);
     }
 
-    // A message of exactly `message_max` goes, and one byte more is refused.
-    test_message_limit(): void {
-      const line = put_make(jslb.blob_make(bytes_count(100)));
-      const total = line_bytes(line).length;
-      const limit = settings_make().queue_max;
-      const fits = new wire.FrameQueue(1024, total, limit);
+    // A line of exactly `line_max` goes, and one byte more is refused.
+    test_line_limit(): void {
+      const line = notice_make("mcp");
+      const size = line_bytes(line).length;
+      const limit = settings_make().blob_max;
+      const fits = new wire.FrameQueue(1024, size, limit);
       fits.line_add(line, undefined);
       this.assertEqual(bodies_join(frames_drain(fits)), line_bytes(line));
-      const over = new wire.FrameQueue(1024, total - 1, limit);
+      const over = new wire.FrameQueue(1024, size - 1, limit);
       const message = message_thrown(this, () =>
         over.line_add(line, undefined),
       );
-      this.assertEqual(
-        message,
-        i18n("wire.message_over", "kv.put", total, total - 1),
-      );
+      this.assertEqual(message, i18n("wire.line_over", "mcp", size, size - 1));
       this.assertFalse(over.frames_left());
     }
 
-    // A line that would pass `queue_max` is refused until frames free room.
-    test_queue_limit(): void {
-      const first = notice_make("a");
-      const second = notice_make("b");
-      const first_size = line_bytes(first).length;
-      const second_size = line_bytes(second).length;
-      const limit = first_size + second_size - 1;
-      const value = settings_make();
-      const frames = new wire.FrameQueue(8, value.message_max, limit);
-      frames.line_add(first, undefined);
+    // Blobs of exactly `blob_max` go beside their line, one byte more not.
+    test_blobs_limit(): void {
+      const line = put_make(jslb.blob_make(bytes_count(100)));
+      const size = json_bytes(line).length;
+      const fits = new wire.FrameQueue(1024, size, 100);
+      fits.line_add(line, undefined);
+      this.assertEqual(bodies_join(frames_drain(fits)), line_bytes(line));
+      const over = new wire.FrameQueue(1024, size, 99);
       const message = message_thrown(this, () =>
-        frames.line_add(second, undefined),
+        over.line_add(line, undefined),
       );
-      this.assertEqual(
-        message,
-        i18n("wire.queue_over", "b", second_size, first_size, limit),
-      );
-      const taken = new Uint8Array(frames.frame_next()).subarray(1);
-      frames.line_add(second, undefined);
-      const rest = bodies_join(frames_drain(frames));
-      this.assertEqual(
-        bytes_join([taken, rest]),
-        bytes_join([line_bytes(first), line_bytes(second)]),
-      );
+      this.assertEqual(message, i18n("wire.blobs_over", "kv.put", 100, 99));
+      this.assertFalse(over.frames_left());
+    }
+
+    // Blobs that would pass `blob_max` with those held wait for blob frames.
+    test_queue_limit(): void {
+      const first = put_make(jslb.blob_make(bytes_count(10)));
+      const notice = notice_make("a");
+      const second = put_make(jslb.blob_make(bytes_count(6)));
+      const frames = new wire.FrameQueue(8, settings_make().line_max, 15);
+      frames.line_add(first, undefined);
+      frames.line_add(notice, undefined);
+      const refused = i18n("wire.queue_over", "kv.put", 6, 10, 15);
+      const second_add = () => frames.line_add(second, undefined);
+      this.assertEqual(message_thrown(this, second_add), refused);
+      // The frames of the first line's JSON free no room, a blob's frame does.
+      const taken: Uint8Array[] = [];
+      const json_frames = Math.ceil(json_bytes(first).length / 7);
+      for (let index = 0; index < json_frames; index += 1) {
+        taken.push(new Uint8Array(frames.frame_next()).subarray(1));
+      }
+      this.assertEqual(message_thrown(this, second_add), refused);
+      taken.push(new Uint8Array(frames.frame_next()).subarray(1));
+      second_add();
+      taken.push(bodies_join(frames_drain(frames)));
+      const sent = [first, notice, second].map((line) => line_bytes(line));
+      this.assertEqual(bytes_join(taken), bytes_join(sent));
     }
 
     // An empty queue has no frame to give.
@@ -395,7 +403,7 @@ namespace test_wire {
       for (const chunk of [-4, 0, 1, 1.5, NaN, Infinity]) {
         const message = message_thrown(
           this,
-          () => new wire.FrameQueue(chunk, value.message_max, value.queue_max),
+          () => new wire.FrameQueue(chunk, value.line_max, value.blob_max),
         );
         this.assertEqual(message, i18n("wire.chunk_invalid", chunk));
       }
@@ -424,22 +432,18 @@ namespace test_wire {
       ]);
     }
 
-    // The size of a cache file's blob counts toward `message_max`.
+    // The size of a cache file's blob counts toward `blob_max`.
     test_handle_counted(): void {
       const cache = new CacheDouble();
       cache.files.set(constants.handle, bytes_count(20));
       const blob = jslb.blob_make(constants.handle, undefined, {}, 20);
       const line = put_make(blob);
-      const total = json_bytes(line).length + 20;
-      const limit = settings_make().queue_max;
-      const frames = new wire.FrameQueue(1024, total - 1, limit);
+      const size = json_bytes(line).length;
+      const frames = new wire.FrameQueue(1024, size, 19);
       const message = message_thrown(this, () =>
         frames.line_add(line, cache.read),
       );
-      this.assertEqual(
-        message,
-        i18n("wire.message_over", "kv.put", total, total - 1),
-      );
+      this.assertEqual(message, i18n("wire.blobs_over", "kv.put", 20, 19));
       this.assertEqual(cache.ranges, []);
     }
 
@@ -684,7 +688,7 @@ namespace test_wire {
       const message = message_thrown(this, () =>
         port.message_take(output_lines(hello)),
       );
-      this.assertEqual(message, i18n("jslb.blob_over_max", 1, 1, 0));
+      this.assertEqual(message, i18n("jslb.blobs_over", 1, 0));
     }
 
     // The settings size the decoder only once hello has come.
@@ -723,20 +727,31 @@ namespace test_wire {
       this.assertEqual(message, i18n("settings.not_set"));
     }
 
-    // A message over `message_max` is refused before it is queued.
-    test_message_over(): void {
+    // Blobs over `blob_max` are refused before they are queued.
+    test_blobs_over(): void {
       const value = settings_make();
-      value.message_max = 64;
+      value.blob_max = 64;
       const port = port_make(value);
       port.hello_receive(() => {});
       port.message_take(output_lines(hello_make(constants.root)));
       const line = put_make(jslb.blob_make(bytes_count(100)));
-      const total = line_bytes(line).length;
       const message = message_thrown(this, () => port.line_post(line, []));
-      this.assertEqual(
-        message,
-        i18n("wire.message_over", "kv.put", total, 64),
-      );
+      this.assertEqual(message, i18n("wire.blobs_over", "kv.put", 100, 64));
+    }
+
+    // A line over `line_max` is refused before it is queued.
+    test_line_over(): void {
+      const value = settings_make();
+      value.line_max = 64;
+      const port = port_make(value);
+      port.hello_receive(() => {});
+      port.message_take(output_lines(hello_make(constants.root)));
+      const line = jslb.line_make(jslb.header_make("mcp"), [], {
+        text: "x".repeat(100),
+      });
+      const size = line_bytes(line).length;
+      const message = message_thrown(this, () => port.line_post(line, []));
+      this.assertEqual(message, i18n("wire.line_over", "mcp", size, 64));
     }
 
     // A line within the limits is queued, and sending it needs the socket.

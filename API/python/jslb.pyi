@@ -44,6 +44,7 @@ def line_encode(line: Object) -> Iterator[bytes | str]: ...
 # The JSON text of a line followed by one `<blob "n"=K>` tag per blob.
 def line_render(line: Object) -> str: ...
 
+# WireError: a line over `line_max`, or blobs over `blob_max` in all.
 class LineDecoder:
     # `sink_make(header)` returns the path a blob over `overflow_bytes` takes.
     def __init__(

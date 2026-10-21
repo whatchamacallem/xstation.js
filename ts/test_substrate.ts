@@ -5,13 +5,12 @@
 // Tests of substrate.ts: refs, the document encoding, the sink's incremental
 // hash against known digests, the cache over slot files kept in memory, and
 // the store on the sqlite3.wasm module and OPFS pool the test page sets as
-// globals: databases, values, documents, turns, SQL, seq, snapshots, a
-// snapshot fetched in pieces from the store that keeps it, forwarded lines,
-// the operations of the castle turn and two later ones replayed on a second
-// store, the administration of the databases, cached values filled back and
-// freed by budget, a put stopped between its cache file and its row, and the
-// handlers. It also holds the pause point of that stop, which a browser rung
-// uses to kill a worker of the test page there.
+// globals: databases, values, documents, turns, compaction at the threshold,
+// SQL, seq, snapshots, forwarded lines, the operations of the castle turn and two later ones
+// replayed on a second store, the administration of the databases, cached
+// values filled back and freed by budget, a put stopped between its cache
+// file and its row, and the handlers. It also holds the pause point of that
+// stop, which a browser rung uses to kill a worker of the test page there.
 namespace test_substrate {
   // The initialized sqlite3.wasm module, a global the test page sets.
   declare const test_sqlite3: substrate.SqliteModule;
@@ -25,6 +24,10 @@ namespace test_substrate {
     overflow_bytes: 131072,
     // The `db_soft_bytes` of `settings.json`, 1 GiB.
     soft_bytes: 1073741824,
+    // The `turn_compact_turns` of `settings.json`, 64.
+    compact_turns: 64,
+    // A threshold of compaction that a test reaches in a few turns.
+    compact_small: 3,
     // The start of the root of each store a test makes in the pool.
     root_prefix: "/test_substrate/",
     // The files of the cache of each store a test makes.
@@ -94,9 +97,6 @@ namespace test_substrate {
     desync_message: "kv.put: since 3 is not seq 4 of _files",
     // The first bytes of a database file.
     file_magic: "SQLite format 3",
-    // The `line_max` and `message_max` of a fetch, which leave pieces of 4096.
-    piece_line: 1024,
-    piece_message: 5120,
     // The database and key of the put that a kill stops.
     kill_db: "alpha",
     kill_key: "big",
@@ -160,6 +160,14 @@ namespace test_substrate {
   // A copy of the bytes in reverse order.
   function bytes_reversed(data: Uint8Array): Uint8Array {
     return data.slice().reverse();
+  }
+
+  // The message of the role with the text.
+  function message_said(
+    role: provider.Role,
+    content: string,
+  ): provider.ChatMessage {
+    return { role, content };
   }
 
   // A value of exactly `overflow_bytes`, which stays in its row.
@@ -302,23 +310,6 @@ namespace test_substrate {
     blobs: lines.BlobHeader[] = [],
   ): lines.Line {
     return jslb.line_make(jslb.header_make(type, { id, key }), blobs, payload);
-  }
-
-  // A reply line of a type to request 1, with its payload.
-  function reply_of(
-    type: string,
-    payload: { [key: string]: unknown },
-  ): lines.Line {
-    return jslb.line_make(jslb.header_make(type, { reply: 1 }), [], payload);
-  }
-
-  // The handlers a store registers for the UI thread's lines, by type.
-  function handlers_of(store: substrate.Store): Map<string, dispatch.Handler> {
-    const table = new Map<string, dispatch.Handler>();
-    store.handlers_register((type, _version, fn) => {
-      table.set(type, fn);
-    });
-    return table;
   }
 
   // The rows of one statement a store runs.
@@ -919,6 +910,7 @@ namespace test_substrate {
       cache: substrate.CacheFiles,
       forwards: boolean,
       pool: substrate.SqlitePool = this.pool_get(),
+      compact_turns: number = constants.compact_turns,
     ): substrate.Store {
       const store = new substrate.Store(
         this.sqlite_get(),
@@ -926,6 +918,7 @@ namespace test_substrate {
         cache,
         root,
         constants.overflow_bytes,
+        compact_turns,
       );
       const forwarded: lines.Line[] = [];
       if (forwards) {
@@ -1844,6 +1837,132 @@ namespace test_substrate {
     }
   }
 
+  // Compaction at `turn_compact_turns`: when it runs, what it writes, sends.
+  export class TestCompaction extends StoreCase {
+    // A `user` turn at the threshold compacts its scene first, sent first.
+    test_threshold_reached(): void {
+      const store = this.store_compacting();
+      store.db_create("alpha");
+      this.lines_answer(store);
+      const scene = "/alpha/scene/1";
+      const other = "/alpha/scene/2";
+      store.turn_append(scene, "user", message_said("user", "1"));
+      store.turn_append(scene, "assistant", message_said("assistant", "2"));
+      this.assertEqual(
+        store.turn_append(scene, "user", message_said("user", "3")),
+        { n: 3, seq: 3 },
+      );
+      this.assertEqual(
+        store.turn_append(scene, "assistant", message_said("assistant", "4")),
+        { n: 4, seq: 4 },
+      );
+      this.assertEqual(
+        store.turn_append(other, "user", message_said("user", "a")),
+        { n: 1, seq: 5 },
+      );
+      this.lines_answer(store);
+      const fifth = message_said("user", "5");
+      this.assertEqual(store.turn_append(scene, "user", fifth), {
+        n: 2,
+        seq: 7,
+      });
+      const summary = i18n("substrate.turns_compacted", 4, 4);
+      this.assertEqual(store.turn_list(scene), [
+        {
+          scene,
+          n: 1,
+          role: "system",
+          content: message_said("system", summary),
+        },
+        { scene, n: 2, role: "user", content: fifth },
+      ]);
+      this.assertEqual(
+        this.lines_of(store).map((line) => jslb.line_render(line)),
+        [
+          '{"0":{"t":"turn.compact"},"scene":"/alpha/scene/1","through":4,' +
+            `"summary":${utility.json_text(summary)},"since":5}`,
+          '{"0":{"t":"turn.append"},"scene":"/alpha/scene/1","role":"user",' +
+            '"content":{"role":"user","content":"5"},"since":6}',
+        ],
+      );
+      this.lines_answer(store);
+      const opening = message_said("user", "a");
+      this.assertEqual(store.turn_list(other), [
+        { scene: other, n: 1, role: "user", content: opening },
+      ]);
+      this.assertEqual(
+        store.turn_append(scene, "user", message_said("user", "6")),
+        { n: 3, seq: 8 },
+      );
+      this.assertEqual(store.turn_list(scene).length, 3);
+    }
+
+    // The compaction rolls back with the transaction of its `user` turn.
+    test_compaction_rolled(): void {
+      const store = this.store_compacting();
+      store.db_create("alpha");
+      const scene = "/alpha/scene/1";
+      for (const text of ["1", "2", "3"]) {
+        store.turn_append(scene, "assistant", message_said("assistant", text));
+      }
+      this.lines_answer(store);
+      const before = store.turn_list(scene);
+      this.raised_assert("rolled back", () =>
+        store.transaction_run(() => {
+          store.turn_append(scene, "user", message_said("user", "4"));
+          throw new Error("rolled back");
+        }),
+      );
+      this.assertEqual(store.turn_list(scene), before);
+      this.assertEqual(store.seq_get("alpha"), 3);
+      this.assertEqual(this.lines_of(store), []);
+    }
+
+    // A forwarded `turn.append` applies as it is and never compacts.
+    test_applied_exactly(): void {
+      const store = this.store_compacting();
+      store.db_create("alpha");
+      const scene = "/alpha/scene/1";
+      for (const text of ["1", "2", "3"]) {
+        store.turn_append(scene, "assistant", message_said("assistant", text));
+      }
+      this.lines_answer(store);
+      const user = message_said("user", "4");
+      this.assertEqual(
+        store.operation_apply("turn.append", 3, {
+          scene,
+          role: "user",
+          content: user,
+        }),
+        4,
+      );
+      this.assertEqual(
+        store.turn_list(scene).map((row) => row.content),
+        [
+          message_said("assistant", "1"),
+          message_said("assistant", "2"),
+          message_said("assistant", "3"),
+          user,
+        ],
+      );
+      this.assertEqual(this.lines_taken(store), [
+        '{"0":{"t":"turn.append"},"scene":"/alpha/scene/1","role":"user",' +
+          '"content":{"role":"user","content":"4"},"since":3}',
+      ]);
+    }
+
+    // A forwarding store on a new root whose threshold is small.
+    store_compacting(): substrate.Store {
+      return this.store_make(
+        this.root_make(),
+        cache_make(),
+        true,
+        this.pool_get(),
+        constants.compact_small,
+      );
+    }
+  }
+
   // SQL: the results of statements, what counts, and what is refused.
   export class TestSql extends StoreCase {
     // Statements return columns, rows and changes, and only writes count.
@@ -2097,182 +2216,6 @@ namespace test_substrate {
         "alpha.sqlite-restore",
       ]);
       this.assertEqual(store.seq_get("alpha"), 0);
-    }
-  }
-
-  // A snapshot fetched in pieces from the store that keeps it.
-  export class TestFetch extends StoreCase {
-    // A fetch whose pieces are 4096 bytes, in short names.
-    fetch_make(): substrate.SnapshotFetch {
-      return new substrate.SnapshotFetch(
-        "alpha",
-        constants.piece_message,
-        constants.piece_line,
-        false,
-      );
-    }
-
-    // Fetches a snapshot through the owner's handlers. Returns the requests.
-    fetch_through(
-      table: Map<string, dispatch.Handler>,
-      fetch: substrate.SnapshotFetch,
-    ): lines.Line[] {
-      const asked: lines.Line[] = [];
-      // Sends a request with the next id and returns the handler's reply.
-      const answer = (line: lines.Line): lines.Line => {
-        Object.assign(line[0], { i: asked.length + 1 });
-        asked.push(line);
-        const type = jslb.field_get(line[0], "type") as string;
-        const fn = table.get(type) as dispatch.Handler;
-        return fn(line) as lines.Line;
-      };
-      let next: lines.Line | undefined = fetch.head_take(
-        answer(fetch.head_line()),
-      );
-      while (next !== undefined) {
-        const blob = answer(next)[1] as lines.BlobHeader;
-        next = fetch.piece_take(blob.d as Uint8Array);
-      }
-      return asked;
-    }
-
-    // A snapshot comes whole in pieces of the size the limits leave.
-    test_pieces_whole(): void {
-      const owner = this.store_fresh();
-      owner.db_create("alpha");
-      owner.kv_put("/alpha/exact", value_exact);
-      this.lines_answer(owner);
-      const data = owner.db_snapshot("alpha").data;
-      const fetch = this.fetch_make();
-      const asked = this.fetch_through(handlers_of(owner), fetch);
-      const piece = constants.piece_message - constants.piece_line;
-      const count = Math.ceil(data.length / piece);
-      this.assertTrue(count > 2);
-      this.assertEqual(asked.length, count + 1);
-      this.assertEqual(
-        jslb.line_render(asked[0]),
-        '{"0":{"t":"db.snapshot","i":1},"db":"alpha"}',
-      );
-      this.assertEqual(jslb.payload_of(asked[1]), {
-        snapshot: 1,
-        offset: 0,
-        size: piece,
-      });
-      const last = (count - 1) * piece;
-      this.assertEqual(jslb.payload_of(asked[count]), {
-        snapshot: 1,
-        offset: last,
-        size: data.length - last,
-      });
-      this.assertEqual(fetch.bytes_get(), data);
-      this.assertEqual(fetch.seq_sent(), 1);
-      this.raised_assert(i18n("substrate.snapshot_unknown", 1), () =>
-        owner.snapshot_read(1, 0, 1),
-      );
-      const second = this.store_fresh();
-      this.assertEqual(second.db_restore("alpha", fetch.bytes_get()), 1);
-      this.assertEqual(second.kv_get("/alpha/exact").data, value_exact);
-    }
-
-    // A piece of the wrong size, or a whole of the wrong digest, throws.
-    test_pieces_checked(): void {
-      const data = bytes_pattern(6000);
-      const head = {
-        snapshot: 4,
-        size: data.length,
-        sha256: utility.sha256_hex(data),
-        seq: 2,
-      };
-      const fetch = this.fetch_make();
-      const first = fetch.head_take(reply_of("db.snapshot", head));
-      this.assertEqual(jslb.payload_of(first), {
-        snapshot: 4,
-        offset: 0,
-        size: 4096,
-      });
-      this.raised_assert(
-        i18n("substrate.piece_size", "alpha", 0, 4095, 4096),
-        () => fetch.piece_take(data.subarray(0, 4095)),
-      );
-      const second = fetch.piece_take(data.subarray(0, 4096)) as lines.Line;
-      this.assertEqual(jslb.payload_of(second), {
-        snapshot: 4,
-        offset: 4096,
-        size: 1904,
-      });
-      this.assertEqual(fetch.piece_take(data.subarray(4096)), undefined);
-      this.assertEqual(fetch.bytes_get(), data);
-      this.assertEqual(fetch.seq_sent(), 2);
-      const other = this.fetch_make();
-      const wrong = { ...head, sha256: utility.sha256_hex(bytes_text("x")) };
-      other.head_take(reply_of("db.snapshot", wrong));
-      other.piece_take(data.subarray(0, 4096));
-      this.raised_assert(
-        i18n("substrate.snapshot_digest", "alpha", head.sha256, wrong.sha256),
-        () => other.piece_take(data.subarray(4096)),
-      );
-    }
-
-    // Limits that leave no room for a piece throw, and full names are kept.
-    test_limits_names(): void {
-      this.raised_assert(i18n("substrate.piece_none", 1024, 1024), () =>
-        new substrate.SnapshotFetch("alpha", 1024, 1024, false),
-      );
-      const fetch = new substrate.SnapshotFetch("alpha", 5120, 1024, true);
-      this.assertEqual(
-        jslb.line_render(fetch.head_line()),
-        '{"0":{"type":"db.snapshot"},"db":"alpha"}',
-      );
-      const head = { snapshot: 1, size: 1, sha256: "", seq: 0 };
-      this.assertEqual(
-        jslb.line_render(fetch.head_take(reply_of("db.snapshot", head))),
-        '{"0":{"type":"db.chunk"},"snapshot":1,"offset":0,"size":1}',
-      );
-    }
-
-    // A piece of no kept snapshot or outside one throws, and the rest reads.
-    test_kept_range(): void {
-      const owner = this.store_fresh();
-      owner.db_create("alpha");
-      const head = owner.snapshot_keep("alpha");
-      const size = head.size;
-      this.assertEqual(head.snapshot, 1);
-      this.assertEqual(head.seq, 0);
-      const cases: [number, number][] = [
-        [-1, 1],
-        [0, 0],
-        [0, size + 1],
-        [size, 1],
-        [size - 1, 2],
-      ];
-      for (const [offset, length] of cases) {
-        this.raised_assert(
-          i18n("substrate.snapshot_range", 1, offset, length, size),
-          () => owner.snapshot_read(1, offset, length),
-        );
-      }
-      this.raised_assert(i18n("substrate.snapshot_unknown", 2), () =>
-        owner.snapshot_read(2, 0, 1),
-      );
-      const data = owner.snapshot_read(1, 0, size);
-      this.assertEqual(data, owner.db_snapshot("alpha").data);
-      this.assertEqual(utility.sha256_hex(data), head.sha256);
-    }
-
-    // A blob's bytes come as they are, a streamed one's read and freed.
-    test_blob_take(): void {
-      const cache = cache_make();
-      const store = this.store_make(this.root_make(), cache, true);
-      const data = bytes_text("piece");
-      this.assertEqual(store.blob_take(data), data);
-      const free = cache.slots_free();
-      const handle = sink_fill(cache, value_over);
-      this.assertEqual(cache.slots_free(), free - 1);
-      this.assertEqual(store.blob_take(handle), value_over);
-      this.assertEqual(cache.slots_free(), free);
-      this.raised_assert(i18n("substrate.cache_unknown", handle), () =>
-        cache.cache_read(handle, 0, 1),
-      );
     }
   }
 
@@ -3043,7 +2986,6 @@ namespace test_substrate {
     test_types_registered(): void {
       const table = this.handlers_get(this.store_fresh());
       this.assertEqual([...table.keys()].sort(), [
-        "db.chunk",
         "db.create",
         "db.drop",
         "db.snapshot",
@@ -3197,7 +3139,7 @@ namespace test_substrate {
       );
     }
 
-    // Databases are created, kept, read in a piece and dropped by their lines.
+    // Databases are created, sent as one blob and dropped by their lines.
     test_databases_answered(): void {
       const store = this.store_fresh();
       const table = this.handlers_get(store);
@@ -3211,41 +3153,27 @@ namespace test_substrate {
       );
       this.assertEqual(store.db_list(), ["alpha"]);
       const data = store.db_snapshot("alpha").data;
-      const head = this.answer_get(
+      const snapshot = this.answer_get(
         table,
         request_make("db.snapshot", 18, { db: "alpha" }),
       );
-      this.assertEqual(head[0], { t: "db.snapshot", r: 18 });
-      this.assertEqual(jslb.payload_of(head), {
-        snapshot: 1,
-        size: data.length,
+      this.assertEqual(snapshot[0], { t: "db.snapshot", r: 18, b: 1 });
+      this.assertEqual(jslb.payload_of(snapshot), {
         sha256: utility.sha256_hex(data),
         seq: 0,
       });
-      const piece = this.answer_get(
-        table,
-        request_make("db.chunk", 19, {
-          snapshot: 1,
-          offset: 0,
-          size: data.length,
-        }),
-      );
       const size = String(data.length);
       this.assertEqual(
-        jslb.line_render(piece),
-        `{"0":{"t":"db.chunk","r":19,"b":1},"1":{"s":${size}}}<blob "n"=1>`,
+        jslb.line_render(snapshot),
+        `{"0":{"t":"db.snapshot","r":18,"b":1},"1":{"s":${size}},` +
+          `"sha256":"${utility.sha256_hex(data)}","seq":0}<blob "n"=1>`,
       );
-      this.assertEqual((piece[1] as lines.BlobHeader).d, data);
+      this.assertEqual((snapshot[1] as lines.BlobHeader).d, data);
       this.assertEqual(
         data.subarray(0, 15),
         bytes_text(constants.file_magic),
       );
-      this.raised_assert(i18n("substrate.snapshot_unknown", 1), () =>
-        this.answer_get(
-          table,
-          request_make("db.chunk", 20, { snapshot: 1, offset: 0, size: 1 }),
-        ),
-      );
+      this.assertFalse(table.has("db.chunk"));
       const dropped = this.answer_get(
         table,
         request_make("db.drop", 21, { db: "alpha" }),
@@ -3285,7 +3213,6 @@ namespace test_substrate {
       this.assertTrue(Object.isFrozen(substrate));
       this.assertEqual(Object.keys(substrate).sort(), [
         "CacheFiles",
-        "SnapshotFetch",
         "Store",
         "doc_decode",
         "doc_encode",
@@ -3294,7 +3221,6 @@ namespace test_substrate {
       this.assertEqual(
         Object.getOwnPropertyNames(substrate.Store.prototype).sort(),
         [
-          "blob_take",
           "cache_evict",
           "cache_fill",
           "constructor",
@@ -3324,8 +3250,6 @@ namespace test_substrate {
           "operation_apply",
           "seq_get",
           "sink",
-          "snapshot_keep",
-          "snapshot_read",
           "sql_run",
           "start_open",
           "transaction_run",
@@ -3344,17 +3268,6 @@ namespace test_substrate {
           "sink_open",
           "slot_add",
           "slots_free",
-        ],
-      );
-      this.assertEqual(
-        Object.getOwnPropertyNames(substrate.SnapshotFetch.prototype).sort(),
-        [
-          "bytes_get",
-          "constructor",
-          "head_line",
-          "head_take",
-          "piece_take",
-          "seq_sent",
         ],
       );
     }

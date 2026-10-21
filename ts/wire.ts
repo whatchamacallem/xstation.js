@@ -35,12 +35,10 @@ namespace wire {
     drain_seconds: 120,
     // A poll of the socket buffer: 0 ms, a default chosen by its writer.
     poll_ms: 0,
-    // The longest hello phase line: 10 MiB, the maintainer's size.
+    // The longest hello phase line: 10 MiB, a default kept from earlier code.
     hello_line_max: 10485760,
-    // The largest hello phase blob: none, as hello carries no blob.
+    // The hello phase blob bytes of a message: none, as hello has no blob.
     hello_blob_max: 0,
-    // The largest hello phase message: 10 MiB, the maintainer's size.
-    hello_message_max: 10485760,
     // The hello phase blob bytes held in memory: none.
     hello_overflow_bytes: 0,
     hello_type: "hello",
@@ -53,9 +51,7 @@ namespace wire {
     chunk_setting: "chunk_bytes",
     line_setting: "line_max",
     blob_setting: "blob_max",
-    message_setting: "message_max",
     overflow_setting: "overflow_bytes",
-    queue_setting: "queue_max",
   });
 
   // Reads a cache file: `length` bytes from `offset`, fewer only at its end.
@@ -319,50 +315,60 @@ namespace wire {
     return new CachePiece(data, jslb.field_get(blob, "size") as number, read);
   }
 
+  // A piece waiting in the frame queue, and whether it is a blob's bytes.
+  interface QueuedPiece {
+    piece: MemoryPiece | CachePiece;
+    blob: boolean;
+  }
+
   // Encoded lines waiting to go to ttyd as input frames, bounded in bytes.
   export class FrameQueue {
     private readonly chunk_bytes: number;
-    private readonly message_max: number;
-    private readonly queue_max: number;
-    private readonly pieces: (MemoryPiece | CachePiece)[] = [];
+    private readonly line_max: number;
+    private readonly blob_max: number;
+    private readonly pieces: QueuedPiece[] = [];
     private offset = 0;
-    // The bytes of the lines queued that no frame has taken yet.
+    // The blob bytes of the lines queued that no frame has taken yet.
     private held = 0;
 
-    // Takes the bytes of a frame with its kind, of a message, of all held.
-    constructor(chunk_bytes: number, message_max: number, queue_max: number) {
+    // Takes the bytes of a frame with its kind, of a line, of all blobs held.
+    constructor(chunk_bytes: number, line_max: number, blob_max: number) {
       if (!Number.isInteger(chunk_bytes) || chunk_bytes < 2) {
         throw new Error(i18n("wire.chunk_invalid", chunk_bytes));
       }
       this.chunk_bytes = chunk_bytes;
-      this.message_max = message_max;
-      this.queue_max = queue_max;
+      this.line_max = line_max;
+      this.blob_max = blob_max;
     }
 
-    // Queues a line, refused whole over `message_max` or `queue_max`.
+    // Queues a line, refused over `line_max` or with blobs over `blob_max`.
     line_add(line: lines.Line, read: CacheRead | undefined): void {
       const type = jslb.field_get(line[0], "type");
       const encoded = jslb.line_encode(line);
-      const pieces: (MemoryPiece | CachePiece)[] = [];
-      let bytes = 0;
+      const pieces: QueuedPiece[] = [];
       for (let number = 0; number < encoded.length; number += 1) {
         const piece = piece_make(line, number, encoded[number], read);
-        bytes += piece.size;
-        pieces.push(piece);
+        pieces.push({ piece, blob: number > 0 });
       }
-      if (bytes > this.message_max) {
-        throw new Error(
-          i18n("wire.message_over", type, bytes, this.message_max),
-        );
+      const bytes = pieces[0].piece.size;
+      if (bytes > this.line_max) {
+        throw new Error(i18n("wire.line_over", type, bytes, this.line_max));
       }
-      if (this.held + bytes > this.queue_max) {
+      let total = 0;
+      for (const queued of pieces.slice(1)) {
+        total += queued.piece.size;
+      }
+      if (total > this.blob_max) {
+        throw new Error(i18n("wire.blobs_over", type, total, this.blob_max));
+      }
+      if (this.held + total > this.blob_max) {
         throw new Error(
-          i18n("wire.queue_over", type, bytes, this.held, this.queue_max),
+          i18n("wire.queue_over", type, total, this.held, this.blob_max),
         );
       }
       // A piece of no bytes, an empty blob, sends no frame.
-      this.pieces.push(...pieces.filter((piece) => piece.size > 0));
-      this.held += bytes;
+      this.pieces.push(...pieces.filter((queued) => queued.piece.size > 0));
+      this.held += total;
     }
 
     // Whether a frame waits to be sent.
@@ -375,14 +381,16 @@ namespace wire {
       if (this.pieces.length === 0) {
         throw new Error(i18n("wire.frames_none"));
       }
-      const piece = this.pieces[0];
+      const { piece, blob } = this.pieces[0];
       const size = Math.min(piece.size - this.offset, this.chunk_bytes - 1);
       const buffer = new ArrayBuffer(size + 1);
       const frame = new Uint8Array(buffer);
       frame[0] = constants.input_kind;
       frame.set(piece.range_read(this.offset, size), 1);
       this.offset += size;
-      this.held -= size;
+      if (blob) {
+        this.held -= size;
+      }
       if (this.offset === piece.size) {
         this.pieces.shift();
         this.offset = 0;
@@ -503,7 +511,6 @@ namespace wire {
       this.decoder = new jslb.LineDecoder(
         constants.hello_line_max,
         constants.hello_blob_max,
-        constants.hello_message_max,
         constants.hello_overflow_bytes,
         sink,
       );
@@ -696,16 +703,12 @@ namespace wire {
         return built;
       }
       const chunk_bytes = this.setting_number(constants.chunk_setting);
-      const message_max = this.setting_number(constants.message_setting);
-      const frames = new FrameQueue(
-        chunk_bytes,
-        message_max,
-        this.setting_number(constants.queue_setting),
-      );
+      const line_max = this.setting_number(constants.line_setting);
+      const blob_max = this.setting_number(constants.blob_setting);
+      const frames = new FrameQueue(chunk_bytes, line_max, blob_max);
       this.decoder = new jslb.LineDecoder(
-        this.setting_number(constants.line_setting),
-        this.setting_number(constants.blob_setting),
-        message_max,
+        line_max,
+        blob_max,
         this.setting_number(constants.overflow_setting),
         this.sink,
       );

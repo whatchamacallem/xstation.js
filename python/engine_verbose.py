@@ -14,7 +14,7 @@ from i18n import i18n
 _SERVER_THREAD = "server"
 
 # The fields of a line from the page, and no others.
-_LINE_FIELDS = {"at", "level", "text"}
+_LINE_FIELDS = {"at", "text"}
 
 
 # The state the registration sets, which is empty until then.
@@ -36,16 +36,15 @@ def _debug_check() -> None:
         raise RuntimeError(i18n("engine_verbose.debug_off"))
 
 
-# Reads one line of the page, raising unless it has the three typed fields.
+# Reads one line of the page, raising unless it has the two typed fields.
 def _line_read(entry: dict[str, object]) -> verbose.LogLine:
     if set(entry) != _LINE_FIELDS:
         raise ValueError(i18n("engine_verbose.line_invalid", entry))
     at = entry["at"]
-    level = entry["level"]
     text = entry["text"]
-    if type(at) is not int or type(level) is not int or type(text) is not str:
+    if type(at) is not int or type(text) is not str:
         raise ValueError(i18n("engine_verbose.line_invalid", entry))
-    return verbose.LogLine(at, level, text)
+    return verbose.LogLine(at, text)
 
 
 # Writes the lines of the page thread to `_verbose`, in debug mode only.
@@ -66,10 +65,7 @@ def verbose_tail(
         entries = verbose.tail_get(thread, count)
     return dispatch.reply_make(
         line,
-        lines=[
-            {"at": entry.at, "level": entry.level, "text": entry.text}
-            for entry in entries
-        ],
+        lines=[{"at": entry.at, "text": entry.text} for entry in entries],
     )
 
 

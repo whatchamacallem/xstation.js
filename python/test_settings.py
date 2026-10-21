@@ -25,18 +25,15 @@ _GOOD_SETTINGS: dict[str, Any] = {
     "queue_synchronous": False,
     "verbose_level": 1,
     "verbose_ring": 1000,
-    "verbose_forward": True,
     "line_max": 1048576,
-    "blob_max": 10485760,
-    "message_max": 10485760,
-    "queue_max": 104857600,
+    "blob_max": 2147483391,
     "overflow_bytes": 131072,
     "chunk_bytes": 1048576,
     "srv_buf_size": 1048576,
     "media_db_bytes": 268435456,
     "files_browser_bytes": 1073741824,
     "db_soft_bytes": 1073741824,
-    "turn_compact_tokens": 65536,
+    "turn_compact_turns": 64,
     "long_task_ms": 5,
     "provider": {
         "scripted": True,
@@ -48,7 +45,6 @@ _GOOD_SETTINGS: dict[str, Any] = {
 _BOOL_PATHS = (
     "debug",
     "queue_synchronous",
-    "verbose_forward",
     "provider.scripted",
 )
 
@@ -58,15 +54,13 @@ _INT_PATHS = (
     "verbose_ring",
     "line_max",
     "blob_max",
-    "message_max",
-    "queue_max",
     "overflow_bytes",
     "chunk_bytes",
     "srv_buf_size",
     "media_db_bytes",
     "files_browser_bytes",
     "db_soft_bytes",
-    "turn_compact_tokens",
+    "turn_compact_turns",
     "long_task_ms",
     "provider.timeout_seconds",
 )
@@ -77,6 +71,9 @@ _MOVED_PATHS = (
     "provider.chat_model",
     "provider.image_model",
 )
+
+# The paths of the windows that `blob_max` replaced, refused as extra keys.
+_WINDOW_PATHS = ("message_max", "queue_max")
 
 # The paths of the values that are objects.
 _OBJECT_PATHS = ("provider",)
@@ -112,7 +109,6 @@ def _wire_make() -> dict[str, Any]:
     decoder = jslb.LineDecoder(
         _GOOD_SETTINGS["line_max"],
         _GOOD_SETTINGS["blob_max"],
-        _GOOD_SETTINGS["message_max"],
         _GOOD_SETTINGS["overflow_bytes"],
         _sink_refuse,
     )
@@ -167,9 +163,9 @@ class TestCheck(unittest.TestCase):
     def test_int_wrong(self) -> None:
         self.values_refuse(_INT_PATHS, "int", _NOT_INT)
 
-    # An extra key, the provider file's keys among them, is refused.
+    # An extra key, the provider file's and the old windows' among them, fails.
     def test_key_extra(self) -> None:
-        for path in ("extra", "provider.extra") + _MOVED_PATHS:
+        for path in ("extra", "provider.extra") + _MOVED_PATHS + _WINDOW_PATHS:
             bad = _wire_make()
             holder, name = _holder_find(bad, path)
             holder[name] = 0

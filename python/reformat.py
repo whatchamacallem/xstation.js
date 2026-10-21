@@ -3,83 +3,127 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Formats the files reformat_whitelist.txt's shell globs match, from the
-# project's top directory: Python with ruff, at the 79 columns
-# pyproject.toml sets, shell with shfmt, and TypeScript, JavaScript and HTML
-# with prettier, at 79 columns given on its command line and no
-# configuration file. Markdown is checked with mdformat, not rewritten.
+# Formats the files that reformat_whitelist.txt's lines match, from the
+# project's top directory, each with the formatter that reformat_table.json
+# gives its extension: Python with ruff, at the 79 columns pyproject.toml
+# sets, shell with shfmt, and TypeScript, JavaScript and HTML with prettier,
+# at 79 columns given on its command line and no configuration file.
+# Markdown is checked with mdformat, not rewritten. It formats the table's
+# linux rows; powershell/test_lint.ps1 formats its windows rows, the
+# PowerShell files, on Windows. A whitelist line is a path from the top with
+# * or ? in its last part only, and matches at least one file and no
+# directory.
 
-import argparse, glob, os, subprocess
+import argparse, fnmatch, json, os, re, subprocess
+from typing import Any, NamedTuple
 
 _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
 
 _ROOT_PATH = os.path.dirname(_PYTHON_PATH)
 
-_RUFF_CACHE_PATH = os.path.join(_ROOT_PATH, "build", "ruff_cache")
+# The system whose rows this script formats, `test_lint.ps1` the others.
+_SYSTEM = "linux"
 
-# The one ruff configuration, for files outside python/ too.
-_RUFF_CONFIG_PATH = os.path.join(_PYTHON_PATH, "pyproject.toml")
+# What handles each extension of the whitelisted files.
+_TABLE_PATH = os.path.join(_PYTHON_PATH, "reformat_table.json")
 
-_RUFF_FORMAT = [
-    "ruff",
-    "format",
-    "--config",
-    _RUFF_CONFIG_PATH,
-    "--cache-dir",
-    _RUFF_CACHE_PATH,
-]
-
-# `prettier` rewrites the files in place at 79 columns, reading no config.
-_PRETTIER_FORMAT = [
-    "prettier",
-    "--write",
-    "--no-config",
-    "--print-width",
-    "79",
-]
-
-# The formatter command for each extension. Other files have none.
-_FORMATTERS: dict[str, list[str]] = {
-    ".html": _PRETTIER_FORMAT,
-    ".js": _PRETTIER_FORMAT,
-    ".md": ["mdformat", "--check"],
-    ".py": _RUFF_FORMAT,
-    ".pyi": _RUFF_FORMAT,
-    ".sh": ["shfmt", "--list", "--write"],
-    ".ts": _PRETTIER_FORMAT,
-}
+# A whitelist line: a path from the top, with `*` or `?` in its last part only.
+_WHITELIST_LINE = re.compile(r"(?:[^*?\[\]`/]+/)*[^\[\]`/]+")
 
 _WHITELIST_PATH = os.path.join(_PYTHON_PATH, "reformat_whitelist.txt")
 
 
-# Runs each formatter once over its files.
+# What handles the whitelisted files of one extension, a row of the table.
+class FileType(NamedTuple):
+    comments: str
+    encoding: str
+    formatter: list[str]
+    linter: list[str]
+    system: str
+
+
+# Returns the files the whitelist lines match under the root, sorted.
+def paths_match(root_path: str, patterns: list[str]) -> list[str]:
+    paths: set[str] = set()
+    for pattern in patterns:
+        if not _WHITELIST_LINE.fullmatch(pattern):
+            raise RuntimeError(
+                f"whitelist line {pattern!r} is not a path with * or ? in"
+                " its last part only"
+            )
+        directory, _, leaf = pattern.rpartition("/")
+        directory_path = os.path.join(root_path, directory)
+        names: list[str] = []
+        if os.path.isdir(directory_path):
+            names = os.listdir(directory_path)
+        matched = [
+            name
+            for name in sorted(names)
+            if fnmatch.fnmatchcase(name, leaf)
+            and (leaf.startswith(".") or not name.startswith("."))
+        ]
+        if not matched:
+            raise RuntimeError(
+                f"whitelist line {pattern!r} matches nothing under {root_path}"
+            )
+        for name in matched:
+            relative = os.path.join(directory, name)
+            path = os.path.join(root_path, relative)
+            if not os.path.isfile(path):
+                raise RuntimeError(
+                    f"whitelist line {pattern!r} matches {relative!r}, which"
+                    " is not a file"
+                )
+            paths.add(path)
+    return sorted(paths)
+
+
+# Runs each formatter of this system once over its files.
 def reformat(paths: list[str]) -> None:
-    for extension, command in _FORMATTERS.items():
-        matched = [path for path in paths if path.endswith(extension)]
+    table = table_read()
+    # A file whose extension has no row fails before any formatter runs.
+    for path in paths:
+        type_find(table, path)
+    for extension, row in table.items():
+        matched = [
+            path for path in paths if os.path.splitext(path)[1] == extension
+        ]
         # With no files, ruff formats the directory and shfmt reads stdin.
-        if matched:
-            subprocess.run(command + matched, check=True, cwd=_ROOT_PATH)
+        if matched and row.system == _SYSTEM:
+            subprocess.run(
+                [*row.formatter, *matched], check=True, cwd=_ROOT_PATH
+            )
 
 
-# Returns the files the whitelist's globs match from the top, sorted.
+# Returns the table's rows by extension, each with exactly the five keys.
+def table_read() -> dict[str, FileType]:
+    with open(_TABLE_PATH, encoding="utf-8") as table_file:
+        table: dict[str, dict[str, Any]] = json.load(table_file)
+    return {extension: FileType(**row) for extension, row in table.items()}
+
+
+# Returns the row of the file's extension, failing when it has none.
+def type_find(table: dict[str, FileType], path: str) -> FileType:
+    extension = os.path.splitext(path)[1]
+    if extension not in table:
+        raise RuntimeError(
+            f"{path}: no row for {extension!r} in {_TABLE_PATH}"
+        )
+    return table[extension]
+
+
+# Returns the files the whitelist's lines match from the top, sorted.
 def whitelist_paths() -> list[str]:
     with open(_WHITELIST_PATH, encoding="utf-8") as whitelist_file:
         patterns = whitelist_file.read().splitlines()
-    paths: set[str] = set()
-    for pattern in patterns:
-        matched = glob.glob(pattern, root_dir=_ROOT_PATH)
-        if not matched:
-            raise RuntimeError(
-                f"{_WHITELIST_PATH}: {pattern!r} matches nothing"
-            )
-        paths.update(os.path.join(_ROOT_PATH, path) for path in matched)
-    return sorted(paths)
+    return paths_match(_ROOT_PATH, patterns)
 
 
 # Formats the whitelisted files.
 def main() -> None:
     argparse.ArgumentParser(
-        description="Format the files reformat_whitelist.txt lists."
+        description="Format the whitelisted files of the linux rows of"
+        " reformat_table.json."
     ).parse_args()
     reformat(whitelist_paths())
 

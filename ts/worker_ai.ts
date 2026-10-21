@@ -18,12 +18,10 @@ namespace worker_ai {
     console_owner: "console" as const,
     provider_owner: "http" as const,
     debug_setting: "debug",
-    level_setting: "verbose_level",
     synchronous_setting: "queue_synchronous",
     overflow_setting: "overflow_bytes",
-    limit_setting: "queue_max",
-    message_setting: "message_max",
-    line_setting: "line_max",
+    compact_setting: "turn_compact_turns",
+    limit_setting: "blob_max",
     scripted_setting: "provider.scripted",
     timeout_setting: "provider.timeout_seconds",
     settings_type: "settings.set",
@@ -35,14 +33,14 @@ namespace worker_ai {
     overlay_type: "overlay.line",
     verbose_type: "verbose.put",
     get_type: "kv.get",
+    snapshot_type: "db.snapshot",
     store_type: "media.store",
     render_type: "render",
     mcp_type: "mcp",
     next_type: "replicate.next",
     done_type: "replicate.done",
     start_type: "worker.start",
-    head_type: "worker.snapshot_head",
-    piece_type: "worker.snapshot_piece",
+    snapshot_wake: "worker.snapshot_reply",
     initialized_type: "worker.initialized",
     listed_type: "worker.listed",
     fetched_type: "worker.fetched",
@@ -119,7 +117,6 @@ namespace worker_ai {
     start_open(server: { [db: string]: number }): string[];
     db_restore(db: string, data: Uint8Array | string): number;
     db_load(db: string, data: Uint8Array | string): number;
-    blob_take(data: Uint8Array | string): Uint8Array;
     db_list(): string[];
     kv_get(ref: lines.KvRef): substrate.KvValue;
     kv_put(
@@ -144,7 +141,6 @@ namespace worker_ai {
     server: mcp.Client;
     hello: lines.Hello;
     full: boolean;
-    settings_get: (id: string) => unknown;
     provider_attach: () => void;
   }
 
@@ -165,9 +161,9 @@ namespace worker_ai {
     request: lines.Line;
   }
 
-  // A snapshot the start fetches: whether it restores, what restores follow.
+  // A snapshot the start fetches: its database, whether it restores, the rest.
   interface FetchState {
-    fetch: substrate.SnapshotFetch;
+    db: string;
     restore: boolean;
     rest: string[];
   }
@@ -207,19 +203,30 @@ namespace worker_ai {
     return jslb.field_get(blob, "data") as Uint8Array | string;
   }
 
-  // The bytes a held line counts: its JSON text without blob data, then sizes.
+  // Blob 1 of a `db.snapshot` reply, checked against the `sha256` it sent.
+  function snapshot_data(db: string, reply: lines.Line): Uint8Array | string {
+    const blob = reply[1] as lines.BlobHeader;
+    const data = blob_data(reply);
+    // A streamed blob's digest is the one its cache file took as it came.
+    const sha256 =
+      typeof data === "string"
+        ? (blob.sha256 as lines.Sha256)
+        : utility.sha256_hex(data);
+    const sent = jslb.payload_of(reply).sha256 as lines.Sha256;
+    if (sha256 !== sent) {
+      throw new Error(i18n("substrate.snapshot_digest", db, sha256, sent));
+    }
+    return data;
+  }
+
+  // The bytes a held line counts: the sizes of its blobs, never its text.
   function line_bytes(line: lines.Line): number {
-    const shown: { [key: string]: unknown } = { ...line };
     const blobs = jslb.headers_of(line).slice(1) as lines.BlobHeader[];
     let sizes = 0;
-    for (let index = 0; index < blobs.length; index += 1) {
-      const blob = blobs[index];
-      shown[index + 1] = Object.fromEntries(
-        Object.entries(blob).filter(([name]) => name !== "d"),
-      );
+    for (const blob of blobs) {
       sizes += jslb.field_get(blob, "size") as number;
     }
-    return utility.utf8_encode(utility.json_text(shown)).length + sizes;
+    return sizes;
   }
 
   // The database a forwarded line writes, by its `db`, its key or its scene.
@@ -291,7 +298,7 @@ namespace worker_ai {
     private readonly flying = new Set<string>();
     private held = 0;
 
-    // Takes the store, the queue, the reader of `queue_max`, the name form.
+    // Takes the store, the queue, the reader of `blob_max`, the name form.
     constructor(
       store: ForwardStore,
       tasks: queue.TaskQueue,
@@ -355,7 +362,7 @@ namespace worker_ai {
       }
     }
 
-    // The bytes of the lines held and not yet sent.
+    // The blob bytes of the lines held and not yet sent.
     held_bytes(): number {
       return this.held;
     }
@@ -433,30 +440,17 @@ namespace worker_ai {
       return this.restore_next(names);
     }
 
-    // Takes the head of a snapshot and asks for its first piece.
-    head_take(wake: lines.Line): dispatch.Sleep {
-      const state = wake.state as FetchState;
-      const replies = wake.replies as lines.Line[];
-      return this.piece_ask(state, state.fetch.head_take(replies[0]));
-    }
-
-    // Takes a piece and asks the next, or opens the snapshot and goes on.
-    piece_take(wake: lines.Line): dispatch.Sleep {
+    // Checks a snapshot's digest, opens it, checks its `seq` and goes on.
+    snapshot_take(wake: lines.Line): dispatch.Sleep {
       const state = wake.state as FetchState;
       const replies = wake.replies as lines.Line[];
       const { store } = this.parts;
-      const { fetch } = state;
-      const piece = store.blob_take(blob_data(replies[0]));
-      const next = fetch.piece_take(piece);
-      if (next !== undefined) {
-        return this.piece_ask(state, next);
-      }
-      const db = fetch.db;
-      const data = fetch.bytes_get();
+      const { db } = state;
+      const data = snapshot_data(db, replies[0]);
       const seq = state.restore
         ? store.db_restore(db, data)
         : store.db_load(db, data);
-      const sent = fetch.seq_sent();
+      const sent = jslb.payload_of(replies[0]).seq as number;
       if (seq !== sent) {
         throw new Error(i18n("worker_ai.snapshot_desync", db, seq, sent));
       }
@@ -509,28 +503,17 @@ namespace worker_ai {
       return this.fetch_start(names[0], true, names.slice(1));
     }
 
-    // Asks the server for the head of a database's snapshot, one at a time.
+    // Asks the server for a database's snapshot, one at a time, and sleeps.
     private fetch_start(
       db: string,
       restore: boolean,
       rest: string[],
     ): dispatch.Sleep {
-      const { tasks, full, settings_get } = this.parts;
-      const fetch = new substrate.SnapshotFetch(
-        db,
-        settings_get(constants.message_setting) as number,
-        settings_get(constants.line_setting) as number,
-        full,
-      );
-      const id = tasks.task_submit(fetch.head_line(), constants.server_owner);
-      const state: FetchState = { fetch, restore, rest };
-      return dispatch.task_sleep(state, [id], constants.head_type);
-    }
-
-    // Asks the server for the next piece of a snapshot and sleeps on it.
-    private piece_ask(state: FetchState, line: lines.Line): dispatch.Sleep {
-      const id = this.parts.tasks.task_submit(line, constants.server_owner);
-      return dispatch.task_sleep(state, [id], constants.piece_type);
+      const { tasks, full } = this.parts;
+      const ask = line_build(constants.snapshot_type, full, { db });
+      const id = tasks.task_submit(ask, constants.server_owner);
+      const state: FetchState = { db, restore, rest };
+      return dispatch.task_sleep(state, [id], constants.snapshot_wake);
     }
 
     // Asks for the next database the start lacks, or starts the handshakes.
@@ -655,8 +638,9 @@ namespace worker_ai {
   ): void {
     const version = constants.handler_version;
     register(constants.start_type, version, () => chain.start_take());
-    register(constants.head_type, version, (line) => chain.head_take(line));
-    register(constants.piece_type, version, (line) => chain.piece_take(line));
+    register(constants.snapshot_wake, version, (line) =>
+      chain.snapshot_take(line),
+    );
     register(constants.initialized_type, version, (line) =>
       chain.initialized_take(line),
     );
@@ -798,8 +782,6 @@ namespace worker_ai {
   ): queue.TaskQueue {
     const value = (jslb.payload_of(hello) as unknown as lines.Hello).settings;
     settings.settings_set(value);
-    const level = settings.settings_get(constants.level_setting) as number;
-    verbose.level_set(level);
     const synchronous = settings.settings_get(
       constants.synchronous_setting,
     ) as boolean;
@@ -856,6 +838,7 @@ namespace worker_ai {
       start.cache,
       hello.root,
       settings.settings_get(constants.overflow_setting) as number,
+      settings.settings_get(constants.compact_setting) as number,
     );
     const forwards = new ForwardQueue(
       store,
@@ -921,7 +904,6 @@ namespace worker_ai {
       server: server_client,
       hello,
       full,
-      settings_get: settings.settings_get,
       provider_attach: () => provider_attach(tasks, store, start.cache),
     });
     chain_register(chain, dispatch.handler_register);

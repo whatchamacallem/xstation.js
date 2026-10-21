@@ -24,11 +24,8 @@ _VECTORS_PATH = os.path.join(_BUILD_PATH, "vectors")
 # The longest line the decoders here read, its CR included.
 _LINE_MAX = 4096
 
-# The largest blob the decoders here read.
+# The most bytes the blobs of one message come to in the decoders here.
 _BLOB_MAX = 65536
-
-# The largest message the decoders here read, room for two largest blobs.
-_MESSAGE_MAX = 2 * _BLOB_MAX
 
 # The largest blob the decoders here keep in memory.
 _OVERFLOW_BYTES = 1024
@@ -107,7 +104,6 @@ class _ScratchCase(_MessageCase):
         return jslb.LineDecoder(
             _LINE_MAX,
             _BLOB_MAX,
-            _MESSAGE_MAX,
             _OVERFLOW_BYTES,
             self.sink.path_make,
         )
@@ -118,7 +114,6 @@ class _ScratchCase(_MessageCase):
         return jslb.LineDecoder(
             limits["line_max"],
             limits["blob_max"],
-            limits["message_max"],
             limits["overflow_bytes"],
             self.sink.path_make,
         )
@@ -777,7 +772,7 @@ class TestDecode(_ScratchCase):
     def test_blob_max(self) -> None:
         line = b'{"0":{"t":"echo","b":1},"1":{"s":%d}}\r'
         over = line % (_BLOB_MAX + 1) + bytes(_BLOB_MAX + 1)
-        message = i18n("jslb.blob_over_max", 1, _BLOB_MAX + 1, _BLOB_MAX)
+        message = i18n("jslb.blobs_over", _BLOB_MAX + 1, _BLOB_MAX)
         self.refused_assert(over, message)
         self.assertEqual(self.sink.headers, [])
         self.assertEqual(os.listdir(self.scratch), [])
@@ -786,17 +781,17 @@ class TestDecode(_ScratchCase):
         )
         self.assertEqual(len(lines), 1)
 
-    # A message of `message_max` bytes is read, one more refused at its CR.
-    def test_message_max(self) -> None:
-        first = bytes(_BLOB_MAX)
-        rest = _MESSAGE_MAX - _BLOB_MAX - _LINE_MAX // 2
-        over = _message_padded(_LINE_MAX // 2, [first, bytes(rest + 1)])
-        message = i18n("jslb.message_over", _MESSAGE_MAX + 1, _MESSAGE_MAX)
+    # Blobs of `blob_max` in all pass with a longest line, one byte more not.
+    def test_blobs_summed(self) -> None:
+        first = bytes(_BLOB_MAX // 2)
+        rest = _BLOB_MAX - len(first)
+        over = _message_padded(_LINE_MAX, [first, bytes(rest + 1)])
+        message = i18n("jslb.blobs_over", _BLOB_MAX + 1, _BLOB_MAX)
         self.refused_assert(over, message)
         self.assertEqual(self.sink.headers, [])
         self.assertEqual(os.listdir(self.scratch), [])
-        data = _message_padded(_LINE_MAX // 2, [first, bytes(rest)])
-        self.assertEqual(len(data), _MESSAGE_MAX)
+        data = _message_padded(_LINE_MAX, [first, bytes(rest)])
+        self.assertEqual(len(data), _LINE_MAX + _BLOB_MAX)
         lines = self.pieces_decode(self.decoder_make(), [data])
         self.assertEqual(len(lines), 1)
 
@@ -925,7 +920,6 @@ class TestDecode(_ScratchCase):
             decoder = jslb.LineDecoder(
                 2 * len(data),
                 _BLOB_MAX,
-                _MESSAGE_MAX,
                 _OVERFLOW_BYTES,
                 self.sink.path_make,
             )
@@ -987,7 +981,6 @@ class TestStream(_ScratchCase):
         decoder = jslb.LineDecoder(
             _LINE_MAX,
             _BLOB_MAX,
-            _MESSAGE_MAX,
             _OVERFLOW_BYTES,
             lambda header: path,
         )
@@ -1055,7 +1048,7 @@ class TestVectors(_ScratchCase):
         self, limits: dict[str, int]
     ) -> dict[str, tuple[str, str]]:
         blob_max = limits["blob_max"]
-        message_max = limits["message_max"]
+        over = ("blobs_over", i18n("jslb.blobs_over", blob_max + 1, blob_max))
         start = self.decode_reason(bytes.fromhex("c080"))
         continuation = self.decode_reason(bytes.fromhex("eda080"))
         header = ("no_header_zero", i18n("jslb.no_header_zero"))
@@ -1075,10 +1068,7 @@ class TestVectors(_ScratchCase):
             ),
             "error_blob_gap": ("blob_gap", i18n("jslb.blob_gap", 2, 3)),
             "error_blob_gap_first": ("blob_gap", i18n("jslb.blob_gap", 1, 2)),
-            "error_blob_over_max": (
-                "blob_over_max",
-                i18n("jslb.blob_over_max", 1, blob_max + 1, blob_max),
-            ),
+            "error_blob_over_max": over,
             "error_blobs_mismatch": (
                 "blobs_mismatch",
                 i18n("jslb.blobs_mismatch", 2, 1),
@@ -1087,6 +1077,7 @@ class TestVectors(_ScratchCase):
                 "blobs_mismatch",
                 i18n("jslb.blobs_mismatch", 0, 1),
             ),
+            "error_blobs_over": over,
             "error_both_name_forms": forms,
             "error_both_name_forms_blob": forms,
             "error_header_not_object": (
@@ -1100,10 +1091,6 @@ class TestVectors(_ScratchCase):
             "error_line_over_max": (
                 "line_over_max",
                 i18n("jslb.line_over_max", limits["line_max"]),
-            ),
-            "error_message_over": (
-                "message_over",
-                i18n("jslb.message_over", message_max + 1, message_max),
             ),
             "error_nan": ("line_not_json", i18n("jslb.line_not_json", "NaN")),
             "error_no_header_zero": header,

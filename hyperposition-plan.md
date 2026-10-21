@@ -293,7 +293,7 @@ ttyd --url-arg, one per machine, one program per WebSocket
   runs the agent (5.3), the MCP server and client (5.4), the AI's
   scripts (5.6) and replication (6.8). A long query stalls the agent,
   which is accepted: the provider's latency is larger, and the AI can
-  raise the verbose level and optimize.
+  trace a script with `script_debug` and optimize.
 - A third thread, if a hard need arises, reuses `queue.ts` and
   `substrate.ts` unchanged with a new owner table entry.
 
@@ -307,9 +307,11 @@ ttyd --url-arg, one per machine, one program per WebSocket
   `<root>/engine.lock` with `flock`, and when it cannot, writes `error`
   and exits 1.
 - tty 0, the console: bootstrap.py with role `console`, when the setting
-  `debug` is true, runs `/bin/dash` through `verbose.exec`, `[dash,
-  "-v"]` its level 2 form, with a scrubbed environment and the root as
-  working directory, and exits with its code; when `debug` is false it
+  `debug` is true, runs `/bin/dash` through `verbose.exec` at the setting
+  `verbose_level`, `[dash, "-v"]` its level 2 form, with a scrubbed
+  environment and the root as working directory, and exits with its code.
+  The shell is the one thing with verbose levels; the server and the page
+  have only `debug` (2.4, 10.19); when `debug` is false it
   exits 1 and ttyd closes the connection. Its pty stays cooked, so it
   echoes. The page's console module speaks ttyd's own client protocol
   to it, which is ttyd's dash and xterm.js recycled. The user opens it
@@ -351,6 +353,13 @@ ttyd --url-arg, one per machine, one program per WebSocket
 - Debug mode is the setting `debug`, false in a release. The server
   gates `console`, `settings.put`, `source.put`, `system.restart` and
   `verbose.put` on it; the page gates the overlays and `settings_put`.
+- `debug` is also the only verbose switch of the server and of the page,
+  which have no verbose level (10.19): the task manager's trace (4.2),
+  the server's trace of each line it dispatches and replies to, and the
+  forwarding of `verbose.put` happen in debug mode only. A failure is
+  logged always. Verbose levels belong to the shell alone (2.3).
+  Unconfirmed: the server's trace holds each line's header JSON only;
+  rework is the whole line in the form of 3.11.
 - Headers use full names in debug mode, short names otherwise.
 
 ### 2.5 The page and its build
@@ -367,6 +376,11 @@ ttyd --url-arg, one per machine, one program per WebSocket
   worker is a Blob URL of the same bundle with its entry chosen by
   `self.name`. The output's SHA-256 is printed.
 - `html/test.html` is built the same way with the test modules added.
+- `html/test_engine.html` is the engine page built with the test
+  bundle's `test_hook.ts`, through which a browser rung submits tasks
+  from the UI's live queue (`page.test_engine`, `boot.test_engine`);
+  `page_build(name, test, template)` chooses the template. The
+  production page carries no test code.
 - Canonical TypeScript error handling: `strict` on, every thrown value
   an `Error` with `cause` when wrapped, no empty catch.
 - The AI's scripts are not in the bundle: they are KV values the AI
@@ -385,13 +399,17 @@ ttyd --url-arg, one per machine, one program per WebSocket
   rendered form (3.11) of the last `verbose_ring` lines in both
   directions, newest last. These overlays are read only and have no
   console features.
-- In debug mode with `verbose_forward` on, the same rendering of the
-  wire traffic and the page's `console.*` output goes to the server as
-  `verbose.put`, so `_verbose` holds the page's view. Unconfirmed:
-  verbose level 2 and `verbose_forward` gate it; a 128 MiB upload
-  renders as one line per message, a turn as many.
+- In debug mode the same rendering of the wire traffic and the page's
+  `console.*` output goes to the server as `verbose.put`, so `_verbose`
+  holds the page's view; `debug` alone gates it (2.4). The overlay of
+  tty 1 does not show the `verbose.put` lines it forwards, which would
+  feed it to itself. A 128 MiB upload renders as one line, a turn as
+  many.
 - The console view and the overlays show above the scene's image.
-  Unintentional invisibility is always a bug, not a style issue.
+  Unintentional invisibility is always a bug, not a style issue. Two
+  states are accepted by the maintainer: with both shown, the overlay
+  below the console scrolls the console's top rows out, and the subtitle
+  band lies over the bottom strip of the image.
 
 ### 2.7 ttyd
 
@@ -505,10 +523,9 @@ default values should not be stored, but be implicit by omission.
 - No 0, no `t`, `b` not matching the headers present, a gap in 1 to
   `b`, a non-integer or negative `s`, a payload key that is decimal
   digits, both name forms, an unknown field in the line header.
-- A line over `line_max` or a blob over `blob_max`, 10 MiB, refused
-  before the bytes are buffered. A message, a line with its CR plus the
-  `s` of every blob, over `message_max`, 10 MiB, refused when the line
-  ends, before any blob byte is buffered.
+- A line over `line_max` refused before its bytes are buffered. A
+  message whose blobs' `s` sum over `blob_max` refused when the line
+  ends, before any blob byte is buffered (3.8).
 - The decoder raises on the first error and the port that fed it
   closes. No resynchronization on a byte stream.
 
@@ -517,13 +534,27 @@ default values should not be stored, but be implicit by omission.
 - A blob of `s` at most `overflow_bytes` is collected in memory. A
   larger blob is written to a new file in the cache directory as it
   arrives, hashed on the way, and `d` is that path; the handler moves or
-  links it. Memory per message is bounded by `message_max`.
-- Any JSLB queue holds at most `queue_max`, 100 MiB, a held line
-  counting its JSON text in UTF-8 plus its blob sizes; a line that would
-  exceed it is a fault. The task manager's queues, the wire's and the AI
-  worker's replication queue are bounded so, and `wire.ts` refuses to
-  post a message over `message_max`. The server holds no queue: it
-  dispatches one line at a time.
+  links it. Memory per message is bounded by `line_max` plus `blob_max`.
+- `blob_max` is the one window every blob goes through, the size of the
+  largest database (6.10), and one `settings.json` entry. A window counts
+  blob bytes, the `s` of each blob it holds or passes, never line bytes,
+  which `line_max` bounds line by line: a message's blobs, and the blobs
+  of the lines any JSLB queue holds, sum to at most `blob_max`, and a
+  line that would pass it is a fault. The task manager's queues, the
+  wire's frame queue and the AI worker's replication queue are bounded
+  so, and `wire.ts` refuses to post a line over `line_max` or a message
+  whose blobs sum over `blob_max`. The server holds no queue: it
+  dispatches one line at a time. Unconfirmed: a window counts blob bytes
+  only, so that a blob of `blob_max` passes every window with its line
+  and a `kv.get` reply fits whenever its `kv.put` did; rework is counting
+  line bytes too, the largest blob then `blob_max` minus its line.
+- Unconfirmed: `blob_max` is 2147483391, the largest allocation SQLite's
+  `sqlite3_serialize` makes by default, which every whole database image
+  passes through and which no browser limit can raise; Chrome's own
+  limits, the origin's quota, the largest `Uint8Array` and the wasm heap
+  of the worker's export, are measured in stage 6 (8.7.7), and a lower
+  one is the maintainer's to set. The research, its sources and the
+  options are in `PLAN_B.md` 2.13.
 - The encoder yields the JSON bytes, then each `d` as is, bytes or
   file. It never copies blob bytes.
 
@@ -551,11 +582,15 @@ default values should not be stored, but be implicit by omission.
   `--srv-buf-size 1048576`; `chunk_bytes` is 1 MiB; `wire.ts` waits for
   `bufferedAmount` under one chunk before the next; the server streams
   big blobs to the cache file so libuv's queue stays short. ttyd's
-  resident size during a 128 MiB upload, sent as messages that each fit
-  `message_max`, one after another, never holding more than
-  `queue_max`, is measured in stage 2; only if the measurement demands
-  it is a credit line added (10.11) or ttyd patched to bound the queue
-  (2.7).
+  resident size during a 128 MiB upload, one message within `blob_max`,
+  is measured in stage 2; only if the measurement demands it is a credit
+  line added (10.11) or ttyd patched to bound the queue (2.7).
+- `chunk_bytes` and `srv_buf_size` stay 1 MiB and are not set to
+  `blob_max`: they are the pieces a blob is cut into, not windows that
+  hold one, and each is allocated whole, by every `os.read` of the
+  server and, read from the libwebsockets sources, by each service
+  thread of ttyd. The maintainer approved this on 2026-10-21
+  (`PLAN_B.md` 2.20).
 - ttyd may end a connection without delivering a program's last output,
   and Linux ttyd closes with no close frame, code 1006, when the program
   exits. The page treats a close with no `error` line as the fault
@@ -615,8 +650,8 @@ http     agent      <->  provider      HTTPS, one request per line
   holds, including woken tasks and tasks it posted to itself, to
   completion; a sleep that waits on another thread is the only thing
   that lets an input through. Runs are then deterministic.
-- The queue handles sleeping tasks and an empty queue. It logs every
-  submit, dispatch, sleep, wake and reply through `verbose` at level 2,
+- The queue handles sleeping tasks and an empty queue. In debug mode it
+  logs every submit, dispatch, sleep, wake and reply through `verbose`,
   and no other information is needed to reconstruct the thread's
   timeline.
 - Blob buffers are transferred, never copied; after submit the caller's
@@ -746,12 +781,15 @@ http     agent      <->  provider      HTTPS, one request per line
 - One turn is a chain of tasks. `ai.say {text}` or `ai.click {x, y}`
   from the UI: the handler appends the turn (6.6), builds the provider
   request, submits it and sleeps with `ai.model_reply`.
-  `ai.model_reply`: stores the assistant turn; for each tool call
-  submits an MCP `tools/call`; a tool that must wait (an image, a
+  `ai.model_reply`: for each tool call of the reply submits an MCP
+  `tools/call`, storing nothing yet; a tool that must wait (an image, a
   permit, the console) sleeps in turn; when every tool result is in,
-  the next provider request is submitted; a reply with no tool calls
-  ends the turn with the reply to the original `ai.say`. The queue log
-  is the transcript of the turn (4.2).
+  `ai.tool_reply` stores the reply that called the tools together with
+  their results in one transaction and submits the next provider
+  request, so no stored call lacks its result and a failed tool call
+  leaves no unanswered turn; a reply with no tool calls is stored and
+  ends the turn with the reply to the original `ai.say`. In debug mode
+  the queue log is the transcript of the turn (4.2).
 - The system prompt is the analyst's prompt document in the metaverse,
   then the current universe's prompt document when the scripts have made
   one.
@@ -790,7 +828,8 @@ Browser, in the AI worker; each names its request:
   is edited with `kv_put` on `/_files/script/<name>.js`.
 - `image_make {prompt, key}`, `render {image, subtitle}`.
 - `console_run {text, timeout_seconds}`, permit, debug.
-- `verbose_level {level}`, `verbose_tail {thread, count}`.
+- `verbose_tail {thread, count}`. The page has no verbose level to set
+  (2.4); the `verbose_level` tool is deferred with the levels (10.19).
 
 Server, in Python:
 
@@ -807,9 +846,10 @@ set is `console_run` (4.6).
 - `script_run {name, args}` runs the text in the AI worker as a task:
   `new Function("engine", "args", text)` with `engine` the frozen object
   of the substrate, `verbose` and `i18n` APIs. It returns the value, or
-  the exception with its stack, and the verbose lines the run emitted.
-  `script_debug {name, args}` is the same run at verbose level 2, which
-  traces every substrate call the script makes through the single door.
+  the exception with its stack, and the verbose lines the run emitted;
+  `engine.log(text)` takes no level. `script_debug {name, args}` is the
+  same run with its trace on, which traces every substrate call the
+  script makes through the single door.
   A simulation step is such a script run by a tool call or a turn.
   Nothing is sent to the server for compilation. Unconfirmed: run and
   debug are a run and a traced run; rework if stepping or breakpoints
@@ -982,10 +1022,28 @@ CREATE TABLE _turn (
 - Regions are disjoint entities; a scene is a location inside one. The
   hyperposition creates a new scene document for each conversation.
 - Turns are `_turn` rows in the database of the scene, keyed by the
-  scene's Document-Ref, each one provider message. `turn_compact(scene)`
-  in the substrate replaces turns 1 to N with one summary row when the
-  estimate exceeds `turn_compact_tokens`; a heuristic baked into the
-  wrapper, not an AI script.
+  scene's Document-Ref, each one provider message.
+  `turn_compact(scene, through, summary)` in the substrate replaces turns
+  1 to `through` with one summary row, role `system`, at `n` 1.
+- Compaction is automatic, by an event counter, a heuristic baked into
+  the wrapper, not an AI script. The events are the turns appended to a
+  scene's conversation, of any role; the counter is the number of the
+  scene's `_turn` rows, counted when read, so it survives whatever the
+  turn store survives and resets when a compaction replaces the turns it
+  covers with one. When the browser's `Store.turn_append` appends a turn
+  of role `user` to a scene that already holds `turn_compact_turns`
+  turns or more (6.9), it first compacts that scene's turns 1 to its
+  last in the same transaction, forwarded as its own `turn.compact`
+  before the `turn.append`; the server applies both and never compacts
+  by itself. A `user` turn starts a player's turn, when no tool call
+  waits for its result (5.3). The summary is by truncation: one `i18n`
+  text naming the turns compacted and the count that reached the
+  threshold; the databases hold the state. The AI may still compact by
+  hand with `turn_compact`. Unconfirmed: the events, the counter, the
+  moment, the summary and the threshold of 64 are readings and a
+  default chosen by the planner; rework is this item, `substrate.ts`'s
+  `turn_append` and the setting. The estimate design this replaces is
+  in 10.20.
 
 ### 6.7 Media tiers
 
@@ -1028,10 +1086,11 @@ _files (server)   server      everything ever stored       never, v0
   server is the source of truth.
 - Start: `hello` carries `seq` per database. Where the browser's `seq`
   differs, its file is invalidated and replaced by the server's:
-  `db.snapshot` yields `Connection.serialize` bytes as one blob and
-  `db.restore` writes a temp file and renames it. Only the databases the
-  browser holds are replaced; the others stay unloaded until `db_load`
-  (6.10).
+  `db.snapshot` yields `Connection.serialize` bytes as one blob, at most
+  `blob_max` (3.8), with their `sha256`, which the browser checks before
+  it restores, and `db.restore` writes a temp file and renames it. Only
+  the databases the browser holds are replaced; the others stay unloaded
+  until `db_load` (6.10).
 - Desync: a refused push, or a reply whose `seq` is not the browser's,
   is a fault; the page reloads and the reload replaces the file. That
   path is unit tested in stage 6, early. Content divergence with equal
@@ -1043,21 +1102,29 @@ _files (server)   server      everything ever stored       never, v0
 
 - `settings.json` holds constants only, each with a sane default:
   `debug`, `queue_synchronous`, `verbose_level`, `verbose_ring`,
-  `verbose_forward`, `line_max`, `blob_max`, `message_max`, `queue_max`,
-  `overflow_bytes`, `chunk_bytes`, `srv_buf_size`, `media_db_bytes`,
-  `files_browser_bytes`, `db_soft_bytes`, `turn_compact_tokens`,
-  `long_task_ms`, and `provider` with `scripted` and `timeout_seconds`.
-  Never a password or a key. A constant no module reads is not there.
+  `line_max`, `blob_max`, `overflow_bytes`, `chunk_bytes`,
+  `srv_buf_size`, `media_db_bytes`, `files_browser_bytes`,
+  `db_soft_bytes`, `turn_compact_turns`, `long_task_ms`, and `provider`
+  with `scripted` and `timeout_seconds`. Never a password or a key. A
+  constant no module reads is not there.
+- `blob_max` is the one window of every blob (3.8); `verbose_level` is the
+  shell's level, read by the console role alone (2.3); `verbose_ring` the
+  size of each thread's ring; `turn_compact_turns`, 64, the count of a
+  scene's turns at which it is compacted (6.6). `message_max`,
+  `queue_max`, `verbose_forward` and `turn_compact_tokens` are gone.
 - The server loads it into `_settings` at start, so the AI can query it,
   and sends it in `hello` (2.4). `settings.put` in debug mode rewrites
   the file; the server rereads it at the next `hello`.
 - `provider.json` beside `settings.json` holds the provider's
   `base_url`, `chat_model` and `image_model`, empty strings until the
-  maintainer fills them out, and is not used during testing. When
-  `provider.scripted` is false the server reads it, an empty value is
-  an error, and `hello` carries it as `provider_info` beside
-  `provider_key`; when it is true, as in every test, the file is never
-  read and `hello` carries no `provider_info`. Unconfirmed: the file's
+  maintainer fills them out, and is not used during testing but by one
+  rung. When `provider.scripted` is false the server reads it, an empty
+  value is an error, and `hello` carries it as `provider_info` beside
+  `provider_key`; when it is true, as in every test but that one, the
+  file is never read and `hello` carries no `provider_info`. The rung of
+  the real HTTP timeout inside a turn writes its own `provider.json` into
+  its own root, sets `provider.scripted` false there and points
+  `base_url` at a local stub; the maintainer accepted that. Unconfirmed: the file's
   name, place and keys; rework is the server's reading of it and
   `hello`.
 
@@ -1085,7 +1152,15 @@ _files (server)   server      everything ever stored       never, v0
   OPFS file and the cache files only it references; the server's copy
   stays, nothing is forwarded, and a later operation on that database is
   an error naming `db_load`. `db_load {db}` fetches the server's copy
-  with `db.snapshot` and opens it as the start replacement does (6.8).
+  with `db.snapshot`, one blob, and opens it as the start replacement
+  does (6.8).
+- The largest database is `blob_max` (3.8), what Chrome supports for one
+  database in this stack, and the limit of browser storage and of the
+  caching and restoring above. Unconfirmed: `db_unload` is the caching,
+  the server's replicated copy being the image kept, and `db_load` the
+  restoring; no line sends a browser database to the server whole;
+  rework is a line that does. A database that grows past `blob_max` is
+  not refused (5.5); its image fails loud at a window.
 - After each turn the agent compares `total_bytes` with
   `db_soft_bytes`. When over, it adds one system message holding the
   `db_stats` result to the next provider request, and the AI decides
@@ -1150,15 +1225,19 @@ classes. API/python holds the stubs.
   `field_get`, `headers_of`, `payload_of`, `line_encode`,
   `LineDecoder` with `bytes_feed`, `line_render` (3.11), `WireError`.
   Headers are the `int` keys of the decoded `dict` (3.2).
-- `verbose.py`: `level_set`, `log(level, text)`, `history_get(count)`,
-  `exec(level, argv, argv_verbose)`, the one place an external program
-  is started: level 0 runs `argv` quietly with its output passed
-  through, level 1 runs `argv` with Markdown formatted progress, level 2
-  runs `argv_verbose`, the caller's command line carrying that program's
-  own verbose flags, raw, its output passed through. Lines go to
-  `_verbose` and the ring. Unconfirmed: level 2 takes a whole
+- `verbose.py`: `log(text)`, `history_get(count)`, and `exec(level,
+  argv, argv_verbose)`, the one place an external program is started,
+  whose levels are the shell's and the only verbose levels the server
+  has (2.3, 2.4): level 0 runs `argv` with its output passed through,
+  level 1 runs `argv` with its output passed through and its start and
+  exit logged, level 2 runs `argv_verbose`, the caller's command line
+  carrying that program's own verbose flags, raw, its output passed
+  through and the same two lines logged. Lines go to `_verbose` and the
+  ring, with no level. Unconfirmed: level 2 takes a whole
   `argv_verbose` from the caller; rework if the flags are inserted after
-  `argv[0]` or appended.
+  `argv[0]` or appended. Unconfirmed: level 1 passes the output through,
+  as a captured level 1 gives dash no input; rework is Markdown
+  formatted progress.
 - `settings.py`: `settings_load(path)`, `settings_check(settings)`.
 - `substrate.py`: `Store` with `db_open`, `db_close`, `db_list`,
   `db_create`, `db_drop`, `ref_split`, `kv_get`, `kv_put`, `kv_delete`,
@@ -1187,7 +1266,9 @@ classes. API/python holds the stubs.
   intact, sending several main loops and examining the output of each.
 - `page_build.py`, `third_party_fetch.py` (urllib and SHA-256 into
   `third_party/`), `devtools.py` (8.2), `test_all.py`, `test_wire.py`,
-  `test_browser.py`, `test_posix.py` with the audit of 8.6.
+  `test_browser.py`, `test_posix.py` with the audit of 8.6, and
+  `category.py`, the test categories, the runners' options and each
+  suite's alarm (8.2).
 
 ### 7.3 TypeScript, bottom up
 
@@ -1246,6 +1327,21 @@ harness.
 
 ### 7.5 Admin scripts
 
+- The PowerShell files, `xsjs_*.ps1`, `powershell/*.ps1` and
+  `powershell/en-US/*.psd1`, are in `python/reformat_whitelist.txt`, by
+  the maintainer's decision of 2026-10-21 (`PLAN_B.md` 2.21). Windows
+  formats them: `powershell/test_lint.ps1` reads the whitelist itself,
+  matches its lines by the rule `reformat.py` uses, and formats and
+  analyses the whitelisted `.ps1` and `.psd1` files, stopping at the first
+  fault. Linux formats the rest with `reformat.py`. In `test_posix.py` they
+  pass only the character check, with a UTF-8 byte order mark allowed at
+  their start, and the comment check, with a PowerShell comment lexer that
+  refuses `<# #>` below the header. `python/reformat_table.json` maps each
+  extension to its comment lexer, codec, formatter, linter and system; the
+  PowerShell rows' system is `windows`, so `reformat.py` formats none of
+  them. Unconfirmed: the mark allowed by the codec of those rows
+  (`PLAN_B.md` 10.4.44); the banner of `xsjs_install.ps1` stops
+  `test_posix.py` until the maintainer chooses (10.4.45).
 - The Windows scripts change in two places. The install script builds
   ttyd from the pinned source release with its patches (2.7) in place of
   installing the apt package. The function that starts ttyd runs the
@@ -1254,7 +1350,11 @@ harness.
   the user's environment into ttyd's; nothing about debug, which is a
   setting.
 - `archive.sh` and `clean.sh` are not part of the project.
-- `.sh` parallels, a Dockerfile and `--container` are doors (10.3).
+- `test_posix.sh` at the top and `powershell/test_powershell.ps1` are the
+  project's two official test targets (8.2). `test_posix.sh` has no
+  verbose levels (`PLAN_B.md` 2.15.2, 10.4.41).
+- `.sh` parallels, a Dockerfile and `--container` are doors (10.3), and
+  so is `test_posix.sh` run in Docker (10.22).
 
 ## 8 Testing
 
@@ -1281,27 +1381,85 @@ harness.
 
 ### 8.2 Runners
 
-- `python3 python/test_all.py`: the tests of `tap_producer` and
-  `tap_consumer` first, then the Python suites in dependency order, then
-  `test_wire.py`.
-- `python3 python/test_browser.py`: builds `test.html`, serves it
-  through ttyd, runs the TypeScript suites in headless Chrome, the
-  `tap_producer` tests first in the page's `test_all.ts`, reads the
-  `tap.line` stream from the file of 8.1, checks it with the consumer,
-  saves a PNG. The one JavaScript runner is a browser. `devtools.py` is
+- Two categories of test suite, the maintainer's (`PLAN_B.md` 2.18):
+  `smoke-test`, the important suites that fit in 2 minutes in all, and
+  `normal-test`, the others. A `smoke-test` run runs the first; a
+  `normal-test` run runs both. A suite is the smallest unit a runner
+  starts, times and names on its own: a module of `test_all.py`, a rung
+  of `test_wire.py` or `test_browser.py`. `test_posix.py` is one suite,
+  and the page's TypeScript modules carry the label of the rung that runs
+  them. Each label is written beside its suite. A wire stage or a browser
+  root is `smoke-test` when it holds a `smoke-test` rung, and a
+  `smoke-test` run starts no other. A `smoke-test` suite needs nothing
+  that a `normal-test` suite does. `category.py` holds the two labels, the
+  options, the alarm of each suite within a run's limit and the checks of
+  these rules. Unconfirmed: each label and the fit in 2 minutes, until the
+  testing phase measures them; rework is the labels of `PLAN_B.md` 2.18.4.
+- The test driver and the infrastructure for testing (`PLAN_B.md` 2.22).
+  `python/test_all.py` is the test driver: it chooses, orders, times and
+  runs the test suites. The infrastructure for testing is the code the
+  drivers and tests are built from, such as the test categories and their
+  deadline: `category.py`, and the TAP modules, whose own tests run first.
+  `python/test_test.py` tests the infrastructure for testing, every part
+  of `category.py`, and not the test driver; no test module tests the
+  driver. Unconfirmed: `alarm_plan` lives in `category.py`, and
+  `test_test.py` holds every test of it; rework is `PLAN_B.md` 10.4.52 and
+  10.4.53 (10.26).
+- The project's two official test targets, which both call
+  `python/test_all.py`:
+  - `./test_posix.sh [--smoke-test | --normal-test]`, bash at the top. No
+    option or `--smoke-test` runs the `smoke-test` suites, and
+    `--normal-test` runs both labels; any other argument writes its usage
+    and exits 2. It runs `python3 python/test_all.py` with the one option
+    from its own directory and exits with its code. It will later run in
+    Docker (10.22).
+  - `.\powershell\test_powershell.ps1 [--smoke-test | --normal-test]`, on
+    Windows as admin. It checks the option first, runs `test_lint.ps1`,
+    then the lifecycle, with `wsl --cd <checkout> -e python3
+    python/test_all.py <option>` as the step after the status check that
+    follows `xsjs_install.ps1`, before the first start. It stops on
+    failure, by the maintainer's decision of 2026-10-21: the first failed
+    step ends the run with exit code 1, and the later steps, the last
+    `xsjs_stop.ps1` among them, do not run, so the lifecycle's state at
+    the failure is left as it is (`PLAN_B.md` 2.19.5).
+  - `test_posix.sh` and `python/test_posix.py`, the checker of the
+    whitelisted files, share a stem; both names are the maintainer's.
+- `python3 python/test_all.py [--smoke-test | --normal-test]
+  [--failfast]`, `--smoke-test` by default, each option by its full name
+  only (the maintainer's decision of 2026-10-21: `--normal` is refused),
+  the test driver and the one runner of every suite: the tests of
+  `tap_producer` and `tap_consumer` first, then the
+  Python suites of the category in dependency order, then, when the
+  stream is clean, `test_posix.py`'s checks, `test_wire.py` and
+  `test_browser.py`, each given the category, stopping at the first
+  failure with its exit code. Each suite's label and measured seconds are
+  printed. A `smoke-test` run has 120 s in all: every alarm ends at that
+  deadline at the latest, and passing it fails loud naming the suite it
+  stopped.
+- `python3 python/test_wire.py [--smoke-test | --normal-test]`, the rungs
+  of 8.7.3 and 8.7.5 of the category.
+- `python3 python/test_browser.py [--smoke-test | --normal-test]`: builds
+  `test.html` and the engine pages, each when the first root that serves
+  it starts, serves them through ttyd, runs the TypeScript suites in
+  headless Chrome, the `tap_producer` tests first in the page's
+  `test_all.ts`, reads the `tap.line` stream from the file of 8.1, checks
+  it with the consumer, saves a PNG. The one JavaScript runner is a browser. `devtools.py` is
   `page_open(url)`, `script_evaluate(text)`, `console_follow(fn)`,
   `screenshot_save(path)`, `page_close()` over the DevTools protocol,
   implemented by the relay now inside `xsjs_screenshot.py`, split out.
 - `test_wire.py` and `test_browser.py` run the ttyd the install script
   built (2.7) and fail naming the install script when it is missing.
 - `python3 python/test_posix.py` keeps its role for every whitelisted
-  file and gains the audit of 8.6.
+  file and gains the audit of 8.6. It checks the PowerShell files'
+  characters and comments only, and formats and lints none of them (7.5).
 - Every rung and every browser test has a timer; a timer expiring is a
   failure that names the rung.
 
 ### 8.3 Cross-language vectors
 
-- `python/vectors/*.jslb` from `jslb.py`: empty payloads, every header
+- `build/vectors/*.jslb`, written by `vectors_make.py` with `jslb.py`
+  before the vector tests read them: by `test_all.py` before `test_jslb`,
+  and by `page_build.py` for the test page. Empty payloads, every header
   field, both name forms, zero to three blobs, blob bytes holding CR,
   LF, 0x03, 0x04, 0x13 and invalid UTF-8, each hard error, and the
   rendered form of 3.11. Both decoders read every vector, compare to the
@@ -1311,12 +1469,14 @@ harness.
 ### 8.4 The UI thread stress test
 
 - A long task observer on the UI thread during a `kv.put` and a
-  `kv.get` each of the largest message that fits `message_max`, a 128
-  MiB upload sent as messages that each fit, one after another within
-  `queue_max`, and a scripted turn with an image requires
-  no task over `long_task_ms`, 5 ms, a soft target reported as a
-  measurement, and no synchronous I/O on the main thread, a hard failure
-  found by tracing.
+  `kv.get` each of a blob of `blob_max`, a 128 MiB upload, one message
+  within `blob_max`, and a scripted turn with an image requires no task
+  over `long_task_ms`, 5 ms, a soft target reported as a measurement,
+  and no synchronous network load on the main thread, a hard failure
+  found by tracing. The UI's puts go through the test engine page
+  (2.5). Only synchronous network loads are detected, not the
+  synchronous calls behind `document.cookie` or `localStorage`, which
+  the maintainer accepted.
 
 ### 8.5 Stubs
 
@@ -1339,12 +1499,13 @@ harness.
 
 Each stage names what is built, what its tests prove, what a person
 surveys, and the exit criterion. A stage starts only when the previous
-one's exit criterion holds.
+one's exit criterion holds. An exit criterion is met by a `--normal-test`
+run (8.2), which runs every rung.
 
 8.7.1 Stage 0, the harness: ttyd built from the pinned release with its
 patches (2.7), which `test_browser.py` serves through;
 `third_party_fetch.py`, `tap_producer.py`, `tap_consumer.py`, `i18n`,
-`test_all.py`, `tap_producer.ts`, `unittest.ts`, `devtools.py`,
+`test_all.py`, `category.py`, `test_posix.sh`, `tap_producer.ts`, `unittest.ts`, `devtools.py`,
 `test_browser.py`, `page_build.py` for the test page, tsc in the build,
 `error_overlay.ts`, `utility.ts`, `ui_strings.ts`, `settings.ts`. The
 TAP modules' own tests run first in each runner. Proves one passing,
@@ -1363,9 +1524,10 @@ each reads all the vectors of the other.
 
 8.7.3 Stage 2, the raw wire: `bootstrap.py` with raw mode, the lock and
 `hello`, an `echo` handler; `test_wire.py` rungs `hello`, `echo`, `echo
-1 MiB with control bytes`, `echo 128 MiB` as messages that each fit
-`message_max`, sent one after another within `queue_max`, with ttyd's
-resident size printed, `second connection refused`, `ttyd killed`, and
+1 MiB with control bytes`, `echo 128 MiB` as one message within
+`blob_max`, with ttyd's resident size printed, an echo of a blob of
+`blob_max` and a message whose blobs sum to one byte more refused at its
+CR, `second connection refused`, `ttyd killed`, and
 the last line regression of the rules' Project Direction 1.1, the old
 test that keys on the last line of a process that exits right after
 printing it, kept as it is: a lone loss there is a ttyd fault, reported
@@ -1394,8 +1556,13 @@ builds replayed over the wire (6.8). Exit: rungs pass; pyright clean.
 with sleep, wake and synchronous mode, `wire.ts`, `http.ts` against a
 local stub, `verbose.ts`, `overlay.ts`, `worker_ai.ts` without
 databases, `page.ts` showing `hello`. Proves the hello relay, a round
-trip of the largest message that fits `message_max` equal by SHA-256
-and a message one byte larger refused, a `verbose.put` forwarded from
+trip of a blob of `blob_max` equal by SHA-256 and a message whose blobs
+sum to one byte more refused by `wire.ts` at its post, a UI put of one
+byte more refused first by the AI worker's task queue with
+`queue.queue_over`, a `kv.get` reply of one byte more refused by the
+page's decoder, its value written on the server behind the page's back
+since no port carries it (both approved, `PLAN_B.md` 2.20), a
+`verbose.put` forwarded from
 the UI through the AI worker to the server unchanged, a sleeping task
 woken by two replies in either order, the same run identical twice in
 synchronous mode, the stress test of 8.4, a fault ending in the `<pre>`
@@ -1404,10 +1571,18 @@ Survey: a PNG with ctrl-1 open. Exit: `test_browser.py` exits 0.
 
 8.7.7 Stage 6, the browser substrate and replication: `substrate.ts` in
 the AI worker, the forwarded operations both sides. Proves the stage 3
-suite ported, a second load finding the rows, overflow files in OPFS,
-the string to string table replicated from the UI and from the AI (6.8),
-the start replacement of a differing file, the desync reload, an
-operation sequence the test builds replayed into the page. Exit:
+suite ported, but for what has no meaning on the SAH pool, which has no
+WAL: a WAL file left by a kill, `test_wal_left`, is not ported. Proves a
+second load finding the rows, overflow files in OPFS, the string to
+string table replicated from the UI and from the AI (6.8), the start
+replacement of a differing file, the desync reload, and an operation
+sequence the test builds, `test_wire.replay_build`'s, replayed into the
+page from the UI's queue, the browser's copy then compared with the
+server's. Measures the largest database (3.8): a database of the most
+4096 byte pages within `blob_max` loaded with `db_load` as one
+`db.snapshot` blob, the origin's quota and usage read before it, and the
+UI's `db.snapshot` of it compared with the server's file; the rung fails
+naming the path and the numbers where one cannot carry it. Exit:
 identical counts to the Python suite; the reload test passes.
 
 8.7.8 Stage 7, the console tty: `console_view.ts`, the console lane,
@@ -1539,7 +1714,7 @@ nothing is lost.
 - `dispatch.py` gains `task_sleep` and `main_loop.py` a wake table when
   the server first needs to wait on something, as 10.5 would.
 
-10.14 Compaction beyond an estimate.
+10.14 Compaction beyond the turn counter.
 
 - A summary turn written by the provider rather than by truncation,
   and heuristics on scene changes, inside the wrapper.
@@ -1569,6 +1744,466 @@ nothing is lost.
 - The `sql.run` line on the wire against a server database, debug only,
   for the AI recovering the server. The AI's console reaches `sqlite3`
   meanwhile. Not required by any stage.
+
+10.19 Verbose levels in the server and the runtime (deferred by the
+maintainer on 2026-10-20, "for now only have verbose levels for shell
+scripts. the server and runtime only have a debug flag").
+
+- Levels 0, 1 and 2 in the server and in both page threads: 0 only what
+  must be said, 1 progress, 2 everything, every task queue event and
+  every substrate call included. A line above the level is not written.
+- Python: `verbose.level_set(level)` and `verbose.log(level, text)`;
+  `_verbose`'s `line` table has a `level INTEGER NOT NULL` column and
+  `LogLine` a `level`; `lines_put` checks each page line's level.
+- TypeScript: `verbose.level_set(level)` per thread and
+  `verbose.log(level, text)`; the ring of `verbose_ring` keeps the lines
+  at or under the level; the sink batches them into `verbose.put` when
+  `debug` and `verbose_forward` are both on; `lines.VerboseLine` has a
+  `level`.
+- Settings: `verbose_level` sets the server's level, both threads' and
+  the console shell's at start; `verbose_forward` gates the forwarding
+  beside `debug`.
+- The server at level 2 logs `bootstrap.hello_submit`,
+  `main_loop.line_dispatch` and `main_loop.line_reply`, each line's
+  header JSON; a failure at level 0. The task manager at level 2 logs
+  every submit, dispatch, sleep, wake and reply.
+- Tools: `verbose_level {level}` sets the AI worker's level, 0, 1 or 2;
+  `script_debug` is `script_run` at level 2, which traces every
+  substrate call; a script's `engine.log(level, text)`, the run keeping
+  the lines at or under its level; `script.script_run(store, name, args,
+  level)`.
+- Overlays: verbose level 2 and `verbose_forward` gate the forwarding of
+  the page's view, an Unconfirmed reading.
+- `verbose.dump(level, name, value)` of 10.17 has a level only with this
+  design.
+- Rework when it returns: the settings, both verbose modules, the
+  queue's and the server's trace, the two tools, `script.ts` and the
+  `level` column.
+
+10.20 Compaction by a token estimate sent to the AI (replaced by the
+maintainer on 2026-10-20, "just use an event counter and compact when it
+reaches a reasonable threshold"). The design built before:
+
+- After each turn the agent estimated the scene's conversation by the
+  UTF-8 bytes of the JSON of its turns, taken as never fewer than their
+  tokens: bytes counted as tokens, Unconfirmed.
+- When the estimate was over the setting `turn_compact_tokens`, 65536,
+  the next provider request carried one more system message, after the
+  `db_stats` one when both were due, holding only a JSON object of
+  `scene`, the scene's Document-Ref, `last`, its last turn's `n`,
+  `tokens`, the estimate, and `turn_compact_tokens`.
+- The AI decided whether and how far to compact, calling
+  `engine.store.turn_compact(scene, through, summary)` from a script
+  with a summary it wrote. `agent.ts`'s `TurnLoop.estimate_check` built
+  it, and the analyst's seed prompt described it.
+- The plan's text before that: `turn_compact(scene)` in the substrate
+  replaced turns 1 to N with one summary row when the estimate exceeded
+  `turn_compact_tokens`, a heuristic baked into the wrapper.
+- Replaced by the event counter of 6.6.
+
+10.21 Snapshots in pieces (replaced by the maintainer on 2026-10-20, "the
+max blob size needs to be the same as the max db size"). Built for a
+database over the 10 MiB that `message_max` then allowed per message:
+
+- `db.snapshot {db}` replied with a head, `snapshot`, `size`, `sha256`
+  and `seq`, and no blob; the server kept the image under the number
+  `snapshot`.
+- `db.chunk {snapshot, offset, size}` replied with `size` bytes from
+  `offset` as blob 1, each piece at most `message_max` minus `line_max`;
+  the piece that reached the end let the kept image go.
+- The browser's `SnapshotFetch(db, message_max, line_max, full)` asked
+  for the head, then each piece in order, assembled the bytes and
+  checked their SHA-256 against the head before the restore; the
+  TypeScript store kept and served snapshots to the UI the same way,
+  with `Store.snapshot_keep`, `Store.snapshot_read` and
+  `Store.blob_take`.
+- Known defects then: parallel `db_load` calls could each hold a piece
+  and reach `queue_max`, and a `kv.get` reply near the largest `kv.put`
+  still exceeded `message_max`.
+- The sizes it worked under, 10 MiB per blob and per message and 100 MiB
+  per queue, are kept in `PLAN_B.md` 2.1.
+- Replaced by one blob within `blob_max` (3.8, 6.8).
+
+10.22 `test_posix.sh` in Docker (deferred by the maintainer on 2026-10-21,
+"later one will run in docker").
+
+- An image built from the Ubuntu release of the maintainer's WSL (0.4),
+  holding from apt: `python3`, `openssl`, and the build tools and headers
+  that `xsjs_install.ps1` checks for ttyd (`cmake`, `build-essential`,
+  `patch`, `libuv1-dev`, `libjson-c-dev`, `zlib1g-dev`,
+  `libwebsockets-dev`, `libssl-dev`). It also holds the tools
+  `test_all.py` needs: `tsc` (Node at build time only, 11), `ruff`,
+  `shfmt`, `prettier` 3.9.8, `mdformat`, and a Linux Chrome or Chromium
+  for `test_browser.py`.
+- ttyd is built in the image from the pinned release and its patches
+  (2.7), by the build steps of `xsjs_install.ps1` written as its `.sh`
+  parallel (10.3).
+- `devtools.Browser` starts the container's Chrome directly. The C# relay
+  through `powershell.exe` (0.4) serves WSL's NAT only and has no place
+  in a container.
+- The container runs as a user, not root (10.3), with the checkout bind
+  mounted for reading and writing, so `build/` and the kept roots land in
+  it. Its command is `./test_posix.sh [--smoke-test | --normal-test]`, and
+  its exit code is the run's.
+- A `--normal-test` run needs the disk and memory of the edge rungs
+  (`PLAN_B.md` 2.13): about 2 GiB per edge root and up to 6 GiB of OPFS.
+  Chrome needs a larger `/dev/shm` than Docker's default.
+- What starts it, a `docker run` by hand, an option of `test_posix.sh`
+  or the `--container` of 10.3, is decided when it is built.
+- Rework when it is built: the image file, the ttyd build script,
+  `devtools.py`'s start of Chrome, and 8.2.
+
+10.23 Test category designs not built (2026-10-21, `PLAN_B.md` 2.18 and
+2.19). Each option a) of `PLAN_B.md` 10.4.33 to 10.4.43 is built; the
+others are kept here whole.
+
+- The grain of a label (10.4.33):
+  - the runner whole: `test_all.py`'s modules, `test_wire.py`,
+    `test_browser.py` and `test_posix.py` each one suite. The browser
+    and wire tests then leave the smoke run whole.
+  - the root or stage: one label per `session_run` root and per wire
+    stage, and no rung labels. The probe root then goes to `normal-test`
+    whole for its 2 GiB rungs and 120 s timers, unless it is split into
+    a root of its quick rungs and a root of the rest. Each half then
+    starts a fresh page, and the moved rungs lose what the earlier rungs
+    of the root left them.
+  - the stages of 8.7: a label per stage number, read from the prefix of
+    the rung names. Stages 5 and 6 mix labels.
+- Where the labels are written (10.4.33):
+  - one table, a JSON file beside `test_all.py` mapping each module,
+    root and rung name to its label, read by every runner. The label
+    then stands away from its suite and each name is written twice.
+  - held by `test_posix.sh`, which passes the names to run to each
+    runner as `--only` arguments.
+- The limit (10.4.35):
+  - checked once at the end of a `smoke-test` run, failing after every
+    `smoke-test` suite ran when the total passed 120 s: the full
+    measurements are printed, but the failure is reported late.
+  - the seconds reported with no limit, for the maintainer to read.
+  - the limit in the target: `test_posix.sh` measures with bash's
+    `SECONDS` and runs each runner under coreutils `timeout` with the
+    seconds left, turning exit code 124 into a message and exit 1.
+    `test_powershell.ps1` would need the same again in PowerShell.
+- Defaults and arguments (10.4.36):
+  - a runner run alone runs every suite, and the targets pass
+    `--smoke-test` by default;
+  - the runners require an option;
+  - the targets pass every argument through to `test_all.py`,
+    `--failfast` included;
+  - a `--help` on `test_posix.sh` that prints its usage to stdout and
+    exits 0, as `clean.sh` does.
+- Suites left out, reported: a TAP point `ok N - <module> # SKIP
+  normal-test` for a module left out, through `Tracker.add_skip`, and a
+  line per rung left out, so that a `smoke-test` run lists what it did
+  not run.
+- Messages through `i18n`: names such as `category.label_unknown` in
+  `i18n/en-US.json`, where the TAP modules and `devtools.py` use
+  f-strings.
+- Tests of the targets (10.4.42): a Python test copies `test_posix.sh`
+  beside stub runners into a scratch directory and runs it with bash, each
+  stub recording its arguments and its exit code. Python running a
+  command line utility needs the maintainer's approval. Or a shell test
+  script of its own.
+- `test_powershell.ps1` (10.4.38 to 10.4.40):
+  - the first failure followed by a cleanup stop (replaced by the
+    maintainer on 2026-10-21, "make test_powershell.ps1 stop on failure";
+    built in this plan before that). At the first failed step after the
+    lint step, the script wrote a section `test_cleanup`, "Stopping what
+    the lifecycle started", and ran `xsjs_stop.ps1` once more in its own
+    PowerShell as a cleanup, not a test, its exit code shown and logged as
+    a step's. Then it threw `test_failed_step`, naming the failed step and
+    the log, and exited 1. Its reason: to release the task, port proxy,
+    firewall rule and password the lifecycle opened, as the Python
+    runners' `with` blocks stop ttyd on a failure.
+  - the carry-on and the tally kept, an exception to the rule (rejected
+    by the maintainer the same day): every lifecycle step ran, the failed
+    numbers were collected, and `test_failed_steps` named them at the end,
+    so that the last stop still cleaned up.
+  - `test_all.py` run before the lint step, or after the whole
+    lifecycle;
+  - the checkout copied into the Linux file system, for example under
+    `~/.cache`, and the tests run there, with `build/` off `/mnt/c`.
+- `test_posix.py` in the smoke run (10.4.37): a check that rewrites
+  nothing, `ruff format --check`, `prettier --check` and `shfmt --diff`,
+  failing on the files a formatter would change; or `test_posix.py`
+  labelled `normal-test`.
+- Verbose levels for `test_posix.sh` (10.4.41): the shell's level from
+  `verbose_level` or an option, its start and exit written at levels 1
+  and 2 as `verbose.exec` writes them.
+
+10.24 Labels per TypeScript module (deferred: no TypeScript module is
+`normal-test`, `PLAN_B.md` 2.18.2).
+
+- `ts/test_all.ts`'s tables `first_modules`, `page_modules` and
+  `worker_modules` become entries of a name, a label and a reader.
+  `stream_run` leaves out a module whose label the category does not run,
+  through a `ts/category.ts` with the rule of `category.py`.
+- The category reaches the page in the test page's address:
+  `test_browser.py` opens the suites root's page with `?category=` and the
+  category, `boot.test_page` reads it from `location.search`, and the UI
+  thread sends it to the AI worker in the payload of `worker.tests`.
+- The browser rung "stage 0: typescript suites" then runs in both
+  categories, and each TypeScript module's label stands beside it.
+- Rework when it is built: `ts/test_all.ts`, `ts/boot.ts`, a
+  `ts/category.ts` and its tests, the suites rung and its `API/ts/` stub.
+
+10.25 The PowerShell files and the one table (2026-10-21, `PLAN_B.md`
+2.21). Each option a) of `PLAN_B.md` 10.4.44 to 10.4.49 is built; the
+others, and the design 1.6 replaced, are kept here whole.
+
+- The PowerShell files outside the whitelist (replaced by the maintainer on
+  2026-10-21, "add the powershell reformatting back ... remove it from all
+  scanning except the comment scanner and the utf-8 allow list"; built by
+  log task 1.20.8). `PLAN_B.md` 2.14 as written for 1.3:
+  - 2.14.1 Decision: the PowerShell scripts leave
+    `python/reformat_whitelist.txt` and `python/test_posix.py` does not
+    scan them. The lines `xsjs_install.ps1`, `xsjs_start.ps1`,
+    `xsjs_status.ps1`, `xsjs_stop.ps1`, `powershell/*.ps1` and
+    `powershell/en-US/*.psd1` go. "Not scanned" covers every check of
+    `test_posix.py`: the character check, the formatting, and the comment
+    check, which also reads every PowerShell file `_POWERSHELL_GLOBS`
+    finds, whitelisted or not; that scan goes too.
+  - 2.14.2 READING: `powershell/en-US/*.psd1`, a PowerShell data file and
+    not a script, goes with the scripts. Only they read it, its byte order
+    mark is the PowerShell rule's, and keeping it scanned would keep the
+    handling the decision removes. Rejected: it stays whitelisted, with the
+    byte order mark handling and the PowerShell comment lexer kept for it.
+    Question 10.4.21.
+  - 2.14.3 `test_posix.py`'s PowerShell handling. Removed, because it
+    served only the PowerShell files: `_BOM_EXTENSIONS` and the
+    `utf-8-sig` choice of `non_ascii_check`, which reads every file as
+    `utf-8` again; the `utf-8-sig` of `comments_check`, back to `utf-8`;
+    `_POWERSHELL_GLOBS`, `powershell_paths()` and its use in `main`; the
+    `.ps1`, `.psm1` and `.psd1` case of `comments_find`,
+    `powershell_scan`, `powershell_double_scan` and
+    `_POWERSHELL_TOKEN_BREAK`; the PowerShell sentences of the header
+    comment and of `main`'s description. Kept, because whitelisted files
+    use it: `non_ascii_check`, which refuses U+FEFF like any character
+    outside `_NON_ASCII_ALLOWED`, anywhere in any whitelisted file;
+    `token_find`'s `utf-8-sig`, which reads only `ts/*.ts` and was not
+    made for PowerShell.
+  - 2.14.4 `python/test_test_posix.py`, made for log task 1.18.10: the
+    tests of a mark accepted at the start of a `.ps1` or `.psd1` file go
+    (`test_powershell_marked`, `test_powershell_plain`,
+    `test_mark_inside`, `test_column_after`). `test_others_refused` stays
+    with `a.py` and `a.ts` and without `a.psm1`: it proves that a
+    whitelisted file starting with a byte order mark is refused, which
+    every whitelisted file still relies on. The file stays, so log task
+    1.20.4 still tracks it; its header and class comments say what is
+    left. READING: question 10.4.22.
+  - 2.14.5 An exception to 3.8 and to the project rules' whitelist rule: a
+    new PowerShell file is not added to the whitelist. The project rules
+    are the maintainer's to edit.
+  - Built with it, beyond that text (`tmp/handoff_20_L.md` G1): the
+    `<# #>` check of `comments_check` and the header clause "not be a
+    <# #> comment" were removed, since no lexer was left to find such a
+    comment. 1.6 brings both back.
+- Where the byte order mark is allowed (10.4.44):
+  - b) U+FEFF added to `_NON_ASCII_ALLOWED` as
+    `"\N{ZERO WIDTH NO-BREAK SPACE}"`: allowed anywhere in every
+    whitelisted file, every row's codec `utf-8`; `test_others_refused`
+    becomes a test that the mark passes, and a Python file starting with it
+    fails in `tokenize` inside `comments_check`.
+  - c) at the start of any whitelisted file: every row's codec
+    `utf-8-sig`, or the `encoding` key dropped and both checks reading
+    every file as `utf-8-sig`; `test_others_refused` reverses.
+  - d) required at the start of a PowerShell file, the design of log task
+    1.18.10 (`tmp/handovers_20_1601.md`, 1.18.10.2): `non_ascii_check`
+    raises `<path>: no UTF-8 byte order mark` when a file of a PowerShell
+    row does not start with EF BB BF, through a sixth row key such as
+    `mark` (`required` or `refused`). It fails today on `xsjs_status.ps1`,
+    `xsjs_stop.ps1` and `powershell/test_lint.ps1` (`PLAN_B.md` 6.4).
+- The banner characters (10.4.45, log item 4.6.6, the options of
+  `tmp/handovers_20_1601.md` for log task 1.18.10):
+  - b) `"\N{FULL BLOCK}"`, `"\N{LIGHT SHADE}"`, `"\N{MEDIUM SHADE}"` and
+    `"\N{DARK SHADE}"` added to `_NON_ASCII_ALLOWED`, for every file.
+  - c) a sixth row key, `allowed`, a list of the characters beyond
+    `_NON_ASCII_ALLOWED` that the row's files may hold: the four in the
+    PowerShell rows, empty in the others, passed to `non_ascii_check` as a
+    third argument and joined to the set there.
+  - d) the maintainer redraws the banner in ASCII.
+  - e) `xsjs_install.ps1` builds the banner at run time: its here string
+    holds ASCII stand-ins, one per character, replaced with
+    `[string][char]0x2588`, `0x2591`, `0x2592` and `0x2593`.
+- Where the table lives (10.4.46):
+  - b) a constant `_FILE_TYPES` in `reformat.py`: its rows are literal
+    tuples or dicts, since a constant comes before the classes of its file,
+    so the rows lose their field names or their types; `test_posix.py`
+    reaches it through a public function of `reformat`.
+  - c) a shared module `python/file_types.py` holding `FileType`, the
+    table and `type_find`, with its tests and an `API/python` stub;
+    `reformat.py` and `test_posix.py` import it after setting
+    `sys.pycache_prefix`, which `reformat.py` does not do today.
+  - A refusal of a repeated key: `json.load` with an `object_pairs_hook`
+    that raises when an extension appears twice. Not built: Python keeps
+    the last of two equal keys silently.
+- How `test_lint.ps1` chooses its files (10.4.47):
+  - b) it also reads `python/reformat_table.json` with `ConvertFrom-Json`,
+    which Windows PowerShell 5.1 returns as an object whose properties are
+    the extensions, takes the names of the properties whose `system` is
+    `windows` as `$extensions_`, and throws on a whitelisted file whose
+    extension has no row, as `reformat.type_find` does. One source then
+    names the PowerShell extensions for both systems.
+  - c) it formats every whitelisted file whose extension is not of a
+    `linux` row; it too needs the table.
+- The matching rule (10.4.48):
+  - b) `reformat.py` keeps `glob.glob(pattern, root_dir=...)`, which also
+    accepts wildcards in directories, `[...]` sets and a directory as a
+    match; `test_lint.ps1` alone refuses those lines, so the two systems
+    can disagree until a Windows run fails.
+  - c) every whitelist line names one file, with no wildcard, and both
+    scripts test that each exists.
+- First failure in `test_lint.ps1` (10.4.49), b): the loop collects the
+  CRLF fault of every file, prints them all and exits 1; one
+  `Invoke-ScriptAnalyzer` over the whole file list prints every result.
+- The PowerShell lexer's limits, not built: a `$( )` inside `@" "@` read
+  as code, scanning the body as a double quoted string whose end is a line
+  that starts with `"@`; `#` after a word read as a comment where
+  PowerShell's expression mode would; PowerShell's own parser,
+  `[System.Management.Automation.Language.Parser]::ParseFile` in
+  `test_lint.ps1`, giving every comment token exactly, which would move the
+  comment check to Windows against 1.6's "except the comment scanner".
+- A stub `API/python/reformat.pyi`, not written, as no tool has one:
+
+  ```python
+  from typing import NamedTuple
+
+  # What handles the whitelisted files of one extension.
+  class FileType(NamedTuple):
+      comments: str
+      encoding: str
+      formatter: list[str]
+      linter: list[str]
+      system: str
+
+  # Returns the table's rows by extension.
+  def table_read() -> dict[str, FileType]: ...
+
+  # Returns the row of the file's extension, failing when it has none.
+  def type_find(table: dict[str, FileType], path: str) -> FileType: ...
+
+  # Returns the files the whitelist lines match under the root, sorted.
+  def paths_match(root_path: str, patterns: list[str]) -> list[str]: ...
+
+  # Returns the files the whitelist's lines match from the top, sorted.
+  def whitelist_paths() -> list[str]: ...
+
+  # Runs each formatter of this system once over its files.
+  def reformat(paths: list[str]) -> None: ...
+  ```
+
+- The synchronization audit through the table, not built: an `audit` row
+  key choosing the files `token_find` reads. The audit chooses `ts/*.ts` by
+  its own glob, and the whitelist also lists `API/ts/*.ts`.
+- Rework when one is chosen: `python/reformat_table.json`,
+  `python/reformat.py`, `python/test_posix.py`, their tests and
+  `powershell/test_lint.ps1`.
+
+10.26 The tests of the driver and of the infrastructure for testing
+(2026-10-21, `PLAN_B.md` 2.22). Each option a) of `PLAN_B.md` 10.4.52 and
+10.4.53 is built; the others, the options of the two answered questions
+10.4.50 and 10.4.51, and the design 1.7 replaced, are kept here whole.
+
+- The tests of the driver (replaced by the maintainer on 2026-10-21, "just
+  test the stuff that is infrastructre for testing, not the test driver in
+  there"; built by log task 1.22.2). `python/test_test_all.py` held
+  `TestModules` and `TestAlarm`. Its header read: "Tests of test_all: its
+  table of modules, each with a label category.py accepts, the TAP modules
+  first and no name twice; and alarm_plan, the alarm of a suite, its own
+  seconds or the deadline of a smoke-test run, whichever comes first, own
+  seconds winning a tie, or a refusal once the deadline has passed. No real
+  alarm is armed, since the runner's alarm of this module is running." It
+  imported `category, test_all, unittest`. `TestAlarm` called
+  `test_all.alarm_plan`, which `test_all.py` defined between
+  `StreamWriter` and `suite_load`. `_MODULES` listed the module last, as
+  `("test_test_all", "smoke-test")`, after `("test_category",
+  "smoke-test")` (`PLAN_B.md` 2.18.4). The table was read with `getattr`,
+  as pyright strict reports a private name read from another module
+  (`tmp/handoff_20_T2a.md` G18). The part that goes, as written:
+
+  ```python
+  # The name of the runner's table of modules, read by name as it is private.
+  _MODULES_NAME = "_MODULES"
+
+  # The two categories of run.
+  _CATEGORIES = ("smoke-test", "normal-test")
+
+
+  # Returns the runner's table of modules, each name with its label.
+  def modules_get() -> list[tuple[str, str]]:
+      modules: list[tuple[str, str]] = getattr(test_all, _MODULES_NAME)
+      return modules
+
+
+  # The table of the modules the runner runs, in order.
+  class TestModules(unittest.TestCase):
+      # Each label is one that a run of either category accepts.
+      def test_labels_valid(self) -> None:
+          for name, label in modules_get():
+              for chosen in _CATEGORIES:
+                  with self.subTest(module=name, category=chosen):
+                      category.suite_runs(label, chosen)
+
+      # The tests of the TAP producer and consumer come first.
+      def test_tap_first(self) -> None:
+          names = [name for name, _ in modules_get()[:2]]
+          self.assertEqual(names, ["test_tap_producer", "test_tap_consumer"])
+
+      # No module is listed twice.
+      def test_names_unique(self) -> None:
+          names = [name for name, _ in modules_get()]
+          self.assertEqual(len(set(names)), len(names))
+
+      # The tests of category.py and of the runner itself are listed.
+      def test_new_listed(self) -> None:
+          names = [name for name, _ in modules_get()]
+          self.assertIn("test_category", names)
+          self.assertIn("test_test_all", names)
+  ```
+
+- The driver's table checked by the driver, not built: `test_all.main`
+  raising before its first module when the first two names are not
+  `test_tap_producer` and `test_tap_consumer`, or when a name stands twice,
+  which keeps the checks of `TestModules` without a test of the driver.
+  Nothing asks for it, and a label other than the two already raises in
+  `category.suite_runs` when the driver reaches it.
+- Where `alarm_plan` lives (`PLAN_B.md` 10.4.52):
+  - b) a new module of the infrastructure, `python/deadline.py`, holding
+    `alarm_plan` alone, with a stub `API/python/deadline.pyi` of the same
+    signature and comment, imported by `test_all.py` inside `main` as
+    `category` is. Its tests stay in `python/test_test.py`, which then
+    imports both. The limit, its 120 s and `limit_seconds` stay in
+    `category.py`.
+  - c) as a), with `timer_start(plan)` and `timer_stop()` moved into
+    `category.py` beside the plan they arm, `signal` and `types` imported
+    there. They stay untested: a real alarm armed in a test would replace
+    the alarm the driver runs over that test module.
+- The test modules of the infrastructure for testing (`PLAN_B.md`
+  10.4.53):
+  - b) `python/test_category.py` kept as T2a wrote it, the test module of
+    `category.py` but for `alarm_plan`, and `python/test_test.py` holding
+    `TestAlarm` alone, importing `category` and `unittest`. `_MODULES`
+    then lists `("test_category", "smoke-test")` and then `("test_test",
+    "smoke-test")`, last.
+  - c) as a), with the classes of `python/test_tap_producer.py` and
+    `python/test_tap_consumer.py` moved into `python/test_test.py`, which
+    `_MODULES` then lists first, so that the TAP modules' tests still run
+    before the rest, as 1.2 asks.
+- Abbreviated options (`PLAN_B.md` 10.4.50, answered a)):
+  - b) `argparse`'s default kept in `test_all.py` and in the tests' parser,
+    the test's input changed to one that is no prefix, such as
+    `--normal-tests` or `--all`;
+  - c) `options_add` setting `parser.allow_abbrev = False` on the parser it
+    is given, one place for all three runners, a change to the caller's
+    parser.
+- The driver listing its own test module (`PLAN_B.md` 10.4.51, answered
+  c)): b) the module left out of `_MODULES` and run by an entry of its own,
+  for example every module named `test_test_<runner>` found by a glob, its
+  label then not beside its name.
+- Rework when one is chosen: `python/category.py`,
+  `API/python/category.pyi`, `python/test_test.py`, `python/test_all.py`,
+  and for 10.4.53 b) a `python/test_category.py` written again from the
+  classes now in `python/test_test.py`.
 
 ## 11 Things that are not being done without permission.
 
@@ -1663,7 +2298,8 @@ request.
   and `scene_enter` as engine tools: the scripts are the database
   administrator and the seeded bootstrap script does these.
 - `verbose.dump`, `verbose.follow`, `verbose.line` and a server side
-  `verbose.level`: deferred to 10.16 and 10.17.
+  `verbose.level`: deferred to 10.16 and 10.17; verbose levels in the
+  server and the runtime are deferred to 10.19.
 - Turns as documents, or as the version history of one document: the
   turn table.
 - The apt package of ttyd, and `../ttyd` built by the screenshot tool:

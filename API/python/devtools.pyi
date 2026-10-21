@@ -1,7 +1,29 @@
 from collections.abc import Callable
+from typing import Any
+
+# The page's loads as loader and event name pairs, as DevTools reported them.
+class PageEvents:
+    lifecycle: set[tuple[str, str]]
+
+# Speaks the DevTools protocol over a WebSocket on a byte channel.
+class ProtocolClient:
+    # Returns the result of a DevTools method, on the page once attached.
+    def method_call(
+        self, method: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]: ...
+    # Returns the result of a method on the session, the browser's when empty.
+    def session_call(
+        self,
+        session_id: str,
+        method: str,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
+    # Passes events on until the condition holds, failing when the wait ends.
+    def events_pump(self, what: str, done: Callable[[], bool]) -> None: ...
 
 # Headless Chrome over DevTools, through the `powershell.exe` relay.
 class Browser:
+    events: PageEvents
     def page_open(self, url: str) -> None: ...
     # Evaluates JavaScript on the page and returns its JSON value.
     def script_evaluate(self, text: str) -> object: ...
@@ -9,3 +31,16 @@ class Browser:
     def console_follow(self, fn: Callable[[str], None]) -> None: ...
     def screenshot_save(self, path: str) -> None: ...
     def page_close(self) -> None: ...
+    # Returns the DevTools client, failing if the browser isn't started.
+    def client_get(self) -> ProtocolClient: ...
+    # Starts a trace of the categories on the page, its events sent as events.
+    def trace_start(self, categories: list[str]) -> None: ...
+    # Ends the trace and returns its events once DevTools has sent them all.
+    def trace_end(self) -> list[dict[str, Any]]: ...
+    # Pauses the page's worker of that name in its debugger, waiting for it.
+    def worker_pause(self, name: str) -> None: ...
+
+# Returns the trace categories that hold what `blocking_find` looks for.
+def blocking_categories() -> list[str]: ...
+# Returns the trace's synchronous loads on the main thread of a renderer.
+def blocking_find(events: list[dict[str, Any]]) -> list[dict[str, Any]]: ...

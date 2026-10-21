@@ -109,6 +109,19 @@ manager without request.
   writes beside the sources.
 - Always use the reformatting tools to reformat code when needed instead of
   doing it manually. Stage code for this reason first if safety is required.
+- Define 2 categories of test suite `smoke-test` and `normal-test`. Have
+  `test_posix.sh` run by default whatever important test suites fit in 2
+  minutes by labelling those `smoke-test` and running only them unless asked
+  to run the normal tests too.
+- The two official test targets for the whole project are
+  `powershell/test_powershell.ps1`, which runs on Windows, and
+  `test_posix.sh`, which will later run in Docker. Both call
+  `python/test_all.py`, the first inside WSL.
+- `python/test_all.py` is the test driver: it chooses, orders, times and runs
+  the test suites. The infrastructure for testing is the code the drivers and
+  tests are built from, such as the test categories and their deadline.
+  `python/test_test.py` tests the infrastructure for testing, not the test
+  driver.
 
 ### Accidental-Requirements, Requirements-Data-Loss, and Requirements-Refusal
 

@@ -4,16 +4,19 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Checks the whitelisted files are UTF-8 with no non-ASCII outside
-# _NON_ASCII_ALLOWED, checks the comments of those and the PowerShell files,
-# including the TypeScript and JavaScript ones, proves the synchronization
-# audit on probe files under build/, audits every ts/*.ts file other than the
+# _NON_ASCII_ALLOWED, checks the comments of those, including the TypeScript,
+# JavaScript and PowerShell ones, proves the synchronization audit on probe
+# files under build/, audits every ts/*.ts file other than the
 # _SYNCHRONIZATION_MODULES for await, .then(, new Promise, Atomics and
 # SharedArrayBuffer outside its comments and its string, template and regular
 # expression literals, formats the whitelisted files with reformat.py, then
-# lints the Python ones with ruff check. Below a file's header, the comment at
-# its top, a comment must be one line, not be a <# #> comment, and outside its
-# Doxygen `code` spans hold nothing but letters, digits, white space and
-# _ENGLISH_PUNCT. A .ps1 or .psd1 file may start with a UTF-8 byte order mark.
+# lints them with the linters of their rows. reformat_table.json gives each
+# extension its comment lexer, codec, formatter and linter; a PowerShell file,
+# formatted on Windows, is read past a UTF-8 byte order mark at its start and
+# only its characters and comments are checked. Below a file's header, the
+# comment at its top, a comment must be one line, not be a <# #> comment, and
+# outside its Doxygen `code` spans hold nothing but letters, digits, white
+# space and _ENGLISH_PUNCT.
 
 import argparse, glob, io, os, re, subprocess, sys, tempfile, tokenize
 from typing import NamedTuple
@@ -47,9 +50,6 @@ _AUDIT_REFUSED = (
     "new SharedArrayBuffer(8);\n",
     "const t = `${await x}`;\n",
 )
-
-# The extensions of the PowerShell files, which start with a byte order mark.
-_BOM_EXTENSIONS = (".ps1", ".psd1")
 
 # A Doxygen code span, cut from a comment before its punctuation is checked.
 _CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
@@ -97,16 +97,14 @@ _OUTSIDE_PUNCTUATION = re.compile(
     r"[^A-Za-z0-9\s" + re.escape(_ENGLISH_PUNCT) + r"]"
 )
 
-# The PowerShell files, found as the PowerShell lint finds them.
-_POWERSHELL_GLOBS = ["**/*.ps1", "**/*.psm1", "**/*.psd1"]
+# A PowerShell here string's opening line: `@` and a quote, then its end.
+_POWERSHELL_HERE = re.compile(r"@(['\"])[ \t]*\n")
 
-# What PowerShell can have before a comment.
-_POWERSHELL_TOKEN_BREAK = " \t\n;(){}|&,="
+# A single quoted PowerShell string, where two quotes stand for one.
+_POWERSHELL_SINGLE = re.compile(r"'(?:[^']|'')*'")
 
-_RUFF_CACHE_PATH = os.path.join(_BUILD_PATH, "ruff_cache")
-
-# The one ruff configuration, for files outside python/ too.
-_RUFF_CONFIG_PATH = os.path.join(_ROOT_PATH, "python", "pyproject.toml")
+# What PowerShell can have before a `#` comment.
+_POWERSHELL_TOKEN_BREAK = " \t\n;|&(){},"
 
 # A shell here document's start: `<<`, `-` to strip tabs, a quote, its word.
 _SHELL_HEREDOC = re.compile(r"<<(-?)[ \t]*(['\"]?)(\w+)\2")
@@ -158,11 +156,11 @@ def audit_probe() -> None:
 
 
 # Fails on the first comment below the header that breaks a comment rule.
-def comments_check(path: str) -> None:
-    with open(path, encoding="utf-8-sig") as file:
+def comments_check(path: str, encoding: str, lexer: str) -> None:
+    with open(path, encoding=encoding) as file:
         text = file.read()
     groups: list[list[Comment]] = []
-    for comment in comments_find(path, text):
+    for comment in comments_find(path, text, lexer):
         line_start = text.rfind("\n", 0, comment.start) + 1
         if (
             groups
@@ -201,24 +199,24 @@ def comments_check(path: str) -> None:
             )
 
 
-# Returns the comments of the file's text, in order, by its extension.
-def comments_find(path: str, text: str) -> list[Comment]:
+# Returns the comments of the file's text, in order, by its row's lexer.
+def comments_find(path: str, text: str, lexer: str) -> list[Comment]:
     comments: list[Comment] = []
-    match os.path.splitext(path)[1]:
-        case ".md":
+    match lexer:
+        case "none":
             pass
-        case ".py" | ".pyi":
+        case "python":
             comments = python_comments(text)
-        case ".sh":
+        case "shell":
             shell_scan(path, text, 0, False, comments)
-        case ".ps1" | ".psm1" | ".psd1":
-            powershell_scan(path, text, 0, False, comments)
-        case ".html":
+        case "html":
             html_scan(path, text, comments)
-        case ".ts" | ".js":
+        case "javascript":
             javascript_scan(path, text, 0, len(text), False, comments, [])
-        case extension:
-            raise RuntimeError(f"{path}: no comment lexer for {extension!r}")
+        case "powershell":
+            powershell_scan(path, text, 0, False, comments)
+        case name:
+            raise RuntimeError(f"{path}: no comment lexer named {name!r}")
     return comments
 
 
@@ -403,14 +401,12 @@ def javascript_template_scan(
     )
 
 
-# Fails on the first disallowed character beyond ASCII, past a PowerShell BOM.
-def non_ascii_check(path: str) -> None:
+# Fails on the first disallowed character beyond ASCII, in the row's codec.
+def non_ascii_check(path: str, encoding: str) -> None:
     with open(path, "rb") as file:
         data = file.read()
-    # The `utf-8-sig` codec drops one byte order mark at the start, if any.
-    codec = "utf-8-sig" if path.endswith(_BOM_EXTENSIONS) else "utf-8"
     try:
-        text = data.decode(codec)
+        text = data.decode(encoding)
     except UnicodeDecodeError as error:
         raise RuntimeError(f"{path}: not UTF-8: {error}") from error
     for line_number, line in enumerate(text.split("\n"), 1):
@@ -448,15 +444,6 @@ def powershell_double_scan(
     )
 
 
-# Returns the PowerShell files under the top directory, sorted.
-def powershell_paths() -> list[str]:
-    paths: list[str] = []
-    for pattern in _POWERSHELL_GLOBS:
-        matched = glob.glob(pattern, root_dir=_ROOT_PATH, recursive=True)
-        paths += [os.path.join(_ROOT_PATH, path) for path in matched]
-    return sorted(paths)
-
-
 # Returns the offset past PowerShell to the end, or past an unmatched paren.
 def powershell_scan(
     path: str, text: str, i: int, closer: bool, comments: list[Comment]
@@ -464,7 +451,20 @@ def powershell_scan(
     depth = 0
     while i < len(text):
         character = text[i]
-        if text.startswith("<#", i):
+        if character == "`":
+            i += 2
+        elif character == "'":
+            single = _POWERSHELL_SINGLE.match(text, i)
+            if not single:
+                raise RuntimeError(
+                    f"{path}:{offset_line(text, i)}: unterminated string"
+                )
+            i = single.end()
+        elif character == '"':
+            i = powershell_double_scan(path, text, i, comments)
+        elif here := _POWERSHELL_HERE.match(text, i):
+            i = end_find(path, text, here.end() - 1, f"\n{here.group(1)}@")
+        elif text.startswith("<#", i):
             end = end_find(path, text, i + 2, "#>")
             comments.append(Comment(i, end, 2, 2))
             i = end
@@ -475,25 +475,13 @@ def powershell_scan(
             end = len(text) if end == -1 else end
             comments.append(Comment(i, end, 1, 0))
             i = end
-        elif character == "`":
-            i += 2
-        elif text.startswith("@'\n", i):
-            i = end_find(path, text, i + 2, "\n'@")
-        elif text.startswith('@"\n', i):
-            i = end_find(path, text, i + 2, '\n"@')
-        elif character == "'":
-            i = end_find(path, text, i + 1, "'")
-            while text.startswith("'", i):
-                i = end_find(path, text, i + 1, "'")
-        elif character == '"':
-            i = powershell_double_scan(path, text, i, comments)
         elif character == ")" and closer and depth == 0:
             return i + 1
         else:
             depth += {"(": 1, ")": -1}.get(character, 0)
             i += 1
     if closer:
-        raise RuntimeError(f"{path}:{offset_line(text, i)}: no closing paren")
+        raise RuntimeError(f"{path}:{offset_line(text, i)}: unterminated")
     return i
 
 
@@ -624,40 +612,37 @@ def typescript_paths() -> list[str]:
 
 
 # Checks and audits the files, then formats and lints the whitelisted ones.
-def main() -> None:
+def main(arguments: list[str]) -> None:
     import reformat
 
     argparse.ArgumentParser(
-        description="Check, format and lint the files"
-        " reformat_whitelist.txt lists, check the comments of those and the"
-        " PowerShell files, and audit the ts/*.ts files for synchronization"
-        " tokens."
-    ).parse_args()
+        description="Check the characters and comments of the files"
+        " reformat_whitelist.txt lists, audit the ts/*.ts files for"
+        " synchronization tokens, then format and lint the files of the"
+        " linux rows of reformat_table.json."
+    ).parse_args(arguments)
+    table = reformat.table_read()
     paths = reformat.whitelist_paths()
-    for path in paths:
-        non_ascii_check(path)
-    for path in paths + powershell_paths():
-        comments_check(path)
+    # Every row is found before any check, so a file of no row fails first.
+    rows = [reformat.type_find(table, path) for path in paths]
+    for path, row in zip(paths, rows, strict=True):
+        non_ascii_check(path, row.encoding)
+    for path, row in zip(paths, rows, strict=True):
+        comments_check(path, row.encoding, row.comments)
     audit_probe()
     for path in typescript_paths():
         synchronization_check(path)
     reformat.reformat(paths)
-    python_paths = [path for path in paths if path.endswith((".py", ".pyi"))]
-    # With no files, ruff checks the directory.
-    if python_paths:
-        subprocess.run(
-            [
-                "ruff",
-                "check",
-                "--config",
-                _RUFF_CONFIG_PATH,
-                "--cache-dir",
-                _RUFF_CACHE_PATH,
-                *python_paths,
-            ],
-            check=True,
-        )
+    for extension, row in table.items():
+        matched = [
+            path for path in paths if os.path.splitext(path)[1] == extension
+        ]
+        # With no files, ruff checks the directory.
+        if matched and row.linter:
+            subprocess.run(
+                [*row.linter, *matched], check=True, cwd=_ROOT_PATH
+            )
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

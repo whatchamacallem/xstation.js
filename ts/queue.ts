@@ -4,11 +4,12 @@
 //
 // The task manager of one thread, the one synchronization tool: its ports,
 // the owner table, one line dispatched at a time, sleeps and their wakes, the
-// bound on the bytes it holds, and the verbose sink of the thread. Its message
-// channel only turns a platform event into the next step.
+// bound on the blob bytes it holds, the verbose sink of the thread, and in
+// debug mode the trace of every submit, dispatch, sleep, wake and reply. Its
+// message channel only turns a platform event into the next step.
 
 namespace queue {
-  // The names this module reads and writes and the level of its log lines.
+  // The names and settings this module reads and writes.
   const constants = Object.freeze({
     error_type: "error",
     verbose_type: "verbose.put",
@@ -16,14 +17,11 @@ namespace queue {
     id_field: "id",
     reply_field: "reply",
     size_field: "size",
-    data_field: "d",
     id_short: "i",
     full_marker: "type",
     debug_setting: "debug",
-    forward_setting: "verbose_forward",
     line_setting: "line_max",
-    limit_setting: "queue_max",
-    log_level: 2,
+    limit_setting: "blob_max",
   });
 
   // The owners a line can have: the threads, the server and the ports.
@@ -132,19 +130,13 @@ namespace queue {
     return jslb.headers_of(line).slice(1) as lines.BlobHeader[];
   }
 
-  // The bytes a held line counts: its JSON text without blob data, then sizes.
+  // The bytes a held line counts: the sizes of its blobs, never its text.
   function line_bytes(line: lines.Line): number {
-    const shown: { [key: string]: unknown } = { ...line };
-    const blobs = blobs_of(line);
     let sizes = 0;
-    for (let index = 0; index < blobs.length; index += 1) {
-      const blob = blobs[index];
-      shown[index + 1] = Object.fromEntries(
-        Object.entries(blob).filter(([name]) => name !== constants.data_field),
-      );
+    for (const blob of blobs_of(line)) {
       sizes += jslb.field_get(blob, constants.size_field) as number;
     }
-    return json_bytes(shown) + sizes;
+    return sizes;
   }
 
   // The bytes of the blobs of a line that are held in memory.
@@ -290,12 +282,9 @@ namespace queue {
       this.sending = false;
     }
 
-    // Whether the settings `debug` and `verbose_forward` are both true.
+    // Whether the setting `debug` is true, which alone turns forwarding on.
     private forward_on(): boolean {
-      return (
-        this.settings_get(constants.debug_setting) === true &&
-        this.settings_get(constants.forward_setting) === true
-      );
+      return this.settings_get(constants.debug_setting) === true;
     }
 
     // Splits the kept lines into groups whose `verbose.put` fits `line_max`.
@@ -447,7 +436,7 @@ namespace queue {
       return this.local.length + this.inbox.length + running + this.sleeping;
     }
 
-    // Installs the verbose sink and the settings reader that bounds the queue.
+    // Installs the verbose sink and the settings that bound and trace it.
     sink_attach(
       sink_set: (fn: (line: lines.VerboseLine) => void) => void,
       settings_get: (id: string) => unknown,
@@ -501,7 +490,7 @@ namespace queue {
       this.run_start();
     }
 
-    // Counts the bytes of a line to hold, a fault when past `queue_max`.
+    // Counts the blob bytes of a line to hold, a fault when past `blob_max`.
     private hold_take(line: lines.Line): number {
       try {
         const bytes = line_bytes(line);
@@ -513,7 +502,7 @@ namespace queue {
       }
     }
 
-    // Throws when the bytes held would pass `queue_max`, once it can be read.
+    // Throws when the blob bytes held would pass `blob_max`, once it is read.
     private limit_check(line: lines.Line, bytes: number): void {
       const settings_get = this.settings_get;
       if (settings_get === undefined) {
@@ -852,9 +841,15 @@ namespace queue {
       }
     }
 
-    // Writes one finished line of the thread's timeline at level 2.
+    // Writes one line of the thread's timeline once the settings say debug.
     private log_write(text: string): void {
-      verbose.log(constants.log_level, text);
+      const settings_get = this.settings_get;
+      if (
+        settings_get !== undefined &&
+        settings_get(constants.debug_setting) === true
+      ) {
+        verbose.log(text);
+      }
     }
   }
 }

@@ -5,9 +5,10 @@
 // The browser substrate, the single door to SQLite in the AI worker: one
 // sqlite3.wasm connection for each database file of the OPFS pool under a
 // root, the substrate's tables in each, values with overflow to a cache of
-// OPFS files held open for synchronous access, documents, turns, SQL,
-// snapshots kept for their pieces and the fetch of one in pieces that each
-// fit `message_max`, the measurement and administration of the databases,
+// OPFS files held open for synchronous access, documents, turns that compact
+// themselves when a `user` turn finds `compact_turns` of them, SQL,
+// snapshots sent as one blob, the measurement and administration of the
+// databases,
 // cached values filled back from the server and freed by budget, and the
 // emitting side of replication, which hands on each committed modifying
 // operation as the line the server applies. It is given an initialized
@@ -83,6 +84,8 @@ namespace substrate {
     open_read: "r",
     // The role of the summary turn that compaction writes.
     summary_role: "system",
+    // The role of the turn that compacts a scene at the threshold first.
+    compact_role: "user",
     // The largest magnitude of a number in stored JSON, as on the wire.
     integer_limit: 2 ** 53,
     // A database name, a C identifier.
@@ -135,9 +138,6 @@ namespace substrate {
     statement_fields: Object.freeze<readonly string[]>(["params", "sql"]),
     // The forwarded operations whose replies carry no `seq`.
     seqless_types: Object.freeze<readonly string[]>(["db.create", "db.drop"]),
-    // The line types of a snapshot's head and of its pieces.
-    snapshot_type: "db.snapshot",
-    chunk_type: "db.chunk",
   });
 
   // The first prime numbers, as many as asked for.
@@ -404,21 +404,6 @@ namespace substrate {
   export interface CompactBytes {
     before: number;
     after: number;
-  }
-
-  // The head of a snapshot kept for its pieces: number, size, digest, `seq`.
-  export interface SnapshotHead {
-    snapshot: number;
-    size: number;
-    sha256: lines.Sha256;
-    seq: number;
-  }
-
-  // The piece a `db.chunk` asks of a kept snapshot: its number and range.
-  interface ChunkAsk {
-    snapshot: number;
-    offset: number;
-    size: number;
   }
 
   // Registers the handler of one line type and version.
@@ -1203,116 +1188,6 @@ namespace substrate {
     }
   }
 
-  // A snapshot asked of the owner that keeps it, its pieces taken in order.
-  export class SnapshotFetch {
-    // The database whose snapshot this is.
-    readonly db: string;
-    // The largest piece asked for, so that its reply fits `message_max`.
-    readonly #piece_max: number;
-    // Whether the lines use full names.
-    readonly #full: boolean;
-    // The head the owner replied, once it came.
-    #head: SnapshotHead | undefined = undefined;
-    // The bytes of the snapshot, filled in order.
-    #data = new Uint8Array(0);
-    // The number of bytes filled.
-    #filled = 0;
-    // The hash of the bytes filled.
-    readonly #hash = new HashStream();
-
-    // Takes the database, the limits each reply keeps within, the name form.
-    constructor(
-      db: string,
-      message_max: number,
-      line_max: number,
-      full: boolean,
-    ) {
-      const piece_max = message_max - line_max;
-      if (piece_max < 1) {
-        throw new Error(i18n("substrate.piece_none", message_max, line_max));
-      }
-      this.db = db;
-      this.#piece_max = piece_max;
-      this.#full = full;
-    }
-
-    // The request of the snapshot's head.
-    head_line(): lines.Line {
-      const header = jslb.header_make(constants.snapshot_type, {
-        full: this.#full,
-      });
-      return jslb.line_make(header, [], { db: this.db });
-    }
-
-    // Takes the head the owner replied and returns the first piece's request.
-    head_take(reply: lines.Line): lines.Line {
-      const { snapshot, size, sha256, seq } =
-        payload_read<SnapshotHead>(reply);
-      this.#head = { snapshot, size, sha256, seq };
-      this.#data = new Uint8Array(size);
-      return this.#piece_line();
-    }
-
-    // Adds the next piece and returns the next request, none once all is in.
-    piece_take(data: Uint8Array): lines.Line | undefined {
-      const head = this.#head as SnapshotHead;
-      const due = this.#piece_size();
-      if (data.length !== due) {
-        throw new Error(
-          i18n(
-            "substrate.piece_size",
-            this.db,
-            this.#filled,
-            data.length,
-            due,
-          ),
-        );
-      }
-      this.#data.set(data, this.#filled);
-      this.#hash.bytes_add(data);
-      this.#filled += data.length;
-      if (this.#filled < head.size) {
-        return this.#piece_line();
-      }
-      const sha256 = this.#hash.digest_hex();
-      if (sha256 !== head.sha256) {
-        throw new Error(
-          i18n("substrate.snapshot_digest", this.db, sha256, head.sha256),
-        );
-      }
-      return undefined;
-    }
-
-    // The `seq` of the database that the head gave.
-    seq_sent(): number {
-      return (this.#head as SnapshotHead).seq;
-    }
-
-    // The bytes of the whole snapshot, once its last piece is in.
-    bytes_get(): Uint8Array {
-      return this.#data;
-    }
-
-    // The size of the next piece: the bytes due, at most `piece_max`.
-    #piece_size(): number {
-      const head = this.#head as SnapshotHead;
-      return Math.min(this.#piece_max, head.size - this.#filled);
-    }
-
-    // The request of the next piece of the kept snapshot.
-    #piece_line(): lines.Line {
-      const head = this.#head as SnapshotHead;
-      const header = jslb.header_make(constants.chunk_type, {
-        full: this.#full,
-      });
-      return jslb.line_make(header, [], {
-        snapshot: head.snapshot,
-        offset: this.#filled,
-        size: this.#piece_size(),
-      });
-    }
-  }
-
   // One owner's databases under one root in the pool, the single door.
   export class Store {
     // The sqlite3.wasm module.
@@ -1327,6 +1202,8 @@ namespace substrate {
     readonly #root: string;
     // The largest value kept in its row.
     readonly #overflow_bytes: number;
+    // The count of a scene's turns at which a `user` turn compacts them.
+    readonly #compact_turns: number;
     // The open databases, by name.
     readonly #connections = new Map<string, SqliteDatabase>();
     // The databases the server holds that this side does not, until loaded.
@@ -1345,10 +1222,6 @@ namespace substrate {
     #forward: ((line: lines.Line) => void) | undefined = undefined;
     // Whether forwarded lines use full names.
     #full = false;
-    // The snapshots the UI thread asked for, kept by number for their pieces.
-    readonly #kept = new Map<number, Uint8Array>();
-    // The number of the last snapshot kept.
-    #kept_last = 0;
 
     // Takes the initialized module, the installed pool, the cache, the root.
     constructor(
@@ -1357,6 +1230,7 @@ namespace substrate {
       cache: CacheFiles,
       root: string,
       overflow_bytes: number,
+      compact_turns: number,
     ) {
       this.#sqlite = sqlite3;
       this.#pool = pool;
@@ -1364,6 +1238,7 @@ namespace substrate {
       this.#slots = pool_of(cache);
       this.#root = root;
       this.#overflow_bytes = overflow_bytes;
+      this.#compact_turns = compact_turns;
     }
 
     // Opens `<root>/<name>.sqlite`, applying the schema. Returns its `seq`.
@@ -1546,7 +1421,7 @@ namespace substrate {
       return `/${db}/${id}/${String(rows[0][0])}`;
     }
 
-    // Appends a turn to the scene's conversation. Returns its `n` and `seq`.
+    // A `user` turn on a scene of `compact_turns` turns first compacts them.
     turn_append(
       scene: lines.DocRef,
       role: provider.Role,
@@ -1555,9 +1430,12 @@ namespace substrate {
       const name = scene_database(scene);
       const text = json_canonical(content);
       const database = this.#connection_get(name);
-      return this.transaction_run(() =>
-        this.#turn_add(name, database, scene, role, text),
-      );
+      return this.transaction_run(() => {
+        if (role === constants.compact_role) {
+          this.#threshold_compact(name, database, scene);
+        }
+        return this.#turn_add(name, database, scene, role, text);
+      });
     }
 
     // The scene's turns in order.
@@ -1668,14 +1546,17 @@ namespace substrate {
           this.db_drop(db);
           return 0;
         },
-        // `scene`, `role` and `content`, the message object.
+        // `scene`, `role` and `content`, applied as it is, never compacting.
         "turn.append": () => {
           const scene = payload.scene as string;
-          return this.#since_apply(type, since, scene_database(scene), () =>
-            this.turn_append(
+          const name = scene_database(scene);
+          return this.#since_apply(type, since, name, () =>
+            this.#turn_add(
+              name,
+              this.#connection_get(name),
               scene,
               payload.role as provider.Role,
-              payload.content as provider.ChatMessage,
+              json_canonical(payload.content),
             ),
           );
         },
@@ -1828,53 +1709,6 @@ namespace substrate {
         }
       }
       return replace;
-    }
-
-    // Keeps a snapshot under the next number for its pieces. Returns its head.
-    snapshot_keep(db: string): SnapshotHead {
-      const snapshot = this.db_snapshot(db);
-      this.#kept_last += 1;
-      this.#kept.set(this.#kept_last, snapshot.data);
-      return {
-        snapshot: this.#kept_last,
-        size: snapshot.data.length,
-        sha256: utility.sha256_hex(snapshot.data),
-        seq: snapshot.seq,
-      };
-    }
-
-    // The piece of a kept snapshot at `offset`; its last piece lets it go.
-    snapshot_read(snapshot: number, offset: number, size: number): Uint8Array {
-      const data = this.#kept.get(snapshot);
-      if (data === undefined) {
-        throw new Error(i18n("substrate.snapshot_unknown", snapshot));
-      }
-      const end = offset + size;
-      if (offset < 0 || size < 1 || end > data.length) {
-        throw new Error(
-          i18n(
-            "substrate.snapshot_range",
-            snapshot,
-            offset,
-            size,
-            data.length,
-          ),
-        );
-      }
-      if (end === data.length) {
-        this.#kept.delete(snapshot);
-      }
-      return data.slice(offset, end);
-    }
-
-    // The bytes of a blob the decoder took, a streamed one read and freed.
-    blob_take(data: Uint8Array | string): Uint8Array {
-      if (typeof data !== "string") {
-        return data;
-      }
-      const bytes = this.#slots.handle_bytes(data);
-      this.#slots.handle_discard(data);
-      return bytes;
     }
 
     // Whether this side holds the bytes of a value, in its row or a file.
@@ -2295,6 +2129,24 @@ namespace substrate {
       return { ref: `/${db}/${key}`, seq };
     }
 
+    // Compacts the scene's turns 1 to its last once they are `compact_turns`.
+    #threshold_compact(
+      name: string,
+      database: SqliteDatabase,
+      scene: string,
+    ): void {
+      this.#transaction_join(database);
+      const [count, last] = rows_select(
+        database,
+        "SELECT COUNT(*), MAX(n) FROM _turn WHERE scene = ?",
+        [scene],
+      )[0] as [number, number];
+      if (count >= this.#compact_turns) {
+        const summary = i18n("substrate.turns_compacted", last, count);
+        this.#turns_compact(name, database, scene, last, summary);
+      }
+    }
+
     // Inserts a turn after the last of its scene and forwards it.
     #turn_add(
       name: string,
@@ -2601,16 +2453,14 @@ namespace substrate {
           this.db_drop(payload_read<lines.DbName>(line).db);
           return dispatch.reply_make(line, {});
         },
-        // Keeps a snapshot of a database for its pieces and answers its head.
+        // Answers a database's digest and `seq`, its file as blob 1.
         "db.snapshot": (line) => {
           const { db } = payload_read<lines.DbName>(line);
-          return dispatch.reply_make(line, { ...this.snapshot_keep(db) });
-        },
-        // Answers a piece of a kept snapshot as blob 1.
-        "db.chunk": (line) => {
-          const { snapshot, offset, size } = payload_read<ChunkAsk>(line);
-          const data = this.snapshot_read(snapshot, offset, size);
-          return dispatch.reply_make(line, {}, [jslb.blob_make(data)]);
+          const { data, seq } = this.db_snapshot(db);
+          const sha256 = utility.sha256_hex(data);
+          return dispatch.reply_make(line, { sha256, seq }, [
+            jslb.blob_make(data),
+          ]);
         },
         // Appends a turn.
         "turn.append": (line) => {

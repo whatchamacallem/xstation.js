@@ -29,11 +29,8 @@ _RING_LINES = 10
 # A count of lines greater than any ring a test makes.
 _HISTORY_ALL = 100
 
-# The highest verbose level, which the message of a level refused names.
-_LEVEL_HIGHEST = 2
-
 # Reads every row of the table, in the order they were written.
-_SELECT_ROWS = "SELECT seq, at, thread, level, text FROM line ORDER BY seq"
+_SELECT_ROWS = "SELECT seq, at, thread, text FROM line ORDER BY seq"
 
 # The dotted name of the handler table that the tests patch.
 _HANDLERS_TARGET = "dispatch._HANDLERS"
@@ -43,23 +40,20 @@ _DEBUG_TARGET = "engine_verbose._STATE.debug"
 
 # Two lines of a page thread.
 _PAGE_LINES: list[dict[str, object]] = [
-    {"at": 10, "level": 1, "text": "a"},
-    {"at": 20, "level": 2, "text": "b"},
+    {"at": 10, "text": "a"},
+    {"at": 20, "text": "b"},
 ]
 
-# Lines the handler refuses: a field missing, extra or mistyped.
+# Lines the handler refuses: a field missing, extra, a level, or mistyped.
 _LINES_INVALID: list[dict[str, object]] = [
-    {"at": 1, "level": 1},
-    {"at": 1, "level": 1, "text": "x", "n": 2},
-    {"at": "1", "level": 1, "text": "x"},
-    {"at": 1.5, "level": 1, "text": "x"},
-    {"at": True, "level": 1, "text": "x"},
-    {"at": 1, "level": "1", "text": "x"},
-    {"at": 1, "level": 1, "text": 5},
+    {"at": 1},
+    {"at": 1, "text": "x", "n": 2},
+    {"at": 1, "level": 1, "text": "x"},
+    {"at": "1", "text": "x"},
+    {"at": 1.5, "text": "x"},
+    {"at": True, "text": "x"},
+    {"at": 1, "text": 5},
 ]
-
-# A line with its fields right and a level the log refuses.
-_LINE_HIGH: dict[str, object] = {"at": 1, "level": 3, "text": "x"}
 
 
 # Builds a line with no blobs: the type, an optional id and the payload.
@@ -107,7 +101,6 @@ class IsolatedCase(unittest.TestCase):
         self.path = scratch.name
         verbose.log_open(self.path, _RING_LINES)
         self.addCleanup(verbose.log_close)
-        verbose.level_set(2)
 
     # Calls `fn` and checks the type and the text of what it raises.
     def raise_check(
@@ -126,24 +119,18 @@ class IsolatedCase(unittest.TestCase):
 
 # Tests the handler of `verbose.put`.
 class TestPut(IsolatedCase):
-    # Page lines are stored under their thread, whatever the level.
+    # Page lines are stored under their thread, in order.
     def test_lines_stored(self) -> None:
         engine_verbose.handlers_register(True)
         ui = _line_make("verbose.put", thread="ui", lines=_PAGE_LINES)
         ai = _line_make(
-            "verbose.put",
-            thread="ai",
-            lines=[{"at": 30, "level": 0, "text": "c"}],
+            "verbose.put", thread="ai", lines=[{"at": 30, "text": "c"}]
         )
         self.assertIsNone(dispatch.line_dispatch(ui))
         self.assertIsNone(dispatch.line_dispatch(ai))
         self.assertEqual(
             _rows_read(self.path),
-            [
-                (1, 10, "ui", 1, "a"),
-                (2, 20, "ui", 2, "b"),
-                (3, 30, "ai", 0, "c"),
-            ],
+            [(1, 10, "ui", "a"), (2, 20, "ui", "b"), (3, 30, "ai", "c")],
         )
 
     # Page lines are not in the ring of the server.
@@ -173,16 +160,6 @@ class TestPut(IsolatedCase):
                 self.dispatch_check(ValueError, message, line)
                 self.assertEqual(_rows_read(self.path), [])
 
-    # A level outside 0 to 2 raises and the batch is not written.
-    def test_level_invalid(self) -> None:
-        engine_verbose.handlers_register(True)
-        line = _line_make(
-            "verbose.put", thread="ui", lines=_PAGE_LINES + [_LINE_HIGH]
-        )
-        message = i18n("verbose.level_invalid", 3, _LEVEL_HIGHEST)
-        self.dispatch_check(ValueError, message, line)
-        self.assertEqual(_rows_read(self.path), [])
-
     # A thread other than ui or ai raises and nothing is written.
     def test_thread_unknown(self) -> None:
         engine_verbose.handlers_register(True)
@@ -207,28 +184,27 @@ class TestPut(IsolatedCase):
 
 # Tests the handler of `verbose.tail`.
 class TestTail(IsolatedCase):
-    # The reply holds the last lines of the ring with all three fields.
+    # The reply holds the last lines of the ring with their two fields.
     def test_tail_lines(self) -> None:
         engine_verbose.handlers_register(True)
         for text in ("a", "b", "c"):
-            verbose.log(1, text)
+            verbose.log(text)
         reply = _reply_get(
             _line_make("verbose.tail", 7, thread="server", count=2)
         )
         self.assertEqual(reply[0]["r"], 7)
         expected = [
-            {"at": entry.at, "level": entry.level, "text": entry.text}
+            {"at": entry.at, "text": entry.text}
             for entry in verbose.history_get(2)
         ]
         self.assertEqual(jslb.payload_of(reply), {"lines": expected})
         self.assertEqual([entry["text"] for entry in expected], ["b", "c"])
-        self.assertEqual([entry["level"] for entry in expected], [1, 1])
 
     # The count limits the reply, oldest first, and a large one gives all.
     def test_tail_counts(self) -> None:
         engine_verbose.handlers_register(True)
         for text in ("a", "b", "c"):
-            verbose.log(1, text)
+            verbose.log(text)
         expected: dict[int, list[str]] = {
             0: [],
             1: ["c"],
@@ -245,18 +221,18 @@ class TestTail(IsolatedCase):
         engine_verbose.handlers_register(True)
         page = _line_make("verbose.put", thread="ui", lines=_PAGE_LINES)
         dispatch.line_dispatch(page)
-        verbose.log(1, "s")
+        verbose.log("s")
         lines = _tail_lines("server", _HISTORY_ALL)
         self.assertEqual([entry["text"] for entry in lines], ["s"])
 
     # A page thread replies with its own stored lines, oldest first.
     def test_page_threads(self) -> None:
         engine_verbose.handlers_register(True)
-        ai_line: dict[str, object] = {"at": 30, "level": 0, "text": "c"}
+        ai_line: dict[str, object] = {"at": 30, "text": "c"}
         for thread, lines in (("ui", _PAGE_LINES), ("ai", [ai_line])):
             put = _line_make("verbose.put", thread=thread, lines=lines)
             dispatch.line_dispatch(put)
-        verbose.log(1, "s")
+        verbose.log("s")
         expected: dict[tuple[str, int], list[dict[str, object]]] = {
             ("ui", 0): [],
             ("ui", 1): [_PAGE_LINES[1]],
@@ -298,7 +274,7 @@ class TestTail(IsolatedCase):
     # Debug mode does not gate the tail.
     def test_tail_ungated(self) -> None:
         engine_verbose.handlers_register(False)
-        verbose.log(1, "a")
+        verbose.log("a")
         lines = _tail_lines("server", 1)
         self.assertEqual([entry["text"] for entry in lines], ["a"])
 

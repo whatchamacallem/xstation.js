@@ -32,11 +32,8 @@ _OVERFLOW_BYTES = 131072
 # The `line_max` of the settings, 1 MiB.
 _LINE_MAX = 1048576
 
-# The `blob_max` of the settings, 10 MiB.
-_BLOB_MAX = 10485760
-
-# The `message_max` of the settings, 10 MiB.
-_MESSAGE_MAX = 10485760
+# The `blob_max` of the settings, the largest database.
+_BLOB_MAX = 2147483391
 
 # The database the tests keep their values in.
 _DATABASE = "_files"
@@ -93,7 +90,7 @@ _SCRIPT_TWO = b"engine.say('Mind the moat.');"
 _SCRIPT_KEY = "/_files/script/bootstrap.js"
 
 # A stand in for the script of the put that a desync refuses.
-_TIDE_SCRIPT = b"engine.log(1, 'tide advanced by 1');"
+_TIDE_SCRIPT = b"engine.log('tide advanced by 1');"
 
 # The ref of that script.
 _TIDE_KEY = "/_files/script/step_tide.js"
@@ -157,7 +154,7 @@ def _decoder_make(root: str) -> jslb.LineDecoder:
         return os.path.join(cache, "sink" + uuid.uuid4().hex)
 
     return jslb.LineDecoder(
-        _LINE_MAX, _BLOB_MAX, _MESSAGE_MAX, _OVERFLOW_BYTES, sink_make
+        _LINE_MAX, _BLOB_MAX, _OVERFLOW_BYTES, sink_make
     )
 
 
