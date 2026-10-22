@@ -29,7 +29,7 @@ namespace test_provider {
   });
 
   // An object of fields by name.
-  type Fields = { [key: string]: unknown };
+  type FieldTable = { [key: string]: unknown };
 
   // The error the function throws, and an error of its own when it doesn't.
   function thrown_get(fn: () => unknown): Error {
@@ -55,16 +55,16 @@ namespace test_provider {
   }
 
   // The headers with their names in lower case, as HTTP compares them.
-  function headers_lower(value: unknown): Fields {
-    const lowered: Fields = {};
-    for (const [name, text] of Object.entries(value as Fields)) {
+  function headers_lower(value: unknown): FieldTable {
+    const lowered: FieldTable = {};
+    for (const [name, text] of Object.entries(value as FieldTable)) {
       lowered[name.toLowerCase()] = text;
     }
     return lowered;
   }
 
   // A tool call that every check accepts.
-  function call_valid(): Fields {
+  function call_valid(): FieldTable {
     return {
       id: "call_1",
       type: "function",
@@ -73,22 +73,22 @@ namespace test_provider {
   }
 
   // An assistant message that calls that tool.
-  function message_valid(): Fields {
+  function message_valid(): FieldTable {
     return { role: "assistant", content: null, tool_calls: [call_valid()] };
   }
 
   // A choice that holds that message.
-  function choice_valid(): Fields {
+  function choice_valid(): FieldTable {
     return { index: 0, message: message_valid(), finish_reason: "tool_calls" };
   }
 
   // A chat body with the one choice given.
-  function chat_body(choice: unknown): Fields {
+  function chat_body(choice: unknown): FieldTable {
     return { id: "chatcmpl-synthetic-3", model: "grok-4", choices: [choice] };
   }
 
   // A chat body whose message has the fields given in place of its own.
-  function message_with(fields: Fields): Fields {
+  function message_with(fields: FieldTable): FieldTable {
     return chat_body({
       ...choice_valid(),
       message: { ...message_valid(), ...fields },
@@ -96,12 +96,12 @@ namespace test_provider {
   }
 
   // A chat body whose tool call has the fields given in place of its own.
-  function call_with(fields: Fields): Fields {
+  function call_with(fields: FieldTable): FieldTable {
     return message_with({ tool_calls: [{ ...call_valid(), ...fields }] });
   }
 
   // The chat body of the castle turn that runs the bootstrap script.
-  function recorded_calling(): Fields {
+  function recorded_calling(): FieldTable {
     return {
       id: "chatcmpl-synthetic-3",
       model: constants.chat_model,
@@ -129,7 +129,7 @@ namespace test_provider {
   }
 
   // The chat body of the castle turn that ends it with the subtitle.
-  function recorded_stop(): Fields {
+  function recorded_stop(): FieldTable {
     return {
       id: "chatcmpl-synthetic-60",
       model: constants.chat_model,
@@ -375,7 +375,7 @@ namespace test_provider {
 
   // The conversion of MCP tools into function tools.
   export class TestToolsConvert extends unittest.TestCase {
-    // Each tool keeps its dotted name, its text and its schema, in order.
+    // Each tool keeps its dotted name, text and schema, in order, not `_meta`.
     test_dotted_names(): void {
       const create = tool_make(
         "browser.db_create",
@@ -388,7 +388,16 @@ namespace test_provider {
           "the named main loop file. Debug mode.",
         "main_loop",
       );
-      const converted = provider.tools_convert([create, restart]);
+      const console_run: mcp.Tool = {
+        ...tool_make(
+          "browser.console_run",
+          "Run one command line in the debug console's dash and return its " +
+            "output until the next prompt or the timeout. Debug mode.",
+          "text",
+        ),
+        _meta: { xsjs: { permit: true } },
+      };
+      const converted = provider.tools_convert([create, restart, console_run]);
       this.assertEqual(converted, [
         {
           type: "function",
@@ -411,6 +420,18 @@ namespace test_provider {
               type: "object",
               properties: { main_loop: { type: "string" } },
               required: ["main_loop"],
+            },
+          },
+        },
+        {
+          type: "function",
+          function: {
+            name: "browser.console_run",
+            description: console_run.description,
+            parameters: {
+              type: "object",
+              properties: { text: { type: "string" } },
+              required: ["text"],
             },
           },
         },

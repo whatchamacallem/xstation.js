@@ -100,10 +100,10 @@ namespace mcp {
   ) => ToolResult | dispatch.Sleep;
 
   // An object of fields by name, as a decoded message holds them.
-  type Fields = { [key: string]: unknown };
+  type FieldTable = { [key: string]: unknown };
 
   // A method of the server: its result, or the sleep of a tool.
-  type MethodFn = (params: unknown) => Fields | dispatch.Sleep;
+  type MethodFn = (params: unknown) => FieldTable | dispatch.Sleep;
 
   // What the sleep of a tool holds: the `mcp` line it answers, its state.
   interface WaitState {
@@ -129,7 +129,7 @@ namespace mcp {
   }
 
   // Whether a value is an object that is neither an array nor `null`.
-  function fields_is(value: unknown): value is Fields {
+  function fields_is(value: unknown): value is FieldTable {
     return (
       typeof value === "object" && value !== null && !Array.isArray(value)
     );
@@ -161,7 +161,7 @@ namespace mcp {
   }
 
   // A response that carries the result.
-  function result_make(id: Id, result: Fields): Response {
+  function result_make(id: Id, result: FieldTable): Response {
     return { jsonrpc: constants.jsonrpc_version, id, result };
   }
 
@@ -202,7 +202,7 @@ namespace mcp {
   // The outcome of a tool as a method's: its sleep, or a copy of its result.
   function outcome_fields(
     outcome: ToolResult | dispatch.Sleep,
-  ): Fields | dispatch.Sleep {
+  ): FieldTable | dispatch.Sleep {
     return sleep_is(outcome) ? outcome : { ...outcome };
   }
 
@@ -246,7 +246,7 @@ namespace mcp {
 
     // Handles one message: the response, the sleep of a tool, or nothing.
     message_handle(message: Message): Message | dispatch.Sleep | undefined {
-      const fields = message as unknown as Fields;
+      const fields = message as unknown as FieldTable;
       const method = fields.method;
       const raw = fields.id;
       const id = id_valid(raw) ? raw : null;
@@ -299,13 +299,13 @@ namespace mcp {
       if (sleep_is(outcome)) {
         return this.sleep_wrap(request, outcome);
       }
-      return dispatch.reply_make(request, outcome as unknown as Fields);
+      return dispatch.reply_make(request, outcome as unknown as FieldTable);
     }
 
     // Runs a method or a continuation, a throw becoming an error response.
     private outcome_take(
       id: Id,
-      run: () => Fields | dispatch.Sleep,
+      run: () => FieldTable | dispatch.Sleep,
     ): Message | dispatch.Sleep {
       try {
         const outcome = run();
@@ -331,7 +331,7 @@ namespace mcp {
     private method_run(
       method: string,
       params: unknown,
-    ): Fields | dispatch.Sleep {
+    ): FieldTable | dispatch.Sleep {
       const run = this.methods.get(method);
       if (run === undefined) {
         throw new ProtocolError(
@@ -343,7 +343,7 @@ namespace mcp {
     }
 
     // Answers `initialize` with the revision, the capability and the name.
-    private initialize_run(): Fields {
+    private initialize_run(): FieldTable {
       return {
         protocolVersion: constants.protocol_version,
         capabilities: { tools: {} },
@@ -352,12 +352,12 @@ namespace mcp {
     }
 
     // Answers `tools/list` with the tools in the order they were registered.
-    private list_run(): Fields {
+    private list_run(): FieldTable {
       return { tools: [...this.tools.values()] };
     }
 
     // Runs the tool a `tools/call` names on its arguments, empty when absent.
-    private call_run(params: unknown): Fields | dispatch.Sleep {
+    private call_run(params: unknown): FieldTable | dispatch.Sleep {
       if (!fields_is(params)) {
         throw new ProtocolError(
           constants.code_params,
@@ -499,7 +499,7 @@ namespace mcp {
     }
 
     // Submits a request with the next `JSON-RPC` id and keeps what it sent.
-    private request_send(method: string, fields: Fields): number {
+    private request_send(method: string, fields: FieldTable): number {
       this.rpc_last += 1;
       const rpc = this.rpc_last;
       const message = {
@@ -514,7 +514,7 @@ namespace mcp {
     }
 
     // Builds the `mcp` line of a message in the name form of the client.
-    private line_build(message: Fields): lines.Line {
+    private line_build(message: FieldTable): lines.Line {
       const header = jslb.header_make(constants.line_type, {
         full: this.full,
       });
@@ -522,7 +522,7 @@ namespace mcp {
     }
 
     // The result of the reply to a request this client sent for the method.
-    private result_read(reply: lines.Line, method: string): Fields {
+    private result_read(reply: lines.Line, method: string): FieldTable {
       const id = reply_of(reply);
       const sent = this.sent.get(id);
       if (sent === undefined) {

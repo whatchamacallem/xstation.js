@@ -26,6 +26,12 @@ _TEMP_SUFFIX = ".tmp"
 # The process option that names the main loop file.
 _MAIN_LOOP_OPTION = "--main-loop"
 
+# The prefix of a long option, which alone ends the options.
+_LONG_PREFIX = "--"
+
+# The mark that joins a long option and its value in one word.
+_VALUE_MARK = "="
+
 # The `JSON-RPC` code of arguments that a tool cannot use.
 _CODE_PARAMS_INVALID = -32602
 
@@ -103,7 +109,7 @@ def _settings_write(root: str, value: dict[str, Any]) -> None:
 
 
 # Returns the path of a main loop file, raising unless the name is plain.
-def _main_loop_path(root: str, name: str) -> str:
+def _loop_path(root: str, name: str) -> str:
     if (
         os.path.basename(name) != name
         or name.startswith(".")
@@ -115,7 +121,7 @@ def _main_loop_path(root: str, name: str) -> str:
 
 # Writes the bytes as a main loop file and returns their `sha256` in hex.
 def _bytes_install(root: str, name: str, data: bytes) -> str:
-    path = _main_loop_path(root, name)
+    path = _loop_path(root, name)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     _file_write(path, data)
     return hashlib.sha256(data).hexdigest()
@@ -123,9 +129,16 @@ def _bytes_install(root: str, name: str, data: bytes) -> str:
 
 # Moves a file that was streamed to the cache into place as a main loop file.
 def _file_install(root: str, name: str, source: str) -> None:
-    path = _main_loop_path(root, name)
+    path = _loop_path(root, name)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     os.replace(source, path)
+
+
+# Says whether a word gives the main loop option, as argparse abbreviates it.
+def _option_match(word: str) -> bool:
+    name = word.partition(_VALUE_MARK)[0]
+    longer = len(name) > len(_LONG_PREFIX)
+    return longer and _MAIN_LOOP_OPTION.startswith(name)
 
 
 # Returns the process arguments with the main loop option set to the file.
@@ -135,20 +148,16 @@ def _argv_make(argv: list[str], main_loop: str) -> list[str]:
     for word in argv:
         if skipping:
             skipping = False
-        elif word == _MAIN_LOOP_OPTION:
-            skipping = True
+        elif _option_match(word):
+            skipping = _VALUE_MARK not in word
         else:
             kept.append(word)
-    if skipping:
-        raise ValueError(
-            i18n("engine_system.option_unfinished", _MAIN_LOOP_OPTION)
-        )
     return [*kept, _MAIN_LOOP_OPTION, main_loop]
 
 
 # Replaces the process image to serve the main loop file, which must exist.
 def _restart_run(root: str, main_loop: str) -> NoReturn:
-    path = _main_loop_path(root, main_loop)
+    path = _loop_path(root, main_loop)
     if not os.path.isfile(path):
         raise FileNotFoundError(i18n("engine_system.main_loop_missing", path))
     os.execv(sys.executable, _argv_make(sys.orig_argv, main_loop))

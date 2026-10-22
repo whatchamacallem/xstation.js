@@ -44,7 +44,7 @@ _WORLD = "castle_world"
 # The database of the universe table.
 _METAVERSE = "metaverse"
 
-# The `seq` the test gives `metaverse` before it inserts the universe row.
+# The `seq` of `metaverse` before the universe row, a count its writer chose.
 _METAVERSE_SINCE = 7
 
 # The universe table, the one fixed schema of `metaverse`.
@@ -431,7 +431,7 @@ class TestRegister(IsolatedCase):
         )
 
     # Called before the registration the handler raises.
-    def test_unregistered(self) -> None:
+    def test_called_early(self) -> None:
         line = _line_make("sql.run", 1)
         message = i18n("engine_sql.not_registered")
         self.raise_check(

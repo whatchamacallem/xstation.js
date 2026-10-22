@@ -470,7 +470,7 @@ class TestRegister(IsolatedCase):
         )
 
     # Called before the registration each handler raises.
-    def test_unregistered(self) -> None:
+    def test_called_early(self) -> None:
         line = _line_make("turn.append", 1)
         content: dict[str, object] = {}
         message = i18n("engine_turn.not_registered")

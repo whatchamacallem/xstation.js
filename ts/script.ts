@@ -107,6 +107,8 @@ namespace script {
     try {
       const body = new Function("engine", "args", text);
       const value: unknown = body(engine, args);
+      // A value JSON cannot carry is the run's exception, not the tool's.
+      utility.json_text({ value });
       return { value, lines: kept };
     } catch (thrown) {
       return { ...thrown_fields(thrown), lines: kept };

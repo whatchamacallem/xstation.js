@@ -33,7 +33,7 @@ _VALUE_EXACT = bytes(range(256)) * (_OVERFLOW_BYTES // 256)
 # A value one byte over `overflow_bytes`, which goes to the cache.
 _VALUE_OVER = _VALUE_EXACT + bytes(1)
 
-# A map of 204800 bytes, over `overflow_bytes`.
+# A size chosen by its writer: a map of 204800 bytes, over `overflow_bytes`.
 _MAP_BYTES = bytes(range(256)) * 800
 
 # The real `os.replace`, which the patched one of the forked child calls.
@@ -96,11 +96,19 @@ _REGION_SQL = (
     " (name TEXT PRIMARY KEY, tide INTEGER NOT NULL DEFAULT 0) STRICT"
 )
 
-# Each database the replay starts from: its `seq` and its tables.
-_HELLO_DATABASES: dict[str, tuple[int, list[str]]] = {
-    "_files": (1, []),
-    "metaverse": (5, [_UNIVERSE_SQL]),
+# The hyperposition, the scene whose conversation the replay appends to.
+_HYPERPOSITION_BODY: dict[int | str, Any] = {
+    0: {"t": "scene"},
+    "subtitle": "How can I help you?",
 }
+
+# The values the replay starts from, chosen by its writer: a script, refs.
+_HELLO_VALUES: list[tuple[str, bytes]] = [
+    ("/_files/script/bootstrap.js", b"// Makes a universe.\n"),
+    ("/metaverse/player", b"player"),
+    ("/metaverse/world", b"metaverse"),
+    ("/metaverse/scene", _SCENE.encode("utf-8")),
+]
 
 # The arguments of the first tool call, the bootstrap script run.
 _SCRIPT_ARGUMENTS = (
@@ -366,9 +374,6 @@ _DESYNC: tuple[str, int, dict[str, Any], int] = (
     4,
 )
 
-# The English text of the desync message for that put.
-_DESYNC_MESSAGE = "kv.put: since 3 is not seq 4 of _files"
-
 
 # Makes a scratch root under build/, removed when the test ends.
 def _root_make(case: unittest.TestCase) -> str:
@@ -456,16 +461,14 @@ def _names_read(path: str) -> list[str]:
     return [row[0] for row in rows]
 
 
-# Makes the databases the replay starts from, each at its `seq`.
-def _hello_make(root: str) -> None:
-    for name, (seq, tables) in _HELLO_DATABASES.items():
-        statements = [_statement_make(sql) for sql in tables]
-        statements.append(
-            _statement_make(
-                "UPDATE _meta SET value = ? WHERE name = 'seq'", str(seq)
-            )
-        )
-        _file_make(os.path.join(root, name + ".sqlite"), True, statements)
+# Makes the databases the replay starts from by writes, each counted.
+def _hello_make(store: substrate.Store) -> None:
+    store.db_create("_files")
+    store.db_create("metaverse")
+    store.sql_run("metaverse", [_statement_make(_UNIVERSE_SQL)])
+    store.doc_put("metaverse", "hyperposition", _HYPERPOSITION_BODY)
+    for ref, value in _HELLO_VALUES:
+        store.kv_put(ref, value)
 
 
 # Writes a row of `alpha`, then makes the call in the same transaction.
@@ -1576,13 +1579,12 @@ class TestReplay(unittest.TestCase):
     def test_recorded_replay(self) -> None:
         first_root = _root_make(self)
         second_root = _root_make(self)
-        _hello_make(first_root)
-        _hello_make(second_root)
         first = _store_make(self, first_root)
         second = _store_make(self, second_root)
-        for name, (seq, _) in _HELLO_DATABASES.items():
-            self.assertEqual(first.db_open(name), seq)
-            self.assertEqual(second.db_open(name), seq)
+        for store in (first, second):
+            _hello_make(store)
+            self.assertEqual(store.seq_get("_files"), 1)
+            self.assertEqual(store.seq_get("metaverse"), 5)
         sink = os.path.join(second_root, "cache", "sink")
         for kind, since, fields, seq in _RECORDED:
             _modifier_call(first, kind, fields)
@@ -1624,10 +1626,11 @@ class TestReplay(unittest.TestCase):
         kind, since, fields, seq = _DESYNC
         self.assertEqual(second.db_open("_files"), since)
         second.kv_put(fields["k"], fields["data"])
+        message = i18n("substrate.since_stale", kind, since, seq, "_files")
         _error_check(
             self,
             RuntimeError,
-            _DESYNC_MESSAGE,
+            message,
             lambda: second.operation_apply(kind, since, **fields),
         )
         self.assertEqual(second.seq_get("_files"), seq)

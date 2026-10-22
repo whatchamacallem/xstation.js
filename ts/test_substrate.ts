@@ -31,11 +31,11 @@ namespace test_substrate {
     compact_small: 3,
     // The start of the root of each store a test makes in the pool.
     root_prefix: "/test_substrate/",
-    // The files of the cache of each store a test makes.
+    // A count chosen by its writer: the files of each test store's cache.
     slot_count: 8,
     // The bytes at the start of a cache file that hold its name.
     name_bytes: 64,
-    // The bytes streamed into a sink at once.
+    // A size chosen by its writer: the bytes streamed into a sink at once.
     piece_bytes: 4096,
     // The hyperposition scene, whose conversation the turn tests append to.
     scene: "/metaverse/hyperposition/1",
@@ -76,7 +76,7 @@ namespace test_substrate {
     // The `SHA-256` of the step script.
     script_sha256:
       "dbc909cf0e2e7954d586c06b3291728e527d5dee4c109409fcb501e200756626",
-    // The size of the map in bytes, past `overflow_bytes` so it streams.
+    // A size chosen by its writer: the map's bytes, past `overflow_bytes`.
     map_bytes: 204800,
     // The universe table, as the metaverse SQL file creates it.
     universe_sql:
@@ -94,8 +94,8 @@ namespace test_substrate {
     meta_sql:
       "CREATE TABLE _meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)" +
       " WITHOUT ROWID, STRICT",
-    // The message of the server's error for a `kv.put` one behind its `seq`.
-    desync_message: "kv.put: since 3 is not seq 4 of _files",
+    // Text beyond ASCII for keys and values, built from its code points.
+    text_wide: String.fromCodePoint(0x4e2d, 0x6587, 0x1f600),
     // The first bytes of a database file.
     file_magic: "SQLite format 3",
     // The database and key of the put that a kill stops.
@@ -105,22 +105,17 @@ namespace test_substrate {
     row_insert: "INSERT INTO _kv ",
     // The message of the stop that stands for the kill in the unit test.
     kill_message: "The put stopped between its cache file and its row.",
+    // The start of the SQL that writes the first of the substrate's tables.
+    schema_create: "CREATE TABLE _meta ",
+    // The message of the failure the test makes where the schema is written.
+    schema_message: "The schema failed where the test made it fail.",
   });
-
-  // Text beyond ASCII for keys and values, built from its code points.
-  const text_wide = String.fromCodePoint(0x4e2d, 0x6587, 0x1f600);
-
-  // The stored text of the arrival scene, its encoded document as JSON.
-  const arrival_text =
-    '{"0":{"t":"scene"},"1":"/_files/gatehouse/arrival.png","subtitle":"' +
-    constants.arrival_subtitle +
-    '","image":{"$ref":1}}';
 
   // The number of the last root a test made, so that each store has its own.
   let root_count = 0;
 
   // One forwarded operation: its fields, the `seq` after, its line and digest.
-  interface Recorded {
+  interface RecordedOperation {
     type: string;
     since: number;
     fields: { [key: string]: unknown };
@@ -172,10 +167,14 @@ namespace test_substrate {
   }
 
   // A value of exactly `overflow_bytes`, which stays in its row.
-  const value_exact = bytes_pattern(constants.overflow_bytes);
+  function value_exact(): Uint8Array {
+    return bytes_pattern(constants.overflow_bytes);
+  }
 
   // A value one byte over `overflow_bytes`, which goes to the cache.
-  const value_over = bytes_pattern(constants.overflow_bytes + 1);
+  function value_over(): Uint8Array {
+    return bytes_pattern(constants.overflow_bytes + 1);
+  }
 
   // A cache file double kept in memory, with the calls OPFS gives.
   class MemorySlot implements substrate.SlotHandle {
@@ -374,7 +373,7 @@ namespace test_substrate {
   }
 
   // The database a forwarded operation modifies.
-  function target_database(record: Recorded): string {
+  function target_database(record: RecordedOperation): string {
     const fields = record.fields;
     if (Object.hasOwn(fields, "db")) {
       return fields.db as string;
@@ -414,11 +413,20 @@ namespace test_substrate {
     };
   }
 
+  // The stored text of the arrival scene, its encoded document as JSON.
+  function arrival_stored(): string {
+    return (
+      '{"0":{"t":"scene"},"1":"/_files/gatehouse/arrival.png","subtitle":"' +
+      constants.arrival_subtitle +
+      '","image":{"$ref":1}}'
+    );
+  }
+
   // A document in its normal form, with refs, shared refs and plain text.
   function fog_normal(): { [key: string]: unknown } {
     return {
       0: { t: "scene", v: 2 },
-      subtitle: "Fog " + text_wide,
+      subtitle: "Fog " + constants.text_wide,
       image: "/_files/fog.png",
       links: [
         "/metaverse/world",
@@ -439,7 +447,7 @@ namespace test_substrate {
       0: { t: "scene", v: 2 },
       1: "/_files/fog.png",
       2: "/metaverse/world",
-      subtitle: "Fog " + text_wide,
+      subtitle: "Fog " + constants.text_wide,
       image: { $ref: 1 },
       links: [{ $ref: 2 }, { to: { $ref: 1 }, note: "/not a ref" }],
       local: "world",
@@ -456,7 +464,12 @@ namespace test_substrate {
     return {
       0: { t: "nest" },
       1: "/_files/fog.png",
-      inner: { b: 1, 2: text_wide, a: [{ z: null, 0: 0.5 }], 1: { $ref: 1 } },
+      inner: {
+        b: 1,
+        2: constants.text_wide,
+        a: [{ z: null, 0: 0.5 }],
+        1: { $ref: 1 },
+      },
       count: -3,
     };
   }
@@ -477,7 +490,7 @@ namespace test_substrate {
   }
 
   // The forwarded operations of the castle turn and two later ones, in order.
-  function recorded_make(): Recorded[] {
+  function recorded_make(): RecordedOperation[] {
     const scene = constants.scene;
     const subtitle = constants.arrival_subtitle;
     const image = "/_files/gatehouse/arrival.png";
@@ -667,7 +680,7 @@ namespace test_substrate {
         text:
           '{"0":{"t":"doc.put"},"db":"castle_gatehouse",' +
           '"id":"scene/arrival","body":' +
-          arrival_text +
+          arrival_stored() +
           ',"since":0}',
       },
       {
@@ -728,17 +741,24 @@ namespace test_substrate {
     ];
   }
 
-  // A database of the pool that runs `stop` before it writes a row to `_kv`.
+  // A database of the pool that runs `stop` before SQL with a given start.
   class StoppedDatabase implements substrate.SqliteDatabase {
     // The database of the pool.
     readonly #inner: substrate.SqliteDatabase;
-    // What runs in place of a write of a row to `_kv`.
+    // What runs in place of the SQL.
     readonly #stop: () => never;
+    // The start of the SQL that the stop runs before.
+    readonly #prefix: string;
 
-    // Takes the database it wraps and the stop.
-    constructor(inner: substrate.SqliteDatabase, stop: () => never) {
+    // Takes the database it wraps, the stop and the start of the SQL.
+    constructor(
+      inner: substrate.SqliteDatabase,
+      stop: () => never,
+      prefix: string,
+    ) {
       this.#inner = inner;
       this.#stop = stop;
+      this.#prefix = prefix;
     }
 
     // The `sqlite3` pointer of the connection.
@@ -746,9 +766,9 @@ namespace test_substrate {
       return this.#inner.pointer;
     }
 
-    // Runs the SQL, stopping before it when it writes a row to `_kv`.
+    // Runs the SQL, stopping before it when it starts with the prefix.
     exec(options: substrate.ExecOptions): unknown {
-      if (options.sql.startsWith(constants.row_insert)) {
+      if (options.sql.startsWith(this.#prefix)) {
         this.#stop();
       }
       return this.#inner.exec(options);
@@ -775,16 +795,17 @@ namespace test_substrate {
     }
   }
 
-  // The pause point: the pool's files, its databases stopping before a row.
-  export function kill_pool(
+  // The pool's files, its databases stopping before SQL with the start.
+  function pool_stopped(
     pool: substrate.SqlitePool,
     stop: () => never,
+    prefix: string,
   ): substrate.SqlitePool {
     // The pool's database class, its databases wrapped to stop.
     class PausedDatabase extends StoppedDatabase {
       // Opens the file as the pool's own class does.
       constructor(options: { filename: string; flags: string }) {
-        super(new pool.OpfsSAHPoolDb(options), stop);
+        super(new pool.OpfsSAHPoolDb(options), stop, prefix);
       }
     }
     return {
@@ -795,10 +816,18 @@ namespace test_substrate {
     };
   }
 
+  // The pause point: the pool's files, its databases stopping before a row.
+  export function kill_pool(
+    pool: substrate.SqlitePool,
+    stop: () => never,
+  ): substrate.SqlitePool {
+    return pool_stopped(pool, stop, constants.row_insert);
+  }
+
   // Creates `alpha` and puts a value over `overflow_bytes` under `big` in it.
   export function kill_put(store: substrate.Store): void {
     store.db_create(constants.kill_db);
-    store.kv_put(`/${constants.kill_db}/${constants.kill_key}`, value_over);
+    store.kv_put(`/${constants.kill_db}/${constants.kill_key}`, value_over());
   }
 
   // Says it is paused, then holds the worker in a loop until it is killed.
@@ -996,8 +1025,8 @@ namespace test_substrate {
     }
   }
 
-  // `Key-Value-Ref` and `Document-Ref` splitting, and the bad refs.
-  export class TestRefs extends RefusalCase {
+  // `Key-Value-Ref` and `Document-Ref` splitting, bad refs, their database.
+  export class TestRefs extends StoreCase {
     // Each form splits into its database, its key and its version.
     test_split_forms(): void {
       const cases: [string, substrate.RefParts][] = [
@@ -1012,8 +1041,8 @@ namespace test_substrate {
         ["maps/01", { key: "maps/01" }],
         ["7", { key: "7" }],
         [
-          "/x/" + text_wide + "/0",
-          { db: "x", key: text_wide + "/0", version: 0 },
+          "/x/" + constants.text_wide + "/0",
+          { db: "x", key: constants.text_wide + "/0", version: 0 },
         ],
         ["/x/line\nbreak", { db: "x", key: "line\nbreak" }],
       ];
@@ -1040,10 +1069,108 @@ namespace test_substrate {
         );
       }
     }
+
+    // An internal ref needs a database and an external ref takes none.
+    test_ref_database(): void {
+      const store = this.store_fresh();
+      store.db_create("alpha");
+      const value = bytes_text("x");
+      this.raised_assert(i18n("substrate.ref_internal", "world"), () =>
+        store.kv_put("world", value),
+      );
+      const both = i18n("substrate.ref_both", "/alpha/world", "alpha");
+      this.raised_assert(both, () =>
+        store.kv_put("/alpha/world", value, "alpha"),
+      );
+      this.raised_assert(both, () => store.kv_get("/alpha/world", "alpha"));
+      this.raised_assert(i18n("substrate.db_closed", "beta"), () =>
+        store.kv_put("/beta/world", value),
+      );
+      this.raised_assert(i18n("substrate.document_ref", "/alpha/world"), () =>
+        store.doc_get("/alpha/world"),
+      );
+      this.assertEqual(store.seq_get("alpha"), 0);
+    }
   }
 
-  // Documents: the encoded round trip, reference strings, bad documents.
-  export class TestDocuments extends RefusalCase {
+  // Documents: versions and heads, the round trip, reference strings, faults.
+  export class TestDocuments extends StoreCase {
+    // Each put writes the next version and moves the head, versions stay.
+    test_document_heads(): void {
+      const store = this.store_fresh();
+      const db = "castle_gatehouse";
+      store.db_create(db);
+      const first = store.doc_put(db, "scene/arrival", arrival_make());
+      this.assertEqual(first, {
+        ref: "/castle_gatehouse/scene/arrival/1",
+        seq: 1,
+      });
+      this.assertEqual(store.doc_head(db, "scene/arrival"), first.ref);
+      this.assertEqual(
+        store.kv_get(first.ref).data,
+        bytes_text(arrival_stored()),
+      );
+      const changed = { ...arrival_make(), subtitle: "The keeper waves." };
+      const second = store.doc_put(db, "scene/arrival", changed);
+      this.assertEqual(second, {
+        ref: "/castle_gatehouse/scene/arrival/2",
+        seq: 2,
+      });
+      this.assertEqual(store.doc_head(db, "scene/arrival"), second.ref);
+      this.assertEqual(store.doc_get(first.ref), arrival_make());
+      const text = utility.json_text(store.doc_get(first.ref));
+      this.assertEqual(text, arrival_stored());
+      this.assertEqual(store.doc_get("scene/arrival/2", db), changed);
+      this.raised_assert(
+        i18n("substrate.id_missing", "scene/absent", db),
+        () => store.doc_head(db, "scene/absent"),
+      );
+      this.raised_assert(
+        i18n("substrate.key_missing", "scene/arrival/3", db),
+        () => store.doc_get("/castle_gatehouse/scene/arrival/3"),
+      );
+      this.raised_assert(
+        i18n("substrate.document_ref", "/castle_gatehouse/scene/arrival"),
+        () => store.doc_get("/castle_gatehouse/scene/arrival"),
+      );
+    }
+
+    // A put whose next version is already a row throws and moves no head.
+    test_version_exists(): void {
+      const store = this.store_fresh();
+      store.db_create("alpha");
+      store.kv_put("/alpha/note/1", bytes_text("{}"));
+      this.raised_assert(
+        i18n("substrate.version_exists", "note/1", "alpha"),
+        () => store.doc_put("alpha", "note", { 0: { t: "note" } }),
+      );
+      this.raised_assert(i18n("substrate.id_missing", "note", "alpha"), () =>
+        store.doc_head("alpha", "note"),
+      );
+      this.assertEqual(store.seq_get("alpha"), 1);
+    }
+
+    // A nested document is stored as the text the wire's encoder writes.
+    test_nested_text(): void {
+      const store = this.store_fresh();
+      store.db_create("alpha");
+      const ref = store.doc_put("alpha", "nest", nested_make()).ref;
+      const stored = store.kv_get(ref).data as Uint8Array;
+      const line = jslb.line_make(jslb.header_make("doc.put"), [], {
+        db: "alpha",
+        id: "nest",
+        body: nested_make(),
+      });
+      this.assertEqual(jslb.line_encode(line), [
+        bytes_join([
+          bytes_text('{"0":{"t":"doc.put"},"db":"alpha","id":"nest","body":'),
+          stored,
+          bytes_text("}\r"),
+        ]),
+      ]);
+      this.assertEqual(store.doc_get(ref), nested_make());
+    }
+
     // Encoding moves refs into shared headers and decoding restores them.
     test_round_trip(): void {
       const encoded = substrate.doc_encode(fog_normal());
@@ -1339,7 +1466,7 @@ namespace test_substrate {
       const root = this.root_make();
       this.raw_run(`${root}/beta.sqlite`, "c", [
         { sql: "CREATE TABLE note (text TEXT)" },
-        { sql: "INSERT INTO note VALUES (?)", bind: [text_wide] },
+        { sql: "INSERT INTO note VALUES (?)", bind: [constants.text_wide] },
       ]);
       const store = this.store_make(root, cache_make(), true);
       this.assertEqual(store.db_open("beta"), 0);
@@ -1351,7 +1478,7 @@ namespace test_substrate {
         "note",
       ]);
       this.assertEqual(rows_query(store, "beta", "SELECT text FROM note"), [
-        [text_wide],
+        [constants.text_wide],
       ]);
     }
 
@@ -1395,6 +1522,27 @@ namespace test_substrate {
       this.raised_assert(i18n("substrate.db_closed", "gamma"), () =>
         store.db_close("gamma"),
       );
+      this.assertEqual(store.seq_get("alpha"), 0);
+    }
+
+    // A create whose schema fails throws it, leaves no file, and is redone.
+    test_create_failed(): void {
+      const root = this.root_make();
+      // The failure the test makes where the schema is written.
+      const schema_stop = (): never => {
+        throw new Error(constants.schema_message);
+      };
+      const prefix = constants.schema_create;
+      const pool = pool_stopped(this.pool_get(), schema_stop, prefix);
+      const failing = this.store_make(root, cache_make(), true, pool);
+      this.raised_assert(constants.schema_message, () =>
+        failing.db_create("alpha"),
+      );
+      this.assertEqual(this.files_under(root), []);
+      this.assertEqual(failing.db_list(), []);
+      this.assertEqual(this.lines_of(failing), []);
+      const store = this.store_make(root, cache_make(), true);
+      store.db_create("alpha");
       this.assertEqual(store.seq_get("alpha"), 0);
     }
 
@@ -1474,12 +1622,12 @@ namespace test_substrate {
       const store = this.store_make(root, cache, true);
       store.db_create("alpha");
       store.db_create("beta");
-      const alone = bytes_reversed(value_over);
+      const alone = bytes_reversed(value_over());
       const alone_name = utility.sha256_hex(alone);
-      const shared_name = utility.sha256_hex(value_over);
-      store.kv_put("/alpha/shared", value_over);
+      const shared_name = utility.sha256_hex(value_over());
+      store.kv_put("/alpha/shared", value_over());
       store.kv_put("/alpha/alone", alone);
-      store.kv_put("/beta/shared", value_over);
+      store.kv_put("/beta/shared", value_over());
       this.lines_answer(store);
       store.db_drop("alpha");
       this.assertEqual(this.files_under(root), ["beta.sqlite"]);
@@ -1503,8 +1651,8 @@ namespace test_substrate {
     test_refs_both(): void {
       const store = this.store_fresh();
       store.db_create("alpha");
-      const key = "greeting/" + text_wide;
-      const value = bytes_text("hello " + text_wide);
+      const key = "greeting/" + constants.text_wide;
+      const value = bytes_text("hello " + constants.text_wide);
       const digest = utility.sha256_hex(value);
       const row = { k: key, size: value.length, sha256: digest };
       this.assertEqual(store.kv_put("/alpha/" + key, value), { row, seq: 1 });
@@ -1525,19 +1673,6 @@ namespace test_substrate {
       this.raised_assert(i18n("substrate.key_missing", key, "alpha"), () =>
         store.kv_get("/alpha/" + key),
       );
-      this.raised_assert(i18n("substrate.ref_internal", "world"), () =>
-        store.kv_put("world", world),
-      );
-      this.raised_assert(
-        i18n("substrate.ref_both", "/alpha/world", "alpha"),
-        () => store.kv_get("/alpha/world", "alpha"),
-      );
-      this.raised_assert(i18n("substrate.db_closed", "beta"), () =>
-        store.kv_put("/beta/world", world),
-      );
-      this.raised_assert(i18n("substrate.document_ref", "/alpha/world"), () =>
-        store.doc_get("/alpha/world"),
-      );
     }
 
     // A value of exactly `overflow_bytes` stays in its row, one byte more not.
@@ -1546,16 +1681,16 @@ namespace test_substrate {
       const cache = cache_make();
       const store = this.store_make(root, cache, true);
       store.db_create("alpha");
-      store.kv_put("/alpha/exact", value_exact);
+      store.kv_put("/alpha/exact", value_exact());
       const exact = store.kv_get("/alpha/exact");
-      this.assertEqual(exact.data, value_exact);
+      this.assertEqual(exact.data, value_exact());
       this.assertEqual(exact.size, constants.overflow_bytes);
-      const exact_name = utility.sha256_hex(value_exact);
+      const exact_name = utility.sha256_hex(value_exact());
       this.raised_assert(i18n("substrate.cache_unknown", exact_name), () =>
         cache.cache_read(exact_name, 0, 1),
       );
-      store.kv_put("/alpha/over", value_over);
-      const name = utility.sha256_hex(value_over);
+      store.kv_put("/alpha/over", value_over());
+      const name = utility.sha256_hex(value_over());
       this.assertEqual(store.kv_get("/alpha/over"), {
         data: name,
         size: constants.overflow_bytes + 1,
@@ -1563,7 +1698,7 @@ namespace test_substrate {
       });
       this.assertEqual(
         cache.cache_read(name, 0, constants.overflow_bytes + 1),
-        value_over,
+        value_over(),
       );
     }
 
@@ -1572,29 +1707,29 @@ namespace test_substrate {
       const root = this.root_make();
       const cache = cache_make();
       const store = this.store_make(root, cache, true);
-      const name = utility.sha256_hex(value_over);
+      const name = utility.sha256_hex(value_over());
       // The bytes the cache file gives from its start, one when it is there.
-      const present = (): number => cache.cache_read(name, 0, 1).length;
+      const cache_present = (): number => cache.cache_read(name, 0, 1).length;
       store.db_create("alpha");
       store.db_create("beta");
-      store.kv_put("/alpha/one", value_over);
-      store.kv_put("/alpha/two", value_over);
-      store.kv_put("/beta/three", value_over);
+      store.kv_put("/alpha/one", value_over());
+      store.kv_put("/alpha/two", value_over());
+      store.kv_put("/beta/three", value_over());
       store.kv_delete("/alpha/one");
       this.lines_answer(store);
-      this.assertEqual(present(), 1);
+      this.assertEqual(cache_present(), 1);
       store.kv_put("/alpha/two", bytes_text("small"));
       this.lines_answer(store);
-      this.assertEqual(present(), 1);
+      this.assertEqual(cache_present(), 1);
       store.db_close("beta");
-      store.kv_put("/alpha/two", value_over);
+      store.kv_put("/alpha/two", value_over());
       store.kv_delete("/alpha/two");
       this.lines_answer(store);
-      this.assertEqual(present(), 1);
+      this.assertEqual(cache_present(), 1);
       store.db_open("beta");
       store.kv_delete("/beta/three");
       this.lines_answer(store);
-      this.raised_assert(i18n("substrate.cache_unknown", name), present);
+      this.raised_assert(i18n("substrate.cache_unknown", name), cache_present);
       this.assertEqual(store.kv_check("alpha"), 0);
     }
 
@@ -1604,8 +1739,8 @@ namespace test_substrate {
       const cache = cache_make();
       const store = this.store_make(root, cache, true);
       store.db_create("alpha");
-      const handle = sink_fill(cache, value_over);
-      const name = utility.sha256_hex(value_over);
+      const handle = sink_fill(cache, value_over());
+      const name = utility.sha256_hex(value_over());
       const size = constants.overflow_bytes + 1;
       this.assertEqual(store.kv_put("/alpha/streamed", handle), {
         row: { k: "streamed", size, sha256: name },
@@ -1615,7 +1750,7 @@ namespace test_substrate {
         cache.cache_read(handle, 0, 1),
       );
       this.assertEqual(store.kv_get("/alpha/streamed").data, name);
-      const small = sink_fill(cache, value_exact);
+      const small = sink_fill(cache, value_exact());
       this.raised_assert(
         i18n(
           "substrate.file_small",
@@ -1632,45 +1767,8 @@ namespace test_substrate {
     }
   }
 
-  // Documents in a store: versions and heads, canonical text, refusals.
+  // Documents in a store: stored text and numbers, wide versions, refusals.
   export class TestStored extends StoreCase {
-    // Each put writes the next version and moves the head, versions stay.
-    test_document_heads(): void {
-      const store = this.store_fresh();
-      const db = "castle_gatehouse";
-      store.db_create(db);
-      const first = store.doc_put(db, "scene/arrival", arrival_make());
-      this.assertEqual(first, {
-        ref: "/castle_gatehouse/scene/arrival/1",
-        seq: 1,
-      });
-      this.assertEqual(store.doc_head(db, "scene/arrival"), first.ref);
-      this.assertEqual(store.kv_get(first.ref).data, bytes_text(arrival_text));
-      const changed = { ...arrival_make(), subtitle: "The keeper waves." };
-      const second = store.doc_put(db, "scene/arrival", changed);
-      this.assertEqual(second, {
-        ref: "/castle_gatehouse/scene/arrival/2",
-        seq: 2,
-      });
-      this.assertEqual(store.doc_head(db, "scene/arrival"), second.ref);
-      this.assertEqual(store.doc_get(first.ref), arrival_make());
-      const text = utility.json_text(store.doc_get(first.ref));
-      this.assertEqual(text, arrival_text);
-      this.assertEqual(store.doc_get("scene/arrival/2", db), changed);
-      this.raised_assert(
-        i18n("substrate.id_missing", "scene/absent", db),
-        () => store.doc_head(db, "scene/absent"),
-      );
-      this.raised_assert(
-        i18n("substrate.key_missing", "scene/arrival/3", db),
-        () => store.doc_get("/castle_gatehouse/scene/arrival/3"),
-      );
-      this.raised_assert(
-        i18n("substrate.document_ref", "/castle_gatehouse/scene/arrival"),
-        () => store.doc_get("/castle_gatehouse/scene/arrival"),
-      );
-    }
-
     // An encoded document is stored and read back as the same text.
     test_stored_trip(): void {
       const store = this.store_fresh();
@@ -1685,40 +1783,35 @@ namespace test_substrate {
       this.assertEqual(substrate.doc_decode(stored), fog_normal());
     }
 
-    // A put whose next version is already a row throws and moves no head.
-    test_version_exists(): void {
+    // Numbers below 1e-4 are stored as Python's `repr` writes them.
+    test_numbers_small(): void {
       const store = this.store_fresh();
       store.db_create("alpha");
-      store.kv_put("/alpha/note/1", bytes_text("{}"));
-      this.raised_assert(
-        i18n("substrate.version_exists", "note/1", "alpha"),
-        () => store.doc_put("alpha", "note", { 0: { t: "note" } }),
+      const body = { 0: { t: "note" }, a: 0.00001, b: -1.5e-7, c: 0.0001 };
+      const ref = store.doc_put("alpha", "note", body).ref;
+      this.assertEqual(
+        store.kv_get(ref).data,
+        bytes_text('{"0":{"t":"note"},"a":1e-05,"b":-1.5e-07,"c":0.0001}'),
       );
-      this.raised_assert(i18n("substrate.id_missing", "note", "alpha"), () =>
-        store.doc_head("alpha", "note"),
-      );
-      this.assertEqual(store.seq_get("alpha"), 1);
     }
 
-    // A nested document is stored as the text the wire's encoder writes.
-    test_nested_text(): void {
+    // A head past 2^53 moves to the exact next version, as in Python.
+    test_version_wide(): void {
       const store = this.store_fresh();
       store.db_create("alpha");
-      const ref = store.doc_put("alpha", "nest", nested_make()).ref;
-      const stored = store.kv_get(ref).data as Uint8Array;
-      const line = jslb.line_make(jslb.header_make("doc.put"), [], {
-        db: "alpha",
-        id: "nest",
-        body: nested_make(),
-      });
-      this.assertEqual(jslb.line_encode(line), [
-        bytes_join([
-          bytes_text('{"0":{"t":"doc.put"},"db":"alpha","id":"nest","body":'),
-          stored,
-          bytes_text("}\r"),
-        ]),
+      store.sql_run("alpha", [
+        {
+          sql: "INSERT INTO _head (id, version) VALUES (?, ?)",
+          params: ["note", "9007199254740993"],
+        },
       ]);
-      this.assertEqual(store.doc_get(ref), nested_make());
+      const put = store.doc_put("alpha", "note", { 0: { t: "note" } });
+      this.assertEqual(put.ref, "/alpha/note/9007199254740994");
+      this.assertEqual(store.doc_head("alpha", "note"), put.ref);
+      const head = "SELECT CAST(version AS TEXT) FROM _head";
+      this.assertEqual(rows_query(store, "alpha", head), [
+        ["9007199254740994"],
+      ]);
     }
 
     // Values JSON or the wire cannot carry, and bad ids and headers, throw.
@@ -1765,7 +1858,7 @@ namespace test_substrate {
 
   // Turns: appended in order, listed, and compacted into one summary.
   export class TestTurns extends StoreCase {
-    // Turns number from 1 in their scene, a bad scene throws.
+    // Turns number from 1 in their scene, a bad scene or content throws.
     test_turns_append(): void {
       const store = this.store_fresh();
       store.db_create("metaverse");
@@ -1773,7 +1866,7 @@ namespace test_substrate {
       const user: provider.ChatMessage = { role: "user", content: "1" };
       const answer: provider.ChatMessage = {
         role: "assistant",
-        content: text_wide,
+        content: constants.text_wide,
       };
       this.assertEqual(store.turn_append(scene, "user", user), {
         n: 1,
@@ -1793,6 +1886,16 @@ namespace test_substrate {
           store.turn_append(bad, "user", user),
         );
       }
+      this.sqlite_assert("CHECK constraint failed: json_valid(content)", () =>
+        store.sql_run("metaverse", [
+          {
+            sql:
+              "INSERT INTO _turn (scene, n, role, content)" +
+              " VALUES (?, ?, ?, ?)",
+            params: [scene, 3, "user", "not json"],
+          },
+        ]),
+      );
       this.assertEqual(store.seq_get("metaverse"), 2);
     }
 
@@ -2019,7 +2122,7 @@ namespace test_substrate {
       const store = this.store_fresh();
       store.db_create("alpha");
       // Runs one statement in `alpha`.
-      const run = (sql: string, params: unknown[]): void => {
+      const statement_run = (sql: string, params: unknown[]): void => {
         store.sql_run("alpha", [{ sql, params }]);
       };
       this.assertEqual(store.kv_put("/alpha/a", bytes_text("one")).seq, 1);
@@ -2027,13 +2130,13 @@ namespace test_substrate {
       this.assertEqual(store.kv_put("/alpha/a", bytes_text("two")).seq, 2);
       this.assertEqual(store.kv_delete("/alpha/absent"), 2);
       this.assertEqual(store.kv_delete("/alpha/a"), 3);
-      run("SELECT 1", []);
+      statement_run("SELECT 1", []);
       this.assertEqual(store.seq_get("alpha"), 3);
-      run("CREATE TABLE t (x TEXT)", []);
+      statement_run("CREATE TABLE t (x TEXT)", []);
       this.assertEqual(store.seq_get("alpha"), 4);
-      run("INSERT INTO t VALUES (?)", ["a"]);
+      statement_run("INSERT INTO t VALUES (?)", ["a"]);
       this.assertEqual(store.seq_get("alpha"), 5);
-      run("UPDATE t SET x = ? WHERE x = ?", ["b", "absent"]);
+      statement_run("UPDATE t SET x = ? WHERE x = ?", ["b", "absent"]);
       this.assertEqual(store.seq_get("alpha"), 5);
       this.sqlite_assert("no such table: absent", () =>
         store.sql_run("alpha", [
@@ -2060,7 +2163,7 @@ namespace test_substrate {
       this.lines_answer(store);
       this.raised_assert("rolled back", () =>
         store.transaction_run(() => {
-          store.kv_put("/alpha/d", value_over);
+          store.kv_put("/alpha/d", value_over());
           store.kv_delete("/alpha/a");
           throw new Error("rolled back");
         }),
@@ -2109,8 +2212,11 @@ namespace test_substrate {
       const store = this.store_make(root, first, true);
       store.db_create("alpha");
       store.kv_put("/alpha/a", bytes_text("one"));
-      store.kv_put("/alpha/big", value_over);
-      store.doc_put("alpha", "note", { 0: { t: "note" }, text: text_wide });
+      store.kv_put("/alpha/big", value_over());
+      store.doc_put("alpha", "note", {
+        0: { t: "note" },
+        text: constants.text_wide,
+      });
       store.turn_append("/alpha/scene/1", "user", {
         role: "user",
         content: "hi",
@@ -2124,11 +2230,11 @@ namespace test_substrate {
       const again = this.store_make(root, cache, true);
       this.assertEqual(again.db_open("alpha"), 4);
       this.assertEqual(again.kv_get("/alpha/a").data, bytes_text("one"));
-      const name = utility.sha256_hex(value_over);
+      const name = utility.sha256_hex(value_over());
       this.assertEqual(again.kv_get("/alpha/big").data, name);
       this.assertEqual(
         cache.cache_read(name, 0, constants.overflow_bytes + 1),
-        value_over,
+        value_over(),
       );
     }
   }
@@ -2142,7 +2248,7 @@ namespace test_substrate {
       store.kv_put("/alpha/a", bytes_text("one"));
       store.sql_run("alpha", [
         { sql: "CREATE TABLE t (x TEXT)", params: [] },
-        { sql: "INSERT INTO t VALUES (?)", params: [text_wide] },
+        { sql: "INSERT INTO t VALUES (?)", params: [constants.text_wide] },
       ]);
       const snapshot = store.db_snapshot("alpha");
       this.assertEqual(
@@ -2209,6 +2315,38 @@ namespace test_substrate {
         "alpha.sqlite-restore",
       ]);
       this.assertEqual(store.seq_get("alpha"), 0);
+    }
+
+    // Two snapshots of one database taken apart hold their own bytes and seq.
+    test_snapshots_apart(): void {
+      const store = this.store_fresh();
+      store.db_create("alpha");
+      const first = store.db_snapshot("alpha");
+      store.kv_put("/alpha/a", bytes_text("one"));
+      const second = store.db_snapshot("alpha");
+      this.assertEqual([first.seq, second.seq], [0, 1]);
+      this.assertFalse(
+        utility.sha256_hex(first.data) === utility.sha256_hex(second.data),
+      );
+    }
+
+    // A cached value stays held through a snapshot and its restore.
+    test_value_held(): void {
+      const cache = cache_make();
+      const store = this.store_make(this.root_make(), cache, true);
+      store.db_create("alpha");
+      store.kv_put("/alpha/big", value_over());
+      this.lines_answer(store);
+      const snapshot = store.db_snapshot("alpha");
+      this.assertEqual(store.db_restore("alpha", snapshot.data), snapshot.seq);
+      const name = utility.sha256_hex(value_over());
+      const size = constants.overflow_bytes + 1;
+      this.assertEqual(store.kv_get("/alpha/big"), {
+        data: name,
+        size,
+        sha256: name,
+      });
+      this.assertEqual(cache.cache_read(name, 0, size), value_over());
     }
   }
 
@@ -2300,8 +2438,8 @@ namespace test_substrate {
       const store = this.store_make(root, cache, true);
       store.db_create("alpha");
       this.lines_answer(store);
-      const name = utility.sha256_hex(value_over);
-      store.kv_put("/alpha/big", value_over);
+      const name = utility.sha256_hex(value_over());
+      store.kv_put("/alpha/big", value_over());
       store.kv_put("/alpha/big", bytes_text("small"));
       const [held, small] = this.lines_of(store).splice(0);
       this.assertEqual(
@@ -2312,7 +2450,7 @@ namespace test_substrate {
       this.assertEqual((held[1] as lines.BlobHeader).d, name);
       this.assertEqual(
         cache.cache_read(name, 0, constants.overflow_bytes + 1),
-        value_over,
+        value_over(),
       );
       store.forward_done(held, reply_make(held));
       this.raised_assert(i18n("substrate.cache_unknown", name), () =>
@@ -2413,8 +2551,8 @@ namespace test_substrate {
       const second_cache = cache_make();
       const first = this.store_make(first_root, first_cache, true);
       const second = this.store_make(second_root, second_cache, true);
-      this.hello_make(first, first_root);
-      this.hello_make(second, second_root);
+      this.hello_make(first);
+      this.hello_make(second);
       for (const record of recorded_make()) {
         const line = this.modifier_call(first, record);
         const note = `${record.type} since ${String(record.since)}`;
@@ -2466,8 +2604,9 @@ namespace test_substrate {
       const k = "/_files/script/step_tide.js";
       const data = bytes_text(constants.step_script);
       second.kv_put(k, data);
-      this.raised_assert(constants.desync_message, () =>
-        second.operation_apply("kv.put", 3, { k, data }),
+      this.raised_assert(
+        i18n("substrate.since_stale", "kv.put", 3, 4, "_files"),
+        () => second.operation_apply("kv.put", 3, { k, data }),
       );
       this.assertEqual(second.seq_get("_files"), 4);
     }
@@ -2505,37 +2644,54 @@ namespace test_substrate {
       this.assertEqual(store.db_list(), []);
     }
 
-    // A stale `doc.put`, `turn.append` or `sql.run` throws and writes nothing.
-    test_stale_writes(): void {
+    // A stale `doc.put` throws and writes no version.
+    test_stale_document(): void {
       const store = this.store_fresh();
       store.db_create("alpha");
-      const scene = "/alpha/scene/1";
-      // The message of a stale `since` 1 for the type in `alpha`.
-      const stale = (type: string): string =>
-        i18n("substrate.since_stale", type, 1, 0, "alpha");
-      this.raised_assert(stale("doc.put"), () =>
-        store.operation_apply("doc.put", 1, {
-          db: "alpha",
-          id: "note",
-          body: { 0: { t: "note" } },
-        }),
+      this.raised_assert(
+        i18n("substrate.since_stale", "doc.put", 1, 0, "alpha"),
+        () =>
+          store.operation_apply("doc.put", 1, {
+            db: "alpha",
+            id: "note",
+            body: { 0: { t: "note" } },
+          }),
       );
       this.raised_assert(i18n("substrate.id_missing", "note", "alpha"), () =>
         store.doc_head("alpha", "note"),
       );
-      this.raised_assert(stale("turn.append"), () =>
-        store.operation_apply("turn.append", 1, {
-          scene,
-          role: "user",
-          content: { role: "user", content: "1" },
-        }),
+      this.assertEqual(store.seq_get("alpha"), 0);
+    }
+
+    // A stale `turn.append` throws and appends no turn.
+    test_stale_turn(): void {
+      const store = this.store_fresh();
+      store.db_create("alpha");
+      const scene = "/alpha/scene/1";
+      this.raised_assert(
+        i18n("substrate.since_stale", "turn.append", 1, 0, "alpha"),
+        () =>
+          store.operation_apply("turn.append", 1, {
+            scene,
+            role: "user",
+            content: { role: "user", content: "1" },
+          }),
       );
       this.assertEqual(store.turn_list(scene), []);
-      this.raised_assert(stale("sql.run"), () =>
-        store.operation_apply("sql.run", 1, {
-          db: "alpha",
-          statements: [{ sql: "CREATE TABLE note (x TEXT)", params: [] }],
-        }),
+      this.assertEqual(store.seq_get("alpha"), 0);
+    }
+
+    // A stale `sql.run` throws and runs no statement.
+    test_stale_sql(): void {
+      const store = this.store_fresh();
+      store.db_create("alpha");
+      this.raised_assert(
+        i18n("substrate.since_stale", "sql.run", 1, 0, "alpha"),
+        () =>
+          store.operation_apply("sql.run", 1, {
+            db: "alpha",
+            statements: [{ sql: "CREATE TABLE note (x TEXT)", params: [] }],
+          }),
       );
       this.assertEqual(tables_list(store, "alpha"), [
         "_head",
@@ -2622,30 +2778,36 @@ namespace test_substrate {
       this.assertEqual(store.seq_get("alpha"), 0);
     }
 
-    // Makes `_files` at `seq` 1 and `metaverse` at 5, as a hello names them.
-    hello_make(store: substrate.Store, root: string): void {
-      const hello: [string, number, string[]][] = [
-        ["_files", 1, []],
-        ["metaverse", 5, [constants.universe_sql]],
+    // Makes the databases the replay starts from by writes, each counted.
+    hello_make(store: substrate.Store): void {
+      store.db_create("_files");
+      store.db_create("metaverse");
+      store.sql_run("metaverse", [
+        { sql: constants.universe_sql, params: [] },
+      ]);
+      store.doc_put("metaverse", "hyperposition", {
+        0: { t: "scene" },
+        subtitle: "How can I help you?",
+      });
+      const values: [string, string][] = [
+        ["/_files/script/bootstrap.js", "// Makes a universe.\n"],
+        ["/metaverse/player", "player"],
+        ["/metaverse/world", "metaverse"],
+        ["/metaverse/scene", constants.scene],
       ];
-      for (const [name, seq, tables] of hello) {
-        store.db_create(name);
-        store.db_close(name);
-        const statements: substrate.ExecOptions[] = tables.map((sql) => ({
-          sql,
-        }));
-        statements.push({
-          sql: "UPDATE _meta SET value = ? WHERE name = 'seq'",
-          bind: [String(seq)],
-        });
-        this.raw_run(`${root}/${name}.sqlite`, "w", statements);
-        this.assertEqual(store.db_open(name), seq);
+      for (const [ref, text] of values) {
+        store.kv_put(ref, bytes_text(text));
       }
+      this.assertEqual(store.seq_get("_files"), 1);
+      this.assertEqual(store.seq_get("metaverse"), 5);
       this.lines_of(store).splice(0);
     }
 
     // Makes a forwarded operation's call and returns the one line it sent.
-    modifier_call(store: substrate.Store, record: Recorded): lines.Line {
+    modifier_call(
+      store: substrate.Store,
+      record: RecordedOperation,
+    ): lines.Line {
       const fields = record.fields;
       const calls: { [type: string]: () => unknown } = {
         // A value under an external ref.
@@ -2688,9 +2850,9 @@ namespace test_substrate {
       const store = this.store_fresh();
       store.db_create("alpha");
       store.db_create("beta");
-      store.kv_put("/alpha/big", value_over);
+      store.kv_put("/alpha/big", value_over());
       store.kv_put("/alpha/small", bytes_text("small"));
-      store.kv_put("/beta/big", bytes_reversed(value_over));
+      store.kv_put("/beta/big", bytes_reversed(value_over()));
       const cached = constants.overflow_bytes + 1;
       const databases = [
         stats_measured(store, "alpha", cached),
@@ -2753,12 +2915,12 @@ namespace test_substrate {
       const store = this.store_make(root, cache, true);
       store.db_create("alpha");
       store.db_create("beta");
-      const alone = bytes_reversed(value_over);
+      const alone = bytes_reversed(value_over());
       const alone_name = utility.sha256_hex(alone);
-      const shared_name = utility.sha256_hex(value_over);
-      store.kv_put("/alpha/shared", value_over);
+      const shared_name = utility.sha256_hex(value_over());
+      store.kv_put("/alpha/shared", value_over());
       store.kv_put("/alpha/alone", alone);
-      store.kv_put("/beta/shared", value_over);
+      store.kv_put("/beta/shared", value_over());
       this.lines_answer(store);
       store.db_unload("alpha");
       this.assertEqual(this.files_under(root), ["beta.sqlite"]);
@@ -2787,24 +2949,29 @@ namespace test_substrate {
       );
     }
 
-    // Unloading or loading waits for the lines in flight, then loads back.
+    // Unloading and loading go on with lines in flight, which end after.
     test_load_pending(): void {
-      const store = this.store_fresh();
+      const cache = cache_make();
+      const store = this.store_make(this.root_make(), cache, true);
       store.db_create("alpha");
       store.kv_put("/alpha/a", bytes_text("one"));
       const snapshot = store.db_snapshot("alpha");
       this.lines_answer(store);
-      store.kv_put("/alpha/b", bytes_text("two"));
-      const pending = i18n("substrate.forward_pending", "alpha", 1);
-      this.raised_assert(pending, () => store.db_unload("alpha"));
-      this.raised_assert(pending, () => store.db_load("alpha", snapshot.data));
-      this.lines_answer(store);
+      store.kv_put("/alpha/big", value_over());
       store.db_unload("alpha");
+      const name = utility.sha256_hex(value_over());
+      this.assertEqual(cache.cache_read(name, 0, 1).length, 1);
       this.assertEqual(store.db_load("alpha", snapshot.data), 1);
       this.assertEqual(store.db_list(), ["alpha"]);
       this.assertEqual(store.kv_get("/alpha/a").data, bytes_text("one"));
-      this.raised_assert(i18n("substrate.key_missing", "b", "alpha"), () =>
-        store.kv_get("/alpha/b"),
+      this.raised_assert(i18n("substrate.key_missing", "big", "alpha"), () =>
+        store.kv_get("/alpha/big"),
+      );
+      this.assertEqual(store.kv_put("/alpha/b", bytes_text("two")).seq, 2);
+      this.assertEqual(this.lines_of(store).length, 2);
+      this.lines_answer(store);
+      this.raised_assert(i18n("substrate.cache_unknown", name), () =>
+        cache.cache_read(name, 0, 1),
       );
       this.assertEqual(this.lines_of(store), []);
     }
@@ -2852,9 +3019,9 @@ namespace test_substrate {
     test_value_filled(): void {
       const cache = cache_make();
       const store = this.store_make(this.root_make(), cache, true);
-      const other = bytes_reversed(value_over);
+      const other = bytes_reversed(value_over());
       store.db_create("alpha");
-      store.kv_put("/alpha/big", value_over);
+      store.kv_put("/alpha/big", value_over());
       store.kv_put("/alpha/other", other);
       store.kv_put("/alpha/small", bytes_text("small"));
       this.lines_answer(store);
@@ -2864,7 +3031,7 @@ namespace test_substrate {
       this.assertFalse(store.kv_held("/alpha/big"));
       this.assertFalse(store.kv_held("/alpha/other"));
       this.assertTrue(store.kv_held("/alpha/small"));
-      const name = utility.sha256_hex(value_over);
+      const name = utility.sha256_hex(value_over());
       this.raised_assert(i18n("substrate.cache_unknown", name), () =>
         cache.cache_read(name, 0, 1),
       );
@@ -2874,12 +3041,12 @@ namespace test_substrate {
         () => store.cache_fill("/alpha/big", other),
       );
       this.assertFalse(store.kv_held("/alpha/big"));
-      store.cache_fill("/alpha/big", sink_fill(cache, value_over));
+      store.cache_fill("/alpha/big", sink_fill(cache, value_over()));
       store.cache_fill("/alpha/other", other.slice());
       this.assertTrue(store.kv_held("/alpha/big"));
       this.assertTrue(store.kv_held("/alpha/other"));
-      const size = value_over.length;
-      this.assertEqual(cache.cache_read(name, 0, size), value_over);
+      const size = value_over().length;
+      this.assertEqual(cache.cache_read(name, 0, size), value_over());
       this.assertEqual(cache.cache_read(wrong, 0, size), other);
       this.assertEqual(store.seq_get("alpha"), 3);
       this.assertEqual(this.lines_of(store), []);
@@ -2893,8 +3060,8 @@ namespace test_substrate {
       const store = this.store_fresh();
       store.db_create("_files");
       const values: [string, Uint8Array][] = [
-        ["a", value_over],
-        ["b", bytes_reversed(value_over)],
+        ["a", value_over()],
+        ["b", bytes_reversed(value_over())],
         ["c", bytes_pattern(constants.overflow_bytes + 2)],
       ];
       for (const [key, data] of values) {
@@ -2905,14 +3072,14 @@ namespace test_substrate {
       const keep = ["/_files/b", "/metaverse/c", "c"];
       const each = constants.overflow_bytes + 1;
       // Whether each value is held, in the order of their keys.
-      const held = (): boolean[] =>
+      const values_held = (): boolean[] =>
         values.map(([key]) => store.kv_held(`/_files/${key}`));
       this.assertEqual(store.cache_evict("_files", keep, 3 * each + 1), 0);
-      this.assertEqual(held(), [true, true, true]);
+      this.assertEqual(values_held(), [true, true, true]);
       this.assertEqual(store.cache_evict("_files", keep, 2 * each + 1), 1);
-      this.assertEqual(held(), [false, true, true]);
+      this.assertEqual(values_held(), [false, true, true]);
       this.assertEqual(store.cache_evict("_files", keep, 0), 1);
-      this.assertEqual(held(), [false, true, false]);
+      this.assertEqual(values_held(), [false, true, false]);
       this.assertEqual(store.kv_list("_files", "").length, 3);
       this.assertEqual(store.seq_get("_files"), 3);
       this.assertEqual(this.lines_of(store), []);
@@ -2923,9 +3090,9 @@ namespace test_substrate {
       const store = this.store_fresh();
       store.db_create("_files");
       store.db_create("beta");
-      store.kv_put("/_files/shared", value_over);
-      store.kv_put("/beta/shared", value_over);
-      store.kv_put("/_files/alone", bytes_reversed(value_over));
+      store.kv_put("/_files/shared", value_over());
+      store.kv_put("/beta/shared", value_over());
+      store.kv_put("/_files/alone", bytes_reversed(value_over()));
       this.lines_answer(store);
       const flying = bytes_pattern(constants.overflow_bytes + 2);
       store.kv_put("/_files/flying", flying);
@@ -2948,22 +3115,23 @@ namespace test_substrate {
       const root = this.root_make();
       const slots = slots_make(constants.slot_count);
       // The stop that stands for the kill: it throws where the rung kills.
-      const stop = (): never => {
+      const kill_stop = (): never => {
         throw new Error(constants.kill_message);
       };
-      const pool = kill_pool(this.pool_get(), stop);
+      const pool = kill_pool(this.pool_get(), kill_stop);
       const cache = new substrate.CacheFiles(slots);
       const paused = this.store_make(root, cache, true, pool);
       this.raised_assert(constants.kill_message, () => kill_put(paused));
       paused.db_close(constants.kill_db);
-      const name = utility.sha256_hex(value_over);
+      const name = utility.sha256_hex(value_over());
       const after = new substrate.CacheFiles(slots);
       this.assertEqual(
         after.cache_read(name, 0, 8),
-        value_over.subarray(0, 8),
+        value_over().subarray(0, 8),
       );
       const checked = this.store_make(root, after, true);
       this.assertEqual(kill_check(checked), { rows: 0, removed: 1 });
+      this.assertEqual(checked.seq_get(constants.kill_db), 0);
       this.raised_assert(i18n("substrate.cache_unknown", name), () =>
         after.cache_read(name, 0, 1),
       );
@@ -3024,14 +3192,14 @@ namespace test_substrate {
       this.answer_get(
         table,
         request_make("kv.put", 9, {}, "/metaverse/big", [
-          jslb.blob_make(value_over.slice()),
+          jslb.blob_make(value_over().slice()),
         ]),
       );
       const big = this.answer_get(
         table,
         request_make("kv.get", 10, {}, "/metaverse/big"),
       );
-      this.assertEqual((big[1] as lines.BlobHeader).d, value_over);
+      this.assertEqual((big[1] as lines.BlobHeader).d, value_over());
     }
 
     // `sql.run`, `kv.list` and `kv.delete` answer their results and `seq`.

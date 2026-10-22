@@ -48,6 +48,7 @@ namespace worker_ai {
     rendered_type: "worker.rendered",
     opened_type: "worker.console_opened",
     put_wake: "worker.settings_put",
+    script_wake: "worker.script_fetched",
     tests_type: "worker.tests",
     handler_version: 0,
     server_name: "xsjs-browser",
@@ -119,10 +120,8 @@ namespace worker_ai {
     db_load(db: string, data: Uint8Array | string): number;
     db_list(): string[];
     kv_get(ref: lines.KvRef): substrate.KvValue;
-    kv_put(
-      ref: lines.KvRef,
-      data: Uint8Array | string,
-    ): { row: lines.KvRow; seq: number };
+    kv_held(ref: lines.KvRef): boolean;
+    cache_fill(ref: lines.KvRef, data: Uint8Array | string): void;
     sql_run(db: string, statements: lines.SqlStatement[]): lines.SqlResult[];
     doc_get(ref: lines.DocRef): lines.Document;
   }
@@ -141,13 +140,15 @@ namespace worker_ai {
     server: mcp.Client;
     hello: lines.Hello;
     full: boolean;
+    script: boolean;
     provider_attach: () => void;
   }
 
-  // A forwarded line waiting in its database's queue, and the bytes it counts.
+  // A line waiting in its database's queue, its bytes, a snapshot's port.
   interface ForwardEntry {
     line: lines.Line;
     bytes: number;
+    port?: queue.Port;
   }
 
   // What a `replicate.done` wake keeps: the line in flight and its database.
@@ -252,18 +253,25 @@ namespace worker_ai {
     return db;
   }
 
+  // The bytes of a value: a copy of its row's, or read from its cache file.
+  function value_bytes(
+    store: StartStore,
+    cache: CacheReader,
+    ref: lines.KvRef,
+  ): Uint8Array {
+    const value = store.kv_get(ref);
+    return typeof value.data === "string"
+      ? cache.cache_read(value.data, 0, value.size)
+      : value.data.slice();
+  }
+
   // The text of a value, read from the cache when it is held there.
   function value_text(
     store: StartStore,
     cache: CacheReader,
     ref: lines.KvRef,
   ): string {
-    const value = store.kv_get(ref);
-    const data =
-      typeof value.data === "string"
-        ? cache.cache_read(value.data, 0, value.size)
-        : value.data;
-    return utility.utf8_decode(data);
+    return utility.utf8_decode(value_bytes(store, cache, ref));
   }
 
   // The owner table of the AI thread, with `tap.` on the test page.
@@ -335,14 +343,16 @@ namespace worker_ai {
     // Sends the oldest line of a database that has none in flight.
     next_take(line: lines.Line): dispatch.Sleep | undefined {
       const db = line.db as string;
-      const entries = this.waiting.get(db);
       // A step finds nothing when a line of it flies or went with a step.
-      if (this.flying.has(db) || entries === undefined) {
+      if (this.flying.has(db) || !this.waiting.has(db)) {
         return undefined;
       }
-      const entry = entries.shift() as ForwardEntry;
-      if (entries.length === 0) {
-        this.waiting.delete(db);
+      const entry = this.entry_take(db);
+      const port = entry.port;
+      // A snapshot held behind the lines answered goes out, then the next.
+      if (port !== undefined) {
+        port.line_post(entry.line, []);
+        return this.next_take(line);
       }
       this.held -= entry.bytes;
       this.flying.add(db);
@@ -367,6 +377,26 @@ namespace worker_ai {
       return this.held;
     }
 
+    // Holds a snapshot behind its database's waiting lines, false if none.
+    fetch_hold(line: lines.Line, port: queue.Port): boolean {
+      const entries = this.waiting.get(line.db as string);
+      if (entries === undefined) {
+        return false;
+      }
+      entries.push({ line, bytes: 0, port });
+      return true;
+    }
+
+    // Takes the oldest entry of a database's queue, dropping an empty queue.
+    private entry_take(db: string): ForwardEntry {
+      const entries = this.waiting.get(db) as ForwardEntry[];
+      const entry = entries.shift() as ForwardEntry;
+      if (entries.length === 0) {
+        this.waiting.delete(db);
+      }
+      return entry;
+    }
+
     // Asks this thread for a step of the database.
     private next_notify(db: string): void {
       const line = line_build(constants.next_type, this.full, { db });
@@ -385,6 +415,40 @@ namespace worker_ai {
       forwards.done_take(line);
       return undefined;
     });
+  }
+
+  // The server's port, where a snapshot waits behind its database's lines.
+  export class ServerHold implements queue.Port {
+    private readonly inner: queue.Port;
+    private forwards: ForwardQueue | undefined = undefined;
+
+    // Takes the port it wraps, the wire or its tap.
+    constructor(inner: queue.Port) {
+      this.inner = inner;
+    }
+
+    // Sets the replication whose waiting lines a snapshot goes behind.
+    forwards_attach(forwards: ForwardQueue): void {
+      this.forwards = forwards;
+    }
+
+    // Posts a line, or holds a snapshot while lines of its database wait.
+    line_post(line: lines.Line, transfer: ArrayBuffer[]): void {
+      const forwards = this.forwards as ForwardQueue;
+      const type = jslb.field_get(line[0], "type");
+      if (
+        type === constants.snapshot_type &&
+        forwards.fetch_hold(line, this.inner)
+      ) {
+        return;
+      }
+      this.inner.line_post(line, transfer);
+    }
+
+    // Gives the receiver to the port it wraps.
+    line_receive(fn: (line: lines.Line) => void): void {
+      this.inner.line_receive(fn);
+    }
   }
 
   // A port that shows the lines it carries in the overlay of the wire's tty.
@@ -475,14 +539,22 @@ namespace worker_ai {
       return this.media_start();
     }
 
-    // Keeps the image the server sent in the cache and gives it to the UI.
+    // Fills back the Script the server sent, then starts the handshakes.
+    script_take(wake: lines.Line): dispatch.Sleep {
+      const replies = wake.replies as lines.Line[];
+      const data = blob_data(replies[0]);
+      this.parts.store.cache_fill(constants.script_ref, data);
+      return this.handshake_send();
+    }
+
+    // Fills back the image the server sent and gives it to the UI.
     fetched_take(wake: lines.Line): dispatch.Sleep {
       const view = wake.state as SceneView;
       const replies = wake.replies as lines.Line[];
       const image = view.image as string;
-      const { row } = this.parts.store.kv_put(image, blob_data(replies[0]));
-      const bytes = this.parts.cache.cache_read(row.sha256, 0, row.size);
-      return this.store_submit(view, bytes);
+      const { store, cache } = this.parts;
+      store.cache_fill(image, blob_data(replies[0]));
+      return this.store_submit(view, value_bytes(store, cache, image));
     }
 
     // Renders the scene once the UI holds its image.
@@ -559,29 +631,40 @@ namespace worker_ai {
       return open.includes(image_db) ? undefined : image_db;
     }
 
-    // Adds the provider's port and starts both MCP handshakes.
+    // Asks the server for the scripted provider's Script when not held.
     private handshake_start(): dispatch.Sleep {
+      const { tasks, store, full, script } = this.parts;
+      const ref = constants.script_ref;
+      if (script && !store.kv_held(ref)) {
+        const ask = line_build(constants.get_type, full, {}, [], ref);
+        const id = tasks.task_submit(ask, constants.server_owner);
+        return dispatch.task_sleep({}, [id], constants.script_wake);
+      }
+      return this.handshake_send();
+    }
+
+    // Adds the provider's port and starts both MCP handshakes.
+    private handshake_send(): dispatch.Sleep {
       const { browser, server } = this.parts;
       this.parts.provider_attach();
       const ids = [browser.initialize_send(), server.initialize_send()];
       return dispatch.task_sleep({}, ids, constants.initialized_type);
     }
 
-    // Gives the UI the scene's image: from its row, or the server's cache.
+    // Gives the UI the scene's image: held here, or asked of the server.
     private media_start(): dispatch.Sleep {
-      const { tasks, store, full } = this.parts;
+      const { tasks, store, cache, full } = this.parts;
       const view = this.scene_read(this.scene_current());
       const image = view.image;
       if (image === undefined) {
         return this.render_submit(view);
       }
-      const value = store.kv_get(image);
-      if (typeof value.data === "string") {
+      if (!store.kv_held(image)) {
         const ask = line_build(constants.get_type, full, {}, [], image);
         const id = tasks.task_submit(ask, constants.server_owner);
         return dispatch.task_sleep(view, [id], constants.fetched_type);
       }
-      return this.store_submit(view, value.data.slice());
+      return this.store_submit(view, value_bytes(store, cache, image));
     }
 
     // Gives the UI the image's bytes and sleeps until it holds them.
@@ -641,6 +724,9 @@ namespace worker_ai {
     register(constants.snapshot_wake, version, (line) =>
       chain.snapshot_take(line),
     );
+    register(constants.script_wake, version, (line) =>
+      chain.script_take(line),
+    );
     register(constants.initialized_type, version, (line) =>
       chain.initialized_take(line),
     );
@@ -688,13 +774,13 @@ namespace worker_ai {
     tasks: queue.TaskQueue,
     store: StartStore,
     cache: CacheReader,
+    scripted: boolean,
   ): void {
-    const port =
-      settings.settings_get(constants.scripted_setting) === true
-        ? new provider_script.ScriptPort(script_read(store, cache))
-        : new http.HttpPort(
-            settings.settings_get(constants.timeout_setting) as number,
-          );
+    const port = scripted
+      ? new provider_script.ScriptPort(script_read(store, cache))
+      : new http.HttpPort(
+          settings.settings_get(constants.timeout_setting) as number,
+        );
     tasks.port_add(constants.provider_owner, port);
   }
 
@@ -733,31 +819,49 @@ namespace worker_ai {
   export function settings_register(
     tasks: queue.TaskQueue,
     register: HandlerRegister,
+    live: settings.Settings,
   ): void {
     const version = constants.handler_version;
-    // Submits the settings to the server, which rewrites its file.
+    // Changes this thread's live settings, then submits them to the server.
     register(constants.put_type, version, (line) => {
+      const payload = jslb.payload_of(line);
+      // A copy, so a later change of the live value cannot alter the line.
+      Object.assign(live, JSON.parse(utility.json_text(payload.settings)));
       const header = jslb.header_make(constants.put_type, {
         full: full_of(line),
       });
-      const copy = jslb.line_make(header, [], jslb.payload_of(line));
+      const copy = jslb.line_make(header, [], payload);
       const id = tasks.task_submit(copy, constants.server_owner);
       return dispatch.task_sleep(null, [id], constants.put_wake);
     });
     register(constants.put_wake, version, () => undefined);
   }
 
-  // Posts one rendered line of the wire to the UI's overlay of its tty.
-  function overlay_post(
+  // What takes each rendered line of the wire: tty 1's overlay, then `log`.
+  export function note_make(
     tasks: queue.TaskQueue,
     full: boolean,
-    text: string,
-  ): void {
-    const line = line_build(constants.overlay_type, full, {
-      tty: constants.wire_tty,
-      text,
-    });
-    tasks.line_notify(line, constants.ui_owner);
+    log: (text: string) => void,
+  ): (text: string) => void {
+    return (text: string) => {
+      const line = line_build(constants.overlay_type, full, {
+        tty: constants.wire_tty,
+        text,
+      });
+      tasks.line_notify(line, constants.ui_owner);
+      log(text);
+    };
+  }
+
+  // Synchronous mode, from `queue_synchronous`, which needs debug mode.
+  export function synchronous_read(
+    settings_get: (id: string) => unknown,
+  ): boolean {
+    const synchronous = settings_get(constants.synchronous_setting) === true;
+    if (synchronous && settings_get(constants.debug_setting) !== true) {
+      throw new Error(i18n("worker_ai.synchronous_release"));
+    }
+    return synchronous;
   }
 
   // The console port, whose close the UI hears as `console.exit`.
@@ -782,17 +886,14 @@ namespace worker_ai {
   ): queue.TaskQueue {
     const value = (jslb.payload_of(hello) as unknown as lines.Hello).settings;
     settings.settings_set(value);
-    const synchronous = settings.settings_get(
-      constants.synchronous_setting,
-    ) as boolean;
     const tasks = new queue.TaskQueue(
       constants.thread,
       owners_make(test),
-      synchronous,
+      synchronous_read(settings.settings_get),
     );
     tasks.sink_attach(verbose.sink_set, settings.settings_get);
     tasks.port_add(constants.ui_owner, new queue.ThreadPort(ui));
-    settings_register(tasks, dispatch.handler_register);
+    settings_register(tasks, dispatch.handler_register, value);
     settings.sender_register((put: lines.SettingsPut) => {
       const line = line_build(constants.put_type, names_full(), {
         settings: put.settings,
@@ -806,7 +907,7 @@ namespace worker_ai {
   function hello_answer(
     tasks: queue.TaskQueue,
     hello: lines.Line,
-    server: wire.WirePort,
+    server: queue.Port,
   ): void {
     const value = (jslb.payload_of(hello) as unknown as lines.Hello).settings;
     const line = line_build(constants.settings_type, names_full(), {
@@ -822,9 +923,13 @@ namespace worker_ai {
     const tasks = thread_open(start.hello, start.ui, false);
     const full = names_full();
     const debug = settings.settings_get(constants.debug_setting) === true;
-    const server = debug
-      ? new WireTap(start.wire, (text) => overlay_post(tasks, full, text))
-      : start.wire;
+    const scripted =
+      settings.settings_get(constants.scripted_setting) === true;
+    const tap = debug
+      ? new WireTap(start.wire, note_make(tasks, full, verbose.log))
+      : undefined;
+    const wire_port: queue.Port = tap ?? start.wire;
+    const server = new ServerHold(wire_port);
     tasks.port_add(constants.server_owner, server);
     const console_port = console_make(tasks, start.base_url, full);
     tasks.port_add(constants.console_owner, console_port);
@@ -846,6 +951,7 @@ namespace worker_ai {
       settings.settings_get,
       full,
     );
+    server.forwards_attach(forwards);
     store.forward_set((line: lines.Line) => forwards.line_add(line), full);
     forwards_register(forwards, dispatch.handler_register);
     store.handlers_register(dispatch.handler_register);
@@ -853,10 +959,7 @@ namespace worker_ai {
       constants.server_name,
       constants.mcp_version,
     );
-    const info = info_read(
-      hello,
-      settings.settings_get(constants.scripted_setting) === true,
-    );
+    const info = info_read(hello, scripted);
     tools_browser.tools_register(
       mcp_server,
       store,
@@ -904,10 +1007,12 @@ namespace worker_ai {
       server: server_client,
       hello,
       full,
-      provider_attach: () => provider_attach(tasks, store, start.cache),
+      script: scripted,
+      provider_attach: () =>
+        provider_attach(tasks, store, start.cache, scripted),
     });
     chain_register(chain, dispatch.handler_register);
-    hello_answer(tasks, start.hello, start.wire);
+    hello_answer(tasks, start.hello, wire_port);
     const begin = line_build(constants.start_type, full, {});
     tasks.line_notify(begin, constants.thread);
   }

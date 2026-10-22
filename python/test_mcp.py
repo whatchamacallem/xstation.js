@@ -178,14 +178,14 @@ class TestServer(unittest.TestCase):
         )
 
     # The listed tools equal the API file entry by entry, key order included.
-    def test_tools_list_shape(self) -> None:
+    def test_list_shape(self) -> None:
         response = _response_get(self.server, _request_make(2, "tools/list"))
         tools = response["result"]["tools"]
         self.assertEqual(_text_make(tools), _text_make(self.entries))
         self.assertEqual(len(tools), 4)
 
     # Only a permit tool carries `_meta`.
-    def test_tools_list_permit(self) -> None:
+    def test_list_permit(self) -> None:
         response = _response_get(self.server, _request_make(2, "tools/list"))
         tools = response["result"]["tools"]
         self.assertEqual(
@@ -262,7 +262,7 @@ class TestServer(unittest.TestCase):
         self.assertIn("ValueError: boom", response["error"]["data"]["stack"])
 
     # An `RpcError` of a tool function keeps its code and data.
-    def test_call_rpc_error(self) -> None:
+    def test_error_kept(self) -> None:
         self.failing_register(mcp.RpcError(-32000, "no", {"why": 1}))
         params = {"name": "fail", "arguments": {}}
         response = _response_get(
@@ -275,7 +275,7 @@ class TestServer(unittest.TestCase):
         )
 
     # An `RpcError` with no data answers an error with no `data` member.
-    def test_call_rpc_bare(self) -> None:
+    def test_data_absent(self) -> None:
         self.failing_register(mcp.RpcError(-32000, "no"))
         params = {"name": "fail", "arguments": {}}
         response = _response_get(
@@ -293,7 +293,9 @@ class TestServer(unittest.TestCase):
             self.server, _request_make(9, "tools/call", params)
         )
         self.assertEqual(response["error"]["code"], -32602)
-        self.assertIn("nothing", response["error"]["message"])
+        self.assertEqual(
+            response["error"]["message"], i18n("mcp.tool_unknown", "nothing")
+        )
         self.assertEqual(self.calls, [])
 
     # Params without a name or with arguments that are no object are invalid.
@@ -313,6 +315,9 @@ class TestServer(unittest.TestCase):
                 )
                 self.assertEqual(response["id"], 10)
                 self.assertEqual(response["error"]["code"], -32602)
+                self.assertEqual(
+                    response["error"]["message"], i18n("mcp.call_params")
+                )
         self.assertEqual(self.calls, [])
 
     # An unknown method is not found, named in the message, with the same id.
@@ -323,7 +328,10 @@ class TestServer(unittest.TestCase):
             )
             self.assertEqual(response["id"], request_id)
             self.assertEqual(response["error"]["code"], -32601)
-            self.assertIn("foo/bar", response["error"]["message"])
+            self.assertEqual(
+                response["error"]["message"],
+                i18n("mcp.method_unknown", "foo/bar"),
+            )
 
     # A message that is no request is invalid, with the id only if it is valid.
     def test_request_invalid(self) -> None:
@@ -341,6 +349,9 @@ class TestServer(unittest.TestCase):
                 response = _response_get(self.server, message)
                 self.assertEqual(response["id"], reply_id)
                 self.assertEqual(response["error"]["code"], -32600)
+                self.assertEqual(
+                    response["error"]["message"], i18n("mcp.request_invalid")
+                )
 
     # Registering a name twice raises.
     def test_tool_twice(self) -> None:

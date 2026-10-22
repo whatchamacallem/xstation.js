@@ -40,7 +40,7 @@ namespace tap_producer {
   function line_check(
     description: string,
     directive: string,
-    diagnostics: string | null,
+    diagnostics: string | undefined,
   ): void {
     if (
       description.includes("#") ||
@@ -99,7 +99,7 @@ namespace tap_producer {
       class_name: string,
       description: string,
       directive = "",
-      diagnostics: string | null = null,
+      diagnostics?: string,
     ): void {
       this.#point_add("ok", description, directive, diagnostics);
     }
@@ -109,14 +109,14 @@ namespace tap_producer {
       class_name: string,
       description: string,
       directive = "",
-      diagnostics: string | null = null,
+      diagnostics?: string,
     ): void {
       this.#point_add("not ok", description, directive, diagnostics);
     }
 
     // Writes a passing point with a `SKIP` directive and the reason.
     add_skip(class_name: string, description: string, reason: string): void {
-      this.#point_add("ok", description, skip_directive(reason), null);
+      this.#point_add("ok", description, skip_directive(reason), undefined);
     }
 
     // Writes the plan of the points added, for a level whose plan comes last.
@@ -129,13 +129,13 @@ namespace tap_producer {
       word: string,
       description: string,
       directive: string,
-      diagnostics: string | null,
+      diagnostics: string | undefined,
     ): void {
       line_check(description, directive, diagnostics);
       this.#count += 1;
       const suffix = directive === "" ? "" : ` # ${directive}`;
       this.#write(`${word} ${this.#count} - ${description}${suffix}`);
-      if (diagnostics !== null) {
+      if (diagnostics !== undefined) {
         for (const line of diagnostics.replace(/\n$/, "").split("\n")) {
           this.#write(`# ${line}`);
         }
@@ -248,7 +248,7 @@ namespace tap_producer {
       }
       const id = test.id();
       const name = id.slice(id.lastIndexOf(".") + 1);
-      const diagnostics = lines.length === 0 ? null : lines.join("\n");
+      const diagnostics = lines.length === 0 ? undefined : lines.join("\n");
       const owner = test.constructor.name;
       if (lead.word === "ok") {
         this.#tracker.add_ok(owner, name, lead.directive, diagnostics);
@@ -280,7 +280,7 @@ namespace tap_producer {
   // Writes TAP for a unittest run: one plan, one indented block per module.
   export class TAPTestRunner {
     // Whether the first failure ends the stream.
-    readonly failfast: boolean;
+    readonly #failfast: boolean;
     // Where the lines go, once `set_stream` has set it.
     #write: ((text: string) => void) | null = null;
     // Writes the parent lines and the parent plan.
@@ -294,7 +294,7 @@ namespace tap_producer {
 
     // `failfast` ends the stream at the first failure, as unittest's does.
     constructor(failfast: boolean) {
-      this.failfast = failfast;
+      this.#failfast = failfast;
       this.#parent = new Tracker((text) => this.#line_write(text));
     }
 
@@ -311,7 +311,7 @@ namespace tap_producer {
     run(test: unittest.TestSuite): TAPTestResult {
       const block = new Tracker((text) => this.#block_write(text));
       block.set_plan(test.countTestCases());
-      const result = new TAPTestResult(block, this.failfast);
+      const result = new TAPTestResult(block, this.#failfast);
       test.run(result);
       result.point_flush();
       return result;
@@ -324,7 +324,7 @@ namespace tap_producer {
           `the TAP stream ended before ${JSON.stringify(module)}`,
         );
       }
-      line_check(module, "", null);
+      line_check(module, "", undefined);
       let suite: unittest.TestSuite;
       try {
         suite = load();
@@ -337,7 +337,7 @@ namespace tap_producer {
         const block = new Tracker((text) => this.#block_write(text));
         block.set_plan(1);
         block.add_not_ok(module, module, "", stack_text(module, error));
-        return this.#block_end(module, false, this.failfast);
+        return this.#block_end(module, false, this.#failfast);
       }
       const result = this.run(suite);
       return this.#block_end(

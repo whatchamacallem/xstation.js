@@ -13,35 +13,6 @@
 // operation as the line the server applies. It is given an initialized module,
 // an installed pool and open cache files, and waits on nothing.
 namespace substrate {
-  // The ranges of the code points Python's `str.isspace` holds, ends kept.
-  const space_ranges: readonly (readonly [number, number])[] = [
-    [0x09, 0x0d],
-    [0x1c, 0x20],
-    [0x85, 0x85],
-    [0xa0, 0xa0],
-    [0x1680, 0x1680],
-    [0x2000, 0x200a],
-    [0x2028, 0x2029],
-    [0x202f, 0x202f],
-    [0x205f, 0x205f],
-    [0x3000, 0x3000],
-  ];
-
-  // The range of the code points of surrogates.
-  const surrogate_ranges: readonly (readonly [number, number])[] = [
-    [0xd800, 0xdfff],
-  ];
-
-  // The body of a character class of the ranges, as code point escapes.
-  function class_text(ranges: readonly (readonly [number, number])[]): string {
-    return ranges
-      .map(
-        ([first, last]) =>
-          `\\u{${first.toString(16)}}-\\u{${last.toString(16)}}`,
-      )
-      .join("");
-  }
-
   // The schema, names, patterns and sizes, and the fields of the operations.
   const constants = Object.freeze({
     // The substrate's tables, one statement each, as the server makes them.
@@ -87,17 +58,21 @@ namespace substrate {
     compact_role: "user",
     // The largest magnitude of a number in stored JSON, as on the wire.
     integer_limit: 2 ** 53,
+    // The smallest magnitude Python's `repr` writes in fixed notation.
+    fixed_min: 1e-4,
     // A database name, a C identifier.
     c_identifier: /^[A-Za-z_][A-Za-z0-9_]*$/,
     // An external ref: a slash, a database name, a slash and a key.
     external_ref: /^\/([A-Za-z_][A-Za-z0-9_]*)\/(.+)$/su,
-    // A reference string: an external ref whose key holds no Python space.
+    // A reference string: an external ref, no Python `str.isspace` in its key.
     reference_string: new RegExp(
-      `^/[A-Za-z_][A-Za-z0-9_]*/[^${class_text(space_ranges)}]+$`,
+      "^/[A-Za-z_][A-Za-z0-9_]*/[^\\u{9}-\\u{d}\\u{1c}-\\u{20}\\u{85}" +
+        "\\u{a0}\\u{1680}\\u{2000}-\\u{200a}\\u{2028}\\u{2029}\\u{202f}" +
+        "\\u{205f}\\u{3000}]+$",
       "u",
     ),
     // A surrogate standing alone, which `UTF-8` cannot encode.
-    lone_surrogate: new RegExp(`[${class_text(surrogate_ranges)}]`, "u"),
+    lone_surrogate: /[\u{d800}-\u{dfff}]/u,
     // An integer literal: decimal digits with no sign and no leading zero.
     integer_literal: /^(?:0|[1-9][0-9]*)$/,
     // Decimal digits, which no payload key of a document may be.
@@ -442,7 +417,7 @@ namespace substrate {
   }
 
   // A forwarded line and its record.
-  interface Forward {
+  interface ForwardedLine {
     line: lines.Line;
     record: FlightRecord;
   }
@@ -694,6 +669,16 @@ namespace substrate {
     return utility.json_text(text);
   }
 
+  // A number as Python's `repr` writes it, which differs below 1e-4 only.
+  function number_canonical(value: number): string {
+    const magnitude = Math.abs(value);
+    if (magnitude === 0 || magnitude >= constants.fixed_min) {
+      return utility.json_text(value);
+    }
+    const [digits, exponent] = value.toExponential().split("e");
+    return `${digits}e${exponent[0]}${exponent.slice(1).padStart(2, "0")}`;
+  }
+
   // The canonical JSON text of a value: at every level integer keys first.
   function json_canonical(value: unknown): string {
     if (value === null || typeof value === "boolean") {
@@ -706,7 +691,7 @@ namespace substrate {
       if (Math.abs(value) > constants.integer_limit) {
         throw new Error(i18n("substrate.integer_range", value));
       }
-      return utility.json_text(value);
+      return number_canonical(value);
     }
     if (typeof value === "string") {
       return text_canonical(value);
@@ -1216,7 +1201,7 @@ namespace substrate {
     // The cache files the running transaction stopped naming.
     #unlinks = new Set<string>();
     // The lines of the running transaction, emitted after its commit.
-    #pending: Forward[] = [];
+    #pending: ForwardedLine[] = [];
     // The function that takes each forwarded line.
     #forward: ((line: lines.Line) => void) | undefined = undefined;
     // Whether forwarded lines use full names.
@@ -1677,14 +1662,12 @@ namespace substrate {
     // Deletes this side's copy, which the server keeps, until `db_load`.
     db_unload(db: string): void {
       this.#connection_get(db);
-      this.#flights_check(db);
       this.#file_remove(db);
       this.#unloaded.add(db);
     }
 
     // Opens the server's snapshot of a database as at start. Returns `seq`.
     db_load(db: string, data: Uint8Array | string): number {
-      this.#flights_check(db);
       return this.#file_load(db, data);
     }
 
@@ -2090,13 +2073,14 @@ namespace substrate {
     ): lines.DocPutReply {
       this.#transaction_join(database);
       const since = seq_read(database);
+      // The next version is counted by SQLite, exact past 2^53, as text.
       const rows = rows_select(
         database,
-        "SELECT version FROM _head WHERE id = ?",
+        "SELECT CAST(version + 1 AS TEXT) FROM _head WHERE id = ?",
         [id],
       );
-      const version = rows.length === 0 ? 1 : (rows[0][0] as number) + 1;
-      const key = `${id}/${String(version)}`;
+      const version = rows.length === 0 ? "1" : (rows[0][0] as string);
+      const key = `${id}/${version}`;
       const exists = rows_select(database, "SELECT 1 FROM _kv WHERE key = ?", [
         key,
       ]);
@@ -2289,7 +2273,7 @@ namespace substrate {
       key: string | undefined,
       blobs: lines.BlobHeader[],
       names: string[],
-    ): Forward {
+    ): ForwardedLine {
       this.#forward_live(type);
       const header = jslb.header_make(type, { key, full: this.#full });
       const line = jslb.line_make(header, blobs, { ...fields, since });
@@ -2301,7 +2285,7 @@ namespace substrate {
     }
 
     // Hands a forwarded line on, recorded until its reply comes.
-    #forward_emit(forward: Forward): void {
+    #forward_emit(forward: ForwardedLine): void {
       const fn = this.#forward_live(forward.record.type);
       this.#flights.set(forward.line, forward.record);
       fn(forward.line);
@@ -2316,19 +2300,6 @@ namespace substrate {
         } else {
           this.#holds.set(name, count - 1);
         }
-      }
-    }
-
-    // Throws when forwarded lines of the database wait for their replies.
-    #flights_check(db: string): void {
-      let count = 0;
-      for (const record of this.#flights.values()) {
-        if (record.db === db) {
-          count += 1;
-        }
-      }
-      if (count > 0) {
-        throw new Error(i18n("substrate.forward_pending", db, count));
       }
     }
 

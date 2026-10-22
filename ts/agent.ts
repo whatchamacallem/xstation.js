@@ -24,7 +24,6 @@ namespace agent {
     world_ref: "/metaverse/world",
     scene_key: "scene",
     prompt_id: "prompt",
-    prompt_type: "prompt",
     part_separator: "\n",
     tool_choice: "auto" as const,
     soft_setting: "db_soft_bytes",
@@ -71,12 +70,10 @@ namespace agent {
     return text_get(store, `/${world}/${constants.scene_key}`);
   }
 
-  // The text of a prompt document, which has the type `prompt` and `text`.
+  // The text of a prompt document, the string its member `text` holds.
   function prompt_text(store: substrate.Store, ref: lines.DocRef): string {
-    const normal = substrate.doc_decode(store.doc_get(ref));
-    const header = normal[0] as { t: string };
-    const text = normal.text;
-    if (header.t !== constants.prompt_type || typeof text !== "string") {
+    const text = substrate.doc_decode(store.doc_get(ref)).text;
+    if (typeof text !== "string") {
       throw new Error(i18n("agent.prompt_invalid", ref));
     }
     return text;

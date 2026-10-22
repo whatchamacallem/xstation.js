@@ -5,11 +5,11 @@
 # Tests the parts of page_build.py that start no program: the strings table
 # substitution, the archive member lookup by path suffix, the vectors written
 # anew, the base64 of the vectors and the wasm, the template markers and the
-# check of each piece, the template read before anything is compiled, and the
-# hash of the page written. No test starts tsc.
+# check of each piece, the template read before anything is compiled, the
+# hash of the page written and the bound on tsc's run. No test starts tsc.
 
-import base64, hashlib, io, json, os, page_build, tarfile, tempfile, unittest
-import zipfile
+import base64, hashlib, io, json, os, page_build, subprocess, tarfile
+import tempfile, unittest.mock, zipfile
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -89,19 +89,30 @@ class TestTable(unittest.TestCase):
 
     # A bundle without the identifier is refused.
     def test_identifier_absent(self) -> None:
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as caught:
             page_build.table_substitute("x = 1;", "{}")
+        self.assertEqual(
+            str(caught.exception),
+            "I18N_TABLE_JSON occurs 0 times in the bundle, not once",
+        )
 
     # A bundle holding the identifier twice is refused.
     def test_identifier_twice(self) -> None:
         bundle = "I18N_TABLE_JSON; I18N_TABLE_JSON;"
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as caught:
             page_build.table_substitute(bundle, "{}")
+        self.assertEqual(
+            str(caught.exception),
+            "I18N_TABLE_JSON occurs 2 times in the bundle, not once",
+        )
 
     # A table that does not parse as JSON is refused.
     def test_table_invalid(self) -> None:
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as caught:
             page_build.table_substitute("I18N_TABLE_JSON;", '{"a": ')
+        self.assertEqual(
+            str(caught.exception), "Expecting value: line 1 column 7 (char 6)"
+        )
 
 
 # Archive members found by the end of their path, under a folder or not.
@@ -145,16 +156,25 @@ class TestMembers(unittest.TestCase):
                 path,
                 {"a/jswasm/sqlite3.js": b"a", "b/jswasm/sqlite3.js": b"b"},
             )
-            with self.assertRaises(LookupError):
+            with self.assertRaises(LookupError) as caught:
                 page_build.zip_read(path, ["jswasm/sqlite3.js"])
+        self.assertEqual(
+            str(caught.exception),
+            "jswasm/sqlite3.js: archive members ['a/jswasm/sqlite3.js',"
+            " 'b/jswasm/sqlite3.js'], not one",
+        )
 
     # A suffix that starts inside a folder name is no match, and is refused.
     def test_zip_absent(self) -> None:
         with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
             path = os.path.join(scratch, "sqlite.zip")
             zip_write(path, {"xjswasm/sqlite3.js": b"x"})
-            with self.assertRaises(LookupError):
+            with self.assertRaises(LookupError) as caught:
                 page_build.zip_read(path, ["jswasm/sqlite3.js"])
+        self.assertEqual(
+            str(caught.exception),
+            "jswasm/sqlite3.js: archive members [], not one",
+        )
 
     # The package members of a gzipped tar are found, folders ignored.
     def test_tar_package(self) -> None:
@@ -180,8 +200,12 @@ class TestMembers(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
             path = os.path.join(scratch, "xterm.tgz")
             tar_write(path, {"package/lib/xterm.mjs": b"module"})
-            with self.assertRaises(LookupError):
+            with self.assertRaises(LookupError) as caught:
                 page_build.tar_read(path, ["package/lib/xterm.js"])
+        self.assertEqual(
+            str(caught.exception),
+            "package/lib/xterm.js: archive members [], not one",
+        )
 
 
 # The vectors as one JSON object of base64 text by file name.
@@ -242,20 +266,35 @@ class TestMarkers(unittest.TestCase):
     # A marker the template lacks is refused.
     def test_marker_absent(self) -> None:
         pieces = {"XSJS_BUILD_BUNDLE": "", "XSJS_BUILD_XTERM_JS": ""}
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as caught:
             page_build.markers_fill("XSJS_BUILD_BUNDLE", pieces)
+        self.assertEqual(
+            str(caught.exception),
+            "template markers ['XSJS_BUILD_BUNDLE'], not"
+            " ['XSJS_BUILD_BUNDLE', 'XSJS_BUILD_XTERM_JS']",
+        )
 
     # A marker the template holds twice is refused.
     def test_marker_twice(self) -> None:
         template = "XSJS_BUILD_BUNDLE XSJS_BUILD_BUNDLE"
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as caught:
             page_build.markers_fill(template, {"XSJS_BUILD_BUNDLE": ""})
+        self.assertEqual(
+            str(caught.exception),
+            "template markers ['XSJS_BUILD_BUNDLE', 'XSJS_BUILD_BUNDLE'], not"
+            " ['XSJS_BUILD_BUNDLE']",
+        )
 
     # A marker in the template that no piece names is refused.
     def test_marker_unknown(self) -> None:
         template = "XSJS_BUILD_BUNDLE XSJS_BUILD_OTHER"
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as caught:
             page_build.markers_fill(template, {"XSJS_BUILD_BUNDLE": ""})
+        self.assertEqual(
+            str(caught.exception),
+            "template markers ['XSJS_BUILD_BUNDLE', 'XSJS_BUILD_OTHER'], not"
+            " ['XSJS_BUILD_BUNDLE']",
+        )
 
     # The wasm bytes reach the page as base64 inside the string literal.
     def test_wasm_base64(self) -> None:
@@ -279,7 +318,7 @@ class TestMarkers(unittest.TestCase):
             template,
             {"XSJS_BUILD_XTERM_CSS": "</script>", "XSJS_BUILD_XTERM_JS": ""},
         )
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as caught:
             page_build.page_merge(
                 template,
                 {
@@ -287,6 +326,10 @@ class TestMarkers(unittest.TestCase):
                     "XSJS_BUILD_XTERM_JS": "</script>",
                 },
             )
+        self.assertEqual(
+            str(caught.exception),
+            "XSJS_BUILD_XTERM_JS: holds </script, which ends the element",
+        )
 
     # The engine template holds each page marker once.
     def test_template_engine(self) -> None:
@@ -321,29 +364,61 @@ class TestTemplate(unittest.TestCase):
         self.assertEqual(caught.exception.filename, path)
 
 
+# The run of tsc, bounded by its timer, with no compiler started.
+class TestCompile(unittest.TestCase):
+    # A tsc that outlasts its timer fails, its run given that bound.
+    def test_compile_bounded(self) -> None:
+        seconds: float = getattr(page_build, "_TSC_SECONDS")
+        expired = subprocess.TimeoutExpired(["tsc"], seconds)
+        with (
+            unittest.mock.patch("shutil.which", return_value="/x/tsc"),
+            unittest.mock.patch("subprocess.run", side_effect=expired) as run,
+            self.assertRaises(subprocess.TimeoutExpired) as caught,
+        ):
+            page_build.bundle_compile("tsconfig.json")
+        self.assertIs(caught.exception, expired)
+        self.assertEqual(run.call_args.kwargs["timeout"], seconds)
+
+
 # Pieces that would change meaning as the raw text of their element.
 class TestEmbed(unittest.TestCase):
     # A script piece holding its end tag, in any case, is refused.
     def test_script_end(self) -> None:
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as caught:
             page_build.embed_check("piece", 'x = "</SCRIPT >";', "script")
+        self.assertEqual(
+            str(caught.exception),
+            "piece: holds </script, which ends the element",
+        )
 
     # A style piece holding its end tag is refused, a script end tag is not.
     def test_style_end(self) -> None:
         page_build.embed_check("piece", 'a { content: "</script>"; }', "style")
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as caught:
             page_build.embed_check("piece", "a {} </Style>", "style")
+        self.assertEqual(
+            str(caught.exception),
+            "piece: holds </style, which ends the element",
+        )
 
     # A comment opener with a script start tag is refused, alone it is not.
     def test_comment_script(self) -> None:
         page_build.embed_check("piece", 'x = "<!--";', "script")
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as caught:
             page_build.embed_check("piece", 'x = "<!-- <script>";', "script")
+        self.assertEqual(
+            str(caught.exception),
+            "piece: holds <!-- and <script, which hide the end tag",
+        )
 
     # A `NUL` character is refused.
     def test_nul_refused(self) -> None:
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as caught:
             page_build.embed_check("piece", 'x = "\0";', "script")
+        self.assertEqual(
+            str(caught.exception),
+            "piece: holds NUL, which the HTML parser replaces",
+        )
 
 
 # The page written as `UTF-8` and the hex digest of the file.

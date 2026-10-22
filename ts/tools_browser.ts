@@ -67,6 +67,8 @@ namespace tools_browser {
     image_count: 1,
     // The form an image request asks the images in.
     image_format: "b64_json" as const,
+    // The setting of debug mode, which the debug tool needs.
+    debug_setting: "debug",
     // The setting of the soft limit of the databases' bytes.
     soft_setting: "db_soft_bytes",
     // The setting of the budget of the browser's tier of `_files`.
@@ -610,8 +612,13 @@ namespace tools_browser {
           constants.render_wake,
         );
       },
-      // Asks the player's permit unless always allowed, then runs the line.
+      // In debug mode asks the permit unless always allowed, then runs.
       console_run: (args) => {
+        const debug = context.settings_get(constants.debug_setting) as boolean;
+        if (!debug) {
+          const name = context.permit_name;
+          throw new Error(i18n("tools_browser.debug_off", name));
+        }
         const text = args.text as string;
         const timeout_seconds = args.timeout_seconds as number;
         if (context.allowed.has(context.permit_name)) {
@@ -659,6 +666,10 @@ namespace tools_browser {
       // Asks the server for a database's snapshot and sleeps on it.
       db_load: (args) => {
         const state: LoadState = { db: args.db as string };
+        // No task writes a loaded copy while the image is on its way.
+        if (store.db_list().includes(state.db)) {
+          store.db_unload(state.db);
+        }
         return context.request_sleep(
           line_build(constants.snapshot_type, { db: state.db }),
           constants.server_owner,

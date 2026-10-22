@@ -62,10 +62,82 @@ namespace test_tools_browser {
     }),
     // The owner the image requests go to.
     provider_owner: "http" as const,
-    // The sentence the old description of `sql_run` ended with, now removed.
-    refusal_sentence:
-      " Tables whose name starts with _ and the _settings database" +
-      " refuse writes.",
+    // The first tools of `tools/list` as `API/mcp/tools.json` holds them.
+    recorded_tools: Object.freeze<readonly string[]>([
+      '{"name":"sql_run","description":"Run SQL statements in one' +
+        " transaction on a database. DDL is allowed: your scripts are the" +
+        ' database administrator.","inputSchema":{"type":"object",' +
+        '"properties":{"db":{"type":"string"},"statements":{"type":"array",' +
+        '"items":{"type":"object","properties":{"sql":{"type":"string"},' +
+        '"params":{"type":"array"}},"required":["sql","params"]}}},' +
+        '"required":["db","statements"]}}',
+      '{"name":"db_create","description":"Create an empty database. The' +
+        ' name is a C identifier.","inputSchema":{"type":"object",' +
+        '"properties":{"db":{"type":"string"}},"required":["db"]}}',
+      '{"name":"db_drop","description":"Delete a database and everything' +
+        ' in it.","inputSchema":{"type":"object","properties":{"db":' +
+        '{"type":"string"}},"required":["db"]}}',
+      '{"name":"kv_get","description":"Read the value a Key-Value-Ref' +
+        ' names, /$db/$key, as text.","inputSchema":{"type":"object",' +
+        '"properties":{"ref":{"type":"string"}},"required":["ref"]}}',
+      '{"name":"kv_put","description":"Write text under a Key-Value-Ref,' +
+        ' /$db/$key. A script is the row /_files/script/<name>.js.",' +
+        '"inputSchema":{"type":"object","properties":{"ref":' +
+        '{"type":"string"},"text":{"type":"string"}},"required":' +
+        '["ref","text"]}}',
+      '{"name":"kv_delete","description":"Delete the row a Key-Value-Ref' +
+        ' names.","inputSchema":{"type":"object","properties":{"ref":' +
+        '{"type":"string"}},"required":["ref"]}}',
+      '{"name":"kv_list","description":"List the keys of a database under' +
+        ' a prefix with sizes and hashes.","inputSchema":{"type":"object",' +
+        '"properties":{"db":{"type":"string"},"prefix":{"type":"string"}},' +
+        '"required":["db","prefix"]}}',
+      '{"name":"doc_get","description":"Read a document by Document-Ref,' +
+        " /$db/$id/$version, in its encoded form: header 0, references at" +
+        ' 1 on, {\\"$ref\\": n} in the body.","inputSchema":' +
+        '{"type":"object","properties":{"ref":{"type":"string"}},' +
+        '"required":["ref"]}}',
+      '{"name":"doc_put","description":"Write a new version of document' +
+        " $id in database $db and move its head. Returns the new" +
+        ' Document-Ref.","inputSchema":{"type":"object","properties":' +
+        '{"db":{"type":"string"},"id":{"type":"string"},"body":' +
+        '{"type":"object"}},"required":["db","id","body"]}}',
+      '{"name":"doc_head","description":"The current Document-Ref of' +
+        ' document $id in database $db.","inputSchema":{"type":"object",' +
+        '"properties":{"db":{"type":"string"},"id":{"type":"string"}},' +
+        '"required":["db","id"]}}',
+      '{"name":"script_run","description":"Run the script' +
+        " /_files/script/<name>.js with args as a task in this worker." +
+        " Returns its value or exception and the verbose lines it" +
+        ' wrote.","inputSchema":{"type":"object","properties":{"name":' +
+        '{"type":"string"},"args":{"type":"object"}},"required":' +
+        '["name","args"]}}',
+      '{"name":"script_debug","description":"Run the script as' +
+        " script_run does, tracing every substrate call it makes" +
+        ' first.","inputSchema":{"type":"object","properties":{"name":' +
+        '{"type":"string"},"args":{"type":"object"}},"required":' +
+        '["name","args"]}}',
+      '{"name":"image_make","description":"Generate an image from a' +
+        " prompt and keep it under /_files/<key>. Returns the key, size" +
+        ' and sha256.","inputSchema":{"type":"object","properties":' +
+        '{"prompt":{"type":"string"},"key":{"type":"string"}},' +
+        '"required":["prompt","key"]}}',
+      '{"name":"render","description":"Show an image by its' +
+        ' Key-Value-Ref with a subtitle. No image means black.",' +
+        '"inputSchema":{"type":"object","properties":{"image":' +
+        '{"type":"string"},"subtitle":{"type":"string"}},"required":' +
+        '["subtitle"]}}',
+      '{"name":"console_run","description":"Run one command line in the' +
+        " debug console's dash and return its output until the next" +
+        ' prompt or the timeout. Debug mode.","inputSchema":' +
+        '{"type":"object","properties":{"text":{"type":"string"},' +
+        '"timeout_seconds":{"type":"number"}},"required":' +
+        '["text","timeout_seconds"]},"_meta":{"xsjs":{"permit":true}}}',
+      '{"name":"verbose_tail","description":"The last lines of a' +
+        ' thread\'s verbose ring: ui, ai or server.","inputSchema":' +
+        '{"type":"object","properties":{"thread":{"type":"string"},' +
+        '"count":{"type":"integer"}},"required":["thread","count"]}}',
+    ]),
     // The tools that follow the first ones, in order.
     added_tools: ["db_stats", "db_compact", "db_unload", "db_load"],
     // The wake types the tools sleep with.
@@ -182,82 +254,6 @@ namespace test_tools_browser {
     // A verbose line the step script logs, with a time.
     verbose_line: { at: 1760800000000, text: "tide advanced by 1" },
   });
-
-  // The first tools of `tools/list` as JSON text, `sql_run` with its old text.
-  const recorded_tools: readonly string[] = [
-    '{"name":"sql_run","description":"Run SQL statements in one' +
-      " transaction on a database. DDL is allowed: your scripts are the" +
-      " database administrator. Tables whose name starts with _ and the" +
-      ' _settings database refuse writes.","inputSchema":{"type":"object",' +
-      '"properties":{"db":{"type":"string"},"statements":{"type":"array",' +
-      '"items":{"type":"object","properties":{"sql":{"type":"string"},' +
-      '"params":{"type":"array"}},"required":["sql","params"]}}},' +
-      '"required":["db","statements"]}}',
-    '{"name":"db_create","description":"Create an empty database. The' +
-      ' name is a C identifier.","inputSchema":{"type":"object",' +
-      '"properties":{"db":{"type":"string"}},"required":["db"]}}',
-    '{"name":"db_drop","description":"Delete a database and everything in' +
-      ' it.","inputSchema":{"type":"object","properties":{"db":' +
-      '{"type":"string"}},"required":["db"]}}',
-    '{"name":"kv_get","description":"Read the value a Key-Value-Ref' +
-      ' names, /$db/$key, as text.","inputSchema":{"type":"object",' +
-      '"properties":{"ref":{"type":"string"}},"required":["ref"]}}',
-    '{"name":"kv_put","description":"Write text under a Key-Value-Ref,' +
-      ' /$db/$key. A script is the row /_files/script/<name>.js.",' +
-      '"inputSchema":{"type":"object","properties":{"ref":' +
-      '{"type":"string"},"text":{"type":"string"}},"required":' +
-      '["ref","text"]}}',
-    '{"name":"kv_delete","description":"Delete the row a Key-Value-Ref' +
-      ' names.","inputSchema":{"type":"object","properties":{"ref":' +
-      '{"type":"string"}},"required":["ref"]}}',
-    '{"name":"kv_list","description":"List the keys of a database under a' +
-      ' prefix with sizes and hashes.","inputSchema":{"type":"object",' +
-      '"properties":{"db":{"type":"string"},"prefix":{"type":"string"}},' +
-      '"required":["db","prefix"]}}',
-    '{"name":"doc_get","description":"Read a document by Document-Ref,' +
-      " /$db/$id/$version, in its encoded form: header 0, references at 1" +
-      ' on, {\\"$ref\\": n} in the body.","inputSchema":{"type":"object",' +
-      '"properties":{"ref":{"type":"string"}},"required":["ref"]}}',
-    '{"name":"doc_put","description":"Write a new version of document $id' +
-      " in database $db and move its head. Returns the new" +
-      ' Document-Ref.","inputSchema":{"type":"object","properties":' +
-      '{"db":{"type":"string"},"id":{"type":"string"},"body":' +
-      '{"type":"object"}},"required":["db","id","body"]}}',
-    '{"name":"doc_head","description":"The current Document-Ref of' +
-      ' document $id in database $db.","inputSchema":{"type":"object",' +
-      '"properties":{"db":{"type":"string"},"id":{"type":"string"}},' +
-      '"required":["db","id"]}}',
-    '{"name":"script_run","description":"Run the script' +
-      " /_files/script/<name>.js with args as a task in this worker." +
-      " Returns its value or exception and the verbose lines it" +
-      ' wrote.","inputSchema":{"type":"object","properties":{"name":' +
-      '{"type":"string"},"args":{"type":"object"}},"required":' +
-      '["name","args"]}}',
-    '{"name":"script_debug","description":"Run the script as script_run' +
-      " does, tracing every substrate call it makes" +
-      ' first.","inputSchema":{"type":"object","properties":{"name":' +
-      '{"type":"string"},"args":{"type":"object"}},"required":' +
-      '["name","args"]}}',
-    '{"name":"image_make","description":"Generate an image from a prompt' +
-      " and keep it under /_files/<key>. Returns the key, size and" +
-      ' sha256.","inputSchema":{"type":"object","properties":{"prompt":' +
-      '{"type":"string"},"key":{"type":"string"}},"required":' +
-      '["prompt","key"]}}',
-    '{"name":"render","description":"Show an image by its Key-Value-Ref' +
-      ' with a subtitle. No image means black.","inputSchema":' +
-      '{"type":"object","properties":{"image":{"type":"string"},' +
-      '"subtitle":{"type":"string"}},"required":["subtitle"]}}',
-    '{"name":"console_run","description":"Run one command line in the' +
-      " debug console's dash and return its output until the next prompt" +
-      ' or the timeout. Debug mode.","inputSchema":{"type":"object",' +
-      '"properties":{"text":{"type":"string"},"timeout_seconds":' +
-      '{"type":"number"}},"required":["text","timeout_seconds"]},' +
-      '"_meta":{"xsjs":{"permit":true}}}',
-    '{"name":"verbose_tail","description":"The last lines of a' +
-      ' thread\'s verbose ring: ui, ai or server.","inputSchema":' +
-      '{"type":"object","properties":{"thread":{"type":"string"},' +
-      '"count":{"type":"integer"}},"required":["thread","count"]}}',
-  ];
 
   // The stored text of the arrival scene, its encoded document as JSON.
   const arrival_text =
@@ -587,17 +583,12 @@ namespace test_tools_browser {
 
   // The tools and the wakes registered on the server.
   export class TestRegistry extends ToolCase {
-    // The first tools come in their order, `sql_run` refusing nothing.
+    // The first tools come in their order.
     test_tools_recorded(): void {
       const bench = this.bench_make();
-      const recorded = recorded_tools.map(
+      const recorded = constants.recorded_tools.map(
         (text) => JSON.parse(text) as mcp.Tool,
       );
-      const first = recorded[0];
-      const refusal = constants.refusal_sentence;
-      this.assertTrue(first.description.endsWith(refusal));
-      const kept = first.description.length - refusal.length;
-      first.description = first.description.slice(0, kept);
       const listed = bench.server.tools.slice(0, recorded.length);
       this.assertEqual(utility.json_text(listed), utility.json_text(recorded));
     }
@@ -605,7 +596,7 @@ namespace test_tools_browser {
     // The four tools of the administration of the databases follow.
     test_tools_added(): void {
       const bench = this.bench_make();
-      const added = bench.server.tools.slice(recorded_tools.length);
+      const added = bench.server.tools.slice(constants.recorded_tools.length);
       this.assertEqual(
         added.map((tool) => tool.name),
         constants.added_tools,
@@ -1039,24 +1030,24 @@ namespace test_tools_browser {
       }
       this.lines_answer(store);
       // Whether each image is held, in the order of their keys.
-      const held = (): boolean[] =>
+      const images_held = (): boolean[] =>
         ["a", "b", "c", "d"].map((name) =>
           store.kv_held(`/_files/${name}.png`),
         );
       // Makes the scene current and renders the image in it.
-      const show = (scene: string, image: string): void => {
+      const scene_show = (scene: string, image: string): void => {
         store.kv_put("/metaverse/scene", utility.utf8_encode(scene));
         this.lines_answer(store);
         this.tool_run(bench, "render", { image, subtitle: "" });
       };
-      show(scenes[0], "/_files/d.png");
-      this.assertEqual(held(), [true, false, false, true]);
+      scene_show(scenes[0], "/_files/d.png");
+      this.assertEqual(images_held(), [true, false, false, true]);
       store.kv_put("/_files/c.png", new Uint8Array(each).fill(9));
       this.lines_answer(store);
-      show(scenes[0], "/_files/d.png");
-      this.assertEqual(held(), [true, false, true, true]);
-      show(scenes[1], "/_files/c.png");
-      this.assertEqual(held(), [false, false, true, false]);
+      scene_show(scenes[0], "/_files/d.png");
+      this.assertEqual(images_held(), [true, false, true, true]);
+      scene_show(scenes[1], "/_files/c.png");
+      this.assertEqual(images_held(), [false, false, true, false]);
       this.assertEqual(store.kv_list("_files", "").length, 4);
       const renders = bench.tasks.sent.filter(
         (entry) => type_of(entry.line) === "render",
@@ -1130,6 +1121,19 @@ namespace test_tools_browser {
         isError: true,
       });
       this.assertEqual(bench.tasks.sent.length, 1);
+    }
+
+    // Outside debug mode the tool throws and asks the player nothing.
+    test_debug_off(): void {
+      const bench = this.bench_make({ debug: false });
+      const text = i18n("tools_browser.debug_off", "browser.console_run");
+      this.raised_assert(text, () =>
+        this.tool_run(bench, "console_run", {
+          text: "echo hi",
+          timeout_seconds: 5,
+        }),
+      );
+      this.assertEqual(bench.tasks.sent.length, 0);
     }
 
     // Always Allow runs this command and every later one with no ask.
@@ -1314,6 +1318,35 @@ namespace test_tools_browser {
       this.assertEqual(bench.store.db_list(), ["alpha"]);
       const read = this.tool_run(bench, "kv_get", { ref: "/alpha/a" });
       this.assertEqual(this.text_of(read), "one");
+    }
+
+    // `db_load` of a loaded database unloads it before asking, then opens it.
+    test_load_loaded(): void {
+      const bench = this.bench_make();
+      bench.store.db_create("alpha");
+      bench.store.kv_put("/alpha/a", utility.utf8_encode("one"));
+      const snapshot = bench.store.db_snapshot("alpha");
+      this.lines_answer(bench.store);
+      const asked = this.sleep_check(
+        bench,
+        this.tool_run(bench, "db_load", { db: "alpha" }),
+        0,
+        "tools.snapshot_reply",
+      );
+      this.assertEqual(bench.store.db_list(), []);
+      this.raised_assert(i18n("substrate.db_unloaded", "alpha"), () =>
+        bench.store.kv_get("/alpha/a"),
+      );
+      const reply = this.snapshot_reply(
+        bench.tasks.sent[0],
+        jslb.blob_make(snapshot.data),
+        utility.sha256_hex(snapshot.data),
+        snapshot.seq,
+      );
+      const result = this.wake_run(bench, asked, [reply]);
+      const expected = utility.json_text({ seq: snapshot.seq });
+      this.assertEqual(this.text_of(result), expected);
+      this.assertEqual(bench.store.db_list(), ["alpha"]);
     }
 
     // A snapshot streamed to the cache opens from its handle, sink digest kept.

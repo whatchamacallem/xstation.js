@@ -71,6 +71,17 @@ _CODE_INTERNAL = -32603
 # Names that are not plain file names that end in `.py`.
 _NAMES_INVALID = ("", "b", "b.txt", ".b.py", ".py", "d/b.py", "../b.py")
 
+# Forms of the option and its value that argparse reads as `--main-loop`.
+_OPTION_FORMS: tuple[list[str], ...] = (
+    ["--main-loop=a.py"],
+    ["--main", "a.py"],
+    ["--m=a.py"],
+    ["--main-loo", "a.py"],
+)
+
+# No overflow bytes, so the decoder streams every blob, its writer's choice.
+_OVERFLOW_NONE = 0
+
 
 # Reads a file with a handle of its own.
 def _file_read(path: str) -> bytes:
@@ -111,7 +122,7 @@ def _line_make(
 def _streamed_make(name: str, data: bytes, path: str) -> jslb.Object:
     header = jslb.header_make("source.put", id=4)
     line = jslb.line_make(header, [jslb.blob_make(data)], name=name)
-    return _wire_pass(line, 0, lambda blob: path)
+    return _wire_pass(line, _OVERFLOW_NONE, lambda blob: path)
 
 
 # Dispatches a line that must be answered and returns the reply.
@@ -137,7 +148,7 @@ def _entries_read() -> list[dict[str, Any]]:
 
 
 # Writes a main loop file in the root, with its directory.
-def _main_loop_write(root: str, name: str) -> str:
+def _loop_write(root: str, name: str) -> str:
     path = os.path.join(root, "main_loop", name)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as file:
@@ -314,7 +325,7 @@ class TestSource(IsolatedCase):
     # A second write under the same name replaces the file.
     def test_file_replaced(self) -> None:
         engine_system.handlers_register(self.root, True)
-        _main_loop_write(self.root, "a.py")
+        _loop_write(self.root, "a.py")
         blob = jslb.blob_make(b"new\n")
         _reply_get(_line_make("source.put", 1, (blob,), name="a.py"))
         self.assertEqual(os.listdir(self.loop_path), ["a.py"])
@@ -363,7 +374,7 @@ class TestRestart(IsolatedCase):
     # The call gets the interpreter and the arguments with the option last.
     def test_exec_argv(self) -> None:
         engine_system.handlers_register(self.root, True)
-        _main_loop_write(self.root, "b.py")
+        _loop_write(self.root, "b.py")
         line = _line_make("system.restart", main_loop="b.py")
         with (
             unittest.mock.patch(
@@ -379,7 +390,7 @@ class TestRestart(IsolatedCase):
     # An option the process already had is removed with its value.
     def test_option_replaced(self) -> None:
         engine_system.handlers_register(self.root, True)
-        _main_loop_write(self.root, "b.py")
+        _loop_write(self.root, "b.py")
         line = _line_make("system.restart", main_loop="b.py")
         argv = _PROGRAM_ARGV + [_MAIN_LOOP_OPTION, "a.py", "--other"]
         with (
@@ -393,21 +404,41 @@ class TestRestart(IsolatedCase):
         expected = _PROGRAM_ARGV + ["--other", _MAIN_LOOP_OPTION, "b.py"]
         execv.assert_called_once_with(sys.executable, expected)
 
-    # An option with no value raises and the process is not replaced.
-    def test_option_unfinished(self) -> None:
+    # Each form of the option that argparse takes is removed with its value.
+    def test_option_forms(self) -> None:
         engine_system.handlers_register(self.root, True)
-        _main_loop_write(self.root, "b.py")
+        _loop_write(self.root, "b.py")
         line = _line_make("system.restart", main_loop="b.py")
-        argv = _PROGRAM_ARGV + [_MAIN_LOOP_OPTION]
-        message = i18n("engine_system.option_unfinished", _MAIN_LOOP_OPTION)
+        expected = _PROGRAM_ARGV + ["--other", _MAIN_LOOP_OPTION, "b.py"]
+        for form in _OPTION_FORMS:
+            with self.subTest(form=form):
+                argv = _PROGRAM_ARGV + form + ["--other"]
+                with (
+                    unittest.mock.patch(
+                        _EXEC_TARGET, side_effect=ImageReplaced
+                    ) as execv,
+                    unittest.mock.patch(_ARGV_TARGET, argv),
+                    self.assertRaises(ImageReplaced),
+                ):
+                    dispatch.line_dispatch(line)
+                execv.assert_called_once_with(sys.executable, expected)
+
+    # A word that only looks like the option is kept.
+    def test_option_kept(self) -> None:
+        engine_system.handlers_register(self.root, True)
+        _loop_write(self.root, "b.py")
+        line = _line_make("system.restart", main_loop="b.py")
+        argv = _PROGRAM_ARGV + ["--mainloop", "--main-loops=a.py"]
         with (
             unittest.mock.patch(
                 _EXEC_TARGET, side_effect=ImageReplaced
             ) as execv,
             unittest.mock.patch(_ARGV_TARGET, argv),
+            self.assertRaises(ImageReplaced),
         ):
-            self.dispatch_check(ValueError, message, line)
-        execv.assert_not_called()
+            dispatch.line_dispatch(line)
+        expected = argv + [_MAIN_LOOP_OPTION, "b.py"]
+        execv.assert_called_once_with(sys.executable, expected)
 
     # A file that does not exist raises and the process is not replaced.
     def test_file_missing(self) -> None:
@@ -426,8 +457,8 @@ class TestRestart(IsolatedCase):
     # A name that is not plain raises, even where a file of it exists.
     def test_name_invalid(self) -> None:
         engine_system.handlers_register(self.root, True)
-        _main_loop_write(self.root, "b.py")
-        _main_loop_write(self.root, os.path.join("d", "b.py"))
+        _loop_write(self.root, "b.py")
+        _loop_write(self.root, os.path.join("d", "b.py"))
         outside = os.path.join(self.root, "b.py")
         with open(outside, "w", encoding="utf-8") as file:
             file.write(_SOURCE_TEXT)
@@ -442,7 +473,7 @@ class TestRestart(IsolatedCase):
     # With debug mode off the handler raises and the process is not replaced.
     def test_restart_gated(self) -> None:
         engine_system.handlers_register(self.root, False)
-        _main_loop_write(self.root, "b.py")
+        _loop_write(self.root, "b.py")
         line = _line_make("system.restart", main_loop="b.py")
         message = i18n("engine_system.debug_off", "system.restart")
         with unittest.mock.patch(_EXEC_TARGET) as execv:
@@ -457,6 +488,13 @@ class TestTools(IsolatedCase):
         server = mcp.Server("xsjs-server", "0")
         engine_system.tools_register(server, self.root, debug)
         return server
+
+    # Checks the code and the text of the error that a response carries.
+    def error_check(
+        self, response: mcp.Message, code: int, message: str
+    ) -> None:
+        self.assertEqual(response["error"]["code"], code)
+        self.assertEqual(response["error"]["message"], message)
 
     # The list is the server side of the API file, key for key.
     def test_tools_listed(self) -> None:
@@ -502,24 +540,28 @@ class TestTools(IsolatedCase):
         server = self.server_make(False)
         call = _call_make("source_put", {"name": "a.py", "text": _SOURCE_TEXT})
         response = _response_get(server, call)
-        self.assertEqual(response["error"]["code"], _CODE_INTERNAL)
+        message = i18n("engine_system.debug_off", "source_put")
+        self.error_check(response, _CODE_INTERNAL, message)
         self.assertEqual(os.listdir(self.root), [])
 
     # Arguments that are missing or not text are refused with their code.
     def test_source_arguments(self) -> None:
         server = self.server_make(True)
-        bad: list[dict[str, Any]] = [
-            {"name": "a.py"},
-            {"text": "x"},
-            {"name": 5, "text": "x"},
-            {"name": "a.py", "text": None},
+        bad: list[tuple[dict[str, Any], str]] = [
+            ({"name": "a.py"}, "text"),
+            ({"text": "x"}, "name"),
+            ({"name": 5, "text": "x"}, "name"),
+            ({"name": "a.py", "text": None}, "text"),
         ]
-        for arguments in bad:
+        for arguments, key in bad:
             with self.subTest(arguments=arguments):
                 response = _response_get(
                     server, _call_make("source_put", arguments)
                 )
-                self.assertEqual(response["error"]["code"], _CODE_PARAMS)
+                message = i18n(
+                    "engine_system.argument_invalid", "source_put", key
+                )
+                self.error_check(response, _CODE_PARAMS, message)
         self.assertEqual(os.listdir(self.root), [])
 
     # A name that is not plain raises as any exception of a tool does.
@@ -527,13 +569,14 @@ class TestTools(IsolatedCase):
         server = self.server_make(True)
         call = _call_make("source_put", {"name": "../a.py", "text": "x"})
         response = _response_get(server, call)
-        self.assertEqual(response["error"]["code"], _CODE_INTERNAL)
+        message = i18n("engine_system.name_invalid", "../a.py")
+        self.error_check(response, _CODE_INTERNAL, message)
         self.assertEqual(os.listdir(self.root), [])
 
     # The restart tool replaces the process image as the handler does.
     def test_restart_tool(self) -> None:
         server = self.server_make(True)
-        _main_loop_write(self.root, "b.py")
+        _loop_write(self.root, "b.py")
         call = _call_make("system_restart", {"main_loop": "b.py"})
         with (
             unittest.mock.patch(
@@ -549,27 +592,36 @@ class TestTools(IsolatedCase):
     # With debug mode off the restart tool raises and nothing is replaced.
     def test_restart_gated(self) -> None:
         server = self.server_make(False)
-        _main_loop_write(self.root, "b.py")
+        _loop_write(self.root, "b.py")
         call = _call_make("system_restart", {"main_loop": "b.py"})
         with unittest.mock.patch(_EXEC_TARGET) as execv:
             response = _response_get(server, call)
-        self.assertEqual(response["error"]["code"], _CODE_INTERNAL)
+        message = i18n("engine_system.debug_off", "system_restart")
+        self.error_check(response, _CODE_INTERNAL, message)
         execv.assert_not_called()
 
     # A missing file or a missing argument is an error and nothing is replaced.
     def test_restart_refused(self) -> None:
         server = self.server_make(True)
-        cases: tuple[tuple[dict[str, Any], int], ...] = (
-            ({"main_loop": "b.py"}, _CODE_INTERNAL),
-            ({}, _CODE_PARAMS),
-            ({"main_loop": 5}, _CODE_PARAMS),
+        path = os.path.join(self.loop_path, "b.py")
+        invalid = i18n(
+            "engine_system.argument_invalid", "system_restart", "main_loop"
         )
-        for arguments, code in cases:
+        cases: tuple[tuple[dict[str, Any], int, str], ...] = (
+            (
+                {"main_loop": "b.py"},
+                _CODE_INTERNAL,
+                i18n("engine_system.main_loop_missing", path),
+            ),
+            ({}, _CODE_PARAMS, invalid),
+            ({"main_loop": 5}, _CODE_PARAMS, invalid),
+        )
+        for arguments, code, message in cases:
             with self.subTest(arguments=arguments):
                 call = _call_make("system_restart", arguments)
                 with unittest.mock.patch(_EXEC_TARGET) as execv:
                     response = _response_get(server, call)
-                self.assertEqual(response["error"]["code"], code)
+                self.error_check(response, code, message)
                 execv.assert_not_called()
 
 
@@ -585,7 +637,7 @@ class TestRegister(IsolatedCase):
         )
 
     # Called before the registration each handler raises.
-    def test_unregistered(self) -> None:
+    def test_called_early(self) -> None:
         line = _line_make("settings.put")
         message = i18n("engine_system.not_registered")
         uses: list[Callable[[], object]] = [

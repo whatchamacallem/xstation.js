@@ -14,6 +14,17 @@ _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
 )
 
+# The install script, which unpacks the pinned ttyd archive.
+_INSTALL_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "xsjs_install.ps1",
+)
+
+# The install script's line naming the ttyd archive in `third_party/`.
+_INSTALL_PATTERN = re.compile(
+    r"^\$ttyd_archive_path_ = 'third_party/([^']+)'$", re.MULTILINE
+)
+
 # A pinned name: words joined by hyphens, a hyphen, the version, the extension.
 _NAME_PATTERN = re.compile(
     r"[a-z]+(?:-[a-z]+)*-([0-9]+(?:\.[0-9]+)*)(\.tar\.gz|\.tgz|\.zip)"
@@ -133,6 +144,19 @@ class TestPins(unittest.TestCase):
         for constant in ("_SQLITE_ARCHIVE", "_XTERM_ARCHIVE"):
             archive: str = getattr(page_build, constant)
             self.assertIn(archive, names, constant)
+
+    # The ttyd archive that `xsjs_install.ps1` unpacks is a name of the table.
+    def test_install_pinned(self) -> None:
+        with open(_INSTALL_PATH, encoding="utf-8-sig") as file:
+            found = _INSTALL_PATTERN.search(file.read())
+        self.assertIsNotNone(found, _INSTALL_PATH)
+        names = [name for name, _url, _sha256 in self.pins_get()]
+        self.assertIn(cast(re.Match[str], found).group(1), names)
+
+    # No two pins share a name, as each name is a file in `third_party/`.
+    def test_pin_names(self) -> None:
+        names = [name for name, _url, _sha256 in self.pins_get()]
+        self.assertEqual(len(names), len(set(names)))
 
     # The version in each name occurs in its URL, which ends in its extension.
     def test_pin_versions(self) -> None:

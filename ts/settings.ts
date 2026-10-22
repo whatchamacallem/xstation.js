@@ -41,7 +41,7 @@ namespace settings {
   export type Sender = (payload: lines.SettingsPut) => void;
 
   // The object that holds the last key of an id, and that key.
-  interface Leaf {
+  interface SettingLeaf {
     holder: { [key: string]: unknown };
     key: string;
   }
@@ -69,7 +69,7 @@ namespace settings {
   }
 
   // Walks an id down from the settings, throwing for an unknown id.
-  function leaf_find(root: Settings, id: Id): Leaf {
+  function leaf_find(root: Settings, id: Id): SettingLeaf {
     const keys = id.split(constants.id_separator);
     const last = id.slice(id.lastIndexOf(constants.id_separator) + 1);
     let holder: unknown = root;

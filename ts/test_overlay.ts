@@ -6,9 +6,18 @@
 // and of the scrolling that keeps a shown overlay's newest line in view, run
 // on a container of a fixed size put in the page and taken out after.
 namespace test_overlay {
-  // The lines the scrolling tests add to a tty, enough to overflow.
+  // The counts and sizes the tests set.
   const constants = Object.freeze({
+    // Lines added to overflow the scrolling container, its writer's choice.
     tall_count: 50,
+    // The lines kept for each tty, its writer's choice.
+    ring_lines: 3,
+    // A ring of two lines, its writer's choice.
+    ring_pair: 2,
+    // The scrolling container's width in pixels, its writer's choice.
+    container_width: 400,
+    // The scrolling container's height in pixels, its writer's choice.
+    container_height: 100,
   });
 
   // A container that is not in the page, so the live page is not touched.
@@ -28,6 +37,16 @@ namespace test_overlay {
     return pre.getBoundingClientRect().bottom - bottom;
   }
 
+  // The message of the error a function throws, failing the test if none.
+  function message_thrown(test: unittest.TestCase, fn: () => unknown): string {
+    try {
+      fn();
+    } catch (error) {
+      return (error as Error).message;
+    }
+    return test.fail("Nothing was thrown.");
+  }
+
   // Adds the lines of a tall overlay to a tty.
   function lines_add(instance: overlay.Overlay, tty: number): void {
     for (let index = 0; index < constants.tall_count; index += 1) {
@@ -42,21 +61,24 @@ namespace test_overlay {
       const container = container_make();
       const rings = [0, -1, 1.5, NaN, Infinity];
       for (const ring of rings) {
-        this.assertRaises(Error, () => new overlay.Overlay(container, ring));
+        this.assertEqual(
+          message_thrown(this, () => new overlay.Overlay(container, ring)),
+          i18n("overlay.ring_invalid", ring),
+        );
       }
     }
 
     // Nothing is made before the first use of a tty.
     test_no_elements(): void {
       const container = container_make();
-      new overlay.Overlay(container, 3);
+      new overlay.Overlay(container, constants.ring_lines);
       this.assertEqual(container.childNodes.length, 0);
     }
 
     // The first line of a tty makes one hidden `pre` holding only text.
     test_first_use(): void {
       const container = container_make();
-      const instance = new overlay.Overlay(container, 3);
+      const instance = new overlay.Overlay(container, constants.ring_lines);
       instance.line_add(1, "first");
       const pres = pre_list(container);
       this.assertEqual(pres.length, 1);
@@ -70,7 +92,7 @@ namespace test_overlay {
     // Later lines and toggles of the same tty reuse its `pre`.
     test_pre_reused(): void {
       const container = container_make();
-      const instance = new overlay.Overlay(container, 3);
+      const instance = new overlay.Overlay(container, constants.ring_lines);
       instance.line_add(1, "a");
       const first = pre_list(container)[0];
       instance.line_add(1, "b");
@@ -82,7 +104,7 @@ namespace test_overlay {
     // The lines are in the order added, joined by line feeds, newest last.
     test_line_order(): void {
       const container = container_make();
-      const instance = new overlay.Overlay(container, 3);
+      const instance = new overlay.Overlay(container, constants.ring_lines);
       instance.line_add(1, "a");
       instance.line_add(1, "b");
       instance.line_add(1, "c");
@@ -92,7 +114,7 @@ namespace test_overlay {
     // A line above the ring drops the oldest line, one at a time.
     test_oldest_dropped(): void {
       const container = container_make();
-      const instance = new overlay.Overlay(container, 3);
+      const instance = new overlay.Overlay(container, constants.ring_lines);
       for (const text of ["a", "b", "c"]) {
         instance.line_add(1, text);
       }
@@ -115,7 +137,7 @@ namespace test_overlay {
     // The text is shown as text, so markup in a line makes no element.
     test_text_escaped(): void {
       const container = container_make();
-      const instance = new overlay.Overlay(container, 3);
+      const instance = new overlay.Overlay(container, constants.ring_lines);
       const text = '<b id="x">bold</b> &amp; <i>';
       instance.line_add(1, text);
       const pre = pre_list(container)[0];
@@ -129,7 +151,7 @@ namespace test_overlay {
     // A line with no characters still counts toward the ring.
     test_empty_line(): void {
       const container = container_make();
-      const instance = new overlay.Overlay(container, 2);
+      const instance = new overlay.Overlay(container, constants.ring_pair);
       instance.line_add(1, "a");
       instance.line_add(1, "");
       instance.line_add(1, "");
@@ -139,7 +161,7 @@ namespace test_overlay {
     // Nothing is put in the page: the container and its `pre` stay detached.
     test_stays_detached(): void {
       const container = container_make();
-      const instance = new overlay.Overlay(container, 3);
+      const instance = new overlay.Overlay(container, constants.ring_lines);
       instance.line_add(1, "a");
       instance.overlay_toggle(1);
       this.assertFalse(container.isConnected);
@@ -152,7 +174,7 @@ namespace test_overlay {
     // A toggle shows a hidden `pre` and a second toggle hides it again.
     test_toggle_twice(): void {
       const container = container_make();
-      const instance = new overlay.Overlay(container, 3);
+      const instance = new overlay.Overlay(container, constants.ring_lines);
       instance.line_add(1, "a");
       const pre = pre_list(container)[0];
       this.assertTrue(pre.hidden);
@@ -165,7 +187,7 @@ namespace test_overlay {
     // A line added to a shown overlay does not hide it.
     test_shown_kept(): void {
       const container = container_make();
-      const instance = new overlay.Overlay(container, 3);
+      const instance = new overlay.Overlay(container, constants.ring_lines);
       instance.line_add(1, "a");
       instance.overlay_toggle(1);
       instance.line_add(1, "b");
@@ -177,7 +199,7 @@ namespace test_overlay {
     // The lines added while hidden are kept for when the overlay is shown.
     test_hidden_lines(): void {
       const container = container_make();
-      const instance = new overlay.Overlay(container, 3);
+      const instance = new overlay.Overlay(container, constants.ring_lines);
       instance.line_add(1, "a");
       instance.line_add(1, "b");
       instance.overlay_toggle(1);
@@ -192,7 +214,7 @@ namespace test_overlay {
     // A toggle before any line makes the `pre` and shows it, empty.
     test_first_toggle(): void {
       const container = container_make();
-      const instance = new overlay.Overlay(container, 3);
+      const instance = new overlay.Overlay(container, constants.ring_lines);
       instance.overlay_toggle(2);
       const pres = pre_list(container);
       this.assertEqual(pres.length, 1);
@@ -209,7 +231,7 @@ namespace test_overlay {
     // Each tty has its own `pre`, made in the order of first use.
     test_separate_pres(): void {
       const container = container_make();
-      const instance = new overlay.Overlay(container, 3);
+      const instance = new overlay.Overlay(container, constants.ring_lines);
       instance.line_add(2, "two");
       instance.line_add(1, "one");
       const pres = pre_list(container);
@@ -221,7 +243,7 @@ namespace test_overlay {
     // Lines added to one tty do not appear in the other.
     test_lines_independent(): void {
       const container = container_make();
-      const instance = new overlay.Overlay(container, 3);
+      const instance = new overlay.Overlay(container, constants.ring_lines);
       instance.line_add(1, "a");
       instance.line_add(2, "x");
       instance.line_add(1, "b");
@@ -233,7 +255,7 @@ namespace test_overlay {
     // Each tty has its own ring, so a full ring costs the other tty nothing.
     test_rings_independent(): void {
       const container = container_make();
-      const instance = new overlay.Overlay(container, 2);
+      const instance = new overlay.Overlay(container, constants.ring_pair);
       instance.line_add(1, "a");
       instance.line_add(2, "x");
       instance.line_add(1, "b");
@@ -246,7 +268,7 @@ namespace test_overlay {
     // A toggle changes only the `pre` of its own tty.
     test_toggles_independent(): void {
       const container = container_make();
-      const instance = new overlay.Overlay(container, 3);
+      const instance = new overlay.Overlay(container, constants.ring_lines);
       instance.line_add(1, "a");
       instance.line_add(2, "x");
       const pres = pre_list(container);
@@ -263,8 +285,8 @@ namespace test_overlay {
     test_objects_independent(): void {
       const first = container_make();
       const second = container_make();
-      const first_overlay = new overlay.Overlay(first, 3);
-      const second_overlay = new overlay.Overlay(second, 3);
+      const first_overlay = new overlay.Overlay(first, constants.ring_lines);
+      const second_overlay = new overlay.Overlay(second, constants.ring_lines);
       first_overlay.line_add(1, "a");
       second_overlay.overlay_toggle(1);
       this.assertEqual(pre_list(first)[0].textContent, "a");
@@ -279,15 +301,15 @@ namespace test_overlay {
     // The container of a fixed size, made in `setUp`.
     #container: HTMLElement | undefined = undefined;
 
-    // Puts in the page a container 100 pixels high that scrolls.
+    // Puts in the page a container of a fixed size that scrolls.
     setUp(): void {
       const container = document.createElement("div");
       Object.assign(container.style, {
         position: "fixed",
         top: "0px",
         left: "0px",
-        width: "400px",
-        height: "100px",
+        width: `${constants.container_width}px`,
+        height: `${constants.container_height}px`,
         overflow: "auto",
       });
       document.body.append(container);

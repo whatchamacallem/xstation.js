@@ -65,6 +65,8 @@ _MODULES: list[tuple[str, str]] = [
     ("test_engine_system", "smoke-test"),
     ("test_main_loop", "smoke-test"),
     ("test_bootstrap", "smoke-test"),
+    ("test_echo_loop", "smoke-test"),
+    ("test_stall_loop", "smoke-test"),
     ("test_mcp_stdio", "smoke-test"),
     ("test_third_party_fetch", "smoke-test"),
     ("test_devtools", "smoke-test"),
@@ -130,7 +132,7 @@ def timer_stop() -> None:
 
 
 # Runs the modules of the category, checks the stream, then runs the rest.
-def main() -> int:
+def main(arguments: list[str]) -> int:
     import category, tap_consumer, tap_producer
 
     parser = argparse.ArgumentParser(
@@ -146,9 +148,9 @@ def main() -> int:
         help="end the stream at the first failing test",
     )
     category.options_add(parser)
-    arguments = parser.parse_args()
-    failfast: bool = arguments.failfast
-    chosen: str = arguments.category
+    parsed = parser.parse_args(arguments)
+    failfast: bool = parsed.failfast
+    chosen: str = parsed.category
     started = time.monotonic()
     limit = category.limit_seconds(chosen)
     stream = StreamWriter()
@@ -206,12 +208,9 @@ def main() -> int:
     if code:
         return code
     elapsed = time.monotonic() - started
-    total = f"the {chosen} run took {elapsed:.3f} s"
-    if limit is not None:
-        total += f" of its {limit:g} s"
-    print(total, flush=True)
+    print(f"the {chosen} run took {elapsed:.3f} s", flush=True)
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

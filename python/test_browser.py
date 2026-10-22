@@ -28,9 +28,9 @@
 #
 #     python3 python/test_browser.py [--smoke-test | --normal-test]
 
-import argparse, base64, fcntl, hashlib, http.server, json, os, re, select
-import shlex, shutil, signal, socket, sqlite3, subprocess, sys, tempfile
-import threading, time, types
+import argparse, base64, contextlib, fcntl, hashlib, http.server, json, os, re
+import select, shlex, shutil, signal, socket, sqlite3, subprocess, sys
+import tempfile, threading, time, traceback, types
 from collections.abc import Callable, Iterator
 from typing import Any, NamedTuple, Protocol, Self, cast
 
@@ -228,6 +228,21 @@ _PROVIDER_VARIABLE = "XSJS_PROVIDER_KEY"
 # The provider key ttyd is given for a provider that is not scripted.
 _PROVIDER_KEY = "rung-provider-key"
 
+# The fields of a `ServerExtras` adding nothing, as the start script serves.
+_EXTRAS_NONE = ((), ())
+
+# The fields of a `ServerExtras` giving ttyd the provider key, not scripted.
+_EXTRAS_KEY = ((), (), ((_PROVIDER_VARIABLE, _PROVIDER_KEY),))
+
+# Debug mode for a root that does not set it, as `settings.json` held it.
+_ROOT_DEBUG = True
+
+# A scripted provider for a root that does not set it, as `settings.json` did.
+_ROOT_SCRIPTED = True
+
+# The shell's level where a root does not set it, as `settings.json` held it.
+_ROOT_LEVEL = 1
+
 # The provider file of a root, which only a provider not scripted reads.
 _PROVIDER_FILE = "provider.json"
 
@@ -299,6 +314,12 @@ _LOAD_EVENT = "load"
 # The modifier bit of the control key in DevTools' input events.
 _CONTROL_MODIFIER = 2
 
+# The fields of the `KeyStroke` that ends a line, in a form or in the console.
+_KEY_ENTER = ("Enter", "Enter", 13, 0, "\r")
+
+# The fields of the `KeyStroke` of control and C, which interrupts a command.
+_KEY_INTERRUPT = ("c", "KeyC", 67, _CONTROL_MODIFIER, "")
+
 # The key code of the digit 0, the other digits following it.
 _DIGIT_CODE = 48
 
@@ -307,6 +328,9 @@ _NO_BREAK = chr(0xA0)
 
 # How far inside the corner of a box a point is taken, in CSS pixels.
 _CORNER_PIXELS = 4
+
+# A count chosen by its writer: the clicked pixel is the image's size over it.
+_CLICK_DIVISOR = 3
 
 # The overlays of the ttys, one `pre` each in the debug container.
 _OVERLAY_SELECTOR = "#debug > pre"
@@ -329,10 +353,10 @@ _CONSOLE_COLUMNS = 120
 # The start of the output of the command that prints the terminal's size.
 _SIZE_TAG = "rung_size_"
 
-# The lines the refit rung adds to the permit area of the band.
+# A count chosen by its writer: the lines the refit rung adds to the band.
 _REFIT_LINES = 3
 
-# The animation frames waited for after the band changed size.
+# A count chosen by its writer: the frames waited for after the band changed.
 _FRAMES_COUNT = 2
 
 # A default chosen by its writer: the milliseconds those frames may take.
@@ -407,20 +431,23 @@ _STALL_PATH = "/stall"
 # The body length the stalled answer announces, more than it sends.
 _STALL_LENGTH = 100
 
-# The start of the stub's paths answered in reverse order of their number.
+# The stub's path answered only once the rung releases it, after a timeout.
+_LATE_PATH = "/late"
+
+# The start of the stub's paths, each held until the order rung releases it.
 _ORDER_PREFIX = "/order/"
 
 # How many requests the order rung sends.
 _ORDER_COUNT = 3
+
+# A default chosen by its writer: the whole seconds the order port waits.
+_ORDER_SECONDS = 30
 
 # The stub's path answered only after the second one.
 _FIRST_PATH = "/pair/first"
 
 # The stub's path answered at once.
 _SECOND_PATH = "/pair/second"
-
-# The base whose token request the stub holds until it stops.
-_HELD_BASE = "/held/"
 
 # The base whose token the stub answers and whose socket it holds.
 _OPENING_BASE = "/opening/"
@@ -509,8 +536,7 @@ _PATTERN_PERIOD = 251
 # The bytes in a MiB.
 _MIB = 1 << 20
 
-# A size chosen by its writer: the pieces the pattern is hashed and written
-# in, whole periods within a MiB.
+# A size chosen by its writer: a piece of the pattern, whole periods in a MiB.
 _PATTERN_PIECE = _PATTERN_PERIOD * (_MIB // _PATTERN_PERIOD)
 
 # The 10 MiB a message once held, which the bulk root's `_files` passes.
@@ -741,13 +767,16 @@ _PROMPT_TEXT = "$ "
 # The word typed into the console before its first message, then dropped.
 _MARK_EARLY = "rung_early"
 
+# The word typed once the console prompted, after anything typed early.
+_MARK_LATE = "rung_late"
+
 # The character that starts a message of ttyd's client carrying input.
 _INPUT_KIND = "0"
 
-# The columns the probe's first console message gives the terminal.
+# A size chosen by its writer: the columns of the probe's first message.
 _PROBE_COLUMNS = 80
 
-# The rows the probe's first console message gives the terminal.
+# A size chosen by its writer: the rows of the probe's first message.
 _PROBE_ROWS = 24
 
 # The script that makes a table of strings and reads it back.
@@ -780,7 +809,7 @@ _POOL_PREFIX = "rung_pool_"
 # The script the failing tool call names, which no root holds.
 _MISSING_NAME = "rung_missing"
 
-# The most values or databases the filling scripts try.
+# A count chosen by its writer: the most values or databases a script tries.
 _SCRIPT_LIMIT = 1000
 
 # The AI script that makes a table of strings and reads it back.
@@ -971,9 +1000,9 @@ _STRESS_SECONDS = 600.0
 
 # The AI script that compacts every turn of the scene on screen.
 _COMPACT_SCRIPT = """const store = engine.store;
-const text = (ref) => new TextDecoder().decode(store.kv_get(ref).data);
-const world = text("/metaverse/world");
-const scene = text("/" + world + "/scene");
+const ref_text = (ref) => new TextDecoder().decode(store.kv_get(ref).data);
+const world = ref_text("/metaverse/world");
+const scene = ref_text("/" + world + "/scene");
 const turns = store.turn_list(scene);
 const through = turns[turns.length - 1].n;
 const seq = store.turn_compact(scene, through, args.summary);
@@ -1033,8 +1062,7 @@ _LARGEST_INSERT = "INSERT INTO rung_largest (data) VALUES (?)"
 # A table of one page, made to fill that database's last pages one by one.
 _FILL_DDL = "CREATE TABLE rung_fill_{} (n INTEGER PRIMARY KEY) STRICT"
 
-# The copies of a database in OPFS at a restore's peak: the cache file, the
-# temporary file of its check and the database file.
+# Copies in OPFS at a restore's peak: cache file, check's temporary, database.
 _IMAGE_COPIES = 3
 
 # The input whose turn loads the largest database, after the stress inputs.
@@ -1064,10 +1092,10 @@ _KILL_DIRECTORY = ".xsjs-kill-pool"
 # The OPFS directory of the kill rung's cache files.
 _KILL_SLOTS_DIRECTORY = "xsjs-kill-cache"
 
-# The files of that pool, as many as the test page's pool holds.
+# A count chosen by its writer, the test page's: the files of that pool.
 _KILL_CAPACITY = 32
 
-# The cache files of the kill rung, as many as the TypeScript suite's.
+# A count chosen by its writer, the TypeScript suite's: the kill cache files.
 _KILL_SLOTS = 8
 
 # The root of the kill rung's store in that pool.
@@ -1118,8 +1146,11 @@ _SHELL_LEVEL = 2
 # The subtitle of the hyperposition's second version, written by the test.
 _REPLACED_SUBTITLE = "The rung hyperposition is replaced."
 
-# The ref the desync rung writes on the server behind the page's back.
+# The ref under which the desync rung writes behind the page's back.
 _DESYNC_REF = "/metaverse/rung/desync"
+
+# A count chosen by its writer: more writes than the plain turn's two appends.
+_DESYNC_WRITES = 3
 
 # The first byte of a ttyd message of program output.
 _OUTPUT_KIND = 0x30
@@ -1134,8 +1165,8 @@ globalThis.Worker = class {
 
 # Adds a prefix and a suffix to the text of every script `Blob`.
 _BLOB_PATCH = """(() => {
-  const Original = globalThis.Blob;
-  globalThis.Blob = class extends Original {
+  const OriginalBlob = globalThis.Blob;
+  globalThis.Blob = class extends OriginalBlob {
     constructor(parts, options) {
       const script =
         options !== undefined && options.type === "text/javascript";
@@ -1203,7 +1234,7 @@ _PROBE_KIT = r"""(() => {
     const data = jslb.field_get(blob, "data");
     return typeof data === "string" ? probe.sink_bytes[data] : data;
   };
-  probe.summary = (line) => ({
+  probe.summary_make = (line) => ({
     header: line[0],
     payload: jslb.payload_of(line),
     blobs: jslb
@@ -1214,21 +1245,21 @@ _PROBE_KIT = r"""(() => {
         return { size: bytes.length, sha256: utility.sha256_hex(bytes) };
       }),
   });
-  probe.receiver = (name) => {
+  probe.receiver_make = (name) => {
     probe.lines[name] = [];
     return (line) => {
-      probe.lines[name].push(probe.summary(line));
+      probe.lines[name].push(probe.summary_make(line));
     };
   };
   probe.http_port = (name, seconds) => {
     const port = new http.HttpPort(seconds);
-    port.line_receive(probe.receiver(name));
+    port.line_receive(probe.receiver_make(name));
     probe.ports[name] = port;
     return true;
   };
   probe.media_port = (name, budget, seconds) => {
     const port = new media.MediaPort(budget, seconds);
-    port.line_receive(probe.receiver(name));
+    port.line_receive(probe.receiver_make(name));
     probe.ports[name] = port;
     return true;
   };
@@ -1240,14 +1271,14 @@ _PROBE_KIT = r"""(() => {
   };
   probe.lines_when = (name, count) =>
     probe.lines[name].length >= count ? probe.lines[name] : null;
-  probe.pattern = (size) => {
+  probe.pattern_make = (size) => {
     const data = new Uint8Array(size);
     for (let index = 0; index < size; index += 1) {
       data[index] = index % 251;
     }
     return data;
   };
-  probe.thrown = (fn) => {
+  probe.thrown_message = (fn) => {
     try {
       fn();
     } catch (error) {
@@ -1268,7 +1299,7 @@ _PROBE_KIT = r"""(() => {
     const values = {};
     const port = new wire.WirePort(base, probe.sink, (id) => values[id]);
     port.line_receive((line) => {
-      record.lines.push(probe.summary(line));
+      record.lines.push(probe.summary_make(line));
       probe.sink_free(line);
       if (record.after !== null) {
         record.after();
@@ -1296,13 +1327,13 @@ _PROBE_KIT = r"""(() => {
   };
   probe.kv_put = (name, id, key, size, since) => {
     const header = jslb.header_make("kv.put", { id, key });
-    const blob = jslb.blob_make(probe.pattern(size));
+    const blob = jslb.blob_make(probe.pattern_make(size));
     const line = jslb.line_make(header, [blob], { since });
     probe.wire[name].port.line_post(line, []);
     return true;
   };
   probe.put_refused = (name, id, key, size, since) =>
-    probe.thrown(() => probe.kv_put(name, id, key, size, since));
+    probe.thrown_message(() => probe.kv_put(name, id, key, size, since));
   probe.wire_send = (name, type, options, payload) => {
     const header = jslb.header_make(type, options);
     probe.wire[name].port.line_post(jslb.line_make(header, [], payload), []);
@@ -1314,9 +1345,9 @@ _PROBE_KIT = r"""(() => {
   };
   probe.echo_run = (name, count, size) => {
     const wired = probe.wire[name];
-    const data = probe.pattern(size);
+    const data = probe.pattern_make(size);
     let sent = 0;
-    const post = () => {
+    const echo_post = () => {
       sent += 1;
       const header = jslb.header_make("echo", { id: sent });
       const line = jslb.line_make(header, [jslb.blob_make(data)], {});
@@ -1324,17 +1355,17 @@ _PROBE_KIT = r"""(() => {
     };
     wired.record.after = () => {
       if (sent < count) {
-        post();
+        echo_post();
       }
     };
-    post();
+    echo_post();
     return true;
   };
   probe.token_read = (url) =>
     fetch(url, { cache: "no-store" }).then((response) =>
       response.text().then((text) => ({ status: response.status, text })),
     );
-  probe.hit = (element, x, y) => {
+  probe.hit_test = (element, x, y) => {
     const top = document.elementFromPoint(x, y);
     return top !== null && (top === element || element.contains(top));
   };
@@ -1351,32 +1382,33 @@ _PROBE_KIT = r"""(() => {
       hidden: element.hidden,
       display: style.display,
       background: style.backgroundColor,
-      center_hit: probe.hit(element, x, y),
+      center_hit: probe.hit_test(element, x, y),
       text: element.textContent,
       disabled: element.disabled === true,
     };
   };
-  probe.view = (selector) => {
+  probe.view_get = (selector) => {
     const element = document.querySelector(selector);
     return element === null ? null : probe.element_view(element);
   };
-  probe.views = (selector) =>
+  probe.views_get = (selector) =>
     Array.from(document.querySelectorAll(selector), (element) =>
       probe.element_view(element),
     );
-  probe.viewport = () => ({ width: innerWidth, height: innerHeight });
+  probe.viewport_size = () => ({ width: innerWidth, height: innerHeight });
   probe.center_inside = (selector, outer) => {
     const box = document.querySelector(selector).getBoundingClientRect();
     const x = box.left + box.width / 2;
     const y = box.top + box.height / 2;
-    return probe.hit(document.querySelector(outer), x, y);
+    return probe.hit_test(document.querySelector(outer), x, y);
   };
   probe.bottom_inside = (selector, outer, offset) => {
     const container = document.querySelector(outer);
     const box = container.getBoundingClientRect();
     const bottom = box.top + container.clientTop + container.clientHeight;
     const x = box.left + container.clientLeft + offset;
-    return probe.hit(document.querySelector(selector), x, bottom - offset);
+    const element = document.querySelector(selector);
+    return probe.hit_test(element, x, bottom - offset);
   };
   probe.debug_box = () => {
     const debug = document.querySelector("#debug");
@@ -1408,16 +1440,16 @@ _PROBE_KIT = r"""(() => {
     new Promise((resolve) => {
       const timer = setTimeout(() => resolve(false), limit);
       let left = count;
-      const step = () => {
+      const frame_step = () => {
         left -= 1;
         if (left === 0) {
           clearTimeout(timer);
           resolve(true);
         } else {
-          requestAnimationFrame(step);
+          requestAnimationFrame(frame_step);
         }
       };
-      requestAnimationFrame(step);
+      requestAnimationFrame(frame_step);
     });
   probe.permit_lines = (count) => {
     const permit = document.querySelector("#permit");
@@ -1436,7 +1468,7 @@ _PROBE_KIT = r"""(() => {
     probe.added = [];
     return true;
   };
-  probe.widths = () => {
+  probe.widths_get = () => {
     const debug = document.querySelector("#debug");
     return {
       debug_scroll: debug.scrollWidth,
@@ -1445,7 +1477,7 @@ _PROBE_KIT = r"""(() => {
       inner: innerWidth,
     };
   };
-  probe.canvas = () => {
+  probe.canvas_view = () => {
     const canvas = document.querySelector("#image");
     return {
       view: probe.element_view(canvas),
@@ -1466,14 +1498,23 @@ _PROBE_KIT = r"""(() => {
     const top = (box.height - canvas.height * scale) / 2;
     const point_x = box.left + left + (x + 0.5) * scale;
     const point_y = box.top + top + (y + 0.5) * scale;
-    return { x: point_x, y: point_y, hit: probe.hit(canvas, point_x, point_y) };
+    const hit = probe.hit_test(canvas, point_x, point_y);
+    return { x: point_x, y: point_y, hit };
   };
-  probe.fault = () => {
+  probe.fault_text = () => {
     const pre = document.querySelector("body > pre");
     return pre === null ? null : pre.textContent;
   };
-  probe.outcome = (subtitle) => {
-    const fault = probe.fault();
+  probe.fault_holding = (message) => {
+    const pre = document.querySelector("body > pre");
+    if (pre === null || !pre.textContent.includes(message)) {
+      return null;
+    }
+    const count = document.querySelectorAll("pre").length;
+    return { text: pre.textContent, count };
+  };
+  probe.outcome_get = (subtitle) => {
+    const fault = probe.fault_text();
     if (fault !== null) {
       return { fault };
     }
@@ -1496,16 +1537,16 @@ _PROBE_KIT = r"""(() => {
         };
   };
   probe.image_kept = () => document.querySelector("#image") !== null;
-  probe.rows = () =>
+  probe.rows_get = () =>
     Array.from(
       document.querySelectorAll("#debug .xterm-rows > div"),
       (row) => row.textContent,
     );
-  probe.focus = (selector) => {
+  probe.focus_set = (selector) => {
     document.querySelector(selector).focus();
     return true;
   };
-  probe.permit = () => {
+  probe.permit_view = () => {
     const text = document.querySelector("#permit p");
     const buttons = Array.from(document.querySelectorAll("#permit button"));
     return text === null || buttons.length === 0
@@ -1535,20 +1576,32 @@ _PROBE_KIT = r"""(() => {
     document.body.append(element);
     return true;
   };
+  probe.svg_add = (href) => {
+    const space = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(space, "svg");
+    const image = document.createElementNS(space, "image");
+    const xlink = "http://www.w3.org/1999/xlink";
+    image.setAttributeNS(xlink, "xlink:href", href);
+    svg.append(image);
+    document.body.append(svg);
+    return true;
+  };
   probe.overlay_again = (message) => {
     error_overlay.overlay_show(message, "");
     return document.querySelectorAll("pre").length;
   };
-  probe.history = () =>
+  probe.history_get = () =>
     verbose.history_get(settings.settings_get("verbose_ring"));
   probe.sink_twice = () =>
-    probe.thrown(() => verbose.sink_set(() => undefined));
+    probe.thrown_message(() => verbose.sink_set(() => undefined));
   probe.log_mark = (text) => {
     verbose.log(text);
     return verbose.history_get(1)[0];
   };
   probe.ring_refused = () =>
-    probe.thrown(() => new overlay.Overlay(document.createElement("div"), 0));
+    probe.thrown_message(() =>
+      new overlay.Overlay(document.createElement("div"), 0),
+    );
   probe.line_of = (type, payload) =>
     jslb.line_make(jslb.header_make(type), [], payload);
   probe.ui_notify = (type) => {
@@ -1609,7 +1662,9 @@ _PROBE_KIT = r"""(() => {
       return dispatch.task_sleep({}, [id], done);
     });
     dispatch.handler_register(done, 0, (wake) => {
-      probe.thread_replies = wake.replies.map((line) => probe.summary(line));
+      probe.thread_replies = wake.replies.map((line) =>
+        probe.summary_make(line),
+      );
       return undefined;
     });
     tasks.line_notify(probe.line_of(begin, {}), "ui");
@@ -1632,7 +1687,9 @@ _PROBE_KIT = r"""(() => {
       return dispatch.task_sleep({}, ids, done);
     });
     dispatch.handler_register(done, 0, (wake) => {
-      probe.pair_replies = wake.replies.map((line) => probe.summary(line));
+      probe.pair_replies = wake.replies.map((line) =>
+        probe.summary_make(line),
+      );
       return undefined;
     });
     tasks.line_notify(probe.line_of(begin, {}), "ui");
@@ -1678,6 +1735,112 @@ _PROBE_KIT = r"""(() => {
   };
   probe.worker_when = () =>
     probe.worker_lines.length > 0 ? probe.worker_lines : null;
+  probe.echo_body = (base, count, size) => {
+    const kept = {};
+    let opened = 0;
+    const parts_join = (parts) => {
+      let total = 0;
+      for (const part of parts) {
+        total += part.length;
+      }
+      const joined = new Uint8Array(total);
+      let offset = 0;
+      for (const part of parts) {
+        joined.set(part, offset);
+        offset += part.length;
+      }
+      return joined;
+    };
+    const sink = {
+      sink_open: () => {
+        opened += 1;
+        const handle = "worker/" + opened;
+        kept[handle] = [];
+        return handle;
+      },
+      sink_append: (handle, data) => {
+        kept[handle].push(data.slice());
+      },
+      sink_close: (handle) => {
+        const joined = parts_join(kept[handle]);
+        kept[handle] = joined;
+        return utility.sha256_hex(joined);
+      },
+    };
+    const values = {};
+    const port = new wire.WirePort(base, sink, (id) => values[id]);
+    const data = new Uint8Array(size);
+    for (let index = 0; index < size; index += 1) {
+      data[index] = index % 251;
+    }
+    let sent = 0;
+    const echo_post = () => {
+      sent += 1;
+      const header = jslb.header_make("echo", { id: sent });
+      port.line_post(jslb.line_make(header, [jslb.blob_make(data)], {}), []);
+    };
+    port.line_receive((line) => {
+      const blobs = jslb
+        .headers_of(line)
+        .slice(1)
+        .map((blob) => {
+          const held = jslb.field_get(blob, "data");
+          const bytes = typeof held === "string" ? kept[held] : held;
+          if (typeof held === "string") {
+            delete kept[held];
+          }
+          return { size: bytes.length, sha256: utility.sha256_hex(bytes) };
+        });
+      const header = line[0];
+      const payload = jslb.payload_of(line);
+      self.postMessage({ line: { header, payload, blobs } });
+      if (sent < count) {
+        echo_post();
+      }
+    });
+    port.wire_open((hello) => {
+      Object.assign(values, hello.settings);
+      self.postMessage({ hello: jslb.payload_of(hello) });
+      port.line_post(dispatch.reply_make(hello, {}), []);
+    });
+    self.onmessage = () => echo_post();
+  };
+  probe.echo_worker = (base, count, size) => {
+    const args = JSON.stringify([base, count, size]).slice(1, -1);
+    const code = "(" + probe.echo_body.toString() + ")(" + args + ");";
+    probe.echo_record = { hello: null, lines: [], fault: null };
+    const worker = probe.worker_make(code);
+    worker.onmessage = (event) => {
+      if (event.data.hello !== undefined) {
+        probe.echo_record.hello = event.data.hello;
+      } else {
+        probe.echo_record.lines.push(event.data.line);
+      }
+    };
+    worker.onerror = (event) => {
+      probe.echo_record.fault = String(event.message);
+    };
+    probe.echo_thread = worker;
+    return true;
+  };
+  probe.echo_start = () => {
+    probe.echo_thread.postMessage("start");
+    return true;
+  };
+  probe.echo_hello = () => {
+    const record = probe.echo_record;
+    if (record.fault !== null) {
+      return { fault: record.fault };
+    }
+    return record.hello === null ? null : { hello: record.hello };
+  };
+  probe.echo_lines = (count) => {
+    const record = probe.echo_record;
+    if (record.fault !== null) {
+      return { fault: record.fault };
+    }
+    return record.lines.length >= count ? { lines: record.lines } : null;
+  };
   probe.png_bytes = () => Array.from(provider_script.image_pattern());
   probe.image_size = (name, key) => {
     const image = probe.ports[name].image_get(key);
@@ -1793,7 +1956,8 @@ _PROBE_KIT = r"""(() => {
     probe.word_state = seed;
     dispatch.handler_register("ui.probe_run", 0, () => probe.ui_next());
     dispatch.handler_register("ui.probe_done", 0, (wake) => {
-      probe.ui_replies.push(probe.summary(jslb.payload_of(wake).replies[0]));
+      const reply = jslb.payload_of(wake).replies[0];
+      probe.ui_replies.push(probe.summary_make(reply));
       return probe.ui_queue.length > 0 ? probe.ui_next() : undefined;
     });
     return true;
@@ -1805,7 +1969,7 @@ _PROBE_KIT = r"""(() => {
     return true;
   };
   probe.ui_when = (count) => {
-    const fault = probe.fault();
+    const fault = probe.fault_text();
     if (fault !== null) {
       return { fault };
     }
@@ -1815,7 +1979,7 @@ _PROBE_KIT = r"""(() => {
   };
   probe.echo_burst = (name, count, size) => {
     const port = probe.wire[name].port;
-    const data = probe.pattern(size);
+    const data = probe.pattern_make(size);
     for (let number = 1; number <= count; number += 1) {
       const header = jslb.header_make("echo", { id: number });
       port.line_post(jslb.line_make(header, [jslb.blob_make(data)], {}), []);
@@ -1829,7 +1993,7 @@ _PROBE_KIT = r"""(() => {
       polling: port.poll_id !== undefined,
     };
   };
-  probe.ui_tasks_kind = () => typeof globalThis.test_ui_tasks.task_submit;
+  probe.submit_kind = () => typeof globalThis.test_ui_tasks.task_submit;
   probe.sync_get = () => {
     const request = new XMLHttpRequest();
     request.open("GET", location.href, false);
@@ -1907,17 +2071,17 @@ _PROBE_KIT = r"""(() => {
   ];
   probe.kill_run = (options) => {
     probe.kill = null;
-    const fault = (text) => {
+    const fault_keep = (text) => {
       probe.kill = { fault: text };
     };
     const first = probe.worker_real(
       probe.kill_code({ ...options, clear: true }, probe.kill_put_body),
       "kill_put",
     );
-    first.onerror = (event) => fault(String(event.message));
+    first.onerror = (event) => fault_keep(String(event.message));
     first.onmessage = (event) => {
       if (event.data.paused !== true) {
-        fault(JSON.stringify(event.data));
+        fault_keep(JSON.stringify(event.data));
         return;
       }
       first.terminate();
@@ -1925,7 +2089,7 @@ _PROBE_KIT = r"""(() => {
         probe.kill_code({ ...options, clear: false }, probe.kill_check_body),
         "kill_check",
       );
-      second.onerror = (event) => fault(String(event.message));
+      second.onerror = (event) => fault_keep(String(event.message));
       second.onmessage = (event) => {
         probe.kill = event.data;
       };
@@ -1956,13 +2120,6 @@ class KeyStroke(NamedTuple):
     text: str
 
 
-# The key that ends a line, in a form or in the console.
-_KEY_ENTER = KeyStroke("Enter", "Enter", 13, 0, "\r")
-
-# Control and C, which interrupts the console's command.
-_KEY_INTERRUPT = KeyStroke("c", "KeyC", 67, _CONTROL_MODIFIER, "")
-
-
 # One request the stub server took: its method, path, headers and body.
 class StubRequest(NamedTuple):
     method: str
@@ -1990,13 +2147,6 @@ class ServerExtras(NamedTuple):
     options: tuple[str, ...]
     arguments: tuple[str, ...]
     variables: tuple[tuple[str, str], ...] = ()
-
-
-# Nothing added: the root served as the start script serves it.
-_EXTRAS_NONE = ServerExtras((), ())
-
-# The provider key in ttyd's environment, for a provider not scripted.
-_EXTRAS_KEY = ServerExtras((), (), ((_PROVIDER_VARIABLE, _PROVIDER_KEY),))
 
 
 # A process's resident size and its peak, in KiB.
@@ -2074,7 +2224,9 @@ class LifecycleEvents(Protocol):
 
 # The browser of `devtools.py` as the rungs use it.
 class BrowserDriver(Protocol):
-    events: LifecycleEvents
+    # The page loads seen, read only here so that `PageEvents` matches.
+    @property
+    def events(self) -> LifecycleEvents: ...
 
     # Navigates to the URL, again while refused, and returns once it loads.
     def page_open(self, url: str) -> None: ...
@@ -2340,16 +2492,23 @@ class StubServer(http.server.ThreadingHTTPServer):
         self.condition = threading.Condition()
         self.requests: list[StubRequest] = []
         self.answered: list[str] = []
+        self.orders_released: set[int] = set()
+        self.late_released = False
+        self.late_outcome = ""
         self.released = False
+        self.failure = ""
         self.png = b""
-        self.thread = threading.Thread(target=self.serve_forever)
+        self.thread = threading.Thread(target=self.serve_forever, daemon=True)
+        self.main_id = cast(int, threading.main_thread().ident)
+        self.handler_kept = signal.getsignal(signal.SIGUSR1)
 
-    # Starts serving on a thread of its own.
+    # Starts serving on a thread of its own, a handler's failure raised here.
     def __enter__(self) -> Self:
+        signal.signal(signal.SIGUSR1, self.failure_raise)
         self.thread.start()
         return self
 
-    # Lets every held request go, then stops serving and closes the socket.
+    # Lets held requests go, stops, restores the signal, raises a late failure.
     def __exit__(
         self,
         exception_type: type[BaseException] | None,
@@ -2362,6 +2521,27 @@ class StubServer(http.server.ThreadingHTTPServer):
         self.shutdown()
         self.thread.join()
         self.server_close()
+        signal.signal(signal.SIGUSR1, self.handler_kept)
+        if self.failure and exception is None:
+            raise CheckFailed(self.failure)
+
+    # Sends a handler's error, with its stack, in place of printing it.
+    def handle_error(self, request: object, client_address: object) -> None:
+        self.failure_send(traceback.format_exc())
+
+    # Keeps the first failure, raised in the main thread before the release.
+    def failure_send(self, text: str) -> None:
+        with self.condition:
+            if not self.failure:
+                self.failure = text
+                if not self.released:
+                    signal.pthread_kill(self.main_id, signal.SIGUSR1)
+
+    # Raises in the main thread the failure a handler sent.
+    def failure_raise(
+        self, number: int, frame: types.FrameType | None
+    ) -> None:
+        raise CheckFailed(self.failure)
 
     # The address of a path of the stub.
     def url_make(self, path: str) -> str:
@@ -2423,19 +2603,23 @@ class StubServer(http.server.ThreadingHTTPServer):
         with self.condition:
             return [path for path in self.answered if path.startswith(prefix)]
 
-    # The order request due next, the highest first, once all have come.
-    def order_turn(self) -> int | None:
-        arrived = [
-            request
-            for request in self.requests
-            if request.path.startswith(_ORDER_PREFIX)
-        ]
-        done = [
-            path for path in self.answered if path.startswith(_ORDER_PREFIX)
-        ]
-        if len(arrived) < _ORDER_COUNT:
-            return None
-        return _ORDER_COUNT - 1 - len(done)
+    # Lets the held answer of the order request of the number go.
+    def order_release(self, number: int) -> None:
+        with self.condition:
+            self.orders_released.add(number)
+            self.condition.notify_all()
+
+    # Lets the held answer of the late path go.
+    def late_release(self) -> None:
+        with self.condition:
+            self.late_released = True
+            self.condition.notify_all()
+
+    # Keeps what the late answer's write met, sent or the error it raised.
+    def late_record(self, outcome: str) -> None:
+        with self.condition:
+            self.late_outcome = outcome
+            self.condition.notify_all()
 
 
 # Answers the page's requests by path, recording each in the stub server.
@@ -2517,16 +2701,24 @@ class StubHandler(http.server.BaseHTTPRequestHandler):
         elif path == _STALL_PATH:
             self.stall_send()
             stub.hold_wait(lambda: False)
+        elif path == _LATE_PATH:
+            stub.hold_wait(lambda: stub.late_released)
+            try:
+                self.answer_send(_HTTP_OK, _TEXT_MEDIA, _PLAIN_TEXT.encode())
+            except (BrokenPipeError, ConnectionResetError) as error:
+                stub.late_record(type(error).__name__)
+            else:
+                stub.late_record("sent")
         elif path.startswith(_ORDER_PREFIX):
             number = int(path.removeprefix(_ORDER_PREFIX))
-            stub.hold_wait(lambda: stub.order_turn() == number)
+            stub.hold_wait(lambda: number in stub.orders_released)
             self.json_send({"n": number})
         elif path == _FIRST_PATH:
             stub.hold_wait(lambda: _SECOND_PATH in stub.answered)
             self.json_send({"name": "first"})
         elif path == _SECOND_PATH:
             self.json_send({"name": "second"})
-        elif path in (_HELD_BASE + _TOKEN_PATH, _OPENING_BASE + _SOCKET_PATH):
+        elif path == _OPENING_BASE + _SOCKET_PATH:
             stub.release_wait()
         elif path in (
             _OPENING_BASE + _TOKEN_PATH,
@@ -2587,7 +2779,9 @@ class PageSession:
     # Waits until the subtitle shows with the input open, failing on a fault.
     def outcome_wait(self, subtitle: str) -> None:
         found = json_object(
-            self.probe_wait(f"the subtitle {subtitle!r}", "outcome", subtitle)
+            self.probe_wait(
+                f"the subtitle {subtitle!r}", "outcome_get", subtitle
+            )
         )
         if "fault" in found:
             raise CheckFailed(
@@ -2596,11 +2790,11 @@ class PageSession:
 
     # Waits for the fault screen and returns its text.
     def fault_wait(self, what: str) -> str:
-        return cast(str, self.probe_wait(what, "fault"))
+        return cast(str, self.probe_wait(what, "fault_text"))
 
     # Fails if the page shows the fault screen.
     def fault_none(self, what: str) -> None:
-        fault = self.probe_call("fault")
+        fault = self.probe_call("fault_text")
         if fault is not None:
             raise CheckFailed(f"{what}: the page faulted: {fault}")
 
@@ -2659,13 +2853,13 @@ class PageSession:
 
     # Focuses an element and types the text into it.
     def text_type(self, selector: str, text: str) -> None:
-        self.probe_call("focus", selector)
+        self.probe_call("focus_set", selector)
         self.text_insert(text)
 
     # Types the text into the player's input and presses Enter.
     def turn_send(self, text: str) -> None:
         self.text_type(_INPUT_SELECTOR, text)
-        self.key_press(_KEY_ENTER)
+        self.key_press(KeyStroke(*_KEY_ENTER))
 
     # Sends a turn and waits until it ends with the subtitle.
     def turn_run(self, text: str, ending: str) -> None:
@@ -2675,7 +2869,7 @@ class PageSession:
     # Types a command into the console and presses Enter.
     def command_type(self, command: str) -> None:
         self.text_type(_TERMINAL_INPUT, command)
-        self.key_press(_KEY_ENTER)
+        self.key_press(KeyStroke(*_KEY_ENTER))
 
     # Saves a PNG of the page under the name and returns its path.
     def shot_save(self, name: str) -> str:
@@ -2718,7 +2912,8 @@ class RunContext(NamedTuple):
     browser: BrowserDriver
     log: RungLog
     work: str
-    stub: StubServer
+    stack: contextlib.ExitStack
+    stubs: list[StubServer]
     test_page: str
     engine_page: str
     test_engine_page: str
@@ -2809,12 +3004,11 @@ def database_path(root: str, db: str) -> str:
     return os.path.join(root, db + _DB_EXTENSION)
 
 
-# A file's text, or nothing while it does not exist yet.
+# A file's whole lines, untranslated, or nothing while it does not exist yet.
 def file_text(path: str) -> str:
     if not os.path.exists(path):
         return ""
-    with open(path, encoding="utf-8") as file:
-        return file.read()
+    return lines_after(path, 0)
 
 
 # Copies each console message of the page to stderr.
@@ -2822,11 +3016,18 @@ def console_copy(text: str) -> None:
     sys.stderr.write(f"console: {text}\n")
 
 
-# A port on the local host that nothing listens on.
-def port_closed() -> int:
-    with socket.socket() as sock:
-        sock.bind((_LOCAL_HOST, 0))
-        return cast(int, sock.getsockname()[1])
+# A port on the local host held bound for the run and never listening.
+def port_closed(stack: contextlib.ExitStack) -> int:
+    sock = stack.enter_context(socket.socket())
+    sock.bind((_LOCAL_HOST, 0))
+    return cast(int, sock.getsockname()[1])
+
+
+# The run's stub server, started the first time a rung needs it.
+def stub_ready(context: RunContext) -> StubServer:
+    if not context.stubs:
+        context.stubs.append(context.stack.enter_context(StubServer()))
+    return context.stubs[0]
 
 
 # The stroke of control and a digit, which the page keeps from the browser.
@@ -2901,7 +3102,7 @@ def views_wait(
     test: Callable[[list[dict[str, Any]]], bool],
 ) -> list[dict[str, Any]]:
     while True:
-        found = json_list(session.probe_call("views", selector))
+        found = json_list(session.probe_call("views_get", selector))
         views = [json_object(view) for view in found]
         if test(views):
             return views
@@ -2913,7 +3114,7 @@ def rows_wait(
     session: PageSession, what: str, test: Callable[[list[Any]], bool]
 ) -> list[Any]:
     while True:
-        rows = json_list(session.probe_call("rows"))
+        rows = json_list(session.probe_call("rows_get"))
         if test(rows):
             return rows
         time.sleep(min(_POLL_SECONDS, session.log.timer.seconds_left(what)))
@@ -2931,7 +3132,7 @@ def server_wait[T](
         time.sleep(min(_POLL_SECONDS, session.log.timer.seconds_left(what)))
 
 
-# Makes a root as the start script does, its settings changed as given.
+# Makes a root as the start script does, debug, level and scripted pinned.
 def root_make(
     work: str, name: str, page: str, overrides: dict[str, Any]
 ) -> tuple[str, str, dict[str, Any]]:
@@ -2950,6 +3151,9 @@ def root_make(
     shutil.copyfile(_STRINGS_PATH, os.path.join(strings_path, "en-US.json"))
     with open(_SETTINGS_PATH, encoding="utf-8") as file:
         values: dict[str, Any] = json.load(file)
+    values["debug"] = _ROOT_DEBUG
+    values["verbose_level"] = _ROOT_LEVEL
+    values["provider"] = {**values["provider"], "scripted": _ROOT_SCRIPTED}
     values.update(overrides)
     text = json.dumps(values, ensure_ascii=False, indent=2) + "\n"
     with open(
@@ -3531,61 +3735,61 @@ def count_settled(session: PageSession) -> int | None:
 def tap_documents(path: str, text: str) -> list[str]:
     documents: list[list[str]] = []
     whole = text[: text.rfind("\n") + 1]
-    for line in whole.splitlines(keepends=True):
-        if line == _TAP_VERSION + "\n":
+    for line in whole.split("\n")[:-1]:
+        if line == _TAP_VERSION:
             documents.append([])
         elif not documents:
             raise CheckFailed(f"{path} starts with {line!r}, not a version")
-        documents[-1].append(line)
+        documents[-1].append(line + "\n")
     return ["".join(lines) for lines in documents]
 
 
-# The failing points, their diagnostics, bail outs and unknown lines.
-def tap_failures(documents: list[str]) -> list[str]:
+# The first failing point and its diagnostics, else the first bail or unknown.
+def tap_failure(document: str) -> list[str]:
     import tap_consumer
 
     shown: list[str] = []
-    for number, document in enumerate(documents, 1):
-        kinds = tap_consumer.Parser().parse_text(document)
-        following = False
-        for text, kind in zip(document.splitlines(), kinds, strict=True):
-            match kind:
-                case tap_consumer.Result() if not kind.ok and not kind.todo:
-                    following = True
-                case tap_consumer.Diagnostic() if following:
-                    pass
-                case tap_consumer.Bail() | tap_consumer.Unknown():
-                    following = False
-                case _:
-                    following = False
-                    continue
-            shown.append(f"document {number}: {text}")
+    lines = document.removesuffix("\n").split("\n")
+    kinds = tap_consumer.Parser().parse_text(document)
+    for text, kind in zip(lines, kinds, strict=True):
+        match kind:
+            case tap_consumer.Diagnostic() if shown:
+                shown.append(text)
+            case _ if shown:
+                break
+            case tap_consumer.Result() if not kind.ok and not kind.todo:
+                shown.append(text)
+            case tap_consumer.Bail() | tap_consumer.Unknown():
+                return [text]
+            case _:
+                pass
     return shown
 
 
-# Fails unless both documents are well formed and none has a failing point.
+# Fails at the first fault: not two documents, then a document's first fault.
 def tap_check(path: str, documents: list[str]) -> str:
     import tap_consumer
 
-    stats = [tap_consumer.document_stats(document) for document in documents]
-    shown = "; ".join(
-        f"document {number}: plan {item.plan}, {item.passed} passed,"
-        f" {item.failed} failed, {item.skipped} skipped,"
-        f" {'well formed' if item.well_formed else 'not well formed'}"
-        for number, item in enumerate(stats, 1)
-    )
-    if (
-        len(documents) != _TAP_DOCUMENTS
-        or not all(item.well_formed for item in stats)
-        or any(item.failed for item in stats)
-    ):
-        failing = "\n".join(tap_failures(documents))
+    if len(documents) != _TAP_DOCUMENTS:
         raise CheckFailed(
             f"{path} holds {len(documents)} TAP documents where"
-            f" {_TAP_DOCUMENTS} were due; {shown}; the failing lines:\n"
-            f"{failing}"
+            f" {_TAP_DOCUMENTS} were due"
         )
-    return shown
+    shown: list[str] = []
+    for number, document in enumerate(documents, 1):
+        stats = tap_consumer.document_stats(document)
+        if stats.failed or not stats.well_formed:
+            first = "\n".join(tap_failure(document))
+            raise CheckFailed(
+                f"document {number} of {path} fails, well formed"
+                f" {stats.well_formed}, at its first failing point, bail out"
+                f" or unknown line:\n{first}"
+            )
+        shown.append(
+            f"document {number}: plan {stats.plan}, {stats.passed} passed,"
+            f" {stats.skipped} skipped, well formed"
+        )
+    return "; ".join(shown)
 
 
 # The names of the modules whose blocks a TAP document's stream reports.
@@ -3752,6 +3956,22 @@ def rung_resource(
     )
 
 
+# An SVG image whose only address is `xlink:href` faults naming no address.
+def rung_svg(session: PageSession, subtitle: str, href: str) -> str:
+    due = _ADDRESS_MISSING + "image"
+    fault_page(session, subtitle)
+    session.probe_call("svg_add", href)
+    text = session.fault_wait("the fault screen of the SVG image")
+    if due not in text:
+        raise CheckFailed(f"the fault screen shows {text!r}, not {due!r}")
+    session.programs_wait(1, "the stop function to end the engine")
+    return (
+        f"an SVG image whose only address, xlink:href, is {href!r} failed to"
+        f" load, showed {due!r} on the fault screen, and the engine program"
+        " ended"
+    )
+
+
 # A worker that throws once its script ran posts its fault to the page.
 def rung_posted(session: PageSession) -> str:
     session.page_leave()
@@ -3834,7 +4054,7 @@ def blob_patch(prefix: str, suffix: str) -> str:
 # The page answers before any render: the input shows, closed.
 def rung_idle(session: PageSession) -> str:
     session.page_open()
-    view = json_object(session.probe_call("view", _INPUT_SELECTOR))
+    view = json_object(session.probe_call("view_get", _INPUT_SELECTOR))
     if view["hidden"] or not view["center_hit"] or not view["disabled"]:
         raise CheckFailed(f"#input before the first render is {view}")
     png = session.shot_save("stage5_input_before_render")
@@ -4191,26 +4411,57 @@ def rung_stall(session: PageSession, stub: StubServer) -> str:
     )
 
 
-# After a timeout the port gives no second line for that request.
+# After a timeout the port gives no second line, though the answer comes late.
 def rung_single(session: PageSession, stub: StubServer) -> str:
-    for name in ("silent", "stall"):
-        get_send(session, name, 2, stub.url_make(_TEXT_PATH))
-        lines = port_lines(session, name, 2)
-        ids = [line["header"]["r"] for line in lines]
-        if ids != [1, 2]:
-            raise CheckFailed(f"the port {name} gave lines for {ids}")
+    import i18n
+
+    session.probe_call("http_port", "late", _HTTP_SECONDS)
+    url = stub.url_make(_LATE_PATH)
+    get_send(session, "late", 1, url)
+    line = port_lines(session, "late", 1)[0]
+    due = i18n.i18n("http.timeout_expired", url, _HTTP_SECONDS)
+    if (
+        line["header"] != {"t": "error", "r": 1}
+        or line["payload"]["message"] != due
+    ):
+        raise CheckFailed(f"the late server gave {line}, not {due!r}")
+    stub.late_release()
+    outcome = server_wait(
+        session, "the stub's late answer", lambda: stub.late_outcome or None
+    )
+    get_send(session, "late", 2, stub.url_make(_TEXT_PATH))
+    port_lines(session, "late", 2)
+    time.sleep(_QUIET_SECONDS)
+    lines = json_list(session.probe_call("lines_when", "late", 0))
+    ids = [json_object(line)["header"]["r"] for line in lines]
+    if ids != [1, 2]:
+        raise CheckFailed(f"the port late gave lines for {ids}")
     return (
-        "on both timed out ports a later request's reply came, and each port"
-        " gave exactly one line for its timed out request"
+        f"a GET of {url} timed out with {due!r}; the stub then answered it"
+        f" late, its write {outcome}; a later request's reply came, and"
+        f" {_QUIET_SECONDS:g} s on the port held exactly the lines of r 1 and"
+        " 2"
     )
 
 
 # Replies arriving in reverse order each answer their own request.
 def rung_order(session: PageSession, stub: StubServer) -> str:
-    session.probe_call("http_port", "order", _HTTP_SECONDS)
-    for number in range(_ORDER_COUNT):
-        url = stub.url_make(f"{_ORDER_PREFIX}{number}")
-        get_send(session, "order", number + 1, url)
+    session.probe_call("http_port", "order", _ORDER_SECONDS)
+    paths = [f"{_ORDER_PREFIX}{number}" for number in range(_ORDER_COUNT)]
+    for number, path in enumerate(paths):
+        get_send(session, "order", number + 1, stub.url_make(path))
+    server_wait(
+        session,
+        f"the stub to take the {_ORDER_COUNT} order requests",
+        lambda: (
+            True
+            if all(stub.requests_of("GET", path) for path in paths)
+            else None
+        ),
+    )
+    for number in reversed(range(_ORDER_COUNT)):
+        stub.order_release(number)
+        port_lines(session, "order", _ORDER_COUNT - number)
     lines = port_lines(session, "order", _ORDER_COUNT)
     came = [
         (line["header"]["r"], line["payload"]["json"]["n"]) for line in lines
@@ -4455,23 +4706,27 @@ def rung_cycle(session: PageSession) -> str:
     )
 
 
-# The wire port's wait for a token that never comes runs out.
-def rung_token(session: PageSession, stub: StubServer) -> str:
+# The wire port's wait for a token from a stopped ttyd runs out.
+def rung_token(session: PageSession) -> str:
     import i18n
 
+    ttyd = session.ttyd
     session.page_leave()
     session.page_open()
-    session.probe_call("wire_open", "held", stub.url_make(_HELD_BASE))
-    text = session.fault_wait("the fault of the wait for the token")
-    url = stub.url_make(_HELD_BASE + _TOKEN_PATH)
+    ttyd.signal_send(signal.SIGSTOP)
+    try:
+        session.probe_call("wire_open", "held", session.url)
+        text = session.fault_wait("the fault of the wait for the token")
+    finally:
+        ttyd.signal_send(signal.SIGCONT)
+    url = session.url + _TOKEN_PATH
     what = i18n.i18n("wire.what_token", url)
     due = i18n.i18n("wire.wait_expired", _WIRE_SECONDS, what)
     if due not in text:
         raise CheckFailed(f"the fault screen shows {text!r}, not {due!r}")
-    stub.request_find("GET", _HELD_BASE + _TOKEN_PATH)
     return (
-        f"a WirePort aimed at a server that took GET {url} and never"
-        f" answered faulted with {due!r}"
+        f"a WirePort aimed at ttyd, stopped with SIGSTOP so that GET {url}"
+        f" was never answered, faulted with {due!r}"
     )
 
 
@@ -4723,7 +4978,8 @@ def rung_relay(session: PageSession, subtitle: str) -> str:
         ),
     )
     ring = [
-        json_object(line) for line in json_list(session.probe_call("history"))
+        json_object(line)
+        for line in json_list(session.probe_call("history_get"))
     ]
     kept = [line for line in ring if line["text"] == rows[0].text]
     if len(kept) != 1 or kept[0]["at"] != rows[0].at:
@@ -4739,7 +4995,7 @@ def rung_relay(session: PageSession, subtitle: str) -> str:
 
 # The live verbose ring of the UI holds its lines, each an at and a text.
 def rung_ring(session: PageSession) -> str:
-    ring = json_list(session.probe_call("history"))
+    ring = json_list(session.probe_call("history_get"))
     size: int = session.values["verbose_ring"]
     fields = {"at", "text"}
     other = [line for line in ring if set(json_object(line)) != fields]
@@ -4870,7 +5126,7 @@ def rung_batch(session: PageSession) -> str:
 
 # The overlay's `pre` is hidden by the real style and shown uncovered.
 def rung_style(session: PageSession) -> str:
-    views = json_list(session.probe_call("views", _OVERLAY_SELECTOR))
+    views = json_list(session.probe_call("views_get", _OVERLAY_SELECTOR))
     hidden = json_object(views[0])
     if hidden["display"] != "none":
         raise CheckFailed(f"the hidden overlay is {hidden}")
@@ -4908,7 +5164,7 @@ def rung_survey(session: PageSession) -> str:
     return f"PNG {png} with control 1 open, then closed again"
 
 
-# Keys typed while tty 0 opens are dropped; ttyd is stopped meanwhile.
+# Keys typed while tty 0 opens are dropped, and ttyd is stopped meanwhile.
 def rung_early(session: PageSession) -> str:
     ttyd = session.ttyd
     ttyd.signal_send(signal.SIGSTOP)
@@ -4924,19 +5180,30 @@ def rung_early(session: PageSession) -> str:
         session.fault_none("typing into the opening console")
     finally:
         ttyd.signal_send(signal.SIGCONT)
-    rows = rows_wait(
+    rows_wait(
         session,
         "dash's prompt in the console",
         lambda rows: row_last(rows) == _PROMPT_ROW,
     )
+    session.command_type("echo " + _MARK_LATE)
+    rows = rows_wait(
+        session,
+        f"{_MARK_LATE} and dash's prompt after it",
+        lambda rows: (
+            _MARK_LATE in rows_filled(rows) and row_last(rows) == _PROMPT_ROW
+        ),
+    )
     typed = [row for row in rows_filled(rows) if _MARK_EARLY in row]
     if typed:
         raise CheckFailed(f"the console shows {typed} typed before it opened")
+    session.fault_none("the console after its first prompt")
     return (
         "with ttyd stopped, control 0 showed the console view and echo"
         f" {_MARK_EARLY} with Enter typed into it before its first message"
         " reached no handler and made no fault; ttyd continued, the console"
-        " opened, and dash prompted with nothing of what was typed"
+        f" opened, dash prompted, and once echo {_MARK_LATE} typed after the"
+        " prompt had printed its word, nothing of what was typed early had"
+        " come before it, with no fault"
     )
 
 
@@ -4953,8 +5220,8 @@ def rung_console(session: PageSession) -> str:
         "dash's prompt in the console",
         lambda rows: row_last(rows) == _PROMPT_ROW,
     )
-    overlays = json_list(session.probe_call("views", _OVERLAY_SELECTOR))
-    terminal = json_object(session.probe_call("view", _TERMINAL_SELECTOR))
+    overlays = json_list(session.probe_call("views_get", _OVERLAY_SELECTOR))
+    terminal = json_object(session.probe_call("view_get", _TERMINAL_SELECTOR))
     inside = session.probe_call(
         "center_inside", _TERMINAL_SELECTOR, _DEBUG_SELECTOR
     )
@@ -5008,7 +5275,7 @@ def console_show(session: PageSession) -> None:
 
 # Fails unless the console view is shown.
 def console_check(session: PageSession, what: str) -> None:
-    views = json_list(session.probe_call("views", _CONSOLE_SELECTOR))
+    views = json_list(session.probe_call("views_get", _CONSOLE_SELECTOR))
     if len(views) != 1 or json_object(views[0])["hidden"] is not False:
         raise CheckFailed(f"{what}: the console view is {views}, not shown")
 
@@ -5035,8 +5302,8 @@ def size_read(session: PageSession, number: int) -> tuple[int, int]:
 # Measures how the console fits the space of `#debug` above the band.
 def fit_read(session: PageSession) -> ConsoleFit:
     debug = json_object(session.probe_call("debug_box"))
-    screen = json_object(session.probe_call("view", _SCREEN_SELECTOR))
-    band = json_object(session.probe_call("view", _SUBTITLE_SELECTOR))
+    screen = json_object(session.probe_call("view_get", _SCREEN_SELECTOR))
+    band = json_object(session.probe_call("view_get", _SUBTITLE_SELECTOR))
     bars = debug["offset_height"] - debug["client_height"]
     return ConsoleFit(
         band["top"] - debug["top"] - bars,
@@ -5126,10 +5393,12 @@ def permit_take(
     import i18n
 
     session.turn_send(text)
-    permit = json_object(session.probe_wait("the permit request", "permit"))
+    permit = json_object(
+        session.probe_wait("the permit request", "permit_view")
+    )
     shown = json_object(permit["text"])
     buttons = [json_object(button) for button in permit["buttons"]]
-    viewport = json_object(session.probe_call("viewport"))
+    viewport = json_object(session.probe_call("viewport_size"))
     due = i18n.i18n(
         "page.permit_text", _PERMIT_TOOL, json_text(call.arguments)
     )
@@ -5192,16 +5461,16 @@ def rung_deny(
 
 # Fails unless each element of the band hits and `#debug` ends above it.
 def band_check(session: PageSession, what: str) -> int:
-    permit = json_object(session.probe_call("permit"))
+    permit = json_object(session.probe_call("permit_view"))
     views = [
-        json_object(session.probe_call("view", _SUBTITLE_TEXT)),
+        json_object(session.probe_call("view_get", _SUBTITLE_TEXT)),
         json_object(permit["text"]),
         *[json_object(button) for button in permit["buttons"]],
-        json_object(session.probe_call("view", _INPUT_SELECTOR)),
+        json_object(session.probe_call("view_get", _INPUT_SELECTOR)),
     ]
-    debug = json_object(session.probe_call("view", _DEBUG_SELECTOR))
-    band = json_object(session.probe_call("view", _SUBTITLE_SELECTOR))
-    viewport = json_object(session.probe_call("viewport"))
+    debug = json_object(session.probe_call("view_get", _DEBUG_SELECTOR))
+    band = json_object(session.probe_call("view_get", _SUBTITLE_SELECTOR))
+    viewport = json_object(session.probe_call("viewport_size"))
     covered = [
         view
         for view in views
@@ -5244,7 +5513,7 @@ def rung_band(session: PageSession, calls: dict[str, ScriptCall]) -> str:
         _OVERLAY_SELECTOR,
         lambda views: views[0]["hidden"],
     )
-    permit = json_object(session.probe_call("permit"))
+    permit = json_object(session.probe_call("permit_view"))
     session.view_click(json_object(permit["buttons"][1]))
     session.outcome_wait(call.ending)
     return (
@@ -5283,8 +5552,8 @@ def rung_interrupt(session: PageSession) -> str:
         f"{_SLEEP_COMMAND} in the console",
         lambda rows: row_last(rows).endswith(_SLEEP_COMMAND),
     )
-    session.probe_call("focus", _TERMINAL_INPUT)
-    session.key_press(_KEY_INTERRUPT)
+    session.probe_call("focus_set", _TERMINAL_INPUT)
+    session.key_press(KeyStroke(*_KEY_INTERRUPT))
     rows_wait(
         session,
         "dash's prompt after the interrupt",
@@ -5406,6 +5675,7 @@ def rung_pool(
     session: PageSession, scene: str, calls: dict[str, ScriptCall]
 ) -> str:
     call = calls[_INPUT_POOL]
+    drops = drop_replies(session)
     session.turn_run(_INPUT_POOL, call.ending)
     value = json_object(script_value(session, scene, call.ending))
     if (
@@ -5415,6 +5685,11 @@ def rung_pool(
     ):
         raise CheckFailed(f"the script returned {value}")
     made = cast(int, value["made"])
+    server_wait(
+        session,
+        "the server's replies to the pool's drops",
+        lambda: True if drop_replies(session) >= drops + made else None,
+    )
     names = [f"{_POOL_PREFIX}{count}" for count in range(made + 1)]
     left = [
         db for db in names if os.path.exists(database_path(session.root, db))
@@ -5425,8 +5700,8 @@ def rung_pool(
     return (
         f"{made} databases were created before db_create threw"
         f" {value['error']!r}; the failed one is not listed, and all were"
-        " dropped again; the server, holding the turn's last message, which"
-        f" was forwarded after the drops, holds none of the {len(names)}"
+        f" dropped again; the server replied to the {made} drops and holds"
+        f" none of the {len(names)}"
     )
 
 
@@ -5435,7 +5710,7 @@ def rung_turn(session: PageSession, scene: str, png: bytes) -> str:
     console_hide(session)
     session.probe_call("long_start")
     session.turn_run(_INPUT_TURN, _SCENE_SUBTITLE)
-    canvas = json_object(session.probe_call("canvas"))
+    canvas = json_object(session.probe_call("canvas_view"))
     width, height = png_size(png)
     if canvas["view"]["hidden"] or (canvas["width"], canvas["height"]) != (
         width,
@@ -5505,8 +5780,8 @@ def still_state(session: PageSession, scene: str) -> dict[str, Any]:
         for name in os.listdir(session.root)
         if name.endswith(_DB_EXTENSION) and name != _VERBOSE_FILE
     )
-    ring = json_list(session.probe_call("history"))
-    subtitle = json_object(session.probe_call("view", _SUBTITLE_TEXT))
+    ring = json_list(session.probe_call("history_get"))
+    subtitle = json_object(session.probe_call("view_get", _SUBTITLE_TEXT))
     return {
         "seq": {db: seq_read(session, db) for db in names},
         "ai": len(verbose_read(session, _AI_THREAD)),
@@ -5517,9 +5792,21 @@ def still_state(session: PageSession, scene: str) -> dict[str, Any]:
     }
 
 
+# The state once two reads a poll apart agree, else None.
+def still_settled(session: PageSession, scene: str) -> dict[str, Any] | None:
+    first = still_state(session, scene)
+    time.sleep(_POLL_SECONDS)
+    return first if still_state(session, scene) == first else None
+
+
 # With no input nothing runs: the server and the page stay as they were.
 def rung_still(session: PageSession, scene: str) -> str:
-    before = still_state(session, scene)
+    # The writes of the turn still in transit land before the baseline.
+    before = server_wait(
+        session,
+        "the state after the turn to settle",
+        lambda: still_settled(session, scene),
+    )
     time.sleep(_QUIET_SECONDS)
     after = still_state(session, scene)
     if after != before:
@@ -5537,7 +5824,7 @@ def rung_still(session: PageSession, scene: str) -> str:
 
 # After a render with an image, `#image` fills the viewport, uncovered.
 def rung_image(session: PageSession) -> str:
-    canvas = json_object(session.probe_call("canvas"))
+    canvas = json_object(session.probe_call("canvas_view"))
     view = json_object(canvas["view"])
     if (
         view["hidden"]
@@ -5556,9 +5843,9 @@ def rung_image(session: PageSession) -> str:
 # The subtitle shows its text inside the viewport on black, the console shown.
 def rung_subtitle(session: PageSession) -> str:
     console_check(session, "before the subtitle's view")
-    text = json_object(session.probe_call("view", _SUBTITLE_TEXT))
-    area = json_object(session.probe_call("view", _SUBTITLE_SELECTOR))
-    viewport = json_object(session.probe_call("viewport"))
+    text = json_object(session.probe_call("view_get", _SUBTITLE_TEXT))
+    area = json_object(session.probe_call("view_get", _SUBTITLE_SELECTOR))
+    viewport = json_object(session.probe_call("viewport_size"))
     if (
         text["text"] != _SCENE_SUBTITLE
         or not box_inside(text, viewport)
@@ -5577,7 +5864,7 @@ def rung_subtitle(session: PageSession) -> str:
 # The input shows, open, after the first render, the console shown.
 def rung_input(session: PageSession) -> str:
     console_check(session, "before the input's view")
-    view = json_object(session.probe_call("view", _INPUT_SELECTOR))
+    view = json_object(session.probe_call("view_get", _INPUT_SELECTOR))
     if view["hidden"] or view["disabled"] or not view["center_hit"]:
         raise CheckFailed(f"#input after the render is {view}")
     png = session.shot_save("stage8_input_visible")
@@ -5587,10 +5874,10 @@ def rung_input(session: PageSession) -> str:
     )
 
 
-# The console view shows over the rendered image, inside `#debug`, and stays.
+# The console view shows over the rendered image, inside `#debug`.
 def rung_terminal(session: PageSession) -> str:
     console_show(session)
-    terminal = json_object(session.probe_call("view", _TERMINAL_SELECTOR))
+    terminal = json_object(session.probe_call("view_get", _TERMINAL_SELECTOR))
     inside = session.probe_call(
         "center_inside", _TERMINAL_SELECTOR, _DEBUG_SELECTOR
     )
@@ -5602,7 +5889,7 @@ def rung_terminal(session: PageSession) -> str:
     return (
         "over the image the terminal's box is"
         f" {terminal['width']:g}x{terminal['height']:g} and its centre hits"
-        f" inside #debug, not #image, and it stays shown; PNG {png}"
+        f" inside #debug, not #image; PNG {png}"
     )
 
 
@@ -5618,7 +5905,7 @@ def rung_overlay(session: PageSession) -> str:
     newest = session.probe_call(
         "bottom_inside", _OVERLAY_SELECTOR, _DEBUG_SELECTOR, _CORNER_PIXELS
     )
-    debug = json_object(session.probe_call("view", _DEBUG_SELECTOR))
+    debug = json_object(session.probe_call("view_get", _DEBUG_SELECTOR))
     if (
         view["width"] <= 0
         or view["height"] <= 0
@@ -5631,7 +5918,7 @@ def rung_overlay(session: PageSession) -> str:
         )
     png = session.shot_save("stage8_overlay_visible")
     return (
-        "over the image, below the console, the overlay of tty 1 has a box,"
+        "over the image the overlay of tty 1 has a box,"
         " the bottom of #debug's view hits its newest line and #debug's"
         f" background is {_BLACK}; PNG {png}"
     )
@@ -5671,7 +5958,7 @@ def rung_overlay_newest(session: PageSession) -> str:
 
 # A line wider than the viewport scrolls inside `#debug`, not the page.
 def rung_wide(session: PageSession) -> str:
-    widths = json_object(session.probe_call("widths"))
+    widths = json_object(session.probe_call("widths_get"))
     if (
         widths["debug_scroll"] <= widths["debug_client"]
         or widths["document_scroll"] != widths["inner"]
@@ -5692,10 +5979,10 @@ def rung_long(session: PageSession) -> str:
         for value in json_list(session.probe_call("long_list"))
     ]
     target = session.values["long_task_ms"]
-    longest = max(durations, default=0.0)
+    longest = f"{max(durations):.1f} ms" if durations else "none"
     return (
         f"the long task observer saw {len(durations)} tasks of 50 ms or more"
-        f" on the UI thread, the longest {longest:.1f} ms; long_task_ms"
+        f" on the UI thread, the longest {longest}; long_task_ms"
         f" {target} is a soft target below the observer's 50 ms floor"
     )
 
@@ -5724,7 +6011,7 @@ def rung_exit(session: PageSession) -> str:
 def rung_scene(session: PageSession, png: bytes) -> str:
     session.page_leave()
     session.engine_open(_SCENE_SUBTITLE)
-    canvas = json_object(session.probe_call("canvas"))
+    canvas = json_object(session.probe_call("canvas_view"))
     width, height = png_size(png)
     if (
         canvas["view"]["hidden"]
@@ -5743,9 +6030,9 @@ def rung_scene(session: PageSession, png: bytes) -> str:
 def rung_click(session: PageSession) -> str:
     import i18n
 
-    canvas = json_object(session.probe_call("canvas"))
-    pixel_x = cast(int, canvas["width"]) // 3
-    pixel_y = cast(int, canvas["height"]) // 3
+    canvas = json_object(session.probe_call("canvas_view"))
+    pixel_x = cast(int, canvas["width"]) // _CLICK_DIVISOR
+    pixel_y = cast(int, canvas["height"]) // _CLICK_DIVISOR
     point = json_object(session.probe_call("click_point", pixel_x, pixel_y))
     if point["hit"] is not True:
         raise CheckFailed(f"the point {point} does not hit #image")
@@ -5788,9 +6075,9 @@ def rung_gating(session: PageSession, subtitle: str) -> str:
     for digit in (1, 0):
         session.key_press(digit_stroke(digit))
     session.turn_run(_INPUT_PLAIN, _ENDING_PLAIN)
-    overlays = json_list(session.probe_call("views", _OVERLAY_SELECTOR))
-    views = json_list(session.probe_call("views", _CONSOLE_SELECTOR))
-    terminal = session.probe_call("view", _TERMINAL_SELECTOR)
+    overlays = json_list(session.probe_call("views_get", _OVERLAY_SELECTOR))
+    views = json_list(session.probe_call("views_get", _CONSOLE_SELECTOR))
+    terminal = session.probe_call("view_get", _TERMINAL_SELECTOR)
     started = session.ttyd.pids_found(_STARTED_PATTERN, 1, session.mark)
     if (
         overlays
@@ -5962,13 +6249,21 @@ def rung_replace(session: PageSession) -> str:
 
 # A refused push is a fault, and Reload replaces the database and starts.
 def rung_desync(session: PageSession) -> str:
-    import i18n
+    import i18n, jslb
 
-    seq = seq_bump(session, _DESYNC_REF)
+    seqs = [
+        seq_bump(session, f"{_DESYNC_REF}/{number}")
+        for number in range(_DESYNC_WRITES)
+    ]
+    seq = seqs[-1]
     session.turn_send(_INPUT_PLAIN)
     text = session.fault_wait("the fault of the refused push")
     due = i18n.i18n(
-        "substrate.since_stale", "turn.append", seq - 1, seq, _METAVERSE_DB
+        "substrate.since_stale",
+        "turn.append",
+        seq - _DESYNC_WRITES,
+        seq,
+        _METAVERSE_DB,
     )
     if due not in text:
         raise CheckFailed(f"the fault screen shows {text!r}, not {due!r}")
@@ -5976,11 +6271,29 @@ def rung_desync(session: PageSession) -> str:
     button = json_object(
         session.probe_wait("the Reload button", "reload_button")
     )
+    after = verbose_last(session)
     session.reload_click(json_object(button["view"]))
     session.outcome_wait(_REPLACED_SUBTITLE)
+    rows = server_wait(
+        session,
+        "the AI's lines of the reloaded start",
+        lambda: rendered_rows(session, after),
+    )
+    replies = snapshot_received(rows)
+    blobs = [
+        jslb.field_get(jslb.Object(header), "blobs") for header in replies
+    ]
+    if not replies or blobs != [1] * len(replies):
+        raise CheckFailed(
+            f"the reload logged {len(replies)} db.snapshot replies with"
+            f" {blobs} blobs, where one reply or more of one blob each was"
+            f" due: {rows}"
+        )
     return (
-        f"with {_DESYNC_REF} written on the server, the page's next push was"
-        f" refused with {due!r}; Reload replaced metaverse and started again"
+        f"with {_DESYNC_WRITES} values under {_DESYNC_REF} written on the"
+        f" server, the page's next push was refused with {due!r}; Reload"
+        f" started again and logged {len(replies)} db.snapshot replies, each"
+        " of one blob"
     )
 
 
@@ -6045,11 +6358,14 @@ def rung_credential(session: PageSession) -> str:
     )
 
 
-# The page echoes 128 MiB through ttyd as one message within `blob_max`.
+# A worker of the bundle echoes 128 MiB through ttyd as one message.
 def rung_large(session: PageSession) -> str:
     session.page_open()
-    session.probe_call("wire_open", "echo", session.url)
-    hello = json_object(session.probe_wait("hello", "wire_hello", "echo"))
+    session.probe_call("echo_worker", session.url, 1, _LARGE_BYTES)
+    opened = json_object(session.probe_wait("hello", "echo_hello"))
+    if "fault" in opened:
+        raise CheckFailed(f"the echo worker faulted: {opened['fault']}")
+    hello = json_object(opened["hello"])
     if hello["seq"] != {}:
         raise CheckFailed(
             f"hello's seq is {hello['seq']}, where the echo main loop, which"
@@ -6060,10 +6376,13 @@ def rung_large(session: PageSession) -> str:
     ttyd_pid = session.ttyd.process.pid
     before = memory_read(ttyd_pid)
     started = time.monotonic()
-    session.probe_call("echo_run", "echo", 1, _LARGE_BYTES)
-    lines = json_list(session.probe_wait("the echo", "wire_lines", "echo", 1))
+    session.probe_call("echo_start")
+    found = json_object(session.probe_wait("the echo", "echo_lines", 1))
     seconds = time.monotonic() - started
     after = memory_read(ttyd_pid)
+    if "fault" in found:
+        raise CheckFailed(f"the echo worker faulted: {found['fault']}")
+    lines = json_list(found["lines"])
     due = [
         {
             "header": {"t": "echo", "r": 1, "b": 1},
@@ -6076,7 +6395,7 @@ def rung_large(session: PageSession) -> str:
     rate = _LARGE_BYTES / _MIB / seconds
     return (
         f"one echo request of one {_LARGE_BYTES} byte blob, one message"
-        " within blob_max, posted by a WirePort on the page to"
+        " within blob_max, posted by a WirePort in a worker of the bundle to"
         f" {_LOOP_OPTION} {_ECHO_LOOP_NAME}, came back equal by sha256"
         f" {digest[:12]}; {seconds:.2f} s,"
         f" {rate:.1f} MiB/s each way; ttyd's resident size"
@@ -6150,7 +6469,7 @@ def rung_level_two(session: PageSession, subtitle: str) -> str:
     session.engine_open(subtitle)
     session.turn_run(_INPUT_PLAIN, _ENDING_PLAIN)
     session.fault_none("the start and a turn in debug mode")
-    views = json_list(session.probe_call("views", _OVERLAY_SELECTOR))
+    views = json_list(session.probe_call("views_get", _OVERLAY_SELECTOR))
     text = cast(str, json_object(views[0])["text"])
     if _VERBOSE_TYPE in text:
         raise CheckFailed(
@@ -6867,6 +7186,8 @@ def turn_results(session: PageSession, scene: str, ending: str) -> list[str]:
 
 # A cached value over `overflow_bytes` is read again after unload and load.
 def rung_bulk_reload(session: PageSession) -> str:
+    import jslb
+
     scene = cast(str, text_read(session, "/metaverse/scene"))
     text = chain_text(_HELD_SEED, session.values["overflow_bytes"] + 1)
     session.turn_run(_INPUT_BULK, _ENDING_BULK)
@@ -6880,11 +7201,26 @@ def rung_bulk_reload(session: PageSession) -> str:
             f" {len(text)} characters of {_HELD_REF}, an empty unload, a"
             f" load at the server's seq {seq} and the text again were due"
         )
-    fetched = snapshots_fetched(session, _FILES_DB)
+    rows = wire_rows(overlay_rows(session))
+    fetched = [
+        reply for reply in snapshot_replies(rows) if reply.db == _FILES_DB
+    ]
     if len(fetched) != 2:
         raise CheckFailed(
             f"the page fetched {len(fetched)} snapshots of {_FILES_DB}, not"
             f" the start's and db_load's: {fetched}"
+        )
+    gets = [
+        row
+        for row in rows
+        if row.sent
+        and jslb.field_get(jslb.Object(row.header), "type") == "kv.get"
+        and jslb.field_get(jslb.Object(row.header), "key") == _HELD_REF
+    ]
+    if len(gets) != 2:
+        raise CheckFailed(
+            f"the AI sent {len(gets)} kv.get lines for {_HELD_REF}, where one"
+            f" per kv_get, two, was due: {gets}"
         )
     size = files_check(session, fetched[1], "db_load")
     if value_read(session, _HELD_REF) != text.encode():
@@ -6892,10 +7228,11 @@ def rung_bulk_reload(session: PageSession) -> str:
     return (
         f"kv_get of {_HELD_REF}, {len(text)} characters of seed"
         f" {_HELD_SEED!r} over overflow_bytes, fetched it into the cache;"
-        f" db_unload of {_FILES_DB} removed its file, db_load brought"
+        f" db_unload of {_FILES_DB} dropped the database, db_load brought"
         f" {size} bytes back at seq {seq} as one db.snapshot blob, the"
-        " server's image, and kv_get fetched the value again on its miss,"
-        " equal to the server's"
+        " server's image, and kv_get missed and fetched the value again:"
+        f" the AI sent {len(gets)} kv.get lines for it, and the value equals"
+        " the server's"
     )
 
 
@@ -6914,7 +7251,7 @@ def rungs_bulk(session: PageSession) -> None:
     )
 
 
-# A line for the UI to submit; `made` is the size of the probe's own bytes.
+# A line for the UI to submit, `made` the size of the probe's own bytes.
 def ui_request(
     line_type: str,
     key: str | None,
@@ -7507,7 +7844,7 @@ def rung_drain_poll(session: PageSession) -> str:
     drain_open(session)
     ttyd.signal_send(signal.SIGSTOP)
     try:
-        session.probe_call("echo_run", "drain", count, _ECHO_BLOB_BYTES)
+        session.probe_call("echo_burst", "drain", count, _ECHO_BLOB_BYTES)
         time.sleep(_STALL_SECONDS)
         pending = json_object(session.probe_call("wire_pending", "drain"))
     finally:
@@ -7525,8 +7862,9 @@ def rung_drain_poll(session: PageSession) -> str:
         raise CheckFailed(f"the echoes came back as {lines}")
     session.fault_none("the echoes after the stall")
     return (
-        f"with ttyd stopped, the first of {count} echo requests of one"
-        f" {_ECHO_BLOB_BYTES} byte blob each filled the socket, which"
+        f"with ttyd stopped, {count} echo requests of one"
+        f" {_ECHO_BLOB_BYTES} byte blob each, posted at once, filled the"
+        " socket, which"
         f" buffered {pending['buffered']} bytes after {_STALL_SECONDS:g} s"
         " with the port's poll waiting; continued, ttyd took the rest and"
         " every echo came back equal by sha256, with no fault"
@@ -7560,10 +7898,10 @@ def rung_drain_timer(session: PageSession) -> str:
 
 
 # The test engine page starts and gives its live queue to the test.
-def rung_test_engine_start(session: PageSession, subtitle: str) -> str:
+def rung_engine_start(session: PageSession, subtitle: str) -> str:
     ui_open(session, subtitle)
-    kind = session.probe_call("ui_tasks_kind")
-    view = json_object(session.probe_call("view", _INPUT_SELECTOR))
+    kind = session.probe_call("submit_kind")
+    view = json_object(session.probe_call("view_get", _INPUT_SELECTOR))
     kept = session.probe_call("image_kept")
     if (
         kind != "function"
@@ -7629,8 +7967,8 @@ def files_row(session: PageSession, key: str) -> list[Any] | None:
     return rows[0] if rows else None
 
 
-# A put of `blob_max` from the UI reaches the server; one byte more faults.
-def rung_ui_put_largest(session: PageSession, subtitle: str) -> str:
+# A put of `blob_max` from the UI reaches the server, one byte more faults.
+def rung_put_largest(session: PageSession, subtitle: str) -> str:
     import devtools, i18n
 
     size: int = session.values["blob_max"]
@@ -7721,7 +8059,7 @@ def rung_ui_upload(session: PageSession) -> str:
 def rung_traced_turn(session: PageSession) -> str:
     png = bytes(cast(list[int], session.probe_call("png_bytes")))
     session.turn_run(_INPUT_TURN, _SCENE_SUBTITLE)
-    canvas = json_object(session.probe_call("canvas"))
+    canvas = json_object(session.probe_call("canvas_view"))
     width, height = png_size(png)
     if canvas["view"]["hidden"] or (canvas["width"], canvas["height"]) != (
         width,
@@ -7764,7 +8102,7 @@ def rungs_upload(session: PageSession) -> None:
     log.rung_run(
         "stage 5: test engine page start",
         "normal-test",
-        lambda: rung_test_engine_start(session, subtitle),
+        lambda: rung_engine_start(session, subtitle),
     )
     log.rung_run(
         "stage 5: traced synchronous load found",
@@ -7774,7 +8112,7 @@ def rungs_upload(session: PageSession) -> None:
     log.rung_run(
         "stage 5: largest UI put",
         "normal-test",
-        lambda: rung_ui_put_largest(session, subtitle),
+        lambda: rung_put_largest(session, subtitle),
         _LARGEST_SECONDS,
     )
     log.rung_run(
@@ -7875,7 +8213,7 @@ def rung_blob_max(session: PageSession, subtitle: str) -> str:
     session.turn_send(_INPUT_LARGEST)
     found = json_object(
         session.probe_wait(
-            f"the db_load of {_LARGEST_DB}", "outcome", _ENDING_LARGEST
+            f"the db_load of {_LARGEST_DB}", "outcome_get", _ENDING_LARGEST
         )
     )
     loaded = time.monotonic() - started
@@ -8080,6 +8418,29 @@ def rung_worker_hang(session: PageSession) -> str:
     )
 
 
+# A thrown error on the test page ends in its one `pre`, the fault screen.
+def rung_page_thrown(session: PageSession) -> str:
+    session.page_open()
+    session.probe_call("throw_later", _THROWN_MESSAGE)
+    found = json_object(
+        session.probe_wait(
+            "the fault screen of the test page",
+            "fault_holding",
+            _THROWN_MESSAGE,
+        )
+    )
+    if found["count"] != 1:
+        raise CheckFailed(
+            f"the test page holds {found['count']} pre elements with its"
+            " fault, where the fault screen alone was due"
+        )
+    first = cast(str, found["text"]).split("\n")[0]
+    return (
+        f"a throw of {_THROWN_MESSAGE!r} on the test page ended in the fault"
+        f" screen, the document's one pre, which begins {first!r}"
+    )
+
+
 # The test page of stage 0: the TypeScript suites, then their documents' order.
 def rungs_suites(session: PageSession) -> None:
     seen: list[str] = []
@@ -8104,6 +8465,11 @@ def rungs_suites(session: PageSession) -> None:
         "normal-test",
         lambda: rung_worker_hang(session),
         _SUITES_SECONDS,
+    )
+    session.log.rung_run(
+        "stage 0: thrown error on the test page",
+        "normal-test",
+        lambda: rung_page_thrown(session),
     )
 
 
@@ -8158,6 +8524,22 @@ def rungs_faults(session: PageSession) -> None:
         ),
     )
     log.rung_run(
+        "stage 0: failing object",
+        "normal-test",
+        lambda: rung_resource(
+            session,
+            subtitle,
+            "object",
+            {"data": "/rung-missing.bin"},
+            _ADDRESS_MISSING + "object",
+        ),
+    )
+    log.rung_run(
+        "stage 0: failing SVG image",
+        "normal-test",
+        lambda: rung_svg(session, subtitle, "/rung-missing-svg.png"),
+    )
+    log.rung_run(
         "stage 0: worker fault posted",
         "normal-test",
         lambda: rung_posted(session),
@@ -8177,7 +8559,7 @@ def rungs_faults(session: PageSession) -> None:
 # The probe page of stages 5 and 8: the ports on the page's main thread.
 def rungs_probe(session: PageSession, context: RunContext) -> None:
     log = session.log
-    stub = context.stub
+    stub = stub_ready(context)
     closed = context.closed_port
     identifier = session.preload_add(_WORKER_STUB)
     log.rung_run(
@@ -8342,7 +8724,7 @@ def rungs_probe(session: PageSession, context: RunContext) -> None:
     log.rung_run(
         "stage 5: wire token timer",
         "normal-test",
-        lambda: rung_token(session, stub),
+        lambda: rung_token(session),
         waits,
     )
     log.rung_run(
@@ -8664,7 +9046,7 @@ def session_run(
 
 # The stub's own page, which proves the browser reaches it first.
 def rung_reachable(context: RunContext) -> str:
-    url = context.stub.url_make(_TEXT_PATH)
+    url = stub_ready(context).url_make(_TEXT_PATH)
     context.browser.page_open(url)
     return f"the browser loaded {url} from the stub HTTP server"
 
@@ -8675,11 +9057,10 @@ def stages_run(log: RungLog, work: str) -> None:
 
     test_page, engine_page, test_engine_page = list(_PAGE_BUILDS)
     os.makedirs(_PNG_PATH, exist_ok=True)
-    closed = port_closed()
     synchronous = {"queue_synchronous": True, "debug": True}
     recorded: list[list[str]] = []
     with (
-        StubServer() as stub,
+        contextlib.ExitStack() as stack,
         devtools.Browser(_WINDOW_WIDTH, _WINDOW_HEIGHT) as browser,
     ):
         browser.console_follow(console_copy)
@@ -8687,11 +9068,12 @@ def stages_run(log: RungLog, work: str) -> None:
             browser,
             log,
             work,
-            stub,
+            stack,
+            [],
             test_page,
             engine_page,
             test_engine_page,
-            closed,
+            port_closed(stack),
             set(),
         )
         session_run(
@@ -8700,7 +9082,7 @@ def stages_run(log: RungLog, work: str) -> None:
             "smoke-test",
             test_page,
             {},
-            _EXTRAS_NONE,
+            ServerExtras(*_EXTRAS_NONE),
             nothing_place,
             rungs_suites,
         )
@@ -8710,7 +9092,7 @@ def stages_run(log: RungLog, work: str) -> None:
             "normal-test",
             engine_page,
             {},
-            _EXTRAS_NONE,
+            ServerExtras(*_EXTRAS_NONE),
             scripts_place,
             rungs_faults,
         )
@@ -8725,7 +9107,7 @@ def stages_run(log: RungLog, work: str) -> None:
             "normal-test",
             engine_page,
             {},
-            _EXTRAS_NONE,
+            ServerExtras(*_EXTRAS_NONE),
             nothing_place,
             lambda session: rungs_probe(session, context),
         )
@@ -8765,7 +9147,7 @@ def stages_run(log: RungLog, work: str) -> None:
             "normal-test",
             engine_page,
             {"debug": False},
-            _EXTRAS_NONE,
+            ServerExtras(*_EXTRAS_NONE),
             scripts_place,
             rungs_release,
         )
@@ -8775,7 +9157,7 @@ def stages_run(log: RungLog, work: str) -> None:
             "normal-test",
             engine_page,
             synchronous,
-            _EXTRAS_NONE,
+            ServerExtras(*_EXTRAS_NONE),
             scripts_place,
             lambda session: rungs_first(session, recorded),
         )
@@ -8785,7 +9167,7 @@ def stages_run(log: RungLog, work: str) -> None:
             "normal-test",
             engine_page,
             synchronous,
-            _EXTRAS_NONE,
+            ServerExtras(*_EXTRAS_NONE),
             scripts_place,
             lambda session: rungs_second(session, recorded),
         )
@@ -8795,7 +9177,7 @@ def stages_run(log: RungLog, work: str) -> None:
             "normal-test",
             engine_page,
             {},
-            _EXTRAS_NONE,
+            ServerExtras(*_EXTRAS_NONE),
             restart_place,
             rungs_main,
         )
@@ -8805,7 +9187,7 @@ def stages_run(log: RungLog, work: str) -> None:
             "smoke-test",
             engine_page,
             provider_settings(True),
-            _EXTRAS_NONE,
+            ServerExtras(*_EXTRAS_NONE),
             nothing_place,
             rungs_fresh,
         )
@@ -8815,7 +9197,7 @@ def stages_run(log: RungLog, work: str) -> None:
             "normal-test",
             engine_page,
             {},
-            _EXTRAS_NONE,
+            ServerExtras(*_EXTRAS_NONE),
             nothing_place,
             rungs_locked,
         )
@@ -8825,7 +9207,7 @@ def stages_run(log: RungLog, work: str) -> None:
             "normal-test",
             engine_page,
             {"debug": True, "verbose_level": _SHELL_LEVEL},
-            _EXTRAS_NONE,
+            ServerExtras(*_EXTRAS_NONE),
             scripts_place,
             rungs_level,
         )
@@ -8835,7 +9217,7 @@ def stages_run(log: RungLog, work: str) -> None:
             "normal-test",
             engine_page,
             {},
-            _EXTRAS_NONE,
+            ServerExtras(*_EXTRAS_NONE),
             scripts_place,
             rungs_tool,
         )
@@ -8845,7 +9227,7 @@ def stages_run(log: RungLog, work: str) -> None:
             "normal-test",
             test_engine_page,
             {},
-            _EXTRAS_NONE,
+            ServerExtras(*_EXTRAS_NONE),
             scripts_place,
             rungs_crash,
         )
@@ -8860,11 +9242,11 @@ def stages_run(log: RungLog, work: str) -> None:
                     "timeout_seconds": _PROVIDER_SECONDS,
                 }
             },
-            _EXTRAS_KEY,
+            ServerExtras(*_EXTRAS_KEY),
             lambda root, values: provider_place(
-                root, stub.url_make(_HELD_PROVIDER)
+                root, stub_ready(context).url_make(_HELD_PROVIDER)
             ),
-            lambda session: rungs_timeout(session, stub),
+            lambda session: rungs_timeout(session, stub_ready(context)),
         )
         session_run(
             context,
@@ -8878,11 +9260,11 @@ def stages_run(log: RungLog, work: str) -> None:
                 },
                 "turn_compact_turns": _COMPACT_TURNS,
             },
-            _EXTRAS_KEY,
+            ServerExtras(*_EXTRAS_KEY),
             lambda root, values: provider_place(
-                root, stub.url_make(_ANSWER_PROVIDER)
+                root, stub_ready(context).url_make(_ANSWER_PROVIDER)
             ),
-            lambda session: rungs_compact(session, stub),
+            lambda session: rungs_compact(session, stub_ready(context)),
         )
         session_run(
             context,
@@ -8890,7 +9272,7 @@ def stages_run(log: RungLog, work: str) -> None:
             "normal-test",
             engine_page,
             {},
-            _EXTRAS_NONE,
+            ServerExtras(*_EXTRAS_NONE),
             bulk_place,
             rungs_bulk,
         )
@@ -8900,7 +9282,7 @@ def stages_run(log: RungLog, work: str) -> None:
             "normal-test",
             test_engine_page,
             {"debug": True},
-            _EXTRAS_NONE,
+            ServerExtras(*_EXTRAS_NONE),
             scripts_place,
             rungs_replay,
         )
@@ -8910,7 +9292,7 @@ def stages_run(log: RungLog, work: str) -> None:
             "normal-test",
             engine_page,
             evict_settings(),
-            _EXTRAS_NONE,
+            ServerExtras(*_EXTRAS_NONE),
             evict_place,
             rungs_evict,
         )
@@ -8920,7 +9302,7 @@ def stages_run(log: RungLog, work: str) -> None:
             "normal-test",
             engine_page,
             {"turn_compact_turns": _STRESS_COMPACT_TURNS},
-            _EXTRAS_NONE,
+            ServerExtras(*_EXTRAS_NONE),
             stress_place,
             rungs_stress,
         )
@@ -8930,7 +9312,7 @@ def stages_run(log: RungLog, work: str) -> None:
             "normal-test",
             test_engine_page,
             {},
-            _EXTRAS_NONE,
+            ServerExtras(*_EXTRAS_NONE),
             scripts_place,
             rungs_upload,
         )
@@ -8940,7 +9322,7 @@ def stages_run(log: RungLog, work: str) -> None:
             "normal-test",
             test_engine_page,
             {},
-            _EXTRAS_NONE,
+            ServerExtras(*_EXTRAS_NONE),
             largest_place,
             rungs_largest,
         )
@@ -8979,6 +9361,9 @@ def main(arguments: list[str]) -> int:
         return _EXIT_FAILED
     except KeyboardInterrupt:
         return _EXIT_INTERRUPTED
+    except Exception as failure:
+        failure.add_note(f"the rung that ran: {log.rung}")
+        raise
     return 0
 
 

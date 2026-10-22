@@ -44,8 +44,7 @@ function _xsjs_status_show_task {
     if (Test-Path $runner_path_) {
         $mode_ = _xsjs_status_get_mode (Get-Content $runner_path_ -Raw)
     }
-    $query_ = @{ TaskName = $task_name_; ErrorAction = 'SilentlyContinue' }
-    $info_ = Get-ScheduledTaskInfo @query_
+    $info_ = Get-ScheduledTaskInfo -TaskName $task_name_
     $text_ = $i18n_.status_task -f (
         $task_name_, $task_.State, $mode_, $task_.Principal.UserId,
         $info_.LastTaskResult)
@@ -61,11 +60,10 @@ function _xsjs_status_show_item ([string]$text_) {
 function _xsjs_status_get_mode ([string]$command_line_) {
     # The command line holds the password, so only the user name leaves here.
     if ($command_line_ -notmatch '--ssl(\s|$)') { return 'HTTP' }
-    $user_ = ''
     if ($command_line_ -match '(^|\s)(--credential|-c)\s+"?([^:"]+):') {
-        $user_ = $Matches[3]
+        return $i18n_.status_https -f $Matches[3]
     }
-    $i18n_.status_https -f $user_
+    throw $i18n_.status_no_user
 }
 
 # Shows each ttyd that start runs in Linux, with its mode and port.
@@ -81,8 +79,10 @@ function _xsjs_status_show_ttyd {
 
 # Shows what listens on the port in Windows and where connections come from.
 function _xsjs_status_show_port ([int]$port_number_) {
-    $query_ = @{ LocalPort = $port_number_; ErrorAction = 'SilentlyContinue' }
-    $listeners_ = @(Get-NetTCPConnection @query_ -State Listen)
+    $connections_ = @(
+        Get-NetTCPConnection | Where-Object LocalPort -EQ $port_number_
+    )
+    $listeners_ = @($connections_ | Where-Object State -EQ 'Listen')
     foreach ($group_ in $listeners_ | Group-Object OwningProcess) {
         $owner_ = $processes_ | Where-Object ProcessId -EQ $group_.Name
         $addresses_ = ($group_.Group | ForEach-Object LocalAddress) -join ', '
@@ -94,7 +94,7 @@ function _xsjs_status_show_port ([int]$port_number_) {
         _xsjs_status_show_item ($i18n_.status_port_closed -f $port_number_)
     }
     $clients_ = @(
-        Get-NetTCPConnection @query_ -State Established |
+        $connections_ | Where-Object State -EQ 'Established' |
             ForEach-Object RemoteAddress | Sort-Object -Unique
     )
     if ($clients_) {
@@ -106,8 +106,7 @@ function _xsjs_status_show_port ([int]$port_number_) {
 
 # Shows the firewall rule, if there is one.
 function _xsjs_status_show_firewall {
-    $rule_ = @{ Name = $firewall_rule_name_; ErrorAction = 'SilentlyContinue' }
-    $found_ = Get-NetFirewallRule @rule_
+    $found_ = Get-NetFirewallRule | Where-Object Name -EQ $firewall_rule_name_
     if (-not $found_) {
         $text_ = $i18n_.status_firewall_none -f $firewall_rule_name_
         _xsjs_status_show_item $text_
@@ -121,9 +120,10 @@ function _xsjs_status_show_firewall {
 # Shows every port proxy set up in Windows.
 function _xsjs_status_show_proxies {
     $path_ = 'HKLM:\SYSTEM\CurrentControlSet\Services\PortProxy'
-    $proxies_ = @(
-        Get-ChildItem $path_ -Recurse -ErrorAction SilentlyContinue |
-            ForEach-Object {
+    $proxies_ = @()
+    if (Test-Path $path_) {
+        $proxies_ = @(
+            Get-ChildItem $path_ -Recurse | ForEach-Object {
                 $key_ = $_
                 $kind_ = Split-Path -Leaf $key_.PSParentPath
                 foreach ($name_ in $key_.GetValueNames()) {
@@ -131,7 +131,8 @@ function _xsjs_status_show_proxies {
                     $i18n_.status_proxy -f $kind_, $name_, $to_
                 }
             }
-    )
+        )
+    }
     if (-not $proxies_) { $proxies_ = @($i18n_.status_proxy_none) }
     $proxies_ | ForEach-Object { _xsjs_status_show_item $_ }
 }
@@ -203,10 +204,10 @@ function _xsjs_status_show_process_tree ($process_, [string]$indent_) {
 
 # Lists the files in the state folder.
 function _xsjs_status_show_files {
-    $names_ = @(
-        Get-ChildItem $state_path_ -File -ErrorAction SilentlyContinue |
-            ForEach-Object Name
-    )
+    $names_ = @()
+    if (Test-Path $state_path_) {
+        $names_ = @(Get-ChildItem $state_path_ -File | ForEach-Object Name)
+    }
     if ($names_) {
         $text_ = $i18n_.status_files -f $state_path_, ($names_ -join ', ')
         _xsjs_status_show_item $text_
@@ -234,8 +235,7 @@ function _xsjs_status_main {
     trap { xsjs_util_write_failure $_; exit 1 }
 
     $processes_ = @(Get-CimInstance Win32_Process)
-    $query_ = @{ TaskName = $task_name_; ErrorAction = 'SilentlyContinue' }
-    $task_ = Get-ScheduledTask @query_
+    $task_ = Get-ScheduledTask | Where-Object TaskName -EQ $task_name_
     $distribution_ = xsjs_util_get_distribution
     $servers_ = @()
     # Only look inside Linux when it already runs, so this doesn't start it.

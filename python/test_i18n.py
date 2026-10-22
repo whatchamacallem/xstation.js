@@ -3,12 +3,17 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the lookup and the placeholder rule of the strings module on a patched
-# table, then the real strings file and the names the sources look up in it.
+# table, the loader's refusals of a strings file of the wrong shape, then the
+# real strings file and the names the sources look up in it.
 
-import glob, i18n, json, os, re, unittest, unittest.mock
+import glob, i18n, json, os, re, tempfile, unittest, unittest.mock
+from collections.abc import Callable
 
 # The root of the checkout.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# The checkout's build directory, where a test makes its scratch directory.
+_BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
 # The strings file of the checkout.
 _STRINGS_PATH = os.path.join(_ROOT_PATH, "i18n", "en-US.json")
@@ -63,43 +68,90 @@ class TestLookup(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    # A name the table lacks raises.
+    # A name the table lacks raises, naming it.
     def test_name_missing(self) -> None:
-        with self.assertRaises(KeyError):
+        with self.assertRaises(KeyError) as caught:
             i18n.i18n("t.absent")
+        self.assertEqual(caught.exception.args, ("t.absent",))
 
     # Fewer arguments than placeholders raises.
     def test_arguments_few(self) -> None:
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as caught:
             i18n.i18n("t.two", "a")
-        with self.assertRaises(ValueError):
+        message = "t.two: placeholders [0, 1], arguments 1"
+        self.assertEqual(caught.exception.args, (message,))
+        with self.assertRaises(ValueError) as caught:
             i18n.i18n("t.one")
+        message = "t.one: placeholders [0], arguments 0"
+        self.assertEqual(caught.exception.args, (message,))
 
     # More arguments than placeholders raises.
     def test_arguments_many(self) -> None:
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as caught:
             i18n.i18n("t.one", "a", "b")
-        with self.assertRaises(ValueError):
+        message = "t.one: placeholders [0], arguments 2"
+        self.assertEqual(caught.exception.args, (message,))
+        with self.assertRaises(ValueError) as caught:
             i18n.i18n("t.plain", "a")
+        message = "t.plain: placeholders [], arguments 1"
+        self.assertEqual(caught.exception.args, (message,))
 
     # A repeated index counts once and each argument is made into text.
     def test_index_repeat(self) -> None:
         self.assertEqual(i18n.i18n("t.repeat", 7, "b"), "7 and b and 7")
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as caught:
             i18n.i18n("t.repeat", 7, "b", "c")
+        message = "t.repeat: placeholders [0, 1], arguments 3"
+        self.assertEqual(caught.exception.args, (message,))
 
     # An index gap raises even when the distinct count equals the arguments.
     def test_index_gap(self) -> None:
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as caught:
             i18n.i18n("t.gap", "a", "b")
-        with self.assertRaises(ValueError):
+        message = "t.gap: placeholders [0, 2], arguments 2"
+        self.assertEqual(caught.exception.args, (message,))
+        with self.assertRaises(ValueError) as caught:
             i18n.i18n("t.late", "a")
+        message = "t.late: placeholders [1], arguments 1"
+        self.assertEqual(caught.exception.args, (message,))
 
     # Braces that are not a placeholder pass through, also from an argument.
     def test_braces_literal(self) -> None:
         self.assertEqual(i18n.i18n("t.literal"), _TEST_STRINGS["t.literal"])
         self.assertEqual(i18n.i18n("t.mixed", "x"), "{a} x {}")
         self.assertEqual(i18n.i18n("t.two", "{1}", "b"), "{1} then b")
+
+
+# Tests the loader's refusals of a strings file of the wrong shape.
+class TestLoading(unittest.TestCase):
+    # Writes the text as a strings file in a scratch directory under `build/`.
+    def file_write(self, text: str) -> str:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+        scratch = self.enterContext(
+            tempfile.TemporaryDirectory(dir=_BUILD_PATH)
+        )
+        path = os.path.join(scratch, "en-US.json")
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(text)
+        return path
+
+    # A document that is not one JSON object raises, naming the file.
+    def test_document_refused(self) -> None:
+        path = self.file_write('["text"]')
+        load: Callable[[str], dict[str, str]] = getattr(i18n, "_strings_load")
+        with self.assertRaises(ValueError) as caught:
+            load(path)
+        message = f"{path}: not a JSON object"
+        self.assertEqual(caught.exception.args, (message,))
+
+    # A value that is not a string raises, naming the file and the name.
+    def test_value_refused(self) -> None:
+        path = self.file_write('{"t.one": "one", "t.two": 2}')
+        load: Callable[[str], dict[str, str]] = getattr(i18n, "_strings_load")
+        with self.assertRaises(ValueError) as caught:
+            load(path)
+        message = f"{path}: 't.two' is not a string"
+        self.assertEqual(caught.exception.args, (message,))
 
 
 # Tests the real strings file and the names the sources look up in it.

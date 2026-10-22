@@ -5,6 +5,14 @@
 // Tests of the settings module.
 
 namespace test_settings {
+  // The values the tests put.
+  const constants = Object.freeze({
+    // A changed `provider.timeout_seconds`, its writer's choice.
+    timeout_changed: 60,
+    // A changed `line_max`, its writer's choice.
+    line_changed: 2048,
+  });
+
   // A complete settings object with `debug` as given, the example values.
   function settings_make(debug: boolean): settings.Settings {
     return {
@@ -94,7 +102,7 @@ namespace test_settings {
         value.debug = true;
       });
       this.assertRaises(TypeError, () => {
-        value.provider.timeout_seconds = 60;
+        value.provider.timeout_seconds = constants.timeout_changed;
       });
       this.assertEqual(store.value_get("debug"), false);
     }
@@ -116,8 +124,11 @@ namespace test_settings {
       store.value_set(value);
       this.assertFalse(Object.isFrozen(value));
       this.assertFalse(Object.isFrozen(value.provider));
-      value.provider.timeout_seconds = 60;
-      this.assertEqual(store.value_get("provider.timeout_seconds"), 60);
+      value.provider.timeout_seconds = constants.timeout_changed;
+      this.assertEqual(
+        store.value_get("provider.timeout_seconds"),
+        constants.timeout_changed,
+      );
     }
 
     // A put outside debug mode throws, sends nothing and changes nothing.
@@ -129,7 +140,7 @@ namespace test_settings {
         sent.push(payload);
       });
       const message = message_thrown(this, () => {
-        store.value_put("line_max", 2048);
+        store.value_put("line_max", constants.line_changed);
       });
       this.assertEqual(message, i18n("settings.put_denied"));
       this.assertEqual(store.value_get("line_max"), 1048576);
@@ -141,7 +152,7 @@ namespace test_settings {
       const store = new settings.ValueStore();
       store.sender_register(() => {});
       const message = message_thrown(this, () => {
-        store.value_put("line_max", 2048);
+        store.value_put("line_max", constants.line_changed);
       });
       this.assertEqual(message, i18n("settings.not_set"));
     }
@@ -154,14 +165,20 @@ namespace test_settings {
       store.sender_register((payload) => {
         sent.push(payload);
       });
-      store.value_put("provider.timeout_seconds", 60);
-      store.value_put("line_max", 2048);
-      this.assertEqual(store.value_get("provider.timeout_seconds"), 60);
-      this.assertEqual(store.value_get("line_max"), 2048);
+      store.value_put("provider.timeout_seconds", constants.timeout_changed);
+      store.value_put("line_max", constants.line_changed);
+      this.assertEqual(
+        store.value_get("provider.timeout_seconds"),
+        constants.timeout_changed,
+      );
+      this.assertEqual(store.value_get("line_max"), constants.line_changed);
       this.assertEqual(sent.length, 2);
-      this.assertEqual(sent[0].settings.provider.timeout_seconds, 60);
+      this.assertEqual(
+        sent[0].settings.provider.timeout_seconds,
+        constants.timeout_changed,
+      );
       this.assertEqual(sent[0].settings.line_max, 1048576);
-      this.assertEqual(sent[1].settings.line_max, 2048);
+      this.assertEqual(sent[1].settings.line_max, constants.line_changed);
       this.assertEqual(sent[1].settings.debug, true);
       this.assertEqual(sent[1].settings.provider.scripted, true);
     }
@@ -185,7 +202,7 @@ namespace test_settings {
       const store = new settings.ValueStore();
       store.value_set(settings_make(true));
       const message = message_thrown(this, () => {
-        store.value_put("line_max", 2048);
+        store.value_put("line_max", constants.line_changed);
       });
       this.assertEqual(message, i18n("settings.no_sender"));
       this.assertEqual(store.value_get("line_max"), 1048576);

@@ -14,9 +14,14 @@ namespace test_jslb {
 
   // The limits of the decoders here, and texts.
   const constants = Object.freeze({
+    // The longest line read with its CR, its writer's choice.
     line_max: 4096,
+    // The most bytes one message's blobs come to, its writer's choice.
     blob_max: 65536,
+    // The largest blob kept in memory, its writer's choice.
     overflow_bytes: 1024,
+    // The digits of a number too long for a double, its writer's choice.
+    long_digits: 5000,
     echo_text: '{"0":{"t":"echo"}}',
     echo_line: '{"0":{"t":"echo"}}\r',
     vector_suffix: ".jslb",
@@ -389,6 +394,10 @@ namespace test_jslb {
         "blobs_mismatch",
         i18n("jslb.blobs_mismatch", 2, 1),
       ],
+      error_blobs_mismatch_boolean: [
+        "blobs_mismatch",
+        i18n("jslb.blobs_mismatch", true, 1),
+      ],
       error_blobs_mismatch_extra: [
         "blobs_mismatch",
         i18n("jslb.blobs_mismatch", 0, 1),
@@ -399,6 +408,10 @@ namespace test_jslb {
       error_header_not_object: [
         "header_not_object",
         i18n("jslb.header_not_object", 0),
+      ],
+      error_header_not_object_blob: [
+        "header_not_object",
+        i18n("jslb.header_not_object", 1),
       ],
       error_infinity: [
         "line_not_json",
@@ -1293,6 +1306,21 @@ namespace test_jslb {
         const text = `{"0":{"t":"echo"},"n":${constant}}`;
         this.refused_assert(bytes_of(text + "\r"), parse_refusal(text));
       }
+    }
+
+    // A number too long for a double reads as `Infinity`, Python refusing it.
+    test_number_long(): void {
+      const digits = "1".repeat(constants.long_digits);
+      const data = bytes_of(`{"0":{"t":"echo"},"n":${digits}}\r`);
+      const decoder = new jslb.LineDecoder(
+        2 * data.length,
+        constants.blob_max,
+        constants.overflow_bytes,
+        new MemorySink(),
+      );
+      const found = pieces_decode(decoder, [data]);
+      this.assertEqual(found.length, 1);
+      this.assertEqual(found[0]["n"], Infinity);
     }
   }
 

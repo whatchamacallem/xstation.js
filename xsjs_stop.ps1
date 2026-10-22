@@ -35,8 +35,8 @@ function _xsjs_stop_get_softly {
 # Removes the task, port proxy, firewall rule and the runner with its password.
 function _xsjs_stop_step_remove_autostart {
     xsjs_util_write_log_section $i18n_.remove_autostart
-    $task_ = @{ TaskName = $task_name_; ErrorAction = 'SilentlyContinue' }
-    if (Get-ScheduledTask @task_) {
+    $task_ = Get-ScheduledTask | Where-Object TaskName -EQ $task_name_
+    if ($task_) {
         Unregister-ScheduledTask -TaskName $task_name_ -Confirm:$false
         xsjs_util_write_log ($i18n_.task_removed -f $task_name_)
     } else {

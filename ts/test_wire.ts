@@ -45,7 +45,11 @@ namespace test_wire {
     readonly ranges: number[][] = [];
 
     // Reads a range of a file, fewer bytes at its end, as a cache file does.
-    read = (handle: string, offset: number, length: number): Uint8Array => {
+    range_read = (
+      handle: string,
+      offset: number,
+      length: number,
+    ): Uint8Array => {
       this.ranges.push([offset, length]);
       const file = this.files.get(handle) as Uint8Array;
       return file.subarray(offset, offset + length);
@@ -420,7 +424,7 @@ namespace test_wire {
       const blob = jslb.blob_make(constants.handle, undefined, {}, 20);
       const line = put_make(blob);
       const frames = frames_make(8);
-      frames.line_add(line, cache.read);
+      frames.line_add(line, cache.range_read);
       this.assertEqual(
         bodies_join(frames_drain(frames)),
         bytes_join([json_bytes(line), data]),
@@ -429,6 +433,7 @@ namespace test_wire {
         [0, 7],
         [7, 7],
         [14, 6],
+        [20, 1],
       ]);
     }
 
@@ -441,7 +446,7 @@ namespace test_wire {
       const size = json_bytes(line).length;
       const frames = new wire.FrameQueue(1024, size, 19);
       const message = message_thrown(this, () =>
-        frames.line_add(line, cache.read),
+        frames.line_add(line, cache.range_read),
       );
       this.assertEqual(message, i18n("wire.blobs_over", "kv.put", 20, 19));
       this.assertEqual(cache.ranges, []);
@@ -466,11 +471,26 @@ namespace test_wire {
       const blob = jslb.blob_make(constants.handle, undefined, {}, 20);
       const line = put_make(blob);
       const frames = frames_make(8);
-      frames.line_add(line, cache.read);
+      frames.line_add(line, cache.range_read);
       const message = message_thrown(this, () => frames_drain(frames));
       this.assertEqual(
         message,
         i18n("wire.handle_differs", constants.handle, 14, 6, 1),
+      );
+    }
+
+    // A cache file longer than its blob's size is a fault at its last range.
+    test_handle_long(): void {
+      const cache = new CacheDouble();
+      cache.files.set(constants.handle, bytes_count(25));
+      const blob = jslb.blob_make(constants.handle, undefined, {}, 20);
+      const line = put_make(blob);
+      const frames = frames_make(8);
+      frames.line_add(line, cache.range_read);
+      const message = message_thrown(this, () => frames_drain(frames));
+      this.assertEqual(
+        message,
+        i18n("wire.handle_differs", constants.handle, 20, 0, 1),
       );
     }
   }
@@ -578,6 +598,16 @@ namespace test_wire {
       this.assertEqual(message, i18n("wire.post_early", "verbose.put"));
     }
 
+    // A port opens once: its hello receiver, which an open sets, is set.
+    test_open_twice(): void {
+      const port = port_make(settings_make());
+      port.hello_receive(() => {});
+      this.assertEqual(
+        message_thrown(this, () => port.wire_open(() => {})),
+        i18n("wire.open_twice", constants.socket_url),
+      );
+    }
+
     // An empty message, or one of a kind ttyd never sends, is a fault.
     test_kind_unknown(): void {
       const port = port_make(settings_make());
@@ -640,7 +670,7 @@ namespace test_wire {
       port.hello_receive(() => {});
       port.line_receive(() => {});
       port.close_receive(() => {});
-      port.cache_attach(cache.read);
+      port.cache_attach(cache.range_read);
       this.assertEqual(
         message_thrown(this, () => port.hello_receive(() => {})),
         i18n("wire.receiver_twice", "hello_receive"),
@@ -654,7 +684,7 @@ namespace test_wire {
         i18n("wire.receiver_twice", "close_receive"),
       );
       this.assertEqual(
-        message_thrown(this, () => port.cache_attach(cache.read)),
+        message_thrown(this, () => port.cache_attach(cache.range_read)),
         i18n("wire.receiver_twice", "cache_attach"),
       );
     }
@@ -962,6 +992,15 @@ namespace test_wire {
       this.assertEqual(closes, [1000]);
     }
 
+    // A close with no close receiver set is a fault, as nobody hears it.
+    test_close_unheard(): void {
+      const port = console_make();
+      this.assertEqual(
+        message_thrown(this, () => port.close_take(1000)),
+        i18n("wire.receiver_missing", "close"),
+      );
+    }
+
     // A line of a type the console port does not take is refused.
     test_type_refused(): void {
       const port = console_make();
@@ -991,12 +1030,13 @@ namespace test_wire {
       );
     }
 
-    // A read needs text to wait for and a number of seconds from 0.
+    // A read needs text to wait for and seconds from 0 that a timer holds.
     test_read_invalid(): void {
       const port = console_make();
       const until = read_make(1, 5, 5);
       const negative = read_make(1, "$ ", -1);
       const text = read_make(1, "$ ", "5");
+      const long = read_make(1, "$ ", 2147484);
       this.assertEqual(
         message_thrown(this, () => port.line_post(until, [])),
         i18n("wire.read_until"),
@@ -1008,6 +1048,10 @@ namespace test_wire {
       this.assertEqual(
         message_thrown(this, () => port.line_post(text, [])),
         i18n("wire.read_seconds", "5"),
+      );
+      this.assertEqual(
+        message_thrown(this, () => port.line_post(long, [])),
+        i18n("wire.read_seconds", 2147484),
       );
     }
 

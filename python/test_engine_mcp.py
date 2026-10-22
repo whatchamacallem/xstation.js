@@ -214,6 +214,8 @@ class TestExchange(IsolatedCase):
         self.assertEqual(sorted(payload), ["error", "id", "jsonrpc"])
         self.assertEqual(payload["id"], 4)
         self.assertEqual(payload["error"]["code"], -32601)
+        message = i18n("mcp.method_unknown", "nothing/here")
+        self.assertEqual(payload["error"]["message"], message)
 
     # A request that came as a push, with no wire id, cannot be answered.
     def test_request_pushed(self) -> None:
@@ -261,7 +263,7 @@ class TestPass(IsolatedCase):
         self.assertIsNone(engine_mcp.mcp_message(line, **_MESSAGES[0]))
 
     # Called before the registration the handler raises.
-    def test_unregistered(self) -> None:
+    def test_called_early(self) -> None:
         line = _line_make(None, **_MESSAGES[3])
         self.raise_check(
             RuntimeError,

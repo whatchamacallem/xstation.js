@@ -50,7 +50,7 @@ namespace console_view {
     wake_type: "ui.console_reply",
     closed_type: "ui.console_closed",
     owner: "ai" as const,
-    // The terminal's size in characters when made, its rows fitted at a show.
+    // The size when made, 120 by 40, its writer's; the rows fitted at a show.
     columns: 120,
     rows: 40,
     names_full: true,
@@ -59,7 +59,7 @@ namespace console_view {
   });
 
   // How far tty 0 has got: idle before and after it, opening, open, closing.
-  type Phase = "idle" | "opening" | "open" | "closing";
+  type ViewPhase = "idle" | "opening" | "open" | "closing";
 
   // A message of ttyd's client: the kind byte, then the body.
   function message_make(kind: number, body: Uint8Array): Uint8Array {
@@ -84,7 +84,7 @@ namespace console_view {
     private readonly child: HTMLElement;
     private readonly terminal: Terminal;
     private readonly observer: ResizeObserver;
-    private phase: Phase = "idle";
+    private phase: ViewPhase = "idle";
     private placed = false;
     // The height of one row in pixels, measured when the terminal is placed.
     private cell = 0;

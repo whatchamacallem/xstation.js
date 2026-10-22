@@ -23,10 +23,10 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 # The file in the root that holds the lines.
 _FILE_NAME = "_verbose.sqlite"
 
-# The lines the ring of a test holds at most.
+# The lines the ring of a test holds at most, a count its writer chose.
 _RING_LINES = 10
 
-# A count of lines greater than any ring a test makes.
+# A count of lines greater than any ring a test makes, its writer's choice.
 _HISTORY_ALL = 100
 
 # Reads every row of the table, in the order they were written.
@@ -173,7 +173,7 @@ class TestPut(IsolatedCase):
                 self.assertEqual(_rows_read(self.path), [])
 
     # Called before the registration the handler raises.
-    def test_unregistered(self) -> None:
+    def test_called_early(self) -> None:
         line = _line_make("verbose.put")
         self.raise_check(
             RuntimeError,

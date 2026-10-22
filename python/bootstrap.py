@@ -422,6 +422,12 @@ def _error_write(error: Exception) -> None:
 def bootstrap_run(argv: list[str]) -> int:
     try:
         arguments = _arguments_parse(argv)
+    except Exception as error:
+        # A refused command line may be the engine's, raw before it writes.
+        tty.setraw(_READ_FD, termios.TCSANOW)
+        _error_write(error)
+        return _EXIT_FAILURE
+    try:
         if arguments.role == _CONSOLE_ROLE:
             loaded = _settings_read(arguments.root)
             return _console_run(arguments.root, loaded)

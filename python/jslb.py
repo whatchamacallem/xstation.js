@@ -196,10 +196,7 @@ def _blob_named(blob: Object, full: bool) -> Object:
     renames = _BLOB_NAMES if full else _BLOB_SHORT
     named = Object()
     for name, value in blob.items():
-        if isinstance(name, str):
-            named[renames.get(name, name)] = value
-        else:
-            named[name] = value
+        named[renames.get(cast(str, name), name)] = value
     return named
 
 

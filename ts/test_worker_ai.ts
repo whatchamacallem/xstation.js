@@ -3,9 +3,10 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // Tests of the AI worker with a synchronous queue, port doubles and a store
-// double: the owner tables, the replication queue, the wire's overlay tap,
-// the relays of the console and of the settings, the start from the hello
-// to the render, and the provider script.
+// double: the owner tables, the synchronous mode, the replication queue and
+// the server port's hold, the wire's overlay tap, the relays of the console
+// and of the settings, the start from the hello to the render, and the
+// provider script.
 
 namespace test_worker_ai {
   // The types the worker registers, routed by the tests, and the values used.
@@ -23,6 +24,9 @@ namespace test_worker_ai {
       "worker.fetched",
       "worker.stored",
       "worker.rendered",
+      "worker.script_fetched",
+      "worker_test.fetch",
+      "worker_test.fetched",
     ]),
     bootstrap: "/home/t/.cache/xsjs/bootstrap.py",
     bootstrap_sha256:
@@ -49,10 +53,14 @@ namespace test_worker_ai {
     }),
     // A type routed to the relay of `settings.put`, which test pages register.
     put_alias: "worker_test.settings_put",
+    // A `blob_max` of two blobs of three bytes, a value chosen by its writer.
+    queue_blob_max: 6,
+    // A `blob_max` a test puts, a value chosen by its writer.
+    put_blob_max: 7,
   });
 
   // An object of fields by name.
-  type Fields = { [key: string]: unknown };
+  type FieldTable = { [key: string]: unknown };
 
   // The handlers the code under test registered, by line type.
   const routed = new Map<string, dispatch.Handler>();
@@ -138,7 +146,7 @@ namespace test_worker_ai {
   }
 
   // A synchronous queue of the AI thread and doubles of four of its ports.
-  interface Bench {
+  interface WorkerBench {
     tasks: queue.TaskQueue;
     ui: PortDouble;
     server: PortDouble;
@@ -146,8 +154,16 @@ namespace test_worker_ai {
     http: PortDouble;
   }
 
+  // A queue whose server port holds snapshots, its double and replication.
+  interface HoldBench {
+    tasks: queue.TaskQueue;
+    server: PortDouble;
+    store: ForwardDouble;
+    forwards: worker_ai.ForwardQueue;
+  }
+
   // Makes a bench with the engine's owner table and no handler routed.
-  function bench_make(): Bench {
+  function bench_make(): WorkerBench {
     router_install();
     routed.clear();
     const owners = worker_ai.owners_make(false);
@@ -166,6 +182,40 @@ namespace test_worker_ai {
     return bench;
   }
 
+  // Makes a bench whose server port is a hold on its double, with replication.
+  function hold_make(): HoldBench {
+    router_install();
+    routed.clear();
+    const owners = worker_ai.owners_make(false);
+    const tasks = new queue.TaskQueue("ai", owners, true);
+    const server = new PortDouble();
+    const hold = new worker_ai.ServerHold(server);
+    tasks.port_add("server", hold);
+    const store = new ForwardDouble();
+    const forwards = new worker_ai.ForwardQueue(
+      store,
+      tasks,
+      reader_from(settings_make()),
+      false,
+    );
+    hold.forwards_attach(forwards);
+    worker_ai.forwards_register(forwards, register_route);
+    return { tasks, server, store, forwards };
+  }
+
+  // Routes a task that asks the server for a snapshot and keeps its reply.
+  function fetch_route(tasks: queue.TaskQueue, replies: lines.Line[]): void {
+    routed.set("worker_test.fetch", (line: lines.Line) => {
+      const ask = line_short("db.snapshot", { db: line.db });
+      const id = tasks.task_submit(ask, "server");
+      return dispatch.task_sleep(null, [id], "worker_test.fetched");
+    });
+    routed.set("worker_test.fetched", (line: lines.Line) => {
+      replies.push(...(line.replies as lines.Line[]));
+      return undefined;
+    });
+  }
+
   // The type of a line.
   function type_of(line: lines.Line): unknown {
     return jslb.field_get(line[0], "type");
@@ -182,7 +232,7 @@ namespace test_worker_ai {
   // A line in short names from its type, payload, header options and blobs.
   function line_short(
     type: string,
-    payload: Fields = {},
+    payload: FieldTable = {},
     options: HeaderOptions = {},
     blobs: lines.BlobHeader[] = [],
   ): lines.Line {
@@ -192,7 +242,7 @@ namespace test_worker_ai {
   // The reply to a request a double received, with its payload and blobs.
   function reply_to(
     request: lines.Line,
-    payload: Fields,
+    payload: FieldTable,
     blobs: lines.BlobHeader[] = [],
   ): lines.Line {
     const header = jslb.header_make(type_of(request) as string, {
@@ -284,6 +334,8 @@ namespace test_worker_ai {
     readonly values = new Map<string, substrate.KvValue>();
     readonly documents = new Map<string, lines.Document>();
     readonly seqs = new Map<string, number>();
+    // The refs of cached values whose files this side lacks.
+    readonly lacking = new Set<string>();
     replace: string[] = [];
     universes: string[] = [];
 
@@ -313,18 +365,17 @@ namespace test_worker_ai {
       return this.value_get(ref);
     }
 
-    // Records the write and returns the row the value already has.
-    kv_put(
-      ref: lines.KvRef,
-      data: Uint8Array | string,
-    ): { row: lines.KvRow; seq: number } {
+    // Whether this side holds a value's bytes, which the double must hold.
+    kv_held(ref: lines.KvRef): boolean {
+      this.value_get(ref);
+      return !this.lacking.has(ref);
+    }
+
+    // Records the filling back of a value's file, which this side then holds.
+    cache_fill(ref: lines.KvRef, data: Uint8Array | string): void {
       const shown = typeof data === "string" ? data : "bytes";
-      this.calls.push(`kv_put ${ref} ${shown}`);
-      const value = this.value_get(ref);
-      return {
-        row: { k: ref, size: value.size, sha256: value.sha256 },
-        seq: 0,
-      };
+      this.calls.push(`cache_fill ${ref} ${shown}`);
+      this.lacking.delete(ref);
     }
 
     // Records the statements and returns the universes as rows of names.
@@ -401,10 +452,11 @@ namespace test_worker_ai {
 
   // Registers a start on the bench whose browser server is the `http` double.
   function chain_make(
-    bench: Bench,
+    bench: WorkerBench,
     store: StoreDouble,
     cache: CacheDouble,
     attached: string[],
+    script = false,
   ): void {
     const browser = new mcp.Client(
       "hyperposition-engine",
@@ -428,6 +480,7 @@ namespace test_worker_ai {
       server,
       hello: hello_make(),
       full: false,
+      script,
       provider_attach: () => {
         attached.push("provider");
       },
@@ -436,12 +489,12 @@ namespace test_worker_ai {
   }
 
   // Starts the chain as the hello's follow up task does.
-  function chain_start(bench: Bench): void {
+  function chain_start(bench: WorkerBench): void {
     bench.tasks.line_notify(line_short("worker.start"), "ai");
   }
 
   // Answers the last snapshot request of the server double with one blob.
-  function snapshot_answer(bench: Bench, seq: number): void {
+  function snapshot_answer(bench: WorkerBench, seq: number): void {
     const data = new Uint8Array([7]);
     const ask = bench.server.last_of("db.snapshot");
     const sha256 = utility.sha256_hex(data);
@@ -450,12 +503,12 @@ namespace test_worker_ai {
   }
 
   // The `JSON-RPC` response to an `mcp` request a double received.
-  function mcp_answer(request: lines.Line, result: Fields): lines.Line {
+  function mcp_answer(request: lines.Line, result: FieldTable): lines.Line {
     return reply_to(request, { jsonrpc: "2.0", id: request.id, result });
   }
 
   // Answers both initializations, then both lists of tools, with none.
-  function handshake_answer(bench: Bench): void {
+  function handshake_answer(bench: WorkerBench): void {
     const result = {
       protocolVersion: mcp.constants.protocol_version,
       capabilities: { tools: {} },
@@ -469,7 +522,7 @@ namespace test_worker_ai {
   }
 
   // The databases whose snapshots the server double was asked for.
-  function snapshots_asked(bench: Bench): unknown[] {
+  function snapshots_asked(bench: WorkerBench): unknown[] {
     return bench.server.posted
       .filter((line) => type_of(line) === "db.snapshot")
       .map((line) => line.db);
@@ -517,6 +570,25 @@ namespace test_worker_ai {
     // The name form is the thread's debug setting.
     test_names_debug(): void {
       this.assertEqual(worker_ai.names_full(), settings.settings_get("debug"));
+    }
+  }
+
+  // Synchronous mode, which only debug mode may set.
+  export class TestQueueMode extends unittest.TestCase {
+    // Read in debug mode, it is refused outside it.
+    test_debug_only(): void {
+      const value = settings_make();
+      value.queue_synchronous = true;
+      this.assertTrue(worker_ai.synchronous_read(reader_from(value)));
+      const plain = reader_from(settings_make());
+      this.assertFalse(worker_ai.synchronous_read(plain));
+      const release = settings_make();
+      release.debug = false;
+      release.queue_synchronous = true;
+      const error = thrown_get(() =>
+        worker_ai.synchronous_read(reader_from(release)),
+      );
+      this.assertEqual(error.message, i18n("worker_ai.synchronous_release"));
     }
   }
 
@@ -585,7 +657,7 @@ namespace test_worker_ai {
     test_queue_over(): void {
       const bench = bench_make();
       const value = settings_make();
-      value.blob_max = 6;
+      value.blob_max = constants.queue_blob_max;
       const forwards = new worker_ai.ForwardQueue(
         new ForwardDouble(),
         bench.tasks,
@@ -597,14 +669,55 @@ namespace test_worker_ai {
       forwards.line_add(sql_line("castle", 1));
       forwards.line_add(kv_line("/castle/b"));
       forwards.line_add(kv_line("/castle/c"));
-      this.assertEqual(forwards.held_bytes(), 6);
+      const limit = constants.queue_blob_max;
+      this.assertEqual(forwards.held_bytes(), limit);
       const over = kv_line("/castle/d");
       const error = thrown_get(() => forwards.line_add(over));
+      const header = utility.json_text(over[0]);
       this.assertEqual(
         error.message,
-        i18n("worker_ai.queue_over", utility.json_text(over[0]), 3, 6, 6),
+        i18n("worker_ai.queue_over", header, 3, limit, limit),
       );
-      this.assertEqual(forwards.held_bytes(), 6);
+      this.assertEqual(forwards.held_bytes(), limit);
+    }
+
+    // A snapshot of a database with lines waiting goes out behind them.
+    test_snapshot_behind(): void {
+      const bench = hold_make();
+      const replies: lines.Line[] = [];
+      fetch_route(bench.tasks, replies);
+      const first = sql_line("castle", 0);
+      const second = sql_line("castle", 1);
+      bench.forwards.line_add(first);
+      bench.forwards.line_add(second);
+      const fetch = line_short("worker_test.fetch", { db: "castle" });
+      bench.tasks.line_notify(fetch, "ai");
+      this.assertEqual(bench.server.posted.length, 1);
+      bench.server.line_send(reply_to(first, { results: [], seq: 1 }));
+      this.assertEqual(bench.server.posted.length, 2);
+      this.assertTrue(bench.server.posted[1] === second);
+      bench.server.line_send(reply_to(second, { results: [], seq: 2 }));
+      this.assertEqual(bench.server.posted.length, 3);
+      const ask = bench.server.posted[2];
+      this.assertEqual(type_of(ask), "db.snapshot");
+      this.assertEqual(jslb.payload_of(ask), { db: "castle" });
+      const answer = reply_to(ask, { seq: 2 });
+      bench.server.line_send(answer);
+      this.assertTrue(replies[0] === answer);
+      this.assertEqual(bench.store.done.length, 2);
+      this.assertEqual(bench.tasks.depth(), 0);
+    }
+
+    // With no line waiting, a snapshot goes out at once, behind one in flight.
+    test_snapshot_passed(): void {
+      const bench = hold_make();
+      fetch_route(bench.tasks, []);
+      bench.forwards.line_add(sql_line("castle", 0));
+      const fetch = line_short("worker_test.fetch", { db: "castle" });
+      bench.tasks.line_notify(fetch, "ai");
+      const types = bench.server.posted.map((line) => type_of(line));
+      this.assertEqual(types, ["sql.run", "db.snapshot"]);
+      this.assertEqual(bench.forwards.held_bytes(), 0);
     }
 
     // A line of a type that writes no database is refused.
@@ -685,6 +798,20 @@ namespace test_worker_ai {
         i18n("worker_ai.overlay_sent", jslb.line_render(sent)),
       ]);
     }
+
+    // A note goes to the overlay of tty 1 on the UI and to the log.
+    test_note_logged(): void {
+      const bench = bench_make();
+      const logged: string[] = [];
+      const note = worker_ai.note_make(bench.tasks, false, (text) => {
+        logged.push(text);
+      });
+      const text = i18n("worker_ai.overlay_sent", "{}");
+      note(text);
+      const shown = bench.ui.last_of("overlay.line");
+      this.assertEqual(jslb.payload_of(shown), { tty: 1, text });
+      this.assertEqual(logged, [text]);
+    }
   }
 
   // The relays of the UI's console opening and close, and of the settings.
@@ -730,13 +857,16 @@ namespace test_worker_ai {
       this.assertEqual(bench.tasks.depth(), 0);
     }
 
-    // A notice of new settings goes to the server as a request, then ends.
+    // A notice of new settings changes the live value, goes to the server.
     test_settings_sent(): void {
       const bench = bench_make();
-      worker_ai.settings_register(bench.tasks, register_route);
+      const live = settings_make();
+      worker_ai.settings_register(bench.tasks, register_route, live);
       const value = settings_make();
+      value.blob_max = constants.put_blob_max;
       const notice = line_short(constants.put_alias, { settings: value });
       bench.tasks.line_notify(notice, "ai");
+      this.assertEqual(live, value);
       this.assertEqual(bench.server.posted.length, 1);
       const put = bench.server.posted[0];
       this.assertEqual(type_of(put), "settings.put");
@@ -903,6 +1033,7 @@ namespace test_worker_ai {
         size: constants.image_size,
         sha256: constants.image_sha256,
       });
+      store.lacking.add(constants.image);
       const bytes = new Uint8Array(constants.image_size).fill(9);
       cache.files.set(constants.image_sha256, bytes);
       for (const db of ["castle_world", "castle", "castle_gatehouse"]) {
@@ -928,7 +1059,7 @@ namespace test_worker_ai {
         [handle],
       );
       bench.server.line_send(fetched);
-      this.assertIn(`kv_put ${constants.image} sink/1`, store.calls);
+      this.assertIn(`cache_fill ${constants.image} sink/1`, store.calls);
       this.assertEqual(cache.reads, [constants.image_sha256]);
       const kept = bench.ui.last_of("media.store");
       this.assertEqual(kept.k, constants.image);
@@ -964,6 +1095,72 @@ namespace test_worker_ai {
       const kept = bench.ui.last_of("media.store");
       const data = jslb.field_get(kept[1] as lines.BlobHeader, "data");
       this.assertEqual(data, utility.utf8_encode("png"));
+    }
+
+    // A cached image whose file the browser holds goes to the UI from it.
+    test_image_held(): void {
+      const bench = bench_make();
+      const store = store_seeded();
+      const cache = new CacheDouble();
+      store.open.push("metaverse", "_files");
+      store.documents.set(constants.hyperposition, {
+        0: { t: "scene" },
+        1: constants.image,
+        subtitle: constants.greeting,
+        image: { $ref: 1 },
+      });
+      store.values.set(constants.image, {
+        data: constants.image_sha256,
+        size: constants.image_size,
+        sha256: constants.image_sha256,
+      });
+      const bytes = new Uint8Array(constants.image_size).fill(9);
+      cache.files.set(constants.image_sha256, bytes);
+      chain_make(bench, store, cache, []);
+      chain_start(bench);
+      handshake_answer(bench);
+      this.assertEqual(bench.server.posted.length, 3);
+      this.assertEqual(cache.reads, [constants.image_sha256]);
+      const kept = bench.ui.last_of("media.store");
+      const data = jslb.field_get(kept[1] as lines.BlobHeader, "data");
+      this.assertEqual(data, new Uint8Array(constants.image_size).fill(9));
+    }
+
+    // A scripted start fetches the Script it lacks, then adds the provider.
+    test_script_fetched(): void {
+      const bench = bench_make();
+      const store = store_seeded();
+      store.open.push("metaverse", "_files");
+      const data = utility.utf8_encode('{"start":"a","nodes":{}}');
+      const sha256 = utility.sha256_hex(data);
+      const size = data.length;
+      store.values.set(constants.script_ref, { data: sha256, size, sha256 });
+      store.lacking.add(constants.script_ref);
+      const attached: string[] = [];
+      chain_make(bench, store, new CacheDouble(), attached, true);
+      chain_start(bench);
+      this.assertEqual(attached, []);
+      const ask = bench.server.last_of("kv.get");
+      this.assertEqual(jslb.field_get(ask[0], "key"), constants.script_ref);
+      const handle = jslb.blob_make("sink/2", undefined, {}, size);
+      bench.server.line_send(reply_to(ask, { size, sha256 }, [handle]));
+      this.assertIn(`cache_fill ${constants.script_ref} sink/2`, store.calls);
+      this.assertEqual(attached, ["provider"]);
+      this.assertEqual(type_of(bench.http.posted[0]), "mcp");
+    }
+
+    // A scripted start whose Script is held adds the provider at once.
+    test_script_held(): void {
+      const bench = bench_make();
+      const store = store_seeded();
+      store.open.push("metaverse", "_files");
+      store.text_set(constants.script_ref, '{"start":"a","nodes":{}}');
+      const attached: string[] = [];
+      chain_make(bench, store, new CacheDouble(), attached, true);
+      chain_start(bench);
+      this.assertEqual(attached, ["provider"]);
+      const types = bench.server.posted.map((line) => type_of(line));
+      this.assertEqual(types, ["mcp"]);
     }
 
     // A scene with no text subtitle or an image that is no ref is refused.

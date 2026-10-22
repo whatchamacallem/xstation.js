@@ -97,7 +97,7 @@ namespace provider_script {
   }
 
   // An object of unknown members, as a parsed JSON body holds them.
-  type Fields = { [key: string]: unknown };
+  type FieldTable = { [key: string]: unknown };
 
   // The largest prime below the limit, found by trial division.
   function prime_below(limit: number): number {
@@ -129,14 +129,9 @@ namespace provider_script {
     return table;
   }
 
-  // The table of `CRC-32` remainders by byte value.
-  const crc_table = table_make();
-
-  // The modulus of the `Adler-32` sums, the largest prime below `2 ** 16`.
-  const adler_modulus = prime_below(constants.sum_range);
-
   // The `CRC-32` of the bytes, as a PNG chunk carries it.
   function crc_compute(data: Uint8Array): number {
+    const crc_table = table_make();
     let crc = constants.word_mask;
     for (const byte of data) {
       const index = (crc ^ byte) & constants.byte_mask;
@@ -147,6 +142,7 @@ namespace provider_script {
 
   // The `Adler-32` of the bytes, which ends a zlib stream.
   function adler_compute(data: Uint8Array): number {
+    const adler_modulus = prime_below(constants.sum_range);
     let low = 1;
     let high = 0;
     for (const byte of data) {
@@ -266,7 +262,7 @@ namespace provider_script {
   }
 
   // Whether the value is an object that is neither an array nor `null`.
-  function fields_is(value: unknown): value is Fields {
+  function fields_is(value: unknown): value is FieldTable {
     return (
       typeof value === "object" && value !== null && !Array.isArray(value)
     );
@@ -278,7 +274,7 @@ namespace provider_script {
   }
 
   // The object at the path of the request, or a throw when it is not one.
-  function fields_read(value: unknown, path: string): Fields {
+  function fields_read(value: unknown, path: string): FieldTable {
     if (!fields_is(value)) {
       return field_invalid(path);
     }
@@ -294,7 +290,7 @@ namespace provider_script {
   }
 
   // The body that answers an image request: the pattern as base64, `n` times.
-  function image_answer(body: Fields): Fields {
+  function image_answer(body: FieldTable): FieldTable {
     const format = body.response_format;
     if (format !== constants.image_format) {
       throw new Error(
@@ -310,11 +306,26 @@ namespace provider_script {
       return field_invalid("json.n");
     }
     const text = base64_encode(image_pattern());
-    const data: Fields[] = [];
+    const data: FieldTable[] = [];
     for (let made = 0; made < count; made += 1) {
       data.push({ b64_json: text });
     }
     return { data };
+  }
+
+  // The `tool_call_id` of each tool result that ends the messages, in order.
+  function results_ids(messages: unknown[]): unknown[] {
+    let start = messages.length;
+    while (
+      start > 0 &&
+      fields_read(messages[start - 1], `json.messages[${start - 1}]`).role ===
+        constants.tool_role
+    ) {
+      start -= 1;
+    }
+    return messages
+      .slice(start)
+      .map((message: unknown) => (message as FieldTable).tool_call_id);
   }
 
   // A port that answers each request from the script before its post returns.
@@ -322,6 +333,8 @@ namespace provider_script {
     private readonly script: Script;
     private current: string;
     private pending: string | undefined;
+    // The ids of the calls whose tool results are pending, in order.
+    private pending_ids: string[] = [];
     private chats_answered = 0;
     private receiver: ((line: lines.Line) => void) | undefined;
 
@@ -383,7 +396,7 @@ namespace provider_script {
     }
 
     // The JSON body that answers the request, chosen by the path of its url.
-    private body_answer(payload: Fields): Fields {
+    private body_answer(payload: FieldTable): FieldTable {
       if (payload.method !== constants.method) {
         return field_invalid("method");
       }
@@ -401,7 +414,7 @@ namespace provider_script {
     }
 
     // The body that answers a chat request, which moves the script on.
-    private chat_answer(body: Fields): Fields {
+    private chat_answer(body: FieldTable): FieldTable {
       const model = body.model;
       if (typeof model !== "string") {
         return field_invalid("json.model");
@@ -412,15 +425,16 @@ namespace provider_script {
       }
       const index = messages.length - 1;
       const last = fields_read(messages[index], `json.messages[${index}]`);
-      const reply = this.reply_choose(last);
+      const reply = this.reply_choose(last, messages);
       const calls = reply.tool_calls ?? [];
-      const message: Fields = {
+      const message: FieldTable = {
         role: constants.assistant_role,
         content: reply.content,
       };
       if (calls.length > 0) {
         message.tool_calls = structuredClone(calls);
         this.pending = reply.next;
+        this.pending_ids = calls.map((call) => call.id);
       } else {
         this.current = reply.next;
       }
@@ -435,13 +449,28 @@ namespace provider_script {
     }
 
     // The reply to the last message: after tool results, or for the input.
-    private reply_choose(last: Fields): ScriptReply {
+    private reply_choose(last: FieldTable, messages: unknown[]): ScriptReply {
       const role = last.role;
       const pending = this.pending;
       if (role === constants.tool_role) {
         if (pending === undefined) {
           throw new Error(
             i18n("provider_script.results_unasked", this.current),
+          );
+        }
+        const answered = results_ids(messages);
+        const asked = this.pending_ids;
+        if (
+          answered.length !== asked.length ||
+          answered.some((id: unknown, index: number) => id !== asked[index])
+        ) {
+          throw new Error(
+            i18n(
+              "provider_script.results_unmatched",
+              this.current,
+              utility.json_text(answered),
+              utility.json_text(asked),
+            ),
           );
         }
         const after = node_get(this.script, pending).after_tools;

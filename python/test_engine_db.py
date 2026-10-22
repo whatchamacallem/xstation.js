@@ -38,10 +38,10 @@ _BLOB_MAX = 2147483391
 # The 10 MiB a snapshot once had to fit in each of its pieces.
 _OLD_WINDOW = 10485760
 
-# The bytes of each row of the database past that size, 1 MiB.
+# Each row of the database past that size, 1 MiB, a size its writer chose.
 _ROW_BYTES = 1048576
 
-# The rows of that database, 11 MiB together.
+# The rows of that database, 11 MiB together, a count its writer chose.
 _ROW_COUNT = 11
 
 # The database the tests create, snapshot and drop.
@@ -50,10 +50,10 @@ _DATABASE = "castle"
 # Text beyond ASCII, built from its code points.
 _WIDE_TEXT = chr(0x4E2D) + chr(0x6587) + chr(0x1F600)
 
-# A text row large enough to put the database file over `overflow_bytes`.
+# A text row putting the file over `overflow_bytes`, a size its writer chose.
 _BIG_TEXT = "x" * 200000
 
-# A value over `overflow_bytes`, which the store keeps in the cache.
+# A value over `overflow_bytes`, kept in the cache, a size its writer chose.
 _VALUE_OVER = bytes(range(256)) * 800
 
 # The magic bytes that start every SQLite database file.
@@ -414,7 +414,7 @@ class TestRegister(IsolatedCase):
         self.dispatch_check(LookupError, message, line)
 
     # Called before the registration each handler raises.
-    def test_unregistered(self) -> None:
+    def test_called_early(self) -> None:
         line = _line_make("db.create", 1)
         message = i18n("engine_db.not_registered")
         calls: list[Callable[[], object]] = [

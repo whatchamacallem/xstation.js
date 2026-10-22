@@ -91,7 +91,7 @@ _HELLO_KEYS = [
     "seq",
 ]
 
-# The `seq` map the test main loop returns.
+# Counts chosen by their writer: the `seq` map the test main loop returns.
 _LOOP_SEQ = {"_settings": 15, "_files": 1, "_preferences": 0, "metaverse": 5}
 
 # The file name the test main loops are written under in the root.
@@ -468,7 +468,7 @@ def _lock_hold(root: str) -> tuple[int, int]:
     return pid, release_write
 
 
-# Tests the arguments, which are refused with an error line before raw mode.
+# Tests the arguments, which are refused with an error line after raw mode.
 class TestArguments(unittest.TestCase):
     # No root, an unknown role, option or extra word is refused by `argparse`.
     def test_arguments_refused(self) -> None:
@@ -483,12 +483,12 @@ class TestArguments(unittest.TestCase):
         for argv in cases:
             record = _run_captured(made, argv, b"", _ENGINE_ENVIRONMENT)
             self.assertEqual(record.code, 1)
-            self.assertEqual(record.raw_calls, [])
+            _raw_check(self, record)
             (line,) = _lines_parse(record.output)
             _raised_check(self, line, "argparse.ArgumentError")
         _log_absent(self, made.root)
 
-    # A repeated `--root` or `--main-loop` is refused before raw mode.
+    # A repeated `--root` or `--main-loop` is refused after raw mode.
     def test_option_repeated(self) -> None:
         made = _root_make(self, True)
         root = ["--root", made.root]
@@ -499,7 +499,7 @@ class TestArguments(unittest.TestCase):
         ):
             record = _run_captured(made, argv, b"", _ENGINE_ENVIRONMENT)
             self.assertEqual(record.code, 1)
-            self.assertEqual(record.raw_calls, [])
+            _raw_check(self, record)
             (line,) = _lines_parse(record.output)
             self.assertEqual(
                 _error_check(self, line),
@@ -713,6 +713,22 @@ class TestHello(unittest.TestCase):
                 path = os.path.join(made.root, _PROVIDER_NAME)
                 expected = i18n("bootstrap.provider_empty", path, key)
                 self.info_refused(made, "ValueError", expected)
+
+    # A provider file that is not JSON raises the JSON parser's error.
+    def test_info_garbled(self) -> None:
+        made = _root_make(self, True, scripted=False)
+        _info_write(made.root, "not JSON")
+        _loop_write(made.root, _LOOP_TEXT)
+        argv = _engine_argv(made.root)
+        record = _run_captured(made, argv, _REPLY_FULL, _ENGINE_ENVIRONMENT)
+        self.assertEqual(record.code, 1)
+        (line,) = _lines_parse(record.output)
+        kind = "json.decoder.JSONDecodeError"
+        message = _raised_check(self, line, kind)
+        self.assertTrue(message.startswith(_GARBLED_REASON))
+        prepared = os.path.join(made.root, _PREPARE_NAME)
+        self.assertFalse(os.path.exists(prepared))
+        _failure_logged(self, made.root, message)
 
 
 # Tests the reply to `hello`, which must be the empty reply in either form.
@@ -940,7 +956,7 @@ class TestConsole(unittest.TestCase):
             record = _run_captured(made, argv, b"", _CONSOLE_ENVIRONMENT)
         self.assertEqual(record, RunRecord(128 + signal.SIGKILL, b"", []))
 
-    # The console role with `--main-loop` is refused before dash runs.
+    # The console role with `--main-loop` is refused, raw, before dash runs.
     def test_console_loop(self) -> None:
         made = _root_make(self, True)
         argv = ["--root", made.root, "console", "--main-loop", _LOOP_NAME]
@@ -948,7 +964,7 @@ class TestConsole(unittest.TestCase):
             record = _run_captured(made, argv, b"", _CONSOLE_ENVIRONMENT)
         executed.assert_not_called()
         self.assertEqual(record.code, 1)
-        self.assertEqual(record.raw_calls, [])
+        _raw_check(self, record)
         (line,) = _lines_parse(record.output)
         self.assertEqual(
             _error_check(self, line),

@@ -43,7 +43,7 @@ namespace test_page {
   });
 
   // An object of fields by name.
-  type Fields = { [key: string]: unknown };
+  type FieldTable = { [key: string]: unknown };
 
   // The header options the tests set.
   type HeaderOptions = { id?: number; reply?: number; full?: boolean };
@@ -204,7 +204,7 @@ namespace test_page {
   }
 
   // The elements the page's code finds, in a container in the document.
-  interface Elements {
+  interface FixtureElements {
     container: HTMLElement;
     canvas: HTMLCanvasElement;
     subtitle: HTMLElement;
@@ -214,7 +214,7 @@ namespace test_page {
   }
 
   // Makes the elements in a container and puts it in the document's body.
-  function elements_make(document_of: Document): Elements {
+  function elements_make(document_of: Document): FixtureElements {
     const container = document_of.createElement("div");
     const canvas = document_of.createElement("canvas");
     canvas.id = "image";
@@ -231,7 +231,7 @@ namespace test_page {
   }
 
   // A synchronous UI queue, its port doubles and the doubles of its parts.
-  interface Bench {
+  interface HandlerBench {
     tasks: queue.TaskQueue;
     ai: PortDouble;
     media: PortDouble;
@@ -243,11 +243,14 @@ namespace test_page {
   }
 
   // Makes a bench whose handlers work on the elements, in debug mode or not.
-  function bench_make(elements: Elements, debug: boolean): Bench {
+  function bench_make(
+    elements: FixtureElements,
+    debug: boolean,
+  ): HandlerBench {
     router_install();
     routed.clear();
     const tasks = new queue.TaskQueue("ui", page.owners_make(false), true);
-    const bench: Bench = {
+    const bench: HandlerBench = {
       tasks,
       ai: new PortDouble(),
       media: new PortDouble(),
@@ -289,7 +292,7 @@ namespace test_page {
   // A line in short names from its type, payload, header options and blobs.
   function line_short(
     type: string,
-    payload: Fields = {},
+    payload: FieldTable = {},
     options: HeaderOptions = {},
     blobs: lines.BlobHeader[] = [],
   ): lines.Line {
@@ -299,7 +302,7 @@ namespace test_page {
   // The reply to a request a double received, with its payload and blobs.
   function reply_to(
     request: lines.Line,
-    payload: Fields,
+    payload: FieldTable,
     blobs: lines.BlobHeader[] = [],
   ): lines.Line {
     const header = jslb.header_make(type_of(request) as string, {
@@ -341,7 +344,7 @@ namespace test_page {
   // A test on elements put in the document in `setUp` and removed after.
   class ElementsCase extends unittest.TestCase {
     // The elements, made from the document in `setUp`.
-    #elements: Elements | undefined = undefined;
+    #elements: FixtureElements | undefined = undefined;
 
     // Makes the elements in the test page's document.
     setUp(): void {
@@ -354,8 +357,8 @@ namespace test_page {
     }
 
     // The elements of this test.
-    elements_get(): Elements {
-      return this.#elements as Elements;
+    elements_get(): FixtureElements {
+      return this.#elements as FixtureElements;
     }
   }
 

@@ -72,6 +72,21 @@ namespace test_unittest {
     });
   }
 
+  // The name and the message of the error the function throws.
+  function thrown_text(fn: () => unknown): string {
+    try {
+      fn();
+    } catch (error) {
+      if (!(error instanceof Error)) {
+        throw new TypeError("the function threw a value that is no Error", {
+          cause: error,
+        });
+      }
+      return `${error.name}: ${error.message}`;
+    }
+    throw new Error("the function threw nothing");
+  }
+
   // Tests the unittest subset on the fixtures nested here.
   export class TestUnittest extends unittest.TestCase {
     // A pass, a failure, an error and a skip, recording the parts that ran.
@@ -289,9 +304,9 @@ namespace test_unittest {
 
     // A case bound to a method its class lacks is refused.
     test_missing_method(): void {
-      this.assertRaises(
-        TypeError,
-        () => new TestUnittest.NestedFixture("test_missing"),
+      this.assertEqual(
+        thrown_text(() => new TestUnittest.NestedFixture("test_missing")),
+        "TypeError: NestedFixture has no method test_missing",
       );
     }
 
@@ -300,14 +315,24 @@ namespace test_unittest {
       this.assertEqual([1, [2, "x"]], [1, [2, "x"]]);
       this.assertEqual({ a: 1, b: [2] }, { b: [2], a: 1 });
       this.assertEqual(new Uint8Array([1, 2]), new Uint8Array([1, 2]));
-      this.assertRaises(Error, () => this.assertEqual([1], [1, 2]));
-      this.assertRaises(Error, () =>
-        this.assertEqual({ a: 1 }, { a: 1, b: 2 }),
+      this.assertEqual(
+        thrown_text(() => this.assertEqual([1], [1, 2])),
+        "AssertionError: [1] != [1,2]",
       );
-      this.assertRaises(Error, () =>
-        this.assertEqual(new Uint8Array([1]), new Uint8Array([2])),
+      this.assertEqual(
+        thrown_text(() => this.assertEqual({ a: 1 }, { a: 1, b: 2 })),
+        'AssertionError: {"a":1} != {"a":1,"b":2}',
       );
-      this.assertRaises(Error, () => this.assertEqual("1", 1));
+      this.assertEqual(
+        thrown_text(() =>
+          this.assertEqual(new Uint8Array([1]), new Uint8Array([2])),
+        ),
+        'AssertionError: {"0":1} != {"0":2}',
+      );
+      this.assertEqual(
+        thrown_text(() => this.assertEqual("1", 1)),
+        'AssertionError: "1" != 1',
+      );
     }
 
     // `assertIn` searches text, arrays by value and object keys.
@@ -315,11 +340,26 @@ namespace test_unittest {
       this.assertIn("b", "abc");
       this.assertIn([2], [[1], [2]]);
       this.assertIn("k", { k: 1 });
-      this.assertRaises(Error, () => this.assertIn("z", "abc"));
-      this.assertRaises(Error, () => this.assertIn(3, [1, 2]));
-      this.assertRaises(Error, () => this.assertIn("j", { k: 1 }));
-      this.assertRaises(TypeError, () => this.assertIn(1, "abc"));
-      this.assertRaises(TypeError, () => this.assertIn(1, 5));
+      this.assertEqual(
+        thrown_text(() => this.assertIn("z", "abc")),
+        'AssertionError: "z" not found in "abc"',
+      );
+      this.assertEqual(
+        thrown_text(() => this.assertIn(3, [1, 2])),
+        "AssertionError: 3 not found in [1,2]",
+      );
+      this.assertEqual(
+        thrown_text(() => this.assertIn("j", { k: 1 })),
+        'AssertionError: "j" not found in {"k":1}',
+      );
+      this.assertEqual(
+        thrown_text(() => this.assertIn(1, "abc")),
+        "TypeError: 1 is no text to search for",
+      );
+      this.assertEqual(
+        thrown_text(() => this.assertIn(1, 5)),
+        "TypeError: cannot search in 5",
+      );
     }
 
     // `assertRaises` passes on its class, fails on no throw, passes others on.
@@ -327,11 +367,17 @@ namespace test_unittest {
       this.assertRaises(RangeError, () => {
         throw new RangeError("range");
       });
-      this.assertRaises(Error, () => this.assertRaises(RangeError, () => 0));
-      this.assertRaises(TypeError, () =>
-        this.assertRaises(RangeError, () => {
-          throw new TypeError("type");
-        }),
+      this.assertEqual(
+        thrown_text(() => this.assertRaises(RangeError, () => 0)),
+        "AssertionError: RangeError not raised",
+      );
+      this.assertEqual(
+        thrown_text(() =>
+          this.assertRaises(RangeError, () => {
+            throw new TypeError("type");
+          }),
+        ),
+        "TypeError: type",
       );
     }
 
@@ -339,8 +385,14 @@ namespace test_unittest {
     test_truth_asserts(): void {
       this.assertTrue(1);
       this.assertFalse("");
-      this.assertRaises(Error, () => this.assertTrue(0));
-      this.assertRaises(Error, () => this.assertFalse("x"));
+      this.assertEqual(
+        thrown_text(() => this.assertTrue(0)),
+        "AssertionError: 0 is not true",
+      );
+      this.assertEqual(
+        thrown_text(() => this.assertFalse("x")),
+        'AssertionError: "x" is not false',
+      );
     }
   }
 }

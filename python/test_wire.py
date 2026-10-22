@@ -31,8 +31,9 @@
 
 import argparse, base64, collections, hashlib, http.client, json, os, re
 import select, shutil, signal, socket, subprocess, sys, tempfile, time, types
-from collections.abc import Callable
-from typing import Any, NamedTuple, NoReturn, Self, TypeAlias, cast
+import uuid
+from collections.abc import Callable, Iterator
+from typing import Any, NamedTuple, Self, TypeAlias, cast
 
 # The checkout's `python` directory, which holds this file.
 _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -54,6 +55,12 @@ _WORK_PREFIX = "test_wire-"
 
 # The checkout's settings, the object each root's settings are made from.
 _SETTINGS_PATH = os.path.join(_CHECKOUT_PATH, "settings.json")
+
+# A scripted provider for every root, as `settings.json` held it.
+_ROOT_SCRIPTED = True
+
+# The shell's level for every root, as `settings.json` held it.
+_ROOT_LEVEL = 1
 
 # The strings file, which the start script copies into the root.
 _STRINGS_PATH = os.path.join(_CHECKOUT_PATH, "i18n", "en-US.json")
@@ -235,6 +242,9 @@ _MIB = 1 << 20
 # The blob bytes the large echo sends in all, 128 MiB.
 _LARGE_BYTES = 128 * _MIB
 
+# A size chosen by its writer: the client streams a larger blob to a file.
+_HELD_BYTES = _LARGE_BYTES
+
 # The database the kv rung writes in, which every new root has.
 _FILES_DB = "_files"
 
@@ -259,10 +269,10 @@ _PAGE_THREAD = "ai"
 # The server's own thread, whose ring the verbose rung reads.
 _SERVER_THREAD = "server"
 
-# How many lines the verbose rung puts, which carry no level.
+# A count chosen by its writer: the lines the verbose rung puts, no level.
 _PUT_COUNT = 3
 
-# How many of those lines the verbose rung reads back.
+# A count chosen by its writer: those lines the verbose rung reads back.
 _TAIL_COUNT = 2
 
 # The database the replay creates and fills, which no new root has.
@@ -348,10 +358,10 @@ _LINES_COMMAND = (
 # The prompt dash writes when it waits for a command.
 _PROMPT = b"$ "
 
-# The columns the first message gives the terminal.
+# A count chosen by its writer: the terminal's columns in the first message.
 _COLUMNS = 80
 
-# The rows the first message gives the terminal.
+# A count chosen by its writer: the terminal's rows in the first message.
 _ROWS = 24
 
 # ttyd's first log line, with its version and that of libwebsockets.
@@ -423,6 +433,12 @@ class CheckFailed(Exception):
 class MemoryUse(NamedTuple):
     resident: int
     peak: int
+
+
+# Frames of one opcode queued for ttyd, each payload framed when it is sent.
+class QueuedFrames(NamedTuple):
+    opcode: int
+    payloads: Iterator[bytes]
 
 
 # A rung's time limit, which fails loud once it has passed.
@@ -643,8 +659,10 @@ class WireClient:
         self.sock = sock
         self.unread = bytearray(rest)
         self.fragments: bytearray | None = None
-        self.unsent: collections.deque[bytes] = collections.deque()
-        self.unsent_offset = 0
+        self.unsent: collections.deque[QueuedFrames] = collections.deque()
+        self.frame = b""
+        self.frame_offset = 0
+        self.directory = os.path.dirname(ttyd.root)
         self.close_sent = False
         self.close_code: int | None = None
         self.close_reason = b""
@@ -661,8 +679,8 @@ class WireClient:
         self.decoder = jslb.LineDecoder(
             values["line_max"],
             values["blob_max"],
-            values["blob_max"],
-            blob_refuse,
+            _HELD_BYTES,
+            self.sink_make,
         )
         self.lines: collections.deque[LineObject] = collections.deque()
         self.full = False
@@ -676,29 +694,25 @@ class WireClient:
         self.id_last += 1
         return self.id_last
 
-    # Queues one WebSocket frame, masked as a client's must be.
+    # Queues one WebSocket frame, masked when it is sent.
     def frame_send(self, opcode: int, payload: bytes) -> None:
-        head = bytearray([0x80 | opcode])
-        if len(payload) < 126:
-            head.append(0x80 | len(payload))
-        elif len(payload) < 1 << 16:
-            head.append(0x80 | 126)
-            head += len(payload).to_bytes(2, "big")
-        else:
-            head.append(0x80 | 127)
-            head += len(payload).to_bytes(8, "big")
-        mask = os.urandom(4)
-        keys = (mask * (len(payload) // 4 + 1))[: len(payload)]
-        masked = (
-            int.from_bytes(payload, "big") ^ int.from_bytes(keys, "big")
-        ).to_bytes(len(payload), "big")
-        self.unsent.append(bytes(head) + mask + masked)
+        self.unsent.append(QueuedFrames(opcode, iter((payload,))))
 
     # Queues bytes for the program as ttyd input messages of `chunk_bytes`.
     def input_send(self, data: bytes) -> None:
-        for start in range(0, len(data), self.chunk_bytes):
-            piece = data[start : start + self.chunk_bytes]
-            self.frame_send(_OPCODE_BINARY, b"0" + piece)
+        self.input_stream(iter((data,)))
+
+    # Queues pieces for the program, cut into messages only as they are sent.
+    def input_stream(self, pieces: Iterator[bytes]) -> None:
+        payloads = self.input_split(pieces)
+        self.unsent.append(QueuedFrames(_OPCODE_BINARY, payloads))
+
+    # Yields ttyd input messages of `chunk_bytes`, each cut when it is due.
+    def input_split(self, pieces: Iterator[bytes]) -> Iterator[bytes]:
+        for piece in pieces:
+            view = memoryview(piece)
+            for start in range(0, len(view), self.chunk_bytes):
+                yield b"0" + view[start : start + self.chunk_bytes]
 
     # Queues a close frame with the normal code, after which the end is due.
     def close_send(self) -> None:
@@ -706,14 +720,30 @@ class WireClient:
         self.end_expected = True
         self.frame_send(_OPCODE_CLOSE, _CLOSE_NORMAL.to_bytes(2, "big"))
 
-    # Sends as much of the first queued frame as the socket takes.
-    def unsent_send(self) -> None:
-        frame = self.unsent[0]
-        sent = self.sock.send(memoryview(frame)[self.unsent_offset :])
-        self.unsent_offset += sent
-        if self.unsent_offset == len(frame):
+    # Says whether a frame is part sent or still queued.
+    def frames_due(self) -> bool:
+        return self.frame_offset < len(self.frame) or bool(self.unsent)
+
+    # Frames the next payload queued, dropping each run that has ended.
+    def frame_next(self) -> bytes:
+        while self.unsent:
+            queued = self.unsent[0]
+            for payload in queued.payloads:
+                return frame_make(queued.opcode, payload)
             self.unsent.popleft()
-            self.unsent_offset = 0
+        return b""
+
+    # Sends as much of the frame as the socket takes, framing the next first.
+    def unsent_send(self) -> None:
+        if self.frame_offset == len(self.frame):
+            self.frame = self.frame_next()
+            self.frame_offset = 0
+        sent = self.sock.send(memoryview(self.frame)[self.frame_offset :])
+        self.frame_offset += sent
+
+    # Names a new file in the run's directory for a blob the decoder streams.
+    def sink_make(self, header: LineObject) -> str:
+        return os.path.join(self.directory, uuid.uuid4().hex)
 
     # Reads from ttyd, failing on an end of the connection that is not due.
     def socket_read(self) -> None:
@@ -929,11 +959,23 @@ class ReplaySequence:
         self.step_count(db, "sql.run", None, [], payload, due)
 
 
-# Refuses a blob the client would stream, as it keeps each message in memory.
-def blob_refuse(header: LineObject) -> NoReturn:
-    raise CheckFailed(
-        f"the client's decoder was asked to stream the blob {header}"
-    )
+# Returns one final WebSocket frame, masked as a client's must be.
+def frame_make(opcode: int, payload: bytes) -> bytes:
+    head = bytearray([0x80 | opcode])
+    if len(payload) < 126:
+        head.append(0x80 | len(payload))
+    elif len(payload) < 1 << 16:
+        head.append(0x80 | 126)
+        head += len(payload).to_bytes(2, "big")
+    else:
+        head.append(0x80 | 127)
+        head += len(payload).to_bytes(8, "big")
+    mask = os.urandom(4)
+    keys = (mask * (len(payload) // 4 + 1))[: len(payload)]
+    masked = (
+        int.from_bytes(payload, "big") ^ int.from_bytes(keys, "big")
+    ).to_bytes(len(payload), "big")
+    return bytes(head) + mask + masked
 
 
 # Returns ttyd's preferences, which must be a JSON object.
@@ -982,7 +1024,7 @@ def clients_wait(
 ) -> None:
     ttyd = clients[0].ttyd
     while not done() or any(
-        client.unsent for client in clients if not client.ended
+        client.frames_due() for client in clients if not client.ended
     ):
         readers: list[socket.socket | int] = [
             client.sock for client in clients if not client.ended
@@ -990,7 +1032,7 @@ def clients_wait(
         writers = [
             client.sock
             for client in clients
-            if client.unsent and not client.ended
+            if client.frames_due() and not client.ended
         ]
         if not ttyd.log_ended:
             readers.append(ttyd.fd)
@@ -1130,12 +1172,15 @@ def blobs_of(line: LineObject) -> list[bytes]:
     ]
 
 
-# The bytes a line and its blobs take on the wire.
+# The bytes a line and its blobs take on the wire, a streamed blob its file's.
 def message_bytes(line: LineObject) -> int:
     import jslb
 
     pieces = jslb.line_encode(cast(jslb.Object, line))
-    return sum(len(cast(bytes, piece)) for piece in pieces)
+    return sum(
+        os.path.getsize(piece) if isinstance(piece, str) else len(piece)
+        for piece in pieces
+    )
 
 
 # The text and CR of an echo request with no payload and blobs of the sizes.
@@ -1184,12 +1229,12 @@ def notice_make(
     return jslb.line_make(header, [], **payload)
 
 
-# Queues a line and its blobs as the program's input.
+# Queues a line and its blobs as the program's input, copying no blob.
 def line_send(client: WireClient, line: LineObject) -> None:
     import jslb
 
     pieces = jslb.line_encode(cast(jslb.Object, line))
-    client.input_send(b"".join(cast(bytes, piece) for piece in pieces))
+    client.input_stream(cast(Iterator[bytes], pieces))
 
 
 # Returns the next line the program wrote, failing if the connection ends.
@@ -1280,7 +1325,7 @@ def payload_check(reply: LineObject, due: dict[str, Any], what: str) -> None:
         )
 
 
-# Fails unless the reply is the echo of the request: its payload and blobs.
+# Fails unless the reply echoes the request, a streamed blob by its sha256.
 def echo_check(request: LineObject, reply: LineObject, what: str) -> None:
     import jslb
 
@@ -1293,7 +1338,12 @@ def echo_check(request: LineObject, reply: LineObject, what: str) -> None:
             reply=jslb.field_get(header, "id"),
             full="type" in header,
         ),
-        [jslb.blob_make(data) for data in sent],
+        [
+            jslb.blob_make(data, sha256=sha256_text(data))
+            if len(data) > _HELD_BYTES
+            else jslb.blob_make(data)
+            for data in sent
+        ],
         **jslb.payload_of(asked),
     )
     if line_text(reply) != line_text(expected):
@@ -1302,7 +1352,7 @@ def echo_check(request: LineObject, reply: LineObject, what: str) -> None:
             f" {line_text(expected)} was due"
         )
     for number, (came, went) in enumerate(zip(blobs_of(reply), sent), 1):
-        if came != went:
+        if len(went) <= _HELD_BYTES and came != went:
             raise CheckFailed(
                 f"{what}: blob {number} came back {len(came)} bytes, sha256"
                 f" {sha256_text(came)}, where {len(went)} bytes, sha256"
@@ -2122,7 +2172,7 @@ def rung_refused(ttyd: TtydServer, values: dict[str, Any]) -> str:
     )
 
 
-# Makes a root as the start script does, its setting debug as given.
+# Makes a root as the start script does, its debug, level and provider set.
 def root_make(work: str, name: str, debug: bool) -> tuple[str, dict[str, Any]]:
     root = os.path.join(work, name)
     python_path = os.path.join(root, "python")
@@ -2140,6 +2190,8 @@ def root_make(work: str, name: str, debug: bool) -> tuple[str, dict[str, Any]]:
     with open(_SETTINGS_PATH, encoding="utf-8") as file:
         values: dict[str, Any] = json.load(file)
     values["debug"] = debug
+    values["verbose_level"] = _ROOT_LEVEL
+    values["provider"] = {**values["provider"], "scripted": _ROOT_SCRIPTED}
     text = json.dumps(values, ensure_ascii=False, indent=2) + "\n"
     with open(
         os.path.join(root, "settings.json"), "w", encoding="utf-8"

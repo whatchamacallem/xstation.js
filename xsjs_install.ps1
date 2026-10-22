@@ -69,9 +69,7 @@ function _xsjs_install_step_check_wsl {
         throw ($i18n_.restart_windows -f $script_name_)
     }
     xsjs_util_invoke_native { wsl --update }
-    if ($LASTEXITCODE -ne 0) {
-        xsjs_util_write_problem $i18n_.wsl_update_failed
-    }
+    if ($LASTEXITCODE -ne 0) { throw $i18n_.wsl_update_failed }
 }
 
 # Installs Ubuntu if WSL runs no Linux, and throws if it still doesn't.
@@ -95,7 +93,9 @@ function _xsjs_install_step_check_python {
     if ($LASTEXITCODE -ne 0) {
         xsjs_util_write_log $i18n_.python_missing
         xsjs_util_invoke_native { wsl -u root -e apt-get update }
+        if ($LASTEXITCODE -ne 0) { throw $i18n_.python_install_failed }
         xsjs_util_invoke_native { wsl -u root -e apt-get install -y python3 }
+        if ($LASTEXITCODE -ne 0) { throw $i18n_.python_install_failed }
         xsjs_util_invoke_native { wsl -e python3 --version }
         if ($LASTEXITCODE -ne 0) { throw $i18n_.python_install_failed }
     }
@@ -108,7 +108,9 @@ function _xsjs_install_step_check_openssl {
     if ($LASTEXITCODE -ne 0) {
         xsjs_util_write_log $i18n_.openssl_missing
         xsjs_util_invoke_native { wsl -u root -e apt-get update }
+        if ($LASTEXITCODE -ne 0) { throw $i18n_.openssl_install_failed }
         xsjs_util_invoke_native { wsl -u root -e apt-get install -y openssl }
+        if ($LASTEXITCODE -ne 0) { throw $i18n_.openssl_install_failed }
         xsjs_util_invoke_native { wsl -e openssl version }
         if ($LASTEXITCODE -ne 0) { throw $i18n_.openssl_install_failed }
     }
@@ -116,9 +118,6 @@ function _xsjs_install_step_check_openssl {
 
 # Runs the command in Linux from the checkout, or throws the message.
 function _xsjs_install_run_linux ([string[]]$arguments_, [string]$failure_) {
-    # The exit line names the variables, so log the command they hold first.
-    $shown_ = 'wsl --cd {0} -e {1}' -f $checkout_path_, ($arguments_ -join ' ')
-    xsjs_util_write_log ('`{0}`' -f $shown_)
     xsjs_util_invoke_native { wsl --cd $checkout_path_ -e @arguments_ }
     if ($LASTEXITCODE -ne 0) { throw $failure_ }
 }
@@ -186,7 +185,8 @@ function _xsjs_install_step_build_ttyd {
 function _xsjs_install_step_check_windows_ttyd {
     xsjs_util_write_log_section $i18n_.check_windows_ttyd
     xsjs_util_update_path
-    $ttyd_ = Get-Command ttyd.exe -ErrorAction SilentlyContinue
+    $ttyd_ = Get-Command -CommandType Application |
+        Where-Object Name -EQ 'ttyd.exe' | Select-Object -First 1
     if ($ttyd_) {
         xsjs_util_write_notice ($i18n_.windows_ttyd_left -f $ttyd_.Source)
     } else {

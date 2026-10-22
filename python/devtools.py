@@ -15,7 +15,7 @@
 import base64, errno, functools, hashlib, json, os, select, shutil
 import subprocess, time, types, uuid
 from collections.abc import Callable
-from typing import IO, Any, NamedTuple, Self, cast
+from typing import Any, IO, NamedTuple, Self, cast
 
 # The public names of this module, as its stub declares them.
 __all__ = ["Browser", "blocking_categories", "blocking_find"]
@@ -92,23 +92,26 @@ using System.Net.Sockets;
 using System.Threading;
 
 public static class XsjsDevToolsRelay {
-    public static void Run(int port) {
+    // The bytes each read copies, 64 KiB, a default chosen by its writer.
+    const int CopyBytes = 65536;
+
+    public static void RelayRun(int port) {
         var client = new TcpClient("127.0.0.1", port);
         client.NoDelay = true;
         var network = client.GetStream();
         var input = Console.OpenStandardInput();
         var output = Console.OpenStandardOutput();
         var upload = new Thread(() => {
-            Copy(input, network);
+            StreamCopy(input, network);
             client.Client.Shutdown(SocketShutdown.Send);
         });
         upload.IsBackground = true;
         upload.Start();
-        Copy(network, output);
+        StreamCopy(network, output);
     }
 
-    static void Copy(Stream from, Stream to) {
-        var buffer = new byte[65536];
+    static void StreamCopy(Stream from, Stream to) {
+        var buffer = new byte[CopyBytes];
         int count;
         while ((count = from.Read(buffer, 0, buffer.Length)) > 0) {
             to.Write(buffer, 0, count);
@@ -117,7 +120,7 @@ public static class XsjsDevToolsRelay {
     }
 }
 '@
-[XsjsDevToolsRelay]::Run($port_)
+[XsjsDevToolsRelay]::RelayRun($port_)
 """
 
 # Seconds for one answer, event or page load, a default chosen by its writer.
@@ -133,7 +136,14 @@ $pattern_ = "*$profile_*"
 Get-CimInstance Win32_Process -Filter "Name = '$name_'" |
     Where-Object { $_.CommandLine -like $pattern_ } |
     ForEach-Object {
-        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        try {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop
+        } catch {
+            # A helper gone with the browser is ObjectNotFound, as recalled.
+            if ($_.CategoryInfo.Category -ne 'ObjectNotFound') {
+                throw
+            }
+        }
     }
 $end_ = [DateTime]::UtcNow.AddSeconds($seconds_)
 while ($true) {
@@ -498,7 +508,10 @@ class Browser:
     # Navigates to the URL, again while refused, and returns once it loads.
     def page_open(self, url: str) -> None:
         client = self.client_get()
-        timer = WaitTimer(f"{url} to accept connections", _SERVER_WAIT_SECONDS)
+        timer = WaitTimer(
+            f"{url} to accept connections after {_REFUSED_ERROR_TEXT}",
+            _SERVER_WAIT_SECONDS,
+        )
         navigated = client.method_call("Page.navigate", {"url": url})
         while navigated.get("errorText") == _REFUSED_ERROR_TEXT:
             time.sleep(min(_POLL_SECONDS, timer.seconds_left()))

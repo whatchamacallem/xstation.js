@@ -13,7 +13,7 @@ namespace overlay {
   });
 
   // The `pre` of one tty and the lines it shows, oldest first.
-  interface Entry {
+  interface OverlayEntry {
     pre: HTMLPreElement;
     lines: string[];
   }
@@ -22,7 +22,7 @@ namespace overlay {
   export class Overlay {
     private container: HTMLElement;
     private ring: number;
-    private entries = new Map<number, Entry>();
+    private entries = new Map<number, OverlayEntry>();
 
     // Takes the container the overlays go in and the lines kept for each tty.
     constructor(container: HTMLElement, ring: number) {
@@ -64,7 +64,7 @@ namespace overlay {
     }
 
     // The entry of a tty, made hidden in the container on first use.
-    private entry_get(tty: number): Entry {
+    private entry_get(tty: number): OverlayEntry {
       let entry = this.entries.get(tty);
       if (entry === undefined) {
         const pre = this.container.ownerDocument.createElement("pre");

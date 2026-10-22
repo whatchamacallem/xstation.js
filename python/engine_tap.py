@@ -37,15 +37,19 @@ def _root_get() -> str:
     return _STATE.root
 
 
-# Appends the text and a newline to the file of the language, then closes it.
+# Appends the text and a newline to the file of the language, unbuffered.
 def tap_line(line: jslb.Object, *, language: str, text: str) -> None:
     if language not in _LANGUAGES:
         raise ValueError(i18n("engine_tap.language_unknown", language))
     directory = os.path.join(_root_get(), _TAP_DIRECTORY)
     os.makedirs(directory, exist_ok=True)
     path = os.path.join(directory, language + _TAP_EXTENSION)
-    with open(path, "ab") as file:
-        file.write((text + "\n").encode("utf-8"))
+    data = (text + "\n").encode("utf-8")
+    with open(path, "ab", buffering=0) as file:
+        written = file.write(data)
+    if written != len(data):
+        message = i18n("engine_tap.write_short", written, len(data), path)
+        raise OSError(message)
 
 
 # Registers the handler, with the root that holds the `tap` directory.

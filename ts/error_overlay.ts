@@ -95,6 +95,10 @@ namespace error_overlay {
 
   // Reports an uncaught error that reached the global scope.
   function error_event(event: ErrorEvent): void {
+    // The worker cancels it so the page's `onerror` gets only the posted line.
+    if (worker_inside()) {
+      event.preventDefault();
+    }
     fault_report(event.message, thrown_stack(event.error));
   }
 
@@ -131,5 +135,8 @@ namespace error_overlay {
   export function overlay_show(message: string, stack: string): void {
     screen_page.overlay_show(message, stack);
   }
+
+  // The handlers stand from the first module of the bundle, before any other.
+  overlay_install();
 }
 Object.freeze(error_overlay);

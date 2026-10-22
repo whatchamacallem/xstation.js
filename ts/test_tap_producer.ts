@@ -297,10 +297,10 @@ namespace test_tap_producer {
     test_line_refused(): void {
       const lines: string[] = [];
       const tracker = new tap_producer.Tracker((text) => lines.push(text));
-      const refused: [string, string, string | null][] = [
+      const refused: [string, string, string | undefined][] = [
         ["a # b", "", "trace"],
-        ["a\nb", "", null],
-        ["test_one", "SKIP a\rb", null],
+        ["a\nb", "", undefined],
+        ["test_one", "SKIP a\rb", undefined],
       ];
       for (const [description, directive, diagnostics] of refused) {
         const message = thrown_message(() =>
@@ -422,7 +422,7 @@ namespace test_tap_producer {
       this.assertEqual(
         message,
         'the TAP point "a # b" # "" does not fit on one line, its ' +
-          "diagnostics: null",
+          "diagnostics: undefined",
       );
       this.assertEqual(lines, [constants.version_line]);
     }

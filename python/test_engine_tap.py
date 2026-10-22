@@ -38,6 +38,12 @@ _HANDLERS_TARGET = "dispatch._HANDLERS"
 # The dotted name of the root that the tests patch.
 _ROOT_TARGET = "engine_tap._STATE.root"
 
+# The dotted name of the `open` that the handler calls, which a test patches.
+_OPEN_TARGET = "engine_tap.open"
+
+# The bytes a write cut short reports, a count its writer chose.
+_SHORT_BYTES = 1
+
 # Text with a character of two bytes and one of three bytes in `UTF-8`.
 _WIDE_TEXT = "ok 1 - caf" + chr(0xE9) + " " + chr(0x4E2D)
 
@@ -146,6 +152,22 @@ class TestAppend(IsolatedCase):
         path = _tap_path(self.root, "python")
         self.assertEqual(_file_read(path), expected)
 
+    # The file is opened unbuffered, and a write cut short raises.
+    def test_write_short(self) -> None:
+        engine_tap.handlers_register(self.root)
+        opened = unittest.mock.mock_open()
+        opened.return_value.write.return_value = _SHORT_BYTES
+        line = _line_make("tap.line", language="python", text="ok")
+        data = b"ok\n"
+        path = _tap_path(self.root, "python")
+        message = i18n("engine_tap.write_short", _SHORT_BYTES, len(data), path)
+        with unittest.mock.patch(_OPEN_TARGET, opened, create=True):
+            self.raise_check(
+                OSError, message, lambda: dispatch.line_dispatch(line)
+            )
+        opened.assert_called_once_with(path, "ab", buffering=0)
+        opened.return_value.write.assert_called_once_with(data)
+
 
 # Tests what the handler refuses.
 class TestRefuse(IsolatedCase):
@@ -163,7 +185,7 @@ class TestRefuse(IsolatedCase):
                 self.assertEqual(os.listdir(self.root), [])
 
     # Called before the registration the handler raises.
-    def test_unregistered(self) -> None:
+    def test_called_early(self) -> None:
         line = _line_make("tap.line")
         self.raise_check(
             RuntimeError,

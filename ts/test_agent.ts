@@ -42,6 +42,8 @@ namespace test_agent {
     compact_reached: 2,
     // A count chosen by its writer: a threshold one exchange stays under.
     compact_unreached: 3,
+    // A size chosen by its writer: a soft limit every store is over.
+    soft_reached: 0,
     // The owner whose port answers the provider's requests.
     provider_owner: "http" as const,
     // The owner whose port answers the tool calls in these tests.
@@ -120,16 +122,16 @@ namespace test_agent {
   });
 
   // An object of fields by name.
-  type Fields = { [key: string]: unknown };
+  type FieldTable = { [key: string]: unknown };
 
   // What a tool double does with its arguments, and the result it gives.
-  type ToolAnswer = (args: Fields) => mcp.ToolResult;
+  type ToolAnswer = (args: FieldTable) => mcp.ToolResult;
 
   // The tool doubles by their full name.
   type ToolTable = { [name: string]: ToolAnswer };
 
   // A store, a synchronous queue and its ports, with the agent registered.
-  interface Bench {
+  interface AgentBench {
     store: substrate.Store;
     tasks: queue.TaskQueue;
     ui: PortDouble;
@@ -259,7 +261,7 @@ namespace test_agent {
   function tool_make(
     name: string,
     description: string,
-    properties: Fields,
+    properties: FieldTable,
     required: string[],
   ): mcp.Tool {
     return {
@@ -472,7 +474,7 @@ namespace test_agent {
   }
 
   // The store changes the seeded bootstrap script makes in the castle turn.
-  function bootstrap_run(store: substrate.Store, args: Fields): void {
+  function bootstrap_run(store: substrate.Store, args: FieldTable): void {
     const universe = args.universe as string;
     const title = args.title as string;
     const world = args.world as string;
@@ -496,17 +498,17 @@ namespace test_agent {
   // The tools of the castle turn: what each changes and the text it gives.
   function tools_recorded(store: substrate.Store): ToolTable {
     return {
-      "browser.script_run": (args: Fields) => {
-        bootstrap_run(store, args.args as Fields);
+      "browser.script_run": (args: FieldTable) => {
+        bootstrap_run(store, args.args as FieldTable);
         return text_result(constants.bootstrap_result);
       },
       "browser.image_make": () => text_result(constants.image_result),
-      "browser.doc_put": (args: Fields) => {
+      "browser.doc_put": (args: FieldTable) => {
         const body = args.body as lines.Document;
         const put = store.doc_put(args.db as string, args.id as string, body);
         return text_result(utility.json_text({ ref: put.ref }));
       },
-      "browser.kv_put": (args: Fields) => {
+      "browser.kv_put": (args: FieldTable) => {
         const data = utility.utf8_encode(args.text as string);
         const put = store.kv_put(args.ref as string, data);
         const result = { sha256: put.row.sha256, seq: put.seq };
@@ -519,7 +521,7 @@ namespace test_agent {
   // The `mcp` reply to a `tools/call` line, with its tool double's result.
   function tool_reply(line: lines.Line, table: ToolTable): lines.Line {
     const payload = jslb.payload_of(line);
-    const params = payload.params as { name: string; arguments: Fields };
+    const params = payload.params as { name: string; arguments: FieldTable };
     if (!Object.hasOwn(table, params.name)) {
       throw new Error(`The tool doubles have no tool ${params.name}.`);
     }
@@ -550,7 +552,7 @@ namespace test_agent {
   }
 
   // The payload of the chat request the provider door makes for messages.
-  function request_expected(messages: provider.ChatMessage[]): Fields {
+  function request_expected(messages: provider.ChatMessage[]): FieldTable {
     const { base_url, chat_model } = constants.info;
     const line = provider.chat_request(base_url, constants.key, {
       model: chat_model,
@@ -563,29 +565,29 @@ namespace test_agent {
 
   // Hands the UI's request to the queue: its type, header, payload.
   function request_send(
-    bench: Bench,
+    bench: AgentBench,
     type: string,
     header: { id: number; full?: boolean },
-    payload: Fields,
+    payload: FieldTable,
   ): void {
     const line = jslb.line_make(jslb.header_make(type, header), [], payload);
     bench.ui.line_send(line);
   }
 
   // Hands the player's text to the queue as `ai.say` with the id.
-  function say_send(bench: Bench, id: number, text: string): void {
+  function say_send(bench: AgentBench, id: number, text: string): void {
     request_send(bench, "ai.say", { id }, { text });
   }
 
   // The bodies of the chat requests the agent submitted, in order.
-  function requests_of(bench: Bench): provider.ChatRequest[] {
+  function requests_of(bench: AgentBench): provider.ChatRequest[] {
     return bench.provider_tap.posted.map(
       (line: lines.Line) => line.json as provider.ChatRequest,
     );
   }
 
   // The number of system messages of each chat request, in order.
-  function systems_counted(bench: Bench): number[] {
+  function systems_counted(bench: AgentBench): number[] {
     return requests_of(bench).map(
       (request: provider.ChatRequest) =>
         request.messages.filter((message) => message.role === "system").length,
@@ -593,7 +595,7 @@ namespace test_agent {
   }
 
   // The payloads of the `turn.append` lines the store forwarded, in order.
-  function appends_of(bench: Bench): Fields[] {
+  function appends_of(bench: AgentBench): FieldTable[] {
     return bench.forwarded
       .filter((line) => jslb.field_get(line[0], "type") === "turn.append")
       .map((line) => jslb.payload_of(line));
@@ -809,7 +811,7 @@ namespace test_agent {
       value: settings.Settings,
       tools_make: (store: substrate.Store) => ToolTable,
       info: lines.ProviderInfo,
-    ): Bench {
+    ): AgentBench {
       const forwarded: lines.Line[] = [];
       const store = this.store_make(forwarded, true, value.turn_compact_turns);
       const tasks = new queue.TaskQueue("ai", { "ai.": "ai" }, true);
@@ -840,7 +842,7 @@ namespace test_agent {
     bench_recorded(
       provider_port: queue.Port,
       value: settings.Settings,
-    ): Bench {
+    ): AgentBench {
       return this.bench_make(
         provider_port,
         value,
@@ -1038,7 +1040,7 @@ namespace test_agent {
           after_tools: { content: constants.nothing_reply, next: "after" },
         },
       );
-      const tools = (): ToolTable => ({
+      const tool_table = (): ToolTable => ({
         "browser.render": () => ({
           content: [
             { type: "text", text: "first" },
@@ -1050,7 +1052,7 @@ namespace test_agent {
       const bench = this.bench_make(
         port,
         settings_make(),
-        tools,
+        tool_table,
         constants.info,
       );
       say_send(bench, 1, "1");
@@ -1094,11 +1096,11 @@ namespace test_agent {
     // Over the limit, the next request carries it after the system prompt.
     test_soft_over(): void {
       const value = settings_make();
-      value.db_soft_bytes = 0;
+      value.db_soft_bytes = constants.soft_reached;
       const script = new provider_script.ScriptPort(script_recorded());
       const bench = this.bench_recorded(script, value);
       say_send(bench, 1, "2");
-      const stats = bench.store.db_stats(0);
+      const stats = bench.store.db_stats(constants.soft_reached);
       this.assertTrue(stats.over);
       say_send(bench, 2, "2");
       const requests = requests_of(bench);
@@ -1118,7 +1120,7 @@ namespace test_agent {
     // Only the first request after the turn carries it, not the later ones.
     test_soft_once(): void {
       const value = settings_make();
-      value.db_soft_bytes = 0;
+      value.db_soft_bytes = constants.soft_reached;
       const script = new provider_script.ScriptPort(script_recorded());
       const bench = this.bench_recorded(script, value);
       say_send(bench, 1, "2");
@@ -1239,7 +1241,7 @@ namespace test_agent {
       );
     }
 
-    // An answered round stays stored with its results; the failed one not.
+    // An answered round stays stored with its results, the failed one not.
     test_round_answered(): void {
       const render = call_make(
         "call_1",
@@ -1301,7 +1303,7 @@ namespace test_agent {
         },
       );
       const seen: number[] = [];
-      const tools = (store: substrate.Store): ToolTable => ({
+      const tool_table = (store: substrate.Store): ToolTable => ({
         "browser.render": () => {
           seen.push(store.turn_list(constants.scene).length);
           return text_result(constants.render_result);
@@ -1311,7 +1313,7 @@ namespace test_agent {
       const bench = this.bench_make(
         port,
         settings_make(),
-        tools,
+        tool_table,
         constants.info,
       );
       const since = bench.store.seq_get("metaverse");
@@ -1378,6 +1380,19 @@ namespace test_agent {
       store.doc_put("castle", "prompt", prompt_doc("prompt", "An old one."));
       const doc = prompt_doc("prompt", constants.castle_prompt);
       store.doc_put("castle", "prompt", doc);
+      this.assertEqual(agent.prompt_build(store), [
+        system_said(constants.analyst),
+        system_said(constants.castle_prompt),
+      ]);
+    }
+
+    // A prompt document of another type is read by its text all the same.
+    test_prompt_typed(): void {
+      const store = this.store_make([], true);
+      universe_add(store, "castle", "castle_world");
+      world_set(store, "castle_world");
+      const note = prompt_doc("note", constants.castle_prompt);
+      store.doc_put("castle", "prompt", note);
       this.assertEqual(agent.prompt_build(store), [
         system_said(constants.analyst),
         system_said(constants.castle_prompt),
@@ -1468,7 +1483,7 @@ namespace test_agent {
         { content: null, tool_calls: [call], next: "after" },
         { replies: {} },
       );
-      const tools = (): ToolTable => ({
+      const tool_table = (): ToolTable => ({
         "browser.render": () => ({
           content: [{ type: "image", data: "", mimeType: "image/png" }],
         }),
@@ -1477,7 +1492,7 @@ namespace test_agent {
       const bench = this.bench_make(
         port,
         settings_make(),
-        tools,
+        tool_table,
         constants.info,
       );
       const error = thrown_get(() => say_send(bench, 1, "1"));
@@ -1487,19 +1502,18 @@ namespace test_agent {
       );
     }
 
-    // A prompt of another type, or whose text is not text, is refused.
+    // A prompt text not a string throws, the universe's or the analyst's.
     test_prompt_invalid(): void {
       const store = this.store_make([], true);
       universe_add(store, "castle", "castle_world");
       world_set(store, "castle_world");
-      const note = prompt_doc("note", constants.castle_prompt);
-      const typed = store.doc_put("castle", "prompt", note).ref;
-      const first = thrown_get(() => agent.prompt_build(store));
-      this.assertEqual(first.message, i18n("agent.prompt_invalid", typed));
       const number = prompt_doc("prompt", 5);
-      const untexted = store.doc_put("metaverse", "prompt", number).ref;
+      const universe = store.doc_put("castle", "prompt", number).ref;
+      const first = thrown_get(() => agent.prompt_build(store));
+      this.assertEqual(first.message, i18n("agent.prompt_invalid", universe));
+      const analyst = store.doc_put("metaverse", "prompt", number).ref;
       const second = thrown_get(() => agent.prompt_build(store));
-      this.assertEqual(second.message, i18n("agent.prompt_invalid", untexted));
+      this.assertEqual(second.message, i18n("agent.prompt_invalid", analyst));
     }
 
     // Two universes of the current world make the universe prompt ambiguous.

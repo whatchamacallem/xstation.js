@@ -38,7 +38,7 @@ namespace queue {
   export type OwnerTable = { [prefix: string]: ThreadName };
 
   // The request a task owes a reply to: its id and the port it came on.
-  interface Owed {
+  interface OwedRequest {
     id: number;
     from: ThreadName;
   }
@@ -50,7 +50,7 @@ namespace queue {
     count: number;
     replies: Map<number, lines.Line>;
     bytes: number;
-    owed: Owed | undefined;
+    owed: OwedRequest | undefined;
   }
 
   // A request this queue sent: the port it went to and the sleep it wakes.
@@ -69,7 +69,7 @@ namespace queue {
     line: lines.Line;
     from: ThreadName;
     wake: boolean;
-    owed: Owed | undefined;
+    owed: OwedRequest | undefined;
     bytes: number;
   }
 
@@ -556,10 +556,7 @@ namespace queue {
     private step_take(): void {
       this.scheduled = false;
       this.fault_check();
-      const item = this.item_next();
-      if (item === undefined) {
-        throw new Error(i18n("queue.step_empty", this.thread));
-      }
+      const item = this.item_next() as HeldItem;
       this.item_run(item);
       if (this.inbox.length > 0) {
         this.step_schedule();
@@ -645,7 +642,7 @@ namespace queue {
     private task_run(
       line: lines.Line,
       from: ThreadName,
-      owed: Owed | undefined,
+      owed: OwedRequest | undefined,
     ): void {
       this.log_write(
         i18n("queue.dispatch", this.thread, from, header_text(line)),
@@ -662,7 +659,7 @@ namespace queue {
       line: lines.Line,
       run: HandlerRun,
       result: dispatch.Reply | dispatch.Sleep,
-      owed: Owed | undefined,
+      owed: OwedRequest | undefined,
     ): void {
       if (result !== undefined && sleep_is(result)) {
         this.sleep_start(line, run, result, owed);
@@ -706,7 +703,7 @@ namespace queue {
       line: lines.Line,
       run: HandlerRun,
       sleep: dispatch.Sleep,
-      owed: Owed | undefined,
+      owed: OwedRequest | undefined,
     ): void {
       const type = type_of(line[0]);
       const waits = new Set<number>();
@@ -802,7 +799,7 @@ namespace queue {
     private reply_post(
       line: lines.Line,
       reply: lines.Line,
-      owed: Owed | undefined,
+      owed: OwedRequest | undefined,
     ): void {
       const answers = field_number(reply[0], constants.reply_field);
       if (owed === undefined || answers !== owed.id) {

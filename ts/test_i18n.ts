@@ -5,52 +5,72 @@
 // Tests of the strings function and its placeholder rule.
 
 namespace test_i18n {
-  // The pattern that picks an entry of the real table with no braces.
-  const constants = Object.freeze({
-    plain: /^[^{}]*$/,
-  });
-
-  // The first table entry whose text matches the pattern.
-  function entry_find(pattern: RegExp): { name: string; text: string } {
-    for (const name of Object.keys(ui_strings.table)) {
-      const text = ui_strings.table[name];
-      if (pattern.test(text)) {
-        return { name, text };
-      }
+  // The message of the error a function throws, failing the test if none.
+  function message_thrown(test: unittest.TestCase, fn: () => unknown): string {
+    try {
+      fn();
+    } catch (error) {
+      return (error as Error).message;
     }
-    throw new Error(`No table entry matches ${pattern}.`);
+    return test.fail("Nothing was thrown.");
   }
 
   // The lookup of a name in the real table.
   export class TestStringCall extends unittest.TestCase {
     // A name that is not in the table throws, with or without arguments.
     test_missing_name(): void {
-      const name = "test.no_such_name";
-      this.assertRaises(Error, () => i18n(name));
-      this.assertRaises(Error, () => i18n(name, "text"));
+      const missing = "The strings table has no name test.no_such_name.";
+      this.assertEqual(
+        message_thrown(this, () => i18n("test.no_such_name")),
+        missing,
+      );
+      this.assertEqual(
+        message_thrown(this, () => i18n("test.no_such_name", "text")),
+        missing,
+      );
     }
 
     // A name only the object prototype has is missing too.
     test_inherited_name(): void {
-      this.assertRaises(Error, () => i18n("constructor"));
-      this.assertRaises(Error, () => i18n("toString"));
+      this.assertEqual(
+        message_thrown(this, () => i18n("constructor")),
+        "The strings table has no name constructor.",
+      );
+      this.assertEqual(
+        message_thrown(this, () => i18n("toString")),
+        "The strings table has no name toString.",
+      );
     }
 
     // A text with no braces is returned as the table holds it.
     test_plain_text(): void {
-      const entry = entry_find(constants.plain);
-      this.assertEqual(i18n(entry.name), entry.text);
+      this.assertEqual(
+        i18n("utility.bytes_refused"),
+        ui_strings.table["utility.bytes_refused"],
+      );
     }
 
     // An argument given to a text with no placeholder throws.
     test_plain_extra(): void {
-      const entry = entry_find(constants.plain);
-      this.assertRaises(Error, () => i18n(entry.name, "text"));
+      this.assertEqual(
+        message_thrown(this, () => i18n("utility.bytes_refused", "text")),
+        "The string utility.bytes_refused has the placeholder indices [] " +
+          "but 1 arguments were given.",
+      );
     }
   }
 
   // The placeholder rule, applied to texts the test supplies.
   export class TestStringFormat extends unittest.TestCase {
+    // Checks that filling the text throws the mismatch of indices and count.
+    mismatch_thrown(text: string, args: unknown[], indices: string): void {
+      this.assertEqual(
+        message_thrown(this, () => i18n_format("test.name", text, args)),
+        `The string test.name has the placeholder indices [${indices}] ` +
+          `but ${args.length} arguments were given.`,
+      );
+    }
+
     // Braces that are not a canonical index stay literal, as `{01}` does.
     test_literal_braces(): void {
       const text = "{x} {} { 0 } {-1} {00} {01}";
@@ -73,27 +93,20 @@ namespace test_i18n {
 
     // A gap in the indices throws, at any argument count.
     test_gap_index(): void {
-      const text = "{0} {2}";
-      this.assertRaises(Error, () =>
-        i18n_format("test.name", text, ["a", "b"]),
-      );
-      this.assertRaises(Error, () =>
-        i18n_format("test.name", text, ["a", "b", "c"]),
-      );
+      this.mismatch_thrown("{0} {2}", ["a", "b"], "0, 2");
+      this.mismatch_thrown("{0} {2}", ["a", "b", "c"], "0, 2");
     }
 
     // An index at or past the argument count throws.
     test_index_range(): void {
-      this.assertRaises(Error, () => i18n_format("test.name", "{1}", ["a"]));
+      this.mismatch_thrown("{1}", ["a"], "1");
     }
 
     // Fewer or more arguments than the placeholders throw.
     test_count_mismatch(): void {
-      this.assertRaises(Error, () => i18n_format("test.name", "{0}", []));
-      this.assertRaises(Error, () =>
-        i18n_format("test.name", "{0}", ["a", "b"]),
-      );
-      this.assertRaises(Error, () => i18n_format("test.name", "text", ["a"]));
+      this.mismatch_thrown("{0}", [], "0");
+      this.mismatch_thrown("{0}", ["a", "b"], "0");
+      this.mismatch_thrown("text", ["a"], "");
     }
 
     // A text with no placeholder and no arguments is returned as it is.

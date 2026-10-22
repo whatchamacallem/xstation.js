@@ -16,6 +16,7 @@ namespace test_console_view {
     close_type: "console.close",
     input_type: "console.input",
     token: "dXNlcjpwYXNz",
+    // The pixel sizes of the frame, band and cells, chosen by their writer.
     frame_width: 1000,
     frame_height: 400,
     band_height: 50,
@@ -33,7 +34,7 @@ namespace test_console_view {
   let wake_view: console_view.ConsoleView | undefined = undefined;
 
   // The rigs made since the last `setUp`, whose frames `tearDown` takes out.
-  let rigs_made: Rig[] = [];
+  let rigs_made: ViewRig[] = [];
 
   // The options a terminal is made with.
   interface TerminalOptions {
@@ -195,7 +196,7 @@ namespace test_console_view {
   }
 
   // A view in its frame with its terminal, queue, port double and two types.
-  interface Rig {
+  interface ViewRig {
     frame: HTMLElement;
     container: HTMLElement;
     band: HTMLElement;
@@ -259,7 +260,7 @@ namespace test_console_view {
   }
 
   // Makes a view on a UI queue whose owner table leaves out the console.
-  function rig_make(): Rig {
+  function rig_make(): ViewRig {
     wake_register();
     const frame = frame_make();
     const container = document.createElement("div");
@@ -279,7 +280,7 @@ namespace test_console_view {
     const start = handler_fresh(() => view.open_request());
     const stop = handler_fresh(() => view.close_request());
     const terminal = FakeTerminal.made[FakeTerminal.made.length - 1];
-    const rig: Rig = {
+    const rig: ViewRig = {
       frame,
       container,
       band,
@@ -295,38 +296,38 @@ namespace test_console_view {
   }
 
   // Runs the handler that asks for the console, as the `ctrl-0` handler does.
-  function start_run(rig: Rig): void {
+  function start_run(rig: ViewRig): void {
     rig.tasks.line_notify(line_build(rig.start));
   }
 
   // Runs a handler that asks for the close of the console.
-  function stop_run(rig: Rig): void {
+  function stop_run(rig: ViewRig): void {
     rig.tasks.line_notify(line_build(rig.stop));
   }
 
   // The lines of a type the view posted to the AI worker, in order.
-  function posted_of(rig: Rig, type: string): lines.Line[] {
+  function posted_of(rig: ViewRig, type: string): lines.Line[] {
     return rig.ai.posted.filter(
       (line) => jslb.field_get(line[0], "type") === type,
     );
   }
 
   // Answers the last request for the console with the token, as the AI does.
-  function reply_send(rig: Rig, token: string): void {
+  function reply_send(rig: ViewRig, token: string): void {
     const requests = posted_of(rig, constants.open_type);
     const request = requests[requests.length - 1];
     rig.ai.line_send(dispatch.reply_make(request, { token }));
   }
 
   // Answers the last request for the close with no payload, as the AI does.
-  function close_send(rig: Rig): void {
+  function close_send(rig: ViewRig): void {
     const requests = posted_of(rig, constants.close_type);
     const request = requests[requests.length - 1];
     rig.ai.line_send(dispatch.reply_make(request, {}));
   }
 
   // Asks for the console and answers, so that the console is open.
-  function rig_start(rig: Rig): void {
+  function rig_start(rig: ViewRig): void {
     start_run(rig);
     reply_send(rig, constants.token);
   }
@@ -344,7 +345,7 @@ namespace test_console_view {
   }
 
   // The `console.input` lines the view posted to the AI worker, in order.
-  function inputs_of(rig: Rig): lines.Line[] {
+  function inputs_of(rig: ViewRig): lines.Line[] {
     return posted_of(rig, constants.input_type);
   }
 

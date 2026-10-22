@@ -12,6 +12,7 @@ namespace test_media {
     key: "/_files/gatehouse/arrival.png",
     url: "https://images.example.test/arrival.png",
     id: 7,
+    // The cache budget in bytes, a size its writer chose.
     budget: 1000,
     pixel_bytes: 4,
     abc_hash:

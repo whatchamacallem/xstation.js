@@ -78,6 +78,9 @@ _MARKER_ELEMENTS = {
 # The identifier the strings table stands for in the compiled bundle.
 _TABLE_TOKEN = re.compile(r"(?<![\w$])I18N_TABLE_JSON(?![\w$])")
 
+# The seconds tsc may run, a default chosen by its writer.
+_TSC_SECONDS = 120.0
+
 # Bytecode of `vectors_make` and of what it imports goes in `build`.
 sys.pycache_prefix = os.path.join(_BUILD_PATH, "pycache")
 
@@ -87,7 +90,9 @@ def bundle_compile(config_path: str) -> str:
     tsc_path = shutil.which("tsc")
     if tsc_path is None:
         raise FileNotFoundError("tsc, the TypeScript compiler, is not on PATH")
-    subprocess.run([tsc_path, "--project", config_path], check=True)
+    subprocess.run(
+        [tsc_path, "--project", config_path], check=True, timeout=_TSC_SECONDS
+    )
     with open(config_path, encoding="utf-8") as config_file:
         out_file: str = json.load(config_file)["compilerOptions"]["outFile"]
     return text_read(os.path.join(os.path.dirname(config_path), out_file))

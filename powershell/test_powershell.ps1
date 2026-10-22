@@ -12,7 +12,8 @@
 # which needs in WSL what that runner needs.
 #
 # The checkout must first hold what the scripts read and don't make:
-# settings.json, i18n\en-US.json and the page build\hyperposition-engine.html.
+# settings.json, provider.json, i18n\en-US.json and the page
+# build\hyperposition-engine.html.
 # Make the page in WSL in the checkout: python3 python/third_party_fetch.py
 # fetches the pinned archives over the network, then
 # python3 python/page_build.py hyperposition-engine builds the page from
@@ -106,7 +107,9 @@ function _test_powershell_test_step ([int]$number_, [hashtable]$step_) {
         )
     } else {
         $path_ = Join-Path $root_path_ $step_.Script
-        Remove-Item "$path_.md" -ErrorAction SilentlyContinue
+        if (Test-Path "$path_.md") {
+            Remove-Item "$path_.md" -ErrorAction Stop
+        }
         $powershell_ = @(
             '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $path_
         ) + $arguments_

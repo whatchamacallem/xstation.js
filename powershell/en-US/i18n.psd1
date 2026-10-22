@@ -56,7 +56,6 @@
     log_path                = 'Log: {0}'
     log_title               = '{0} log'
     make_certificate        = 'Checking the TLS certificate'
-    no_log                  = "No log: can't write {0}"
     not_administrator       = 'Run {0} as administrator.'
     not_installed           = '{0} missing. Run xsjs_install.ps1 first.'
     open_firewall           = 'Opening firewall port {0}'
@@ -129,6 +128,7 @@
     status_linux_none       = '{0} not running in Linux.'
     status_listening        = 'Port {0}: {1} (PID {2}) listens on {3}.'
     status_no_runner        = 'nothing ({0} missing)'
+    status_no_user          = 'A ttyd command line with --ssl names no user.'
     status_port_closed      = 'Port {0}: not listening.'
     status_processes        = 'Task processes:'
     status_processes_none   = 'No task processes.'
@@ -175,7 +175,7 @@
     ttyd_configure_failed   = 'Configuring the ttyd build failed.'
     ttyd_fetch_failed       = 'Fetching the third party files failed.'
     ttyd_not_stopped        = (
-        'ttyd (Linux PID {0}) still runs 15 s after SIGTERM.'
+        'ttyd (Linux PID {0}) still runs {1} s after SIGTERM.'
     )
     ttyd_patch_failed       = 'Applying the patch `{0}` to ttyd failed.'
     ttyd_stop_failed        = 'Stopping ttyd (Linux PID {0}) failed.'
@@ -189,5 +189,5 @@
     write_runner            = 'Writing the task script'
     wsl_install_failed      = 'Installing WSL failed (exit code {0}).'
     wsl_missing             = 'Installing WSL; approve the Windows prompt.'
-    wsl_update_failed       = 'Updating WSL failed. Continuing anyway.'
+    wsl_update_failed       = 'Updating WSL failed.'
 }

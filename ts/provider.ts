@@ -86,13 +86,13 @@ namespace provider {
   }
 
   // An object of unknown members, as a parsed JSON body holds them.
-  type Fields = { [key: string]: unknown };
+  type FieldTable = { [key: string]: unknown };
 
   // The members of one image of an image reply.
   type ImageEntry = ImageResponse["data"][number];
 
   // Whether the value is an object that is neither an array nor `null`.
-  function fields_is(value: unknown): value is Fields {
+  function fields_is(value: unknown): value is FieldTable {
     return (
       typeof value === "object" && value !== null && !Array.isArray(value)
     );
@@ -119,7 +119,7 @@ namespace provider {
   }
 
   // The object at the path of the reply, or a throw when it is not one.
-  function fields_read(value: unknown, path: string): Fields {
+  function fields_read(value: unknown, path: string): FieldTable {
     if (!fields_is(value)) {
       return field_invalid(path);
     }
@@ -127,7 +127,7 @@ namespace provider {
   }
 
   // The text at the key of the object, or a throw when it is not text.
-  function text_read(fields: Fields, key: string, path: string): string {
+  function text_read(fields: FieldTable, key: string, path: string): string {
     const value = fields[key];
     if (typeof value !== "string") {
       return field_invalid(`${path}.${key}`);
@@ -136,7 +136,7 @@ namespace provider {
   }
 
   // The content of a message: text, or `null` when it only calls tools.
-  function content_read(fields: Fields, path: string): string | null {
+  function content_read(fields: FieldTable, path: string): string | null {
     const value = fields.content;
     if (value !== null && typeof value !== "string") {
       return field_invalid(`${path}.content`);
@@ -221,7 +221,7 @@ namespace provider {
   }
 
   // The JSON object a reply line carries, or a throw for any other reply.
-  function body_read(reply: lines.Line): Fields {
+  function body_read(reply: lines.Line): FieldTable {
     const type = jslb.field_get(reply[0], "type");
     const payload = jslb.payload_of(reply);
     if (type !== constants.request_type) {

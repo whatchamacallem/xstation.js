@@ -8,9 +8,10 @@
 # --main-loop names it in debug mode, or when system.restart names it after
 # source.put stored it there. loop_prepare reads the settings for the
 # decoder's limits and returns no seq, as it opens no database; loop_run
-# decodes each line, dispatches it and writes its reply, a blob over
-# overflow_bytes going through a file in the root's cache directory both ways.
-# A failure writes one error line and exits 1, as the stock main loop does.
+# decodes each line, refuses any reply, dispatches the rest and writes each
+# reply, a blob over overflow_bytes going through a file in the root's cache
+# directory both ways. A failure writes one error line and exits 1, as the
+# stock main loop does.
 
 import dispatch, functools, jslb, os, select, settings, uuid
 from i18n import i18n
@@ -101,6 +102,11 @@ def _bytes_serve(
             raise jslb.WireError(i18n("echo_loop.input_partial"))
         for piece in (data, b""):
             for line in decoder.bytes_feed(piece):
+                if jslb.field_get(line[0], "reply") is not None:
+                    rendered = jslb.line_render(line)
+                    raise LookupError(
+                        i18n("echo_loop.reply_unknown", rendered)
+                    )
                 reply = cast(jslb.Object, dispatch.line_dispatch(line))
                 _line_write(reply, write_fd, chunk)
             line = None

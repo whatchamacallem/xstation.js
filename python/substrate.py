@@ -67,6 +67,9 @@ _SUMMARY_ROLE = "system"
 # The largest magnitude of an integer in stored JSON, as on the wire.
 _INTEGER_LIMIT = 2**53
 
+# A locked database's wait: 5000 ms, a default chosen by its writer.
+_BUSY_TIMEOUT_MS = 5000
+
 # A database name, a C identifier.
 _C_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -290,7 +293,7 @@ def _pragmas_set(connection: sqlite3.Connection) -> None:
     if mode != "wal":
         raise RuntimeError(i18n("substrate.journal_mode", mode))
     connection.execute("PRAGMA synchronous = NORMAL")
-    connection.execute("PRAGMA busy_timeout = 5000")
+    connection.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
 
 
 # The `seq` of a database, the decimal text of its `_meta` row.
@@ -696,9 +699,7 @@ class Store:
 
     # Begins the running transaction on a connection at its first write.
     def _transaction_join(self, connection: sqlite3.Connection) -> None:
-        joined = self._joined
-        if joined is None:
-            raise RuntimeError(i18n("substrate.transaction_none"))
+        joined = cast(list[sqlite3.Connection], self._joined)
         if connection not in joined:
             connection.execute("BEGIN IMMEDIATE")
             joined.append(connection)

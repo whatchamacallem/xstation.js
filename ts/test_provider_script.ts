@@ -46,10 +46,10 @@ namespace test_provider_script {
   });
 
   // An object of fields by name.
-  type Fields = { [key: string]: unknown };
+  type FieldTable = { [key: string]: unknown };
 
   // A port on the test script and the replies it has sent.
-  interface Bench {
+  interface ScriptBench {
     port: provider_script.ScriptPort;
     received: lines.Line[];
   }
@@ -91,7 +91,7 @@ namespace test_provider_script {
   function call_make(
     id: string,
     name: string,
-    args: Fields,
+    args: FieldTable,
   ): provider.ToolCall {
     return {
       id,
@@ -163,7 +163,7 @@ namespace test_provider_script {
   }
 
   // A port on a new test script whose receiver keeps every reply.
-  function bench_make(): Bench {
+  function bench_make(): ScriptBench {
     const port = new provider_script.ScriptPort(script_make());
     const received: lines.Line[] = [];
     port.line_receive((line: lines.Line) => {
@@ -203,7 +203,7 @@ namespace test_provider_script {
 
   // Posts a chat request and reads the choice of the reply that came at once.
   function chat_post(
-    bench: Bench,
+    bench: ScriptBench,
     messages: provider.ChatMessage[],
     id: number,
   ): provider.ChatChoice {
@@ -232,7 +232,7 @@ namespace test_provider_script {
   }
 
   // The payload of a chat request every check accepts, with fields replaced.
-  function payload_with(fields: Fields): Fields {
+  function payload_with(fields: FieldTable): FieldTable {
     return {
       method: "POST",
       url: `${constants.base_url}/chat/completions`,
@@ -247,13 +247,13 @@ namespace test_provider_script {
     type: string,
     options: { id?: number },
     blobs: lines.BlobHeader[],
-    payload: Fields,
+    payload: FieldTable,
   ): lines.Line {
     return jslb.line_make(jslb.header_make(type, options), blobs, payload);
   }
 
   // An image request line numbered 1 whose body is the one given.
-  function image_line(json: Fields): lines.Line {
+  function image_line(json: FieldTable): lines.Line {
     return line_build(constants.request_type, { id: 1 }, [], {
       method: "POST",
       url: `${constants.base_url}/images/generations`,
@@ -544,6 +544,30 @@ namespace test_provider_script {
         error.message,
         i18n("provider_script.results_pending", "hyperposition", "castle"),
       );
+    }
+
+    // Tool results whose call ids are not the calls of the reply are refused.
+    test_results_unmatched(): void {
+      const bench = bench_make();
+      const asked = chat_post(bench, [user_say("1")], 1).message;
+      for (const ids of [["call_9"], ["call_1", "call_1"]]) {
+        const messages: provider.ChatMessage[] = [user_say("1"), asked];
+        for (const id of ids) {
+          messages.push({ role: "tool", tool_call_id: id, content: "{}" });
+        }
+        const error = thrown_get(() => chat_post(bench, messages, 2));
+        this.assertEqual(
+          error.message,
+          i18n(
+            "provider_script.results_unmatched",
+            "hyperposition",
+            utility.json_text(ids),
+            utility.json_text(["call_1"]),
+          ),
+        );
+      }
+      this.assertEqual(bench.received.length, 1);
+      this.assertEqual(bench.port.node(), "hyperposition");
     }
 
     // Tool results that lead to a node with no reply after them are refused.

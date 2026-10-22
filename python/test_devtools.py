@@ -4,10 +4,10 @@
 #
 # Tests the parts of devtools.py that need no browser: WebSocket frames with
 # and without masks, the handshake, joining a message from its fragments, the
-# relay script, the DevTools address, the timers, a client reading canned
-# bytes or an empty pipe, the synchronous loads picked out of a trace, the
-# workers and pauses kept, and a browser's page, trace and worker calls and
-# waits with canned bytes, a scratch profile and a patched removal. No
+# relay and stop scripts, the DevTools address, the timers, a client reading
+# canned bytes or an empty pipe, the synchronous loads picked out of a trace,
+# the workers and pauses kept, and a browser's page, trace and worker calls
+# and waits with canned bytes, a scratch profile and a patched removal. No
 # process is started.
 
 import devtools, errno, functools, io, json, os, subprocess, tempfile
@@ -255,8 +255,11 @@ class TestFrames(unittest.TestCase):
 
     # A frame cut short fails loud.
     def test_decode_short(self) -> None:
-        with self.assertRaises(ConnectionError):
+        with self.assertRaises(ConnectionError) as caught:
             devtools.frame_decode(io.BytesIO(_HELLO_PLAIN[:-1]).read)
+        self.assertEqual(
+            str(caught.exception), "DevTools closed the connection"
+        )
 
 
 # A message is joined from its frames, with pings answered on the way.
@@ -299,14 +302,24 @@ class TestMessages(unittest.TestCase):
 
     # A close frame fails loud.
     def test_read_close(self) -> None:
-        with self.assertRaises(ConnectionError):
+        with self.assertRaises(ConnectionError) as caught:
             self.frames_read("8800")
+        self.assertEqual(
+            str(caught.exception), "DevTools closed the connection"
+        )
 
     # A frame out of order, or of an opcode DevTools doesn't use, fails loud.
     def test_read_order(self) -> None:
-        for frames in ("800161", "010161" + "810162", "820161"):
-            with self.assertRaises(ConnectionError):
+        refusals = {
+            "800161": "DevTools sent WebSocket opcode 0 where 1 was due",
+            "010161" + "810162": "DevTools sent WebSocket opcode 1 where 0"
+            " was due",
+            "820161": "DevTools sent WebSocket opcode 2 where 1 was due",
+        }
+        for frames, message in refusals.items():
+            with self.assertRaises(ConnectionError, msg=frames) as caught:
                 self.frames_read(frames)
+            self.assertEqual(str(caught.exception), message)
 
 
 # The WebSocket upgrade request and its answer.
@@ -337,17 +350,27 @@ class TestHandshake(unittest.TestCase):
 
     # An answer that isn't a switch of protocols, or is empty, fails loud.
     def test_check_status(self) -> None:
-        for head in (b"HTTP/1.1 400 Bad Request\r\n\r\n", b""):
-            with self.assertRaises(ConnectionError):
+        refusals = {
+            b"HTTP/1.1 400 Bad Request\r\n\r\n": "DevTools answered HTTP/1.1"
+            " 400 Bad Request",
+            b"": "DevTools answered nothing",
+        }
+        for head, message in refusals.items():
+            with self.assertRaises(ConnectionError, msg=head) as caught:
                 devtools.handshake_check(_SAMPLE_KEY, head)
+            self.assertEqual(str(caught.exception), message)
 
     # A wrong accept value, or none, fails loud.
     def test_check_key(self) -> None:
         wrong = _ACCEPT_HEAD.replace(b"s3pPLM", b"S3pPLM")
         missing = b"HTTP/1.1 101 Switching Protocols\r\n\r\n"
         for head in (wrong, missing):
-            with self.assertRaises(ConnectionError):
+            with self.assertRaises(ConnectionError, msg=head) as caught:
                 devtools.handshake_check(_SAMPLE_KEY, head)
+            self.assertEqual(
+                str(caught.exception),
+                "DevTools answered a WebSocket key wrongly",
+            )
 
     # The head is read up to the blank line and no further.
     def test_head_read(self) -> None:
@@ -367,9 +390,17 @@ class TestAddress(unittest.TestCase):
 
     # Text that isn't a port then a path fails loud.
     def test_parse_malformed(self) -> None:
-        for text in ("", "9222", "9222\n/a\n/b", "port\n/a"):
-            with self.assertRaises(ValueError):
+        refusals = {
+            "": "DevToolsActivePort holds '', not a port and a path",
+            "9222": "DevToolsActivePort holds '9222', not a port and a path",
+            "9222\n/a\n/b": "DevToolsActivePort holds '9222\\n/a\\n/b', not"
+            " a port and a path",
+            "port\n/a": "invalid literal for int() with base 10: 'port'",
+        }
+        for text, message in refusals.items():
+            with self.assertRaises(ValueError, msg=repr(text)) as caught:
                 devtools.address_parse(text)
+            self.assertEqual(str(caught.exception), message)
 
 
 # The scripts and arguments handed to PowerShell.
@@ -380,13 +411,20 @@ class TestScripts(unittest.TestCase):
         self.assertTrue(script.startswith("$port_ = 1234\n"))
         self.assertIn("Add-Type -TypeDefinition @'\n", script)
         self.assertIn("\n'@\n", script)
-        self.assertIn("[XsjsDevToolsRelay]::Run($port_)", script)
+        self.assertIn("[XsjsDevToolsRelay]::RelayRun($port_)", script)
 
     # The relay script is plain ASCII with LF line ends.
     def test_relay_ascii(self) -> None:
         script = devtools.relay_script(1)
         self.assertTrue(script.isascii())
         self.assertNotIn("\r", script)
+
+    # The stop script fails loud but for a helper gone with the browser.
+    def test_stop_loud(self) -> None:
+        script: str = getattr(devtools, "_STOP_SCRIPT")
+        self.assertNotIn("-ErrorAction SilentlyContinue", script)
+        self.assertIn("-ErrorAction Stop", script)
+        self.assertIn("-ne 'ObjectNotFound'", script)
 
     # The script goes in as base64 of its `UTF-16` little endian bytes.
     def test_command_encoded(self) -> None:
@@ -460,8 +498,11 @@ class TestTimers(unittest.TestCase):
     # A reader that runs dry first fails loud.
     def test_bytes_short(self) -> None:
         stream = io.BytesIO(b"ab")
-        with self.assertRaises(ConnectionError):
+        with self.assertRaises(ConnectionError) as caught:
             devtools.bytes_exact(lambda count: stream.read(1), 3)
+        self.assertEqual(
+            str(caught.exception), "DevTools closed the connection"
+        )
 
 
 # The protocol client's calls, events and timers, on canned bytes or a pipe.
@@ -884,7 +925,8 @@ class TestBrowser(unittest.TestCase):
             browser.page_open("http://u/")
         self.assertEqual(
             str(caught.exception),
-            "gave up after 0 s waiting for http://u/ to accept connections",
+            "gave up after 0 s waiting for http://u/ to accept connections"
+            " after net::ERR_CONNECTION_REFUSED",
         )
         self.assertEqual(len(writes), 1)
 

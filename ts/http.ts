@@ -205,10 +205,7 @@ namespace http {
 
     // The `error` line of the request: the message and stack of an error.
     private error_reply(error: Error): lines.Line {
-      const stack = error.stack;
-      if (stack === undefined) {
-        return utility.fail_now(i18n("http.stack_missing"));
-      }
+      const stack = error.stack as string;
       const header = jslb.header_make(constants.error_type, {
         reply: this.id,
         full: this.full,
@@ -247,13 +244,15 @@ namespace http {
         () => controller.abort(),
         this.timeout_seconds * constants.second_ms,
       );
+      // Only the fetch and the body read fail into an `error` line.
       fetch(url, { ...init, signal: controller.signal })
         .then((response: Response) => answer_read(response))
-        .then((answer: HttpAnswer) => exchange.answer_reply(answer))
-        .catch((cause: unknown) =>
-          controller.signal.aborted
-            ? exchange.timeout_reply(this.timeout_seconds)
-            : exchange.failure_reply(cause),
+        .then(
+          (answer: HttpAnswer) => exchange.answer_reply(answer),
+          (cause: unknown) =>
+            controller.signal.aborted
+              ? exchange.timeout_reply(this.timeout_seconds)
+              : exchange.failure_reply(cause),
         )
         .then((reply: lines.Line) => {
           clearTimeout(timer);

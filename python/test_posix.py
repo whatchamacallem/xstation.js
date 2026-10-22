@@ -28,7 +28,7 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 # Bytecode of the modules main imports goes in build/.
 sys.pycache_prefix = os.path.join(_BUILD_PATH, "pycache")
 
-# Probe code the audit must pass: each token in a literal or a comment.
+# Probe code the audit must pass: tokens in literals, comments or member names.
 _AUDIT_PASSED = (
     'const s = "await p.then( new Promise Atomics SharedArrayBuffer";\n',
     "const s = 'await p.then(';\n",
@@ -36,16 +36,19 @@ _AUDIT_PASSED = (
     "const r = /await|\\.then\\(|Atomics/;\n",
     "// await p.then( new Promise\n",
     "/* Atomics SharedArrayBuffer */\n",
+    "x.await = 1;\n",
 )
 
 # Probe code the audit must refuse, one synchronization token in each.
 _AUDIT_REFUSED = (
     "await x;\n",
+    "[...await x];\n",
     "p.then(f);\n",
     "p.then<T>(f);\n",
     "p.then (f);\n",
     "p.then\n  (f);\n",
     "new Promise(f);\n",
+    "new  Promise(f);\n",
     "Atomics.wait(a, 0, 0);\n",
     "new SharedArrayBuffer(8);\n",
     "const t = `${await x}`;\n",
@@ -123,8 +126,8 @@ _SYNCHRONIZATION_MODULES = (
 
 # The tokens that only the synchronization modules may hold.
 _SYNCHRONIZATION_TOKEN = re.compile(
-    r"\bawait\b|\.then\s*(?:<[^()]*>)?\s*\(|\bnew Promise\b|\bAtomics\b"
-    r"|\bSharedArrayBuffer\b"
+    r"(?<![\w$)\]]\.)\bawait\b|\.then\s*(?:<[^()]*>)?\s*\(|\bnew\s+Promise\b"
+    r"|\bAtomics\b|\bSharedArrayBuffer\b"
 )
 
 # The TypeScript files the audit covers, from the top directory.
@@ -230,7 +233,7 @@ def css_scan(
             comments.append(Comment(i, end, 2, 2))
             i = end
         elif text[i] in "'\"":
-            i = javascript_string_scan(path, text, i)
+            i = string_scan(path, text, i)
         else:
             i += 1
 
@@ -298,17 +301,15 @@ def javascript_scan(
             i = end
             continue
         if character in "'\"":
-            end = javascript_string_scan(path, text, i)
+            end = string_scan(path, text, i)
             literals.append((i, end))
             i = end
             character = "a"
         elif character == "`":
-            i = javascript_template_scan(
-                path, text, i, stop, comments, literals
-            )
+            i = template_scan(path, text, i, stop, comments, literals)
             character = "a"
         elif character == "/" and previous in _JAVASCRIPT_REGEX_AFTER:
-            end = javascript_regex_scan(path, text, i)
+            end = regex_scan(path, text, i)
             literals.append((i, end))
             i = end
             character = "a"
@@ -330,7 +331,7 @@ def javascript_scan(
 
 
 # Returns the offset past the regular expression literal at the offset.
-def javascript_regex_scan(path: str, text: str, i: int) -> int:
+def regex_scan(path: str, text: str, i: int) -> int:
     start = i
     in_class = False
     i += 1
@@ -354,7 +355,7 @@ def javascript_regex_scan(path: str, text: str, i: int) -> int:
 
 
 # Returns the offset past the quoted string at the offset.
-def javascript_string_scan(path: str, text: str, i: int) -> int:
+def string_scan(path: str, text: str, i: int) -> int:
     start = i
     quote = text[i]
     i += 1
@@ -371,7 +372,7 @@ def javascript_string_scan(path: str, text: str, i: int) -> int:
 
 
 # Returns the offset past the template literal, adding its text spans.
-def javascript_template_scan(
+def template_scan(
     path: str,
     text: str,
     i: int,
@@ -505,9 +506,7 @@ def python_comments(text: str) -> list[Comment]:
 
 
 # Returns the offset past the double quoted shell string at the offset.
-def shell_double_scan(
-    path: str, text: str, i: int, comments: list[Comment]
-) -> int:
+def shell_quoted(path: str, text: str, i: int, comments: list[Comment]) -> int:
     start = i
     i += 1
     while i < len(text):
@@ -539,7 +538,7 @@ def shell_scan(
         elif character == "'":
             i = end_find(path, text, i + 1, "'")
         elif character == '"':
-            i = shell_double_scan(path, text, i, comments)
+            i = shell_quoted(path, text, i, comments)
         elif character == "#" and (i == 0 or text[i - 1] in _SHELL_WORD_BREAK):
             end = text.find("\n", i)
             end = len(text) if end == -1 else end
@@ -581,7 +580,7 @@ def synchronization_check(path: str) -> None:
     if match:
         raise RuntimeError(
             f"{path}:{offset_line(match.string, match.start())}:"
-            f" {match.group()} outside the four modules"
+            f" {match.group()} outside _SYNCHRONIZATION_MODULES"
         )
 
 

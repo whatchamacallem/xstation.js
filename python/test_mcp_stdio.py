@@ -54,6 +54,15 @@ _PING_LINE = '{"jsonrpc":"2.0","id":1,"method":"ping"}'
 # The response to it.
 _PING_REPLY = '{"jsonrpc":"2.0","id":1,"result":{}}'
 
+# A ping whose id is a letter outside ASCII, as a client writes it.
+_WIDE_LINE = '{"jsonrpc":"2.0","id":"\xe9","method":"ping"}'
+
+# The response to it, in UTF-8 as MCP's stdio transport requires.
+_WIDE_REPLY = '{"jsonrpc":"2.0","id":"\xe9","result":{}}'
+
+# The encoding the child is told its streams have, which UTF-8 must override.
+_ENCODING_NARROW = "ascii"
+
 # A call of the tool that writes a main loop file.
 _SOURCE_LINE = (
     '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":'
@@ -162,14 +171,18 @@ def _nan_message(case: unittest.TestCase) -> str:
     return str(caught.exception)
 
 
-# Starts the script on a root with pipes on its three streams.
+# Starts the script on a root with pipes on its streams, told they are ASCII.
 def _child_start(root: str) -> subprocess.Popen[bytes]:
     return subprocess.Popen(
         [sys.executable, _STDIO_PATH, "--root", root],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        env={**os.environ, "PYTHONPYCACHEPREFIX": _PYCACHE_PATH},
+        env={
+            **os.environ,
+            "PYTHONPYCACHEPREFIX": _PYCACHE_PATH,
+            "PYTHONIOENCODING": _ENCODING_NARROW,
+        },
     )
 
 
@@ -381,6 +394,14 @@ class TestProcess(unittest.TestCase):
             _line_write(process, sent + "\n")
             if reply is not None:
                 self.assertEqual(_line_read(process), reply + "\n")
+        output, errors = process.communicate(timeout=_CHILD_SECONDS)
+        self.assertEqual((process.returncode, output, errors), (0, b"", b""))
+
+    # Text outside ASCII comes in and goes out as UTF-8, whatever the locale.
+    def test_process_wide(self) -> None:
+        process = self.child_start()
+        _line_write(process, _WIDE_LINE + "\n")
+        self.assertEqual(_line_read(process), _WIDE_REPLY + "\n")
         output, errors = process.communicate(timeout=_CHILD_SECONDS)
         self.assertEqual((process.returncode, output, errors), (0, b"", b""))
 

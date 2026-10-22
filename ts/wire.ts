@@ -17,8 +17,6 @@ namespace wire {
     page_secure: "https:",
     socket_scheme: "ws:",
     socket_secure: "wss:",
-    columns: 80,
-    rows: 24,
     input_kind: 0x30,
     output_kind: 0x30,
     title_kind: 0x31,
@@ -35,6 +33,8 @@ namespace wire {
     drain_seconds: 120,
     // A poll of the socket buffer: 0 ms, a default chosen by its writer.
     poll_ms: 0,
+    // The longest delay a timer holds: 2^31 - 1 ms, the platform's limit.
+    timer_max_ms: 2 ** 31 - 1,
     // The longest hello phase line: 10 MiB, a default kept from earlier code.
     hello_line_max: 10485760,
     // The hello phase blob bytes of a message: none, as hello has no blob.
@@ -219,13 +219,9 @@ namespace wire {
       .then((body) => fn(token_parse(url, body)));
   }
 
-  // The first message of ttyd's client: the token and the terminal size.
+  // The first message of ttyd's client: the token.
   function start_message(token: string): ArrayBuffer {
-    const text = utility.json_text({
-      AuthToken: token,
-      columns: constants.columns,
-      rows: constants.rows,
-    });
+    const text = utility.json_text({ AuthToken: token });
     return buffer_copy(utility.utf8_encode(text));
   }
 
@@ -293,6 +289,15 @@ namespace wire {
             bytes.length,
           ),
         );
+      }
+      // The last range also reads past the end, where a longer file has bytes.
+      if (offset + length === this.size) {
+        const tail = this.read(this.handle, this.size, 1).length;
+        if (tail !== 0) {
+          throw new Error(
+            i18n("wire.handle_differs", this.handle, this.size, 0, tail),
+          );
+        }
       }
       return bytes;
     }
@@ -533,8 +538,11 @@ namespace wire {
       );
     }
 
-    // Fetches the token, opens the socket and passes `hello` to `fn`.
+    // Fetches the token, opens the socket and passes `hello` to `fn`, once.
     wire_open(fn: (hello: lines.Line) => void): void {
+      if (this.hello_fn !== undefined) {
+        throw new Error(i18n("wire.open_twice", this.socket_url));
+      }
       this.hello_receive(fn);
       token_fetch(this.token_url, this.token_timer, (token) =>
         this.socket_start(token),
@@ -861,10 +869,7 @@ namespace wire {
       if (this.read_id !== undefined) {
         this.read_answer(this.reader.read_expire());
       }
-      const fn = this.close_fn;
-      if (fn !== undefined) {
-        fn(code);
-      }
+      receiver_known(this.close_fn, "close")(code);
     }
 
     // Fetches the token and opens tty 0, answering `console.open` once open.
@@ -916,7 +921,8 @@ namespace wire {
       if (
         typeof seconds !== "number" ||
         !Number.isFinite(seconds) ||
-        seconds < 0
+        seconds < 0 ||
+        seconds * constants.second_ms > constants.timer_max_ms
       ) {
         throw new Error(i18n("wire.read_seconds", seconds));
       }
@@ -940,10 +946,7 @@ namespace wire {
         clearTimeout(this.read_timer);
         this.read_timer = undefined;
       }
-      const id = this.read_id;
-      if (id === undefined) {
-        throw new Error(i18n("wire.read_none"));
-      }
+      const id = this.read_id as number;
       this.read_id = undefined;
       const header = jslb.header_make(constants.read_type, {
         reply: id,

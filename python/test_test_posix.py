@@ -7,7 +7,8 @@
 # on text: a UTF-8 byte order mark is refused at the start of a file read as
 # utf-8 and passed there in one read as utf-8-sig, and PowerShell comments
 # are found past its strings and here strings, each refusal compared with its
-# message.
+# message. A synchronization token outside the exempt modules is refused
+# with its message too.
 
 import os, tempfile, test_posix, unittest
 
@@ -186,3 +187,19 @@ class TestLexerName(unittest.TestCase):
             test_posix.comments_find("a.x", "", "cobol")
         expected = "a.x: no comment lexer named 'cobol'"
         self.assertEqual(caught.exception.args, (expected,))
+
+
+# The refusal of a synchronization token outside the exempt modules.
+class TestAuditMessage(unittest.TestCase):
+    # Makes the checkout's `build/` for the scratch directories.
+    def setUp(self) -> None:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+
+    # A token outside the exempt modules is refused at its line.
+    def test_token_refused(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
+            path = file_write(scratch, "a.ts", b"\nawait x;\n")
+            with self.assertRaises(RuntimeError) as caught:
+                test_posix.synchronization_check(path)
+            expected = f"{path}:2: await outside _SYNCHRONIZATION_MODULES"
+            self.assertEqual(caught.exception.args, (expected,))

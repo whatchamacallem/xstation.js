@@ -374,7 +374,7 @@ class TestRegister(IsolatedCase):
         )
 
     # Called before the registration each handler raises.
-    def test_unregistered(self) -> None:
+    def test_called_early(self) -> None:
         line = _line_make("doc.head", 1)
         body: dict[int | str, Any] = {}
         message = i18n("engine_doc.not_registered")

@@ -9,6 +9,7 @@
 # sends when the socket closes ends the program.
 
 import signal
+from i18n import i18n
 
 
 # Sleeps until a signal, forever, so it never returns.
@@ -17,8 +18,6 @@ def loop_prepare(root: str) -> dict[str, int]:
         signal.pause()
 
 
-# Never runs, as loop_prepare never returns; bootstrap.py requires it.
+# Never runs, as `loop_prepare` never returns, but `bootstrap.py` needs it.
 def loop_run(read_fd: int, write_fd: int, root: str) -> None:
-    raise RuntimeError(
-        f"loop_run ran in {root}, though loop_prepare never returns"
-    )
+    raise RuntimeError(i18n("stall_loop.run_reached", root))

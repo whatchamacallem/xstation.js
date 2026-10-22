@@ -25,13 +25,13 @@ _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
 # Where the command line writes the vectors and their sidecars.
 _VECTORS_PATH = os.path.join(os.path.dirname(_PYTHON_PATH), "build", "vectors")
 
-# The longest line a vector's decoder reads, its CR included.
+# The longest line a vector's decoder reads with its CR, its writer's choice.
 _LINE_MAX = 4096
 
-# The most bytes a message's blobs come to, small so splits run fast.
+# A message's most blob bytes, its writer's choice, small so splits run fast.
 _BLOB_MAX = 8192
 
-# The largest blob a vector's decoder keeps in memory.
+# The largest blob a vector's decoder keeps in memory, its writer's choice.
 _OVERFLOW_BYTES = 1024
 
 # The limits a decoder reads every vector with, written into each sidecar.
@@ -232,6 +232,11 @@ def _error_vectors() -> list[_ErrorVector]:
             b'{"0":{"t":"echo"},"1":{"s":1}}\rx',
         ),
         (
+            "error_blobs_mismatch_boolean",
+            "blobs_mismatch",
+            b'{"0":{"t":"echo","b":true},"1":{"s":1}}\rx',
+        ),
+        (
             "error_blob_gap",
             "blob_gap",
             b'{"0":{"t":"echo","b":2},"1":{"s":1},"3":{"s":1}}\rxy',
@@ -305,6 +310,11 @@ def _error_vectors() -> list[_ErrorVector]:
         ),
         ("error_not_object", "line_not_object", b'[{"0":{"t":"echo"}}]\r'),
         ("error_header_not_object", "header_not_object", b'{"0":"echo"}\r'),
+        (
+            "error_header_not_object_blob",
+            "header_not_object",
+            b'{"0":{"t":"echo","b":1},"1":[]}\r',
+        ),
         (
             "error_blob_data",
             "blob_data_field",

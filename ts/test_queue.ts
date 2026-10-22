@@ -66,7 +66,7 @@ namespace test_queue {
   }
 
   // A synchronous queue on the thread `ai` with doubles of `ui` and `server`.
-  interface Bench {
+  interface QueueBench {
     tasks: queue.TaskQueue;
     ui: PortDouble;
     server: PortDouble;
@@ -74,7 +74,7 @@ namespace test_queue {
   }
 
   // Makes a bench with the owner table given.
-  function bench_make(owners: queue.OwnerTable): Bench {
+  function bench_make(owners: queue.OwnerTable): QueueBench {
     const trace: string[] = [];
     const tasks = new queue.TaskQueue("ai", owners, true);
     const ui = new PortDouble("ui", trace);
@@ -162,7 +162,7 @@ namespace test_queue {
   }
 
   // A bench whose queue holds blobs of at most the bytes given, `blob_max`.
-  function bench_bounded(far: queue.OwnerTable, limit: number): Bench {
+  function bench_bounded(far: queue.OwnerTable, limit: number): QueueBench {
     const bench = bench_make(owners_make({ "verbose.": "server", ...far }));
     const value = settings_make(false);
     value.blob_max = limit;
@@ -522,6 +522,24 @@ namespace test_queue {
         i18n("queue.reply_unowed", loose, "ai", utility.json_text(stray[0])),
       );
       this.assertEqual(bench.ui.posted.length, 0);
+    }
+
+    // A type that is not text, or an id that is not a number, throws.
+    test_header_kinds(): void {
+      const bench = bench_make(owners_make({}));
+      const untyped = { 0: { t: 5 } } as unknown as lines.Line;
+      const typed = thrown_get(() => bench.tasks.line_notify(untyped));
+      this.assertEqual(
+        typed.message,
+        i18n("queue.type_invalid", utility.json_text(untyped[0])),
+      );
+      const header = { t: type_fresh(), i: "7" };
+      const unnumbered = { 0: header } as unknown as lines.Line;
+      const numbered = thrown_get(() => bench.tasks.line_notify(unnumbered));
+      this.assertEqual(
+        numbered.message,
+        i18n("queue.field_invalid", utility.json_text(header), "id"),
+      );
     }
   }
 

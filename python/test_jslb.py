@@ -21,14 +21,20 @@ _BUILD_PATH = os.path.join(
 # The vectors and their sidecars, as `vectors_make.py` writes them.
 _VECTORS_PATH = os.path.join(_BUILD_PATH, "vectors")
 
-# The longest line the decoders here read, its CR included.
+# The longest line the decoders here read with its CR, its writer's choice.
 _LINE_MAX = 4096
 
-# The most bytes the blobs of one message come to in the decoders here.
+# The most bytes one message's blobs come to here, its writer's choice.
 _BLOB_MAX = 65536
 
-# The largest blob the decoders here keep in memory.
+# The largest blob the decoders here keep in memory, its writer's choice.
 _OVERFLOW_BYTES = 1024
+
+# The digits of a number past the 4300 an `int` reads, its writer's choice.
+_LONG_DIGITS = 5000
+
+# Arrays nested deeper than the JSON parser recurses, its writer's choice.
+_DEEP_NESTING = 1000000
 
 # A line with no blobs, which a decoder that failed refuses all the same.
 _ECHO_LINE = b'{"0":{"t":"echo"}}\r'
@@ -903,6 +909,12 @@ class TestDecode(_ScratchCase):
         message = i18n("jslb.line_not_object")
         self.refused_assert(b'[{"0":{"t":"echo"}}]\r', message)
 
+    # A leading byte order mark is refused as not JSON.
+    def test_mark_refused(self) -> None:
+        marked = b"\xef\xbb\xbf" + _ECHO_LINE
+        reason = self.parse_reason(marked[:-1].decode("utf-8"))
+        self.refused_assert(marked, i18n("jslb.line_not_json", reason))
+
     # The `NaN` and `Infinity` constants are refused as not JSON.
     def test_constant_refused(self) -> None:
         for constant in ("NaN", "Infinity", "-Infinity"):
@@ -912,7 +924,7 @@ class TestDecode(_ScratchCase):
 
     # A number or a key too long for an `int` is refused as not JSON.
     def test_number_long(self) -> None:
-        digits = b"1" * 5000
+        digits = b"1" * _LONG_DIGITS
         for data in (
             b'{"0":{"t":"echo"},"n":' + digits + b"}\r",
             b'{"0":{"t":"echo"},"n":{"' + digits + b'":1}}\r',
@@ -929,6 +941,19 @@ class TestDecode(_ScratchCase):
             self.assertIs(type(cause), ValueError)
             message = i18n("jslb.line_not_json", str(cause))
             self.assertEqual(caught.exception.args, (message,))
+
+    # Arrays nested past the parser's depth are refused as not JSON.
+    def test_nesting_deep(self) -> None:
+        data = b'{"0":{"t":"echo"},"n":' + b"[" * _DEEP_NESTING + b"}\r"
+        decoder = jslb.LineDecoder(
+            2 * len(data), _BLOB_MAX, _OVERFLOW_BYTES, self.sink.path_make
+        )
+        with self.assertRaises(jslb.WireError) as caught:
+            decoder.bytes_feed(data)
+        cause = caught.exception.__cause__
+        self.assertIs(type(cause), RecursionError)
+        message = i18n("jslb.line_not_json", str(cause))
+        self.assertEqual(caught.exception.args, (message,))
 
 
 # Tests blobs over `overflow_bytes`, streamed into the sink's files.
@@ -1073,6 +1098,10 @@ class TestVectors(_ScratchCase):
                 "blobs_mismatch",
                 i18n("jslb.blobs_mismatch", 2, 1),
             ),
+            "error_blobs_mismatch_boolean": (
+                "blobs_mismatch",
+                i18n("jslb.blobs_mismatch", True, 1),
+            ),
             "error_blobs_mismatch_extra": (
                 "blobs_mismatch",
                 i18n("jslb.blobs_mismatch", 0, 1),
@@ -1083,6 +1112,10 @@ class TestVectors(_ScratchCase):
             "error_header_not_object": (
                 "header_not_object",
                 i18n("jslb.header_not_object", 0),
+            ),
+            "error_header_not_object_blob": (
+                "header_not_object",
+                i18n("jslb.header_not_object", 1),
             ),
             "error_infinity": (
                 "line_not_json",

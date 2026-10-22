@@ -22,7 +22,7 @@ namespace test_script {
     compact_turns: 64,
     // The start of the root of each store a test makes in the pool.
     root_prefix: "/test_script/",
-    // The files of the cache of each store a test makes.
+    // A count chosen by its writer: the cache files of a test's store.
     slot_count: 8,
     // The ref of the step script, which advances the tide of a region.
     step_ref: "/_files/script/step_tide.js",
@@ -125,6 +125,16 @@ namespace test_script {
   // The text of each line, which leaves out the time.
   function lines_shown(kept: lines.VerboseLine[]): string[] {
     return kept.map((line) => line.text);
+  }
+
+  // The text of the error JSON throws for a value it has no text for.
+  function refusal_text(value: unknown): string {
+    try {
+      JSON.stringify(value);
+    } catch (error) {
+      return String(error);
+    }
+    throw new Error("JSON wrote the value.");
   }
 
   // A script test: the module and pool read in `setUp`, its roots removed.
@@ -374,6 +384,25 @@ namespace test_script {
       const result = script.script_run(store, "late", {}, false);
       this.assertEqual(result.error, "Error: after");
       this.assertEqual(lines_shown(result.lines), ["before"]);
+    }
+
+    // A value JSON cannot carry is the run's exception, not the tool's.
+    test_value_uncarried(): void {
+      const store = this.store_fresh();
+      const cases: [string, string][] = [
+        ["NaN", `Error: ${i18n("utility.number_refused", NaN)}`],
+        ["Infinity", `Error: ${i18n("utility.number_refused", Infinity)}`],
+        ["BigInt(1)", refusal_text(BigInt(1))],
+      ];
+      for (const [value, error] of cases) {
+        const text = `engine.log("before");\nreturn ${value};\n`;
+        script_put(store, "uncarried", text);
+        const result = script.script_run(store, "uncarried", {}, false);
+        this.assertEqual(result.error, error);
+        this.assertEqual(typeof result.stack, "string");
+        this.assertFalse("value" in result);
+        this.assertEqual(lines_shown(result.lines), ["before"]);
+      }
     }
 
     // A call of the store that fails is the script's exception.

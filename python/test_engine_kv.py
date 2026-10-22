@@ -41,16 +41,14 @@ _DATABASE = "_files"
 # Every byte value once, the control bytes of a terminal included.
 _VALUE_BYTES = bytes(range(256))
 
-# A value over `overflow_bytes`, which the store keeps in the cache.
+# A value over `overflow_bytes`, kept in the cache, a size its writer chose.
 _VALUE_OVER = bytes(range(256)) * 513
 
 # The value of a world key: the name of a world database.
 _WORLD_VALUE = b"castle_world"
 
 # The `sha256` of the value of the world key, in hex.
-_WORLD_SHA256 = (
-    "6d0be246127ef7993924a9ce127c6fa6c093dca368163093ab31c80273336ecd"
-)
+_WORLD_SHA256 = hashlib.sha256(_WORLD_VALUE).hexdigest()
 
 # A small PNG image, as base64 text.
 _IMAGE_BASE64 = (
@@ -62,20 +60,16 @@ _IMAGE_BASE64 = (
 _IMAGE_BYTES = base64.b64decode(_IMAGE_BASE64)
 
 # The `sha256` of the image, in hex.
-_IMAGE_SHA256 = (
-    "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0"
-)
+_IMAGE_SHA256 = hashlib.sha256(_IMAGE_BYTES).hexdigest()
 
 # The ref the image is put under.
 _IMAGE_KEY = "/_files/gatehouse/arrival.png"
 
-# A map over `overflow_bytes`.
+# A map over `overflow_bytes`, a size its writer chose.
 _MAP_BYTES = bytes(range(256)) * 800
 
 # The `sha256` of the map, in hex.
-_MAP_SHA256 = (
-    "8c6627e25bfbdef2bba5abc03123ea8e9b60d892f7f180a8b9b5079fb3233c54"
-)
+_MAP_SHA256 = hashlib.sha256(_MAP_BYTES).hexdigest()
 
 # The ref the map is put under.
 _MAP_KEY = "/_files/maps/castle.bin"
@@ -571,7 +565,7 @@ class TestRegister(IsolatedCase):
         )
 
     # Called before the registration each handler raises.
-    def test_unregistered(self) -> None:
+    def test_called_early(self) -> None:
         line = _line_make("kv.get", 1, "/_files/a")
         message = i18n("engine_kv.not_registered")
         calls: list[Callable[[], object]] = [

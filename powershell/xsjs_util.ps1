@@ -18,16 +18,14 @@ $progressPreference = 'silentlyContinue'
     [Net.SecurityProtocolType]::Tls12
 )
 
+# The strings, read from `en-US`, the one strings file.
 $i18n_arguments_ = @{
     BindingVariable = 'i18n_'
     BaseDirectory   = $PSScriptRoot
     FileName        = 'i18n.psd1'
+    UICulture       = 'en-US'
 }
-try {
-    Import-LocalizedData @i18n_arguments_
-} catch {
-    Import-LocalizedData @i18n_arguments_ -UICulture en-US
-}
+Import-LocalizedData @i18n_arguments_
 
 $port_ = 5768
 # Linux ttyd's port on WSL's 127.0.0.1, which a port proxy forwards to.
@@ -50,6 +48,27 @@ $key_path_ = Join-Path $state_path_ '_cached_key.pem'
 $certificate_days_ = 825
 $runner_path_ = Join-Path $state_path_ 'serve.ps1'
 $ttyd_log_path_ = Join-Path $state_path_ 'ttyd.log'
+# The tries of each poll: 30, a default chosen by its writer.
+$poll_tries_ = 30
+# The wait before each try of a poll: 500 ms, a default chosen by its writer.
+$poll_milliseconds_ = 500
+# The width of an object logged as text: 200, a default chosen by its writer.
+$output_width_ = 200
+
+# Returns the command of the script block with its variables' values.
+function xsjs_util_get_command_text ([scriptblock]$command_) {
+    $type_ = [Management.Automation.Language.VariableExpressionAst]
+    $pipeline_ = $command_.Ast.EndBlock.Statements[0].PipelineElements[0]
+    $words_ = foreach ($element_ in $pipeline_.CommandElements) {
+        if ($element_ -is $type_) {
+            $value_ = Get-Variable $element_.VariablePath.UserPath -ValueOnly
+            $value_ -join ' '
+        } else {
+            $element_.Extent.Text
+        }
+    }
+    $words_ -join ' '
+}
 
 # Returns the user and password argument, `$null` if none, or throws usage.
 function xsjs_util_get_credential ([object[]]$arguments_) {
@@ -156,8 +175,9 @@ function xsjs_util_get_wsl_lines ([string[]]$wsl_arguments_) {
         Where-Object { $_ }
 }
 
-# Runs a native command and logs its exit code and output, never throwing.
+# Runs a native command and logs it expanded, then its exit code and output.
 function xsjs_util_invoke_native ([scriptblock]$command_) {
+    xsjs_util_write_log ('`{0}`' -f (xsjs_util_get_command_text $command_))
     $ErrorActionPreference = 'Continue'
     $output_ = & $command_ 2>&1
     $exit_ = $i18n_.exit_code -f $command_.ToString().Trim(), $LASTEXITCODE
@@ -165,23 +185,17 @@ function xsjs_util_invoke_native ([scriptblock]$command_) {
     $output_ | xsjs_util_write_log_output
 }
 
-# Starts a log beside the script, returning its path or `$null` if unwritable.
+# Starts a log beside the script and returns its path.
 function xsjs_util_open_log ([string]$script_path_) {
     $log_path_ = "$script_path_.md"
-    try {
-        $log_title_ = $i18n_.log_title -f (Split-Path -Leaf $script_path_)
-        [IO.File]::WriteAllText($log_path_, "# $log_title_`n")
-        Write-Host ($i18n_.log_path -f $log_path_)
-    } catch {
-        Write-Host ($i18n_.no_log -f $log_path_)
-        return $null
-    }
+    $log_title_ = $i18n_.log_title -f (Split-Path -Leaf $script_path_)
+    [IO.File]::WriteAllText($log_path_, "# $log_title_`n")
+    Write-Host ($i18n_.log_path -f $log_path_)
     $now_ = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     # Windows PowerShell leaves the update build revision out of the version.
     $version_ = [Environment]::OSVersion.Version
     $current_ = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
-    $revision_ = (Get-ItemProperty $current_ -ErrorAction SilentlyContinue).UBR
-    if ($null -eq $revision_) { $revision_ = $version_.Revision }
+    $revision_ = Get-ItemPropertyValue $current_ -Name UBR
     $os_ = 'Windows {0}.{1}' -f $version_.ToString(3), $revision_
     $started_ = $i18n_.started -f $now_, $os_, $PSVersionTable.PSVersion
     xsjs_util_write_log $started_
@@ -190,8 +204,8 @@ function xsjs_util_open_log ([string]$script_path_) {
 
 # Removes the firewall rule if there is one, logging either way.
 function xsjs_util_remove_firewall_rule {
-    $rule_ = @{ Name = $firewall_rule_name_; ErrorAction = 'SilentlyContinue' }
-    if (Get-NetFirewallRule @rule_) {
+    $rule_ = Get-NetFirewallRule | Where-Object Name -EQ $firewall_rule_name_
+    if ($rule_) {
         Remove-NetFirewallRule -Name $firewall_rule_name_
         xsjs_util_write_log ($i18n_.firewall_closed -f $port_)
     } else {
@@ -258,15 +272,18 @@ function xsjs_util_step_stop_server {
             throw ($i18n_.ttyd_stop_failed -f ($ids_ -join ', '))
         }
         $left_ = $ids_
-        for ($try_ = 0; $left_ -and $try_ -lt 30; $try_++) {
-            Start-Sleep -Milliseconds 500
+        for ($try_ = 0; $left_ -and $try_ -lt $poll_tries_; $try_++) {
+            Start-Sleep -Milliseconds $poll_milliseconds_
             $left_ = @(xsjs_util_get_linux_servers $path_)
         }
-        if ($left_) { throw ($i18n_.ttyd_not_stopped -f ($ids_ -join ', ')) }
+        if ($left_) {
+            $seconds_ = $poll_tries_ * $poll_milliseconds_ / 1000
+            throw ($i18n_.ttyd_not_stopped -f ($ids_ -join ', '), $seconds_)
+        }
         xsjs_util_write_log ($i18n_.ttyd_stopped -f ($ids_ -join ', '))
     }
-    $task_ = @{ TaskName = $task_name_; ErrorAction = 'SilentlyContinue' }
-    $running_ = (Get-ScheduledTask @task_).State -eq 'Running'
+    $task_ = Get-ScheduledTask | Where-Object TaskName -EQ $task_name_
+    $running_ = $task_.State -eq 'Running'
     if ($running_) {
         Stop-ScheduledTask -TaskName $task_name_
         xsjs_util_write_log ($i18n_.task_stopped -f $task_name_)
@@ -320,7 +337,7 @@ function xsjs_util_write_log_output {
         } elseif ($item_ -is [string]) {
             $item_
         } else {
-            ($item_ | Out-String -Width 200).Trim()
+            ($item_ | Out-String -Width $output_width_).Trim()
         }
     }
     $text_ = ($lines_ -join "`n").Replace("`0", '').Trim()

@@ -33,6 +33,14 @@ namespace test_mcp {
       '{"name":"kv_get","description":"Read the value a Key-Value-Ref ' +
       'names, /$db/$key, as text.","inputSchema":{"type":"object",' +
       '"properties":{"ref":{"type":"string"}},"required":["ref"]}}',
+    console_tool:
+      '{"name":"console_run","description":"Run one command line in the ' +
+      "debug console's dash and return its output until the next prompt " +
+      'or the timeout. Debug mode.","inputSchema":{"type":"object",' +
+      '"properties":{"text":{"type":"string"},' +
+      '"timeout_seconds":{"type":"number"}},' +
+      '"required":["text","timeout_seconds"]},' +
+      '"_meta":{"xsjs":{"permit":true}}}',
     stdio_initialize:
       '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{' +
       '"protocolVersion":"2025-06-18","capabilities":{},' +
@@ -81,7 +89,7 @@ namespace test_mcp {
   });
 
   // An object of fields by name.
-  type Fields = { [key: string]: unknown };
+  type FieldTable = { [key: string]: unknown };
 
   // How many types the tests have made, so that each one is new.
   let types_made = 0;
@@ -169,7 +177,7 @@ namespace test_mcp {
   function line_build(
     type: string,
     options: { id?: number; reply?: number; full?: boolean },
-    payload: Fields,
+    payload: FieldTable,
   ): lines.Line {
     return jslb.line_make(jslb.header_make(type, options), [], payload);
   }
@@ -220,8 +228,8 @@ namespace test_mcp {
   }
 
   // A message or tool read back from its JSON text.
-  function text_read(text: string): Fields {
-    return JSON.parse(text) as Fields;
+  function text_read(text: string): FieldTable {
+    return JSON.parse(text) as FieldTable;
   }
 
   // A line read back from its JSON text.
@@ -244,7 +252,11 @@ namespace test_mcp {
   }
 
   // A `tools/call` request of the tool on the arguments, with the id given.
-  function call_message(id: number, name: string, args: Fields): Fields {
+  function call_message(
+    id: number,
+    name: string,
+    args: FieldTable,
+  ): FieldTable {
     return {
       jsonrpc: "2.0",
       id,
@@ -258,13 +270,13 @@ namespace test_mcp {
     type: string,
     id: number,
     name: string,
-    args: Fields,
+    args: FieldTable,
   ): lines.Line {
     return line_build(type, { id }, call_message(id, name, args));
   }
 
   // The `mcp` reply line to request `id` carrying the payload given.
-  function reply_build(id: number, payload: Fields): lines.Line {
+  function reply_build(id: number, payload: FieldTable): lines.Line {
     return line_build("mcp", { reply: id }, payload);
   }
 
@@ -274,7 +286,7 @@ namespace test_mcp {
   }
 
   // What a server answers to a message, as JSON text.
-  function handled_text(server: mcp.Server, message: Fields): string {
+  function handled_text(server: mcp.Server, message: FieldTable): string {
     const answer = server.message_handle(message as unknown as mcp.Message);
     return utility.json_text(answer);
   }
@@ -344,11 +356,32 @@ namespace test_mcp {
       );
     }
 
+    // Only the permit tool carries its `_meta` through `tools/list`.
+    test_list_permit(): void {
+      const server = browser_make();
+      const texts = [constants.kv_tool, constants.console_tool];
+      const entries = texts.map((text) => text_read(text));
+      for (const entry of entries) {
+        server.tool_register(entry as unknown as mcp.Tool, call_unexpected);
+      }
+      const answer = text_read(
+        handled_text(server, text_read(constants.stdio_list)),
+      );
+      const tools = (answer.result as { tools: FieldTable[] }).tools;
+      const marked = tools.filter((tool) => Object.hasOwn(tool, "_meta"));
+      this.assertEqual(
+        marked.map((tool) => tool.name),
+        ["console_run"],
+      );
+      this.assertEqual(marked[0]._meta, { xsjs: { permit: true } });
+      this.assertEqual(tools, entries);
+    }
+
     // `tools/call` runs the tool on its arguments and answers its result.
     test_call_recorded(): void {
       const server = browser_make();
       const args = { ref: "/_files/script/step_tide.js" };
-      const seen: Fields[] = [];
+      const seen: FieldTable[] = [];
       server.tool_register(tool_make("kv_put"), (given) => {
         seen.push(given);
         return { content: [{ type: "text", text: constants.script_text }] };
@@ -379,7 +412,7 @@ namespace test_mcp {
     // A call with no arguments runs the tool on an empty object.
     test_arguments_absent(): void {
       const server = browser_make();
-      const seen: Fields[] = [];
+      const seen: FieldTable[] = [];
       server.tool_register(tool_make("render"), (given) => {
         seen.push(given);
         return { content: [] };
@@ -418,7 +451,7 @@ namespace test_mcp {
     test_request_invalid(): void {
       const server = browser_make();
       const text = i18n("mcp.request_invalid");
-      const cases: [Fields, unknown][] = [
+      const cases: [FieldTable, unknown][] = [
         [{ jsonrpc: "1.0", id: 5, method: "ping" }, 5],
         [{ jsonrpc: "2.0", id: 5 }, 5],
         [{ jsonrpc: "2.0", id: null, method: "ping" }, null],
@@ -448,7 +481,7 @@ namespace test_mcp {
       const server = browser_make();
       server.tool_register(tool_make("kv_get"), call_unexpected);
       const call = { jsonrpc: "2.0", id: 7, method: "tools/call" };
-      const cases: Fields[] = [
+      const cases: FieldTable[] = [
         call,
         { ...call, params: "kv_get" },
         { ...call, params: { name: 3, arguments: {} } },
@@ -749,7 +782,7 @@ namespace test_mcp {
     test_tools_invalid(): void {
       const bench = bench_make();
       const client = client_make(bench, "server");
-      const cases: Fields[] = [
+      const cases: FieldTable[] = [
         { tools: {} },
         { tools: [{ name: "kv_get", inputSchema: { type: "object" } }] },
       ];
@@ -802,7 +835,7 @@ namespace test_mcp {
     test_result_invalid(): void {
       const bench = bench_make();
       const client = client_make(bench, "server");
-      const cases: Fields[] = [
+      const cases: FieldTable[] = [
         { content: "{}" },
         { content: [], isError: "no" },
       ];
@@ -880,7 +913,7 @@ namespace test_mcp {
       const bench = bench_make();
       const client = client_make(bench, "server");
       const refusal = { code: -32600, message: i18n("mcp.request_invalid") };
-      const cases: Fields[] = [
+      const cases: FieldTable[] = [
         { jsonrpc: "1.0", id: 1, result: {} },
         { jsonrpc: "2.0", id: 1, result: {} },
         { jsonrpc: "2.0", id: 3 },
@@ -923,7 +956,7 @@ namespace test_mcp {
       const set = new mcp.ClientSet();
       set.client_add("browser", browser);
       set.client_add("server", server);
-      const listed = (recorded.result as { tools: Fields[] }).tools;
+      const listed = (recorded.result as { tools: FieldTable[] }).tools;
       this.assertEqual(set.tools_cached(), [
         { ...kv_tool, name: "browser.kv_get" },
         { ...listed[0], name: "server.source_put" },

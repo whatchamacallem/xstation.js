@@ -58,7 +58,8 @@ namespace page {
     debug_setting: "debug",
     synchronous_setting: "queue_synchronous",
     media_setting: "media_db_bytes",
-    timeout_setting: "provider.timeout_seconds",
+    // The seconds an image download may last, a default its writer chose.
+    download_seconds: 120,
     ring_setting: "verbose_ring",
   });
 
@@ -149,11 +150,6 @@ namespace page {
       "dom.": "dom",
     };
     return test ? { ...owners, "tap.": "ai" } : owners;
-  }
-
-  // Whether the lines this thread builds use full names, which is debug mode.
-  function names_full(): boolean {
-    return settings.settings_get(constants.debug_setting) as boolean;
   }
 
   // Whether a line uses full header names.
@@ -607,6 +603,7 @@ namespace page {
   function thread_open(
     port: MessagePort,
     value: settings.Settings,
+    full: boolean,
     test: boolean,
   ): queue.TaskQueue {
     settings.settings_set(value);
@@ -621,7 +618,7 @@ namespace page {
     tasks.sink_attach(verbose.sink_set, settings.settings_get);
     tasks.port_add(constants.ai_owner, new queue.ThreadPort(port));
     settings.sender_register((put: lines.SettingsPut) => {
-      const line = line_build(constants.put_type, names_full(), {
+      const line = line_build(constants.put_type, full, {
         settings: put.settings,
       });
       tasks.line_notify(line, constants.ai_owner);
@@ -629,17 +626,18 @@ namespace page {
     return tasks;
   }
 
-  // Builds the engine's UI thread on the settings the worker sent.
+  // Builds the engine's UI thread on the settings and name form the AI sent.
   function engine_open(
     body: HTMLElement,
     elements: PageElements,
     port: MessagePort,
     value: settings.Settings,
+    full: boolean,
   ): queue.TaskQueue {
-    const tasks = thread_open(port, value, false);
+    const tasks = thread_open(port, value, full, false);
     const images = new media.MediaPort(
       settings.settings_get(constants.media_setting) as number,
-      settings.settings_get(constants.timeout_setting) as number,
+      constants.download_seconds,
     );
     tasks.port_add(constants.dom_owner, new DomPort(body));
     tasks.port_add(constants.media_owner, images);
@@ -655,7 +653,7 @@ namespace page {
         view: new console_view.ConsoleView(elements.debug, tasks),
         overlays: new overlay.Overlay(elements.debug, ring),
         debug: settings.settings_get(constants.debug_setting) === true,
-        full: names_full(),
+        full,
         log: (text: string) => verbose.log(text),
       },
       dispatch.handler_register,
@@ -673,7 +671,9 @@ namespace page {
     const channel = new MessageChannel();
     channel.port1.onmessage = (event: MessageEvent<unknown>) => {
       const value = settings_take(event.data);
-      run(engine_open(body, elements, channel.port1, value));
+      // The worker's one `names_full()` chose the form of its first line.
+      const full = full_of(event.data as lines.Line);
+      run(engine_open(body, elements, channel.port1, value, full));
     };
     worker_post(worker, channel.port2);
   }
@@ -694,7 +694,9 @@ namespace page {
     const worker = worker_make();
     const channel = new MessageChannel();
     channel.port1.onmessage = (event: MessageEvent<unknown>) => {
-      run(thread_open(channel.port1, settings_take(event.data), true));
+      const value = settings_take(event.data);
+      const full = full_of(event.data as lines.Line);
+      run(thread_open(channel.port1, value, full, true));
     };
     worker_post(worker, channel.port2);
   }

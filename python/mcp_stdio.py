@@ -8,10 +8,13 @@
 # Run as python3 python/mcp_stdio.py --root ROOT. A line that is not a JSON
 # object is a hard error: the exception reaches stderr and the exit code is 1.
 
-import argparse, engine_system, json, mcp, os, settings, sys
+import argparse, engine_system, io, json, mcp, os, settings, sys
 from collections.abc import Callable
 from typing import TextIO, cast
 from i18n import i18n
+
+# The encoding of stdin and stdout, which MCP's stdio transport fixes.
+_ENCODING = "utf-8"
 
 # The name the server reports to a client.
 _SERVER_NAME = "xsjs-server"
@@ -67,6 +70,9 @@ def stdio_serve(argv: list[str]) -> int:
     root: str = parser.parse_args(argv).root
     loaded = settings.settings_load(os.path.join(root, _SETTINGS_NAME))
     debug: bool = loaded["debug"]
+    # The streams take the transport's encoding in place of the locale's.
+    for stream in (sys.stdin, sys.stdout):
+        cast(io.TextIOWrapper, stream).reconfigure(encoding=_ENCODING)
     return stdio_run(
         lambda server: engine_system.tools_register(server, root, debug),
         sys.stdin,

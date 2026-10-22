@@ -18,6 +18,9 @@ _STRINGS_PATH = os.path.join(
 # A placeholder, a decimal index with no leading zero in braces.
 _PLACEHOLDER = re.compile(r"\{(0|[1-9][0-9]*)\}")
 
+# The strings, name to text, filled from the strings file once, at import.
+_STRINGS: dict[str, str] = {}
+
 
 # Reads the strings file, a JSON object whose values are all strings.
 def _strings_load(path: str) -> dict[str, str]:
@@ -34,10 +37,6 @@ def _strings_load(path: str) -> dict[str, str]:
     return strings
 
 
-# The strings, name to text, read once at import.
-_STRINGS = _strings_load(_STRINGS_PATH)
-
-
 # Returns the distinct placeholder indices of a text.
 def _indices_find(text: str) -> set[int]:
     return {int(index) for index in _PLACEHOLDER.findall(text)}
@@ -52,3 +51,7 @@ def i18n(name: str, *args: object) -> str:
             f"{name}: placeholders {sorted(indices)}, arguments {len(args)}"
         )
     return _PLACEHOLDER.sub(lambda match: str(args[int(match[1])]), text)
+
+
+# Fills the strings table at import, raising unless the file is well formed.
+_STRINGS.update(_strings_load(_STRINGS_PATH))

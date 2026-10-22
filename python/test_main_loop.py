@@ -62,16 +62,16 @@ _INITIALIZE_RESPONSE: dict[str, Any] = {
     },
 }
 
-# The size over which a blob streams to the cache, small for the loop tests.
+# A size chosen by its writer, small: a blob over it streams to the cache.
 _OVERFLOW_BYTES = 4096
 
-# The most the loop reads at once, small so that lines arrive split.
+# A size chosen by its writer: the most the loop reads, so lines split.
 _CHUNK_BYTES = 1000
 
-# The size of the blob that streams, over `_OVERFLOW_BYTES`.
+# A size chosen by its writer: a blob that streams, over `_OVERFLOW_BYTES`.
 _STREAMED_BYTES = _OVERFLOW_BYTES * 2 + 1
 
-# The most the test reads from the output pipe at once.
+# A size chosen by its writer: the most the test reads from the pipe.
 _READ_BYTES = 65536
 
 # The `seq` of a new database, which its creation leaves as it was.

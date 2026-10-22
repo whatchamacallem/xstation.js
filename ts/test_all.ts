@@ -15,9 +15,9 @@
 // that suite loses none of them.
 
 namespace test_all {
-  // The name of the UI thread, the TAP line, and the element of the stream.
+  // The name of the AI worker's thread, the TAP line, the stream's element.
   const constants = Object.freeze({
-    page_name: "",
+    worker_name: "ai",
     line_type: "tap.line",
     language: "typescript" as const,
     output_id: "tap_output",
@@ -131,10 +131,10 @@ namespace test_all {
 
   // Runs this thread's tests through the test page's hook of the thread.
   export function suites_run(): void {
-    if (self.name === constants.page_name) {
-      boot.test_page(page_run);
-    } else {
+    if (self.name === constants.worker_name) {
       boot.test_worker(worker_run);
+    } else {
+      boot.test_page(page_run);
     }
   }
 }

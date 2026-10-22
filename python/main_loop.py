@@ -306,7 +306,7 @@ def _failure_exit(
 def _line_serve(
     line: jslb.Object, write_fd: int, chunk: int, debug: bool
 ) -> None:
-    # A first server request must take its ids after the 1 that `hello` used.
+    # The server awaits no reply, as the one to `hello` was bootstrap's.
     if jslb.field_get(line[0], "reply") is not None:
         raise LookupError(
             i18n("main_loop.reply_unknown", jslb.line_render(line))

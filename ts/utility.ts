@@ -6,7 +6,7 @@
 // base64 and JSON text. Every one is synchronous. Its messages come from
 // `i18n`, called only when a routine throws.
 namespace utility {
-  // The sizes and limits of the routines below.
+  // The sizes, limits, pattern and coders of the routines below.
   const constants = Object.freeze({
     block_bytes: 64,
     block_words: 16,
@@ -19,6 +19,18 @@ namespace utility {
     word_range: 2 ** 32,
     surrogate_first: 0xd800,
     surrogate_last: 0xdfff,
+    // Matches strict base64: padded, no white space, zero unused bits.
+    base64_form: new RegExp(
+      "^(?:[A-Za-z0-9+/]{4})*" +
+        "(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$",
+    ),
+    // The strict `UTF-8` decoder, which keeps a leading byte order mark.
+    text_decoder: new TextDecoder("utf-8", {
+      fatal: true,
+      ignoreBOM: true,
+    }),
+    // The `UTF-8` encoder.
+    text_encoder: new TextEncoder(),
   });
 
   // Matches a surrogate that is not half of a pair, read by code points.
@@ -26,12 +38,6 @@ namespace utility {
     `[${String.fromCharCode(constants.surrogate_first)}-` +
       `${String.fromCharCode(constants.surrogate_last)}]`,
     "u",
-  );
-
-  // Matches strict base64: padded, no white space, zero unused bits.
-  const base64_form = new RegExp(
-    "^(?:[A-Za-z0-9+/]{4})*" +
-      "(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$",
   );
 
   // The first prime numbers, as many as asked for.
@@ -61,15 +67,6 @@ namespace utility {
     primes_first(constants.hash_words),
     (prime) => fraction_bits(Math.sqrt(prime)),
   );
-
-  // The strict `UTF-8` decoder, which keeps a leading byte order mark.
-  const text_decoder = new TextDecoder("utf-8", {
-    fatal: true,
-    ignoreBOM: true,
-  });
-
-  // The `UTF-8` encoder.
-  const text_encoder = new TextEncoder();
 
   // Rotates the 32 bits of a word right by a count of bits.
   function bits_rotate(word: number, count: number): number {
@@ -170,13 +167,13 @@ namespace utility {
     if (surrogate_lone.test(text)) {
       fail_now(i18n("utility.text_refused"));
     }
-    return text_encoder.encode(text);
+    return constants.text_encoder.encode(text);
   }
 
   // Decodes `UTF-8` and throws on an invalid sequence.
   export function utf8_decode(data: Uint8Array): string {
     try {
-      return text_decoder.decode(data);
+      return constants.text_decoder.decode(data);
     } catch (error) {
       throw error_wrap(i18n("utility.bytes_refused"), error);
     }
@@ -184,7 +181,7 @@ namespace utility {
 
   // Decodes strict base64 text into bytes and throws on any other text.
   export function base64_decode(text: string): Uint8Array {
-    if (!base64_form.test(text)) {
+    if (!constants.base64_form.test(text)) {
       fail_now(i18n("utility.base64_refused"));
     }
     const binary = atob(text);

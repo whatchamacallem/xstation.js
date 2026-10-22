@@ -74,8 +74,8 @@ function _xsjs_start_step_check_port {
     foreach ($port_number_ in $port_, $linux_port_) {
         # A closed port proxy or `wslrelay` frees its port a moment later.
         $owner_ = _xsjs_start_get_listener $port_number_
-        for ($try_ = 0; $owner_ -and $try_ -lt 30; $try_++) {
-            Start-Sleep -Milliseconds 500
+        for ($try_ = 0; $owner_ -and $try_ -lt $poll_tries_; $try_++) {
+            Start-Sleep -Milliseconds $poll_milliseconds_
             $owner_ = _xsjs_start_get_listener $port_number_
         }
         if ($owner_) {
@@ -89,12 +89,9 @@ function _xsjs_start_step_check_port {
 
 # Returns the process listening on the port in Windows, if any.
 function _xsjs_start_get_listener ([int]$port_number_) {
-    $connection_ = @{
-        LocalPort   = $port_number_
-        State       = 'Listen'
-        ErrorAction = 'SilentlyContinue'
-    }
-    $listener_ = Get-NetTCPConnection @connection_ | Select-Object -First 1
+    $listener_ = Get-NetTCPConnection | Where-Object {
+        $_.State -eq 'Listen' -and $_.LocalPort -eq $port_number_
+    } | Select-Object -First 1
     if ($listener_) { Get-Process -Id $listener_.OwningProcess }
 }
 
@@ -111,6 +108,11 @@ function _xsjs_start_copy_files ([string[]]$sources_, [string]$target_) {
 function _xsjs_start_step_install_server {
     xsjs_util_write_log_section $i18n_.install_server
     $folders_ = "$linux_path_/python", "$linux_path_/i18n"
+    # The copies of earlier runs go, so the root holds this checkout's only.
+    xsjs_util_invoke_native { wsl -e rm -rf @folders_ }
+    if ($LASTEXITCODE -ne 0) {
+        throw ($i18n_.bootstrap_not_installed -f $linux_path_)
+    }
     xsjs_util_invoke_native { wsl -e mkdir -p @folders_ }
     if ($LASTEXITCODE -ne 0) {
         throw ($i18n_.bootstrap_not_installed -f $linux_path_)
@@ -329,15 +331,15 @@ function _xsjs_start_step_register_task {
     xsjs_util_write_log $registered_
 }
 
-# Starts the task and throws with ttyd's log unless it listens within 15 s.
+# Starts the task and throws with ttyd's log unless it listens within a poll.
 function _xsjs_start_step_start_task {
     xsjs_util_write_log_section ($i18n_.start_server -f $port_)
-    Remove-Item $ttyd_log_path_ -ErrorAction SilentlyContinue
+    if (Test-Path $ttyd_log_path_) { Remove-Item $ttyd_log_path_ }
     Start-ScheduledTask -TaskName $task_name_
     # `wslrelay` listens in Windows once ttyd listens in Linux.
     $relay_ = $null
-    for ($try_ = 0; -not $relay_ -and $try_ -lt 30; $try_++) {
-        Start-Sleep -Milliseconds 500
+    for ($try_ = 0; -not $relay_ -and $try_ -lt $poll_tries_; $try_++) {
+        Start-Sleep -Milliseconds $poll_milliseconds_
         $relay_ = _xsjs_start_get_listener $linux_port_
     }
     if (-not $relay_) {
