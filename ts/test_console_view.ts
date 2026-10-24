@@ -4,18 +4,17 @@
 //
 // Tests of the console view with a fake terminal on a container above a band
 // in a frame of a fixed size, put in the page by each test and taken out after
-// it, and a real task queue of the UI thread in synchronous mode whose port to
-// the AI worker is a double.
+// it, and a double of the task queue that keeps each line the view gives it
+// and hands each submit the id the test picked. The requests, sleeps and
+// input lines the view makes, the wakes the test gives it, ttyd's first
+// messages and the texts of the view's refusals are the gold record's.
 namespace test_console_view {
-  // The test type prefix, the types, a token, the frame and the fake's cells.
+  // The owner, the ids the double hands out, the frame and the fake's cells.
   const constants = Object.freeze({
-    type_prefix: "console_view_test.",
-    wake_type: "ui.console_reply",
-    closed_type: "ui.console_closed",
-    open_type: "console.open",
-    close_type: "console.close",
-    input_type: "console.input",
-    token: "dXNlcjpwYXNz",
+    // The thread the view gives its lines to.
+    owner: "ai",
+    // The ids the queue double hands the submits, in order, its writer's.
+    request_ids: Object.freeze([11, 12, 13]),
     // The pixel sizes of the frame, band and cells, chosen by their writer.
     frame_width: 1000,
     frame_height: 400,
@@ -23,15 +22,6 @@ namespace test_console_view {
     cell_width: 8,
     cell_height: 17,
   });
-
-  // How many types the tests have made, so that each one is new.
-  let types_made = 0;
-
-  // Whether the wake handlers are registered, which happens once per bundle.
-  let wake_registered = false;
-
-  // The view of the last rig made, to which the wake handler passes wakes.
-  let wake_view: console_view.ConsoleView | undefined = undefined;
 
   // The rigs made since the last `setUp`, whose frames `tearDown` takes out.
   let rigs_made: ViewRig[] = [];
@@ -56,8 +46,6 @@ namespace test_console_view {
     resized: [number, number][] = [];
     screen: HTMLElement | undefined = undefined;
     data_listener: ((data: string) => void) | undefined = undefined;
-    resize_listener:
-      ((size: { cols: number; rows: number }) => void) | undefined = undefined;
 
     // Records the terminal as made, with its size and its input option.
     constructor(options: TerminalOptions) {
@@ -80,12 +68,12 @@ namespace test_console_view {
       this.screen_size();
     }
 
-    // Records a resize and reports a change of size, as xterm does.
+    // Records a resize and takes the new size, as xterm does.
     resize(cols: number, rows: number): void {
       this.resized.push([cols, rows]);
-      if (cols !== this.cols || rows !== this.rows) {
-        this.size_change(cols, rows);
-      }
+      this.cols = cols;
+      this.rows = rows;
+      this.screen_size();
     }
 
     // Records the bytes written to the terminal.
@@ -103,13 +91,6 @@ namespace test_console_view {
       this.data_listener = listener;
     };
 
-    // Keeps the listener of the resize events.
-    onResize = (
-      listener: (size: { cols: number; rows: number }) => void,
-    ): void => {
-      this.resize_listener = listener;
-    };
-
     // Types text, which reaches the view only while input is on, as in xterm.
     text_type(text: string): void {
       if (!this.options.disableStdin) {
@@ -122,18 +103,6 @@ namespace test_console_view {
       (this.data_listener as (data: string) => void)(text);
     }
 
-    // Resizes the terminal and makes it report the new size.
-    size_change(cols: number, rows: number): void {
-      const listener = this.resize_listener as (size: {
-        cols: number;
-        rows: number;
-      }) => void;
-      this.cols = cols;
-      this.rows = rows;
-      this.screen_size();
-      listener({ cols, rows });
-    }
-
     // Sizes the rows' element of a placed terminal at a fixed size per cell.
     private screen_size(): void {
       const screen = this.screen;
@@ -144,24 +113,39 @@ namespace test_console_view {
     }
   }
 
-  // A double of the port to the AI worker: it keeps posts and hands in lines.
-  class PortDouble implements queue.Port {
-    readonly posted: lines.Line[] = [];
-    private receiver: ((line: lines.Line) => void) | undefined = undefined;
+  // One line the view gave the queue double: by which call, for which owner.
+  interface LineGiven {
+    call: "task_submit" | "line_notify";
+    line: lines.Line;
+    owner: string;
+  }
 
-    // Keeps a posted line.
-    line_post(line: lines.Line, _transfer: ArrayBuffer[]): void {
-      this.posted.push(line);
+  // A double of the task queue, keeping each line the view gives it in order.
+  class TasksDouble {
+    readonly given: LineGiven[] = [];
+    // The ids handed to the submits so far, in order.
+    readonly handed: number[] = [];
+    readonly #ids: number[];
+
+    // Takes the ids the submits get, in order.
+    constructor(ids: readonly number[]) {
+      this.#ids = [...ids];
     }
 
-    // Takes the receiver, which is the queue.
-    line_receive(fn: (line: lines.Line) => void): void {
-      this.receiver = fn;
+    // Keeps a request and returns the next id the test picked.
+    task_submit(line: lines.Line, owner: string): number {
+      const id = this.#ids.shift();
+      if (id === undefined) {
+        throw new Error("The queue double was given no id for this submit.");
+      }
+      this.given.push({ call: "task_submit", line, owner });
+      this.handed.push(id);
+      return id;
     }
 
-    // Hands a line to the queue as if the AI worker sent it.
-    line_send(line: lines.Line): void {
-      (this.receiver as (line: lines.Line) => void)(line);
+    // Keeps a notification.
+    line_notify(line: lines.Line, owner: string): void {
+      this.given.push({ call: "line_notify", line, owner });
     }
   }
 
@@ -195,51 +179,60 @@ namespace test_console_view {
     }
   }
 
-  // A view in its frame with its terminal, queue, port double and two types.
+  // A view in its frame with its terminal and its queue double.
   interface ViewRig {
     frame: HTMLElement;
     container: HTMLElement;
     band: HTMLElement;
-    tasks: queue.TaskQueue;
-    ai: PortDouble;
+    tasks: TasksDouble;
     terminal: FakeTerminal;
     view: console_view.ConsoleView;
-    start: string;
-    stop: string;
   }
 
-  // A type that no other test registers.
-  function type_fresh(): string {
-    types_made += 1;
-    return `${constants.type_prefix}${types_made}`;
+  // A copy of a value of this module's gold, which the harness keeps frozen.
+  function gold_value(name: string): unknown {
+    return structuredClone(
+      harness.gold_get(`typescript.test_console_view.${name}`),
+    );
   }
 
-  // Registers a handler for a new type and returns that type.
-  function handler_fresh(fn: dispatch.Handler): string {
-    const type = type_fresh();
-    dispatch.handler_register(type, 0, fn);
-    return type;
+  // A text of this module's gold, a run time `{n}` left for the test to fill.
+  function gold_text(name: string): string {
+    return harness.gold_get(
+      `typescript.test_console_view.texts.${name}`,
+    ) as string;
   }
 
-  // Registers the wake handlers once, which pass each wake to the last view.
-  function wake_register(): void {
-    if (wake_registered) {
-      return;
-    }
-    wake_registered = true;
-    dispatch.handler_register(constants.wake_type, 0, (line) => {
-      (wake_view as console_view.ConsoleView).open_done(line);
-      return undefined;
-    });
-    dispatch.handler_register(constants.closed_type, 0, (line) => {
-      (wake_view as console_view.ConsoleView).close_done(line);
-      return undefined;
-    });
+  // A copy of a line of this module's gold, a run time part set on the copy.
+  function gold_line(name: string): lines.Line {
+    return gold_value(`lines.${name}`) as lines.Line;
   }
 
-  // Builds a line with no blobs and no payload from its type.
-  function line_build(type: string): lines.Line {
-    return jslb.line_make(jslb.header_make(type), [], {});
+  // A ttyd first message of the gold, the text the view sends as bytes.
+  function first_message(name: string): string {
+    return gold_value(`first_messages.${name}`) as string;
+  }
+
+  // A wake of the gold whose one reply answers the request of the id.
+  function wake_make(name: string, id: number): lines.Line {
+    const wake = gold_line(name);
+    const replies = wake.replies as lines.Line[];
+    Object.assign(replies[0][0], { reply: id });
+    return wake;
+  }
+
+  // A sleep of the gold that waits for the request of the id.
+  function sleep_make(name: string, id: number): dispatch.Sleep {
+    const sleep = gold_value(`lines.${name}`) as dispatch.Sleep;
+    sleep.wait_ids = [id];
+    return sleep;
+  }
+
+  // The text of the refusal of a reply to one request while another waits.
+  function reply_id_text(answered: number, waited: number): string {
+    return gold_text("console_view_reply_id")
+      .replaceAll("{0}", String(answered))
+      .replaceAll("{1}", String(waited));
   }
 
   // Puts in the page a frame of a fixed size, a column laid out as the page.
@@ -259,9 +252,8 @@ namespace test_console_view {
     return frame;
   }
 
-  // Makes a view on a UI queue whose owner table leaves out the console.
+  // Makes a view on a queue double that hands out the test's ids.
   function rig_make(): ViewRig {
-    wake_register();
     const frame = frame_make();
     const container = document.createElement("div");
     Object.assign(container.style, { minHeight: "0px", overflow: "auto" });
@@ -271,82 +263,69 @@ namespace test_console_view {
       height: `${constants.band_height}px`,
     });
     frame.append(container, band);
-    const owners: queue.OwnerTable = { [constants.type_prefix]: "ui" };
-    const tasks = new queue.TaskQueue("ui", owners, true);
-    const ai = new PortDouble();
-    tasks.port_add("ai", ai);
-    const view = new console_view.ConsoleView(container, tasks);
-    wake_view = view;
-    const start = handler_fresh(() => view.open_request());
-    const stop = handler_fresh(() => view.close_request());
-    const terminal = FakeTerminal.made[FakeTerminal.made.length - 1];
-    const rig: ViewRig = {
-      frame,
+    const tasks = new TasksDouble(constants.request_ids);
+    const view = new console_view.ConsoleView(
       container,
-      band,
-      tasks,
-      ai,
-      terminal,
-      view,
-      start,
-      stop,
-    };
+      tasks as unknown as queue.TaskQueue,
+    );
+    const terminal = FakeTerminal.made[FakeTerminal.made.length - 1];
+    const rig: ViewRig = { frame, container, band, tasks, terminal, view };
     rigs_made.push(rig);
     return rig;
   }
 
-  // Runs the handler that asks for the console, as the `ctrl-0` handler does.
-  function start_run(rig: ViewRig): void {
-    rig.tasks.line_notify(line_build(rig.start));
+  // The id the queue double handed to the last submit.
+  function id_last(rig: ViewRig): number {
+    return rig.tasks.handed[rig.tasks.handed.length - 1];
   }
 
-  // Runs a handler that asks for the close of the console.
-  function stop_run(rig: ViewRig): void {
-    rig.tasks.line_notify(line_build(rig.stop));
+  // Gives the view the wake of the gold that answers its last request.
+  function open_answer(rig: ViewRig, name: string): void {
+    rig.view.open_done(wake_make(name, id_last(rig)));
   }
 
-  // The lines of a type the view posted to the AI worker, in order.
-  function posted_of(rig: ViewRig, type: string): lines.Line[] {
-    return rig.ai.posted.filter(
-      (line) => jslb.field_get(line[0], "type") === type,
-    );
+  // Gives the view the wake of its last request, the close, as the AI does.
+  function close_answer(rig: ViewRig): void {
+    rig.view.close_done(wake_make("close_wake", id_last(rig)));
   }
 
-  // Answers the last request for the console with the token, as the AI does.
-  function reply_send(rig: ViewRig, token: string): void {
-    const requests = posted_of(rig, constants.open_type);
-    const request = requests[requests.length - 1];
-    rig.ai.line_send(dispatch.reply_make(request, { token }));
-  }
-
-  // Answers the last request for the close with no payload, as the AI does.
-  function close_send(rig: ViewRig): void {
-    const requests = posted_of(rig, constants.close_type);
-    const request = requests[requests.length - 1];
-    rig.ai.line_send(dispatch.reply_make(request, {}));
-  }
-
-  // Asks for the console and answers, so that the console is open.
+  // Asks for the console and answers with the token, so that it is open.
   function rig_start(rig: ViewRig): void {
-    start_run(rig);
-    reply_send(rig, constants.token);
+    rig.view.open_request();
+    open_answer(rig, "open_wake");
   }
 
-  // A reply of the type to the request id, carrying the token.
-  function reply_build(type: string, id: number): lines.Line {
-    const header = jslb.header_make(type, { reply: id, full: true });
-    return jslb.line_make(header, [], { token: constants.token });
+  // The lines the view submitted to the queue double, in order.
+  function submits_of(rig: ViewRig): lines.Line[] {
+    return rig.tasks.given
+      .filter((given) => given.call === "task_submit")
+      .map((given) => given.line);
   }
 
-  // A wake as the queue makes it, holding the one reply.
-  function wake_build(reply: lines.Line): lines.Line {
-    const header = jslb.header_make(constants.wake_type);
-    return jslb.line_make(header, [], { state: null, replies: [reply] });
-  }
-
-  // The `console.input` lines the view posted to the AI worker, in order.
+  // The `console.input` lines the view notified to the queue double.
   function inputs_of(rig: ViewRig): lines.Line[] {
-    return posted_of(rig, constants.input_type);
+    return rig.tasks.given
+      .filter((given) => given.call === "line_notify")
+      .map((given) => given.line);
+  }
+
+  // The `console.input` line of the gold that carries one message as blob 1.
+  function input_expected(message: Uint8Array): lines.Line {
+    const line = gold_line("input");
+    line[1] = { size: message.length, d: message };
+    return line;
+  }
+
+  // A request of the gold as the view submits it for the AI worker.
+  function submit_expected(name: string): LineGiven {
+    const line = gold_line(name);
+    return { call: "task_submit", line, owner: constants.owner };
+  }
+
+  // A message of ttyd as the view notifies it for the AI worker.
+  function notify_expected(message: Uint8Array): LineGiven {
+    const line = input_expected(message);
+    return { call: "line_notify", line, owner: constants.owner };
   }
 
   // The one child element the view made in a container.
@@ -356,12 +335,17 @@ namespace test_console_view {
 
   // The bytes of blob 1 of a line.
   function blob_bytes(line: lines.Line): Uint8Array {
-    return jslb.field_get(line[1] as lines.BlobHeader, "data") as Uint8Array;
+    return (line[1] as lines.BlobHeader).d as Uint8Array;
+  }
+
+  // The text of bytes read as strict `UTF-8`.
+  function text_decode(data: Uint8Array): string {
+    return new TextDecoder("utf-8", { fatal: true }).decode(data);
   }
 
   // The bytes of a message: the kind byte, then the text as `UTF-8`.
   function message_bytes(kind: number, text: string): Uint8Array {
-    const body = utility.utf8_encode(text);
+    const body = new TextEncoder().encode(text);
     const message = new Uint8Array(body.length + 1);
     message[0] = kind;
     message.set(body, 1);
@@ -390,17 +374,20 @@ namespace test_console_view {
       this.assertEqual(FakeTerminal.made.length, 1);
       this.assertEqual(rig.terminal.opened.length, 0);
       this.assertTrue(rig.terminal.options.disableStdin);
-      this.assertEqual(rig.ai.posted.length, 0);
-      this.assertEqual(rig.tasks.depth(), 0);
+      this.assertEqual(rig.tasks.given.length, 0);
     }
 
     // Two views on one queue can be made, as a view registers no handler.
     test_made_twice(): void {
-      const tasks = new queue.TaskQueue("ui", {}, true);
+      const tasks = new TasksDouble([]);
       for (let count = 0; count < 2; count += 1) {
-        new console_view.ConsoleView(document.createElement("div"), tasks);
+        new console_view.ConsoleView(
+          document.createElement("div"),
+          tasks as unknown as queue.TaskQueue,
+        );
       }
       this.assertEqual(FakeTerminal.made.length, 2);
+      this.assertEqual(tasks.given.length, 0);
     }
 
     // The terminal is made 120 columns wide and 40 rows high.
@@ -419,7 +406,7 @@ namespace test_console_view {
       this.assertEqual(rig.terminal.opened.length, 1);
       this.assertTrue(rig.terminal.opened[0] === child);
       this.assertEqual(rig.terminal.focused, 1);
-      this.assertEqual(rig.ai.posted.length, 0);
+      this.assertEqual(rig.tasks.given.length, 0);
     }
 
     // Later shows reveal the child and focus again, and ask for nothing.
@@ -431,7 +418,7 @@ namespace test_console_view {
       this.assertFalse(child_find(rig.container).hidden);
       this.assertEqual(rig.terminal.opened.length, 1);
       this.assertEqual(rig.terminal.focused, 2);
-      this.assertEqual(rig.ai.posted.length, 0);
+      this.assertEqual(rig.tasks.given.length, 0);
     }
 
     // A hide hides the child and does nothing to the terminal.
@@ -442,7 +429,7 @@ namespace test_console_view {
       this.assertTrue(child_find(rig.container).hidden);
       this.assertEqual(rig.terminal.opened.length, 1);
       this.assertEqual(FakeTerminal.made.length, 1);
-      this.assertEqual(rig.ai.posted.length, 0);
+      this.assertEqual(rig.tasks.given.length, 0);
     }
 
     // A hide before any show leaves the terminal out of the page.
@@ -451,7 +438,7 @@ namespace test_console_view {
       rig.view.view_hide();
       this.assertTrue(child_find(rig.container).hidden);
       this.assertEqual(rig.terminal.opened.length, 0);
-      this.assertEqual(rig.ai.posted.length, 0);
+      this.assertEqual(rig.tasks.given.length, 0);
     }
 
     // A toggle shows a hidden view and the next toggle hides it again.
@@ -465,20 +452,17 @@ namespace test_console_view {
       rig.view.view_toggle();
       this.assertFalse(child.hidden);
       this.assertEqual(rig.terminal.opened.length, 1);
-      this.assertEqual(rig.ai.posted.length, 0);
+      this.assertEqual(rig.tasks.given.length, 0);
     }
 
-    // Showing an open console sends its fitted size, hiding sends nothing.
+    // Showing an open console fits its rows and sends no resize to tty 0.
     test_toggle_open(): void {
       const rig = rig_make();
       rig_start(rig);
       rig.view.view_toggle();
       rig.view.view_toggle();
-      this.assertEqual(rig.ai.posted.length, 3);
-      this.assertEqual(
-        blob_bytes(inputs_of(rig)[1]),
-        message_bytes(0x31, '{"columns":120,"rows":20}'),
-      );
+      this.assertEqual(rig.terminal.rows, 20);
+      this.assertEqual(rig.tasks.given.length, 2);
       this.assertFalse(rig.terminal.options.disableStdin);
     }
 
@@ -488,121 +472,95 @@ namespace test_console_view {
       this.assertFalse(rig.view.open_wanted());
       rig.view.view_show();
       this.assertTrue(rig.view.open_wanted());
-      start_run(rig);
+      rig.view.open_request();
       this.assertFalse(rig.view.open_wanted());
-      reply_send(rig, constants.token);
+      open_answer(rig, "open_wake");
       this.assertFalse(rig.view.open_wanted());
       rig.view.exit_done();
       this.assertTrue(rig.view.open_wanted());
       rig.view.view_hide();
       this.assertFalse(rig.view.open_wanted());
-      this.assertEqual(rig.ai.posted.length, 2);
+      this.assertEqual(rig.tasks.given.length, 2);
+    }
+
+    // The view is open only while tty 0 is open: not idle, opening, closing.
+    test_open_is(): void {
+      const rig = rig_make();
+      this.assertFalse(rig.view.open_is());
+      rig.view.open_request();
+      this.assertFalse(rig.view.open_is());
+      open_answer(rig, "open_wake");
+      this.assertTrue(rig.view.open_is());
+      rig.view.close_request();
+      this.assertFalse(rig.view.open_is());
+      close_answer(rig);
+      this.assertFalse(rig.view.open_is());
+      rig.view.exit_done();
+      this.assertFalse(rig.view.open_is());
     }
   }
 
   // The request for tty 0, its wake and ttyd's first message.
   export class TestOpening extends TerminalCase {
-    // A handler run posts one `console.open` request to the AI worker.
+    // A request gives the queue one `console.open` for the AI worker.
     test_open_request(): void {
       const rig = rig_make();
-      start_run(rig);
-      this.assertEqual(rig.ai.posted.length, 1);
-      const line = rig.ai.posted[0];
-      this.assertEqual(jslb.field_get(line[0], "type"), constants.open_type);
-      this.assertEqual(jslb.field_get(line[0], "id"), 1);
-      this.assertEqual(jslb.field_get(line[0], "blobs"), 0);
-      this.assertEqual(rig.tasks.depth(), 1);
+      rig.view.open_request();
+      this.assertEqual(rig.tasks.given, [submit_expected("open_request")]);
       this.assertTrue(rig.terminal.options.disableStdin);
     }
 
-    // The request returns a sleep on its id that wakes with the wake type.
+    // The request returns a sleep on the id it got that wakes with its type.
     test_sleep_returned(): void {
       const rig = rig_make();
-      const sleeps: dispatch.Sleep[] = [];
-      const keep = handler_fresh(() => {
-        const sleep = rig.view.open_request();
-        sleeps.push(sleep);
-        return sleep;
-      });
-      rig.tasks.line_notify(line_build(keep));
-      this.assertEqual(sleeps.length, 1);
-      this.assertEqual(sleeps[0].wait_ids, [1]);
-      this.assertEqual(sleeps[0].then_type, constants.wake_type);
-      this.assertEqual(sleeps[0].state, null);
+      const sleep = rig.view.open_request();
+      this.assertEqual(
+        sleep,
+        sleep_make("open_sleep", constants.request_ids[0]),
+      );
     }
 
-    // Lines use full header names, as the console exists in debug mode only.
+    // Lines take the name form the settings pick, full exactly in debug mode.
     test_full_names(): void {
       const rig = rig_make();
       rig_start(rig);
-      for (const line of [rig.ai.posted[0], rig.ai.posted[1]]) {
-        this.assertTrue("type" in line[0]);
-        this.assertFalse("t" in line[0]);
+      rig.view.close_request();
+      const full = harness.setting_get("debug") === true;
+      this.assertEqual(rig.tasks.given.length, 3);
+      for (const given of rig.tasks.given) {
+        this.assertEqual("type" in given.line[0], full);
+        this.assertEqual("t" in given.line[0], !full);
       }
     }
 
-    // A request outside a handler is refused by the queue and leaves it idle.
-    test_open_outside(): void {
-      const rig = rig_make();
-      const error = thrown_get(() => rig.view.open_request());
-      this.assertEqual(
-        error.message,
-        i18n("queue.submit_outside", "ui", constants.open_type),
-      );
-      this.assertEqual(rig.ai.posted.length, 0);
-      start_run(rig);
-      this.assertEqual(rig.ai.posted.length, 1);
-      this.assertEqual(jslb.field_get(rig.ai.posted[0][0], "id"), 1);
-    }
-
-    // A handler that drops the sleep of its request is refused by the queue.
-    test_sleep_dropped(): void {
-      const rig = rig_make();
-      const drop = handler_fresh(() => {
-        rig.view.open_request();
-        return undefined;
-      });
-      const error = thrown_get(() => rig.tasks.line_notify(line_build(drop)));
-      this.assertEqual(
-        error.message,
-        i18n("queue.wait_missing", drop, "ui", 1),
-      );
-    }
-
-    // A second request while opening or open is refused and posts nothing.
+    // A second request while opening or open is refused and gives nothing.
     test_open_twice(): void {
       const opening = rig_make();
-      start_run(opening);
-      const early = thrown_get(() => start_run(opening));
+      opening.view.open_request();
+      const early = thrown_get(() => opening.view.open_request());
       this.assertEqual(
         early.message,
-        i18n("console_view.open_phase", "opening"),
+        gold_text("console_view_open_phase_opening"),
       );
-      this.assertEqual(opening.ai.posted.length, 1);
+      this.assertEqual(opening.tasks.given.length, 1);
       const open = rig_make();
       rig_start(open);
-      const late = thrown_get(() => start_run(open));
-      this.assertEqual(late.message, i18n("console_view.open_phase", "open"));
-      this.assertEqual(open.ai.posted.length, 2);
+      const late = thrown_get(() => open.view.open_request());
+      this.assertEqual(
+        late.message,
+        gold_text("console_view_open_phase_open"),
+      );
+      this.assertEqual(open.tasks.given.length, 2);
     }
 
-    // The wake sends ttyd's first message, the one for an empty token.
+    // The wake gives ttyd's first message, the one for an empty token.
     test_first_message(): void {
       const rig = rig_make();
-      start_run(rig);
-      reply_send(rig, "");
-      const inputs = inputs_of(rig);
-      this.assertEqual(inputs.length, 1);
-      const line = inputs[0];
-      this.assertEqual(jslb.field_get(line[0], "blobs"), 1);
-      const bytes = blob_bytes(line);
-      this.assertEqual(bytes.length, 40);
-      this.assertEqual(
-        utility.utf8_decode(bytes),
-        '{"AuthToken":"","columns":120,"rows":40}',
-      );
+      rig.view.open_request();
+      open_answer(rig, "open_wake_empty");
+      const message = new TextEncoder().encode(first_message("empty"));
+      this.assertEqual(rig.tasks.given.slice(1), [notify_expected(message)]);
       this.assertFalse(rig.terminal.options.disableStdin);
-      this.assertEqual(rig.tasks.depth(), 0);
     }
 
     // The first message carries the token of the reply.
@@ -610,36 +568,33 @@ namespace test_console_view {
       const rig = rig_make();
       rig_start(rig);
       this.assertEqual(
-        utility.utf8_decode(blob_bytes(inputs_of(rig)[0])),
-        '{"AuthToken":"dXNlcjpwYXNz","columns":120,"rows":40}',
+        text_decode(blob_bytes(inputs_of(rig)[0])),
+        first_message("token"),
       );
     }
 
     // The first message has no kind byte and the size the terminal has.
     test_first_size(): void {
       const rig = rig_make();
-      start_run(rig);
+      rig.view.open_request();
       rig.terminal.cols = 100;
       rig.terminal.rows = 30;
-      reply_send(rig, "");
+      open_answer(rig, "open_wake_empty");
       const bytes = blob_bytes(inputs_of(rig)[0]);
       this.assertEqual(bytes[0], 0x7b);
-      this.assertEqual(
-        utility.utf8_decode(bytes),
-        '{"AuthToken":"","columns":100,"rows":30}',
-      );
+      this.assertEqual(text_decode(bytes), first_message("sized"));
     }
 
     // A wake before any request is refused and sends nothing.
     test_reply_idle(): void {
       const rig = rig_make();
-      const wake = wake_build(reply_build(constants.open_type, 1));
+      const wake = wake_make("open_wake", constants.request_ids[0]);
       const error = thrown_get(() => rig.view.open_done(wake));
       this.assertEqual(
         error.message,
-        i18n("console_view.reply_phase", "idle"),
+        gold_text("console_view_reply_phase_idle"),
       );
-      this.assertEqual(rig.ai.posted.length, 0);
+      this.assertEqual(rig.tasks.given.length, 0);
       this.assertTrue(rig.terminal.options.disableStdin);
     }
 
@@ -647,11 +602,11 @@ namespace test_console_view {
     test_reply_twice(): void {
       const rig = rig_make();
       rig_start(rig);
-      const wake = wake_build(reply_build(constants.open_type, 1));
+      const wake = wake_make("open_wake", constants.request_ids[0]);
       const error = thrown_get(() => rig.view.open_done(wake));
       this.assertEqual(
         error.message,
-        i18n("console_view.reply_phase", "open"),
+        gold_text("console_view_reply_phase_open"),
       );
       this.assertEqual(inputs_of(rig).length, 1);
     }
@@ -659,12 +614,13 @@ namespace test_console_view {
     // A reply of another type to the request is refused and sends nothing.
     test_reply_type(): void {
       const rig = rig_make();
-      start_run(rig);
-      const reply = reply_build("console.close", 1);
-      const error = thrown_get(() => rig.ai.line_send(reply));
+      rig.view.open_request();
+      const error = thrown_get(() =>
+        open_answer(rig, "open_wake_close_reply"),
+      );
       this.assertEqual(
         error.message,
-        i18n("console_view.reply_type", "console.close", "console.open"),
+        gold_text("console_view_reply_type_close"),
       );
       this.assertEqual(inputs_of(rig).length, 0);
       this.assertTrue(rig.terminal.options.disableStdin);
@@ -673,25 +629,22 @@ namespace test_console_view {
     // A wake with the reply to another request is refused, the right one not.
     test_reply_id(): void {
       const rig = rig_make();
-      start_run(rig);
-      const wake = wake_build(reply_build(constants.open_type, 2));
+      rig.view.open_request();
+      const [asked, other] = constants.request_ids;
+      const wake = wake_make("open_wake", other);
       const error = thrown_get(() => rig.view.open_done(wake));
-      this.assertEqual(error.message, i18n("console_view.reply_id", 2, 1));
+      this.assertEqual(error.message, reply_id_text(other, asked));
       this.assertEqual(inputs_of(rig).length, 0);
-      reply_send(rig, constants.token);
+      open_answer(rig, "open_wake");
       this.assertEqual(inputs_of(rig).length, 1);
     }
 
     // A reply without a token is refused and sends nothing.
     test_token_missing(): void {
       const rig = rig_make();
-      start_run(rig);
-      const reply = dispatch.reply_make(rig.ai.posted[0], {});
-      const error = thrown_get(() => rig.ai.line_send(reply));
-      this.assertEqual(
-        error.message,
-        i18n("console_view.token_invalid", "undefined"),
-      );
+      rig.view.open_request();
+      const error = thrown_get(() => open_answer(rig, "open_wake_bare"));
+      this.assertEqual(error.message, gold_text("console_view_token_invalid"));
       this.assertEqual(inputs_of(rig).length, 0);
       this.assertTrue(rig.terminal.options.disableStdin);
     }
@@ -704,13 +657,10 @@ namespace test_console_view {
       const rig = rig_make();
       rig_start(rig);
       rig.terminal.text_type("ls\r");
-      const inputs = inputs_of(rig);
-      this.assertEqual(inputs.length, 2);
-      this.assertEqual(jslb.field_get(inputs[1][0], "blobs"), 1);
-      this.assertEqual(
-        blob_bytes(inputs[1]),
-        Uint8Array.of(0x30, 0x6c, 0x73, 0x0d),
-      );
+      this.assertEqual(inputs_of(rig).length, 2);
+      this.assertEqual(rig.tasks.given.slice(2), [
+        notify_expected(Uint8Array.of(0x30, 0x6c, 0x73, 0x0d)),
+      ]);
     }
 
     // Each batch is its own line, in the order the terminal emitted them.
@@ -807,99 +757,23 @@ namespace test_console_view {
       const error = thrown_get(() => rig.terminal.text_force("x"));
       this.assertEqual(
         error.message,
-        i18n("console_view.input_phase", "idle"),
+        gold_text("console_view_input_phase_idle"),
       );
-      this.assertEqual(rig.ai.posted.length, 0);
+      this.assertEqual(rig.tasks.given.length, 0);
     }
 
     // Before ttyd's first message the terminal takes no input either.
     test_input_opening(): void {
       const rig = rig_make();
-      start_run(rig);
+      rig.view.open_request();
       rig.terminal.text_type("x");
       this.assertTrue(rig.terminal.options.disableStdin);
       const error = thrown_get(() => rig.terminal.text_force("x"));
       this.assertEqual(
         error.message,
-        i18n("console_view.input_phase", "opening"),
+        gold_text("console_view_input_phase_opening"),
       );
       this.assertEqual(inputs_of(rig).length, 0);
-    }
-  }
-
-  // The resizes the terminal reports, as ttyd's resize messages.
-  export class TestResize extends TerminalCase {
-    // A resize is one line whose blob is a one and the JSON of the size.
-    test_resize_message(): void {
-      const rig = rig_make();
-      rig_start(rig);
-      rig.terminal.size_change(100, 30);
-      const inputs = inputs_of(rig);
-      this.assertEqual(inputs.length, 2);
-      this.assertEqual(jslb.field_get(inputs[1][0], "blobs"), 1);
-      this.assertEqual(
-        blob_bytes(inputs[1]),
-        message_bytes(0x31, '{"columns":100,"rows":30}'),
-      );
-    }
-
-    // Input and resizes are lines in the order they happened.
-    test_order_kept(): void {
-      const rig = rig_make();
-      rig_start(rig);
-      rig.terminal.text_type("a");
-      rig.terminal.size_change(90, 20);
-      rig.terminal.text_type("b");
-      const inputs = inputs_of(rig);
-      this.assertEqual(inputs.length, 4);
-      this.assertEqual(blob_bytes(inputs[1]), message_bytes(0x30, "a"));
-      this.assertEqual(
-        blob_bytes(inputs[2]),
-        message_bytes(0x31, '{"columns":90,"rows":20}'),
-      );
-      this.assertEqual(blob_bytes(inputs[3]), message_bytes(0x30, "b"));
-    }
-
-    // A resize before any request sends nothing, and the first message has it.
-    test_resize_idle(): void {
-      const rig = rig_make();
-      rig.terminal.size_change(100, 30);
-      this.assertEqual(rig.ai.posted.length, 0);
-      rig_start(rig);
-      const inputs = inputs_of(rig);
-      this.assertEqual(inputs.length, 1);
-      this.assertEqual(
-        utility.utf8_decode(blob_bytes(inputs[0])),
-        '{"AuthToken":"dXNlcjpwYXNz","columns":100,"rows":30}',
-      );
-    }
-
-    // A resize while opening sends nothing, and the first message has it.
-    test_resize_opening(): void {
-      const rig = rig_make();
-      start_run(rig);
-      rig.terminal.size_change(100, 30);
-      this.assertEqual(rig.ai.posted.length, 1);
-      reply_send(rig, "");
-      const inputs = inputs_of(rig);
-      this.assertEqual(inputs.length, 1);
-      this.assertEqual(
-        utility.utf8_decode(blob_bytes(inputs[0])),
-        '{"AuthToken":"","columns":100,"rows":30}',
-      );
-    }
-
-    // A resize while closing or after the end sends nothing.
-    test_resize_closed(): void {
-      const rig = rig_make();
-      rig_start(rig);
-      stop_run(rig);
-      rig.terminal.size_change(100, 30);
-      this.assertEqual(rig.ai.posted.length, 3);
-      close_send(rig);
-      rig.view.exit_done();
-      rig.terminal.size_change(90, 20);
-      this.assertEqual(rig.ai.posted.length, 3);
     }
   }
 
@@ -930,13 +804,13 @@ namespace test_console_view {
     test_fitted_first(): void {
       const rig = rig_make();
       rig.view.view_show();
-      this.assertEqual(rig.ai.posted.length, 0);
+      this.assertEqual(rig.tasks.given.length, 0);
       rig_start(rig);
       const inputs = inputs_of(rig);
       this.assertEqual(inputs.length, 1);
       this.assertEqual(
-        utility.utf8_decode(blob_bytes(inputs[0])),
-        '{"AuthToken":"dXNlcjpwYXNz","columns":120,"rows":20}',
+        text_decode(blob_bytes(inputs[0])),
+        first_message("fitted"),
       );
     }
 
@@ -952,7 +826,7 @@ namespace test_console_view {
         [120, 20],
         [120, 14],
       ]);
-      this.assertEqual(rig.ai.posted.length, 0);
+      this.assertEqual(rig.tasks.given.length, 0);
     }
 
     // A scroll bar under wide columns is left out of the space.
@@ -973,10 +847,7 @@ namespace test_console_view {
       const rig = rig_make();
       rig.band.style.height = `${constants.frame_height}px`;
       const error = thrown_get(() => rig.view.view_show());
-      this.assertEqual(
-        error.message,
-        i18n("console_view.rows_unfit", 0, constants.cell_height),
-      );
+      this.assertEqual(error.message, gold_text("console_view_rows_unfit"));
       this.assertEqual(rig.terminal.rows, 40);
     }
   }
@@ -998,9 +869,10 @@ namespace test_console_view {
       rig_start(rig);
       rig.view.output_feed(message_bytes(0x30, "$ "));
       rig.view.output_feed(message_bytes(0x30, "hi\r\n"));
+      const encoder = new TextEncoder();
       this.assertEqual(rig.terminal.written.length, 2);
-      this.assertEqual(rig.terminal.written[0], utility.utf8_encode("$ "));
-      this.assertEqual(rig.terminal.written[1], utility.utf8_encode("hi\r\n"));
+      this.assertEqual(rig.terminal.written[0], encoder.encode("$ "));
+      this.assertEqual(rig.terminal.written[1], encoder.encode("hi\r\n"));
     }
 
     // A title message is ignored.
@@ -1029,7 +901,7 @@ namespace test_console_view {
         );
         this.assertEqual(
           error.message,
-          i18n("console_view.kind_unknown", kind),
+          gold_text(`console_view_kind_unknown_${kind}`),
         );
       }
       this.assertEqual(rig.terminal.written.length, 0);
@@ -1040,7 +912,7 @@ namespace test_console_view {
       const rig = rig_make();
       rig_start(rig);
       const error = thrown_get(() => rig.view.output_feed(new Uint8Array(0)));
-      this.assertEqual(error.message, i18n("console_view.message_empty"));
+      this.assertEqual(error.message, gold_text("console_view_message_empty"));
       this.assertEqual(rig.terminal.written.length, 0);
     }
 
@@ -1061,7 +933,10 @@ namespace test_console_view {
       rig.view.view_hide();
       rig.view.output_feed(message_bytes(0x30, "kept"));
       this.assertEqual(rig.terminal.written.length, 1);
-      this.assertEqual(rig.terminal.written[0], utility.utf8_encode("kept"));
+      this.assertEqual(
+        rig.terminal.written[0],
+        new TextEncoder().encode("kept"),
+      );
       this.assertEqual(rig.terminal.opened.length, 1);
     }
 
@@ -1087,138 +962,120 @@ namespace test_console_view {
 
   // The request to close tty 0, its wake, and the end that follows it.
   export class TestClosing extends TerminalCase {
-    // A handler run posts one `console.close` request and turns input off.
+    // A request gives the queue one `console.close` and turns input off.
     test_close_request(): void {
       const rig = rig_make();
       rig_start(rig);
-      stop_run(rig);
-      this.assertEqual(rig.ai.posted.length, 3);
-      const line = rig.ai.posted[2];
-      this.assertEqual(jslb.field_get(line[0], "type"), constants.close_type);
-      this.assertEqual(jslb.field_get(line[0], "id"), 2);
-      this.assertTrue("type" in line[0]);
-      this.assertEqual(jslb.payload_of(line), {});
-      this.assertEqual(rig.tasks.depth(), 1);
+      rig.view.close_request();
+      this.assertEqual(rig.tasks.given.length, 3);
+      this.assertEqual(rig.tasks.given[2], submit_expected("close_request"));
       this.assertTrue(rig.terminal.options.disableStdin);
     }
 
-    // The request returns a sleep on its id that wakes with its own type.
+    // The request returns a sleep on the id it got that wakes with its type.
     test_close_sleep(): void {
       const rig = rig_make();
       rig_start(rig);
-      const sleeps: dispatch.Sleep[] = [];
-      const keep = handler_fresh(() => {
-        const sleep = rig.view.close_request();
-        sleeps.push(sleep);
-        return sleep;
-      });
-      rig.tasks.line_notify(line_build(keep));
-      this.assertEqual(sleeps.length, 1);
-      this.assertEqual(sleeps[0].wait_ids, [2]);
-      this.assertEqual(sleeps[0].then_type, constants.closed_type);
-      this.assertEqual(sleeps[0].state, null);
+      const sleep = rig.view.close_request();
+      this.assertEqual(
+        sleep,
+        sleep_make("close_sleep", constants.request_ids[1]),
+      );
     }
 
     // The reply leaves the console closing, taking no input and no opening.
     test_close_reply(): void {
       const rig = rig_make();
       rig_start(rig);
-      stop_run(rig);
-      close_send(rig);
-      this.assertEqual(rig.tasks.depth(), 0);
+      rig.view.close_request();
+      close_answer(rig);
       this.assertTrue(rig.terminal.options.disableStdin);
       const typed = thrown_get(() => rig.terminal.text_force("x"));
       this.assertEqual(
         typed.message,
-        i18n("console_view.input_phase", "closing"),
+        gold_text("console_view_input_phase_closing"),
       );
-      const again = thrown_get(() => start_run(rig));
+      const again = thrown_get(() => rig.view.open_request());
       this.assertEqual(
         again.message,
-        i18n("console_view.open_phase", "closing"),
+        gold_text("console_view_open_phase_closing"),
       );
-      this.assertEqual(rig.ai.posted.length, 3);
+      this.assertEqual(rig.tasks.given.length, 3);
     }
 
-    // A close while idle, opening or closing is refused and posts nothing.
+    // A close while idle, opening or closing is refused and gives nothing.
     test_close_phase(): void {
       const idle = rig_make();
-      const first = thrown_get(() => stop_run(idle));
+      const first = thrown_get(() => idle.view.close_request());
       this.assertEqual(
         first.message,
-        i18n("console_view.close_phase", "idle"),
+        gold_text("console_view_close_phase_idle"),
       );
-      this.assertEqual(idle.ai.posted.length, 0);
+      this.assertEqual(idle.tasks.given.length, 0);
       const opening = rig_make();
-      start_run(opening);
-      const early = thrown_get(() => stop_run(opening));
+      opening.view.open_request();
+      const early = thrown_get(() => opening.view.close_request());
       this.assertEqual(
         early.message,
-        i18n("console_view.close_phase", "opening"),
+        gold_text("console_view_close_phase_opening"),
       );
-      this.assertEqual(opening.ai.posted.length, 1);
+      this.assertEqual(opening.tasks.given.length, 1);
       const closing = rig_make();
       rig_start(closing);
-      stop_run(closing);
-      const twice = thrown_get(() => stop_run(closing));
+      closing.view.close_request();
+      const twice = thrown_get(() => closing.view.close_request());
       this.assertEqual(
         twice.message,
-        i18n("console_view.close_phase", "closing"),
+        gold_text("console_view_close_phase_closing"),
       );
-      this.assertEqual(closing.ai.posted.length, 3);
+      this.assertEqual(closing.tasks.given.length, 3);
     }
 
     // A wake of the close before any close is asked for is refused.
     test_closed_early(): void {
       const rig = rig_make();
       rig_start(rig);
-      const wake = wake_build(reply_build(constants.close_type, 2));
+      const wake = wake_make("close_wake", constants.request_ids[1]);
       const error = thrown_get(() => rig.view.close_done(wake));
-      this.assertEqual(
-        error.message,
-        i18n("console_view.closed_phase", "open"),
-      );
+      this.assertEqual(error.message, gold_text("console_view_closed_phase"));
     }
 
     // A reply of another type or to another request is refused.
     test_closed_checked(): void {
       const rig = rig_make();
       rig_start(rig);
-      stop_run(rig);
-      const other = wake_build(reply_build(constants.open_type, 2));
+      rig.view.close_request();
+      const [opened, closed] = constants.request_ids;
+      const other = wake_make("close_wake_open_reply", closed);
       const typed = thrown_get(() => rig.view.close_done(other));
       this.assertEqual(
         typed.message,
-        i18n(
-          "console_view.reply_type",
-          constants.open_type,
-          constants.close_type,
-        ),
+        gold_text("console_view_reply_type_open"),
       );
-      const stray = wake_build(reply_build(constants.close_type, 1));
+      const stray = wake_make("close_wake", opened);
       const wrong = thrown_get(() => rig.view.close_done(stray));
-      this.assertEqual(wrong.message, i18n("console_view.reply_id", 1, 2));
-      close_send(rig);
-      this.assertEqual(rig.tasks.depth(), 0);
+      this.assertEqual(wrong.message, reply_id_text(opened, closed));
+      close_answer(rig);
     }
 
     // The end after a close leaves the console idle, and it opens again.
     test_close_reopen(): void {
       const rig = rig_make();
       rig_start(rig);
-      stop_run(rig);
-      close_send(rig);
+      rig.view.close_request();
+      close_answer(rig);
       rig.view.exit_done();
-      start_run(rig);
-      const opened = posted_of(rig, constants.open_type);
-      this.assertEqual(opened.length, 2);
-      this.assertEqual(jslb.field_get(opened[1][0], "id"), 3);
-      reply_send(rig, constants.token);
+      rig.view.open_request();
+      this.assertEqual(submits_of(rig), [
+        gold_line("open_request"),
+        gold_line("close_request"),
+        gold_line("open_request"),
+      ]);
+      open_answer(rig, "open_wake");
       this.assertEqual(inputs_of(rig).length, 2);
       this.assertFalse(rig.terminal.options.disableStdin);
       rig.terminal.text_type("a");
       this.assertEqual(inputs_of(rig).length, 3);
-      this.assertEqual(rig.tasks.depth(), 0);
     }
   }
 
@@ -1238,12 +1095,15 @@ namespace test_console_view {
     test_exit_early(): void {
       const rig = rig_make();
       const idle = thrown_get(() => rig.view.exit_done());
-      this.assertEqual(idle.message, i18n("console_view.exit_phase", "idle"));
-      start_run(rig);
+      this.assertEqual(
+        idle.message,
+        gold_text("console_view_exit_phase_idle"),
+      );
+      rig.view.open_request();
       const opening = thrown_get(() => rig.view.exit_done());
       this.assertEqual(
         opening.message,
-        i18n("console_view.exit_phase", "opening"),
+        gold_text("console_view_exit_phase_opening"),
       );
     }
 
@@ -1253,7 +1113,10 @@ namespace test_console_view {
       rig_start(rig);
       rig.view.exit_done();
       const error = thrown_get(() => rig.view.exit_done());
-      this.assertEqual(error.message, i18n("console_view.exit_phase", "idle"));
+      this.assertEqual(
+        error.message,
+        gold_text("console_view_exit_phase_idle"),
+      );
     }
 
     // Text that reaches the view after the end is refused and sends nothing.
@@ -1264,7 +1127,7 @@ namespace test_console_view {
       const error = thrown_get(() => rig.terminal.text_force("x"));
       this.assertEqual(
         error.message,
-        i18n("console_view.input_phase", "idle"),
+        gold_text("console_view_input_phase_idle"),
       );
       this.assertEqual(inputs_of(rig).length, 1);
     }
@@ -1274,21 +1137,18 @@ namespace test_console_view {
       const rig = rig_make();
       rig_start(rig);
       rig.view.exit_done();
-      start_run(rig);
-      this.assertEqual(rig.ai.posted.length, 3);
-      const line = rig.ai.posted[2];
-      this.assertEqual(jslb.field_get(line[0], "type"), constants.open_type);
-      this.assertEqual(jslb.field_get(line[0], "id"), 2);
+      rig.view.open_request();
+      this.assertEqual(rig.tasks.given.length, 3);
+      this.assertEqual(rig.tasks.given[2], submit_expected("open_request"));
       this.assertTrue(rig.terminal.options.disableStdin);
-      reply_send(rig, constants.token);
+      open_answer(rig, "open_wake");
       const inputs = inputs_of(rig);
       this.assertEqual(inputs.length, 2);
       this.assertEqual(
-        utility.utf8_decode(blob_bytes(inputs[1])),
-        '{"AuthToken":"dXNlcjpwYXNz","columns":120,"rows":40}',
+        text_decode(blob_bytes(inputs[1])),
+        first_message("token"),
       );
       this.assertFalse(rig.terminal.options.disableStdin);
-      this.assertEqual(rig.tasks.depth(), 0);
     }
   }
 

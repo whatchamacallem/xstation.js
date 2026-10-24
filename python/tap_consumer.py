@@ -4,11 +4,16 @@
 #
 # The Python TAP consumer, shaped after tappy's: a `Parser` reads TAP version
 # 14 text line by line into tappy's line kinds, each with its depth, zero for
-# the stream and one for a block indented four spaces, and `document_stats`
-# checks a whole document against the stream the producers write and returns
-# its stats: the points its blocks plan, how many passed, failed and were
-# skipped, and whether it is well formed. Reading stops at the first fault:
-# the counts are those of the lines before it.
+# the stream and one for a block indented four spaces. A `StreamReader`
+# checks a stream against the one the producers write, a line at a time as
+# it arrives, as the wire test reads the TypeScript stream the server
+# writes, and counts its points; `document_stats` reads a whole document so
+# and returns its stats: the points its blocks plan, how many passed, failed
+# and were skipped, and whether it is well formed. Reading stops at the
+# first fault: the counts are those of the lines before it. A `Bail out!`
+# line at depth 0 ends a stream wherever it stands, before the version line
+# too, since the server appends one when the browser fails: it counts as one
+# failure unless it follows a failed point, as the producer's own does.
 
 import io, re
 from collections.abc import Iterator
@@ -131,7 +136,7 @@ class Parser:
 
 
 # Checks a stream line by line against the producers' grammar and counts it.
-class _StreamReader:
+class StreamReader:
     # Starts before the version line, with every count at zero.
     def __init__(self) -> None:
         self.plan = 0
@@ -162,13 +167,19 @@ class _StreamReader:
                 return self._point_count(point)
             case "block", Diagnostic(depth=1) if self._points:
                 pass
-            case "block", Bail(depth=0) if self._last_failed:
-                self._state = "ended"
             case "block", Result(depth=0) as parent:
                 return self._parent_read(parent)
+            case "version" | "between" | "block", Bail(depth=0):
+                self._bail_read()
             case _:
                 return False
         return True
+
+    # Ends the stream, one failure more unless the last point read failed.
+    def _bail_read(self) -> None:
+        if not (self._state == "block" and self._last_failed):
+            self.failed += 1
+        self._state = "ended"
 
     # Opens a block with the number of points its plan line names.
     def _block_open(self, total: int) -> None:
@@ -217,7 +228,7 @@ class _StreamReader:
 
 # Takes a whole document and returns its stats. Its last line needs a newline.
 def document_stats(text: str) -> TapStats:
-    reader = _StreamReader()
+    reader = StreamReader()
     fits = all(reader.line_read(line) for line in Parser().parse_text(text))
     well_formed = fits and reader.stream_ended() and text.endswith("\n")
     return TapStats(

@@ -8,16 +8,25 @@
 # canned bytes or an empty pipe, the synchronous loads picked out of a trace,
 # the workers and pauses kept, and a browser's page, trace and worker calls
 # and waits with canned bytes, a scratch profile and a patched removal. No
-# process is started.
+# process is started. The waits the tests give are the gold's.
 
-import devtools, errno, functools, io, json, os, subprocess, tempfile
-import unittest.mock
+import devtools, errno, functools, harness, io, json, os, subprocess
+import tempfile, time, unittest.mock
 from typing import Any, cast
 
 # The checkout's build directory, where each test makes its scratch directory.
 _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
 )
+
+# The id of this module's gold in `test_settings.json`.
+_GOLD_ID = "python.test_devtools"
+
+# A wait no test reaches the end of, for the replies the bytes hold.
+_WAIT_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.wait_seconds")
+
+# A wait that ends soon, for the replies and events that never come.
+_EXPIRY_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.expiry_seconds")
 
 # What DevTools answers a navigation to an address nothing listens on yet.
 _REFUSED_RESULT = {
@@ -124,7 +133,7 @@ def browser_make(data: bytes, writes: list[bytes]) -> devtools.Browser:
         CannedReader(data).bytes_next,
         writes.append,
         browser.events.message_handle,
-        60,
+        _WAIT_SECONDS,
     )
     return browser
 
@@ -454,21 +463,22 @@ class TestTimers(unittest.TestCase):
 
     # A wait with time left returns it.
     def test_timer_running(self) -> None:
-        left = devtools.WaitTimer("the thing", 1000).seconds_left()
+        left = devtools.WaitTimer("the thing", _WAIT_SECONDS).seconds_left()
         self.assertGreater(left, 0)
-        self.assertLessEqual(left, 1000)
+        self.assertLessEqual(left, _WAIT_SECONDS)
 
     # A pipe nothing is written to fails when its timer ends.
     def test_pipe_timeout(self) -> None:
         read_fd, write_fd = os.pipe()
         self.addCleanup(os.close, read_fd)
         self.addCleanup(os.close, write_fd)
-        timer = devtools.WaitTimer("bytes that never come", 0.05)
+        timer = devtools.WaitTimer("bytes that never come", _EXPIRY_SECONDS)
         with self.assertRaises(TimeoutError) as caught:
             devtools.pipe_read(read_fd, timer, 1)
         self.assertEqual(
             str(caught.exception),
-            "gave up after 0.05 s waiting for bytes that never come",
+            f"gave up after {_EXPIRY_SECONDS:g} s waiting for bytes that"
+            " never come",
         )
 
     # A pipe gives no more than the count asked for.
@@ -477,7 +487,7 @@ class TestTimers(unittest.TestCase):
         self.addCleanup(os.close, read_fd)
         self.addCleanup(os.close, write_fd)
         os.write(write_fd, b"abc")
-        timer = devtools.WaitTimer("bytes", 60)
+        timer = devtools.WaitTimer("bytes", _WAIT_SECONDS)
         self.assertEqual(devtools.pipe_read(read_fd, timer, 2), b"ab")
         self.assertEqual(devtools.pipe_read(read_fd, timer, 2), b"c")
 
@@ -486,7 +496,7 @@ class TestTimers(unittest.TestCase):
         read_fd, write_fd = os.pipe()
         self.addCleanup(os.close, read_fd)
         os.close(write_fd)
-        timer = devtools.WaitTimer("bytes", 60)
+        timer = devtools.WaitTimer("bytes", _WAIT_SECONDS)
         self.assertEqual(devtools.pipe_read(read_fd, timer, 4), b"")
 
     # Short reads are joined until the count is reached.
@@ -511,7 +521,9 @@ class TestClient(unittest.TestCase):
     def test_call_reply(self) -> None:
         event = {"method": "Page.frameNavigated", "params": {}}
         reply = {"id": 1, "result": {"frameId": "F"}}
-        rig = ClientRig(message_frame(event) + message_frame(reply), 60)
+        rig = ClientRig(
+            message_frame(event) + message_frame(reply), _WAIT_SECONDS
+        )
         result = rig.client.method_call("Page.navigate", {"url": "u"})
         self.assertEqual(result, {"frameId": "F"})
         self.assertEqual(rig.events, [event])
@@ -525,7 +537,7 @@ class TestClient(unittest.TestCase):
         rig = ClientRig(
             message_frame({"id": 1, "result": {}})
             + message_frame({"id": 2, "result": {}}),
-            60,
+            _WAIT_SECONDS,
         )
         rig.client.session_id = "S"
         rig.client.method_call("Runtime.enable")
@@ -538,7 +550,7 @@ class TestClient(unittest.TestCase):
         rig = ClientRig(
             message_frame({"id": 1, "result": {}})
             + message_frame({"id": 2, "result": {}}),
-            60,
+            _WAIT_SECONDS,
         )
         rig.client.session_id = "P"
         rig.client.session_call("W", "Target.setAutoAttach", {"flatten": True})
@@ -557,14 +569,16 @@ class TestClient(unittest.TestCase):
     # An error reply fails loud with the method and DevTools' message.
     def test_call_error(self) -> None:
         error = {"code": -32601, "message": "nope"}
-        rig = ClientRig(message_frame({"id": 1, "error": error}), 60)
+        rig = ClientRig(
+            message_frame({"id": 1, "error": error}), _WAIT_SECONDS
+        )
         with self.assertRaises(RuntimeError) as caught:
             rig.client.method_call("Page.enable")
         self.assertEqual(str(caught.exception), "Page.enable: nope")
 
     # A reply to another call fails loud.
     def test_call_mismatch(self) -> None:
-        rig = ClientRig(message_frame({"id": 5, "result": {}}), 60)
+        rig = ClientRig(message_frame({"id": 5, "result": {}}), _WAIT_SECONDS)
         with self.assertRaises(RuntimeError) as caught:
             rig.client.method_call("Page.enable")
         self.assertEqual(
@@ -576,7 +590,7 @@ class TestClient(unittest.TestCase):
     def test_call_ping(self) -> None:
         rig = ClientRig(
             bytes.fromhex("89026162") + message_frame({"id": 1, "result": {}}),
-            60,
+            _WAIT_SECONDS,
         )
         rig.client.method_call("Page.enable")
         self.assertEqual(len(rig.writes), 2)
@@ -594,13 +608,14 @@ class TestClient(unittest.TestCase):
             functools.partial(devtools.pipe_read, read_fd),
             writes.append,
             events.append,
-            0.05,
+            _EXPIRY_SECONDS,
         )
         with self.assertRaises(TimeoutError) as caught:
             client.method_call("Page.navigate")
         self.assertEqual(
             str(caught.exception),
-            "gave up after 0.05 s waiting for the reply to Page.navigate",
+            f"gave up after {_EXPIRY_SECONDS:g} s waiting for the reply to"
+            " Page.navigate",
         )
         self.assertEqual(len(writes), 1)
 
@@ -608,13 +623,15 @@ class TestClient(unittest.TestCase):
     def test_pump_events(self) -> None:
         first = {"method": "A.one", "params": {}}
         second = {"method": "A.two", "params": {}}
-        rig = ClientRig(message_frame(first) + message_frame(second), 60)
+        rig = ClientRig(
+            message_frame(first) + message_frame(second), _WAIT_SECONDS
+        )
         rig.client.events_pump("two events", lambda: len(rig.events) == 2)
         self.assertEqual(rig.events, [first, second])
 
     # A reply while no call waits fails loud.
     def test_pump_reply(self) -> None:
-        rig = ClientRig(message_frame({"id": 1, "result": {}}), 60)
+        rig = ClientRig(message_frame({"id": 1, "result": {}}), _WAIT_SECONDS)
         with self.assertRaises(RuntimeError) as caught:
             rig.client.events_pump("an event", lambda: False)
         self.assertEqual(
@@ -632,12 +649,61 @@ class TestClient(unittest.TestCase):
             functools.partial(devtools.pipe_read, read_fd),
             lambda data: None,
             events.append,
-            0.05,
+            _EXPIRY_SECONDS,
         )
         with self.assertRaises(TimeoutError) as caught:
             client.events_pump("a load", lambda: False)
         self.assertEqual(
-            str(caught.exception), "gave up after 0.05 s waiting for a load"
+            str(caught.exception),
+            f"gave up after {_EXPIRY_SECONDS:g} s waiting for a load",
+        )
+
+    # Returns a client on a pipe nothing is written to, keeping its writes.
+    def client_idle(
+        self, wait_seconds: float, writes: list[bytes]
+    ) -> devtools.ProtocolClient:
+        read_fd, write_fd = os.pipe()
+        self.addCleanup(os.close, read_fd)
+        self.addCleanup(os.close, write_fd)
+        return devtools.ProtocolClient(
+            functools.partial(devtools.pipe_read, read_fd),
+            writes.append,
+            lambda message: None,
+            wait_seconds,
+        )
+
+    # A deadline before the client's own wait ends a call, naming the call.
+    def test_deadline_first(self) -> None:
+        writes: list[bytes] = []
+        client = self.client_idle(_WAIT_SECONDS, writes)
+        client.deadline_set(time.monotonic() + _EXPIRY_SECONDS)
+        with self.assertRaises(TimeoutError) as caught:
+            client.method_call("Page.navigate")
+        self.assertEqual(
+            str(caught.exception),
+            "gave up at the deadline waiting for the reply to Page.navigate",
+        )
+        self.assertEqual(len(writes), 1)
+
+    # A deadline after the client's own wait leaves that wait as it is.
+    def test_deadline_later(self) -> None:
+        client = self.client_idle(_EXPIRY_SECONDS, [])
+        client.deadline_set(time.monotonic() + _WAIT_SECONDS)
+        with self.assertRaises(TimeoutError) as caught:
+            client.events_pump("a load", lambda: False)
+        self.assertEqual(
+            str(caught.exception),
+            f"gave up after {_EXPIRY_SECONDS:g} s waiting for a load",
+        )
+
+    # A deadline already passed ends a later wait at once.
+    def test_deadline_passed(self) -> None:
+        client = self.client_idle(_WAIT_SECONDS, [])
+        client.deadline_set(time.monotonic())
+        with self.assertRaises(TimeoutError) as caught:
+            client.events_pump("a load", lambda: False)
+        self.assertEqual(
+            str(caught.exception), "gave up at the deadline waiting for a load"
         )
 
 

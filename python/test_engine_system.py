@@ -2,20 +2,24 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests `settings.put`, `source.put` and `system.restart` through the
-# dispatcher and the two tools of the same names on an MCP server. Each line
-# is encoded and decoded as the wire carries it, so a nested object arrives as
-# the decoder makes it. The settings file is rewritten whole, a main loop file
-# is written from a blob in memory or from one the decoder streamed to the
-# cache, its name is refused unless plain, and the arguments of the restart
-# are checked up to the call of `os.execv`, which is patched. Debug mode gates
-# all of them. The scratch directories go under `build/`.
+# Tests the handlers of `settings.put`, `source.put` and `system.restart`
+# and the two tools of the same names: the type, version and handler each
+# registration records, each handler called as the dispatcher calls it on
+# lines of the gold, a blob's `d` the bytes or the path of a file the decoder
+# would have streamed, and the tools as a server double records them, each
+# called on the arguments the test chooses. The settings file is rewritten
+# whole, a main loop file is written from bytes or moved from the streamed
+# file, its name is refused unless plain, and the arguments of the restart
+# are checked up to the call of `os.execv`, which is patched. Debug mode
+# gates all of them. The settings check holds the types of every table, the
+# PowerShell constants' among them. A tool's exception reaches its caller;
+# the `isError` answer the MCP server makes of it is `test_mcp.py`'s. The
+# scratch directories go under `build/`.
 
-import dispatch, engine_system, hashlib, jslb, json, mcp, os, sys, tempfile
+import engine_system, harness, hashlib, json, os, re, sys, tempfile
 import unittest, unittest.mock
 from collections.abc import Callable
-from i18n import i18n
-from typing import Any, cast
+from typing import Any
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -23,23 +27,11 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
-# The settings file of the checkout, which holds a valid settings object.
+# The settings file of the checkout, whose bytes the written file matches.
 _SETTINGS_PATH = os.path.join(_ROOT_PATH, "settings.json")
 
 # The API file that holds the tools as `tools/list` returns them.
 _TOOLS_PATH = os.path.join(_ROOT_PATH, "API", "mcp", "tools.json")
-
-# The longest line the test decoder takes, the size of the setting.
-_LINE_MAX = 1048576
-
-# The most bytes the blobs of a message come to, the size of the setting.
-_BLOB_MAX = 2147483391
-
-# The size above which the test decoder streams a blob, from the setting.
-_OVERFLOW_BYTES = 131072
-
-# The dotted name of the handler table that the tests patch.
-_HANDLERS_TARGET = "dispatch._HANDLERS"
 
 # The dotted name of the root that the tests patch.
 _ROOT_TARGET = "engine_system._STATE.root"
@@ -53,6 +45,12 @@ _EXEC_TARGET = "os.execv"
 # The dotted name of the arguments the process was started with.
 _ARGV_TARGET = "sys.orig_argv"
 
+# The id of this module's gold in `test_settings.json`.
+_GOLD_ID = "python.test_engine_system"
+
+# A key of the decimal digits of a non negative integer, as JSLB reads it.
+_NUMBER_KEY = re.compile(r"0|[1-9][0-9]*")
+
 # The process option that names the main loop file.
 _MAIN_LOOP_OPTION = "--main-loop"
 
@@ -65,11 +63,16 @@ _SOURCE_TEXT = "print('main loop')\n"
 # The `JSON-RPC` code of arguments that a tool cannot use.
 _CODE_PARAMS = -32602
 
-# The `JSON-RPC` code of an exception that a tool raised.
-_CODE_INTERNAL = -32603
-
-# Names that are not plain file names that end in `.py`.
-_NAMES_INVALID = ("", "b", "b.txt", ".b.py", ".py", "d/b.py", "../b.py")
+# Names that are not plain file names that end in `.py`, and their texts.
+_NAMES_INVALID = (
+    ("", "engine_system_name_invalid_empty"),
+    ("b", "engine_system_name_invalid_b"),
+    ("b.txt", "engine_system_name_invalid_txt"),
+    (".b.py", "engine_system_name_invalid_hidden"),
+    (".py", "engine_system_name_invalid_bare"),
+    ("d/b.py", "engine_system_name_invalid_nested"),
+    ("../b.py", "engine_system_name_invalid_parent"),
+)
 
 # Forms of the option and its value that argparse reads as `--main-loop`.
 _OPTION_FORMS: tuple[list[str], ...] = (
@@ -79,9 +82,6 @@ _OPTION_FORMS: tuple[list[str], ...] = (
     ["--main-loo", "a.py"],
 )
 
-# No overflow bytes, so the decoder streams every blob, its writer's choice.
-_OVERFLOW_NONE = 0
-
 
 # Reads a file with a handle of its own.
 def _file_read(path: str) -> bytes:
@@ -89,55 +89,61 @@ def _file_read(path: str) -> bytes:
         return file.read()
 
 
-# Stands for the sink of a decoder whose blobs all stay in memory.
-def _sink_refuse(header: jslb.Object) -> str:
-    raise AssertionError("a blob was streamed")
+# A copy of a value of this module's gold, its number keys made `int`.
+def _gold_value(name: str) -> Any:
+    return _keys_number(harness.gold_get(f"{_GOLD_ID}.{name}"))
 
 
-# Encodes the line and decodes it as the server does, with the sink given.
-def _wire_pass(
-    line: jslb.Object,
-    overflow_bytes: int,
-    sink_make: Callable[[jslb.Object], str],
-) -> jslb.Object:
-    data = b"".join(cast(bytes, piece) for piece in jslb.line_encode(line))
-    decoder = jslb.LineDecoder(_LINE_MAX, _BLOB_MAX, overflow_bytes, sink_make)
-    (decoded,) = decoder.bytes_feed(data)
-    return decoded
+# A copy of a JSON value with each number key an `int`, at every depth.
+def _keys_number(value: Any) -> Any:
+    if isinstance(value, dict):
+        made: dict[int | str, Any] = {}
+        for key, item in value.items():
+            number = _NUMBER_KEY.fullmatch(key) is not None
+            made[int(key) if number else key] = _keys_number(item)
+        return made
+    if isinstance(value, list):
+        return [_keys_number(item) for item in value]
+    return value
 
 
-# Builds a line, then passes it through the wire with its blobs in memory.
-def _line_make(
-    name: str,
-    request_id: int | None = None,
-    blobs: tuple[jslb.Object, ...] = (),
-    **payload: Any,
-) -> jslb.Object:
-    header = jslb.header_make(name, id=request_id)
-    line = jslb.line_make(header, list(blobs), **payload)
-    return _wire_pass(line, _OVERFLOW_BYTES, _sink_refuse)
+# A text of this module's gold.
+def _text_get(name: str) -> str:
+    text: str = harness.gold_get(f"{_GOLD_ID}.texts.{name}")
+    return text
 
 
-# Builds a `source.put` line whose blob the decoder streams to the path.
-def _streamed_make(name: str, data: bytes, path: str) -> jslb.Object:
-    header = jslb.header_make("source.put", id=4)
-    line = jslb.line_make(header, [jslb.blob_make(data)], name=name)
-    return _wire_pass(line, _OVERFLOW_NONE, lambda blob: path)
+# A line of the gold with one payload key set to the value the test gives.
+def _line_set(name: str, key: str, value: Any) -> dict[int | str, Any]:
+    line: dict[int | str, Any] = _gold_value(f"lines.{name}")
+    line[key] = value
+    return line
 
 
-# Dispatches a line that must be answered and returns the reply.
-def _reply_get(line: jslb.Object) -> jslb.Object:
-    reply = dispatch.line_dispatch(line)
-    if reply is None:
-        raise AssertionError("the line was not answered")
-    return reply
+# A line of the gold with blob 1's size and `d` set, as the decoder gives it.
+def _blob_line(name: str, data: bytes | str) -> dict[int | str, Any]:
+    line: dict[int | str, Any] = _gold_value(f"lines.{name}")
+    size = len(data) if isinstance(data, bytes) else os.path.getsize(data)
+    line[1]["size" if "type" in line[0] else "s"] = size
+    line[1]["d"] = data
+    return line
 
 
-# Reads the settings file of the checkout as an object.
-def _settings_read() -> dict[str, Any]:
-    with open(_SETTINGS_PATH, encoding="utf-8") as file:
-        data: dict[str, Any] = json.load(file)
-    return data
+# A line of the gold whose blob 1 the decoder streamed to `path`, digest set.
+def _streamed_line(name: str, path: str, data: bytes) -> dict[int | str, Any]:
+    with open(path, "xb") as file:
+        file.write(data)
+    line = _blob_line(name, path)
+    line[1]["sha256"] = hashlib.sha256(data).hexdigest()
+    return line
+
+
+# Calls a handler as `dispatch.line_dispatch` does, the payload as keywords.
+def _handler_call(fn: Callable[..., Any], line: dict[int | str, Any]) -> Any:
+    payload = {
+        key: value for key, value in line.items() if isinstance(key, str)
+    }
+    return fn(line, **payload)
 
 
 # Reads the tool entries of the server side of the API file.
@@ -156,37 +162,46 @@ def _loop_write(root: str, name: str) -> str:
     return path
 
 
-# Builds a `tools/call` request for a tool.
-def _call_make(name: str, arguments: dict[str, Any]) -> mcp.Message:
-    return {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "tools/call",
-        "params": {"name": name, "arguments": arguments},
-    }
-
-
-# Sends a message to the server and returns the response it must give.
-def _response_get(server: mcp.Server, message: mcp.Message) -> mcp.Message:
-    response = server.message_handle(message)
-    if response is None:
-        raise AssertionError("the message was not answered")
-    return response
-
-
 # Stands for the end of the process image, which a successful exec causes.
 class ImageReplaced(BaseException):
     pass
 
 
-# Gives each test an empty handler table, no registration and a scratch root.
+# A dict subclass of the shape of `jslb.Object`, as the decoder makes one.
+class DecodedObject(dict[int | str, Any]):
+    pass
+
+
+# A server double: records each call, answers what the test queued for it.
+class ServerDouble:
+    # Starts with no call recorded and no answer queued.
+    def __init__(self) -> None:
+        self.calls: list[tuple[Any, ...]] = []
+        self.answers: dict[str, list[Any]] = {}
+
+    # Records a call and returns its next queued answer, which must exist.
+    def call_answer(self, name: str, *args: Any) -> Any:
+        self.calls.append((name, *args))
+        if not self.answers.get(name):
+            raise AssertionError(f"the server double has no answer: {name}")
+        return self.answers[name].pop(0)
+
+    # `Server.tool_register`, as `engine_system` calls it.
+    def tool_register(self, tool: Any, fn: Callable[..., Any]) -> Any:
+        return self.call_answer("tool_register", tool, fn)
+
+
+# Gives each test an empty state, a registration recorder, a scratch root.
 class IsolatedCase(unittest.TestCase):
-    # Patches the table and the state, makes a scratch root in `build/`.
+    # Patches the state and the registration, makes a scratch root.
     def setUp(self) -> None:
-        table = unittest.mock.patch.dict(_HANDLERS_TARGET, {}, clear=True)
+        self.handlers: list[tuple[str, int, Callable[..., Any]]] = []
         root_state = unittest.mock.patch(_ROOT_TARGET, None)
         debug_state = unittest.mock.patch(_DEBUG_TARGET, None)
-        for patcher in (table, root_state, debug_state):
+        register = unittest.mock.patch.object(
+            engine_system.dispatch, "handler_register", self.handler_record
+        )
+        for patcher in (root_state, debug_state, register):
             patcher.start()
             self.addCleanup(patcher.stop)
         os.makedirs(_BUILD_PATH, exist_ok=True)
@@ -197,6 +212,18 @@ class IsolatedCase(unittest.TestCase):
         self.loop_path = os.path.join(self.root, "main_loop")
         self.file_path = os.path.join(self.loop_path, "a.py")
 
+    # Records one registration in place of the dispatcher's table.
+    def handler_record(
+        self, name: str, version: int, fn: Callable[..., Any]
+    ) -> None:
+        self.handlers.append((name, version, fn))
+
+    # Registers the handlers for the debug setting, returns the one of `name`.
+    def handler_get(self, name: str, debug: bool) -> Callable[..., Any]:
+        engine_system.handlers_register(self.root, debug)
+        (fn,) = [fn for kind, _, fn in self.handlers if kind == name]
+        return fn
+
     # Calls `fn` and checks the type and the text of what it raises.
     def raise_check(
         self, kind: type[Exception], message: str, fn: Callable[[], object]
@@ -205,90 +232,98 @@ class IsolatedCase(unittest.TestCase):
             fn()
         self.assertEqual(str(caught.exception), message)
 
-    # Dispatches a line and checks the type and the text of what it raises.
-    def dispatch_check(
-        self, kind: type[Exception], message: str, line: jslb.Object
+    # Calls a handler on a line and checks the type and the text it raises.
+    def handler_check(
+        self,
+        kind: type[Exception],
+        message: str,
+        fn: Callable[..., Any],
+        line: dict[int | str, Any],
     ) -> None:
-        self.raise_check(kind, message, lambda: dispatch.line_dispatch(line))
+        self.raise_check(kind, message, lambda: _handler_call(fn, line))
 
 
 # Tests the handler of `settings.put`.
 class TestSettings(IsolatedCase):
     # The file is the settings object written whole, and no file is left over.
     def test_settings_written(self) -> None:
-        engine_system.handlers_register(self.root, True)
-        line = _line_make("settings.put", 3, settings=_settings_read())
-        reply = _reply_get(line)
-        self.assertEqual(reply[0]["r"], 3)
-        self.assertEqual(jslb.payload_of(reply), {})
+        put = self.handler_get("settings.put", True)
+        line = _line_set("settings_put", "settings", harness.settings_copy())
+        reply = _handler_call(put, line)
+        self.assertEqual(reply, _gold_value("lines.settings_reply"))
         written = _file_read(self.settings_path)
         self.assertEqual(written, _file_read(_SETTINGS_PATH))
         self.assertEqual(os.listdir(self.root), ["settings.json"])
 
     # A changed value is in the file, and the file replaces the old one.
     def test_settings_replaced(self) -> None:
-        engine_system.handlers_register(self.root, True)
+        put = self.handler_get("settings.put", True)
         with open(self.settings_path, "w", encoding="utf-8") as file:
             file.write("old\n")
-        changed = _settings_read()
+        changed = harness.settings_copy()
         changed["debug"] = False
         changed["provider"]["scripted"] = False
-        _reply_get(_line_make("settings.put", 1, settings=changed))
+        _handler_call(put, _line_set("settings_put", "settings", changed))
         with open(self.settings_path, encoding="utf-8") as file:
             written: dict[str, Any] = json.load(file)
         self.assertEqual(written, changed)
         self.assertEqual(list(written), list(changed))
         self.assertEqual(os.listdir(self.root), ["settings.json"])
 
-    # The nested provider comes from the decoder as an `Object` and is kept.
+    # A nested provider of a dict subclass, as the decoder makes it, is kept.
     def test_provider_object(self) -> None:
-        engine_system.handlers_register(self.root, True)
-        changed = _settings_read()
-        changed["provider"]["timeout_seconds"] = 60
-        line = _line_make("settings.put", 2, settings=changed)
-        self.assertIs(type(line["settings"]["provider"]), jslb.Object)
-        _reply_get(line)
+        put = self.handler_get("settings.put", True)
+        changed = harness.settings_copy()
+        provider = DecodedObject(changed["provider"])
+        provider["timeout_seconds"] = 60
+        changed["provider"] = provider
+        _handler_call(put, _line_set("settings_put", "settings", changed))
         with open(self.settings_path, encoding="utf-8") as file:
             written: dict[str, Any] = json.load(file)
-        self.assertEqual(written["provider"], changed["provider"])
+        self.assertEqual(written["provider"], provider)
 
     # Settings that fail the check raise and the old file stays as it was.
     def test_settings_invalid(self) -> None:
-        engine_system.handlers_register(self.root, True)
+        put = self.handler_get("settings.put", True)
         with open(self.settings_path, "w", encoding="utf-8") as file:
             file.write("old\n")
-        missing = _settings_read()
+        missing = harness.settings_copy()
         del missing["line_max"]
-        extra = _settings_read()
+        extra = harness.settings_copy()
         extra["other"] = 1
-        wrong = _settings_read()
+        wrong = harness.settings_copy()
         wrong["provider"]["timeout_seconds"] = "120"
+        variable = harness.settings_copy()
+        variable["provider"]["variable"] = 1
+        listed = harness.settings_copy()
+        listed["powershell"]["root_files"] = ["settings.json", 1]
+        table = harness.settings_copy()
+        table["powershell"]["build_tools"] = {"cmake": None}
+        dropped = harness.settings_copy()
+        del dropped["powershell"]["linux_port"]
         cases: list[tuple[dict[str, Any], str]] = [
-            (missing, i18n("settings.key_missing", "line_max")),
-            (extra, i18n("settings.key_extra", "other")),
-            (
-                wrong,
-                i18n(
-                    "settings.type_wrong",
-                    "provider.timeout_seconds",
-                    "int",
-                    "str",
-                ),
-            ),
+            (missing, "settings_key_missing_line_max"),
+            (extra, "settings_key_extra"),
+            (wrong, "settings_type_wrong_timeout"),
+            (variable, "settings_type_wrong_variable"),
+            (listed, "settings_type_wrong_root_files"),
+            (table, "settings_type_wrong_build_tools"),
+            (dropped, "settings_key_missing_linux_port"),
         ]
-        for bad, message in cases:
-            with self.subTest(message=message):
-                line = _line_make("settings.put", 1, settings=bad)
-                self.dispatch_check(ValueError, message, line)
+        for bad, name in cases:
+            with self.subTest(name=name):
+                line = _line_set("settings_put", "settings", bad)
+                message = _text_get(name)
+                self.handler_check(ValueError, message, put, line)
                 self.assertEqual(_file_read(self.settings_path), b"old\n")
                 self.assertEqual(os.listdir(self.root), ["settings.json"])
 
     # With debug mode off the handler raises and writes nothing.
     def test_settings_gated(self) -> None:
-        engine_system.handlers_register(self.root, False)
-        line = _line_make("settings.put", 1, settings=_settings_read())
-        message = i18n("engine_system.debug_off", "settings.put")
-        self.dispatch_check(RuntimeError, message, line)
+        put = self.handler_get("settings.put", False)
+        line = _line_set("settings_put", "settings", harness.settings_copy())
+        message = _text_get("engine_system_debug_off_settings")
+        self.handler_check(RuntimeError, message, put, line)
         self.assertEqual(os.listdir(self.root), [])
 
 
@@ -296,76 +331,74 @@ class TestSettings(IsolatedCase):
 class TestSource(IsolatedCase):
     # A blob in memory is written as the file, and the reply is its `sha256`.
     def test_bytes_written(self) -> None:
-        engine_system.handlers_register(self.root, True)
+        put = self.handler_get("source.put", True)
         data = _SOURCE_TEXT.encode("utf-8")
-        blob = jslb.blob_make(data)
-        reply = _reply_get(_line_make("source.put", 4, (blob,), name="a.py"))
-        digest = hashlib.sha256(data).hexdigest()
-        self.assertEqual(reply[0]["r"], 4)
-        self.assertEqual(jslb.payload_of(reply), {"sha256": digest})
+        reply = _handler_call(put, _blob_line("source_put", data))
+        expected = _gold_value("lines.source_reply")
+        expected["sha256"] = hashlib.sha256(data).hexdigest()
+        self.assertEqual(reply, expected)
         self.assertEqual(os.listdir(self.loop_path), ["a.py"])
         self.assertEqual(_file_read(self.file_path), data)
 
     # A blob the decoder streamed to the cache is moved into place.
     def test_blob_streamed(self) -> None:
-        engine_system.handlers_register(self.root, True)
+        put = self.handler_get("source.put", True)
         cache = os.path.join(self.root, "cache")
         os.makedirs(cache)
         source = os.path.join(cache, "blob")
         data = _SOURCE_TEXT.encode("utf-8")
-        line = _streamed_make("a.py", data, source)
-        self.assertEqual(line[1]["d"], source)
-        reply = _reply_get(line)
-        digest = hashlib.sha256(data).hexdigest()
-        self.assertEqual(jslb.payload_of(reply), {"sha256": digest})
+        line = _streamed_line("source_put", source, data)
+        reply = _handler_call(put, line)
+        expected = _gold_value("lines.source_reply")
+        expected["sha256"] = hashlib.sha256(data).hexdigest()
+        self.assertEqual(reply, expected)
         self.assertFalse(os.path.exists(source))
         self.assertEqual(os.listdir(self.loop_path), ["a.py"])
         self.assertEqual(_file_read(self.file_path), data)
 
     # A second write under the same name replaces the file.
     def test_file_replaced(self) -> None:
-        engine_system.handlers_register(self.root, True)
+        put = self.handler_get("source.put", True)
         _loop_write(self.root, "a.py")
-        blob = jslb.blob_make(b"new\n")
-        _reply_get(_line_make("source.put", 1, (blob,), name="a.py"))
+        _handler_call(put, _blob_line("source_put", b"new\n"))
         self.assertEqual(os.listdir(self.loop_path), ["a.py"])
         self.assertEqual(_file_read(self.file_path), b"new\n")
 
     # A name that is not plain raises and nothing is written.
     def test_name_invalid(self) -> None:
-        engine_system.handlers_register(self.root, True)
-        for name in _NAMES_INVALID:
+        put = self.handler_get("source.put", True)
+        for name, text in _NAMES_INVALID:
             with self.subTest(name=name):
-                blob = jslb.blob_make(b"x")
-                line = _line_make("source.put", 1, (blob,), name=name)
-                message = i18n("engine_system.name_invalid", name)
-                self.dispatch_check(ValueError, message, line)
+                line = _blob_line("source_put", b"x")
+                line["name"] = name
+                message = _text_get(text)
+                self.handler_check(ValueError, message, put, line)
                 self.assertEqual(os.listdir(self.root), [])
 
     # A streamed blob under a name that is not plain stays in the cache.
     def test_streamed_refused(self) -> None:
-        engine_system.handlers_register(self.root, True)
+        put = self.handler_get("source.put", True)
         source = os.path.join(self.root, "blob")
-        line = _streamed_make("../a.py", b"x", source)
-        message = i18n("engine_system.name_invalid", "../a.py")
-        self.dispatch_check(ValueError, message, line)
+        line = _streamed_line("source_put", source, b"x")
+        line["name"] = "../a.py"
+        message = _text_get("engine_system_name_invalid_parent_a")
+        self.handler_check(ValueError, message, put, line)
         self.assertEqual(os.listdir(self.root), ["blob"])
 
     # A line with no blob raises and nothing is written.
     def test_blob_missing(self) -> None:
-        engine_system.handlers_register(self.root, True)
-        line = _line_make("source.put", 1, name="a.py")
-        message = i18n("engine_system.blob_missing")
-        self.dispatch_check(ValueError, message, line)
+        put = self.handler_get("source.put", True)
+        line = _gold_value("lines.source_blobless")
+        message = _text_get("engine_system_blob_missing")
+        self.handler_check(ValueError, message, put, line)
         self.assertEqual(os.listdir(self.root), [])
 
     # With debug mode off the handler raises and writes nothing.
     def test_source_gated(self) -> None:
-        engine_system.handlers_register(self.root, False)
-        blob = jslb.blob_make(b"x")
-        line = _line_make("source.put", 1, (blob,), name="a.py")
-        message = i18n("engine_system.debug_off", "source.put")
-        self.dispatch_check(RuntimeError, message, line)
+        put = self.handler_get("source.put", False)
+        line = _blob_line("source_put", b"x")
+        message = _text_get("engine_system_debug_off_source")
+        self.handler_check(RuntimeError, message, put, line)
         self.assertEqual(os.listdir(self.root), [])
 
 
@@ -373,9 +406,9 @@ class TestSource(IsolatedCase):
 class TestRestart(IsolatedCase):
     # The call gets the interpreter and the arguments with the option last.
     def test_exec_argv(self) -> None:
-        engine_system.handlers_register(self.root, True)
+        restart = self.handler_get("system.restart", True)
         _loop_write(self.root, "b.py")
-        line = _line_make("system.restart", main_loop="b.py")
+        line = _gold_value("lines.restart")
         with (
             unittest.mock.patch(
                 _EXEC_TARGET, side_effect=ImageReplaced
@@ -383,15 +416,15 @@ class TestRestart(IsolatedCase):
             unittest.mock.patch(_ARGV_TARGET, _PROGRAM_ARGV),
             self.assertRaises(ImageReplaced),
         ):
-            dispatch.line_dispatch(line)
+            _handler_call(restart, line)
         expected = _PROGRAM_ARGV + [_MAIN_LOOP_OPTION, "b.py"]
         execv.assert_called_once_with(sys.executable, expected)
 
     # An option the process already had is removed with its value.
     def test_option_replaced(self) -> None:
-        engine_system.handlers_register(self.root, True)
+        restart = self.handler_get("system.restart", True)
         _loop_write(self.root, "b.py")
-        line = _line_make("system.restart", main_loop="b.py")
+        line = _gold_value("lines.restart")
         argv = _PROGRAM_ARGV + [_MAIN_LOOP_OPTION, "a.py", "--other"]
         with (
             unittest.mock.patch(
@@ -400,15 +433,15 @@ class TestRestart(IsolatedCase):
             unittest.mock.patch(_ARGV_TARGET, argv),
             self.assertRaises(ImageReplaced),
         ):
-            dispatch.line_dispatch(line)
+            _handler_call(restart, line)
         expected = _PROGRAM_ARGV + ["--other", _MAIN_LOOP_OPTION, "b.py"]
         execv.assert_called_once_with(sys.executable, expected)
 
     # Each form of the option that argparse takes is removed with its value.
     def test_option_forms(self) -> None:
-        engine_system.handlers_register(self.root, True)
+        restart = self.handler_get("system.restart", True)
         _loop_write(self.root, "b.py")
-        line = _line_make("system.restart", main_loop="b.py")
+        line = _gold_value("lines.restart")
         expected = _PROGRAM_ARGV + ["--other", _MAIN_LOOP_OPTION, "b.py"]
         for form in _OPTION_FORMS:
             with self.subTest(form=form):
@@ -420,14 +453,14 @@ class TestRestart(IsolatedCase):
                     unittest.mock.patch(_ARGV_TARGET, argv),
                     self.assertRaises(ImageReplaced),
                 ):
-                    dispatch.line_dispatch(line)
+                    _handler_call(restart, line)
                 execv.assert_called_once_with(sys.executable, expected)
 
     # A word that only looks like the option is kept.
     def test_option_kept(self) -> None:
-        engine_system.handlers_register(self.root, True)
+        restart = self.handler_get("system.restart", True)
         _loop_write(self.root, "b.py")
-        line = _line_make("system.restart", main_loop="b.py")
+        line = _gold_value("lines.restart")
         argv = _PROGRAM_ARGV + ["--mainloop", "--main-loops=a.py"]
         with (
             unittest.mock.patch(
@@ -436,100 +469,110 @@ class TestRestart(IsolatedCase):
             unittest.mock.patch(_ARGV_TARGET, argv),
             self.assertRaises(ImageReplaced),
         ):
-            dispatch.line_dispatch(line)
+            _handler_call(restart, line)
         expected = argv + [_MAIN_LOOP_OPTION, "b.py"]
         execv.assert_called_once_with(sys.executable, expected)
 
     # A file that does not exist raises and the process is not replaced.
     def test_file_missing(self) -> None:
-        engine_system.handlers_register(self.root, True)
+        restart = self.handler_get("system.restart", True)
         os.makedirs(self.loop_path)
         os.makedirs(os.path.join(self.loop_path, "b.py"))
         for name in ("a.py", "b.py"):
             with self.subTest(name=name):
-                line = _line_make("system.restart", main_loop=name)
+                line = _line_set("restart", "main_loop", name)
                 path = os.path.join(self.loop_path, name)
-                message = i18n("engine_system.main_loop_missing", path)
+                missing = _text_get("engine_system_main_loop_missing")
+                message = missing.replace("{0}", path)
                 with unittest.mock.patch(_EXEC_TARGET) as execv:
-                    self.dispatch_check(FileNotFoundError, message, line)
+                    self.handler_check(
+                        FileNotFoundError, message, restart, line
+                    )
                 execv.assert_not_called()
 
     # A name that is not plain raises, even where a file of it exists.
     def test_name_invalid(self) -> None:
-        engine_system.handlers_register(self.root, True)
+        restart = self.handler_get("system.restart", True)
         _loop_write(self.root, "b.py")
         _loop_write(self.root, os.path.join("d", "b.py"))
         outside = os.path.join(self.root, "b.py")
         with open(outside, "w", encoding="utf-8") as file:
             file.write(_SOURCE_TEXT)
-        for name in _NAMES_INVALID:
+        for name, text in _NAMES_INVALID:
             with self.subTest(name=name):
-                line = _line_make("system.restart", main_loop=name)
-                message = i18n("engine_system.name_invalid", name)
+                line = _line_set("restart", "main_loop", name)
+                message = _text_get(text)
                 with unittest.mock.patch(_EXEC_TARGET) as execv:
-                    self.dispatch_check(ValueError, message, line)
+                    self.handler_check(ValueError, message, restart, line)
                 execv.assert_not_called()
 
     # With debug mode off the handler raises and the process is not replaced.
     def test_restart_gated(self) -> None:
-        engine_system.handlers_register(self.root, False)
+        restart = self.handler_get("system.restart", False)
         _loop_write(self.root, "b.py")
-        line = _line_make("system.restart", main_loop="b.py")
-        message = i18n("engine_system.debug_off", "system.restart")
+        line = _gold_value("lines.restart")
+        message = _text_get("engine_system_debug_off_restart")
         with unittest.mock.patch(_EXEC_TARGET) as execv:
-            self.dispatch_check(RuntimeError, message, line)
+            self.handler_check(RuntimeError, message, restart, line)
         execv.assert_not_called()
 
 
-# Tests the two tools on an MCP server.
+# Tests the two tools as a server double records them.
 class TestTools(IsolatedCase):
-    # Makes an MCP server with the tools, for the debug setting.
-    def server_make(self, debug: bool) -> mcp.Server:
-        server = mcp.Server("xsjs-server", "0")
-        engine_system.tools_register(server, self.root, debug)
-        return server
+    # Registers the tools on a server double, returns each tool and its fn.
+    def tools_record(
+        self, debug: bool
+    ) -> list[tuple[Any, Callable[..., Any]]]:
+        server = ServerDouble()
+        server.answers["tool_register"] = [None, None]
+        double: Any = server
+        engine_system.tools_register(double, self.root, debug)
+        return [(tool, fn) for _, tool, fn in server.calls]
 
-    # Checks the code and the text of the error that a response carries.
-    def error_check(
-        self, response: mcp.Message, code: int, message: str
-    ) -> None:
-        self.assertEqual(response["error"]["code"], code)
-        self.assertEqual(response["error"]["message"], message)
+    # The function of the tool named, registered for the debug setting.
+    def tool_get(self, name: str, debug: bool) -> Callable[..., Any]:
+        recorded = self.tools_record(debug)
+        (fn,) = [fn for tool, fn in recorded if tool[0] == name]
+        return fn
 
-    # The list is the server side of the API file, key for key.
+    # Calls `fn` and checks it raises an `RpcError` of the params code.
+    def params_check(self, message: str, fn: Callable[[], object]) -> None:
+        with self.assertRaises(Exception) as caught:
+            fn()
+        error: Any = caught.exception
+        self.assertEqual(type(error).__name__, "RpcError")
+        self.assertEqual(str(error), message)
+        self.assertEqual(error.code, _CODE_PARAMS)
+
+    # The tools are the server side of the API file, key for key.
     def test_tools_listed(self) -> None:
-        server = self.server_make(True)
-        request = {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
-        listed = _response_get(server, request)["result"]["tools"]
-        self.assertEqual(json.dumps(listed), json.dumps(_entries_read()))
+        tools = [tool for tool, _ in self.tools_record(True)]
+        expected = [
+            [
+                entry["name"],
+                entry["description"],
+                entry["inputSchema"],
+                "_meta" in entry,
+            ]
+            for entry in _entries_read()
+        ]
+        self.assertEqual(json.dumps(tools), json.dumps(expected))
 
-    # Neither tool is listed with a permit mark, so no client asks for one.
+    # Neither tool is registered with a permit, so no client asks for one.
     def test_permit_absent(self) -> None:
-        server = self.server_make(True)
-        request = {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
-        listed = _response_get(server, request)["result"]["tools"]
+        tools = [tool for tool, _ in self.tools_record(True)]
         self.assertEqual(
-            [(tool["name"], "_meta" in tool) for tool in listed],
+            [(tool[0], tool[3]) for tool in tools],
             [("source_put", False), ("system_restart", False)],
-        )
-
-    # A second registration on one server raises.
-    def test_tools_twice(self) -> None:
-        server = self.server_make(True)
-        self.raise_check(
-            ValueError,
-            i18n("mcp.tool_twice", "source_put"),
-            lambda: engine_system.tools_register(server, self.root, True),
         )
 
     # The source tool writes the text as the file and answers its `sha256`.
     def test_source_tool(self) -> None:
-        server = self.server_make(True)
-        call = _call_make("source_put", {"name": "a.py", "text": _SOURCE_TEXT})
-        result = _response_get(server, call)["result"]
+        source = self.tool_get("source_put", True)
+        content, is_error = source({"name": "a.py", "text": _SOURCE_TEXT})
         digest = hashlib.sha256(_SOURCE_TEXT.encode("utf-8")).hexdigest()
-        self.assertFalse(result["isError"])
-        (block,) = result["content"]
+        self.assertIs(is_error, False)
+        (block,) = content
         self.assertEqual(block["type"], "text")
         self.assertEqual(json.loads(block["text"]), {"sha256": digest})
         written = _file_read(self.file_path)
@@ -537,47 +580,41 @@ class TestTools(IsolatedCase):
 
     # With debug mode off the source tool raises and writes nothing.
     def test_source_gated(self) -> None:
-        server = self.server_make(False)
-        call = _call_make("source_put", {"name": "a.py", "text": _SOURCE_TEXT})
-        response = _response_get(server, call)
-        message = i18n("engine_system.debug_off", "source_put")
-        self.error_check(response, _CODE_INTERNAL, message)
+        source = self.tool_get("source_put", False)
+        arguments = {"name": "a.py", "text": _SOURCE_TEXT}
+        message = _text_get("engine_system_debug_off_source_tool")
+        self.raise_check(RuntimeError, message, lambda: source(arguments))
         self.assertEqual(os.listdir(self.root), [])
 
     # Arguments that are missing or not text are refused with their code.
     def test_source_arguments(self) -> None:
-        server = self.server_make(True)
+        source = self.tool_get("source_put", True)
+        text_invalid = "engine_system_argument_invalid_text"
+        name_invalid = "engine_system_argument_invalid_name"
         bad: list[tuple[dict[str, Any], str]] = [
-            ({"name": "a.py"}, "text"),
-            ({"text": "x"}, "name"),
-            ({"name": 5, "text": "x"}, "name"),
-            ({"name": "a.py", "text": None}, "text"),
+            ({"name": "a.py"}, text_invalid),
+            ({"text": "x"}, name_invalid),
+            ({"name": 5, "text": "x"}, name_invalid),
+            ({"name": "a.py", "text": None}, text_invalid),
         ]
-        for arguments, key in bad:
+        for arguments, text in bad:
             with self.subTest(arguments=arguments):
-                response = _response_get(
-                    server, _call_make("source_put", arguments)
-                )
-                message = i18n(
-                    "engine_system.argument_invalid", "source_put", key
-                )
-                self.error_check(response, _CODE_PARAMS, message)
+                message = _text_get(text)
+                self.params_check(message, lambda: source(arguments))
         self.assertEqual(os.listdir(self.root), [])
 
     # A name that is not plain raises as any exception of a tool does.
     def test_source_name(self) -> None:
-        server = self.server_make(True)
-        call = _call_make("source_put", {"name": "../a.py", "text": "x"})
-        response = _response_get(server, call)
-        message = i18n("engine_system.name_invalid", "../a.py")
-        self.error_check(response, _CODE_INTERNAL, message)
+        source = self.tool_get("source_put", True)
+        arguments = {"name": "../a.py", "text": "x"}
+        message = _text_get("engine_system_name_invalid_parent_a")
+        self.raise_check(ValueError, message, lambda: source(arguments))
         self.assertEqual(os.listdir(self.root), [])
 
     # The restart tool replaces the process image as the handler does.
     def test_restart_tool(self) -> None:
-        server = self.server_make(True)
+        restart = self.tool_get("system_restart", True)
         _loop_write(self.root, "b.py")
-        call = _call_make("system_restart", {"main_loop": "b.py"})
         with (
             unittest.mock.patch(
                 _EXEC_TARGET, side_effect=ImageReplaced
@@ -585,61 +622,58 @@ class TestTools(IsolatedCase):
             unittest.mock.patch(_ARGV_TARGET, _PROGRAM_ARGV),
             self.assertRaises(ImageReplaced),
         ):
-            server.message_handle(call)
+            restart({"main_loop": "b.py"})
         expected = _PROGRAM_ARGV + [_MAIN_LOOP_OPTION, "b.py"]
         execv.assert_called_once_with(sys.executable, expected)
 
     # With debug mode off the restart tool raises and nothing is replaced.
     def test_restart_gated(self) -> None:
-        server = self.server_make(False)
+        restart = self.tool_get("system_restart", False)
         _loop_write(self.root, "b.py")
-        call = _call_make("system_restart", {"main_loop": "b.py"})
+        message = _text_get("engine_system_debug_off_restart_tool")
         with unittest.mock.patch(_EXEC_TARGET) as execv:
-            response = _response_get(server, call)
-        message = i18n("engine_system.debug_off", "system_restart")
-        self.error_check(response, _CODE_INTERNAL, message)
+            self.raise_check(
+                RuntimeError, message, lambda: restart({"main_loop": "b.py"})
+            )
         execv.assert_not_called()
 
-    # A missing file or a missing argument is an error and nothing is replaced.
+    # A missing file or a missing argument raises and nothing is replaced.
     def test_restart_refused(self) -> None:
-        server = self.server_make(True)
+        restart = self.tool_get("system_restart", True)
         path = os.path.join(self.loop_path, "b.py")
-        invalid = i18n(
-            "engine_system.argument_invalid", "system_restart", "main_loop"
-        )
-        cases: tuple[tuple[dict[str, Any], int, str], ...] = (
-            (
-                {"main_loop": "b.py"},
-                _CODE_INTERNAL,
-                i18n("engine_system.main_loop_missing", path),
-            ),
-            ({}, _CODE_PARAMS, invalid),
-            ({"main_loop": 5}, _CODE_PARAMS, invalid),
-        )
-        for arguments, code, message in cases:
+        missing = _text_get("engine_system_main_loop_missing")
+        with unittest.mock.patch(_EXEC_TARGET) as execv:
+            self.raise_check(
+                FileNotFoundError,
+                missing.replace("{0}", path),
+                lambda: restart({"main_loop": "b.py"}),
+            )
+        execv.assert_not_called()
+        invalid = _text_get("engine_system_argument_invalid_main_loop")
+        refused: tuple[dict[str, Any], ...] = ({}, {"main_loop": 5})
+        for arguments in refused:
             with self.subTest(arguments=arguments):
-                call = _call_make("system_restart", arguments)
                 with unittest.mock.patch(_EXEC_TARGET) as execv:
-                    response = _response_get(server, call)
-                self.error_check(response, code, message)
+                    self.params_check(invalid, lambda: restart(arguments))
                 execv.assert_not_called()
 
 
 # Tests the registration.
 class TestRegister(IsolatedCase):
-    # A second registration raises, as the dispatcher refuses the pair.
-    def test_register_twice(self) -> None:
+    # Each handler is registered once, under its type at version 0.
+    def test_handlers_registered(self) -> None:
         engine_system.handlers_register(self.root, True)
-        self.raise_check(
-            ValueError,
-            i18n("dispatch.handler_twice", "settings.put", 0),
-            lambda: engine_system.handlers_register(self.root, True),
-        )
+        expected = [
+            ("settings.put", 0, engine_system.settings_put),
+            ("source.put", 0, engine_system.source_put),
+            ("system.restart", 0, engine_system.system_restart),
+        ]
+        self.assertEqual(self.handlers, expected)
 
     # Called before the registration each handler raises.
     def test_called_early(self) -> None:
-        line = _line_make("settings.put")
-        message = i18n("engine_system.not_registered")
+        line = _gold_value("lines.settings_put")
+        message = _text_get("engine_system_not_registered")
         uses: list[Callable[[], object]] = [
             lambda: engine_system.settings_put(line, settings={}),
             lambda: engine_system.source_put(line, name="a.py"),

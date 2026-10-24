@@ -2,100 +2,77 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the AI worker with a synchronous queue, port doubles and a store
-// double: the owner tables, the synchronous mode, the replication queue and
-// the server port's hold, the wire's overlay tap, the relays of the console
-// and of the settings, the start from the hello to the render, and the
-// provider script.
+// Tests of the AI worker with a queue double, a port double and a wire
+// double: the owner table, the synchronous mode, the wire's tap in its full
+// and sized forms, the note of tty 1, the relays of the console and of the
+// settings, called through the handlers they register, and the cascade of a
+// fault sent as an `error` line by `wire_end`, the worker's own and the UI's.
+// The lines the tests send and expect and the texts of the notes and throws
+// are those of the gold record, test_settings.json. `tap_start` runs once
+// per worker, at bring up, which is its integration test, so no test here
+// calls it.
 
 namespace test_worker_ai {
-  // The types the worker registers, routed by the tests, and the values used.
+  // The values the tests use.
   const constants = Object.freeze({
-    routed_types: Object.freeze([
-      "replicate.next",
-      "replicate.done",
-      "console.open",
-      "worker.console_opened",
-      "console.close",
-      "worker.start",
-      "worker.snapshot_reply",
-      "worker.initialized",
-      "worker.listed",
-      "worker.fetched",
-      "worker.stored",
-      "worker.rendered",
-      "worker.script_fetched",
-      "worker_test.fetch",
-      "worker_test.fetched",
-    ]),
-    bootstrap: "/home/t/.cache/xsjs/bootstrap.py",
-    bootstrap_sha256:
-      "ab30a921f2faeb729bc35cdbc0a4f5a8bb70c95624eb5bfc2ff778db2cb22f88",
-    root: "/home/t/.cache/xsjs",
-    pid: 4242,
-    provider_key: "xai-SYNTHETIC-KEY",
-    hyperposition: "/metaverse/hyperposition/1",
-    greeting: "How can I help you?",
-    scene: "/castle_gatehouse/scene/arrival/1",
-    subtitle:
-      "Mind the moat. The gatehouse keeper has been expecting someone," +
-      " though not necessarily you.",
-    image: "/_files/gatehouse/arrival.png",
-    image_sha256:
-      "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0",
-    image_size: 88,
-    script_ref: "/_files/provider/script.json",
-    // The provider's address and models a hello carries when not scripted.
-    info: Object.freeze<lines.ProviderInfo>({
-      base_url: "https://api.x.ai/v1",
-      chat_model: "grok-4",
-      image_model: "grok-2-image",
-    }),
-    // A type routed to the relay of `settings.put`, which test pages register.
-    put_alias: "worker_test.settings_put",
-    // A `blob_max` of two blobs of three bytes, a value chosen by its writer.
-    queue_blob_max: 6,
     // A `blob_max` a test puts, a value chosen by its writer.
     put_blob_max: 7,
+    // The bytes of the payload of `{"text": ""}`, around the text.
+    text_payload_bytes: 11,
+    // The id the queue double answers for a request, chosen by its writer.
+    submit_id: 41,
   });
 
   // An object of fields by name.
   type FieldTable = { [key: string]: unknown };
 
+  // The port `error_send` and `fault_register` take, by their signature.
+  type EndPort = Parameters<typeof worker_ai.error_send>[0];
+
+  // A line and the owner it was given to the queue for.
+  type Owned = [lines.Line, queue.ThreadName | undefined];
+
   // The handlers the code under test registered, by line type.
   const routed = new Map<string, dispatch.Handler>();
 
-  // Whether dispatch's registry routes the worker's types to `routed`.
-  let router_installed = false;
-
-  // Routes the worker's types from dispatch's registry, once per thread.
-  function router_install(): void {
-    if (router_installed) {
-      return;
-    }
-    router_installed = true;
-    for (const type of constants.routed_types) {
-      dispatch.handler_register(type, 0, (line: lines.Line) => {
-        const fn = routed.get(type);
-        if (fn === undefined) {
-          throw new Error(`No handler is routed for ${type}.`);
-        }
-        return fn(line);
-      });
-    }
-    dispatch.handler_register(constants.put_alias, 0, (line: lines.Line) => {
-      const relay = routed.get("settings.put") as dispatch.Handler;
-      return relay(line);
-    });
-  }
-
-  // A register that keeps each handler in `routed`.
+  // A register that keeps each handler in `routed`, checked at version 0.
   function register_route(
     type: string,
-    _version: number,
+    version: number,
     fn: dispatch.Handler,
   ): void {
+    if (version !== 0) {
+      throw new Error(`${type} was registered at version ${String(version)}.`);
+    }
     routed.set(type, fn);
+  }
+
+  // The handler registered for a type, which must have been registered.
+  function routed_get(type: string): dispatch.Handler {
+    const fn = routed.get(type);
+    if (fn === undefined) {
+      throw new Error(`No handler was registered for ${type}.`);
+    }
+    return fn;
+  }
+
+  // A copy of a value of this module's gold, which the harness keeps frozen.
+  function gold_value(name: string): unknown {
+    return structuredClone(
+      harness.gold_get(`typescript.test_worker_ai.${name}`),
+    );
+  }
+
+  // A text of this module's gold, a run time `{n}` left for the test to fill.
+  function gold_text(name: string): string {
+    return harness.gold_get(
+      `typescript.test_worker_ai.texts.${name}`,
+    ) as string;
+  }
+
+  // A copy of a line of this module's gold, a run time part set on the copy.
+  function gold_line(name: string): lines.Line {
+    return gold_value(`lines.${name}`) as lines.Line;
   }
 
   // The error the function throws, and an error of its own when it doesn't.
@@ -111,7 +88,7 @@ namespace test_worker_ai {
     throw new Error("Nothing was thrown.");
   }
 
-  // A port double: it keeps what the queue posts and hands it lines.
+  // A port double: it keeps what is posted and hands lines to its receiver.
   class PortDouble implements queue.Port {
     readonly posted: lines.Line[] = [];
     private receiver: ((line: lines.Line) => void) | undefined;
@@ -121,12 +98,12 @@ namespace test_worker_ai {
       this.posted.push(line);
     }
 
-    // Takes the receiver, which is the queue.
+    // Takes the receiver.
     line_receive(fn: (line: lines.Line) => void): void {
       this.receiver = fn;
     }
 
-    // Hands a line to the queue as if it came on this port.
+    // Hands a line to the receiver as if it came on this port.
     line_send(line: lines.Line): void {
       const receiver = this.receiver;
       if (receiver === undefined) {
@@ -134,442 +111,110 @@ namespace test_worker_ai {
       }
       receiver(line);
     }
+  }
 
-    // The last line posted of a type.
-    last_of(type: string): lines.Line {
-      const found = this.posted.filter((line) => type_of(line) === type);
-      if (found.length === 0) {
-        throw new Error(`The port double was posted no ${type}.`);
+  // A queue double: it answers the ids the test picks and keeps each line.
+  class TasksDouble {
+    readonly submitted: Owned[] = [];
+    readonly notified: Owned[] = [];
+    private readonly ids: number[];
+
+    // Takes the ids `task_submit` answers, in order.
+    constructor(ids: number[]) {
+      this.ids = [...ids];
+    }
+
+    // Keeps the request and its owner, and answers the next id picked.
+    task_submit(line: lines.Line, owner?: queue.ThreadName): number {
+      const id = this.ids.shift();
+      if (id === undefined) {
+        throw new Error("The queue double has no id left to answer.");
       }
-      return found[found.length - 1];
+      this.submitted.push([line, owner]);
+      return id;
+    }
+
+    // Keeps the notification and its owner.
+    line_notify(line: lines.Line, owner?: queue.ThreadName): void {
+      this.notified.push([line, owner]);
     }
   }
 
-  // A synchronous queue of the AI thread and doubles of four of its ports.
-  interface WorkerBench {
-    tasks: queue.TaskQueue;
-    ui: PortDouble;
-    server: PortDouble;
-    console: PortDouble;
-    http: PortDouble;
+  // A wire double: it keeps each line `wire_end` sends, then calls back.
+  class WireDouble {
+    readonly ended: lines.Line[] = [];
+    // The number of lines kept when each callback ran.
+    readonly called: number[] = [];
+
+    // Keeps the line, then calls back as the server's close of the wire does.
+    wire_end(line: lines.Line, fn: () => void): void {
+      this.ended.push(line);
+      this.called.push(this.ended.length);
+      fn();
+    }
   }
 
-  // A queue whose server port holds snapshots, its double and replication.
-  interface HoldBench {
-    tasks: queue.TaskQueue;
-    server: PortDouble;
-    store: ForwardDouble;
-    forwards: worker_ai.ForwardQueue;
-  }
-
-  // Makes a bench with the engine's owner table and no handler routed.
-  function bench_make(): WorkerBench {
-    router_install();
+  // A queue double answering the ids given, with no handler routed.
+  function tasks_make(ids: number[]): TasksDouble {
     routed.clear();
-    const owners = worker_ai.owners_make(false);
-    const tasks = new queue.TaskQueue("ai", owners, true);
-    const bench = {
-      tasks,
-      ui: new PortDouble(),
-      server: new PortDouble(),
-      console: new PortDouble(),
-      http: new PortDouble(),
+    return new TasksDouble(ids);
+  }
+
+  // The queue double as the queue the code under test takes.
+  function queue_of(tasks: TasksDouble): queue.TaskQueue {
+    return tasks as unknown as queue.TaskQueue;
+  }
+
+  // Whether a line was built in full names, as `settings.names_full()` says.
+  function full_of(line: lines.Line): boolean {
+    return Object.hasOwn(line[0], "type");
+  }
+
+  // A settings reader of the test's own values, else of `settings.json`.
+  function reader_from(values: FieldTable): (id: string) => unknown {
+    return (id: string) =>
+      Object.hasOwn(values, id) ? values[id] : harness.setting_get(id);
+  }
+
+  // The live settings a relay changes, two values of `settings.json`.
+  function settings_live(): settings.Settings {
+    const live: FieldTable = {
+      blob_max: harness.setting_get("blob_max"),
+      line_max: harness.setting_get("line_max"),
     };
-    tasks.port_add("ui", bench.ui);
-    tasks.port_add("server", bench.server);
-    tasks.port_add("console", bench.console);
-    tasks.port_add("http", bench.http);
-    return bench;
+    return live as unknown as settings.Settings;
   }
 
-  // Makes a bench whose server port is a hold on its double, with replication.
-  function hold_make(): HoldBench {
-    router_install();
-    routed.clear();
-    const owners = worker_ai.owners_make(false);
-    const tasks = new queue.TaskQueue("ai", owners, true);
-    const server = new PortDouble();
-    const hold = new worker_ai.ServerHold(server);
-    tasks.port_add("server", hold);
-    const store = new ForwardDouble();
-    const forwards = new worker_ai.ForwardQueue(
-      store,
-      tasks,
-      reader_from(settings_make()),
-      false,
-    );
-    hold.forwards_attach(forwards);
-    worker_ai.forwards_register(forwards, register_route);
-    return { tasks, server, store, forwards };
-  }
-
-  // Routes a task that asks the server for a snapshot and keeps its reply.
-  function fetch_route(tasks: queue.TaskQueue, replies: lines.Line[]): void {
-    routed.set("worker_test.fetch", (line: lines.Line) => {
-      const ask = line_short("db.snapshot", { db: line.db });
-      const id = tasks.task_submit(ask, "server");
-      return dispatch.task_sleep(null, [id], "worker_test.fetched");
-    });
-    routed.set("worker_test.fetched", (line: lines.Line) => {
-      replies.push(...(line.replies as lines.Line[]));
-      return undefined;
-    });
-  }
-
-  // The type of a line.
-  function type_of(line: lines.Line): unknown {
-    return jslb.field_get(line[0], "type");
-  }
-
-  // The header options the tests set.
-  type HeaderOptions = {
-    id?: number;
-    reply?: number;
-    key?: string;
-    full?: boolean;
-  };
-
-  // A line in short names from its type, payload, header options and blobs.
-  function line_short(
-    type: string,
-    payload: FieldTable = {},
-    options: HeaderOptions = {},
-    blobs: lines.BlobHeader[] = [],
-  ): lines.Line {
-    return jslb.line_make(jslb.header_make(type, options), blobs, payload);
-  }
-
-  // The reply to a request a double received, with its payload and blobs.
-  function reply_to(
-    request: lines.Line,
-    payload: FieldTable,
-    blobs: lines.BlobHeader[] = [],
-  ): lines.Line {
-    const header = jslb.header_make(type_of(request) as string, {
-      reply: jslb.field_get(request[0], "id") as number,
-      full: Object.hasOwn(request[0], "type"),
-    });
-    return jslb.line_make(header, blobs, payload);
-  }
-
-  // The settings of `settings.json`, every key with its value.
-  function settings_make(): settings.Settings {
+  // A cascade of two failures, the first innermost.
+  function cascade_make(): lines.ErrorCause {
     return {
-      debug: true,
-      queue_synchronous: false,
-      verbose_level: 1,
-      verbose_ring: 1000,
-      line_max: 1048576,
-      blob_max: 2147483391,
-      overflow_bytes: 131072,
-      chunk_bytes: 1048576,
-      srv_buf_size: 1048576,
-      media_db_bytes: 268435456,
-      files_browser_bytes: 1073741824,
-      db_soft_bytes: 1073741824,
-      turn_compact_turns: 64,
-      long_task_ms: 5,
-      provider: {
-        scripted: true,
-        timeout_seconds: 120,
-      },
+      message: "The read failed.",
+      stack: "Error: The read failed.\n    at read",
+      cause: { message: "The file is gone.", stack: "" },
     };
   }
 
-  // The reader of a settings store that holds the settings given.
-  function reader_from(value: settings.Settings): (id: string) => unknown {
-    const store = new settings.ValueStore();
-    store.value_set(value);
-    return (id: string) => store.value_get(id);
-  }
-
-  // A hello of a scripted run, which carries no provider information.
-  function hello_make(): lines.Hello {
-    return {
-      bootstrap: constants.bootstrap,
-      sha256: constants.bootstrap_sha256,
-      pid: constants.pid,
-      root: constants.root,
-      settings: settings_make(),
-      seq: { _settings: 15, _files: 1, _preferences: 0, metaverse: 5 },
-      provider_key: constants.provider_key,
-    };
-  }
-
-  // A forwarded `sql.run` of a database with the `since` given.
-  function sql_line(db: string, since: number): lines.Line {
-    return line_short("sql.run", { db, statements: [], since });
-  }
-
-  // A forwarded `kv.put` of a ref with three bytes as its blob.
-  function kv_line(ref: string): lines.Line {
-    const blob = jslb.blob_make(new Uint8Array([1, 2, 3]));
-    return line_short("kv.put", { since: 0 }, { key: ref }, [blob]);
-  }
-
-  // A forwarded `turn.append` of a scene.
-  function turn_line(scene: string): lines.Line {
-    return line_short("turn.append", {
-      scene,
-      role: "user",
-      content: { role: "user", content: "1" },
-      since: 0,
-    });
-  }
-
-  // A store double for replication: it keeps each line and reply it gets.
-  class ForwardDouble implements worker_ai.ForwardStore {
-    readonly done: [lines.Line, lines.Line][] = [];
-
-    // Keeps the forwarded line and its reply.
-    forward_done(line: lines.Line, reply: lines.Line): void {
-      this.done.push([line, reply]);
-    }
-  }
-
-  // A store double for the start: databases, values, documents, calls.
-  class StoreDouble implements worker_ai.StartStore {
-    readonly open: string[] = [];
-    readonly calls: string[] = [];
-    readonly values = new Map<string, substrate.KvValue>();
-    readonly documents = new Map<string, lines.Document>();
-    readonly seqs = new Map<string, number>();
-    // The refs of cached values whose files this side lacks.
-    readonly lacking = new Set<string>();
-    replace: string[] = [];
-    universes: string[] = [];
-
-    // Records the server's `seq` and returns the databases to replace.
-    start_open(server: { [db: string]: number }): string[] {
-      this.calls.push(`start_open ${utility.json_text(server)}`);
-      return this.replace;
-    }
-
-    // Opens a database from a snapshot and returns its `seq`.
-    db_restore(db: string, data: Uint8Array | string): number {
-      return this.snapshot_open("db_restore", db, data);
-    }
-
-    // Opens a database from a snapshot and returns its `seq`.
-    db_load(db: string, data: Uint8Array | string): number {
-      return this.snapshot_open("db_load", db, data);
-    }
-
-    // The open databases.
-    db_list(): string[] {
-      return [...this.open];
-    }
-
-    // The value of a ref, which the double must hold.
-    kv_get(ref: lines.KvRef): substrate.KvValue {
-      return this.value_get(ref);
-    }
-
-    // Whether this side holds a value's bytes, which the double must hold.
-    kv_held(ref: lines.KvRef): boolean {
-      this.value_get(ref);
-      return !this.lacking.has(ref);
-    }
-
-    // Records the filling back of a value's file, which this side then holds.
-    cache_fill(ref: lines.KvRef, data: Uint8Array | string): void {
-      const shown = typeof data === "string" ? data : "bytes";
-      this.calls.push(`cache_fill ${ref} ${shown}`);
-      this.lacking.delete(ref);
-    }
-
-    // Records the statements and returns the universes as rows of names.
-    sql_run(db: string, statements: lines.SqlStatement[]): lines.SqlResult[] {
-      this.calls.push(`sql_run ${db} ${utility.json_text(statements)}`);
-      const rows = this.universes.map((name) => [name]);
-      return [{ columns: ["name"], rows, changes: 0 }];
-    }
-
-    // The document of a ref, which the double must hold.
-    doc_get(ref: lines.DocRef): lines.Document {
-      const document_held = this.documents.get(ref);
-      if (document_held === undefined) {
-        throw new Error(`The store double has no document ${ref}.`);
-      }
-      return document_held;
-    }
-
-    // Holds text as the value of a ref, in its row.
-    text_set(ref: string, text: string): void {
-      const data = utility.utf8_encode(text);
-      const sha256 = utility.sha256_hex(data);
-      this.values.set(ref, { data, size: data.length, sha256 });
-    }
-
-    // Records the opening of a snapshot and opens the database.
-    private snapshot_open(
-      call: string,
-      db: string,
-      data: Uint8Array | string,
-    ): number {
-      const shown = typeof data === "string" ? data : "bytes";
-      this.calls.push(`${call} ${db} ${shown}`);
-      this.open.push(db);
-      return this.seqs.get(db) as number;
-    }
-
-    // The value of a ref, which the double must hold.
-    private value_get(ref: string): substrate.KvValue {
-      const value = this.values.get(ref);
-      if (value === undefined) {
-        throw new Error(`The store double has no value ${ref}.`);
-      }
-      return value;
-    }
-  }
-
-  // A cache double: files by handle and the handles read.
-  class CacheDouble implements worker_ai.CacheReader {
-    readonly files = new Map<string, Uint8Array>();
-    readonly reads: string[] = [];
-
-    // Reads a range of a file the double holds.
-    cache_read(handle: string, offset: number, length: number): Uint8Array {
-      this.reads.push(handle);
-      const file = this.files.get(handle) as Uint8Array;
-      return file.subarray(offset, offset + length);
-    }
-  }
-
-  // A store double holding the seeded metaverse and its scene.
-  function store_seeded(): StoreDouble {
-    const store = new StoreDouble();
-    store.text_set("/metaverse/world", "metaverse");
-    store.text_set("/metaverse/scene", constants.hyperposition);
-    store.documents.set(constants.hyperposition, {
-      0: { t: "scene" },
-      subtitle: constants.greeting,
-    });
-    store.seqs.set("metaverse", 5);
-    store.seqs.set("_files", 1);
-    return store;
-  }
-
-  // Registers a start on the bench whose browser server is the `http` double.
-  function chain_make(
-    bench: WorkerBench,
-    store: StoreDouble,
-    cache: CacheDouble,
-    attached: string[],
-    script = false,
-  ): void {
-    const browser = new mcp.Client(
-      "hyperposition-engine",
-      "0",
-      bench.tasks,
-      "http",
-      false,
-    );
-    const server = new mcp.Client(
-      "hyperposition-engine",
-      "0",
-      bench.tasks,
-      "server",
-      false,
-    );
-    const chain = new worker_ai.StartChain({
-      tasks: bench.tasks,
-      store,
-      cache,
-      browser,
-      server,
-      hello: hello_make(),
-      full: false,
-      script,
-      provider_attach: () => {
-        attached.push("provider");
-      },
-    });
-    worker_ai.chain_register(chain, register_route);
-  }
-
-  // Starts the chain as the hello's follow up task does.
-  function chain_start(bench: WorkerBench): void {
-    bench.tasks.line_notify(line_short("worker.start"), "ai");
-  }
-
-  // Answers the last snapshot request of the server double with one blob.
-  function snapshot_answer(bench: WorkerBench, seq: number): void {
-    const data = new Uint8Array([7]);
-    const ask = bench.server.last_of("db.snapshot");
-    const sha256 = utility.sha256_hex(data);
-    const blobs = [jslb.blob_make(data)];
-    bench.server.line_send(reply_to(ask, { sha256, seq }, blobs));
-  }
-
-  // The `JSON-RPC` response to an `mcp` request a double received.
-  function mcp_answer(request: lines.Line, result: FieldTable): lines.Line {
-    return reply_to(request, { jsonrpc: "2.0", id: request.id, result });
-  }
-
-  // Answers both initializations, then both lists of tools, with none.
-  function handshake_answer(bench: WorkerBench): void {
-    const result = {
-      protocolVersion: mcp.constants.protocol_version,
-      capabilities: { tools: {} },
-      serverInfo: { name: "xsjs-browser", version: "0" },
-    };
-    bench.http.line_send(mcp_answer(bench.http.last_of("mcp"), result));
-    bench.server.line_send(mcp_answer(bench.server.last_of("mcp"), result));
-    bench.http.line_send(mcp_answer(bench.http.last_of("mcp"), { tools: [] }));
-    const listed = bench.server.last_of("mcp");
-    bench.server.line_send(mcp_answer(listed, { tools: [] }));
-  }
-
-  // The databases whose snapshots the server double was asked for.
-  function snapshots_asked(bench: WorkerBench): unknown[] {
-    return bench.server.posted
-      .filter((line) => type_of(line) === "db.snapshot")
-      .map((line) => line.db);
-  }
-
-  // The owner tables of the engine's worker and of the test page's.
+  // The owner table of the AI thread.
   export class TestOwnerTables extends unittest.TestCase {
-    // The console's lines go here, to its port or to the UI, verbose out.
-    test_engine_routes(): void {
-      const owners = worker_ai.owners_make(false);
-      this.assertEqual(owners["console."], "ai");
-      this.assertEqual(owners["console.input"], "console");
-      this.assertEqual(owners["console.output"], "ui");
-      this.assertEqual(owners["console.exit"], "ui");
-      this.assertEqual(owners["verbose."], "server");
-      this.assertEqual(owners["ai."], "ai");
-      this.assertEqual(owners["replicate."], "ai");
-      this.assertEqual(owners["worker."], "ai");
-      this.assertEqual(owners["settings.put"], "ai");
-      this.assertEqual(owners["kv."], "ai");
-      this.assertFalse(Object.hasOwn(owners, "mcp"));
-      this.assertFalse(Object.hasOwn(owners, "tap."));
-    }
-
-    // The test page's table sends `tap.` lines to the server too.
-    test_tap_route(): void {
-      const owners = worker_ai.owners_make(true);
-      this.assertEqual(owners["tap."], "server");
-      this.assertEqual(owners["verbose."], "server");
-    }
-
-    // Lines from the UI for the console port and the server pass unchanged.
-    test_lines_passed(): void {
-      const bench = bench_make();
-      const input = line_short("console.input", {}, {}, [
-        jslb.blob_make(new Uint8Array([0x30])),
-      ]);
-      bench.ui.line_send(input);
-      this.assertTrue(bench.console.posted[0] === input);
-      const put = line_short("verbose.put", { thread: "ui", lines: [] });
-      bench.ui.line_send(put);
-      this.assertTrue(bench.server.posted[0] === put);
-    }
-
-    // The name form is the thread's debug setting.
-    test_names_debug(): void {
-      this.assertEqual(worker_ai.names_full(), settings.settings_get("debug"));
+    // The console's lines go here, to its port or to the UI, the rest out.
+    test_routes(): void {
+      this.assertEqual(worker_ai.owners_make(), {
+        "ai.": "ai",
+        "tools.": "ai",
+        "kv.": "ai",
+        "doc.": "ai",
+        "db.": "ai",
+        "turn.": "ai",
+        "sql.": "ai",
+        "settings.put": "ai",
+        "console.": "ai",
+        "console.input": "console",
+        "console.output": "ui",
+        "console.exit": "ui",
+        "verbose.": "server",
+        "tap.": "server",
+        fault: "ai",
+      });
     }
   }
 
@@ -577,239 +222,113 @@ namespace test_worker_ai {
   export class TestQueueMode extends unittest.TestCase {
     // Read in debug mode, it is refused outside it.
     test_debug_only(): void {
-      const value = settings_make();
-      value.queue_synchronous = true;
-      this.assertTrue(worker_ai.synchronous_read(reader_from(value)));
-      const plain = reader_from(settings_make());
+      const synchronous = reader_from({ queue_synchronous: true });
+      this.assertTrue(worker_ai.synchronous_read(synchronous));
+      const plain = reader_from({ queue_synchronous: false });
       this.assertFalse(worker_ai.synchronous_read(plain));
-      const release = settings_make();
-      release.debug = false;
-      release.queue_synchronous = true;
-      const error = thrown_get(() =>
-        worker_ai.synchronous_read(reader_from(release)),
-      );
-      this.assertEqual(error.message, i18n("worker_ai.synchronous_release"));
-    }
-  }
-
-  // The replication: a queue per database, one line in flight in each.
-  export class TestForwardQueue extends unittest.TestCase {
-    // A second line of a database waits for the reply to the first.
-    test_one_flight(): void {
-      const bench = bench_make();
-      const store = new ForwardDouble();
-      const reader = reader_from(settings_make());
-      const forwards = new worker_ai.ForwardQueue(
-        store,
-        bench.tasks,
-        reader,
-        false,
-      );
-      worker_ai.forwards_register(forwards, register_route);
-      const first = sql_line("castle", 0);
-      const second = kv_line("/castle/k");
-      const other = sql_line("castle_world", 0);
-      forwards.line_add(first);
-      forwards.line_add(second);
-      forwards.line_add(other);
-      this.assertEqual(bench.server.posted.length, 2);
-      this.assertTrue(bench.server.posted[0] === first);
-      this.assertTrue(bench.server.posted[1] === other);
-      this.assertEqual(forwards.held_bytes(), 3);
-      const reply = reply_to(first, { results: [], seq: 1 });
-      bench.server.line_send(reply);
-      this.assertEqual(store.done.length, 1);
-      this.assertTrue(store.done[0][0] === first);
-      this.assertTrue(store.done[0][1] === reply);
-      this.assertEqual(bench.server.posted.length, 3);
-      this.assertTrue(bench.server.posted[2] === second);
-      this.assertEqual(forwards.held_bytes(), 0);
-      this.assertEqual(bench.tasks.depth(), 2);
-    }
-
-    // A key, a `db` and a scene each name the database a line waits on.
-    test_database_named(): void {
-      const bench = bench_make();
-      const store = new ForwardDouble();
-      const reader = reader_from(settings_make());
-      const forwards = new worker_ai.ForwardQueue(
-        store,
-        bench.tasks,
-        reader,
-        false,
-      );
-      worker_ai.forwards_register(forwards, register_route);
-      forwards.line_add(kv_line("/castle/k"));
-      forwards.line_add(sql_line("castle", 1));
-      forwards.line_add(turn_line("/castle/scene/1"));
-      for (let seq = 1; seq <= 3; seq += 1) {
-        this.assertEqual(bench.server.posted.length, seq);
-        const sent = bench.server.posted[seq - 1];
-        bench.server.line_send(reply_to(sent, { seq }));
-      }
-      const types = bench.server.posted.map((line) => type_of(line));
-      this.assertEqual(types, ["kv.put", "sql.run", "turn.append"]);
-      this.assertEqual(store.done.length, 3);
-      this.assertEqual(bench.tasks.depth(), 0);
-    }
-
-    // Holding blobs over `blob_max` throws, lines without blobs count none.
-    test_queue_over(): void {
-      const bench = bench_make();
-      const value = settings_make();
-      value.blob_max = constants.queue_blob_max;
-      const forwards = new worker_ai.ForwardQueue(
-        new ForwardDouble(),
-        bench.tasks,
-        reader_from(value),
-        false,
-      );
-      worker_ai.forwards_register(forwards, register_route);
-      forwards.line_add(kv_line("/castle/a"));
-      forwards.line_add(sql_line("castle", 1));
-      forwards.line_add(kv_line("/castle/b"));
-      forwards.line_add(kv_line("/castle/c"));
-      const limit = constants.queue_blob_max;
-      this.assertEqual(forwards.held_bytes(), limit);
-      const over = kv_line("/castle/d");
-      const error = thrown_get(() => forwards.line_add(over));
-      const header = utility.json_text(over[0]);
+      const release = reader_from({ debug: false, queue_synchronous: true });
+      const error = thrown_get(() => worker_ai.synchronous_read(release));
       this.assertEqual(
         error.message,
-        i18n("worker_ai.queue_over", header, 3, limit, limit),
+        gold_text("worker_ai_synchronous_release"),
       );
-      this.assertEqual(forwards.held_bytes(), limit);
-    }
-
-    // A snapshot of a database with lines waiting goes out behind them.
-    test_snapshot_behind(): void {
-      const bench = hold_make();
-      const replies: lines.Line[] = [];
-      fetch_route(bench.tasks, replies);
-      const first = sql_line("castle", 0);
-      const second = sql_line("castle", 1);
-      bench.forwards.line_add(first);
-      bench.forwards.line_add(second);
-      const fetch = line_short("worker_test.fetch", { db: "castle" });
-      bench.tasks.line_notify(fetch, "ai");
-      this.assertEqual(bench.server.posted.length, 1);
-      bench.server.line_send(reply_to(first, { results: [], seq: 1 }));
-      this.assertEqual(bench.server.posted.length, 2);
-      this.assertTrue(bench.server.posted[1] === second);
-      bench.server.line_send(reply_to(second, { results: [], seq: 2 }));
-      this.assertEqual(bench.server.posted.length, 3);
-      const ask = bench.server.posted[2];
-      this.assertEqual(type_of(ask), "db.snapshot");
-      this.assertEqual(jslb.payload_of(ask), { db: "castle" });
-      const answer = reply_to(ask, { seq: 2 });
-      bench.server.line_send(answer);
-      this.assertTrue(replies[0] === answer);
-      this.assertEqual(bench.store.done.length, 2);
-      this.assertEqual(bench.tasks.depth(), 0);
-    }
-
-    // With no line waiting, a snapshot goes out at once, behind one in flight.
-    test_snapshot_passed(): void {
-      const bench = hold_make();
-      fetch_route(bench.tasks, []);
-      bench.forwards.line_add(sql_line("castle", 0));
-      const fetch = line_short("worker_test.fetch", { db: "castle" });
-      bench.tasks.line_notify(fetch, "ai");
-      const types = bench.server.posted.map((line) => type_of(line));
-      this.assertEqual(types, ["sql.run", "db.snapshot"]);
-      this.assertEqual(bench.forwards.held_bytes(), 0);
-    }
-
-    // A line of a type that writes no database is refused.
-    test_type_refused(): void {
-      const bench = bench_make();
-      const forwards = new worker_ai.ForwardQueue(
-        new ForwardDouble(),
-        bench.tasks,
-        reader_from(settings_make()),
-        false,
-      );
-      const line = line_short("kv.get", {}, { key: "/castle/k" });
-      const error = thrown_get(() => forwards.line_add(line));
-      const expected = i18n("worker_ai.forward_type", "kv.get");
-      this.assertEqual(error.message, expected);
     }
   }
 
-  // The tap that shows the wire's lines in the overlay of tty 1.
+  // The tap that notes the wire's lines, whole or by their sizes.
   export class TestWireTap extends unittest.TestCase {
-    // Each line is shown as sent or received and passes unchanged.
+    // Each line is noted as sent or received and passes unchanged.
     test_both_ways(): void {
       const inner = new PortDouble();
       const notes: string[] = [];
       const tap = new worker_ai.WireTap(inner, (text) => {
         notes.push(text);
       });
-      const sent = line_short(
-        "kv.list",
-        { db: "castle", prefix: "" },
-        {
-          id: 1,
-        },
-      );
+      const sent = gold_line("kv_list_first");
       tap.line_post(sent, []);
       this.assertTrue(inner.posted[0] === sent);
       const taken: lines.Line[] = [];
       tap.line_receive((line) => {
         taken.push(line);
       });
-      const received = line_short("kv.list", { keys: [] }, { reply: 1 });
+      const received = gold_line("kv_list_reply");
       inner.line_send(received);
       this.assertTrue(taken[0] === received);
       this.assertEqual(notes, [
-        i18n("worker_ai.overlay_sent", jslb.line_render(sent)),
-        i18n("worker_ai.overlay_received", jslb.line_render(received)),
+        gold_text("worker_ai_overlay_sent_first"),
+        gold_text("worker_ai_overlay_received"),
       ]);
     }
 
-    // The page's view forwarded as `verbose.put` passes and is not shown.
+    // A line whose rendering would not fit a verbose entry is noted by sizes.
+    test_sizes_noted(): void {
+      const inner = new PortDouble();
+      const notes: string[] = [];
+      const tap = new worker_ai.WireTap(inner, (text) => {
+        notes.push(text);
+      });
+      const line_max = harness.setting_get("line_max") as number;
+      // A line of a payload text of `line_max` characters and a blob of 3.
+      const sized = (): lines.Line => {
+        const line = gold_line("kv_put_sized");
+        line.text = "x".repeat(line_max);
+        Object.assign(line[1] as lines.BlobHeader, { d: new Uint8Array(3) });
+        return line;
+      };
+      const sent = sized();
+      tap.line_post(sent, []);
+      this.assertTrue(inner.posted[0] === sent);
+      const taken: lines.Line[] = [];
+      tap.line_receive((line) => {
+        taken.push(line);
+      });
+      const received = sized();
+      inner.line_send(received);
+      this.assertTrue(taken[0] === received);
+      const payload = String(line_max + constants.text_payload_bytes);
+      this.assertEqual(notes, [
+        gold_text("worker_ai_overlay_sent_sized").replaceAll("{1}", payload),
+        gold_text("worker_ai_overlay_received_sized").replaceAll(
+          "{1}",
+          payload,
+        ),
+      ]);
+    }
+
+    // The page's view forwarded as `verbose.put` passes and is not noted.
     test_forward_unshown(): void {
       const inner = new PortDouble();
       const notes: string[] = [];
       const tap = new worker_ai.WireTap(inner, (text) => {
         notes.push(text);
       });
-      for (const full of [true, false]) {
-        const put = line_short(
-          "verbose.put",
-          { thread: "ui", lines: [] },
-          {
-            full,
-          },
-        );
+      for (const name of ["verbose_put_full", "verbose_put"]) {
+        const put = gold_line(name);
         tap.line_post(put, []);
         this.assertTrue(inner.posted[inner.posted.length - 1] === put);
       }
-      const sent = line_short(
-        "kv.list",
-        { db: "castle", prefix: "" },
-        {
-          id: 2,
-        },
-      );
+      const sent = gold_line("kv_list_second");
       tap.line_post(sent, []);
       this.assertEqual(inner.posted.length, 3);
-      this.assertEqual(notes, [
-        i18n("worker_ai.overlay_sent", jslb.line_render(sent)),
-      ]);
+      this.assertEqual(notes, [gold_text("worker_ai_overlay_sent_second")]);
     }
 
     // A note goes to the overlay of tty 1 on the UI and to the log.
     test_note_logged(): void {
-      const bench = bench_make();
+      const tasks = tasks_make([]);
       const logged: string[] = [];
-      const note = worker_ai.note_make(bench.tasks, false, (text) => {
+      const note = worker_ai.note_make(queue_of(tasks), (text) => {
         logged.push(text);
       });
-      const text = i18n("worker_ai.overlay_sent", "{}");
+      const text = gold_text("worker_ai_overlay_sent_empty");
       note(text);
-      const shown = bench.ui.last_of("overlay.line");
-      this.assertEqual(jslb.payload_of(shown), { tty: 1, text });
+      this.assertEqual(tasks.notified.length, 1);
+      const [shown, owner] = tasks.notified[0];
+      const expected = gold_line("overlay_line");
+      expected.text = text;
+      this.assertEqual(shown, expected);
+      this.assertEqual(owner, "ui");
+      this.assertEqual(full_of(shown), harness.setting_get("debug"));
       this.assertEqual(logged, [text]);
     }
   }
@@ -818,437 +337,150 @@ namespace test_worker_ai {
   export class TestRelays extends unittest.TestCase {
     // The UI's opening goes to the console port, and its token comes back.
     test_console_opened(): void {
-      const bench = bench_make();
+      const id = constants.submit_id;
+      const tasks = tasks_make([id]);
       let closes = 0;
-      worker_ai.console_register(bench.tasks, register_route, () => {
+      worker_ai.console_register(queue_of(tasks), register_route, () => {
         closes += 1;
       });
-      const request = line_short("console.open", {}, { id: 7, full: true });
-      bench.ui.line_send(request);
-      const opening = bench.console.posted[0];
-      this.assertEqual(type_of(opening), "console.open");
-      this.assertTrue(Object.hasOwn(opening[0], "type"));
+      const request = gold_line("console_open_request");
+      const sleep = routed_get("console.open")(request);
+      this.assertEqual(tasks.submitted.length, 1);
+      const [opening, owner] = tasks.submitted[0];
+      this.assertEqual(opening, gold_line("console_open_copy"));
+      this.assertEqual(owner, "console");
+      this.assertEqual(full_of(opening), harness.setting_get("debug"));
       this.assertTrue(opening !== request);
-      bench.console.line_send(reply_to(opening, { token: "abc" }));
-      const answer = bench.ui.posted[0];
-      this.assertEqual(jslb.field_get(answer[0], "reply"), 7);
-      this.assertEqual(answer.token, "abc");
-      this.assertEqual(bench.tasks.depth(), 0);
+      const expected = gold_value("lines.console_sleep") as dispatch.Sleep;
+      expected.state = { request };
+      expected.wait_ids = [id];
+      this.assertEqual(sleep, expected);
+      const reply = gold_line("console_open_reply");
+      Object.assign(reply[0], { reply: id });
+      const wake = gold_line("console_opened_wake");
+      wake.state = (sleep as dispatch.Sleep).state;
+      wake.replies = [reply];
+      const answer = routed_get("worker.console_opened")(wake);
+      this.assertEqual(answer, gold_line("console_open_answer"));
+      this.assertEqual(tasks.notified.length, 0);
       this.assertEqual(closes, 0);
     }
 
     // The UI's close closes the console port once and is answered at once.
     test_console_closed(): void {
-      const bench = bench_make();
+      const tasks = tasks_make([]);
       let closes = 0;
-      worker_ai.console_register(bench.tasks, register_route, () => {
+      worker_ai.console_register(queue_of(tasks), register_route, () => {
         closes += 1;
       });
-      const request = line_short("console.close", {}, { id: 8, full: true });
-      bench.ui.line_send(request);
+      const request = gold_line("console_close_request");
+      const answer = routed_get("console.close")(request);
       this.assertEqual(closes, 1);
-      this.assertEqual(bench.console.posted.length, 0);
-      this.assertEqual(bench.ui.posted.length, 1);
-      const answer = bench.ui.posted[0];
-      this.assertEqual(type_of(answer), "console.close");
-      this.assertEqual(jslb.field_get(answer[0], "reply"), 8);
-      this.assertTrue(Object.hasOwn(answer[0], "type"));
-      this.assertEqual(jslb.payload_of(answer), {});
-      this.assertEqual(bench.tasks.depth(), 0);
+      this.assertEqual(tasks.submitted.length, 0);
+      this.assertEqual(tasks.notified.length, 0);
+      this.assertEqual(answer, gold_line("console_close_answer"));
     }
 
     // A notice of new settings changes the live value, goes to the server.
     test_settings_sent(): void {
-      const bench = bench_make();
-      const live = settings_make();
-      worker_ai.settings_register(bench.tasks, register_route, live);
-      const value = settings_make();
+      const id = constants.submit_id;
+      const tasks = tasks_make([id]);
+      const live = settings_live();
+      worker_ai.settings_register(queue_of(tasks), register_route, live);
+      const value = settings_live();
       value.blob_max = constants.put_blob_max;
-      const notice = line_short(constants.put_alias, { settings: value });
-      bench.tasks.line_notify(notice, "ai");
+      const notice = gold_line("settings_put_notice");
+      notice.settings = value;
+      const sleep = routed_get("settings.put")(notice);
       this.assertEqual(live, value);
-      this.assertEqual(bench.server.posted.length, 1);
-      const put = bench.server.posted[0];
-      this.assertEqual(type_of(put), "settings.put");
-      this.assertEqual(typeof jslb.field_get(put[0], "id"), "number");
-      this.assertEqual(put.settings, value);
-      this.assertEqual(bench.tasks.depth(), 1);
-      const wake = line_short("worker.settings_put", {
-        state: null,
-        replies: [reply_to(put, {})],
-      });
-      const done = routed.get("worker.settings_put") as dispatch.Handler;
-      this.assertEqual(done(wake), undefined);
-      this.assertEqual(bench.ui.posted.length, 0);
+      this.assertEqual(tasks.submitted.length, 1);
+      const [put, owner] = tasks.submitted[0];
+      const expected = gold_line("settings_put_copy");
+      expected.settings = value;
+      this.assertEqual(put, expected);
+      this.assertEqual(owner, "server");
+      this.assertEqual(full_of(put), harness.setting_get("debug"));
+      const slept = gold_value("lines.settings_sleep") as dispatch.Sleep;
+      slept.wait_ids = [id];
+      this.assertEqual(sleep, slept);
+      const reply = gold_line("settings_put_reply");
+      Object.assign(reply[0], { reply: id });
+      const wake = gold_line("settings_put_wake");
+      wake.replies = [reply];
+      this.assertEqual(routed_get("worker.settings_put")(wake), undefined);
+      this.assertEqual(tasks.notified.length, 0);
     }
   }
 
-  // The start from the hello to the render, on a store double.
-  export class TestStartChain extends unittest.TestCase {
-    // A fresh store loads the metaverse and `_files`, then renders black.
-    test_fresh_start(): void {
-      const bench = bench_make();
-      const store = store_seeded();
-      const attached: string[] = [];
-      chain_make(bench, store, new CacheDouble(), attached);
-      chain_start(bench);
-      const hello = bench.ui.posted[0];
-      this.assertEqual(type_of(hello), "boot.hello");
-      this.assertEqual(jslb.payload_of(hello), {
-        bootstrap: constants.bootstrap,
-        sha256: constants.bootstrap_sha256,
-        pid: constants.pid,
-        root: constants.root,
+  // A fault's cascade sent to the server as an `error` line by `wire_end`.
+  export class TestFaults extends unittest.TestCase {
+    // The cascade goes as one `error` line, its `cause` only when present.
+    test_error_sent(): void {
+      const wire = new WireDouble();
+      const done: number[] = [];
+      const port = wire as unknown as EndPort;
+      const cascade = cascade_make();
+      worker_ai.error_send(port, cascade, () => {
+        done.push(wire.ended.length);
       });
-      snapshot_answer(bench, 5);
-      snapshot_answer(bench, 1);
-      this.assertEqual(snapshots_asked(bench), ["metaverse", "_files"]);
-      this.assertEqual(attached, ["provider"]);
-      handshake_answer(bench);
-      const render = bench.ui.last_of("render");
-      this.assertEqual(jslb.payload_of(render), {
-        scene: constants.hyperposition,
-        subtitle: constants.greeting,
-      });
-      bench.ui.line_send(reply_to(render, {}));
-      this.assertEqual(store.calls.slice(0, 3), [
-        `start_open ${utility.json_text(hello_make().seq)}`,
-        "db_load metaverse bytes",
-        "db_load _files bytes",
-      ]);
-      this.assertEqual(bench.tasks.depth(), 0);
-    }
-
-    // A database whose `seq` differs is restored before anything loads.
-    test_restore_first(): void {
-      const bench = bench_make();
-      const store = store_seeded();
-      store.open.push("metaverse");
-      store.replace = ["_files"];
-      chain_make(bench, store, new CacheDouble(), []);
-      chain_start(bench);
-      this.assertEqual(snapshots_asked(bench), ["_files"]);
-      snapshot_answer(bench, 1);
-      this.assertIn("db_restore _files bytes", store.calls);
-      this.assertEqual(snapshots_asked(bench), ["_files"]);
-      this.assertEqual(type_of(bench.http.posted[0]), "mcp");
-    }
-
-    // A snapshot that opens at another `seq` than the server's is a fault.
-    test_snapshot_desync(): void {
-      const bench = bench_make();
-      chain_make(bench, store_seeded(), new CacheDouble(), []);
-      chain_start(bench);
-      const error = thrown_get(() => snapshot_answer(bench, 6));
-      this.assertEqual(
-        error.message,
-        i18n("worker_ai.snapshot_desync", "metaverse", 5, 6),
-      );
-    }
-
-    // The databases to restore are fetched one after another, in order.
-    test_restores_turns(): void {
-      const bench = bench_make();
-      const store = store_seeded();
-      store.replace = ["_files", "metaverse"];
-      chain_make(bench, store, new CacheDouble(), []);
-      chain_start(bench);
-      this.assertEqual(snapshots_asked(bench), ["_files"]);
-      snapshot_answer(bench, 1);
-      this.assertEqual(snapshots_asked(bench), ["_files", "metaverse"]);
-      snapshot_answer(bench, 5);
-      this.assertEqual(store.calls.slice(1, 3), [
-        "db_restore _files bytes",
-        "db_restore metaverse bytes",
-      ]);
-      this.assertEqual(snapshots_asked(bench), ["_files", "metaverse"]);
-      this.assertEqual(type_of(bench.http.posted[0]), "mcp");
-    }
-
-    // A snapshot comes in one reply, asks no piece and opens with its bytes.
-    test_snapshot_whole(): void {
-      const bench = bench_make();
-      const store = store_seeded();
-      chain_make(bench, store, new CacheDouble(), []);
-      chain_start(bench);
-      const ask = bench.server.last_of("db.snapshot");
-      this.assertEqual(jslb.payload_of(ask), { db: "metaverse" });
-      snapshot_answer(bench, 5);
-      const types = bench.server.posted.map((line) => type_of(line));
-      this.assertEqual(types, ["db.snapshot", "db.snapshot"]);
-      this.assertEqual(store.calls.slice(1), ["db_load metaverse bytes"]);
-      this.assertEqual(snapshots_asked(bench), ["metaverse", "_files"]);
-    }
-
-    // A snapshot whose bytes are not those of its `sha256` opens nothing.
-    test_snapshot_digest(): void {
-      const bench = bench_make();
-      const store = store_seeded();
-      chain_make(bench, store, new CacheDouble(), []);
-      chain_start(bench);
-      const data = new Uint8Array([7]);
-      const wrong = utility.sha256_hex(new Uint8Array([8]));
-      const ask = bench.server.last_of("db.snapshot");
-      const blobs = [jslb.blob_make(data)];
-      const reply = reply_to(ask, { sha256: wrong, seq: 5 }, blobs);
-      const error = thrown_get(() => bench.server.line_send(reply));
-      const sha256 = utility.sha256_hex(data);
-      this.assertEqual(
-        error.message,
-        i18n("substrate.snapshot_digest", "metaverse", sha256, wrong),
-      );
-      this.assertEqual(store.open, []);
-    }
-
-    // A streamed snapshot is checked by its cache digest, opened by handle.
-    test_snapshot_streamed(): void {
-      const bench = bench_make();
-      const store = store_seeded();
-      chain_make(bench, store, new CacheDouble(), []);
-      chain_start(bench);
-      const sha256 = utility.sha256_hex(new Uint8Array([7]));
-      const blob = jslb.blob_make("cache/0001", undefined, { sha256 }, 1);
-      const ask = bench.server.last_of("db.snapshot");
-      bench.server.line_send(reply_to(ask, { sha256, seq: 5 }, [blob]));
-      this.assertEqual(store.calls.slice(1), ["db_load metaverse cache/0001"]);
-    }
-
-    // The world, universe and scene load in turn, then the image is fetched.
-    test_scene_loaded(): void {
-      const bench = bench_make();
-      const store = store_seeded();
-      const cache = new CacheDouble();
-      store.open.push("metaverse", "_files");
-      store.text_set("/metaverse/world", "castle_world");
-      store.text_set("/castle_world/scene", constants.scene);
-      store.universes = ["castle"];
-      store.documents.set(constants.scene, {
-        0: { t: "scene" },
-        1: constants.image,
-        subtitle: constants.subtitle,
-        image: { $ref: 1 },
-      });
-      store.values.set(constants.image, {
-        data: constants.image_sha256,
-        size: constants.image_size,
-        sha256: constants.image_sha256,
-      });
-      store.lacking.add(constants.image);
-      const bytes = new Uint8Array(constants.image_size).fill(9);
-      cache.files.set(constants.image_sha256, bytes);
-      for (const db of ["castle_world", "castle", "castle_gatehouse"]) {
-        store.seqs.set(db, 2);
+      this.assertEqual(wire.ended.length, 1);
+      const [line] = wire.ended;
+      this.assertEqual(full_of(line), harness.setting_get("debug"));
+      for (const name of ["i", "id", "r", "reply"]) {
+        this.assertFalse(Object.hasOwn(line[0], name), name);
       }
-      chain_make(bench, store, cache, []);
-      chain_start(bench);
-      for (let count = 0; count < 3; count += 1) {
-        snapshot_answer(bench, 2);
-      }
-      this.assertEqual(snapshots_asked(bench), [
-        "castle_world",
-        "castle",
-        "castle_gatehouse",
-      ]);
-      handshake_answer(bench);
-      const ask = bench.server.last_of("kv.get");
-      this.assertEqual(jslb.field_get(ask[0], "key"), constants.image);
-      const handle = jslb.blob_make("sink/1", undefined, {}, 88);
-      const fetched = reply_to(
-        ask,
-        { size: constants.image_size, sha256: constants.image_sha256 },
-        [handle],
-      );
-      bench.server.line_send(fetched);
-      this.assertIn(`cache_fill ${constants.image} sink/1`, store.calls);
-      this.assertEqual(cache.reads, [constants.image_sha256]);
-      const kept = bench.ui.last_of("media.store");
-      this.assertEqual(kept.k, constants.image);
-      const data = jslb.field_get(kept[1] as lines.BlobHeader, "data");
-      this.assertEqual(data, new Uint8Array(constants.image_size).fill(9));
-      bench.ui.line_send(reply_to(kept, {}));
-      const render = bench.ui.last_of("render");
-      this.assertEqual(jslb.payload_of(render), {
-        scene: constants.scene,
-        subtitle: constants.subtitle,
-        image: constants.image,
+      this.assertEqual(line, { ...gold_line("error_full"), ...cascade });
+      this.assertEqual(done, [1]);
+      const alone = { message: "The read failed.", stack: "" };
+      worker_ai.error_send(port, alone, () => {
+        done.push(wire.ended.length);
       });
-      bench.ui.line_send(reply_to(render, {}));
-      this.assertEqual(bench.tasks.depth(), 0);
-    }
-
-    // An image held in its row goes to the UI without asking the server.
-    test_image_row(): void {
-      const bench = bench_make();
-      const store = store_seeded();
-      store.open.push("metaverse", "_files");
-      store.documents.set(constants.hyperposition, {
-        0: { t: "scene" },
-        1: constants.image,
-        subtitle: constants.greeting,
-        image: { $ref: 1 },
+      this.assertEqual(wire.ended[1], {
+        ...gold_line("error_full"),
+        ...alone,
       });
-      store.text_set(constants.image, "png");
-      chain_make(bench, store, new CacheDouble(), []);
-      chain_start(bench);
-      handshake_answer(bench);
-      this.assertEqual(bench.server.posted.length, 3);
-      const kept = bench.ui.last_of("media.store");
-      const data = jslb.field_get(kept[1] as lines.BlobHeader, "data");
-      this.assertEqual(data, utility.utf8_encode("png"));
+      this.assertFalse(Object.hasOwn(wire.ended[1], "cause"));
+      this.assertEqual(done, [1, 2]);
     }
 
-    // A cached image whose file the browser holds goes to the UI from it.
-    test_image_held(): void {
-      const bench = bench_make();
-      const store = store_seeded();
-      const cache = new CacheDouble();
-      store.open.push("metaverse", "_files");
-      store.documents.set(constants.hyperposition, {
-        0: { t: "scene" },
-        1: constants.image,
-        subtitle: constants.greeting,
-        image: { $ref: 1 },
+    // The UI's `fault` is sent on as that `error` line, then closes once.
+    test_fault_sent(): void {
+      routed.clear();
+      const wire = new WireDouble();
+      const port = wire as unknown as EndPort;
+      let closes = 0;
+      worker_ai.fault_register(register_route, port, () => {
+        closes += 1;
       });
-      store.values.set(constants.image, {
-        data: constants.image_sha256,
-        size: constants.image_size,
-        sha256: constants.image_sha256,
+      const cascade = cascade_make();
+      const line = Object.assign(gold_line("fault_ui"), cascade);
+      this.assertEqual(routed_get("fault")(line), undefined);
+      this.assertEqual(wire.ended.length, 1);
+      this.assertEqual(wire.ended[0], {
+        ...gold_line("error_full"),
+        ...cascade,
       });
-      const bytes = new Uint8Array(constants.image_size).fill(9);
-      cache.files.set(constants.image_sha256, bytes);
-      chain_make(bench, store, cache, []);
-      chain_start(bench);
-      handshake_answer(bench);
-      this.assertEqual(bench.server.posted.length, 3);
-      this.assertEqual(cache.reads, [constants.image_sha256]);
-      const kept = bench.ui.last_of("media.store");
-      const data = jslb.field_get(kept[1] as lines.BlobHeader, "data");
-      this.assertEqual(data, new Uint8Array(constants.image_size).fill(9));
-    }
-
-    // A scripted start fetches the Script it lacks, then adds the provider.
-    test_script_fetched(): void {
-      const bench = bench_make();
-      const store = store_seeded();
-      store.open.push("metaverse", "_files");
-      const data = utility.utf8_encode('{"start":"a","nodes":{}}');
-      const sha256 = utility.sha256_hex(data);
-      const size = data.length;
-      store.values.set(constants.script_ref, { data: sha256, size, sha256 });
-      store.lacking.add(constants.script_ref);
-      const attached: string[] = [];
-      chain_make(bench, store, new CacheDouble(), attached, true);
-      chain_start(bench);
-      this.assertEqual(attached, []);
-      const ask = bench.server.last_of("kv.get");
-      this.assertEqual(jslb.field_get(ask[0], "key"), constants.script_ref);
-      const handle = jslb.blob_make("sink/2", undefined, {}, size);
-      bench.server.line_send(reply_to(ask, { size, sha256 }, [handle]));
-      this.assertIn(`cache_fill ${constants.script_ref} sink/2`, store.calls);
-      this.assertEqual(attached, ["provider"]);
-      this.assertEqual(type_of(bench.http.posted[0]), "mcp");
-    }
-
-    // A scripted start whose Script is held adds the provider at once.
-    test_script_held(): void {
-      const bench = bench_make();
-      const store = store_seeded();
-      store.open.push("metaverse", "_files");
-      store.text_set(constants.script_ref, '{"start":"a","nodes":{}}');
-      const attached: string[] = [];
-      chain_make(bench, store, new CacheDouble(), attached, true);
-      chain_start(bench);
-      this.assertEqual(attached, ["provider"]);
-      const types = bench.server.posted.map((line) => type_of(line));
-      this.assertEqual(types, ["mcp"]);
-    }
-
-    // A scene with no text subtitle or an image that is no ref is refused.
-    test_scene_invalid(): void {
-      for (const body of [{}, { subtitle: "Fog.", image: 3 }]) {
-        const bench = bench_make();
-        const store = store_seeded();
-        store.open.push("metaverse", "_files");
-        store.documents.set(constants.hyperposition, {
-          0: { t: "scene" },
-          ...body,
-        });
-        chain_make(bench, store, new CacheDouble(), []);
-        const error = thrown_get(() => chain_start(bench));
-        this.assertEqual(
-          error.message,
-          i18n("worker_ai.scene_invalid", constants.hyperposition),
-        );
-      }
-    }
-
-    // A scene named by an internal ref has no database to load.
-    test_ref_internal(): void {
-      const bench = bench_make();
-      const store = store_seeded();
-      store.open.push("metaverse", "_files");
-      store.text_set("/metaverse/scene", "hyperposition/1");
-      chain_make(bench, store, new CacheDouble(), []);
-      const error = thrown_get(() => chain_start(bench));
-      this.assertEqual(
-        error.message,
-        i18n("worker_ai.ref_internal", "hyperposition/1"),
-      );
+      this.assertEqual(wire.called, [1]);
+      this.assertEqual(closes, 1);
     }
   }
 
-  // The provider's address and models the worker hands the agent and tools.
-  export class TestProviderInfo extends unittest.TestCase {
-    // Not scripted, they are the information the hello carries.
-    test_info_hello(): void {
-      const hello = { ...hello_make(), provider_info: constants.info };
-      this.assertEqual(worker_ai.info_read(hello, false), constants.info);
-    }
-
-    // Scripted, they are empty text, and the hello carries none.
-    test_info_scripted(): void {
-      const hello = hello_make();
-      this.assertFalse(Object.hasOwn(hello, "provider_info"));
-      this.assertEqual(worker_ai.info_read(hello, true), {
-        base_url: "",
-        chat_model: "",
-        image_model: "",
-      });
-    }
-  }
-
-  // The provider script, read from `_files`.
-  export class TestScriptRead extends unittest.TestCase {
-    // A script in its row or in the cache is read as JSON.
-    test_script_parsed(): void {
-      const text = '{"start":"a","nodes":{"a":{"replies":{}}}}';
-      const store = new StoreDouble();
-      store.text_set(constants.script_ref, text);
-      const script = worker_ai.script_read(store, new CacheDouble());
-      this.assertEqual(script, { start: "a", nodes: { a: { replies: {} } } });
-      const cache = new CacheDouble();
-      const data = utility.utf8_encode(text);
-      cache.files.set("cached", data);
-      store.values.set(constants.script_ref, {
-        data: "cached",
-        size: data.length,
-        sha256: utility.sha256_hex(data),
-      });
-      this.assertEqual(worker_ai.script_read(store, cache), script);
-    }
-
-    // A script that is not JSON is refused, naming its ref and the cause.
-    test_script_invalid(): void {
-      const store = new StoreDouble();
-      store.text_set(constants.script_ref, "{");
-      const cause = thrown_get(() => JSON.parse("{"));
-      const error = thrown_get(() =>
-        worker_ai.script_read(store, new CacheDouble()),
-      );
-      this.assertEqual(
-        error.message,
-        i18n("worker_ai.script_invalid", constants.script_ref, String(cause)),
-      );
+  // The shape of the module object.
+  export class TestSurface extends unittest.TestCase {
+    // The module is frozen and holds the names of its surface.
+    test_frozen_names(): void {
+      this.assertTrue(Object.isFrozen(worker_ai));
+      this.assertEqual(Object.keys(worker_ai).sort(), [
+        "WireTap",
+        "console_register",
+        "error_send",
+        "fault_register",
+        "note_make",
+        "owners_make",
+        "settings_register",
+        "synchronous_read",
+        "tap_start",
+      ]);
     }
   }
 }

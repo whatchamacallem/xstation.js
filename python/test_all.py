@@ -7,24 +7,27 @@
 # suites labelled smoke-test, the important ones that fit in 2 minutes; a
 # normal-test run runs the suites of both labels. Each suite's label is
 # written beside it, and category.py holds the labels, the options and their
-# checks. It runs the tests of the TAP producer and consumer first, then the
-# other Python test modules in dependency order, each as one block of one TAP
-# stream that goes to stdout a line at a time, then checks that stream with
-# the TAP consumer and exits 1 unless it is well formed and holds no failing
-# point. When the stream is clean it runs, in this process and given the
-# category, the checks of test_posix.py, the wire test and the browser test,
-# and ends at the first that fails, with its exit code. Every module has a
-# timer. The JSLB vectors are written anew into build/vectors as test_jslb
-# loads, inside its block.
+# checks. It runs the Python test modules in the testing order of the module
+# DAG, TAP_PLAN.md section 3.3: the tests of the TAP producer and consumer
+# first, then those of the infrastructure for testing, the harness and
+# category, then each next module the DAG allows. Each is one block of one
+# TAP stream that goes to stdout a line at a time; then it checks that
+# stream with the TAP consumer and exits 1 unless it is well formed and
+# holds no failing point, a bail out counting as one. When the stream is
+# clean it runs, in this process and given the category, the checks of
+# test_posix.py, the wire test and the browser test, and ends at the first
+# that fails, with its exit code. Every module has a timer, the gold
+# record's module_seconds. The JSLB vectors are written anew into
+# build/vectors as test_jslb loads, inside its block.
 #
 # After each module it writes "<module>: <label>, <s> s" to stderr, so that
 # stdout stays the TAP stream. After the checks of test_posix.py it prints
 # "test_posix.py: smoke-test, <s> s", and a passing run ends with "the
-# <category> run took <s> s". A smoke-test run has 120 s in all from its
-# start: each alarm ends at that deadline at the latest, a deadline passed
-# before a suite starts raises at once, and passing it fails naming the
-# suite it stopped. A normal-test run has no limit of its own. Standard
-# library only:
+# <category> run took <s> s". A smoke-test run has the gold record's
+# smoke_seconds in all from its start: each alarm ends at that deadline at
+# the latest, a deadline passed before a suite starts raises at once, and
+# passing it fails naming the suite it stopped. A normal-test run has no
+# limit of its own. Standard library only:
 #
 #     python3 python/test_all.py [--smoke-test | --normal-test] [--failfast]
 #
@@ -39,41 +42,38 @@ _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
 # The build directory of the checkout, for bytecode and scratch files.
 _BUILD_PATH = os.path.join(os.path.dirname(_PYTHON_PATH), "build")
 
-# A default chosen by its writer: the seconds a module runs before it fails.
-_MODULE_SECONDS = 120.0
-
-# The test modules and their labels, the TAP ones first, then by dependency.
+# The test modules and their labels, in the order of `TAP_PLAN.md` 3.3.
 _MODULES: list[tuple[str, str]] = [
     ("test_tap_producer", "smoke-test"),
     ("test_tap_consumer", "smoke-test"),
-    ("test_i18n", "smoke-test"),
-    ("test_vectors_make", "smoke-test"),
+    ("test_test", "smoke-test"),
+    ("test_internationalization", "smoke-test"),
     ("test_jslb", "smoke-test"),
-    ("test_verbose", "smoke-test"),
+    ("test_vectors_make", "smoke-test"),
     ("test_settings", "smoke-test"),
+    ("test_verbose", "smoke-test"),
     ("test_substrate", "smoke-test"),
     ("test_dispatch", "smoke-test"),
     ("test_mcp", "smoke-test"),
+    ("test_stall_loop", "smoke-test"),
+    ("test_engine_tap", "smoke-test"),
+    ("test_engine_verbose", "smoke-test"),
     ("test_engine_kv", "smoke-test"),
     ("test_engine_doc", "smoke-test"),
     ("test_engine_db", "smoke-test"),
     ("test_engine_turn", "smoke-test"),
     ("test_engine_sql", "smoke-test"),
-    ("test_engine_verbose", "smoke-test"),
-    ("test_engine_tap", "smoke-test"),
     ("test_engine_mcp", "smoke-test"),
     ("test_engine_system", "smoke-test"),
+    ("test_echo_loop", "smoke-test"),
     ("test_main_loop", "smoke-test"),
     ("test_bootstrap", "smoke-test"),
-    ("test_echo_loop", "smoke-test"),
-    ("test_stall_loop", "smoke-test"),
     ("test_mcp_stdio", "smoke-test"),
     ("test_third_party_fetch", "smoke-test"),
-    ("test_devtools", "smoke-test"),
     ("test_page_build", "smoke-test"),
+    ("test_devtools", "smoke-test"),
     ("test_reformat", "smoke-test"),
     ("test_test_posix", "smoke-test"),
-    ("test_test", "smoke-test"),
 ]
 
 # The one test module that reads the vectors, which are written as it loads.
@@ -133,13 +133,13 @@ def timer_stop() -> None:
 
 # Runs the modules of the category, checks the stream, then runs the rest.
 def main(arguments: list[str]) -> int:
-    import category, tap_consumer, tap_producer
+    import category, harness, tap_consumer, tap_producer
 
     parser = argparse.ArgumentParser(
-        description="Run the suites of a category: the tests of the TAP"
-        " modules, then the other Python test modules in dependency order,"
-        " as one TAP stream on stdout, check the stream, then run the checks"
-        " of test_posix.py, the wire test and the browser test.",
+        description="Run the suites of a category: the Python test modules"
+        " in the testing order, the tests of the TAP modules first, as one"
+        " TAP stream on stdout, check the stream, then run the checks of"
+        " test_posix.py, the wire test and the browser test.",
         allow_abbrev=False,
     )
     parser.add_argument(
@@ -153,6 +153,7 @@ def main(arguments: list[str]) -> int:
     chosen: str = parsed.category
     started = time.monotonic()
     limit = category.limit_seconds(chosen)
+    module_seconds = float(harness.gold_get("module_seconds"))
     stream = StreamWriter()
     runner = tap_producer.TAPTestRunner(failfast or limit is not None)
     runner.set_stream(stream.line_write)
@@ -163,7 +164,7 @@ def main(arguments: list[str]) -> int:
         begun = time.monotonic()
         what = f"module {name}"
         timer_start(
-            category.alarm_plan(what, _MODULE_SECONDS, limit, begun - started)
+            category.alarm_plan(what, module_seconds, limit, begun - started)
         )
         load = functools.partial(suite_load, loader, name)
         passed = runner.module_run(name, load)
@@ -187,7 +188,7 @@ def main(arguments: list[str]) -> int:
         timer_start(
             category.alarm_plan("test_posix.py", None, limit, begun - started)
         )
-        test_posix.main([])
+        test_posix.main([f"--{chosen}"])
         timer_stop()
         seconds = time.monotonic() - begun
         print(f"test_posix.py: {posix_label}, {seconds:.3f} s", flush=True)

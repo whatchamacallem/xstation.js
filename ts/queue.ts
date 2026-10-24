@@ -7,6 +7,22 @@
 // bound on the blob bytes it holds, the verbose sink of the thread, and in
 // debug mode the trace of every submit, dispatch, sleep, wake and reply. Its
 // message channel only turns a platform event into the next step.
+//
+// The blob bytes it holds are bounded by `blob_max`, the largest database: a
+// held line counts the blobs it holds in memory, `line_bytes`, so a blob
+// streamed to a cache file counts nothing and a database of `blob_max` with
+// its cache files passes through as long as the lines' bytes are streamed.
+//
+// A handler's `dispatch.Failure` is answered first: its reply is posted, then
+// the queue fails with its error. When that handler submitted requests it
+// does not sleep on, the queue fails with `queue.wait_missing` whose `cause`
+// is the failure's error, so the handler's own message is kept.
+//
+// An `error` line that reaches a queue stops it with `queue.error_line`,
+// which names the line's `message` and `stack` and holds the line's own
+// `cause` entries rebuilt as Errors under its `cause`, so the sender's
+// cascade is kept whole. A wake line is built in the form
+// `settings.names_full()` picks.
 
 namespace queue {
   // The names and settings this module reads and writes.
@@ -16,7 +32,6 @@ namespace queue {
     type_field: "type",
     id_field: "id",
     reply_field: "reply",
-    size_field: "size",
     id_short: "i",
     full_marker: "type",
     debug_setting: "debug",
@@ -119,18 +134,66 @@ namespace queue {
     return "state" in result && "wait_ids" in result && "then_type" in result;
   }
 
+  // Says whether a handler result is a failure: its own reply and error.
+  function failure_is(result: object): result is dispatch.Failure {
+    return (
+      Object.hasOwn(result, "reply") &&
+      Object.hasOwn(result, "error") &&
+      !Object.hasOwn(result, "0")
+    );
+  }
+
+  // Rebuilds an entry of a received cascade, and those under it, as Errors.
+  function cause_read(entry: lines.ErrorCause): Error {
+    const error =
+      entry.cause === undefined
+        ? new Error(entry.message)
+        : new Error(entry.message, { cause: cause_read(entry.cause) });
+    error.stack = entry.stack;
+    return error;
+  }
+
   // The blob headers of a line, 1 on.
   function blobs_of(line: lines.Line): lines.BlobHeader[] {
     return jslb.headers_of(line).slice(1) as lines.BlobHeader[];
   }
 
-  // The bytes a held line counts: the sizes of its blobs, never its text.
-  function line_bytes(line: lines.Line): number {
-    let sizes = 0;
+  // The blob bytes a held line counts: its blobs whose `d` is bytes.
+  export function line_bytes(line: lines.Line): number {
+    let bytes = 0;
     for (const blob of blobs_of(line)) {
-      sizes += jslb.field_get(blob, constants.size_field) as number;
+      const data = blob.d;
+      if (data instanceof Uint8Array) {
+        bytes += data.length;
+      }
     }
-    return sizes;
+    return bytes;
+  }
+
+  // A `verbose.put` of the thread holding the lines given, in full names.
+  function put_make(
+    thread: "ui" | "ai",
+    entries: lines.VerboseLine[],
+  ): lines.Line {
+    const header = jslb.header_make(constants.verbose_type, { full: true });
+    return jslb.line_make(header, [], { thread, lines: entries });
+  }
+
+  // Whether an entry of `size` bytes in a `verbose.put` of `empty` bytes with
+  // no entries is below `line_max`: the one comparison of an entry alone.
+  function alone_fits(empty: number, size: number, line_max: number): boolean {
+    return empty + size < line_max;
+  }
+
+  // Whether a verbose line of the text fits one `verbose.put` of the thread.
+  export function entry_fits(
+    thread: "ui" | "ai",
+    text: string,
+    line_max: number,
+  ): boolean {
+    const empty = json_bytes(put_make(thread, []));
+    const size = json_bytes({ at: utility.time_now(), text });
+    return alone_fits(empty, size, line_max);
   }
 
   // The bytes of the blobs of a line that are held in memory.
@@ -271,7 +334,7 @@ namespace queue {
       this.kept = [];
       this.sending = true;
       for (const group of groups) {
-        post(this.put_make(group));
+        post(put_make(this.thread, group));
       }
       this.sending = false;
     }
@@ -284,14 +347,14 @@ namespace queue {
     // Splits the kept lines into groups whose `verbose.put` fits `line_max`.
     private groups_split(): lines.VerboseLine[][] {
       const limit = this.settings_get(constants.line_setting) as number;
-      const empty = json_bytes(this.put_make([]));
+      const empty = json_bytes(put_make(this.thread, []));
       const groups: lines.VerboseLine[][] = [];
       let group: lines.VerboseLine[] = [];
       // The bytes of the group's line: the empty line, each entry, the commas.
       let bytes = empty;
       for (const entry of this.kept) {
         const size = json_bytes(entry);
-        if (empty + size >= limit) {
+        if (!alone_fits(empty, size, limit)) {
           throw new Error(
             i18n("queue.entry_over", this.thread, empty + size, limit),
           );
@@ -306,15 +369,6 @@ namespace queue {
       }
       groups.push(group);
       return groups;
-    }
-
-    // A `verbose.put` of this thread holding the lines given.
-    private put_make(entries: lines.VerboseLine[]): lines.Line {
-      const header = jslb.header_make(constants.verbose_type, { full: true });
-      return jslb.line_make(header, [], {
-        thread: this.thread,
-        lines: entries,
-      });
     }
   }
 
@@ -607,16 +661,18 @@ namespace queue {
       const header = line[0];
       const type = type_of(header);
       if (type === constants.error_type) {
-        const payload = jslb.payload_of(line);
-        throw new Error(
-          i18n(
-            "queue.error_line",
-            this.thread,
-            from,
-            payload.message,
-            payload.stack,
-          ),
+        const payload = jslb.payload_of(line) as unknown as lines.ErrorLine;
+        const message = i18n(
+          "queue.error_line",
+          this.thread,
+          from,
+          payload.message,
+          payload.stack,
         );
+        if (payload.cause === undefined) {
+          throw new Error(message);
+        }
+        throw new Error(message, { cause: cause_read(payload.cause) });
       }
       const reply = field_number(header, constants.reply_field);
       if (reply !== undefined) {
@@ -654,16 +710,20 @@ namespace queue {
       this.result_take(line, run, result, owed);
     }
 
-    // Starts a sleep, posts a reply, or checks that nothing was owed.
+    // Starts a sleep, posts a reply, fails after a failure's reply is posted,
+    // or checks that nothing was owed.
     private result_take(
       line: lines.Line,
       run: HandlerRun,
-      result: dispatch.Reply | dispatch.Sleep,
+      result: dispatch.Reply | dispatch.Sleep | dispatch.Failure,
       owed: OwedRequest | undefined,
     ): void {
       if (result !== undefined && sleep_is(result)) {
         this.sleep_start(line, run, result, owed);
         return;
+      }
+      if (result !== undefined && failure_is(result)) {
+        return this.failure_raise(line, run, result, owed);
       }
       this.waits_check(line, run, new Set<number>());
       if (result === undefined) {
@@ -681,6 +741,25 @@ namespace queue {
         return;
       }
       this.reply_post(line, result as lines.Line, owed);
+    }
+
+    // Posts a failure's reply, then throws its error, under the first request
+    // the handler submitted when it submitted any, as it sleeps on none.
+    private failure_raise(
+      line: lines.Line,
+      run: HandlerRun,
+      failure: dispatch.Failure,
+      owed: OwedRequest | undefined,
+    ): never {
+      this.reply_post(line, failure.reply, owed);
+      if (run.submitted.size > 0) {
+        const [first] = run.submitted.keys();
+        throw new Error(
+          i18n("queue.wait_missing", type_of(line[0]), this.thread, first),
+          { cause: failure.error },
+        );
+      }
+      throw failure.error;
     }
 
     // Throws for a request the handler submitted and does not sleep on.
@@ -775,7 +854,9 @@ namespace queue {
       );
       const ids = entries.map((entry) => entry[0]);
       const replies = entries.map((entry) => entry[1]);
-      const header = jslb.header_make(sleep.then_type);
+      const header = jslb.header_make(sleep.then_type, {
+        full: settings.names_full(),
+      });
       const line = jslb.line_make(header, [], { state: sleep.state, replies });
       this.log_write(
         i18n(

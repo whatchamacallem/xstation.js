@@ -2,13 +2,12 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# The handler of the `sql.run` line, a forwarded commit of statements. It
-# carries `since`, so it checks that against the `seq` of the database itself,
-# as `operation_apply` does, because the reply needs the results of the
-# statements and `operation_apply` returns only the `seq`.
+# The handler of `sql.run`, the browser's commit of statements that changed
+# its database, which the server runs on its own store in one transaction as
+# a plain message and never answers.
 
 import dispatch, jslb, substrate
-from i18n import i18n
+from internationalization import i18n
 from typing import Any, cast
 
 
@@ -30,49 +29,22 @@ def _store_get() -> substrate.Store:
     return _STATE.store
 
 
-# Checks `since`, runs the statements, then reads their results and the `seq`.
-def _statements_apply(
-    store: substrate.Store,
-    db: str,
-    statements: list[substrate.SqlStatement],
-    since: int,
-) -> tuple[list[dict[str, Any]], int]:
-    seq = store.seq_get(db)
-    if since != seq:
-        raise RuntimeError(
-            i18n("substrate.since_stale", "sql.run", since, seq, db)
-        )
-    results: list[dict[str, Any]] = [
-        {
-            "columns": result.columns,
-            "rows": result.rows,
-            "changes": result.changes,
-        }
-        for result in store.sql_run(db, statements)
-    ]
-    return results, store.seq_get(db)
-
-
-# Runs the statements as a forwarded commit. Replies with `results`, `seq`.
+# `sql.run`: runs the statements in order in one transaction.
 def sql_run(
     line: jslb.Object,
     *,
     db: str,
     statements: list[dict[str, object]],
-    since: int,
-) -> jslb.Object:
+) -> None:
     store = _store_get()
     parsed = [
         substrate.SqlStatement(**cast(dict[str, Any], statement))
         for statement in statements
     ]
-    results, seq = store.transaction_run(
-        lambda: _statements_apply(store, db, parsed, since)
-    )
-    return dispatch.reply_make(line, results=results, seq=seq)
+    store.sql_run(db, parsed)
 
 
-# Registers the handler, with the store whose databases it runs statements in.
+# Registers the handler on the store given.
 def handlers_register(store: substrate.Store) -> None:
     _STATE.store = store
     dispatch.handler_register("sql.run", 0, sql_run)

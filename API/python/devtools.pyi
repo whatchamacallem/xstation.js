@@ -1,5 +1,7 @@
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Self
+
+import types
 
 # The page's loads as loader and event name pairs, as DevTools reported them.
 class PageEvents:
@@ -20,10 +22,23 @@ class ProtocolClient:
     ) -> dict[str, Any]: ...
     # Passes events on until the condition holds, failing when the wait ends.
     def events_pump(self, what: str, done: Callable[[], bool]) -> None: ...
+    # Ends every later wait at `end`, a `time.monotonic()` value, if sooner.
+    def deadline_set(self, end: float) -> None: ...
 
 # Headless Chrome over DevTools, through the `powershell.exe` relay.
 class Browser:
     events: PageEvents
+    # Keeps the window size and names a profile, starting nothing yet.
+    def __init__(self, width_px: int, height_px: int) -> None: ...
+    # Starts the browser, its relay and its page, cleaning up if that fails.
+    def __enter__(self) -> Self: ...
+    # Releases the browser whatever ended the block.
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception: BaseException | None,
+        traceback: types.TracebackType | None,
+    ) -> None: ...
     def page_open(self, url: str) -> None: ...
     # Evaluates JavaScript on the page and returns its JSON value.
     def script_evaluate(self, text: str) -> object: ...

@@ -2,18 +2,22 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// The browser substrate, the single door to SQLite in the AI worker: one
+// The browser's store, the single door to SQLite in the AI worker: one
 // sqlite3.wasm connection for each database file of the OPFS pool under a
 // root, the substrate's tables in each, values with overflow to a cache of
 // OPFS files held open for synchronous access, documents, turns that compact
-// themselves when a `user` turn finds `compact_turns` of them, SQL, snapshots
-// sent as one blob, the measurement and administration of the databases,
-// cached values filled back from the server and freed by budget, and the
-// emitting side of replication, which hands on each committed modifying
-// operation as the line the server applies. It is given an initialized module,
-// an installed pool and open cache files, and waits on nothing.
+// themselves for this side alone when a `user` turn finds `compact_turns` of
+// them, SQL, and whole databases as a file and the cache files its rows name.
+// Each committed modifying operation goes to the server as one push line of
+// its type, given to the thread's queue, which nothing waits for, numbers or
+// checks: the sync is lossy. A row whose cache file this side lacks stays,
+// and only a read of its value fails. A statement a schema trigger stops
+// throws the string whose name the trigger raises. The handlers answer the
+// UI thread's requests and take the server's restores. It is given an
+// initialized module, an installed pool and open cache files, and waits on
+// nothing.
 namespace substrate {
-  // The schema, names, patterns and sizes, and the fields of the operations.
+  // The schema, names, patterns and sizes the store uses.
   const constants = Object.freeze({
     // The substrate's tables, one statement each, as the server makes them.
     schema_statements: Object.freeze<readonly string[]>([
@@ -29,10 +33,8 @@ namespace substrate {
         "    content TEXT    NOT NULL CHECK (json_valid(content)),\n" +
         "    PRIMARY KEY (scene, n)\n) WITHOUT ROWID, STRICT",
     ]),
-    // The first rows of `_meta`: `seq` 0 and the schema version bound.
-    meta_insert:
-      "INSERT INTO _meta (name, value)" +
-      " VALUES ('seq', '0'), ('schema', ?)",
+    // The first row of `_meta`: the schema version bound.
+    meta_insert: "INSERT INTO _meta (name, value) VALUES ('schema', ?)",
     // The names of the substrate's tables, in order.
     schema_tables: Object.freeze<readonly string[]>([
       "_head",
@@ -56,8 +58,10 @@ namespace substrate {
     summary_role: "system",
     // The role of the turn that compacts a scene at the threshold first.
     compact_role: "user",
-    // The largest magnitude of a number in stored JSON, as on the wire.
-    integer_limit: 2 ** 53,
+    // The names of the strings the schema's triggers raise.
+    trigger_names: Object.freeze<readonly string[]>([
+      "agent.content_ambiguous",
+    ]),
     // The smallest magnitude Python's `repr` writes in fixed notation.
     fixed_min: 1e-4,
     // A database name, a C identifier.
@@ -85,179 +89,9 @@ namespace substrate {
     read_bytes: 1048576,
     // The start of the handle of a blob the sink writes.
     sink_prefix: "sink/",
-    // The sizes of `SHA-256`, in bytes, words, rounds and bits.
-    block_bytes: 64,
-    block_words: 16,
-    round_count: 64,
-    hash_words: 8,
-    word_bytes: 4,
-    length_bytes: 8,
-    byte_bits: 8,
-    padding_marker: 0x80,
-    word_range: 2 ** 32,
-    // The payload fields of each forwarded operation, sorted.
-    operation_fields: Object.freeze<{
-      readonly [type: string]: readonly string[];
-    }>({
-      "db.create": ["db"],
-      "db.drop": ["db"],
-      "doc.put": ["body", "db", "id"],
-      "kv.delete": ["k"],
-      "kv.put": ["data", "k"],
-      "sql.run": ["db", "statements"],
-      "turn.append": ["content", "role", "scene"],
-      "turn.compact": ["scene", "summary", "through"],
-    }),
-    // The fields of a statement of `sql.run`, sorted.
-    statement_fields: Object.freeze<readonly string[]>(["params", "sql"]),
-    // The forwarded operations whose replies carry no `seq`.
-    seqless_types: Object.freeze<readonly string[]>(["db.create", "db.drop"]),
+    // The owner the push of each committed operation goes to.
+    push_owner: "server" as const,
   });
-
-  // The first prime numbers, as many as asked for.
-  function primes_first(count: number): number[] {
-    const primes: number[] = [];
-    for (let candidate = 2; primes.length < count; candidate += 1) {
-      if (primes.every((prime) => candidate % prime !== 0)) {
-        primes.push(candidate);
-      }
-    }
-    return primes;
-  }
-
-  // The first 32 bits of the fractional part of a positive number.
-  function fraction_bits(value: number): number {
-    return Math.floor((value - Math.floor(value)) * constants.word_range);
-  }
-
-  // The round constants: cube root fractions of the first 64 primes.
-  const round_table = Uint32Array.from(
-    primes_first(constants.round_count),
-    (prime) => fraction_bits(Math.cbrt(prime)),
-  );
-
-  // The first hash state: square root fractions of the first 8 primes.
-  const hash_start = Uint32Array.from(
-    primes_first(constants.hash_words),
-    (prime) => fraction_bits(Math.sqrt(prime)),
-  );
-
-  // Rotates the 32 bits of a word right by a count of bits.
-  function bits_rotate(word: number, count: number): number {
-    return (word >>> count) | (word << (32 - count));
-  }
-
-  // Mixes the block of 64 bytes at the offset into the hash state.
-  function block_mix(
-    state: Uint32Array,
-    schedule: Uint32Array,
-    view: DataView,
-    offset: number,
-  ): void {
-    const { block_words, round_count, word_bytes } = constants;
-    for (let index = 0; index < block_words; index += 1) {
-      schedule[index] = view.getUint32(offset + index * word_bytes);
-    }
-    for (let index = block_words; index < round_count; index += 1) {
-      const early = schedule[index - 15];
-      const late = schedule[index - 2];
-      const sigma_early =
-        bits_rotate(early, 7) ^ bits_rotate(early, 18) ^ (early >>> 3);
-      const sigma_late =
-        bits_rotate(late, 17) ^ bits_rotate(late, 19) ^ (late >>> 10);
-      schedule[index] =
-        schedule[index - 16] + sigma_early + schedule[index - 7] + sigma_late;
-    }
-    // The working variables are named as in the standard.
-    let [a, b, c, d, e, f, g, h] = state;
-    for (let index = 0; index < round_count; index += 1) {
-      const sigma_e =
-        bits_rotate(e, 6) ^ bits_rotate(e, 11) ^ bits_rotate(e, 25);
-      const choice = (e & f) ^ (~e & g);
-      const first =
-        (h + sigma_e + choice + round_table[index] + schedule[index]) | 0;
-      const sigma_a =
-        bits_rotate(a, 2) ^ bits_rotate(a, 13) ^ bits_rotate(a, 22);
-      const majority = (a & b) ^ (a & c) ^ (b & c);
-      const second = (sigma_a + majority) | 0;
-      h = g;
-      g = f;
-      f = e;
-      e = (d + first) | 0;
-      d = c;
-      c = b;
-      b = a;
-      a = (first + second) | 0;
-    }
-    const working = [a, b, c, d, e, f, g, h];
-    for (let index = 0; index < constants.hash_words; index += 1) {
-      state[index] += working[index];
-    }
-  }
-
-  // A `SHA-256` fed in pieces of any size, as a streamed blob arrives.
-  class HashStream {
-    // The hash state after every whole block fed.
-    readonly #state = new Uint32Array(hash_start);
-    // The message schedule a block is mixed with.
-    readonly #schedule = new Uint32Array(constants.round_count);
-    // The bytes of the block not yet whole.
-    readonly #block = new Uint8Array(constants.block_bytes);
-    // A view of those bytes as words.
-    readonly #view = new DataView(this.#block.buffer);
-    // How many bytes of the block are filled.
-    #filled = 0;
-    // How many bytes were fed in all.
-    #length = 0;
-
-    // Feeds bytes, keeping none of the caller's view after the call.
-    bytes_add(data: Uint8Array): void {
-      const { block_bytes } = constants;
-      this.#length += data.length;
-      let offset = 0;
-      if (this.#filled > 0) {
-        offset = Math.min(block_bytes - this.#filled, data.length);
-        this.#block.set(data.subarray(0, offset), this.#filled);
-        this.#filled += offset;
-        if (this.#filled < block_bytes) {
-          return;
-        }
-        block_mix(this.#state, this.#schedule, this.#view, 0);
-        this.#filled = 0;
-      }
-      const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-      for (; offset + block_bytes <= data.length; offset += block_bytes) {
-        block_mix(this.#state, this.#schedule, view, offset);
-      }
-      this.#block.set(data.subarray(offset));
-      this.#filled = data.length - offset;
-    }
-
-    // The hash of the bytes fed so far as 64 lowercase hex characters.
-    digest_hex(): lines.Sha256 {
-      const { block_bytes, length_bytes, word_bytes, word_range } = constants;
-      const state = new Uint32Array(this.#state);
-      const filled = this.#filled;
-      const tail_length =
-        filled < block_bytes - length_bytes ? block_bytes : 2 * block_bytes;
-      const tail = new Uint8Array(tail_length);
-      tail.set(this.#block.subarray(0, filled));
-      tail[filled] = constants.padding_marker;
-      const bits = this.#length * constants.byte_bits;
-      const view = new DataView(tail.buffer);
-      const high = Math.floor(bits / word_range);
-      view.setUint32(tail_length - length_bytes, high);
-      view.setUint32(tail_length - word_bytes, bits % word_range);
-      for (let offset = 0; offset < tail_length; offset += block_bytes) {
-        block_mix(state, this.#schedule, view, offset);
-      }
-      let hex = "";
-      for (const word of state) {
-        hex += word.toString(16).padStart(word_bytes * 2, "0");
-      }
-      return hex;
-    }
-  }
 
   // A file of the cache held open for synchronous access, as OPFS gives it.
   export interface SlotHandle {
@@ -357,27 +191,15 @@ namespace substrate {
     version?: number;
   }
 
-  // The measure of an open database, by heuristics, and its `seq`.
-  export interface DatabaseStats {
-    name: string;
-    bytes: number;
-    free_bytes: number;
-    cache_bytes: number;
-    seq: number;
+  // A database as one blob: its file and the cache files its rows name.
+  export interface DbImage {
+    data: Uint8Array;
+    files: string[];
   }
 
-  // The measure of the open databases against the soft limit.
-  export interface StoreStats {
-    databases: DatabaseStats[];
-    total_bytes: number;
-    soft_bytes: number;
-    over: boolean;
-  }
-
-  // The bytes of a database before and after its compaction.
-  export interface CompactBytes {
-    before: number;
-    after: number;
+  // What the store gives each committed operation to: the thread's queue.
+  export interface Notifier {
+    line_notify(line: lines.Line, owner?: queue.ThreadName): void;
   }
 
   // Registers the handler of one line type and version.
@@ -392,7 +214,7 @@ namespace substrate {
     slot: number;
     size: number;
     written: number;
-    hash: HashStream;
+    hash: utility.HashStream;
   }
 
   // A cache file found by handle: its slot and the size of its value.
@@ -408,18 +230,12 @@ namespace substrate {
     cached: boolean;
   }
 
-  // A forwarded operation not yet answered: type, database, since, holds.
-  interface FlightRecord {
-    type: string;
+  // A `db.restore` waiting for its `db.file` lines: the file, those in, left.
+  interface RestoreWait {
     db: string;
-    since: number;
-    names: string[];
-  }
-
-  // A forwarded line and its record.
-  interface ForwardedLine {
-    line: lines.Line;
-    record: FlightRecord;
+    data: Uint8Array | string;
+    files: (Uint8Array | string)[];
+    left: number;
   }
 
   // Throws unless the name is a C identifier, as a database name must be.
@@ -476,15 +292,6 @@ namespace substrate {
       throw new Error(i18n("substrate.ref_both", ref, db));
     }
     return [parts.db, parts.key];
-  }
-
-  // The database an external ref names. An internal ref throws.
-  function ref_database(ref: string): string {
-    const db = ref_split(ref).db;
-    if (db === undefined) {
-      throw new Error(i18n("substrate.ref_internal", ref));
-    }
-    return db;
   }
 
   // The database of a scene, whose ref must be an external `Document-Ref`.
@@ -669,7 +476,7 @@ namespace substrate {
     return utility.json_text(text);
   }
 
-  // A number as Python's `repr` writes it, which differs below 1e-4 only.
+  // A number as Python's `repr` writes it, which differs below `1e-4` only.
   function number_canonical(value: number): string {
     const magnitude = Math.abs(value);
     if (magnitude === 0 || magnitude >= constants.fixed_min) {
@@ -685,12 +492,6 @@ namespace substrate {
       return String(value);
     }
     if (typeof value === "number") {
-      if (!Number.isFinite(value)) {
-        throw new Error(i18n("substrate.number_refused", value));
-      }
-      if (Math.abs(value) > constants.integer_limit) {
-        throw new Error(i18n("substrate.integer_range", value));
-      }
       return number_canonical(value);
     }
     if (typeof value === "string") {
@@ -755,23 +556,6 @@ namespace substrate {
     return database.selectValue(sql) as number;
   }
 
-  // The `seq` of a database, the decimal text of its `_meta` row.
-  function seq_read(database: SqliteDatabase): number {
-    return Number(
-      database.selectValue("SELECT value FROM _meta WHERE name = 'seq'"),
-    );
-  }
-
-  // Adds one to the `seq` of a database and returns it.
-  function seq_bump(database: SqliteDatabase): number {
-    const seq = seq_read(database) + 1;
-    database.exec({
-      sql: "UPDATE _meta SET value = ? WHERE name = 'seq'",
-      bind: [String(seq)],
-    });
-    return seq;
-  }
-
   // The `schema_version` pragma, which every change of the schema moves.
   function schema_read(database: SqliteDatabase): number {
     return select_number(database, "PRAGMA schema_version");
@@ -814,30 +598,19 @@ namespace substrate {
     return new Set(rows.map((row) => hex_of(row[0] as Uint8Array)));
   }
 
-  // Throws the desync of replication when `since` is not the `seq`.
-  function since_check(
-    type: string,
-    since: number,
-    seq: number,
-    db: string,
-  ): void {
-    if (since !== seq) {
-      throw new Error(i18n("substrate.since_stale", type, since, seq, db));
+  // The string a trigger's failure names as its message's end, else the error.
+  function trigger_error(error: unknown): unknown {
+    if (!(error instanceof Error)) {
+      return error;
     }
-  }
-
-  // Throws unless the object holds exactly the fields, which are sorted.
-  function fields_check(
-    type: string,
-    value: object,
-    fields: readonly string[],
-  ): void {
-    const keys = Object.keys(value).sort();
-    if (keys.join() !== fields.join()) {
-      throw new Error(
-        i18n("substrate.payload_keys", type, fields.join(), keys.join()),
-      );
+    const message = error.message;
+    const name = constants.trigger_names.find((candidate) =>
+      message.endsWith(candidate),
+    );
+    if (name === undefined) {
+      return error;
     }
+    return new Error(i18n(name), { cause: error });
   }
 
   // Runs one statement with its parameters and counts the rows it changed.
@@ -868,7 +641,11 @@ namespace substrate {
     if (params.length > 0) {
       options.bind = params;
     }
-    database.exec(options);
+    try {
+      database.exec(options);
+    } catch (error) {
+      throw trigger_error(error);
+    }
     if (saved.length > 1) {
       throw new Error(i18n("substrate.statement_many", saved.length, sql));
     }
@@ -883,6 +660,24 @@ namespace substrate {
   // The ref of a `kv.*` line, the header's key.
   function ref_of(line: lines.Line): string {
     return jslb.field_get(line[0], "key") as string;
+  }
+
+  // The data of blob 1 of a line: its bytes, or a handle of the cache.
+  function blob_data(line: lines.Line): Uint8Array | string {
+    const blob = line[1] as lines.BlobHeader;
+    return jslb.field_get(blob, "data") as Uint8Array | string;
+  }
+
+  // The push line of an operation, in the name form this thread picks.
+  function push_make(
+    type: string,
+    payload: { [key: string]: unknown },
+    key?: string,
+    blobs: lines.BlobHeader[] = [],
+  ): lines.Line {
+    const full = settings.names_full();
+    const header = jslb.header_make(type, { key, full });
+    return jslb.line_make(header, blobs, payload);
   }
 
   // The files of the cache: slots of OPFS files, free or holding a value.
@@ -926,7 +721,7 @@ namespace substrate {
       const slot = this.#slot_take();
       this.#count += 1;
       const handle = constants.sink_prefix + String(this.#count);
-      const hash = new HashStream();
+      const hash = new utility.HashStream();
       this.#open.set(handle, { slot, size, written: 0, hash });
       return handle;
     }
@@ -972,7 +767,7 @@ namespace substrate {
     // The `SHA-256` of the value a handle names, read in pieces.
     handle_hash(handle: string): lines.Sha256 {
       const file = this.#file_find(handle);
-      const hash = new HashStream();
+      const hash = new utility.HashStream();
       for (
         let offset = 0;
         offset < file.size;
@@ -1130,7 +925,7 @@ namespace substrate {
     return pools.get(cache) as SlotPool;
   }
 
-  // The cache over `overflow_bytes` in open OPFS files, and the sink of hello.
+  // The cache files, opened by the boot, and the decoder's streaming sink.
   export class CacheFiles implements jslb.BlobSink {
     // Takes the open files, each holding the value its first bytes name.
     constructor(slots: SlotHandle[]) {
@@ -1188,26 +983,20 @@ namespace substrate {
     readonly #overflow_bytes: number;
     // The count of a scene's turns at which a `user` turn compacts them.
     readonly #compact_turns: number;
+    // What takes the push of each committed operation.
+    readonly #tasks: Notifier;
     // The open databases, by name.
     readonly #connections = new Map<string, SqliteDatabase>();
-    // The databases the server holds that this side does not, until loaded.
-    readonly #unloaded = new Set<string>();
-    // The forwarded lines not yet answered.
-    readonly #flights = new Map<lines.Line, FlightRecord>();
-    // The cache files forwarded lines still read, with their counts.
-    readonly #holds = new Map<string, number>();
     // The databases the running transaction began, in order.
     #joined: SqliteDatabase[] | undefined = undefined;
     // The cache files the running transaction stopped naming.
     #unlinks = new Set<string>();
-    // The lines of the running transaction, emitted after its commit.
-    #pending: ForwardedLine[] = [];
-    // The function that takes each forwarded line.
-    #forward: ((line: lines.Line) => void) | undefined = undefined;
-    // Whether forwarded lines use full names.
-    #full = false;
+    // The pushes of the running transaction, given on after its commit.
+    #pending: lines.Line[] = [];
+    // The `db.restore` waiting for its `db.file` lines, if any.
+    #restore_wait: RestoreWait | undefined = undefined;
 
-    // Takes the initialized module, the installed pool, the cache, the root.
+    // Takes the module, the pool, the cache, the root, its sizes, the queue.
     constructor(
       sqlite3: SqliteModule,
       pool: SqlitePool,
@@ -1215,6 +1004,7 @@ namespace substrate {
       root: string,
       overflow_bytes: number,
       compact_turns: number,
+      tasks: Notifier,
     ) {
       this.#sqlite = sqlite3;
       this.#pool = pool;
@@ -1223,19 +1013,19 @@ namespace substrate {
       this.#root = root;
       this.#overflow_bytes = overflow_bytes;
       this.#compact_turns = compact_turns;
+      this.#tasks = tasks;
     }
 
-    // Opens `<root>/<name>.sqlite`, applying the schema. Returns its `seq`.
-    db_open(name: string): number {
+    // Opens `<root>/<name>.sqlite`, applying the schema.
+    db_open(name: string): void {
       name_check(name);
-      this.#loaded_check(name);
       if (this.#connections.has(name)) {
         throw new Error(i18n("substrate.db_open", name));
       }
       if (!this.#file_exists(name)) {
         throw new Error(i18n("substrate.db_absent", name));
       }
-      return this.#database_open(name, constants.open_write);
+      this.#database_open(name, constants.open_write);
     }
 
     // Closes an open database, which must not be inside a transaction.
@@ -1253,11 +1043,9 @@ namespace substrate {
       return [...this.#connections.keys()].sort();
     }
 
-    // Creates and opens a new database at `seq` 0 and forwards it.
+    // Creates and opens a new database, then pushes it at once.
     db_create(name: string): void {
       name_check(name);
-      this.#loaded_check(name);
-      this.#forward_live("db.create");
       if (this.#file_exists(name)) {
         throw new Error(i18n("substrate.db_exists", name));
       }
@@ -1267,35 +1055,13 @@ namespace substrate {
         this.#pool.unlink(this.#path_find(name));
         throw error;
       }
-      this.#forward_emit(
-        this.#forward_make(
-          "db.create",
-          name,
-          0,
-          { db: name },
-          undefined,
-          [],
-          [],
-        ),
-      );
+      this.#push_send(push_make("db.create", { db: name }));
     }
 
-    // Closes and deletes a database and its cache files, and forwards it.
+    // Closes and deletes a database and its cache files, then pushes it.
     db_drop(name: string): void {
-      const since = seq_read(this.#connection_get(name));
-      this.#forward_live("db.drop");
       this.#file_remove(name);
-      this.#forward_emit(
-        this.#forward_make(
-          "db.drop",
-          name,
-          since,
-          { db: name },
-          undefined,
-          [],
-          [],
-        ),
-      );
+      this.#push_send(push_make("db.drop", { db: name }));
     }
 
     // The value a ref names. `db` is the database an internal ref is in.
@@ -1315,15 +1081,18 @@ namespace substrate {
         Uint8Array | null,
       ];
       const hex = hex_of(sha256);
+      if (data === null && !this.#slots.name_held(hex)) {
+        throw new Error(i18n("substrate.file_lost", ref, hex));
+      }
       return { data: data === null ? hex : data, size, sha256: hex };
     }
 
-    // Writes bytes, or moves a cache handle's file. Returns the row and `seq`.
+    // Writes bytes, or moves a cache handle's file. Returns the row.
     kv_put(
       ref: lines.KvRef,
       data: Uint8Array | string,
       db?: string,
-    ): { row: lines.KvRow; seq: number } {
+    ): lines.KvRow {
       const [name, key] = ref_resolve(ref, db);
       const database = this.#connection_get(name);
       return this.transaction_run(() =>
@@ -1331,13 +1100,11 @@ namespace substrate {
       );
     }
 
-    // Deletes the row, its cache file when no row names it. Returns `seq`.
-    kv_delete(ref: lines.KvRef, db?: string): number {
+    // Deletes the row, its cache file when no row names it.
+    kv_delete(ref: lines.KvRef, db?: string): void {
       const [name, key] = ref_resolve(ref, db);
       const database = this.#connection_get(name);
-      return this.transaction_run(() =>
-        this.#value_delete(name, database, key),
-      );
+      this.transaction_run(() => this.#value_delete(name, database, key));
     }
 
     // The rows of a database whose keys start with the prefix, by key.
@@ -1361,7 +1128,7 @@ namespace substrate {
       const named = this.#hashes_named();
       let removed = 0;
       for (const name of this.#slots.names_stored()) {
-        if (!named.has(name) && !this.#holds.has(name)) {
+        if (!named.has(name)) {
           this.#slots.name_remove(name);
           removed += 1;
         }
@@ -1378,7 +1145,7 @@ namespace substrate {
       return JSON.parse(utility.utf8_decode(data)) as lines.Document;
     }
 
-    // Writes version head plus one, moves the head, returns ref and `seq`.
+    // Writes version head plus one, moves the head, returns the new ref.
     doc_put(db: string, id: string, body: lines.Document): lines.DocPutReply {
       if (id === "") {
         throw new Error(i18n("substrate.id_empty"));
@@ -1416,9 +1183,9 @@ namespace substrate {
       const database = this.#connection_get(name);
       return this.transaction_run(() => {
         if (role === constants.compact_role) {
-          this.#threshold_compact(name, database, scene);
+          this.#threshold_compact(database, scene);
         }
-        return this.#turn_add(name, database, scene, role, text);
+        return this.#turn_add(database, scene, role, text);
       });
     }
 
@@ -1438,19 +1205,19 @@ namespace substrate {
       }));
     }
 
-    // Replaces turns 1 to `through` with one summary turn at `n` 1.
+    // Replaces turns 1 to `through` by one summary turn at 1, this side only.
     turn_compact(
       scene: lines.DocRef,
       through: number,
       summary: string,
-    ): number {
+    ): void {
       if (through < 1) {
         throw new Error(i18n("substrate.through_bad", through));
       }
       const name = scene_database(scene);
       const database = this.#connection_get(name);
-      return this.transaction_run(() =>
-        this.#turns_compact(name, database, scene, through, summary),
+      this.transaction_run(() =>
+        this.#turns_compact(database, scene, through, summary),
       );
     }
 
@@ -1462,112 +1229,36 @@ namespace substrate {
       );
     }
 
-    // The serialized bytes of a database, and its `seq`.
-    db_snapshot(db: string): { data: Uint8Array; seq: number } {
+    // The file and the handles of the cache files its rows name and it holds.
+    db_snapshot(db: string): DbImage {
       const database = this.#connection_get(db);
       return this.transaction_run(() => {
         this.#transaction_join(database);
+        const files = [...hashes_read(database)]
+          .filter((name) => this.#slots.name_held(name))
+          .sort();
         return {
           data: this.#sqlite.capi.sqlite3_js_db_export(database.pointer),
-          seq: seq_read(database),
+          files,
         };
       });
     }
 
-    // Replaces a database by snapshot bytes or a cache handle. Returns `seq`.
-    db_restore(db: string, data: Uint8Array | string): number {
-      return this.#file_load(db, data);
-    }
-
-    // Applies one forwarded operation when `since` is the database's `seq`.
-    operation_apply(
-      type: string,
-      since: number,
-      payload: { [key: string]: unknown },
-    ): number {
-      if (!Object.hasOwn(constants.operation_fields, type)) {
-        throw new Error(i18n("substrate.operation_type", type));
+    // Replaces the database by the file and keeps the cache files given.
+    db_restore(
+      db: string,
+      data: Uint8Array | string,
+      files: (Uint8Array | string)[],
+    ): void {
+      this.#file_load(db, data);
+      for (const file of files) {
+        if (typeof file === "string") {
+          const sha256 = this.#slots.handle_hash(file);
+          this.#slots.handle_store(file, sha256);
+        } else {
+          this.#slots.bytes_store(utility.sha256_hex(file), file);
+        }
       }
-      fields_check(type, payload, constants.operation_fields[type]);
-      const appliers: { [type: string]: () => number } = {
-        // `k` the external ref, `data` bytes or a cache handle.
-        "kv.put": () => {
-          const k = payload.k as string;
-          const data = payload.data as Uint8Array | string;
-          return this.#since_apply(type, since, ref_database(k), () =>
-            this.kv_put(k, data),
-          );
-        },
-        // `k` the external ref.
-        "kv.delete": () => {
-          const k = payload.k as string;
-          return this.#since_apply(type, since, ref_database(k), () =>
-            this.kv_delete(k),
-          );
-        },
-        // `db`, `id` and `body`, the document encoded.
-        "doc.put": () => {
-          const db = payload.db as string;
-          return this.#since_apply(type, since, db, () =>
-            this.doc_put(
-              db,
-              payload.id as string,
-              payload.body as lines.Document,
-            ),
-          );
-        },
-        // `db`, which has `seq` 0 before it exists and after.
-        "db.create": () => {
-          const db = payload.db as string;
-          since_check(type, since, 0, db);
-          this.db_create(db);
-          return this.seq_get(db);
-        },
-        // `db`. A database that no longer exists has `seq` 0.
-        "db.drop": () => {
-          const db = payload.db as string;
-          since_check(type, since, this.seq_get(db), db);
-          this.db_drop(db);
-          return 0;
-        },
-        // `scene`, `role` and `content`, applied as it is, never compacting.
-        "turn.append": () => {
-          const scene = payload.scene as string;
-          const name = scene_database(scene);
-          return this.#since_apply(type, since, name, () =>
-            this.#turn_add(
-              name,
-              this.#connection_get(name),
-              scene,
-              payload.role as provider.Role,
-              json_canonical(payload.content),
-            ),
-          );
-        },
-        // `scene`, `through` and `summary`.
-        "turn.compact": () => {
-          const scene = payload.scene as string;
-          return this.#since_apply(type, since, scene_database(scene), () =>
-            this.turn_compact(
-              scene,
-              payload.through as number,
-              payload.summary as string,
-            ),
-          );
-        },
-        // `db` and `statements`, each exactly `sql` and `params`.
-        "sql.run": () => {
-          const db = payload.db as string;
-          const statements = payload.statements as lines.SqlStatement[];
-          for (const statement of statements) {
-            fields_check(type, statement, constants.statement_fields);
-          }
-          return this.#since_apply(type, since, db, () =>
-            this.sql_run(db, statements),
-          );
-        },
-      };
-      return appliers[type]();
     }
 
     // Runs `fn` in one transaction: commit on return, roll back on a throw.
@@ -1579,19 +1270,10 @@ namespace substrate {
       const pending = this.#pending;
       this.#pending = [];
       this.#cache_prune(this.#unlinks);
-      for (const forward of pending) {
-        this.#forward_emit(forward);
+      for (const line of pending) {
+        this.#push_send(line);
       }
       return result;
-    }
-
-    // Sets the one function that takes each forwarded line, and its form.
-    forward_set(fn: (line: lines.Line) => void, full: boolean): void {
-      if (this.#forward !== undefined) {
-        throw new Error(i18n("substrate.forward_twice"));
-      }
-      this.#forward = fn;
-      this.#full = full;
     }
 
     // The streaming sink of the decoder, the cache this store was given.
@@ -1599,181 +1281,15 @@ namespace substrate {
       return this.#cache;
     }
 
-    // Registers the handlers of the lines the UI thread submits, version 0.
+    // Registers the handlers of the store's lines on this thread, version 0.
     handlers_register(register: HandlerRegister): void {
       for (const [type, fn] of Object.entries(this.#handlers_make())) {
         register(type, 0, fn);
       }
     }
 
-    // The `seq` of an open database.
-    seq_get(db: string): number {
-      return seq_read(this.#connection_get(db));
-    }
-
-    // Takes the reply to a forwarded line: checks its `seq`, frees its holds.
-    forward_done(line: lines.Line, reply: lines.Line): void {
-      const record = this.#flights.get(line);
-      if (record === undefined) {
-        throw new Error(
-          i18n("substrate.forward_unknown", jslb.field_get(line[0], "type")),
-        );
-      }
-      if (!constants.seqless_types.includes(record.type)) {
-        const seq = jslb.payload_of(reply).seq;
-        const due = record.since + 1;
-        if (seq !== due) {
-          throw new Error(
-            i18n("substrate.reply_desync", record.type, seq, due, record.db),
-          );
-        }
-      }
-      this.#flights.delete(line);
-      this.#holds_drop(record.names);
-      this.#cache_prune(new Set(record.names));
-    }
-
-    // Measures each open database and their total against the soft limit.
-    db_stats(soft_bytes: number): StoreStats {
-      const databases = this.db_list().map((name) => this.#stats_read(name));
-      let total_bytes = 0;
-      for (const stats of databases) {
-        total_bytes += stats.bytes;
-      }
-      return {
-        databases,
-        total_bytes,
-        soft_bytes,
-        over: total_bytes > soft_bytes,
-      };
-    }
-
-    // Runs `VACUUM`, which changes no content nor `seq`, forwarding nothing.
-    db_compact(db: string): CompactBytes {
-      const database = this.#connection_get(db);
-      if (this.#in_transaction(database)) {
-        throw new Error(i18n("substrate.db_busy", db));
-      }
-      const before = this.#stats_read(db).bytes;
-      database.exec({ sql: "VACUUM" });
-      return { before, after: this.#stats_read(db).bytes };
-    }
-
-    // Deletes this side's copy, which the server keeps, until `db_load`.
-    db_unload(db: string): void {
-      this.#connection_get(db);
-      this.#file_remove(db);
-      this.#unloaded.add(db);
-    }
-
-    // Opens the server's snapshot of a database as at start. Returns `seq`.
-    db_load(db: string, data: Uint8Array | string): number {
-      return this.#file_load(db, data);
-    }
-
-    // At start, opens what matches the server and returns what to replace.
-    start_open(server: { [db: string]: number }): string[] {
-      const held = this.#files_held();
-      const replace: string[] = [];
-      for (const name of held) {
-        const seq = this.db_open(name);
-        if (!Object.hasOwn(server, name)) {
-          this.#file_remove(name);
-        } else if (seq !== server[name]) {
-          this.db_close(name);
-          this.#unloaded.add(name);
-          replace.push(name);
-        }
-      }
-      for (const name of Object.keys(server)) {
-        if (!held.includes(name)) {
-          this.#unloaded.add(name);
-        }
-      }
-      return replace;
-    }
-
-    // Whether this side holds the bytes of a value, in its row or a file.
-    kv_held(ref: lines.KvRef, db?: string): boolean {
-      const value = this.kv_get(ref, db);
-      return (
-        typeof value.data !== "string" || this.#slots.name_held(value.data)
-      );
-    }
-
-    // Puts back the file of a cached value from bytes with the row's digest.
-    cache_fill(
-      ref: lines.KvRef,
-      data: Uint8Array | string,
-      db?: string,
-    ): void {
-      const value = this.kv_get(ref, db);
-      const handle = typeof data === "string";
-      const sha256 = handle
-        ? this.#slots.handle_hash(data)
-        : utility.sha256_hex(data);
-      if (sha256 !== value.sha256) {
-        throw new Error(
-          i18n("substrate.fill_desync", ref, sha256, value.sha256),
-        );
-      }
-      if (handle) {
-        this.#slots.handle_store(data, sha256);
-      } else {
-        this.#slots.bytes_store(sha256, data);
-      }
-    }
-
-    // Frees a database's cached values by key until they fit the budget.
-    cache_evict(db: string, keep: readonly string[], budget: number): number {
-      const database = this.#connection_get(db);
-      // The names that other databases' rows and the kept refs hold stay.
-      const kept = this.#hashes_named(db);
-      for (const ref of keep) {
-        const parts = ref_split(ref);
-        if (parts.db === db) {
-          const rows = rows_select(
-            database,
-            "SELECT sha256 FROM _kv WHERE key = ? AND data IS NULL",
-            [parts.key],
-          );
-          for (const row of rows) {
-            kept.add(hex_of(row[0] as Uint8Array));
-          }
-        }
-      }
-      const cached = rows_select(
-        database,
-        "SELECT sha256, size FROM _kv WHERE data IS NULL ORDER BY key",
-        [],
-      );
-      const sizes = new Map<string, number>();
-      for (const row of cached) {
-        const name = hex_of(row[0] as Uint8Array);
-        if (this.#slots.name_held(name)) {
-          sizes.set(name, row[1] as number);
-        }
-      }
-      let held = 0;
-      for (const size of sizes.values()) {
-        held += size;
-      }
-      let freed = 0;
-      for (const [name, size] of sizes) {
-        if (held <= budget) {
-          break;
-        }
-        if (!kept.has(name) && !this.#holds.has(name)) {
-          this.#slots.name_remove(name);
-          held -= size;
-          freed += 1;
-        }
-      }
-      return freed;
-    }
-
     // Opens a database file with the flags, applying the schema.
-    #database_open(name: string, flags: string): number {
+    #database_open(name: string, flags: string): void {
       const database = new this.#pool.OpfsSAHPoolDb({
         filename: this.#path_find(name),
         flags,
@@ -1781,25 +1297,15 @@ namespace substrate {
       try {
         database.exec({ sql: "PRAGMA foreign_keys = ON" });
         this.#schema_apply(database);
-        const seq = seq_read(database);
         this.#connections.set(name, database);
-        return seq;
       } catch (error) {
         database.close();
         throw error;
       }
     }
 
-    // Throws naming `db_load` when the database is unloaded.
-    #loaded_check(name: string): void {
-      if (this.#unloaded.has(name)) {
-        throw new Error(i18n("substrate.db_unloaded", name));
-      }
-    }
-
     // The connection of an open database. Any other database throws.
     #connection_get(name: string): SqliteDatabase {
-      this.#loaded_check(name);
       const database = this.#connections.get(name);
       if (database === undefined) {
         throw new Error(i18n("substrate.db_closed", name));
@@ -1842,8 +1348,8 @@ namespace substrate {
       this.#cache_prune(hashes);
     }
 
-    // Checks snapshot bytes in a file of their own, then replaces the copy.
-    #file_load(db: string, data: Uint8Array | string): number {
+    // Checks a database file in a file of its own, then replaces the copy.
+    #file_load(db: string, data: Uint8Array | string): void {
       name_check(db);
       const path = this.#path_find(db);
       const temporary = path + constants.restore_suffix;
@@ -1865,8 +1371,7 @@ namespace substrate {
       if (typeof data === "string") {
         this.#slots.handle_discard(data);
       }
-      this.#unloaded.delete(db);
-      return this.#database_open(db, constants.open_write);
+      this.#database_open(db, constants.open_write);
     }
 
     // Creates the substrate's tables in a database that lacks them.
@@ -1939,9 +1444,6 @@ namespace substrate {
             database.exec({ sql: "ROLLBACK" });
           }
         }
-        for (const forward of this.#pending) {
-          this.#holds_drop(forward.record.names);
-        }
         this.#pending = [];
         throw error;
       } finally {
@@ -1949,72 +1451,49 @@ namespace substrate {
       }
     }
 
-    // Writes a value inside the transaction, forwarding it when it changed.
+    // Writes a value inside the transaction, pushing it when it changed.
     #value_put(
       name: string,
       database: SqliteDatabase,
       key: string,
       data: Uint8Array | string,
-    ): { row: lines.KvRow; seq: number } {
+    ): lines.KvRow {
       this.#transaction_join(database);
-      const since = seq_read(database);
       const written = this.#row_write(database, key, data);
       const { row } = written;
       if (!written.changed) {
-        return { row, seq: since };
+        return row;
       }
-      const seq = seq_bump(database);
-      // A value in its row goes as a copy, as the caller may move its bytes.
-      const blob = written.cached
-        ? jslb.blob_make(row.sha256, undefined, {}, row.size)
-        : jslb.blob_make((data as Uint8Array).slice());
+      // A cache file read whole, or a copy, as the caller may move its bytes.
+      const bytes = written.cached
+        ? this.#slots.handle_bytes(row.sha256)
+        : (data as Uint8Array).slice();
       this.#pending.push(
-        this.#forward_make(
-          "kv.put",
-          name,
-          since,
-          {},
-          `/${name}/${key}`,
-          [blob],
-          written.cached ? [row.sha256] : [],
-        ),
+        push_make("kv.put", {}, `/${name}/${key}`, [jslb.blob_make(bytes)]),
       );
-      return { row, seq };
+      return row;
     }
 
-    // Deletes a row inside the transaction, forwarding it when it existed.
+    // Deletes a row inside the transaction, pushing it when it existed.
     #value_delete(
       name: string,
       database: SqliteDatabase,
       key: string,
-    ): number {
+    ): void {
       this.#transaction_join(database);
-      const since = seq_read(database);
       const old = rows_select(
         database,
         "SELECT sha256, data IS NULL FROM _kv WHERE key = ?",
         [key],
       );
       if (old.length === 0) {
-        return since;
+        return;
       }
       database.exec({ sql: "DELETE FROM _kv WHERE key = ?", bind: [key] });
       if (old[0][1] === 1) {
         this.#unlinks.add(hex_of(old[0][0] as Uint8Array));
       }
-      const seq = seq_bump(database);
-      this.#pending.push(
-        this.#forward_make(
-          "kv.delete",
-          name,
-          since,
-          {},
-          `/${name}/${key}`,
-          [],
-          [],
-        ),
-      );
-      return seq;
+      this.#pending.push(push_make("kv.delete", {}, `/${name}/${key}`));
     }
 
     // Writes a row, its cache file first, and says whether the row changed.
@@ -2063,7 +1542,7 @@ namespace substrate {
       return { row, changed: true, cached };
     }
 
-    // Writes the next version of a document, moves its head, forwards it.
+    // Writes the next version of a document, moves its head, pushes it.
     #document_put(
       db: string,
       database: SqliteDatabase,
@@ -2072,8 +1551,7 @@ namespace substrate {
       text: string,
     ): lines.DocPutReply {
       this.#transaction_join(database);
-      const since = seq_read(database);
-      // The next version is counted by SQLite, exact past 2^53, as text.
+      // The next version is counted by SQLite, exact past `2^53`, as text.
       const rows = rows_select(
         database,
         "SELECT CAST(version + 1 AS TEXT) FROM _head WHERE id = ?",
@@ -2094,28 +1572,13 @@ namespace substrate {
           " ON CONFLICT (id) DO UPDATE SET version = excluded.version",
         bind: [id, version],
       });
-      const seq = seq_bump(database);
       const body = JSON.parse(text) as lines.Document;
-      this.#pending.push(
-        this.#forward_make(
-          "doc.put",
-          db,
-          since,
-          { db, id, body },
-          undefined,
-          [],
-          [],
-        ),
-      );
-      return { ref: `/${db}/${key}`, seq };
+      this.#pending.push(push_make("doc.put", { db, id, body }));
+      return { ref: `/${db}/${key}` };
     }
 
     // Compacts the scene's turns 1 to its last once they are `compact_turns`.
-    #threshold_compact(
-      name: string,
-      database: SqliteDatabase,
-      scene: string,
-    ): void {
+    #threshold_compact(database: SqliteDatabase, scene: string): void {
       this.#transaction_join(database);
       const [count, last] = rows_select(
         database,
@@ -2124,20 +1587,18 @@ namespace substrate {
       )[0] as [number, number];
       if (count >= this.#compact_turns) {
         const summary = i18n("substrate.turns_compacted", last, count);
-        this.#turns_compact(name, database, scene, last, summary);
+        this.#turns_compact(database, scene, last, summary);
       }
     }
 
-    // Inserts a turn after the last of its scene and forwards it.
+    // Inserts a turn after the last of its scene and pushes it.
     #turn_add(
-      name: string,
       database: SqliteDatabase,
       scene: string,
       role: provider.Role,
       text: string,
     ): lines.TurnAppendReply {
       this.#transaction_join(database);
-      const since = seq_read(database);
       const n = database.selectValue(
         "SELECT COALESCE(MAX(n), 0) + 1 FROM _turn WHERE scene = ?",
         [scene],
@@ -2148,32 +1609,19 @@ namespace substrate {
           " VALUES (?, ?, ?, ?)",
         bind: [scene, n, role, text],
       });
-      const seq = seq_bump(database);
       const content = JSON.parse(text) as provider.ChatMessage;
-      this.#pending.push(
-        this.#forward_make(
-          "turn.append",
-          name,
-          since,
-          { scene, role, content },
-          undefined,
-          [],
-          [],
-        ),
-      );
-      return { n, seq };
+      this.#pending.push(push_make("turn.append", { scene, role, content }));
+      return { n };
     }
 
-    // Deletes turns 1 to `through`, inserts the summary at 1, forwards it.
+    // Deletes turns 1 to `through` and inserts the summary at 1, sending none.
     #turns_compact(
-      name: string,
       database: SqliteDatabase,
       scene: string,
       through: number,
       summary: string,
-    ): number {
+    ): void {
       this.#transaction_join(database);
-      const since = seq_read(database);
       database.exec({
         sql: "DELETE FROM _turn WHERE scene = ? AND n <= ?",
         bind: [scene, through],
@@ -2191,19 +1639,6 @@ namespace substrate {
           " VALUES (?, 1, ?, ?)",
         bind: [scene, constants.summary_role, content],
       });
-      const seq = seq_bump(database);
-      this.#pending.push(
-        this.#forward_make(
-          "turn.compact",
-          name,
-          since,
-          { scene, through, summary },
-          undefined,
-          [],
-          [],
-        ),
-      );
-      return seq;
     }
 
     // Runs the statements, counting a change of a row or of the schema.
@@ -2213,7 +1648,6 @@ namespace substrate {
       statements: lines.SqlStatement[],
     ): lines.SqlResult[] {
       this.#transaction_join(database);
-      const since = seq_read(database);
       const changes = database.changes(true);
       const schema = schema_read(database);
       const results = statements.map((statement) =>
@@ -2223,106 +1657,34 @@ namespace substrate {
         database.changes(true) !== changes ||
         schema_read(database) !== schema
       ) {
-        seq_bump(database);
-        this.#pending.push(
-          this.#forward_make(
-            "sql.run",
-            db,
-            since,
-            { db, statements: structuredClone(statements) },
-            undefined,
-            [],
-            [],
-          ),
-        );
+        const copy = structuredClone(statements);
+        this.#pending.push(push_make("sql.run", { db, statements: copy }));
       }
       return results;
     }
 
-    // Runs a forwarded operation in a transaction when `since` is the `seq`.
-    #since_apply(
-      type: string,
-      since: number,
-      db: string,
-      fn: () => unknown,
-    ): number {
-      const database = this.#connection_get(db);
-      return this.transaction_run(() => {
-        this.#transaction_join(database);
-        since_check(type, since, seq_read(database), db);
-        fn();
-        return seq_read(database);
-      });
+    // Gives a push line to the queue, for the server.
+    #push_send(line: lines.Line): void {
+      this.#tasks.line_notify(line, constants.push_owner);
     }
 
-    // The function that takes forwarded lines. Unset, it throws.
-    #forward_live(type: string): (line: lines.Line) => void {
-      const fn = this.#forward;
-      if (fn === undefined) {
-        throw new Error(i18n("substrate.forward_unset", type));
-      }
-      return fn;
-    }
-
-    // Builds the forwarded line of an operation and holds its cache files.
-    #forward_make(
-      type: string,
-      db: string,
-      since: number,
-      fields: { [key: string]: unknown },
-      key: string | undefined,
-      blobs: lines.BlobHeader[],
-      names: string[],
-    ): ForwardedLine {
-      this.#forward_live(type);
-      const header = jslb.header_make(type, { key, full: this.#full });
-      const line = jslb.line_make(header, blobs, { ...fields, since });
-      for (const name of names) {
-        const count = this.#holds.get(name);
-        this.#holds.set(name, count === undefined ? 1 : count + 1);
-      }
-      return { line, record: { type, db, since, names } };
-    }
-
-    // Hands a forwarded line on, recorded until its reply comes.
-    #forward_emit(forward: ForwardedLine): void {
-      const fn = this.#forward_live(forward.record.type);
-      this.#flights.set(forward.line, forward.record);
-      fn(forward.line);
-    }
-
-    // Lets go of the cache files a forwarded line held.
-    #holds_drop(names: string[]): void {
-      for (const name of names) {
-        const count = this.#holds.get(name) as number;
-        if (count === 1) {
-          this.#holds.delete(name);
-        } else {
-          this.#holds.set(name, count - 1);
-        }
-      }
-    }
-
-    // Removes the cache files of the names that no row and no line holds.
+    // Removes the cache files of the names that no row holds.
     #cache_prune(names: Set<string>): void {
       if (names.size === 0) {
         return;
       }
       const named = this.#hashes_named();
       for (const name of [...names].sort()) {
-        if (!named.has(name) && !this.#holds.has(name)) {
+        if (!named.has(name)) {
           this.#slots.name_remove(name);
         }
       }
     }
 
-    // The cache names the rows of each database file but the skipped one hold.
-    #hashes_named(skip?: string): Set<string> {
+    // The cache names the rows of each database file under the root hold.
+    #hashes_named(): Set<string> {
       const named = new Set<string>();
       for (const name of this.#files_held()) {
-        if (name === skip) {
-          continue;
-        }
         const open = this.#connections.get(name);
         if (open !== undefined) {
           for (const hash of hashes_read(open)) {
@@ -2345,25 +1707,6 @@ namespace substrate {
       return named;
     }
 
-    // The measure of an open database: pages, free pages, cached values.
-    #stats_read(name: string): DatabaseStats {
-      const database = this.#connection_get(name);
-      const page_size = select_number(database, "PRAGMA page_size");
-      const pages = select_number(database, "PRAGMA page_count");
-      const free_pages = select_number(database, "PRAGMA freelist_count");
-      const cache_bytes = select_number(
-        database,
-        "SELECT COALESCE(SUM(size), 0) FROM _kv WHERE data IS NULL",
-      );
-      return {
-        name,
-        bytes: pages * page_size + cache_bytes,
-        free_bytes: free_pages * page_size,
-        cache_bytes,
-        seq: seq_read(database),
-      };
-    }
-
     // The bytes of a value, read from the cache when it is held there.
     #value_bytes(value: KvValue): Uint8Array {
       return typeof value.data === "string"
@@ -2371,7 +1714,7 @@ namespace substrate {
         : value.data;
     }
 
-    // The handlers of the lines the UI thread submits, by type.
+    // The handlers of the UI thread's requests and the server's pushes.
     #handlers_make(): { [type: string]: dispatch.Handler } {
       return {
         // Reads a value, its bytes as blob 1, read whole from the cache.
@@ -2385,17 +1728,14 @@ namespace substrate {
         },
         // Writes blob 1 under the ref.
         "kv.put": (line) => {
-          const blob = line[1] as lines.BlobHeader;
-          const data = jslb.field_get(blob, "data") as Uint8Array | string;
-          const written = this.kv_put(ref_of(line), data);
-          return dispatch.reply_make(line, {
-            sha256: written.row.sha256,
-            seq: written.seq,
-          });
+          const row = this.kv_put(ref_of(line), blob_data(line));
+          return dispatch.reply_make(line, { sha256: row.sha256 });
         },
         // Deletes the ref's row.
-        "kv.delete": (line) =>
-          dispatch.reply_make(line, { seq: this.kv_delete(ref_of(line)) }),
+        "kv.delete": (line) => {
+          this.kv_delete(ref_of(line));
+          return dispatch.reply_make(line, {});
+        },
         // Lists the rows under a prefix.
         "kv.list": (line) => {
           const { db, prefix } = payload_read<lines.KvList>(line);
@@ -2404,7 +1744,8 @@ namespace substrate {
         // Writes a document.
         "doc.put": (line) => {
           const { db, id, body } = payload_read<lines.DocPut>(line);
-          return dispatch.reply_make(line, { ...this.doc_put(db, id, body) });
+          const { ref } = this.doc_put(db, id, body);
+          return dispatch.reply_make(line, { ref });
         },
         // Reads a document's head.
         "doc.head": (line) => {
@@ -2421,36 +1762,50 @@ namespace substrate {
           this.db_drop(payload_read<lines.DbName>(line).db);
           return dispatch.reply_make(line, {});
         },
-        // Answers a database's digest and `seq`, its file as blob 1.
-        "db.snapshot": (line) => {
-          const { db } = payload_read<lines.DbName>(line);
-          const { data, seq } = this.db_snapshot(db);
-          const sha256 = utility.sha256_hex(data);
-          return dispatch.reply_make(line, { sha256, seq }, [
-            jslb.blob_make(data),
-          ]);
-        },
         // Appends a turn.
         "turn.append": (line) => {
           const { scene, role, content } =
             payload_read<lines.TurnAppend>(line);
-          return dispatch.reply_make(line, {
-            ...this.turn_append(scene, role, content),
-          });
+          const { n } = this.turn_append(scene, role, content);
+          return dispatch.reply_make(line, { n });
         },
-        // Compacts a scene's turns.
-        "turn.compact": (line) => {
-          const { scene, through, summary } =
-            payload_read<lines.TurnCompact>(line);
-          return dispatch.reply_make(line, {
-            seq: this.turn_compact(scene, through, summary),
-          });
-        },
-        // Runs statements, the reply carrying the `seq` after them.
+        // Runs statements and answers their results.
         "sql.run": (line) => {
           const { db, statements } = payload_read<lines.SqlRun>(line);
           const results = this.sql_run(db, statements);
-          return dispatch.reply_make(line, { results, seq: this.seq_get(db) });
+          return dispatch.reply_make(line, { results });
+        },
+        // Restores at once with no cache file, else waits for its files.
+        "db.restore": (line) => {
+          const { db, files } = payload_read<lines.DbRestore>(line);
+          const waiting = this.#restore_wait;
+          if (waiting !== undefined) {
+            throw new Error(
+              i18n("substrate.restore_pending", db, waiting.db, waiting.left),
+            );
+          }
+          const data = blob_data(line);
+          if (files === 0) {
+            this.db_restore(db, data, []);
+          } else {
+            this.#restore_wait = { db, data, files: [], left: files };
+          }
+          return undefined;
+        },
+        // Keeps one cache file of the waiting restore, which runs at the last.
+        "db.file": (line) => {
+          const { db } = payload_read<lines.DbFile>(line);
+          const waiting = this.#restore_wait;
+          if (waiting === undefined || waiting.db !== db) {
+            throw new Error(i18n("substrate.file_unexpected", db));
+          }
+          waiting.files.push(blob_data(line));
+          waiting.left -= 1;
+          if (waiting.left === 0) {
+            this.#restore_wait = undefined;
+            this.db_restore(db, waiting.data, waiting.files);
+          }
+          return undefined;
         },
       };
     }

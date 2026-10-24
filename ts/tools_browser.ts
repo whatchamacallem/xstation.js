@@ -2,17 +2,23 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// The browser's MCP tools, registered on the AI worker's server and run
-// through the store inside the task of the `mcp` line: SQL, databases, values,
-// documents, scripts, images, the render, the debug console after the
-// player's permit, the verbose tail, and the measurement and
-// administration of the databases against their soft limit. A value this
-// side no longer holds is asked of the server before it is read, a snapshot
-// comes as one blob whose digest is checked, and a render that leaves a
-// scene frees the cached values of `_files` the new scene does not name
-// until they fit `files_browser_bytes`. A tool that waits submits its one
-// request to an explicit owner and sleeps, and its wake, registered on the
-// server beside the tools, finishes the result or sleeps again.
+// The browser's MCP tools, exactly those of API/mcp/tools.json in its order,
+// registered on the AI worker's server and run through the store inside the
+// task of the `mcp` line. kv_get returns the value as text, every other tool
+// the JSON text of its result: sql_run `{results}`, kv_put `{sha256}`,
+// kv_delete, db_create and db_drop `{}`. No tool exposes the backing store
+// beyond routine SQL: no measure, no VACUUM, no unloading or loading of a
+// copy, no `seq`. kv_get and doc_get read this side's store only, a lost
+// cache file failing as `substrate.file_lost`. render shows the image and
+// the subtitle and frees nothing.
+//
+// console_run, in debug mode, asks the player's permit unless it was always
+// allowed, then submits `console.show` to the UI and sleeps on
+// `tools.show_reply`, then types the command into tty 0 and sleeps on its
+// output. Outside debug mode it throws `tools_browser.debug_off`. Every line
+// a tool builds takes the form `settings.names_full()` picks. A tool that
+// throws, before or after it submitted a request, fails the server as
+// `mcp.d.ts` says, its own message kept.
 
 namespace tools_browser {
   // Finishes a tool's result from the state and replies of its wake.
@@ -26,21 +32,10 @@ namespace tools_browser {
     key: string;
   }
 
-  // The state of a wake that runs or ends a console command.
+  // The state of a wake that shows the console, runs or ends a command.
   interface ConsoleState {
     text: string;
     timeout_seconds: number;
-  }
-
-  // The state of a wake that fills a value back: its ref, whether a document.
-  interface ValueState {
-    ref: string;
-    document: boolean;
-  }
-
-  // The state of a wake that opens a snapshot: its database.
-  interface LoadState {
-    db: string;
   }
 
   // The names, refs, texts, owners, line types and tools of the tools.
@@ -69,12 +64,6 @@ namespace tools_browser {
     image_format: "b64_json" as const,
     // The setting of debug mode, which the debug tool needs.
     debug_setting: "debug",
-    // The setting of the soft limit of the databases' bytes.
-    soft_setting: "db_soft_bytes",
-    // The setting of the budget of the browser's tier of `_files`.
-    files_setting: "files_browser_bytes",
-    // The database of media, scripts and blobs, the tier the render frees.
-    files_db: "_files",
     // The choices of a permit that do not simply accept.
     deny_choice: "deny",
     always_choice: "always",
@@ -90,8 +79,7 @@ namespace tools_browser {
     input_type: "console.input",
     read_type: "console.read",
     tail_type: "verbose.tail",
-    get_type: "kv.get",
-    snapshot_type: "db.snapshot",
+    show_type: "console.show",
     // The wake types of the tools, one per reply they sleep on.
     image_wake: "tools.image_reply",
     media_wake: "tools.media_reply",
@@ -100,8 +88,7 @@ namespace tools_browser {
     permit_wake: "tools.permit_reply",
     console_wake: "tools.console_reply",
     tail_wake: "tools.tail_reply",
-    snapshot_wake: "tools.snapshot_reply",
-    value_wake: "tools.value_reply",
+    show_wake: "tools.show_reply",
     // The tools of this server, in the order `tools/list` lists them.
     tools: Object.freeze<readonly mcp.Tool[]>([
       {
@@ -147,8 +134,8 @@ namespace tools_browser {
       {
         name: "kv_put",
         description:
-          "Write text under a Key-Value-Ref, /$db/$key. A script is the" +
-          " row /_files/script/<name>.js.",
+          "Write text under a Key-Value-Ref, /$db/$key, and return its" +
+          " sha256. A script is the row /_files/script/<name>.js.",
         inputSchema: schema_strings(["ref", "text"]),
       },
       {
@@ -239,8 +226,9 @@ namespace tools_browser {
       {
         name: "console_run",
         description:
-          "Run one command line in the debug console's dash and return" +
-          " its output until the next prompt or the timeout. Debug mode.",
+          "Show the debug console as ctrl-0 does, run one command line in" +
+          " its dash and return its output until the next prompt or the" +
+          " timeout. Debug mode.",
         inputSchema: {
           type: "object",
           properties: {
@@ -263,38 +251,6 @@ namespace tools_browser {
           },
           required: ["thread", "count"],
         },
-      },
-      {
-        name: "db_stats",
-        description:
-          "Measure the databases open in this worker by their pages and" +
-          " cached values: for each its name, bytes, free_bytes," +
-          " cache_bytes and seq, then total_bytes, soft_bytes and whether" +
-          " the total is over the soft limit. Read only.",
-        inputSchema: { type: "object", properties: {} },
-      },
-      {
-        name: "db_compact",
-        description:
-          "Run VACUUM on this worker's copy of a database and return its" +
-          " bytes before and after. The content and seq do not change and" +
-          " nothing is sent to the server.",
-        inputSchema: schema_strings(["db"]),
-      },
-      {
-        name: "db_unload",
-        description:
-          "Close and delete this worker's copy of a database and the cache" +
-          " files only it names. The server keeps its copy; an operation" +
-          " on the database fails until db_load.",
-        inputSchema: schema_strings(["db"]),
-      },
-      {
-        name: "db_load",
-        description:
-          "Fetch the server's copy of a database and open it in this" +
-          " worker, as at start. Returns its seq.",
-        inputSchema: schema_strings(["db"]),
       },
     ]),
   });
@@ -329,13 +285,14 @@ namespace tools_browser {
     return result;
   }
 
-  // A line of a type with its payload and blobs, in short names.
+  // A line of a type with its payload and blobs, in this thread's name form.
   function line_build(
     type: string,
     payload: { [key: string]: unknown },
     blobs: lines.BlobHeader[] = [],
   ): lines.Line {
-    return jslb.line_make(jslb.header_make(type), blobs, payload);
+    const header = jslb.header_make(type, { full: settings.names_full() });
+    return jslb.line_make(header, blobs, payload);
   }
 
   // The payload of the one reply a wake carries.
@@ -347,25 +304,6 @@ namespace tools_browser {
   function reply_data(replies: lines.Line[]): Uint8Array | string {
     const blob = replies[0][1] as lines.BlobHeader;
     return jslb.field_get(blob, "data") as Uint8Array | string;
-  }
-
-  // Blob 1 of a `db.snapshot` reply, checked against the `sha256` it sent.
-  function snapshot_data(
-    db: string,
-    replies: lines.Line[],
-  ): Uint8Array | string {
-    const blob = replies[0][1] as lines.BlobHeader;
-    const data = reply_data(replies);
-    // A streamed blob's digest is the one its cache file took as it came.
-    const sha256 =
-      typeof data === "string"
-        ? (blob.sha256 as lines.Sha256)
-        : utility.sha256_hex(data);
-    const sent = reply_payload(replies).sha256 as lines.Sha256;
-    if (sha256 !== sent) {
-      throw new Error(i18n("substrate.snapshot_digest", db, sha256, sent));
-    }
-    return data;
   }
 
   // A command's output with LF line ends, its echo and its prompt cut off.
@@ -400,8 +338,6 @@ namespace tools_browser {
     readonly allowed = new Set<string>();
     // The number of the last permit asked.
     permit_count = 0;
-    // The scene the last render showed, none before the first.
-    scene_shown: string | undefined = undefined;
 
     // Keeps what the tools use, one context per server.
     constructor(
@@ -441,36 +377,15 @@ namespace tools_browser {
       return dispatch.task_sleep(state, [id], then_type);
     }
 
-    // Asks the server for a value this side does not hold and sleeps on it.
-    value_fetch(ref: string, document: boolean): dispatch.Sleep {
-      const header = jslb.header_make(constants.get_type, { key: ref });
-      const state: ValueState = { ref, document };
+    // Asks the UI to show the console as ctrl 0 does and sleeps until open.
+    console_show(text: string, timeout_seconds: number): dispatch.Sleep {
+      const state: ConsoleState = { text, timeout_seconds };
       return this.request_sleep(
-        jslb.line_make(header, [], {}),
-        constants.server_owner,
+        line_build(constants.show_type, {}),
+        constants.ui_owner,
         state,
-        constants.value_wake,
+        constants.show_wake,
       );
-    }
-
-    // Frees the cached values of `_files` the scene does not name, to fit.
-    files_evict(scene: lines.DocRef, image: string | undefined): void {
-      const open = this.store.db_list();
-      // An unloaded `_files` holds no values to free.
-      if (!open.includes(constants.files_db)) {
-        return;
-      }
-      const keep: string[] = [];
-      // The scene's refs are its headers, read when its database is open.
-      if (open.includes(substrate.ref_split(scene).db as string)) {
-        const document = this.store.doc_get(scene);
-        keep.push(...(jslb.headers_of(document).slice(1) as string[]));
-      }
-      if (image !== undefined) {
-        keep.push(image);
-      }
-      const budget = this.settings_get(constants.files_setting) as number;
-      this.store.cache_evict(constants.files_db, keep, budget);
     }
 
     // Types a command line into the console and sleeps on reading its output.
@@ -499,12 +414,11 @@ namespace tools_browser {
   function runs_make(context: ToolContext): { [name: string]: mcp.ToolFn } {
     const store = context.store;
     return {
-      // Runs the statements and returns their results and the `seq` after.
+      // Runs the statements and returns their results.
       sql_run: (args) => {
         const db = args.db as string;
         const statements = args.statements as lines.SqlStatement[];
-        const results = store.sql_run(db, statements);
-        return result_json({ results, seq: store.seq_get(db) });
+        return result_json({ results: store.sql_run(db, statements) });
       },
       // Creates an empty database.
       db_create: (args) => {
@@ -516,36 +430,26 @@ namespace tools_browser {
         store.db_drop(args.db as string);
         return result_json({});
       },
-      // Reads a value as text, asking the server first when it is not held.
-      kv_get: (args) => {
-        const ref = args.ref as string;
-        if (!store.kv_held(ref)) {
-          return context.value_fetch(ref, false);
-        }
-        return result_text(context.text_read(ref));
-      },
-      // Writes text as its bytes and returns their digest and the `seq`.
+      // Reads a value of this side's store as text.
+      kv_get: (args) => result_text(context.text_read(args.ref as string)),
+      // Writes text as its bytes and returns the row's digest.
       kv_put: (args) => {
         const data = utility.utf8_encode(args.text as string);
-        const written = store.kv_put(args.ref as string, data);
-        return result_json({ sha256: written.row.sha256, seq: written.seq });
+        const row = store.kv_put(args.ref as string, data);
+        return result_json({ sha256: row.sha256 });
       },
-      // Deletes a row and returns the `seq` after.
-      kv_delete: (args) =>
-        result_json({ seq: store.kv_delete(args.ref as string) }),
+      // Deletes a row.
+      kv_delete: (args) => {
+        store.kv_delete(args.ref as string);
+        return result_json({});
+      },
       // Lists the rows under a prefix.
       kv_list: (args) => {
         const keys = store.kv_list(args.db as string, args.prefix as string);
         return result_json({ keys });
       },
-      // Reads a document encoded, asking the server first when it is not held.
-      doc_get: (args) => {
-        const ref = args.ref as string;
-        if (!store.kv_held(ref)) {
-          return context.value_fetch(ref, true);
-        }
-        return result_json(store.doc_get(ref));
-      },
+      // Reads a document of this side's store, encoded.
+      doc_get: (args) => result_json(store.doc_get(args.ref as string)),
       // Writes the next version of a document and returns its ref.
       doc_put: (args) => {
         const body = args.body as lines.Document;
@@ -593,11 +497,6 @@ namespace tools_browser {
         const world = context.text_read(constants.world_ref);
         const scene = context.text_read(`/${world}/${constants.scene_key}`);
         const image = args.image as string | undefined;
-        // A render of another scene than the last one shown leaves that one.
-        if (scene !== context.scene_shown) {
-          context.files_evict(scene, image);
-          context.scene_shown = scene;
-        }
         const payload: { [key: string]: unknown } = {
           scene,
           subtitle: args.subtitle,
@@ -612,7 +511,7 @@ namespace tools_browser {
           constants.render_wake,
         );
       },
-      // In debug mode asks the permit unless always allowed, then runs.
+      // In debug mode asks the permit unless always allowed, then shows.
       console_run: (args) => {
         const debug = context.settings_get(constants.debug_setting) as boolean;
         if (!debug) {
@@ -622,7 +521,7 @@ namespace tools_browser {
         const text = args.text as string;
         const timeout_seconds = args.timeout_seconds as number;
         if (context.allowed.has(context.permit_name)) {
-          return context.console_send(text, timeout_seconds);
+          return context.console_show(text, timeout_seconds);
         }
         context.permit_count += 1;
         const ask = line_build(constants.permit_type, {
@@ -649,32 +548,6 @@ namespace tools_browser {
           constants.server_owner,
           {},
           constants.tail_wake,
-        );
-      },
-      // Measures the open databases against the soft limit.
-      db_stats: () => {
-        const soft = context.settings_get(constants.soft_setting) as number;
-        return result_json(store.db_stats(soft));
-      },
-      // Compacts a database and returns its bytes before and after.
-      db_compact: (args) => result_json(store.db_compact(args.db as string)),
-      // Unloads this side's copy of a database.
-      db_unload: (args) => {
-        store.db_unload(args.db as string);
-        return result_json({});
-      },
-      // Asks the server for a database's snapshot and sleeps on it.
-      db_load: (args) => {
-        const state: LoadState = { db: args.db as string };
-        // No task writes a loaded copy while the image is on its way.
-        if (store.db_list().includes(state.db)) {
-          store.db_unload(state.db);
-        }
-        return context.request_sleep(
-          line_build(constants.snapshot_type, { db: state.db }),
-          constants.server_owner,
-          state,
-          constants.snapshot_wake,
         );
       },
     };
@@ -721,12 +594,12 @@ namespace tools_browser {
       // Keeps the bytes the UI downloaded and returns their key and digest.
       [constants.fetch_wake]: (state, replies) => {
         const { key } = state as KeyState;
-        const { row } = store.kv_put(key, reply_data(replies));
+        const row = store.kv_put(key, reply_data(replies));
         return result_json({ key, size: row.size, sha256: row.sha256 });
       },
       // Ends the render once the UI has shown it.
       [constants.render_wake]: () => result_json({}),
-      // Answers a denial with an error, else runs the command line.
+      // Answers a denial with an error, else shows the console.
       [constants.permit_wake]: (state, replies) => {
         const { text, timeout_seconds } = state as ConsoleState;
         const choice = reply_payload(replies).choice;
@@ -738,6 +611,11 @@ namespace tools_browser {
         if (choice === constants.always_choice) {
           context.allowed.add(context.permit_name);
         }
+        return context.console_show(text, timeout_seconds);
+      },
+      // Runs the command line once tty 0 is open.
+      [constants.show_wake]: (state) => {
+        const { text, timeout_seconds } = state as ConsoleState;
         return context.console_send(text, timeout_seconds);
       },
       // Returns the command's output and whether the read timed out.
@@ -751,25 +629,6 @@ namespace tools_browser {
       // Returns the lines the server sent.
       [constants.tail_wake]: (_state, replies) =>
         result_json({ lines: reply_payload(replies).lines }),
-      // Checks the snapshot's digest and opens it at the `seq` it gave.
-      [constants.snapshot_wake]: (state, replies) => {
-        const { db } = state as LoadState;
-        const seq = store.db_load(db, snapshot_data(db, replies));
-        const sent = reply_payload(replies).seq as number;
-        if (seq !== sent) {
-          throw new Error(i18n("tools_browser.load_desync", db, seq, sent));
-        }
-        return result_json({ seq });
-      },
-      // Fills back the value the server sent, then reads it as asked.
-      [constants.value_wake]: (state, replies) => {
-        const { ref, document } = state as ValueState;
-        store.cache_fill(ref, reply_data(replies));
-        if (document) {
-          return result_json(store.doc_get(ref));
-        }
-        return result_text(context.text_read(ref));
-      },
     };
   }
 

@@ -2,9 +2,15 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the strings function and its placeholder rule.
+// Tests of the strings function and its placeholder rule. A text the real
+// table holds is checked against its copy in the gold record.
 
 namespace test_i18n {
+  // A text of this module's gold, a run time `{n}` left for the test to fill.
+  function gold_text(name: string): string {
+    return harness.gold_get(`typescript.test_i18n.texts.${name}`) as string;
+  }
+
   // The message of the error a function throws, failing the test if none.
   function message_thrown(test: unittest.TestCase, fn: () => unknown): string {
     try {
@@ -46,7 +52,7 @@ namespace test_i18n {
     test_plain_text(): void {
       this.assertEqual(
         i18n("utility.bytes_refused"),
-        ui_strings.table["utility.bytes_refused"],
+        gold_text("utility_bytes_refused"),
       );
     }
 

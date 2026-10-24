@@ -4,17 +4,17 @@
 //
 // Tests of the provider door: the request lines it builds, the reading of the
 // reply lines, the conversion of MCP tools and the key it keeps in memory.
+// The request lines it expects, in the full names of debug mode, the reply
+// lines it reads and the texts of its refusals are its gold in
+// `test_settings.json`, read through the harness.
 
 namespace test_provider {
   // A provider's address, key and models, and values of the castle turn.
   const constants = Object.freeze({
     base_url: "https://api.x.ai/v1",
     key: "xai-SYNTHETIC-KEY",
-    chat_url: "https://api.x.ai/v1/chat/completions",
-    image_url: "https://api.x.ai/v1/images/generations",
     chat_model: "grok-4",
     image_model: "grok-2-image",
-    request_type: "http.request",
     bootstrap_arguments:
       '{"name":"bootstrap","args":{"universe":"castle",' +
       '"title":"The castle","world":"castle_world",' +
@@ -44,14 +44,30 @@ namespace test_provider {
     throw new Error("Nothing was thrown.");
   }
 
+  // A copy of a value of this module's gold, which the harness keeps frozen.
+  function gold_value(name: string): unknown {
+    return structuredClone(
+      harness.gold_get(`typescript.test_provider.${name}`),
+    );
+  }
+
+  // A text of this module's gold, a run time `{n}` left for the test to fill.
+  function gold_text(name: string): string {
+    return harness.gold_get(
+      `typescript.test_provider.texts.${name}`,
+    ) as string;
+  }
+
+  // A copy of a line of this module's gold, a run time part set on the copy.
+  function gold_line(name: string): lines.Line {
+    return gold_value(`lines.${name}`) as lines.Line;
+  }
+
   // A reply line to request 1 carrying the JSON body, in short names.
   function reply_build(json: unknown): lines.Line {
-    const header = jslb.header_make(constants.request_type, { reply: 1 });
-    return jslb.line_make(header, [], {
-      status: 200,
-      headers: { "content-type": "application/json" },
-      json,
-    });
+    const reply = gold_line("reply");
+    reply.json = json;
+    return reply;
   }
 
   // The headers with their names in lower case, as HTTP compares them.
@@ -162,6 +178,20 @@ namespace test_provider {
 
   // The request lines the two builders make.
   export class TestRequestBuild extends unittest.TestCase {
+    // Checks a request line against the gold, its body the one given.
+    line_assert(line: lines.Line, name: string, request: object): void {
+      const expected = gold_line(name);
+      this.assertEqual(line[0], expected[0]);
+      this.assertEqual(
+        Object.keys(line).join(","),
+        "0,method,url,headers,json",
+      );
+      this.assertEqual(line.method, expected.method);
+      this.assertEqual(line.url, expected.url);
+      this.assertEqual(headers_lower(line.headers), expected.headers);
+      this.assertTrue(line.json === request);
+    }
+
     // A chat request is one `http.request` line with no id.
     test_chat_line(): void {
       const request: provider.ChatRequest = {
@@ -174,18 +204,7 @@ namespace test_provider {
         constants.key,
         request,
       );
-      this.assertEqual(line[0], { t: constants.request_type });
-      this.assertEqual(
-        Object.keys(line).join(","),
-        "0,method,url,headers,json",
-      );
-      this.assertEqual(line.method, "POST");
-      this.assertEqual(line.url, constants.chat_url);
-      this.assertEqual(headers_lower(line.headers), {
-        authorization: "Bearer xai-SYNTHETIC-KEY",
-        "content-type": "application/json",
-      });
-      this.assertTrue(line.json === request);
+      this.line_assert(line, "chat_request", request);
     }
 
     // An image request goes to the image path with its own body.
@@ -201,18 +220,7 @@ namespace test_provider {
         constants.key,
         request,
       );
-      this.assertEqual(line[0], { t: constants.request_type });
-      this.assertEqual(
-        Object.keys(line).join(","),
-        "0,method,url,headers,json",
-      );
-      this.assertEqual(line.method, "POST");
-      this.assertEqual(line.url, constants.image_url);
-      this.assertEqual(headers_lower(line.headers), {
-        authorization: "Bearer xai-SYNTHETIC-KEY",
-        "content-type": "application/json",
-      });
-      this.assertTrue(line.json === request);
+      this.line_assert(line, "image_request", request);
     }
 
     // The key given is the one the header carries.
@@ -249,11 +257,8 @@ namespace test_provider {
 
     // A reply in full names is read as one in short names.
     test_full_names(): void {
-      const header = jslb.header_make(constants.request_type, {
-        reply: 4,
-        full: true,
-      });
-      const reply = jslb.line_make(header, [], { json: recorded_stop() });
+      const reply = gold_line("reply_full");
+      reply.json = recorded_stop();
       this.assertEqual(provider.chat_response(reply), recorded_stop());
     }
 
@@ -267,17 +272,9 @@ namespace test_provider {
 
     // An `error` line or a line of another type is refused by its type.
     test_type_refused(): void {
-      for (const type of ["error", "kv.get"]) {
-        const header = jslb.header_make(type, { reply: 1 });
-        const line = jslb.line_make(header, [], {
-          message: "It failed.",
-          stack: "Error: It failed.",
-        });
-        const expected = i18n(
-          "provider.reply_type",
-          type,
-          constants.request_type,
-        );
+      for (const suffix of ["error", "kv_get"]) {
+        const line = gold_line(`refused_${suffix}`);
+        const expected = gold_text(`provider_reply_type_${suffix}`);
         const chat = thrown_get(() => provider.chat_response(line));
         this.assertEqual(chat.message, expected);
         const image = thrown_get(() => provider.image_response(line));
@@ -288,43 +285,37 @@ namespace test_provider {
     // Each part that is missing or not valid is named by its path.
     test_fields_invalid(): void {
       const choice = choice_valid();
-      const calls = "json.choices[0].message.tool_calls";
       const cases: [string, unknown][] = [
         ["json", null],
         ["json", [1]],
-        ["json.choices", { id: "c", model: "m" }],
-        ["json.choices", { id: "c", model: "m", choices: [] }],
-        ["json.id", { model: "m", choices: [choice] }],
-        ["json.model", { id: "c", model: 5, choices: [choice] }],
-        ["json.choices[0]", chat_body(5)],
-        ["json.choices[0].index", chat_body({ ...choice, index: "0" })],
-        ["json.choices[0].message", chat_body({ ...choice, message: [] })],
-        ["json.choices[0].message.role", message_with({ role: "robot" })],
-        ["json.choices[0].message.content", message_with({ content: 5 })],
-        [calls, message_with({ tool_calls: {} })],
-        [`${calls}[0]`, message_with({ tool_calls: [null] })],
-        [`${calls}[0].id`, call_with({ id: 5 })],
-        [`${calls}[0].type`, call_with({ type: "other" })],
-        [`${calls}[0].function`, call_with({ function: "f" })],
-        [`${calls}[0].function.name`, call_with({ function: {} })],
+        ["choices", { id: "c", model: "m" }],
+        ["choices", { id: "c", model: "m", choices: [] }],
+        ["id", { model: "m", choices: [choice] }],
+        ["model", { id: "c", model: 5, choices: [choice] }],
+        ["choice", chat_body(5)],
+        ["choice_index", chat_body({ ...choice, index: "0" })],
+        ["message", chat_body({ ...choice, message: [] })],
+        ["message_role", message_with({ role: "robot" })],
+        ["message_content", message_with({ content: 5 })],
+        ["calls", message_with({ tool_calls: {} })],
+        ["call", message_with({ tool_calls: [null] })],
+        ["call_id", call_with({ id: 5 })],
+        ["call_type", call_with({ type: "other" })],
+        ["call_function", call_with({ function: "f" })],
+        ["call_name", call_with({ function: {} })],
         [
-          `${calls}[0].function.arguments`,
+          "call_arguments",
           call_with({ function: { name: "n", arguments: {} } }),
         ],
-        [
-          "json.choices[0].message.tool_call_id",
-          message_with({ tool_call_id: 7 }),
-        ],
-        [
-          "json.choices[0].finish_reason",
-          chat_body({ ...choice, finish_reason: "done" }),
-        ],
+        ["message_call_id", message_with({ tool_call_id: 7 })],
+        ["finish_reason", chat_body({ ...choice, finish_reason: "done" })],
       ];
-      for (const [path, json] of cases) {
+      for (const [suffix, json] of cases) {
         const error = thrown_get(() =>
           provider.chat_response(reply_build(json)),
         );
-        this.assertEqual(error.message, i18n("provider.field_invalid", path));
+        const expected = gold_text(`provider_field_invalid_${suffix}`);
+        this.assertEqual(error.message, expected);
       }
     }
   }
@@ -351,24 +342,22 @@ namespace test_provider {
     test_fields_invalid(): void {
       const cases: [string, unknown][] = [
         ["json", "text"],
-        ["json.data", {}],
-        ["json.data", { data: [] }],
-        ["json.data", { data: { url: "u" } }],
-        ["json.data[0]", { data: [5] }],
-        ["json.data[0]", { data: [{}] }],
-        ["json.data[0]", { data: [{ revised_prompt: "p" }] }],
-        ["json.data[0].b64_json", { data: [{ b64_json: 5 }] }],
-        ["json.data[1].url", { data: [{ url: "u" }, { url: 5 }] }],
-        [
-          "json.data[0].revised_prompt",
-          { data: [{ url: "u", revised_prompt: 1 }] },
-        ],
+        ["data", {}],
+        ["data", { data: [] }],
+        ["data", { data: { url: "u" } }],
+        ["image", { data: [5] }],
+        ["image", { data: [{}] }],
+        ["image", { data: [{ revised_prompt: "p" }] }],
+        ["image_base64", { data: [{ b64_json: 5 }] }],
+        ["second_url", { data: [{ url: "u" }, { url: 5 }] }],
+        ["image_prompt", { data: [{ url: "u", revised_prompt: 1 }] }],
       ];
-      for (const [path, json] of cases) {
+      for (const [suffix, json] of cases) {
         const error = thrown_get(() =>
           provider.image_response(reply_build(json)),
         );
-        this.assertEqual(error.message, i18n("provider.field_invalid", path));
+        const expected = gold_text(`provider_field_invalid_${suffix}`);
+        this.assertEqual(error.message, expected);
       }
     }
   }
@@ -444,7 +433,7 @@ namespace test_provider {
     }
   }
 
-  // The key `hello` brings, kept in memory.
+  // The key `key_set` keeps in memory.
   export class TestProviderKey extends unittest.TestCase {
     // A second key replaces the first.
     test_key_replaced(): void {
@@ -458,6 +447,19 @@ namespace test_provider {
     test_key_empty(): void {
       provider.key_set("");
       this.assertEqual(provider.key_get(), "");
+    }
+
+    // With the key cleared, none is set, which `key_get` refuses.
+    test_key_cleared(): void {
+      provider.key_set("first");
+      provider.key_clear();
+      let message = "";
+      try {
+        provider.key_get();
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      this.assertEqual(message, gold_text("provider_key_missing"));
     }
   }
 }

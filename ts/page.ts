@@ -2,14 +2,29 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// The UI thread: the page's elements, the AI worker made from the texts of
-// the worker scripts and the channel to it, the task manager built on the
-// settings the worker sends first, the DOM port of the player's text, clicks
-// and keys and of the permit buttons, the media port, the console view, the
-// overlays, and the handlers that paint renders, keep media, ask permits and
-// carry the player's turns. The test page's UI thread runs its tests on the
-// same queue, and the test engine page hands the engine's live queue to the
-// caller once it is made.
+// The UI thread: the AI worker made from the texts of the worker scripts and
+// the channel to it, the queue built on the settings the worker sends first,
+// and the pieces of the UI the test suites build toward: the DOM port of the
+// player's text, clicks and control keys and of the permit buttons, the media
+// port, the console view, the overlays, and the handlers that paint renders,
+// keep media, ask permits, carry the player's turns and show the console.
+//
+// Every line the UI thread builds takes the form `settings.names_full()`
+// picks, the DOM port's `ui.input` and `ui.control_key` and the page's own
+// `fault` line included.
+//
+// `console.show`, a request of the AI worker, shows the console view as
+// ctrl 0 does, then answers once tty 0 is open: at once when `open_is()`,
+// else, when the shown view `open_wanted()`, through `open_request()`, whose
+// sleep the handler takes over with the wake `ui.console_shown`, which runs
+// `open_done` and replies Empty. A view that is opening or closing cannot
+// answer and throws `page.console_busy`.
+//
+// A worker's `fault` line shows the fault screen, its stack followed by each
+// cause's message and stack, then the page terminates the worker, which has
+// already reported it to the server and seen the server end the wire. The
+// page's own fault goes to the worker as a `fault` line, posted on the
+// channel by the stop function, its cascade under `cause`.
 
 namespace page {
   // The owners, ids, line types, settings and texts of the page.
@@ -23,11 +38,10 @@ namespace page {
     strict_line: '"use strict";\n',
     script_join: "\n",
     script_media: "text/javascript",
+    line_break: "\n",
     image_id: "image",
-    subtitle_id: "subtitle",
     input_id: "input",
     permit_id: "permit",
-    debug_id: "debug",
     settings_type: "settings.set",
     fault_type: "fault",
     put_type: "settings.put",
@@ -35,11 +49,13 @@ namespace page {
     click_type: "ai.click",
     input_type: "ui.input",
     key_type: "ui.control_key",
+    tests_type: "ui.tests",
     turn_wake: "ui.turn_end",
     permit_wake: "ui.permit_reply",
     media_wake: "ui.media_reply",
     console_wake: "ui.console_reply",
     closed_wake: "ui.console_closed",
+    shown_wake: "ui.console_shown",
     render_type: "render",
     store_type: "media.store",
     fetch_type: "media.fetch",
@@ -47,20 +63,15 @@ namespace page {
     choice_type: "dom.choice",
     output_type: "console.output",
     exit_type: "console.exit",
+    show_type: "console.show",
     overlay_type: "overlay.line",
-    hello_type: "boot.hello",
     handler_version: 0,
     choices: Object.freeze(["accept", "deny", "always"]),
     // The state of a turn's sleep: the input, enabled again when it ends.
     turn_state: Object.freeze({ input: "enabled" }),
     key_digit: /^[0-9]$/,
     console_digit: 0,
-    debug_setting: "debug",
     synchronous_setting: "queue_synchronous",
-    media_setting: "media_db_bytes",
-    // The seconds an image download may last, a default its writer chose.
-    download_seconds: 120,
-    ring_setting: "verbose_ring",
   });
 
   // Registers the handler of one line type and version, as dispatch does.
@@ -78,7 +89,9 @@ namespace page {
   // The console view as the handlers drive it.
   export interface ConsoleControl {
     view_toggle(): void;
+    view_show(): void;
     open_wanted(): boolean;
+    open_is(): boolean;
     open_request(): dispatch.Sleep;
     open_done(wake: lines.Line): void;
     close_done(wake: lines.Line): void;
@@ -103,17 +116,6 @@ namespace page {
     view: ConsoleControl;
     overlays: OverlayControl;
     debug: boolean;
-    full: boolean;
-    log: (text: string) => void;
-  }
-
-  // The elements the page makes once.
-  interface PageElements {
-    canvas: HTMLCanvasElement;
-    subtitle: HTMLElement;
-    input: HTMLInputElement;
-    permit: HTMLElement;
-    debug: HTMLElement;
   }
 
   // What a relay's wake keeps: the request it owes the reply to.
@@ -127,21 +129,22 @@ namespace page {
     text: HTMLElement;
   }
 
-  // The owner table of the UI thread, with `tap.` on the test page.
-  export function owners_make(test: boolean): queue.OwnerTable {
-    const owners: queue.OwnerTable = {
+  // The owner table of the UI thread.
+  export function owners_make(): queue.OwnerTable {
+    return {
       "ui.": "ui",
       render: "ui",
       "media.": "ui",
       "permit.": "ui",
-      "boot.": "ui",
       "overlay.": "ui",
       "console.": "ai",
       "console.output": "ui",
       "console.exit": "ui",
+      "console.show": "ui",
       "ai.": "ai",
       "settings.put": "ai",
       "verbose.": "ai",
+      "tap.": "ai",
       "kv.": "ai",
       "doc.": "ai",
       "db.": "ai",
@@ -149,7 +152,6 @@ namespace page {
       "sql.": "ai",
       "dom.": "dom",
     };
-    return test ? { ...owners, "tap.": "ai" } : owners;
   }
 
   // Whether a line uses full header names.
@@ -157,13 +159,13 @@ namespace page {
     return Object.hasOwn(line[0], "type");
   }
 
-  // A line of a type in the name form given, with its payload.
+  // A line of a type in the name form of this thread, with its payload.
   function line_build(
     type: string,
-    full: boolean,
     payload: { [key: string]: unknown },
   ): lines.Line {
-    return jslb.line_make(jslb.header_make(type, { full }), [], payload);
+    const header = jslb.header_make(type, { full: settings.names_full() });
+    return jslb.line_make(header, [], payload);
   }
 
   // The element of a container with the id given, which must be there.
@@ -188,14 +190,14 @@ namespace page {
     return labels[choice];
   }
 
-  // The settings the first line of the worker carries, which is settings.set.
-  export function settings_take(data: unknown): settings.Settings {
+  // The first line of the worker, which is settings.set, taken whole.
+  export function settings_take(data: unknown): lines.SettingsSet {
     const line = data as lines.Line;
     const type = jslb.field_get(line[0], "type");
     if (type !== constants.settings_type) {
       throw new Error(i18n("page.settings_missing", String(type)));
     }
-    return (jslb.payload_of(line) as unknown as lines.SettingsSet).settings;
+    return jslb.payload_of(line) as unknown as lines.SettingsSet;
   }
 
   // The fault a message of the worker carries, which must be a fault line.
@@ -281,7 +283,7 @@ namespace page {
       event.preventDefault();
       const text = this.input.value;
       this.input.value = "";
-      this.receiver_call(line_build(constants.input_type, false, { text }));
+      this.receiver_call(line_build(constants.input_type, { text }));
     }
 
     // Takes a click on the image as a point of the image's own pixels.
@@ -300,7 +302,7 @@ namespace page {
       const top = (box.height - canvas.height * scale) / 2;
       const x = Math.floor((event.clientX - box.left - left) / scale);
       const y = Math.floor((event.clientY - box.top - top) / scale);
-      this.receiver_call(line_build(constants.input_type, false, { x, y }));
+      this.receiver_call(line_build(constants.input_type, { x, y }));
     }
 
     // Takes control with a digit, which the page keeps from the browser.
@@ -311,10 +313,10 @@ namespace page {
       event.preventDefault();
       event.stopPropagation();
       const digit = Number(event.key);
-      this.receiver_call(line_build(constants.key_type, false, { digit }));
+      this.receiver_call(line_build(constants.key_type, { digit }));
     }
 
-    // Answers a `dom.choice` with the choice clicked.
+    // Answers a `dom.choice` with the choice clicked, in the request's form.
     private choice_answer(full: boolean, id: number, choice: string): void {
       const header = jslb.header_make(constants.choice_type, {
         reply: id,
@@ -332,7 +334,7 @@ namespace page {
   // The handlers of the UI thread and the state they share.
   class PageHandlers {
     readonly #parts: PageParts;
-    // Whether the first render came, which ends the start.
+    // Whether the first render came, which opens the input.
     #ready = false;
 
     // Takes what the handlers work with.
@@ -359,7 +361,7 @@ namespace page {
         canvas.hidden = false;
       }
       subtitle.textContent = render.subtitle;
-      // The first render ends the start, after which the player may type.
+      // The first render opens the input, after which the player may type.
       if (!this.#ready) {
         this.#ready = true;
         input.disabled = false;
@@ -370,7 +372,7 @@ namespace page {
     // Passes a media request to the media port and sleeps on its answer.
     media_take(line: lines.Line): dispatch.Sleep {
       const type = jslb.field_get(line[0], "type") as string;
-      const header = jslb.header_make(type, { full: full_of(line) });
+      const header = jslb.header_make(type, { full: settings.names_full() });
       const blobs = jslb.headers_of(line).slice(1) as lines.BlobHeader[];
       const copy = jslb.line_make(header, blobs, jslb.payload_of(line));
       const id = this.#parts.tasks.task_submit(copy, constants.media_owner);
@@ -388,13 +390,13 @@ namespace page {
 
     // Shows the permit request, asks the DOM port for a choice, and sleeps.
     permit_take(line: lines.Line): dispatch.Sleep {
-      const { tasks, permit, full } = this.#parts;
+      const { tasks, permit } = this.#parts;
       const ask = jslb.payload_of(line) as unknown as lines.PermitAsk;
       const text = permit.ownerDocument.createElement("p");
       const input = utility.json_text(ask.input);
       text.textContent = i18n("page.permit_text", ask.tool, input);
       permit.append(text);
-      const choose = line_build(constants.choice_type, full, {
+      const choose = line_build(constants.choice_type, {
         permit: ask.permit,
         choices: [...constants.choices],
       });
@@ -416,12 +418,12 @@ namespace page {
 
     // Starts a turn with the player's text or click and closes the input.
     input_take(line: lines.Line): dispatch.Sleep {
-      const { tasks, input, full } = this.#parts;
+      const { tasks, input } = this.#parts;
       const said = jslb.payload_of(line) as unknown as lines.UiInput;
       const turn =
         said.text === undefined
-          ? line_build(constants.click_type, full, { x: said.x, y: said.y })
-          : line_build(constants.say_type, full, { text: said.text });
+          ? line_build(constants.click_type, { x: said.x, y: said.y })
+          : line_build(constants.say_type, { text: said.text });
       input.disabled = true;
       const id = tasks.task_submit(turn, constants.ai_owner);
       const state = constants.turn_state;
@@ -454,6 +456,28 @@ namespace page {
       return view.open_wanted() ? view.open_request() : undefined;
     }
 
+    // Shows the console, answered at once when open, else once it opens.
+    show_take(line: lines.Line): lines.Line | dispatch.Sleep {
+      const { view } = this.#parts;
+      view.view_show();
+      if (view.open_is()) {
+        return dispatch.reply_make(line, {});
+      }
+      if (!view.open_wanted()) {
+        throw new Error(i18n("page.console_busy"));
+      }
+      const sleep = view.open_request();
+      const state: RelayState = { request: line };
+      return dispatch.task_sleep(state, sleep.wait_ids, constants.shown_wake);
+    }
+
+    // Gives the view the answer to its opening, then answers the show.
+    shown_take(wake: lines.Line): lines.Line {
+      this.#parts.view.open_done(wake);
+      const { request } = wake.state as RelayState;
+      return dispatch.reply_make(request, {});
+    }
+
     // Gives the view the answer to its opening.
     console_done(wake: lines.Line): undefined {
       this.#parts.view.open_done(wake);
@@ -483,14 +507,6 @@ namespace page {
     overlay_take(line: lines.Line): undefined {
       const shown = jslb.payload_of(line) as unknown as lines.OverlayLine;
       this.#parts.overlays.line_add(shown.tty, shown.text);
-      return undefined;
-    }
-
-    // Writes what the hello says of the server as a verbose line.
-    hello_take(line: lines.Line): undefined {
-      const hello = jslb.payload_of(line) as unknown as lines.BootHello;
-      const { bootstrap, sha256, pid, root } = hello;
-      this.#parts.log(i18n("page.hello_shown", bootstrap, sha256, pid, root));
       return undefined;
     }
   }
@@ -525,6 +541,10 @@ namespace page {
     );
     register(constants.turn_wake, version, (line) => handlers.turn_done(line));
     register(constants.key_type, version, (line) => handlers.key_take(line));
+    register(constants.show_type, version, (line) => handlers.show_take(line));
+    register(constants.shown_wake, version, (line) =>
+      handlers.shown_take(line),
+    );
     register(constants.console_wake, version, (line) =>
       handlers.console_done(line),
     );
@@ -538,33 +558,28 @@ namespace page {
     register(constants.overlay_type, version, (line) =>
       handlers.overlay_take(line),
     );
-    register(constants.hello_type, version, (line) =>
-      handlers.hello_take(line),
-    );
   }
 
-  // Makes the page's elements in the body, the input closed until the start.
-  function page_build(body: HTMLElement): PageElements {
-    const document_of = body.ownerDocument;
-    const canvas = document_of.createElement("canvas");
-    canvas.id = constants.image_id;
-    canvas.hidden = true;
-    const area = document_of.createElement("div");
-    area.id = constants.subtitle_id;
-    const subtitle = document_of.createElement("p");
-    const permit = document_of.createElement("div");
-    permit.id = constants.permit_id;
-    const form = document_of.createElement("form");
-    const input = document_of.createElement("input");
-    input.id = constants.input_id;
-    input.disabled = true;
-    form.append(input);
-    area.append(subtitle, permit, form);
-    const debug = document_of.createElement("div");
-    debug.id = constants.debug_id;
-    // In the column of the style the debug views are above the subtitle band.
-    body.append(canvas, debug, area);
-    return { canvas, subtitle, input, permit, debug };
+  // The stack of a fault followed by each cause's message and stack in turn.
+  function fault_text(fault: lines.Fault): string {
+    const parts = [fault.stack];
+    let cause = fault.cause;
+    while (cause !== undefined) {
+      parts.push(cause.message, cause.stack);
+      cause = cause.cause;
+    }
+    return parts.join(constants.line_break);
+  }
+
+  // The `fault` line of the UI thread, full names before the settings exist.
+  function fault_make(thrown: unknown): lines.Line {
+    const header = jslb.header_make(constants.fault_type, {
+      full: settings.names_full(),
+    });
+    return jslb.line_make(header, [], {
+      thread: constants.thread,
+      ...dispatch.cause_make(thrown),
+    });
   }
 
   // Makes the AI worker from the worker scripts' texts and shows its faults.
@@ -578,9 +593,11 @@ namespace page {
     const worker = new Worker(URL.createObjectURL(blob), {
       name: constants.worker_name,
     });
+    // The worker reported the fault and the server ended the wire before it.
     worker.onmessage = (event: MessageEvent<unknown>) => {
       const fault = fault_read(event.data);
-      error_overlay.overlay_show(fault.message, fault.stack);
+      error_overlay.overlay_show(fault.message, fault_text(fault));
+      worker.terminate();
     };
     worker.onerror = (event: ErrorEvent) => {
       const { filename, lineno, colno } = event;
@@ -603,8 +620,6 @@ namespace page {
   function thread_open(
     port: MessagePort,
     value: settings.Settings,
-    full: boolean,
-    test: boolean,
   ): queue.TaskQueue {
     settings.settings_set(value);
     const synchronous = settings.settings_get(
@@ -612,91 +627,40 @@ namespace page {
     ) as boolean;
     const tasks = new queue.TaskQueue(
       constants.thread,
-      owners_make(test),
+      owners_make(),
       synchronous,
     );
     tasks.sink_attach(verbose.sink_set, settings.settings_get);
     tasks.port_add(constants.ai_owner, new queue.ThreadPort(port));
     settings.sender_register((put: lines.SettingsPut) => {
-      const line = line_build(constants.put_type, full, {
-        settings: put.settings,
-      });
+      const line = line_build(constants.put_type, { settings: put.settings });
       tasks.line_notify(line, constants.ai_owner);
     });
     return tasks;
   }
 
-  // Builds the engine's UI thread on the settings and name form the AI sent.
-  function engine_open(
-    body: HTMLElement,
-    elements: PageElements,
-    port: MessagePort,
-    value: settings.Settings,
-    full: boolean,
-  ): queue.TaskQueue {
-    const tasks = thread_open(port, value, full, false);
-    const images = new media.MediaPort(
-      settings.settings_get(constants.media_setting) as number,
-      constants.download_seconds,
-    );
-    tasks.port_add(constants.dom_owner, new DomPort(body));
-    tasks.port_add(constants.media_owner, images);
-    const ring = settings.settings_get(constants.ring_setting) as number;
-    handlers_register(
-      {
-        tasks,
-        canvas: elements.canvas,
-        subtitle: elements.subtitle,
-        input: elements.input,
-        permit: elements.permit,
-        images,
-        view: new console_view.ConsoleView(elements.debug, tasks),
-        overlays: new overlay.Overlay(elements.debug, ring),
-        debug: settings.settings_get(constants.debug_setting) === true,
-        full,
-        log: (text: string) => verbose.log(text),
-      },
-      dispatch.handler_register,
-    );
-    return tasks;
-  }
-
-  // The engine's elements, worker and channel, its queue given to `run`.
-  function engine_start(run: (tasks: queue.TaskQueue) => void): void {
-    error_overlay.overlay_install();
-    const body = document.body;
-    const elements = page_build(body);
-    const worker = worker_make();
-    error_overlay.stop_register(() => worker.terminate());
-    const channel = new MessageChannel();
-    channel.port1.onmessage = (event: MessageEvent<unknown>) => {
-      const value = settings_take(event.data);
-      // The worker's one `names_full()` chose the form of its first line.
-      const full = full_of(event.data as lines.Line);
-      run(engine_open(body, elements, channel.port1, value, full));
-    };
-    worker_post(worker, channel.port2);
-  }
-
-  // The UI thread of the engine page, whose queue nothing outside it takes.
-  export function page_main(): void {
-    engine_start(() => undefined);
-  }
-
-  // The UI thread of the engine page, its live queue given to `run` when made.
-  export function test_engine(run: (tasks: queue.TaskQueue) => void): void {
-    engine_start(run);
-  }
-
-  // The UI thread of the test page: the worker, then the tests on the queue.
+  // The bring up of the UI thread, `run` getting its queue at `ui.tests`.
   export function test_page(run: (tasks: queue.TaskQueue) => void): void {
     error_overlay.overlay_install();
     const worker = worker_make();
     const channel = new MessageChannel();
+    error_overlay.stop_register((thrown) =>
+      channel.port1.postMessage(fault_make(thrown)),
+    );
     channel.port1.onmessage = (event: MessageEvent<unknown>) => {
-      const value = settings_take(event.data);
-      const full = full_of(event.data as lines.Line);
-      run(thread_open(channel.port1, value, full, true));
+      const set = settings_take(event.data);
+      const tasks = thread_open(channel.port1, set.settings);
+      if (set.test_settings !== undefined) {
+        harness.values_set(set.settings, set.test_settings);
+      }
+      dispatch.handler_register(
+        constants.tests_type,
+        constants.handler_version,
+        () => {
+          run(tasks);
+          return undefined;
+        },
+      );
     };
     worker_post(worker, channel.port2);
   }

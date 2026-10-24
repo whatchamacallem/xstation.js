@@ -2,17 +2,19 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests the stdio loop on text streams: an external agent's session opened
-# against the tools of API/mcp/tools.json, each server tool run when called,
-# an output flushed for each response, and a line that is not a JSON object
-# ending the loop with an exception. Then tests the script as a process
-# started the way an external agent starts it, on a root in build/ that holds
-# a copy of the checkout's settings.json.
+# Tests the stdio loop on text streams with a double of `mcp`, the module it
+# imports inside itself: one server made and given to the register function,
+# each line parsed and handed to the server, each response written as compact
+# JSON and flushed, a notification writing nothing, an exception the server
+# keeps raised once its answer is out, and a line that is not a JSON object,
+# or holds a bad number, ending the loop with an exception, its texts against
+# the gold. Then tests the script as a process started the way an external
+# agent starts it, the real server answering against the tools of
+# API/mcp/tools.json, on a root in build/ that holds a copy of the checkout's
+# settings.json.
 
-import contextlib, functools, io, json, mcp, mcp_stdio, os, select, shutil
-import subprocess, sys, tempfile, unittest
-from collections.abc import Callable
-from i18n import i18n
+import contextlib, harness, io, json, mcp_stdio, os, select, shutil
+import subprocess, sys, tempfile, types, unittest, unittest.mock
 from typing import Any, IO, cast
 
 # The root of the checkout.
@@ -36,17 +38,20 @@ _STDIO_PATH = os.path.join(_ROOT_PATH, "python", "mcp_stdio.py")
 # The API file that holds the tools as `tools/list` returns them.
 _TOOLS_PATH = os.path.join(_ROOT_PATH, "API", "mcp", "tools.json")
 
+# The id of this module's gold in `test_settings.json`.
+_GOLD_ID = "python.test_mcp_stdio"
+
 # The most seconds a wait on the child takes, a default chosen by its writer.
-_CHILD_SECONDS = 30
+_CHILD_SECONDS: int = harness.gold_get(f"{_GOLD_ID}.child_seconds")
 
 # The most bytes read from the output of the child at once.
-_READ_BYTES = 65536
+_READ_BYTES: int = harness.gold_get(f"{_GOLD_ID}.read_bytes")
 
 # The first line of the traceback the child writes when it raises.
 _TRACEBACK_HEAD = "Traceback (most recent call last):\n"
 
-# The schema of a tool that takes nothing.
-_EMPTY_SCHEMA: dict[str, Any] = {"type": "object", "properties": {}}
+# The call of the double that makes the server, as `stdio_run` names it.
+_SERVER_MADE = ("server_make", "xsjs-server", "0")
 
 # A ping request as a client writes it.
 _PING_LINE = '{"jsonrpc":"2.0","id":1,"method":"ping"}'
@@ -62,30 +67,6 @@ _WIDE_REPLY = '{"jsonrpc":"2.0","id":"\xe9","result":{}}'
 
 # The encoding the child is told its streams have, which UTF-8 must override.
 _ENCODING_NARROW = "ascii"
-
-# A call of the tool that writes a main loop file.
-_SOURCE_LINE = (
-    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":'
-    '{"name":"source_put","arguments":{"name":"a.py","text":"x"}}}'
-)
-
-# The response of the recorder to it.
-_SOURCE_REPLY = (
-    '{"jsonrpc":"2.0","id":2,"result":{"content":'
-    '[{"type":"text","text":"source_put"}],"isError":false}}'
-)
-
-# A call of the tool that restarts the process.
-_RESTART_LINE = (
-    '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":'
-    '{"name":"system_restart","arguments":{"main_loop":"a.py"}}}'
-)
-
-# The response of the recorder to it.
-_RESTART_REPLY = (
-    '{"jsonrpc":"2.0","id":3,"result":{"content":'
-    '[{"type":"text","text":"system_restart"}],"isError":false}}'
-)
 
 # A client's `initialize` request, which opens a session.
 _INITIALIZE_LINE = (
@@ -110,19 +91,38 @@ _LIST_LINE = '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 # A line that is not JSON, with the newline the loop reads with it.
 _MALFORMED_LINE = '{"jsonrpc"\n'
 
+# A ping whose params hold a number that overflows a double.
+_OVERFLOW_LINE = (
+    '{"jsonrpc":"2.0","id":1,"method":"ping","params":{"x":1e400}}'
+)
+
+# A call of a tool that raises.
+_FAIL_LINE = (
+    '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":'
+    '{"name":"fail","arguments":{}}}'
+)
+
+# The answer the server double gives that call, an error result.
+_FAIL_REPLY = (
+    '{"jsonrpc":"2.0","id":4,"result":{"content":'
+    '[{"type":"text","text":"boom"}],"isError":true}}'
+)
+
+# The start of the traceback line of the decoder's error.
+_WIRE_PREFIX = "jslb.WireError: "
+
+
+# A text of this module's gold.
+def _text_get(name: str) -> str:
+    text: str = harness.gold_get(f"{_GOLD_ID}.texts.{name}")
+    return text
+
 
 # Reads the tool entries of the server side of the API file.
 def _entries_read() -> list[dict[str, Any]]:
     with open(_TOOLS_PATH, encoding="utf-8") as file:
         data: dict[str, Any] = json.load(file)
     return data["server"]["result"]["tools"]
-
-
-# Builds a tool from an entry of the API file, never a permit tool.
-def _tool_make(entry: dict[str, Any]) -> mcp.Tool:
-    return mcp.Tool(
-        entry["name"], entry["description"], entry["inputSchema"], False
-    )
 
 
 # The response to `tools/list`: the server tools of the API file, no permit.
@@ -146,29 +146,6 @@ def _session_steps() -> list[tuple[str, str | None]]:
         (_INITIALIZED_LINE, None),
         (_LIST_LINE, _list_reply()),
     ]
-
-
-# Runs the loop on the text and returns the exit code and the output.
-def _loop_run(
-    register: Callable[[mcp.Server], None], text: str
-) -> tuple[int, str]:
-    stdout = io.StringIO()
-    code = mcp_stdio.stdio_run(register, io.StringIO(text), stdout)
-    return code, stdout.getvalue()
-
-
-# Returns the message of the error `json.loads` raises for the text.
-def _decode_message(case: unittest.TestCase, text: str) -> str:
-    with case.assertRaises(json.JSONDecodeError) as caught:
-        json.loads(text)
-    return str(caught.exception)
-
-
-# Returns the message of the error `json.dumps` raises for NaN.
-def _nan_message(case: unittest.TestCase) -> str:
-    with case.assertRaises(ValueError) as caught:
-        json.dumps(float("nan"), allow_nan=False)
-    return str(caught.exception)
 
 
 # Starts the script on a root with pipes on its streams, told they are ASCII.
@@ -216,31 +193,31 @@ def _line_read(process: subprocess.Popen[bytes]) -> str:
     return data.decode("utf-8")
 
 
-# Registers the server tools of the API file and records the calls that run.
-class CallRecorder:
-    # Starts with no calls.
+# A double of `mcp.Server`: records each call, answers what the test queued.
+class ServerDouble:
+    # Starts with no call recorded and no answer queued.
     def __init__(self) -> None:
-        self.calls: list[str] = []
+        self.calls: list[tuple[Any, ...]] = []
+        self.answers: dict[str, list[Any]] = {}
 
-    # Records a call of the named tool and answers with the name as text.
-    def tool_run(self, name: str, arguments: dict[str, Any]) -> mcp.ToolResult:
-        self.calls.append(name)
-        return mcp.ToolResult([{"type": "text", "text": name}], False)
+    # Records a call and returns its next queued answer, which must exist.
+    def call_answer(self, name: str, *args: Any) -> Any:
+        self.calls.append((name, *args))
+        if not self.answers.get(name):
+            raise AssertionError(f"the server double has no answer: {name}")
+        return self.answers[name].pop(0)
 
-    # Registers the server tools of the API file.
-    def server_fill(self, server: mcp.Server) -> None:
-        for entry in _entries_read():
-            server.tool_register(
-                _tool_make(entry),
-                functools.partial(self.tool_run, entry["name"]),
-            )
+    # `mcp.Server(name, version)`, as `stdio_run` makes its server.
+    def server_make(self, name: str, version: str) -> Any:
+        return self.call_answer("server_make", name, version)
 
-    # Registers a tool that answers a number that JSON cannot hold.
-    def nan_fill(self, server: mcp.Server) -> None:
-        server.tool_register(
-            mcp.Tool("nan", "Answers NaN.", _EMPTY_SCHEMA, False),
-            lambda arguments: mcp.ToolResult([{"n": float("nan")}], False),
-        )
+    # `Server.message_handle`, as `stdio_run` calls it on each line.
+    def message_handle(self, message: dict[str, Any]) -> Any:
+        return self.call_answer("message_handle", message)
+
+    # `Server.failure_take`, as `stdio_run` calls it after each line.
+    def failure_take(self) -> Any:
+        return self.call_answer("failure_take")
 
 
 # A text stream that counts its flushes.
@@ -256,111 +233,169 @@ class FlushCounter(io.StringIO):
         super().flush()
 
 
+# Runs `stdio_run` in this process with `mcp`, which it imports, a double.
+class DoubleCase(unittest.TestCase):
+    # Makes the server double.
+    def setUp(self) -> None:
+        self.double_make()
+
+    # Makes a new server double, which answers its own making.
+    def double_make(self) -> None:
+        self.server = ServerDouble()
+        self.server.answers["server_make"] = [self.server]
+        self.registered: list[Any] = []
+
+    # Queues the responses `message_handle` gives, and no failure for each.
+    def replies_queue(self, replies: list[str | None]) -> None:
+        self.server.answers["message_handle"] = [
+            None if reply is None else json.loads(reply) for reply in replies
+        ]
+        self.server.answers["failure_take"] = [None] * len(replies)
+
+    # Runs the loop on the text to `stdout`, `mcp` patched to the double.
+    def loop_run(self, text: str, stdout: io.StringIO) -> int:
+        double = types.SimpleNamespace(Server=self.server.server_make)
+        with unittest.mock.patch.dict(sys.modules, {"mcp": double}):
+            return mcp_stdio.stdio_run(
+                self.registered.append, io.StringIO(text), stdout
+            )
+
+    # Checks the server was made and registered once, then got each line.
+    def calls_check(self, sent: list[str]) -> None:
+        calls: list[tuple[Any, ...]] = [_SERVER_MADE]
+        for line in sent:
+            calls += [("message_handle", json.loads(line)), ("failure_take",)]
+        self.assertEqual(self.server.calls, calls)
+        self.assertEqual(self.registered, [self.server])
+
+
 # Tests the loop on lines that are messages.
-class TestLoop(unittest.TestCase):
-    # A session replays line for line, the notification with no reply.
+class TestLoop(DoubleCase):
+    # A session goes to the server line by line; a None reply writes nothing.
     def test_session_replay(self) -> None:
         steps = _session_steps()
+        self.replies_queue([reply for _, reply in steps])
+        stdout = io.StringIO()
         text = "".join(sent + "\n" for sent, _ in steps)
-        code, output = _loop_run(CallRecorder().server_fill, text)
-        self.assertEqual(code, 0)
+        self.assertEqual(self.loop_run(text, stdout), 0)
         expected = [reply for _, reply in steps if reply is not None]
-        self.assertEqual(output.splitlines(), expected)
+        self.assertEqual(stdout.getvalue().splitlines(), expected)
+        self.calls_check([sent for sent, _ in steps])
 
     # No input ends the loop with exit code 0 and no output.
     def test_input_empty(self) -> None:
-        self.assertEqual(_loop_run(CallRecorder().server_fill, ""), (0, ""))
+        stdout = io.StringIO()
+        self.assertEqual(self.loop_run("", stdout), 0)
+        self.assertEqual(stdout.getvalue(), "")
+        self.calls_check([])
 
     # A notification writes nothing.
     def test_notification_silent(self) -> None:
-        text = _INITIALIZED_LINE + "\n"
-        self.assertEqual(_loop_run(CallRecorder().server_fill, text), (0, ""))
+        self.replies_queue([None])
+        stdout = io.StringIO()
+        self.assertEqual(self.loop_run(_INITIALIZED_LINE + "\n", stdout), 0)
+        self.assertEqual(stdout.getvalue(), "")
+        self.calls_check([_INITIALIZED_LINE])
 
     # A last line with no newline is still a message.
     def test_line_unterminated(self) -> None:
-        code, output = _loop_run(CallRecorder().server_fill, _PING_LINE)
-        self.assertEqual((code, output), (0, _PING_REPLY + "\n"))
-
-    # Both server tools run when called, and nothing asks for a permit.
-    def test_tools_run(self) -> None:
-        recorder = CallRecorder()
-        text = _SOURCE_LINE + "\n" + _RESTART_LINE + "\n"
-        code, output = _loop_run(recorder.server_fill, text)
-        self.assertEqual(code, 0)
-        self.assertEqual(output.splitlines(), [_SOURCE_REPLY, _RESTART_REPLY])
-        self.assertEqual(recorder.calls, ["source_put", "system_restart"])
+        self.replies_queue([_PING_REPLY])
+        stdout = io.StringIO()
+        self.assertEqual(self.loop_run(_PING_LINE, stdout), 0)
+        self.assertEqual(stdout.getvalue(), _PING_REPLY + "\n")
+        self.calls_check([_PING_LINE])
 
     # Each response is flushed as it is written, and a notification is not.
     def test_flush_each(self) -> None:
-        stdout = FlushCounter()
         lines = [_PING_LINE, _INITIALIZED_LINE, _PING_LINE]
-        stdin = io.StringIO("".join(line + "\n" for line in lines))
-        code = mcp_stdio.stdio_run(CallRecorder().server_fill, stdin, stdout)
-        self.assertEqual(code, 0)
+        self.replies_queue([_PING_REPLY, None, _PING_REPLY])
+        stdout = FlushCounter()
+        text = "".join(line + "\n" for line in lines)
+        self.assertEqual(self.loop_run(text, stdout), 0)
         self.assertEqual(stdout.flushes, 2)
         self.assertEqual(stdout.getvalue(), (_PING_REPLY + "\n") * 2)
+        self.calls_check(lines)
 
-    # A response that holds NaN is not written and raises.
-    def test_response_nan(self) -> None:
-        line = (
-            '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":'
-            '{"name":"nan","arguments":{}}}'
-        )
-        stdout = io.StringIO()
+    # The exception the server keeps is raised once its answer is flushed.
+    def test_failure_raised(self) -> None:
+        error = ValueError("boom")
+        self.server.answers["message_handle"] = [json.loads(_FAIL_REPLY)]
+        self.server.answers["failure_take"] = [error]
+        stdout = FlushCounter()
+        text = _FAIL_LINE + "\n" + _PING_LINE + "\n"
         with self.assertRaises(ValueError) as caught:
-            mcp_stdio.stdio_run(
-                CallRecorder().nan_fill, io.StringIO(line + "\n"), stdout
-            )
-        self.assertEqual(str(caught.exception), _nan_message(self))
-        self.assertEqual(stdout.getvalue(), "")
+            self.loop_run(text, stdout)
+        self.assertIs(caught.exception, error)
+        self.assertEqual(stdout.getvalue(), _FAIL_REPLY + "\n")
+        self.assertEqual(stdout.flushes, 1)
+        self.calls_check([_FAIL_LINE])
 
 
 # Tests the loop and the runner on input that is not valid.
-class TestErrors(unittest.TestCase):
+class TestErrors(DoubleCase):
+    # Checks the error is `mcp_stdio.line_malformed` of a `WireError` cause.
+    def malformed_check(
+        self, error: BaseException, cause_name: str, error_name: str
+    ) -> None:
+        cause = error.__cause__
+        self.assertEqual(type(cause).__name__, "WireError")
+        self.assertEqual(str(cause), _text_get(cause_name))
+        self.assertEqual(str(error), _text_get(error_name))
+
     # A line that is not JSON raises, after the responses before it are out.
     def test_line_malformed(self) -> None:
+        self.replies_queue([_PING_REPLY])
         stdout = io.StringIO()
         text = _PING_LINE + "\n" + _MALFORMED_LINE + _PING_LINE + "\n"
         with self.assertRaises(ValueError) as caught:
-            mcp_stdio.stdio_run(
-                CallRecorder().server_fill, io.StringIO(text), stdout
-            )
-        message = _decode_message(self, _MALFORMED_LINE)
-        self.assertEqual(
-            str(caught.exception),
-            i18n("mcp_stdio.line_malformed", 2, message),
+            self.loop_run(text, stdout)
+        self.malformed_check(
+            caught.exception,
+            "jslb_text_not_json_delimiter",
+            "mcp_stdio_line_malformed_delimiter",
         )
         self.assertEqual(stdout.getvalue(), _PING_REPLY + "\n")
+        self.calls_check([_PING_LINE])
+
+    # A number that overflows a double is refused by the decoder at read.
+    def test_number_overflow(self) -> None:
+        stdout = io.StringIO()
+        with self.assertRaises(ValueError) as caught:
+            self.loop_run(_OVERFLOW_LINE + "\n", stdout)
+        self.malformed_check(
+            caught.exception,
+            "jslb_number_overflow",
+            "mcp_stdio_line_malformed_overflow",
+        )
+        self.assertEqual(stdout.getvalue(), "")
+        self.calls_check([])
 
     # A line that is JSON but not an object raises.
     def test_line_object(self) -> None:
         for line in ("[1]", "5", '"x"', "null"):
             with self.subTest(line=line):
+                self.double_make()
                 stdout = io.StringIO()
                 with self.assertRaises(ValueError) as caught:
-                    mcp_stdio.stdio_run(
-                        CallRecorder().server_fill,
-                        io.StringIO(line + "\n"),
-                        stdout,
-                    )
+                    self.loop_run(line + "\n", stdout)
                 self.assertEqual(
-                    str(caught.exception), i18n("mcp_stdio.line_object", 1)
+                    str(caught.exception), _text_get("mcp_stdio_line_object")
                 )
                 self.assertEqual(stdout.getvalue(), "")
+                self.calls_check([])
 
     # A blank line is not JSON and raises.
     def test_line_blank(self) -> None:
         stdout = io.StringIO()
         with self.assertRaises(ValueError) as caught:
-            mcp_stdio.stdio_run(
-                CallRecorder().server_fill, io.StringIO("\n"), stdout
-            )
-        message = _decode_message(self, "\n")
-        self.assertEqual(
-            str(caught.exception),
-            i18n("mcp_stdio.line_malformed", 1, message),
+            self.loop_run("\n", stdout)
+        self.malformed_check(
+            caught.exception,
+            "jslb_text_not_json_blank",
+            "mcp_stdio_line_malformed_blank",
         )
         self.assertEqual(stdout.getvalue(), "")
+        self.calls_check([])
 
     # The runner refuses to start without `--root`, with usage exit code 2.
     def test_root_required(self) -> None:
@@ -413,9 +448,15 @@ class TestProcess(unittest.TestCase):
         )
         self.assertEqual((process.returncode, output), (1, b""))
         text: str = errors.decode("utf-8")
-        message = _decode_message(self, _MALFORMED_LINE)
         self.assertTrue(text.startswith(_TRACEBACK_HEAD))
+        lines = text.splitlines()
+        reasons = [
+            line[len(_WIRE_PREFIX) :]
+            for line in lines
+            if line.startswith(_WIRE_PREFIX)
+        ]
+        self.assertEqual(reasons, [_text_get("jslb_text_not_json_delimiter")])
         self.assertEqual(
-            text.splitlines()[-1],
-            "ValueError: " + i18n("mcp_stdio.line_malformed", 1, message),
+            lines[-1],
+            "ValueError: " + _text_get("mcp_stdio_line_malformed_process"),
         )

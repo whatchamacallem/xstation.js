@@ -4,16 +4,38 @@
 #
 # Tests of vectors_make: what vectors_write puts in a scratch directory under
 # build/, each vector beside its sidecar, success and error vectors both, the
-# directory made when it is missing, a file an earlier run left removed, and
-# the two vectors at the edge of blob_max.
+# directory made when it is missing, a file an earlier run left removed, the
+# two vectors at the edge of blob_max, the six number vectors, the digest
+# vectors, inputs of 55, 56 and 64 bytes each beside its SHA-256 digest, and
+# the TypeScript test modules' digests, exactly the entries of the module's
+# table, each input in lowercase hex beside its SHA-256 digest.
 
-import json, os, tempfile, unittest, vectors_make
+import hashlib, json, os, tempfile, unittest, vectors_make
 from typing import Any
 
 # The checkout's build directory, where each test makes its scratch directory.
 _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
 )
+
+# The file of the digest vectors, which the TypeScript check reads by name.
+_DIGESTS_NAME = "sha256.json"
+
+# The digest vectors by name, and the size of each one's input.
+_DIGEST_INPUTS = {"sha256_55": 55, "sha256_56": 56, "sha256_64": 64}
+
+# The file of the TypeScript test modules' digests, read by name.
+_TEST_DIGESTS_NAME = "test_digests.json"
+
+# The number vectors by name, each with the slug of its fault and its token.
+_NUMBER_VECTORS = {
+    "error_number_overflow": ("number_overflow", "1e400"),
+    "error_number_overflow_negative": ("number_overflow", "-1e400"),
+    "error_integer_above": ("integer_refused", "9007199254740993"),
+    "error_integer_below": ("integer_refused", "-9007199254740993"),
+    "error_integer_digits_310": ("integer_refused", "1" + "0" * 309),
+    "error_integer_digits_4301": ("integer_refused", "1" + "0" * 4300),
+}
 
 
 # Returns the names in the directory that end in the suffix, without it.
@@ -31,12 +53,14 @@ class TestVectorsWrite(unittest.TestCase):
     def setUp(self) -> None:
         os.makedirs(_BUILD_PATH, exist_ok=True)
 
-    # Each vector has its sidecar, nothing else is written, and both kinds are.
+    # Vectors pair with sidecars, both kinds, the two digest files the others.
     def test_sidecars_paired(self) -> None:
         with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
             vectors_make.vectors_write(scratch)
             vectors = names_ending(scratch, ".jslb")
             sidecars = names_ending(scratch, ".json")
+            sidecars.remove(_DIGESTS_NAME.removesuffix(".json"))
+            sidecars.remove(_TEST_DIGESTS_NAME.removesuffix(".json"))
             count = len(os.listdir(scratch))
             errors: set[bool] = set()
             for name in sidecars:
@@ -44,8 +68,70 @@ class TestVectorsWrite(unittest.TestCase):
                 with open(path, encoding="utf-8") as file:
                     errors.add("error" in json.load(file))
         self.assertEqual(vectors, sidecars)
-        self.assertEqual(count, 2 * len(vectors))
+        self.assertEqual(count, 2 * len(vectors) + 2)
         self.assertEqual(errors, {False, True})
+
+    # Each input has its size and its digest, both in lowercase hex.
+    def test_digests_written(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
+            vectors_make.vectors_write(scratch)
+            path = os.path.join(scratch, _DIGESTS_NAME)
+            with open(path, encoding="utf-8") as file:
+                digests: dict[str, dict[str, str]] = json.load(file)
+        self.assertEqual(list(digests), list(_DIGEST_INPUTS))
+        for name, size in _DIGEST_INPUTS.items():
+            vector = digests[name]
+            self.assertEqual(sorted(vector), ["data", "sha256"], name)
+            data = bytes.fromhex(vector["data"])
+            self.assertEqual(len(data), size, name)
+            self.assertEqual(vector["data"], data.hex(), name)
+            self.assertEqual(
+                vector["sha256"], hashlib.sha256(data).hexdigest(), name
+            )
+
+    # The table's modules and names exactly, each input beside its digest.
+    def test_modules_written(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
+            vectors_make.vectors_write(scratch)
+            path = os.path.join(scratch, _TEST_DIGESTS_NAME)
+            with open(path, encoding="utf-8") as file:
+                digests: dict[str, dict[str, dict[str, str]]] = json.load(
+                    file
+                )
+        table: dict[str, dict[str, tuple[bytes, int]]] = getattr(
+            vectors_make, "_TEST_DIGESTS"
+        )
+        self.assertEqual(sorted(digests), sorted(table))
+        for module, inputs in table.items():
+            entries = digests[module]
+            self.assertEqual(sorted(entries), sorted(inputs), module)
+            for name, (written, size) in inputs.items():
+                entry = entries[name]
+                self.assertEqual(sorted(entry), ["data", "sha256"], name)
+                pattern = bytes(index % 256 for index in range(size))
+                data = written + pattern
+                self.assertEqual(entry["data"], data.hex(), name)
+                fed = bytes.fromhex(entry["data"])
+                digest = hashlib.sha256(fed).hexdigest()
+                self.assertEqual(entry["sha256"], digest, name)
+                self.assertEqual(len(entry["sha256"]), 64, name)
+
+    # Each number vector is the line of its token alone, within `line_max`.
+    def test_numbers_written(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
+            vectors_make.vectors_write(scratch)
+            for name, (slug, token) in _NUMBER_VECTORS.items():
+                with open(os.path.join(scratch, name + ".jslb"), "rb") as file:
+                    data = file.read()
+                path = os.path.join(scratch, name + ".json")
+                with open(path, encoding="utf-8") as file:
+                    sidecar: dict[str, Any] = json.load(file)
+                line = b'{"0":{"t":"echo"},"n":%s}\r' % token.encode()
+                self.assertEqual(data, line, name)
+                self.assertEqual(sidecar["error"], slug, name)
+                self.assertEqual(sidecar["messages"], [], name)
+                line_max: int = sidecar["limits"]["line_max"]
+                self.assertLessEqual(len(data), line_max, name)
 
     # A directory that does not exist yet is made and filled.
     def test_directory_made(self) -> None:

@@ -12,8 +12,8 @@
 # which needs in WSL what that runner needs.
 #
 # The checkout must first hold what the scripts read and don't make:
-# settings.json, provider.json, i18n\en-US.json and the page
-# build\hyperposition-engine.html.
+# settings.json, test_settings.json, provider.json, i18n\en-US.json and the
+# page build\hyperposition-engine.html.
 # Make the page in WSL in the checkout: python3 python/third_party_fetch.py
 # fetches the pinned archives over the network, then
 # python3 python/page_build.py hyperposition-engine builds the page from
@@ -36,7 +36,9 @@ $arguments_ = $args
 
 # The project's top directory. Each Script is relative to it.
 $root_path_ = Split-Path -Parent $PSScriptRoot
-$test_user_ = 'xstation-test'
+$test_settings_json_ = xsjs_util_read_json (
+    Join-Path $root_path_ 'test_settings.json')
+$test_user_ = xsjs_util_get_setting $test_settings_json_ 'powershell.test_user'
 $test_credential_ = '{0}:{1}' -f $test_user_, [Guid]::NewGuid().ToString('N')
 # Expect is the first line `xsjs_status.ps1` should print.
 $lifecycle_ = @(

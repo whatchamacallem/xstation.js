@@ -6,12 +6,16 @@
 // hash against known digests, the cache over slot files kept in memory, and
 // the store on the sqlite3.wasm module and OPFS pool the test page sets as
 // globals: databases, values, documents, turns, compaction at the threshold,
-// SQL, seq, snapshots, forwarded lines, the operations of the castle turn and
-// two later ones replayed on a second store, the administration of the
-// databases, cached values filled back and freed by budget, a put stopped
-// between its cache file and its row, and the handlers. It also holds the
-// pause point of that stop, which a browser rung uses to kill a worker of the
-// test page there.
+// SQL and the names the schema's triggers raise, transactions, snapshots and
+// restores with their cache files, values whose cache file is lost, the push
+// of each committed operation to a notifier double, a put stopped between its
+// cache file and its row, and the handlers. It also holds the pause point of
+// that stop, which a browser rung uses to kill a worker of the test page
+// there. The texts, pushes and reply texts it expects and the lines it sends
+// are its gold in `test_settings.json`, read through the harness with the
+// `overflow_bytes` and `turn_compact_turns` of `settings.json` its stores
+// take. Each digest and its input are one entry of `test_digests.json` in
+// `test_vectors`, and the test uses that input.
 namespace test_substrate {
   // The initialized sqlite3.wasm module, a global the test page sets.
   declare const test_sqlite3: substrate.SqliteModule;
@@ -19,77 +23,43 @@ namespace test_substrate {
   // Its installed OPFS SAH pool, a global the test page sets.
   declare const test_pool: substrate.SqlitePool;
 
-  // The settings, names, texts and digests the tests use.
+  // The vector files by name, as base64 text, a global the test page sets.
+  declare const test_vectors: { readonly [name: string]: string };
+
+  // The names, texts and sizes the tests use.
   const constants = Object.freeze({
-    // The `overflow_bytes` of `settings.json`, 128 KiB.
-    overflow_bytes: 131072,
-    // The `db_soft_bytes` of `settings.json`, 1 GiB.
-    soft_bytes: 1073741824,
-    // The `turn_compact_turns` of `settings.json`, 64.
-    compact_turns: 64,
+    // The `overflow_bytes` of the kill rung's store in `test_browser.py`.
+    kill_overflow: 131072,
     // A count chosen by its writer: a threshold a test reaches in a few turns.
     compact_small: 3,
     // The start of the root of each store a test makes in the pool.
     root_prefix: "/test_substrate/",
-    // A count chosen by its writer: the files of each test store's cache.
-    slot_count: 8,
     // The bytes at the start of a cache file that hold its name.
     name_bytes: 64,
-    // A size chosen by its writer: the bytes streamed into a sink at once.
-    piece_bytes: 4096,
+    // The file of the digest vectors of the test modules.
+    digests_name: "test_digests.json",
     // The hyperposition scene, whose conversation the turn tests append to.
     scene: "/metaverse/hyperposition/1",
     // The subtitle of the arrival scene the castle turn builds.
     arrival_subtitle:
       "Mind the moat. The gatehouse keeper has been expecting someone," +
       " though not necessarily you.",
-    // The prompt of the arrival scene's image.
-    image_prompt:
-      "A rain dark castle gatehouse at dusk seen from the far side of a" +
-      " moat, one lantern lit, painted, wide still frame, no people",
-    // The arrival scene's image, a checkerboard PNG of 88 bytes, in base64.
-    image_base64:
-      "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAH0lEQVR42mP4jwQYkAAuc" +
-      "YZBqGGQO48oDaPxMCg0AADZV36QzYI8swAAAABJRU5ErkJggg==",
-    // The step script that advances the tide of a region, 322 bytes.
-    step_script:
-      "// Advances the tide by args.hours in the region table" +
-      " of the world.\n" +
-      'const results = engine.store.sql_run("castle_world", [\n' +
-      '  {sql: "UPDATE region SET tide = tide + ? WHERE name = ?",\n' +
-      '    params: [args.hours, "castle_gatehouse"]},\n' +
-      "]);\n" +
-      'engine.log(1, "tide advanced by " + args.hours);\n' +
-      "return {changes: results[0].changes};\n",
-    // The `SHA-256` of the text `castle_world`.
-    world_sha256:
-      "6d0be246127ef7993924a9ce127c6fa6c093dca368163093ab31c80273336ecd",
-    // The `SHA-256` of the arrival scene's ref as text.
-    scene_sha256:
-      "1e2806a1029564579de9739ef0014f0332c5a8026bca9373e473224a3b094d8b",
-    // The `SHA-256` of the image.
-    image_sha256:
-      "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0",
-    // The `SHA-256` of the map, its bytes counting 0 to 255 over and over.
-    map_sha256:
-      "8c6627e25bfbdef2bba5abc03123ea8e9b60d892f7f180a8b9b5079fb3233c54",
-    // The `SHA-256` of the step script.
-    script_sha256:
-      "dbc909cf0e2e7954d586c06b3291728e527d5dee4c109409fcb501e200756626",
-    // A size chosen by its writer: the map's bytes, past `overflow_bytes`.
-    map_bytes: 204800,
     // The universe table, as the metaverse SQL file creates it.
     universe_sql:
       "CREATE TABLE universe (name TEXT PRIMARY KEY, title TEXT NOT NULL," +
       " player TEXT NOT NULL, world TEXT NOT NULL) WITHOUT ROWID, STRICT",
+    // Its trigger that refuses a second row of a world, as that file has it.
+    trigger_sql:
+      "CREATE TRIGGER universe_world_insert BEFORE INSERT ON universe" +
+      " WHEN EXISTS (SELECT 1 FROM universe" +
+      " WHERE world = NEW.world AND name <> NEW.name)" +
+      " BEGIN SELECT RAISE(ABORT, 'agent.content_ambiguous'); END",
+    // The name of the string that trigger raises.
+    trigger_name: "agent.content_ambiguous",
     // The world table of the castle universe.
     world_sql:
       "CREATE TABLE world" +
       " (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT",
-    // The region table of the castle world.
-    region_sql:
-      "CREATE TABLE region" +
-      " (name TEXT PRIMARY KEY, tide INTEGER NOT NULL DEFAULT 0) STRICT",
     // The `_meta` table alone, as the substrate's SQL file creates it.
     meta_sql:
       "CREATE TABLE _meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)" +
@@ -114,14 +84,112 @@ namespace test_substrate {
   // The number of the last root a test made, so that each store has its own.
   let root_count = 0;
 
-  // One forwarded operation: its fields, the `seq` after, its line and digest.
-  interface RecordedOperation {
-    type: string;
-    since: number;
-    fields: { [key: string]: unknown };
-    seq: number;
-    text?: string;
-    sha256?: string;
+  // A push a store gave its notifier: the line and its owner.
+  type Pushed = [lines.Line, string | undefined];
+
+  // An entry of the digest vectors: its input and its `SHA-256`, in hex.
+  interface DigestVector {
+    data: string;
+    sha256: string;
+  }
+
+  // This module's entries of the digest vectors, read at their first use.
+  let digests_kept: { [name: string]: DigestVector } | undefined = undefined;
+
+  // A copy of a value of this module's gold, which the harness keeps frozen.
+  function gold_value(name: string): unknown {
+    return structuredClone(
+      harness.gold_get(`typescript.test_substrate.${name}`),
+    );
+  }
+
+  // A text of this module's gold, a run time `{n}` left for the test to fill.
+  function gold_text(name: string): string {
+    return harness.gold_get(
+      `typescript.test_substrate.texts.${name}`,
+    ) as string;
+  }
+
+  // A copy of a line of this module's gold, a run time part set on the copy.
+  function gold_line(name: string): lines.Line {
+    return gold_value(`lines.${name}`) as lines.Line;
+  }
+
+  // The text of a cache with no file of the name, the name known at run time.
+  function unknown_text(name: string): string {
+    return gold_text("substrate_cache_unknown").replaceAll("{0}", name);
+  }
+
+  // The text of a value whose cache file is lost, both known at run time.
+  function lost_text(ref: string, name: string): string {
+    return gold_text("substrate_file_lost")
+      .replaceAll("{0}", ref)
+      .replaceAll("{1}", name);
+  }
+
+  // A line of the gold the test sends, its blob 1 the bytes and their size.
+  function line_blob(name: string, data: Uint8Array): lines.Line {
+    const line = gold_line(name);
+    line[1] = { s: data.length, d: data };
+    return line;
+  }
+
+  // A push of the gold a store gives the server.
+  function push_gold(name: string): Pushed {
+    return [gold_line(name), "server"];
+  }
+
+  // A push of the gold, its blob 1 the bytes and their size in full names.
+  function push_bytes(name: string, data: Uint8Array): Pushed {
+    const line = gold_line(name);
+    line[1] = { size: data.length, d: data };
+    return [line, "server"];
+  }
+
+  // The entries of this module in the digest vectors of `test_vectors`.
+  function digests_get(): { [name: string]: DigestVector } {
+    if (digests_kept !== undefined) {
+      return digests_kept;
+    }
+    const name = constants.digests_name;
+    if (!Object.hasOwn(test_vectors, name)) {
+      throw new Error(`test_vectors has no file ${name}`);
+    }
+    const file = Uint8Array.from(atob(test_vectors[name]), (character) =>
+      character.charCodeAt(0),
+    );
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(file);
+    const vectors = JSON.parse(text) as {
+      [module: string]: { [name: string]: DigestVector };
+    };
+    if (!Object.hasOwn(vectors, "test_substrate")) {
+      throw new Error(`${name} has no module test_substrate`);
+    }
+    digests_kept = vectors.test_substrate;
+    return digests_kept;
+  }
+
+  // The input and digest of an entry of this module's digest vectors.
+  function digest_entry(name: string): { data: Uint8Array; sha256: string } {
+    const entries = digests_get();
+    if (!Object.hasOwn(entries, name)) {
+      throw new Error(`${constants.digests_name} has no entry ${name}`);
+    }
+    const entry = entries[name];
+    if (!/^(?:[0-9a-f]{2})*$/.test(entry.data)) {
+      throw new Error(`the input of the digest entry ${name} is not hex`);
+    }
+    const data = new Uint8Array(entry.data.length / 2);
+    for (let index = 0; index < data.length; index += 1) {
+      const pair = entry.data.slice(2 * index, 2 * index + 2);
+      data[index] = Number.parseInt(pair, 16);
+    }
+    return { data, sha256: entry.sha256 };
+  }
+
+  // The `overflow_bytes` of `settings.json`, which the test stores take.
+  function overflow_get(): number {
+    return harness.setting_get("overflow_bytes") as number;
   }
 
   // Bytes that count up from 0 and start again at 256, as many as asked.
@@ -135,7 +203,7 @@ namespace test_substrate {
 
   // The `UTF-8` bytes of text.
   function bytes_text(text: string): Uint8Array {
-    return utility.utf8_encode(text);
+    return new TextEncoder().encode(text);
   }
 
   // The bytes of the pieces one after another.
@@ -153,11 +221,6 @@ namespace test_substrate {
     return joined;
   }
 
-  // A copy of the bytes in reverse order.
-  function bytes_reversed(data: Uint8Array): Uint8Array {
-    return data.slice().reverse();
-  }
-
   // The message of the role with the text.
   function message_said(
     role: provider.Role,
@@ -166,14 +229,19 @@ namespace test_substrate {
     return { role, content };
   }
 
-  // A value of exactly `overflow_bytes`, which stays in its row.
+  // The digest entry of exactly `overflow_bytes`, which stays in its row.
   function value_exact(): Uint8Array {
-    return bytes_pattern(constants.overflow_bytes);
+    return digest_entry("value_exact").data;
   }
 
-  // A value one byte over `overflow_bytes`, which goes to the cache.
+  // The digest entry one byte over `overflow_bytes`, which goes to the cache.
   function value_over(): Uint8Array {
-    return bytes_pattern(constants.overflow_bytes + 1);
+    return digest_entry("value_over").data;
+  }
+
+  // Another digest entry of the size of that one, with other bytes.
+  function value_other(): Uint8Array {
+    return digest_entry("value_other").data;
   }
 
   // A cache file double kept in memory, with the calls OPFS gives.
@@ -264,15 +332,20 @@ namespace test_substrate {
     return slot;
   }
 
+  // The files of each test store's cache, a count of this module's gold.
+  function slot_count(): number {
+    return gold_value("slot_count") as number;
+  }
+
   // A cache over empty file doubles.
   function cache_make(): substrate.CacheFiles {
-    return new substrate.CacheFiles(slots_make(constants.slot_count));
+    return new substrate.CacheFiles(slots_make(slot_count()));
   }
 
   // Streams bytes into a cache's sink in pieces and returns the handle.
   function sink_fill(cache: substrate.CacheFiles, data: Uint8Array): string {
     const handle = cache.sink_open({ s: data.length });
-    const step = constants.piece_bytes;
+    const step = gold_value("piece_bytes") as number;
     for (let offset = 0; offset < data.length; offset += step) {
       cache.sink_append(handle, data.subarray(offset, offset + step));
     }
@@ -290,26 +363,21 @@ namespace test_substrate {
     return cache.sink_close(handle);
   }
 
-  // The reply the server gives a forwarded line: `seq` one past `since`.
-  function reply_make(line: lines.Line): lines.Line {
-    const type = jslb.field_get(line[0], "type") as string;
-    const header = jslb.header_make(type, { reply: 1 });
-    if (type === "db.create" || type === "db.drop") {
-      return jslb.line_make(header, [], {});
-    }
-    const since = jslb.payload_of(line).since as number;
-    return jslb.line_make(header, [], { seq: since + 1 });
+  // The type of a push, whose header is in full names in debug mode.
+  function type_pushed(line: lines.Line): unknown {
+    return (line[0] as unknown as { [name: string]: unknown }).type;
   }
 
-  // A request line of the UI thread with its id, ref, blobs and payload.
-  function request_make(
-    type: string,
-    id: number,
-    payload: { [key: string]: unknown },
-    key?: string,
-    blobs: lines.BlobHeader[] = [],
-  ): lines.Line {
-    return jslb.line_make(jslb.header_make(type, { id, key }), blobs, payload);
+  // The JSON text of a line, each blob header without its bytes `d`.
+  function line_text(line: lines.Line): string {
+    const shown: { [key: string]: unknown } = { ...line };
+    for (let number = 1; Object.hasOwn(line, String(number)); number += 1) {
+      const header = line[String(number)] as { [name: string]: unknown };
+      shown[String(number)] = Object.fromEntries(
+        Object.entries(header).filter(([name]) => name !== "d"),
+      );
+    }
+    return JSON.stringify(shown);
   }
 
   // The rows of one statement a store runs.
@@ -345,62 +413,6 @@ namespace test_substrate {
       "SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name",
     );
     return rows.map((row) => row[0] as string);
-  }
-
-  // The number the first row of a pragma holds.
-  function pragma_read(
-    store: substrate.Store,
-    db: string,
-    name: string,
-  ): number {
-    return rows_query(store, db, `PRAGMA ${name}`)[0][0] as number;
-  }
-
-  // The measure of a database read through SQL, as the heuristics define it.
-  function stats_measured(
-    store: substrate.Store,
-    db: string,
-    cache_bytes: number,
-  ): substrate.DatabaseStats {
-    const page_size = pragma_read(store, db, "page_size");
-    return {
-      name: db,
-      bytes: pragma_read(store, db, "page_count") * page_size + cache_bytes,
-      free_bytes: pragma_read(store, db, "freelist_count") * page_size,
-      cache_bytes,
-      seq: store.seq_get(db),
-    };
-  }
-
-  // The database a forwarded operation modifies.
-  function target_database(record: RecordedOperation): string {
-    const fields = record.fields;
-    if (Object.hasOwn(fields, "db")) {
-      return fields.db as string;
-    }
-    const ref = Object.hasOwn(fields, "k") ? fields.k : fields.scene;
-    return substrate.ref_split(ref as string).db as string;
-  }
-
-  // The payload a server applies for a forwarded line, its blob streamed.
-  function payload_replayed(
-    line: lines.Line,
-    from: substrate.CacheFiles,
-    to: substrate.CacheFiles,
-  ): { [key: string]: unknown } {
-    const payload = Object.fromEntries(
-      Object.entries(jslb.payload_of(line)).filter(([key]) => key !== "since"),
-    );
-    if (jslb.field_get(line[0], "type") !== "kv.put") {
-      return payload;
-    }
-    const k = jslb.field_get(line[0], "key");
-    const blob = line[1] as lines.BlobHeader;
-    const data = blob.d as Uint8Array | string;
-    if (typeof data !== "string") {
-      return { k, data };
-    }
-    return { k, data: sink_fill(to, from.cache_read(data, 0, blob.s)) };
   }
 
   // The arrival scene of the castle gatehouse in its stored form.
@@ -472,273 +484,6 @@ namespace test_substrate {
       },
       count: -3,
     };
-  }
-
-  // An assistant message with tool calls: id, function name, arguments.
-  function calls_make(
-    calls: readonly (readonly [string, string, string])[],
-  ): provider.ChatMessage {
-    return {
-      role: "assistant",
-      content: null,
-      tool_calls: calls.map(([id, name, args]): provider.ToolCall => ({
-        id,
-        type: "function",
-        function: { name, arguments: args },
-      })),
-    };
-  }
-
-  // The forwarded operations of the castle turn and two later ones, in order.
-  function recorded_make(): RecordedOperation[] {
-    const scene = constants.scene;
-    const subtitle = constants.arrival_subtitle;
-    const image = "/_files/gatehouse/arrival.png";
-    const script = utility.json_text({
-      name: "bootstrap",
-      args: {
-        universe: "castle",
-        title: "The castle",
-        world: "castle_world",
-        region: "castle_gatehouse",
-      },
-    });
-    const drawn = utility.json_text({
-      prompt: constants.image_prompt,
-      key: image,
-    });
-    const document = utility.json_text({
-      db: "castle_gatehouse",
-      id: "scene/arrival",
-      body: arrival_make(),
-    });
-    const pointer = utility.json_text({
-      ref: "/castle_world/scene",
-      text: "/castle_gatehouse/scene/arrival/1",
-    });
-    const rendered = utility.json_text({ image, subtitle });
-    const user: provider.ChatMessage = { role: "user", content: "1" };
-    const final: provider.ChatMessage = {
-      role: "assistant",
-      content: subtitle,
-    };
-    return [
-      {
-        type: "turn.append",
-        since: 5,
-        fields: { scene, role: "user", content: user },
-        seq: 6,
-        text:
-          '{"0":{"t":"turn.append"},"scene":"/metaverse/hyperposition/1",' +
-          '"role":"user","content":{"role":"user","content":"1"},"since":5}',
-      },
-      {
-        type: "turn.append",
-        since: 6,
-        fields: {
-          scene,
-          role: "assistant",
-          content: calls_make([["call_1", "browser.script_run", script]]),
-        },
-        seq: 7,
-      },
-      {
-        type: "db.create",
-        since: 0,
-        fields: { db: "castle" },
-        seq: 0,
-        text: '{"0":{"t":"db.create"},"db":"castle","since":0}',
-      },
-      {
-        type: "sql.run",
-        since: 0,
-        fields: {
-          db: "castle",
-          statements: [
-            { sql: constants.world_sql, params: [] },
-            {
-              sql: "INSERT INTO world VALUES (?, ?)",
-              params: ["castle_world", "The castle"],
-            },
-          ],
-        },
-        seq: 1,
-        text:
-          '{"0":{"t":"sql.run"},"db":"castle","statements":[{"sql":"' +
-          constants.world_sql +
-          '","params":[]},{"sql":"INSERT INTO world VALUES (?, ?)",' +
-          '"params":["castle_world","The castle"]}],"since":0}',
-      },
-      {
-        type: "db.create",
-        since: 0,
-        fields: { db: "castle_world" },
-        seq: 0,
-        text: '{"0":{"t":"db.create"},"db":"castle_world","since":0}',
-      },
-      {
-        type: "sql.run",
-        since: 0,
-        fields: {
-          db: "castle_world",
-          statements: [
-            { sql: constants.region_sql, params: [] },
-            {
-              sql: "INSERT INTO region (name) VALUES (?)",
-              params: ["castle_gatehouse"],
-            },
-          ],
-        },
-        seq: 1,
-        text:
-          '{"0":{"t":"sql.run"},"db":"castle_world","statements":[{"sql":"' +
-          constants.region_sql +
-          '","params":[]},{"sql":"INSERT INTO region (name) VALUES (?)",' +
-          '"params":["castle_gatehouse"]}],"since":0}',
-      },
-      {
-        type: "db.create",
-        since: 0,
-        fields: { db: "castle_gatehouse" },
-        seq: 0,
-        text: '{"0":{"t":"db.create"},"db":"castle_gatehouse","since":0}',
-      },
-      {
-        type: "sql.run",
-        since: 7,
-        fields: {
-          db: "metaverse",
-          statements: [
-            {
-              sql: "INSERT INTO universe VALUES (?, ?, ?, ?)",
-              params: ["castle", "The castle", "player", "castle_world"],
-            },
-          ],
-        },
-        seq: 8,
-        text:
-          '{"0":{"t":"sql.run"},"db":"metaverse","statements":[{"sql":' +
-          '"INSERT INTO universe VALUES (?, ?, ?, ?)","params":["castle",' +
-          '"The castle","player","castle_world"]}],"since":7}',
-      },
-      {
-        type: "kv.put",
-        since: 8,
-        fields: { k: "/metaverse/world", data: bytes_text("castle_world") },
-        seq: 9,
-        text:
-          '{"0":{"t":"kv.put","k":"/metaverse/world","b":1},' +
-          '"1":{"s":12},"since":8}<blob "n"=1>',
-        sha256: constants.world_sha256,
-      },
-      {
-        type: "turn.append",
-        since: 9,
-        fields: {
-          scene,
-          role: "assistant",
-          content: calls_make([["call_2", "browser.image_make", drawn]]),
-        },
-        seq: 10,
-      },
-      {
-        type: "kv.put",
-        since: 1,
-        fields: {
-          k: image,
-          data: utility.base64_decode(constants.image_base64),
-        },
-        seq: 2,
-        text:
-          '{"0":{"t":"kv.put","k":"/_files/gatehouse/arrival.png","b":1},' +
-          '"1":{"s":88},"since":1}<blob "n"=1>',
-        sha256: constants.image_sha256,
-      },
-      {
-        type: "turn.append",
-        since: 10,
-        fields: {
-          scene,
-          role: "assistant",
-          content: calls_make([
-            ["call_3", "browser.doc_put", document],
-            ["call_4", "browser.kv_put", pointer],
-            ["call_5", "browser.render", rendered],
-          ]),
-        },
-        seq: 11,
-      },
-      {
-        type: "doc.put",
-        since: 0,
-        fields: {
-          db: "castle_gatehouse",
-          id: "scene/arrival",
-          body: arrival_make(),
-        },
-        seq: 1,
-        text:
-          '{"0":{"t":"doc.put"},"db":"castle_gatehouse",' +
-          '"id":"scene/arrival","body":' +
-          arrival_stored() +
-          ',"since":0}',
-      },
-      {
-        type: "kv.put",
-        since: 1,
-        fields: {
-          k: "/castle_world/scene",
-          data: bytes_text("/castle_gatehouse/scene/arrival/1"),
-        },
-        seq: 2,
-        text:
-          '{"0":{"t":"kv.put","k":"/castle_world/scene","b":1},' +
-          '"1":{"s":33},"since":1}<blob "n"=1>',
-        sha256: constants.scene_sha256,
-      },
-      {
-        type: "turn.append",
-        since: 11,
-        fields: { scene, role: "assistant", content: final },
-        seq: 12,
-        text:
-          '{"0":{"t":"turn.append"},"scene":"/metaverse/hyperposition/1",' +
-          '"role":"assistant","content":{"role":"assistant","content":"' +
-          subtitle +
-          '"},"since":11}',
-      },
-      {
-        type: "sql.run",
-        since: 1,
-        fields: {
-          db: "castle",
-          statements: [
-            {
-              sql: "UPDATE world SET title = ? WHERE name = ?",
-              params: ["The castle at dusk", "castle_world"],
-            },
-          ],
-        },
-        seq: 2,
-        text:
-          '{"0":{"t":"sql.run"},"db":"castle","statements":[{"sql":' +
-          '"UPDATE world SET title = ? WHERE name = ?","params":' +
-          '["The castle at dusk","castle_world"]}],"since":1}',
-      },
-      {
-        type: "kv.put",
-        since: 2,
-        fields: {
-          k: "/_files/maps/castle.bin",
-          data: bytes_pattern(constants.map_bytes),
-        },
-        seq: 3,
-        text:
-          '{"0":{"t":"kv.put","k":"/_files/maps/castle.bin","b":1},' +
-          '"1":{"s":204800},"since":2}<blob "n"=1>',
-        sha256: constants.map_sha256,
-      },
-    ];
   }
 
   // A database of the pool that runs `stop` before SQL with a given start.
@@ -827,7 +572,8 @@ namespace test_substrate {
   // Creates `alpha` and puts a value over `overflow_bytes` under `big` in it.
   export function kill_put(store: substrate.Store): void {
     store.db_create(constants.kill_db);
-    store.kv_put(`/${constants.kill_db}/${constants.kill_key}`, value_over());
+    const value = bytes_pattern(constants.kill_overflow + 1);
+    store.kv_put(`/${constants.kill_db}/${constants.kill_key}`, value);
   }
 
   // Says it is paused, then holds the worker in a loop until it is killed.
@@ -878,6 +624,19 @@ namespace test_substrate {
       }
       this.fail("SQLite raised nothing");
     }
+
+    // The `Error` the call throws, failing when it throws none.
+    error_get(fn: () => unknown): Error {
+      try {
+        fn();
+      } catch (error) {
+        if (error instanceof Error) {
+          return error;
+        }
+        throw error;
+      }
+      return this.fail("Error not raised");
+    }
   }
 
   // A store test: the module and pool read in `setUp`, its roots removed.
@@ -888,8 +647,8 @@ namespace test_substrate {
     #pool: substrate.SqlitePool | undefined = undefined;
     // The roots this test made.
     readonly #roots: string[] = [];
-    // The stores this test made, each with the lines it forwarded.
-    readonly #stores = new Map<substrate.Store, lines.Line[]>();
+    // The stores this test made, each with the pushes its notifier kept.
+    readonly #stores = new Map<substrate.Store, Pushed[]>();
 
     // Reads the module and the pool the test page provides.
     setUp(): void {
@@ -932,54 +691,49 @@ namespace test_substrate {
       return root;
     }
 
-    // A store on the root, keeping its forwarded lines when it forwards.
+    // A store on the root whose notifier double keeps each push and owner.
     store_make(
       root: string,
       cache: substrate.CacheFiles,
-      forwards: boolean,
       pool: substrate.SqlitePool = this.pool_get(),
-      compact_turns: number = constants.compact_turns,
+      compact_turns = harness.setting_get("turn_compact_turns") as number,
     ): substrate.Store {
+      const pushed: Pushed[] = [];
       const store = new substrate.Store(
         this.sqlite_get(),
         pool,
         cache,
         root,
-        constants.overflow_bytes,
+        overflow_get(),
         compact_turns,
+        {
+          line_notify: (line: lines.Line, owner?: string) => {
+            pushed.push([line, owner]);
+          },
+        },
       );
-      const forwarded: lines.Line[] = [];
-      if (forwards) {
-        store.forward_set((line) => {
-          forwarded.push(line);
-        }, false);
-      }
-      this.#stores.set(store, forwarded);
+      this.#stores.set(store, pushed);
       return store;
     }
 
-    // A forwarding store on a new root with a new cache.
+    // A store on a new root with a new cache.
     store_fresh(): substrate.Store {
-      return this.store_make(this.root_make(), cache_make(), true);
+      return this.store_make(this.root_make(), cache_make());
     }
 
-    // The lines a store forwarded that were not answered.
-    lines_of(store: substrate.Store): lines.Line[] {
-      return this.#stores.get(store) as lines.Line[];
+    // The pushes a store gave its notifier that no test took yet.
+    pushes_of(store: substrate.Store): Pushed[] {
+      return this.#stores.get(store) as Pushed[];
     }
 
-    // Answers every line a store forwarded, as the server would.
-    lines_answer(store: substrate.Store): void {
-      for (const line of this.lines_of(store).splice(0)) {
-        store.forward_done(line, reply_make(line));
-      }
+    // The pushes a store gave its notifier, which are then let go.
+    pushes_taken(store: substrate.Store): Pushed[] {
+      return this.pushes_of(store).splice(0);
     }
 
-    // The rendered lines a store forwarded, which are then let go.
-    lines_taken(store: substrate.Store): string[] {
-      return this.lines_of(store)
-        .splice(0)
-        .map((line) => jslb.line_render(line));
+    // The types of the pushes a store gave, which are then let go.
+    types_taken(store: substrate.Store): unknown[] {
+      return this.pushes_taken(store).map(([line]) => type_pushed(line));
     }
 
     // The names of the files under a root, in order.
@@ -1053,20 +807,21 @@ namespace test_substrate {
 
     // An empty ref, a missing key and a bad database name throw.
     test_refs_bad(): void {
-      const refs = [
-        "",
-        "/",
-        "//key",
-        "/metaverse",
-        "/metaverse/",
-        "/1db/key",
-        "/d-b/key",
-        "/caf" + String.fromCodePoint(0xe9) + "/key",
+      const refs: [string, string][] = [
+        ["", "substrate_ref_bad_empty"],
+        ["/", "substrate_ref_bad_slash"],
+        ["//key", "substrate_ref_bad_db_empty"],
+        ["/metaverse", "substrate_ref_bad_key_none"],
+        ["/metaverse/", "substrate_ref_bad_key_empty"],
+        ["/1db/key", "substrate_ref_bad_db_digit"],
+        ["/d-b/key", "substrate_ref_bad_db_dash"],
+        [
+          "/caf" + String.fromCodePoint(0xe9) + "/key",
+          "substrate_ref_bad_db_wide",
+        ],
       ];
-      for (const ref of refs) {
-        this.raised_assert(i18n("substrate.ref_bad", ref), () =>
-          substrate.ref_split(ref),
-        );
+      for (const [ref, text] of refs) {
+        this.raised_assert(gold_text(text), () => substrate.ref_split(ref));
       }
     }
 
@@ -1075,21 +830,21 @@ namespace test_substrate {
       const store = this.store_fresh();
       store.db_create("alpha");
       const value = bytes_text("x");
-      this.raised_assert(i18n("substrate.ref_internal", "world"), () =>
+      this.raised_assert(gold_text("substrate_ref_internal"), () =>
         store.kv_put("world", value),
       );
-      const both = i18n("substrate.ref_both", "/alpha/world", "alpha");
+      const both = gold_text("substrate_ref_both");
       this.raised_assert(both, () =>
         store.kv_put("/alpha/world", value, "alpha"),
       );
       this.raised_assert(both, () => store.kv_get("/alpha/world", "alpha"));
-      this.raised_assert(i18n("substrate.db_closed", "beta"), () =>
+      this.raised_assert(gold_text("substrate_db_closed_beta"), () =>
         store.kv_put("/beta/world", value),
       );
-      this.raised_assert(i18n("substrate.document_ref", "/alpha/world"), () =>
+      this.raised_assert(gold_text("substrate_document_ref_key"), () =>
         store.doc_get("/alpha/world"),
       );
-      this.assertEqual(store.seq_get("alpha"), 0);
+      this.assertEqual(store.kv_list("alpha", ""), []);
     }
   }
 
@@ -1101,10 +856,7 @@ namespace test_substrate {
       const db = "castle_gatehouse";
       store.db_create(db);
       const first = store.doc_put(db, "scene/arrival", arrival_make());
-      this.assertEqual(first, {
-        ref: "/castle_gatehouse/scene/arrival/1",
-        seq: 1,
-      });
+      this.assertEqual(first, { ref: "/castle_gatehouse/scene/arrival/1" });
       this.assertEqual(store.doc_head(db, "scene/arrival"), first.ref);
       this.assertEqual(
         store.kv_get(first.ref).data,
@@ -1112,26 +864,20 @@ namespace test_substrate {
       );
       const changed = { ...arrival_make(), subtitle: "The keeper waves." };
       const second = store.doc_put(db, "scene/arrival", changed);
-      this.assertEqual(second, {
-        ref: "/castle_gatehouse/scene/arrival/2",
-        seq: 2,
-      });
+      this.assertEqual(second, { ref: "/castle_gatehouse/scene/arrival/2" });
       this.assertEqual(store.doc_head(db, "scene/arrival"), second.ref);
       this.assertEqual(store.doc_get(first.ref), arrival_make());
-      const text = utility.json_text(store.doc_get(first.ref));
+      const text = JSON.stringify(store.doc_get(first.ref));
       this.assertEqual(text, arrival_stored());
       this.assertEqual(store.doc_get("scene/arrival/2", db), changed);
-      this.raised_assert(
-        i18n("substrate.id_missing", "scene/absent", db),
-        () => store.doc_head(db, "scene/absent"),
+      this.raised_assert(gold_text("substrate_id_missing_absent"), () =>
+        store.doc_head(db, "scene/absent"),
       );
-      this.raised_assert(
-        i18n("substrate.key_missing", "scene/arrival/3", db),
-        () => store.doc_get("/castle_gatehouse/scene/arrival/3"),
+      this.raised_assert(gold_text("substrate_key_missing_version"), () =>
+        store.doc_get("/castle_gatehouse/scene/arrival/3"),
       );
-      this.raised_assert(
-        i18n("substrate.document_ref", "/castle_gatehouse/scene/arrival"),
-        () => store.doc_get("/castle_gatehouse/scene/arrival"),
+      this.raised_assert(gold_text("substrate_document_ref_scene"), () =>
+        store.doc_get("/castle_gatehouse/scene/arrival"),
       );
     }
 
@@ -1140,14 +886,16 @@ namespace test_substrate {
       const store = this.store_fresh();
       store.db_create("alpha");
       store.kv_put("/alpha/note/1", bytes_text("{}"));
-      this.raised_assert(
-        i18n("substrate.version_exists", "note/1", "alpha"),
-        () => store.doc_put("alpha", "note", { 0: { t: "note" } }),
+      this.raised_assert(gold_text("substrate_version_exists"), () =>
+        store.doc_put("alpha", "note", { 0: { t: "note" } }),
       );
-      this.raised_assert(i18n("substrate.id_missing", "note", "alpha"), () =>
+      this.raised_assert(gold_text("substrate_id_missing_note"), () =>
         store.doc_head("alpha", "note"),
       );
-      this.assertEqual(store.seq_get("alpha"), 1);
+      this.assertEqual(
+        store.kv_list("alpha", "").map((row) => row.k),
+        ["note/1"],
+      );
     }
 
     // A nested document is stored as the text the wire's encoder writes.
@@ -1156,18 +904,7 @@ namespace test_substrate {
       store.db_create("alpha");
       const ref = store.doc_put("alpha", "nest", nested_make()).ref;
       const stored = store.kv_get(ref).data as Uint8Array;
-      const line = jslb.line_make(jslb.header_make("doc.put"), [], {
-        db: "alpha",
-        id: "nest",
-        body: nested_make(),
-      });
-      this.assertEqual(jslb.line_encode(line), [
-        bytes_join([
-          bytes_text('{"0":{"t":"doc.put"},"db":"alpha","id":"nest","body":'),
-          stored,
-          bytes_text("}\r"),
-        ]),
-      ]);
+      this.assertEqual(stored, bytes_text(gold_text("nested_stored")));
       this.assertEqual(store.doc_get(ref), nested_make());
     }
 
@@ -1175,40 +912,34 @@ namespace test_substrate {
     test_round_trip(): void {
       const encoded = substrate.doc_encode(fog_normal());
       this.assertEqual(encoded, fog_encoded());
-      this.assertEqual(
-        utility.json_text(encoded),
-        utility.json_text(fog_encoded()),
-      );
+      this.assertEqual(JSON.stringify(encoded), JSON.stringify(fog_encoded()));
       const decoded = substrate.doc_decode(encoded);
       this.assertEqual(decoded, fog_normal());
-      this.assertEqual(
-        utility.json_text(decoded),
-        utility.json_text(fog_normal()),
-      );
+      this.assertEqual(JSON.stringify(decoded), JSON.stringify(fog_normal()));
     }
 
     // Documents that would not round trip, or are malformed, throw.
     test_documents_bad(): void {
       const normals: [{ [key: string]: unknown }, string][] = [
-        [{ subtitle: "x" }, i18n("substrate.header_missing")],
+        [{ subtitle: "x" }, gold_text("substrate_header_missing")],
         [
           { 0: { t: "scene", v: 0 } },
-          i18n("substrate.header_bad", '{"t":"scene","v":0}'),
+          gold_text("substrate_header_bad_version"),
         ],
-        [{ 0: { v: 2 } }, i18n("substrate.header_bad", '{"v":2}')],
+        [{ 0: { v: 2 } }, gold_text("substrate_header_bad_type")],
         [
           { 0: { t: "scene", x: 1 } },
-          i18n("substrate.header_bad", '{"t":"scene","x":1}'),
+          gold_text("substrate_header_bad_field"),
         ],
-        [{ 0: "scene" }, i18n("substrate.header_bad", "scene")],
+        [{ 0: "scene" }, gold_text("substrate_header_bad_text")],
         [
           { 0: { t: "scene" }, 1: "/a/b" },
-          i18n("substrate.header_normal", "1"),
+          gold_text("substrate_header_normal"),
         ],
-        [{ 0: { t: "scene" }, "07": "x" }, i18n("substrate.key_digits", "07")],
+        [{ 0: { t: "scene" }, "07": "x" }, gold_text("substrate_key_digits")],
         [
           { 0: { t: "scene" }, x: { $ref: 1 } },
-          i18n("substrate.ref_shape", '{"$ref":1}'),
+          gold_text("substrate_ref_shape"),
         ],
       ];
       for (const [normal, message] of normals) {
@@ -1217,25 +948,25 @@ namespace test_substrate {
       const encodeds: [lines.Document, string][] = [
         [
           { 0: { t: "scene" }, 1: "/a/b", x: { $ref: 2 } },
-          i18n("substrate.ref_index", 2),
+          gold_text("substrate_ref_index_two"),
         ],
         [
           { 0: { t: "scene" }, 2: "/a/b", x: { $ref: 2 } },
-          i18n("substrate.header_gap", "2"),
+          gold_text("substrate_header_gap"),
         ],
         [
           { 0: { t: "scene" }, 1: 5, x: { $ref: 1 } },
-          i18n("substrate.header_ref", 1),
+          gold_text("substrate_header_ref"),
         ],
         [
           { 0: { t: "scene" }, 1: "world", x: { $ref: 1 } },
-          i18n("substrate.header_ref", 1),
+          gold_text("substrate_header_ref"),
         ],
         [
           { 0: { t: "scene" }, 1: "/a/b", x: { $ref: true } },
-          i18n("substrate.ref_index", true),
+          gold_text("substrate_ref_index_true"),
         ],
-        [{ 0: { t: "scene" }, "07": "x" }, i18n("substrate.key_digits", "07")],
+        [{ 0: { t: "scene" }, "07": "x" }, gold_text("substrate_key_digits")],
       ];
       for (const [encoded, message] of encodeds) {
         this.raised_assert(message, () => substrate.doc_decode(encoded));
@@ -1275,33 +1006,28 @@ namespace test_substrate {
       this.assertEqual(substrate.doc_decode(expected), normal);
       const kept = ["/me waves/ and leaves", ...lines_kept, ...python_spaces];
       for (const text of kept) {
-        this.raised_assert(i18n("substrate.header_ref", 1), () =>
+        this.raised_assert(gold_text("substrate_header_ref"), () =>
           substrate.doc_decode({ 0: { t: "scene" }, 1: text }),
         );
       }
     }
   }
 
-  // The sink's incremental `SHA-256`, against known and one shot digests.
+  // The sink's incremental `SHA-256`, against the digests of the vectors.
   export class TestHash extends RefusalCase {
     // Streamed values give their known digests.
     test_digest_recorded(): void {
-      const cases: [Uint8Array, string][] = [
-        [bytes_text("castle_world"), constants.world_sha256],
-        [
-          bytes_text("/castle_gatehouse/scene/arrival/1"),
-          constants.scene_sha256,
-        ],
-        [
-          utility.base64_decode(constants.image_base64),
-          constants.image_sha256,
-        ],
-        [bytes_text(constants.step_script), constants.script_sha256],
-        [bytes_pattern(constants.map_bytes), constants.map_sha256],
+      const names = [
+        "castle_world",
+        "arrival_ref",
+        "arrival_image",
+        "step_script",
+        "map",
       ];
-      for (const [data, digest] of cases) {
+      for (const name of names) {
+        const { data, sha256 } = digest_entry(name);
         for (const piece of [1, 7, 64, 4097, data.length]) {
-          this.assertEqual(digest_streamed(data, piece), digest);
+          this.assertEqual(digest_streamed(data, piece), sha256);
         }
       }
     }
@@ -1310,8 +1036,9 @@ namespace test_substrate {
     test_digest_lengths(): void {
       const lengths = [0, 1, 55, 56, 57, 63, 64, 65, 119, 120, 127, 128, 1000];
       for (const length of lengths) {
-        const data = bytes_pattern(length);
-        const digest = utility.sha256_hex(data);
+        const entry = digest_entry(`pattern_${String(length)}`);
+        const data = entry.data;
+        const digest = entry.sha256;
         for (const piece of [1, 7, 63, 64, 65, Math.max(1, length)]) {
           this.assertEqual(
             digest_streamed(data, piece),
@@ -1328,13 +1055,14 @@ namespace test_substrate {
     // A finished blob reads back by range, a copy of the bytes it was given.
     test_sink_read(): void {
       const cache = new substrate.CacheFiles(slots_make(2));
-      const data = bytes_pattern(10);
+      const entry = digest_entry("pattern_10");
+      const data = entry.data;
       const handle = cache.sink_open({ s: 10 });
       const first = data.slice(0, 4);
       cache.sink_append(handle, first);
       first.fill(255);
       cache.sink_append(handle, data.subarray(4));
-      this.assertEqual(cache.sink_close(handle), utility.sha256_hex(data));
+      this.assertEqual(cache.sink_close(handle), entry.sha256);
       this.assertEqual(cache.cache_read(handle, 0, 10), data);
       this.assertEqual(cache.cache_read(handle, 3, 4), data.subarray(3, 7));
       this.assertEqual(cache.cache_read(handle, 8, 5), data.subarray(8));
@@ -1348,13 +1076,11 @@ namespace test_substrate {
       const cache = new substrate.CacheFiles(slots_make(1));
       const handle = cache.sink_open({ s: 10 });
       this.assertEqual(cache.slots_free(), 0);
-      cache.sink_append(handle, bytes_pattern(4));
-      this.assertEqual(
-        cache.sink_close(handle),
-        utility.sha256_hex(bytes_pattern(4)),
-      );
+      const entry = digest_entry("pattern_4");
+      cache.sink_append(handle, entry.data);
+      this.assertEqual(cache.sink_close(handle), entry.sha256);
       this.assertEqual(cache.slots_free(), 1);
-      const unknown = i18n("substrate.cache_unknown", handle);
+      const unknown = unknown_text(handle);
       this.raised_assert(unknown, () => cache.cache_read(handle, 0, 1));
       this.raised_assert(unknown, () =>
         cache.sink_append(handle, bytes_pattern(1)),
@@ -1366,11 +1092,11 @@ namespace test_substrate {
     test_cache_full(): void {
       const cache = new substrate.CacheFiles(slots_make(1));
       cache.sink_open({ s: 1 });
-      this.raised_assert(i18n("substrate.cache_full", 1), () =>
+      this.raised_assert(gold_text("substrate_cache_full_one"), () =>
         cache.sink_open({ s: 1 }),
       );
       const empty = new substrate.CacheFiles([]);
-      this.raised_assert(i18n("substrate.cache_full", 0), () =>
+      this.raised_assert(gold_text("substrate_cache_full_none"), () =>
         empty.sink_open({ s: 1 }),
       );
       empty.slot_add(new MemorySlot());
@@ -1381,8 +1107,9 @@ namespace test_substrate {
 
     // Files hold the value their first bytes name, others are free.
     test_slots_found(): void {
-      const data = bytes_pattern(100);
-      const name = utility.sha256_hex(data);
+      const entry = digest_entry("pattern_100");
+      const data = entry.data;
+      const name = entry.sha256;
       const left = new MemorySlot();
       left.bytes_set(bytes_join([new Uint8Array(constants.name_bytes), data]));
       const empty = new MemorySlot();
@@ -1407,14 +1134,15 @@ namespace test_substrate {
     // A file whose first bytes name no `SHA-256`, or a name twice, throws.
     test_names_bad(): void {
       const garbled = "z".repeat(constants.name_bytes);
-      this.raised_assert(i18n("substrate.cache_header", 0, garbled), () => {
+      this.raised_assert(gold_text("substrate_cache_header"), () => {
         new substrate.CacheFiles([slot_stored(garbled, bytes_pattern(1))]);
       });
-      const name = utility.sha256_hex(bytes_pattern(1));
-      this.raised_assert(i18n("substrate.cache_twice", name), () => {
+      const { data, sha256 } = digest_entry("pattern_1");
+      const twice = gold_text("substrate_cache_twice");
+      this.raised_assert(twice.replaceAll("{0}", sha256), () => {
         new substrate.CacheFiles([
-          slot_stored(name, bytes_pattern(1)),
-          slot_stored(name, bytes_pattern(1)),
+          slot_stored(sha256, data),
+          slot_stored(sha256, data),
         ]);
       });
     }
@@ -1424,17 +1152,15 @@ namespace test_substrate {
       const free = new ShortSlot();
       const writer = new substrate.CacheFiles([free]);
       free.short = true;
-      this.raised_assert(
-        i18n("substrate.write_short", 0, constants.name_bytes - 1, 64),
-        () => writer.sink_open({ s: 1 }),
+      this.raised_assert(gold_text("substrate_write_short"), () =>
+        writer.sink_open({ s: 1 }),
       );
-      const data = bytes_pattern(10);
-      const name = utility.sha256_hex(data);
+      const { data, sha256: name } = digest_entry("pattern_10");
       const stored = new ShortSlot();
       stored.bytes_set(bytes_join([bytes_text(name), data]));
       const reader = new substrate.CacheFiles([stored]);
       stored.short = true;
-      this.raised_assert(i18n("substrate.read_short", 0, 9, 10), () =>
+      this.raised_assert(gold_text("substrate_read_short"), () =>
         reader.cache_read(name, 0, 10),
       );
     }
@@ -1442,7 +1168,7 @@ namespace test_substrate {
 
   // Databases: tables on first use, names, creating, opening, dropping.
   export class TestDatabases extends StoreCase {
-    // A new database gets the substrate's tables, `seq` 0 and `schema` 1.
+    // A new database gets the substrate's tables and the `schema` row 1.
     test_tables_created(): void {
       const store = this.store_fresh();
       store.db_create("alpha");
@@ -1453,12 +1179,8 @@ namespace test_substrate {
         "_turn",
       ]);
       const meta = "SELECT name, value FROM _meta ORDER BY name";
-      this.assertEqual(rows_query(store, "alpha", meta), [
-        ["schema", "1"],
-        ["seq", "0"],
-      ]);
+      this.assertEqual(rows_query(store, "alpha", meta), [["schema", "1"]]);
       this.assertEqual(store.db_list(), ["alpha"]);
-      this.assertEqual(store.seq_get("alpha"), 0);
     }
 
     // A database file made elsewhere gets the tables when first opened.
@@ -1468,8 +1190,8 @@ namespace test_substrate {
         { sql: "CREATE TABLE note (text TEXT)" },
         { sql: "INSERT INTO note VALUES (?)", bind: [constants.text_wide] },
       ]);
-      const store = this.store_make(root, cache_make(), true);
-      this.assertEqual(store.db_open("beta"), 0);
+      const store = this.store_make(root, cache_make());
+      store.db_open("beta");
       this.assertEqual(tables_list(store, "beta"), [
         "_head",
         "_kv",
@@ -1485,44 +1207,45 @@ namespace test_substrate {
     // A name that is not a C identifier throws and makes no file.
     test_names_bad(): void {
       const root = this.root_make();
-      const store = this.store_make(root, cache_make(), true);
-      const names = [
-        "",
-        "1abc",
-        "a-b",
-        "a b",
-        "a.b",
-        "a/b",
-        "caf" + String.fromCodePoint(0xe9),
+      const store = this.store_make(root, cache_make());
+      const names: [string, string][] = [
+        ["", "substrate_name_bad_empty"],
+        ["1abc", "substrate_name_bad_digit"],
+        ["a-b", "substrate_name_bad_dash"],
+        ["a b", "substrate_name_bad_space"],
+        ["a.b", "substrate_name_bad_dot"],
+        ["a/b", "substrate_name_bad_slash"],
+        ["caf" + String.fromCodePoint(0xe9), "substrate_name_bad_wide"],
       ];
-      for (const name of names) {
-        const message = i18n("substrate.name_bad", name);
+      for (const [name, text] of names) {
+        const message = gold_text(text);
         this.raised_assert(message, () => store.db_create(name));
         this.raised_assert(message, () => store.db_open(name));
       }
       this.assertEqual(this.files_under(root), []);
       this.assertEqual(store.db_list(), []);
+      this.assertEqual(this.pushes_of(store), []);
     }
 
     // A second create, a second open, a missing file and a close all throw.
     test_create_twice(): void {
       const root = this.root_make();
-      const store = this.store_make(root, cache_make(), true);
+      const store = this.store_make(root, cache_make());
       store.db_create("alpha");
-      this.raised_assert(i18n("substrate.db_exists", "alpha"), () =>
+      this.raised_assert(gold_text("substrate_db_exists"), () =>
         store.db_create("alpha"),
       );
-      this.raised_assert(i18n("substrate.db_open", "alpha"), () =>
+      this.raised_assert(gold_text("substrate_db_open"), () =>
         store.db_open("alpha"),
       );
-      this.raised_assert(i18n("substrate.db_absent", "gamma"), () =>
+      this.raised_assert(gold_text("substrate_db_absent"), () =>
         store.db_open("gamma"),
       );
       this.assertEqual(this.files_under(root), ["alpha.sqlite"]);
-      this.raised_assert(i18n("substrate.db_closed", "gamma"), () =>
+      this.raised_assert(gold_text("substrate_db_closed_gamma"), () =>
         store.db_close("gamma"),
       );
-      this.assertEqual(store.seq_get("alpha"), 0);
+      this.assertEqual(this.types_taken(store), ["db.create"]);
     }
 
     // A create whose schema fails throws it, leaves no file, and is redone.
@@ -1534,16 +1257,16 @@ namespace test_substrate {
       };
       const prefix = constants.schema_create;
       const pool = pool_stopped(this.pool_get(), schema_stop, prefix);
-      const failing = this.store_make(root, cache_make(), true, pool);
+      const failing = this.store_make(root, cache_make(), pool);
       this.raised_assert(constants.schema_message, () =>
         failing.db_create("alpha"),
       );
       this.assertEqual(this.files_under(root), []);
       this.assertEqual(failing.db_list(), []);
-      this.assertEqual(this.lines_of(failing), []);
-      const store = this.store_make(root, cache_make(), true);
+      this.assertEqual(this.pushes_of(failing), []);
+      const store = this.store_make(root, cache_make());
       store.db_create("alpha");
-      this.assertEqual(store.seq_get("alpha"), 0);
+      this.assertEqual(store.db_list(), ["alpha"]);
     }
 
     // A file with only some of the substrate's tables throws, kept as it is.
@@ -1551,8 +1274,8 @@ namespace test_substrate {
       const root = this.root_make();
       const path = `${root}/beta.sqlite`;
       this.raw_run(path, "c", [{ sql: constants.meta_sql }]);
-      const store = this.store_make(root, cache_make(), true);
-      this.raised_assert(i18n("substrate.schema_partial", '["_meta"]'), () =>
+      const store = this.store_make(root, cache_make());
+      this.raised_assert(gold_text("substrate_schema_partial_meta"), () =>
         store.db_open("beta"),
       );
       this.assertEqual(store.db_list(), []);
@@ -1573,7 +1296,7 @@ namespace test_substrate {
     // A file whose `schema` row is not the substrate's version throws.
     test_schema_version(): void {
       const root = this.root_make();
-      const store = this.store_make(root, cache_make(), true);
+      const store = this.store_make(root, cache_make());
       store.db_create("beta");
       store.db_close("beta");
       this.raw_run(`${root}/beta.sqlite`, "w", [
@@ -1582,7 +1305,7 @@ namespace test_substrate {
           bind: ["2"],
         },
       ]);
-      this.raised_assert(i18n("substrate.schema_version", "2", "1"), () =>
+      this.raised_assert(gold_text("substrate_schema_version"), () =>
         store.db_open("beta"),
       );
       this.assertEqual(store.db_list(), []);
@@ -1591,27 +1314,27 @@ namespace test_substrate {
     // Closing, dropping or restoring a database a transaction wrote throws.
     test_database_busy(): void {
       const root = this.root_make();
-      const store = this.store_make(root, cache_make(), true);
+      const store = this.store_make(root, cache_make());
       store.db_create("alpha");
       const data = store.db_snapshot("alpha").data;
       const files = this.files_under(root);
-      this.lines_answer(store);
+      this.pushes_taken(store);
       const calls: (() => unknown)[] = [
         () => store.db_close("alpha"),
         () => store.db_drop("alpha"),
-        () => store.db_restore("alpha", data),
+        () => store.db_restore("alpha", data, []),
       ];
       for (const call of calls) {
-        this.raised_assert(i18n("substrate.db_busy", "alpha"), () =>
+        this.raised_assert(gold_text("substrate_db_busy"), () =>
           store.transaction_run(() => {
             store.kv_put("/alpha/busy", bytes_text("busy"));
             call();
           }),
         );
         this.assertEqual(store.db_list(), ["alpha"]);
-        this.assertEqual(store.seq_get("alpha"), 0);
+        this.assertEqual(store.kv_list("alpha", ""), []);
         this.assertEqual(this.files_under(root), files);
-        this.assertEqual(this.lines_of(store), []);
+        this.assertEqual(this.pushes_of(store), []);
       }
     }
 
@@ -1619,58 +1342,57 @@ namespace test_substrate {
     test_drop_files(): void {
       const root = this.root_make();
       const cache = cache_make();
-      const store = this.store_make(root, cache, true);
+      const store = this.store_make(root, cache);
       store.db_create("alpha");
       store.db_create("beta");
-      const alone = bytes_reversed(value_over());
-      const alone_name = utility.sha256_hex(alone);
-      const shared_name = utility.sha256_hex(value_over());
+      const alone = value_other();
+      const alone_name = digest_entry("value_other").sha256;
+      const shared_name = digest_entry("value_over").sha256;
       store.kv_put("/alpha/shared", value_over());
       store.kv_put("/alpha/alone", alone);
       store.kv_put("/beta/shared", value_over());
-      this.lines_answer(store);
       store.db_drop("alpha");
       this.assertEqual(this.files_under(root), ["beta.sqlite"]);
-      this.raised_assert(i18n("substrate.cache_unknown", alone_name), () =>
+      this.raised_assert(unknown_text(alone_name), () =>
         cache.cache_read(alone_name, 0, 1),
       );
       this.assertEqual(cache.cache_read(shared_name, 0, 1).length, 1);
       this.assertEqual(store.db_list(), ["beta"]);
       this.assertEqual(store.kv_get("/beta/shared").data, shared_name);
       store.db_drop("beta");
-      this.raised_assert(i18n("substrate.cache_unknown", shared_name), () =>
+      this.raised_assert(unknown_text(shared_name), () =>
         cache.cache_read(shared_name, 0, 1),
       );
       this.assertEqual(this.files_under(root), []);
     }
   }
 
-  // Values: both ref forms, the overflow limit, shared cache files, handles.
+  // Values: both ref forms, the overflow limit, shared and lost cache files.
   export class TestValues extends StoreCase {
     // A value put by one ref form is read by the other, listed and deleted.
     test_refs_both(): void {
       const store = this.store_fresh();
       store.db_create("alpha");
       const key = "greeting/" + constants.text_wide;
-      const value = bytes_text("hello " + constants.text_wide);
-      const digest = utility.sha256_hex(value);
+      const { data: value, sha256: digest } = digest_entry("hello_wide");
       const row = { k: key, size: value.length, sha256: digest };
-      this.assertEqual(store.kv_put("/alpha/" + key, value), { row, seq: 1 });
+      this.assertEqual(store.kv_put("/alpha/" + key, value), row);
       this.assertEqual(store.kv_get(key, "alpha"), {
         data: value,
         size: value.length,
         sha256: digest,
       });
       const world = bytes_text("world");
-      this.assertEqual(store.kv_put("place/a/b", world, "alpha").seq, 2);
+      const place = store.kv_put("place/a/b", world, "alpha");
+      this.assertEqual(place.k, "place/a/b");
       this.assertEqual(store.kv_get("/alpha/place/a/b").data, world);
       this.assertEqual(store.kv_list("alpha", "greeting/"), [row]);
       this.assertEqual(
         store.kv_list("alpha", "").map((listed) => listed.k),
         [key, "place/a/b"],
       );
-      this.assertEqual(store.kv_delete(key, "alpha"), 3);
-      this.raised_assert(i18n("substrate.key_missing", key, "alpha"), () =>
+      this.assertEqual(store.kv_delete(key, "alpha"), undefined);
+      this.raised_assert(gold_text("substrate_key_missing_wide"), () =>
         store.kv_get("/alpha/" + key),
       );
     }
@@ -1679,25 +1401,25 @@ namespace test_substrate {
     test_overflow_boundary(): void {
       const root = this.root_make();
       const cache = cache_make();
-      const store = this.store_make(root, cache, true);
+      const store = this.store_make(root, cache);
       store.db_create("alpha");
       store.kv_put("/alpha/exact", value_exact());
       const exact = store.kv_get("/alpha/exact");
       this.assertEqual(exact.data, value_exact());
-      this.assertEqual(exact.size, constants.overflow_bytes);
-      const exact_name = utility.sha256_hex(value_exact());
-      this.raised_assert(i18n("substrate.cache_unknown", exact_name), () =>
+      this.assertEqual(exact.size, overflow_get());
+      const exact_name = digest_entry("value_exact").sha256;
+      this.raised_assert(unknown_text(exact_name), () =>
         cache.cache_read(exact_name, 0, 1),
       );
       store.kv_put("/alpha/over", value_over());
-      const name = utility.sha256_hex(value_over());
+      const name = digest_entry("value_over").sha256;
       this.assertEqual(store.kv_get("/alpha/over"), {
         data: name,
-        size: constants.overflow_bytes + 1,
+        size: overflow_get() + 1,
         sha256: name,
       });
       this.assertEqual(
-        cache.cache_read(name, 0, constants.overflow_bytes + 1),
+        cache.cache_read(name, 0, overflow_get() + 1),
         value_over(),
       );
     }
@@ -1706,8 +1428,8 @@ namespace test_substrate {
     test_cache_shared(): void {
       const root = this.root_make();
       const cache = cache_make();
-      const store = this.store_make(root, cache, true);
-      const name = utility.sha256_hex(value_over());
+      const store = this.store_make(root, cache);
+      const name = digest_entry("value_over").sha256;
       // The bytes the cache file gives from its start, one when it is there.
       const cache_present = (): number => cache.cache_read(name, 0, 1).length;
       store.db_create("alpha");
@@ -1716,20 +1438,16 @@ namespace test_substrate {
       store.kv_put("/alpha/two", value_over());
       store.kv_put("/beta/three", value_over());
       store.kv_delete("/alpha/one");
-      this.lines_answer(store);
       this.assertEqual(cache_present(), 1);
       store.kv_put("/alpha/two", bytes_text("small"));
-      this.lines_answer(store);
       this.assertEqual(cache_present(), 1);
       store.db_close("beta");
       store.kv_put("/alpha/two", value_over());
       store.kv_delete("/alpha/two");
-      this.lines_answer(store);
       this.assertEqual(cache_present(), 1);
       store.db_open("beta");
       store.kv_delete("/beta/three");
-      this.lines_answer(store);
-      this.raised_assert(i18n("substrate.cache_unknown", name), cache_present);
+      this.raised_assert(unknown_text(name), cache_present);
       this.assertEqual(store.kv_check("alpha"), 0);
     }
 
@@ -1737,33 +1455,60 @@ namespace test_substrate {
     test_handle_moved(): void {
       const root = this.root_make();
       const cache = cache_make();
-      const store = this.store_make(root, cache, true);
+      const store = this.store_make(root, cache);
       store.db_create("alpha");
       const handle = sink_fill(cache, value_over());
-      const name = utility.sha256_hex(value_over());
-      const size = constants.overflow_bytes + 1;
+      const name = digest_entry("value_over").sha256;
+      const size = overflow_get() + 1;
       this.assertEqual(store.kv_put("/alpha/streamed", handle), {
-        row: { k: "streamed", size, sha256: name },
-        seq: 1,
+        k: "streamed",
+        size,
+        sha256: name,
       });
-      this.raised_assert(i18n("substrate.cache_unknown", handle), () =>
+      this.raised_assert(unknown_text(handle), () =>
         cache.cache_read(handle, 0, 1),
       );
       this.assertEqual(store.kv_get("/alpha/streamed").data, name);
       const small = sink_fill(cache, value_exact());
+      const overflow = String(overflow_get());
       this.raised_assert(
-        i18n(
-          "substrate.file_small",
-          small,
-          constants.overflow_bytes,
-          constants.overflow_bytes,
-        ),
+        gold_text("substrate_file_small")
+          .replaceAll("{0}", small)
+          .replaceAll("{1}", overflow)
+          .replaceAll("{2}", overflow),
         () => store.kv_put("/alpha/small", small),
       );
-      this.assertEqual(store.seq_get("alpha"), 1);
-      this.lines_answer(store);
+      this.assertEqual(
+        store.kv_list("alpha", "").map((row) => row.k),
+        ["streamed"],
+      );
       this.assertEqual(store.kv_check("alpha"), 0);
       this.assertEqual(cache.cache_read(small, 0, 1).length, 1);
+    }
+
+    // A row whose cache file this store lacks stays, and only its read throws.
+    test_file_lost(): void {
+      const root = this.root_make();
+      const store = this.store_make(root, cache_make());
+      store.db_create("alpha");
+      store.kv_put("/alpha/big", value_over());
+      const text = "x".repeat(overflow_get() + 1);
+      const body = { 0: { t: "note" }, text };
+      const ref = store.doc_put("alpha", "note", body).ref;
+      store.db_close("alpha");
+      const again = this.store_make(root, cache_make());
+      again.db_open("alpha");
+      const name = digest_entry("value_over").sha256;
+      const big = gold_text("substrate_file_lost_big").replaceAll("{1}", name);
+      this.raised_assert(big, () => again.kv_get("/alpha/big"));
+      const note = again.kv_list("alpha", "note/")[0].sha256;
+      this.raised_assert(lost_text(ref, note), () => again.doc_get(ref));
+      this.assertEqual(again.kv_list("alpha", "big"), [
+        { k: "big", size: overflow_get() + 1, sha256: name },
+      ]);
+      again.kv_put("/alpha/big", bytes_text("new"));
+      this.assertEqual(again.kv_get("/alpha/big").data, bytes_text("new"));
+      this.assertEqual(again.kv_check("alpha"), 0);
     }
   }
 
@@ -1774,16 +1519,13 @@ namespace test_substrate {
       const store = this.store_fresh();
       store.db_create("metaverse");
       const put = store.doc_put("metaverse", "fog", fog_encoded());
-      this.assertEqual(put, { ref: "/metaverse/fog/1", seq: 1 });
+      this.assertEqual(put, { ref: "/metaverse/fog/1" });
       const stored = store.doc_get(put.ref);
-      this.assertEqual(
-        utility.json_text(stored),
-        utility.json_text(fog_encoded()),
-      );
+      this.assertEqual(JSON.stringify(stored), JSON.stringify(fog_encoded()));
       this.assertEqual(substrate.doc_decode(stored), fog_normal());
     }
 
-    // Numbers below 1e-4 are stored as Python's `repr` writes them.
+    // Numbers below `1e-4` are stored as Python's `repr` writes them.
     test_numbers_small(): void {
       const store = this.store_fresh();
       store.db_create("alpha");
@@ -1795,7 +1537,7 @@ namespace test_substrate {
       );
     }
 
-    // A head past 2^53 moves to the exact next version, as in Python.
+    // A head past `2^53` moves to the exact next version, as in Python.
     test_version_wide(): void {
       const store = this.store_fresh();
       store.db_create("alpha");
@@ -1814,45 +1556,33 @@ namespace test_substrate {
       ]);
     }
 
-    // Values JSON or the wire cannot carry, and bad ids and headers, throw.
+    // Values JSON cannot carry, and bad ids and headers, throw.
     test_values_refused(): void {
       const store = this.store_fresh();
       store.db_create("alpha");
       const note = { t: "note" };
       const cases: [lines.Document, string][] = [
         [
-          { 0: note, x: [Number.POSITIVE_INFINITY] },
-          i18n("substrate.number_refused", Number.POSITIVE_INFINITY),
-        ],
-        [
-          { 0: note, x: Number.NaN },
-          i18n("substrate.number_refused", Number.NaN),
-        ],
-        [
-          { 0: note, n: 2 ** 53 + 2 },
-          i18n("substrate.integer_range", 2 ** 53 + 2),
-        ],
-        [
           { 0: note, x: "a" + String.fromCharCode(0xd800) },
-          i18n("substrate.text_refused"),
+          gold_text("substrate_text_refused"),
         ],
         [
           { 0: note, x: new Uint8Array(1) },
-          i18n("substrate.value_refused", "[object Uint8Array]"),
+          gold_text("substrate_value_refused_bytes"),
         ],
         [
           { 0: note, x: undefined },
-          i18n("substrate.value_refused", "[object Undefined]"),
+          gold_text("substrate_value_refused_undefined"),
         ],
-        [{ 0: note, 2: "/a/b" }, i18n("substrate.header_gap", "2")],
+        [{ 0: note, 2: "/a/b" }, gold_text("substrate_header_gap")],
       ];
       for (const [body, message] of cases) {
         this.raised_assert(message, () => store.doc_put("alpha", "x", body));
       }
-      this.raised_assert(i18n("substrate.id_empty"), () =>
+      this.raised_assert(gold_text("substrate_id_empty"), () =>
         store.doc_put("alpha", "", { 0: note }),
       );
-      this.assertEqual(store.seq_get("alpha"), 0);
+      this.assertEqual(store.kv_list("alpha", ""), []);
     }
   }
 
@@ -1868,21 +1598,21 @@ namespace test_substrate {
         role: "assistant",
         content: constants.text_wide,
       };
-      this.assertEqual(store.turn_append(scene, "user", user), {
-        n: 1,
-        seq: 1,
-      });
+      this.assertEqual(store.turn_append(scene, "user", user), { n: 1 });
       this.assertEqual(store.turn_append(scene, "assistant", answer), {
         n: 2,
-        seq: 2,
       });
       this.assertEqual(store.turn_list(scene), [
         { scene, n: 1, role: "user", content: user },
         { scene, n: 2, role: "assistant", content: answer },
       ]);
       this.assertEqual(store.turn_list("/metaverse/elsewhere/1"), []);
-      for (const bad of ["hyperposition/1", "/metaverse/world"]) {
-        this.raised_assert(i18n("substrate.scene_bad", bad), () =>
+      const scenes_bad: [string, string][] = [
+        ["hyperposition/1", "substrate_scene_bad_internal"],
+        ["/metaverse/world", "substrate_scene_bad_key"],
+      ];
+      for (const [bad, text] of scenes_bad) {
+        this.raised_assert(gold_text(text), () =>
           store.turn_append(bad, "user", user),
         );
       }
@@ -1896,7 +1626,7 @@ namespace test_substrate {
           },
         ]),
       );
-      this.assertEqual(store.seq_get("metaverse"), 2);
+      this.assertEqual(store.turn_list(scene).length, 2);
     }
 
     // Compaction replaces turns 1 to `through` by one summary turn at 1.
@@ -1907,7 +1637,12 @@ namespace test_substrate {
       for (const text of ["1", "2", "3", "4"]) {
         store.turn_append(scene, "user", { role: "user", content: text });
       }
-      this.assertEqual(store.turn_compact(scene, 3, "Asked thrice."), 5);
+      this.pushes_taken(store);
+      this.assertEqual(
+        store.turn_compact(scene, 3, "Asked thrice."),
+        undefined,
+      );
+      this.assertEqual(this.pushes_of(store), []);
       const fourth: provider.ChatMessage = { role: "user", content: "4" };
       this.assertEqual(store.turn_list(scene), [
         {
@@ -1918,51 +1653,45 @@ namespace test_substrate {
         },
         { scene, n: 4, role: "user", content: fourth },
       ]);
-      this.assertEqual(store.turn_append(scene, "user", fourth), {
-        n: 5,
-        seq: 6,
-      });
-      this.raised_assert(i18n("substrate.through_bad", 0), () =>
+      this.assertEqual(store.turn_append(scene, "user", fourth), { n: 5 });
+      this.assertEqual(this.types_taken(store), ["turn.append"]);
+      this.raised_assert(gold_text("substrate_through_bad"), () =>
         store.turn_compact(scene, 0, "None."),
       );
       const elsewhere = "/metaverse/elsewhere/1";
-      this.raised_assert(i18n("substrate.turns_none", elsewhere, 2), () =>
+      this.raised_assert(gold_text("substrate_turns_none"), () =>
         store.turn_compact(elsewhere, 2, "None."),
       );
-      this.assertEqual(store.seq_get("metaverse"), 6);
+      this.assertEqual(store.turn_list(scene).length, 3);
     }
   }
 
   // Compaction at `turn_compact_turns`: when it runs, what it writes, sends.
   export class TestCompaction extends StoreCase {
-    // A `user` turn at the threshold compacts its scene first, sent first.
+    // A `user` turn at the threshold compacts its scene first, sending none.
     test_threshold_reached(): void {
       const store = this.store_compacting();
       store.db_create("alpha");
-      this.lines_answer(store);
       const scene = "/alpha/scene/1";
       const other = "/alpha/scene/2";
       store.turn_append(scene, "user", message_said("user", "1"));
       store.turn_append(scene, "assistant", message_said("assistant", "2"));
       this.assertEqual(
         store.turn_append(scene, "user", message_said("user", "3")),
-        { n: 3, seq: 3 },
+        { n: 3 },
       );
       this.assertEqual(
         store.turn_append(scene, "assistant", message_said("assistant", "4")),
-        { n: 4, seq: 4 },
+        { n: 4 },
       );
       this.assertEqual(
         store.turn_append(other, "user", message_said("user", "a")),
-        { n: 1, seq: 5 },
+        { n: 1 },
       );
-      this.lines_answer(store);
+      this.pushes_taken(store);
       const fifth = message_said("user", "5");
-      this.assertEqual(store.turn_append(scene, "user", fifth), {
-        n: 2,
-        seq: 7,
-      });
-      const summary = i18n("substrate.turns_compacted", 4, 4);
+      this.assertEqual(store.turn_append(scene, "user", fifth), { n: 2 });
+      const summary = gold_text("substrate_turns_compacted_four");
       this.assertEqual(store.turn_list(scene), [
         {
           scene,
@@ -1972,23 +1701,14 @@ namespace test_substrate {
         },
         { scene, n: 2, role: "user", content: fifth },
       ]);
-      this.assertEqual(
-        this.lines_of(store).map((line) => jslb.line_render(line)),
-        [
-          '{"0":{"t":"turn.compact"},"scene":"/alpha/scene/1","through":4,' +
-            `"summary":${utility.json_text(summary)},"since":5}`,
-          '{"0":{"t":"turn.append"},"scene":"/alpha/scene/1","role":"user",' +
-            '"content":{"role":"user","content":"5"},"since":6}',
-        ],
-      );
-      this.lines_answer(store);
+      this.assertEqual(this.types_taken(store), ["turn.append"]);
       const opening = message_said("user", "a");
       this.assertEqual(store.turn_list(other), [
         { scene: other, n: 1, role: "user", content: opening },
       ]);
       this.assertEqual(
         store.turn_append(scene, "user", message_said("user", "6")),
-        { n: 3, seq: 8 },
+        { n: 3 },
       );
       this.assertEqual(store.turn_list(scene).length, 3);
     }
@@ -2001,7 +1721,7 @@ namespace test_substrate {
       for (const text of ["1", "2", "3"]) {
         store.turn_append(scene, "assistant", message_said("assistant", text));
       }
-      this.lines_answer(store);
+      this.pushes_taken(store);
       const before = store.turn_list(scene);
       this.raised_assert("rolled back", () =>
         store.transaction_run(() => {
@@ -2010,56 +1730,21 @@ namespace test_substrate {
         }),
       );
       this.assertEqual(store.turn_list(scene), before);
-      this.assertEqual(store.seq_get("alpha"), 3);
-      this.assertEqual(this.lines_of(store), []);
+      this.assertEqual(this.pushes_of(store), []);
     }
 
-    // A forwarded `turn.append` applies as it is and never compacts.
-    test_applied_exactly(): void {
-      const store = this.store_compacting();
-      store.db_create("alpha");
-      const scene = "/alpha/scene/1";
-      for (const text of ["1", "2", "3"]) {
-        store.turn_append(scene, "assistant", message_said("assistant", text));
-      }
-      this.lines_answer(store);
-      const user = message_said("user", "4");
-      this.assertEqual(
-        store.operation_apply("turn.append", 3, {
-          scene,
-          role: "user",
-          content: user,
-        }),
-        4,
-      );
-      this.assertEqual(
-        store.turn_list(scene).map((row) => row.content),
-        [
-          message_said("assistant", "1"),
-          message_said("assistant", "2"),
-          message_said("assistant", "3"),
-          user,
-        ],
-      );
-      this.assertEqual(this.lines_taken(store), [
-        '{"0":{"t":"turn.append"},"scene":"/alpha/scene/1","role":"user",' +
-          '"content":{"role":"user","content":"4"},"since":3}',
-      ]);
-    }
-
-    // A forwarding store on a new root whose threshold is small.
+    // A store on a new root whose threshold is small.
     store_compacting(): substrate.Store {
       return this.store_make(
         this.root_make(),
         cache_make(),
-        true,
         this.pool_get(),
         constants.compact_small,
       );
     }
   }
 
-  // SQL: the results of statements, what counts, and what is refused.
+  // SQL: the results of statements, what is refused, the trigger names.
   export class TestSql extends StoreCase {
     // Statements return columns, rows and changes, and only writes count.
     test_sql_results(): void {
@@ -2076,7 +1761,6 @@ namespace test_substrate {
         { columns: [], rows: [], changes: 0 },
         { columns: [], rows: [], changes: 1 },
       ]);
-      this.assertEqual(store.seq_get("castle"), 1);
       const selected = store.sql_run("castle", [
         { sql: "SELECT name, title FROM world", params: [] },
       ]);
@@ -2087,67 +1771,69 @@ namespace test_substrate {
           changes: 0,
         },
       ]);
-      this.assertEqual(store.seq_get("castle"), 1);
     }
 
     // Two statements in one, a parameter count that differs, an SQL error.
     test_statements_refused(): void {
       const store = this.store_fresh();
       store.db_create("castle");
+      this.pushes_taken(store);
       const twice = "SELECT 1; SELECT 2";
-      this.raised_assert(i18n("substrate.statement_many", 2, twice), () =>
+      this.raised_assert(gold_text("substrate_statement_many"), () =>
         store.sql_run("castle", [{ sql: twice, params: [] }]),
       );
-      this.raised_assert(
-        i18n("substrate.params_count", 1, 0, "SELECT ?"),
-        () => store.sql_run("castle", [{ sql: "SELECT ?", params: [] }]),
+      this.raised_assert(gold_text("substrate_params_count_missing"), () =>
+        store.sql_run("castle", [{ sql: "SELECT ?", params: [] }]),
       );
-      this.raised_assert(
-        i18n("substrate.params_count", 0, 1, "SELECT 1"),
-        () => store.sql_run("castle", [{ sql: "SELECT 1", params: [1] }]),
+      this.raised_assert(gold_text("substrate_params_count_extra"), () =>
+        store.sql_run("castle", [{ sql: "SELECT 1", params: [1] }]),
       );
       this.sqlite_assert("no such table: absent", () =>
         store.sql_run("castle", [
           { sql: "INSERT INTO absent VALUES (1)", params: [] },
         ]),
       );
-      this.assertEqual(store.seq_get("castle"), 0);
+      this.assertEqual(this.pushes_of(store), []);
+    }
+
+    // A trigger's name of a string is thrown as that string, SQLite's cause.
+    test_trigger_name(): void {
+      const store = this.store_fresh();
+      store.db_create("metaverse");
+      store.sql_run("metaverse", [
+        { sql: constants.universe_sql, params: [] },
+        { sql: constants.trigger_sql, params: [] },
+      ]);
+      const insert = "INSERT INTO universe VALUES (?, ?, ?, ?)";
+      store.sql_run("metaverse", [
+        {
+          sql: insert,
+          params: ["castle", "The castle", "player", "castle_world"],
+        },
+      ]);
+      this.pushes_taken(store);
+      const error = this.error_get(() =>
+        store.sql_run("metaverse", [
+          {
+            sql: insert,
+            params: ["moat", "The moat", "player", "castle_world"],
+          },
+        ]),
+      );
+      this.assertTrue(error.constructor === Error, "a plain Error expected");
+      this.assertEqual(error.message, gold_text("agent_content_ambiguous"));
+      const cause = error.cause;
+      this.assertTrue(cause instanceof Error, "an Error cause was expected");
+      const message = (cause as Error).message;
+      this.assertTrue(message.endsWith(constants.trigger_name), message);
+      const names = "SELECT name FROM universe ORDER BY name";
+      this.assertEqual(rows_query(store, "metaverse", names), [["castle"]]);
+      this.assertEqual(this.pushes_of(store), []);
     }
   }
 
-  // The rules of `seq`: what counts, what does not, and transactions.
-  export class TestSeq extends StoreCase {
-    // Changes count once each, no change and a failure count nothing.
-    test_seq_rules(): void {
-      const store = this.store_fresh();
-      store.db_create("alpha");
-      // Runs one statement in `alpha`.
-      const statement_run = (sql: string, params: unknown[]): void => {
-        store.sql_run("alpha", [{ sql, params }]);
-      };
-      this.assertEqual(store.kv_put("/alpha/a", bytes_text("one")).seq, 1);
-      this.assertEqual(store.kv_put("/alpha/a", bytes_text("one")).seq, 1);
-      this.assertEqual(store.kv_put("/alpha/a", bytes_text("two")).seq, 2);
-      this.assertEqual(store.kv_delete("/alpha/absent"), 2);
-      this.assertEqual(store.kv_delete("/alpha/a"), 3);
-      statement_run("SELECT 1", []);
-      this.assertEqual(store.seq_get("alpha"), 3);
-      statement_run("CREATE TABLE t (x TEXT)", []);
-      this.assertEqual(store.seq_get("alpha"), 4);
-      statement_run("INSERT INTO t VALUES (?)", ["a"]);
-      this.assertEqual(store.seq_get("alpha"), 5);
-      statement_run("UPDATE t SET x = ? WHERE x = ?", ["b", "absent"]);
-      this.assertEqual(store.seq_get("alpha"), 5);
-      this.sqlite_assert("no such table: absent", () =>
-        store.sql_run("alpha", [
-          { sql: "INSERT INTO t VALUES (?)", params: ["b"] },
-          { sql: "INSERT INTO absent VALUES (1)", params: [] },
-        ]),
-      );
-      this.assertEqual(store.seq_get("alpha"), 5);
-      this.assertEqual(rows_query(store, "alpha", "SELECT x FROM t"), [["a"]]);
-    }
-
+  // Transactions, and what survives closing and reopening.
+  export class TestTransactions extends StoreCase {
     // Writes in one `transaction_run` commit together or roll back together.
     test_transaction_whole(): void {
       const store = this.store_fresh();
@@ -2158,9 +1844,12 @@ namespace test_substrate {
         store.kv_put("/beta/b", bytes_text("2"));
         store.kv_put("/alpha/c", bytes_text("3"));
       });
-      this.assertEqual(store.seq_get("alpha"), 2);
-      this.assertEqual(store.seq_get("beta"), 1);
-      this.lines_answer(store);
+      this.assertEqual(
+        store.kv_list("alpha", "").map((row) => row.k),
+        ["a", "c"],
+      );
+      this.assertEqual(store.kv_get("/beta/b").data, bytes_text("2"));
+      this.pushes_taken(store);
       this.raised_assert("rolled back", () =>
         store.transaction_run(() => {
           store.kv_put("/alpha/d", value_over());
@@ -2168,12 +1857,11 @@ namespace test_substrate {
           throw new Error("rolled back");
         }),
       );
-      this.assertEqual(store.seq_get("alpha"), 2);
       this.assertEqual(store.kv_get("/alpha/a").data, bytes_text("1"));
-      this.raised_assert(i18n("substrate.key_missing", "d", "alpha"), () =>
+      this.raised_assert(gold_text("substrate_key_missing_d"), () =>
         store.kv_get("/alpha/d"),
       );
-      this.assertEqual(this.lines_of(store), []);
+      this.assertEqual(this.pushes_of(store), []);
       this.assertEqual(store.kv_check("alpha"), 1);
     }
 
@@ -2191,57 +1879,60 @@ namespace test_substrate {
           ]);
         }),
       );
-      this.assertEqual(store.seq_get("alpha"), 0);
-      this.assertEqual(store.seq_get("beta"), 0);
-      this.raised_assert(i18n("substrate.key_missing", "a", "alpha"), () =>
+      this.raised_assert(gold_text("substrate_key_missing_a"), () =>
         store.kv_get("/alpha/a"),
       );
+      this.assertEqual(store.kv_list("alpha", ""), []);
       this.assertEqual(tables_list(store, "beta"), [
         "_head",
         "_kv",
         "_meta",
         "_turn",
       ]);
+      this.assertEqual(this.types_taken(store), ["db.create", "db.create"]);
     }
 
-    // `seq` survives closing, reopening and a new store on the same root.
-    test_seq_reopen(): void {
+    // Rows and values survive closing, reopening and a new store on the root.
+    test_reopen(): void {
       const root = this.root_make();
-      const slots = slots_make(constants.slot_count);
+      const slots = slots_make(slot_count());
       const first = new substrate.CacheFiles(slots);
-      const store = this.store_make(root, first, true);
+      const store = this.store_make(root, first);
       store.db_create("alpha");
       store.kv_put("/alpha/a", bytes_text("one"));
       store.kv_put("/alpha/big", value_over());
-      store.doc_put("alpha", "note", {
-        0: { t: "note" },
-        text: constants.text_wide,
-      });
-      store.turn_append("/alpha/scene/1", "user", {
-        role: "user",
-        content: "hi",
-      });
-      this.assertEqual(store.seq_get("alpha"), 4);
+      const note = { 0: { t: "note" }, text: constants.text_wide };
+      const ref = store.doc_put("alpha", "note", note).ref;
+      const scene = "/alpha/scene/1";
+      const hi = message_said("user", "hi");
+      store.turn_append(scene, "user", hi);
+      const rows = store.kv_list("alpha", "");
       store.db_close("alpha");
       this.assertEqual(store.db_list(), []);
-      this.assertEqual(store.db_open("alpha"), 4);
+      store.db_open("alpha");
+      this.assertEqual(store.kv_list("alpha", ""), rows);
       store.db_close("alpha");
       const cache = new substrate.CacheFiles(slots);
-      const again = this.store_make(root, cache, true);
-      this.assertEqual(again.db_open("alpha"), 4);
+      const again = this.store_make(root, cache);
+      again.db_open("alpha");
+      this.assertEqual(again.kv_list("alpha", ""), rows);
       this.assertEqual(again.kv_get("/alpha/a").data, bytes_text("one"));
-      const name = utility.sha256_hex(value_over());
+      const name = digest_entry("value_over").sha256;
       this.assertEqual(again.kv_get("/alpha/big").data, name);
       this.assertEqual(
-        cache.cache_read(name, 0, constants.overflow_bytes + 1),
+        cache.cache_read(name, 0, overflow_get() + 1),
         value_over(),
       );
+      this.assertEqual(again.doc_get(ref), note);
+      this.assertEqual(again.turn_list(scene), [
+        { scene, n: 1, role: "user", content: hi },
+      ]);
     }
   }
 
-  // Snapshots: serialized bytes with `seq`, restored from bytes or a handle.
+  // Snapshots with the cache files they name, and restores with or without.
   export class TestSnapshot extends StoreCase {
-    // A restore brings back the rows and the `seq` of the snapshot.
+    // A restore brings back the rows of the snapshot and pushes nothing.
     test_snapshot_restore(): void {
       const store = this.store_fresh();
       store.db_create("alpha");
@@ -2255,92 +1946,90 @@ namespace test_substrate {
         snapshot.data.subarray(0, 16),
         bytes_join([bytes_text(constants.file_magic), new Uint8Array(1)]),
       );
-      this.assertEqual(snapshot.seq, 2);
+      this.assertEqual(snapshot.files, []);
       const dump = content_dump(store, "alpha");
       store.kv_put("/alpha/a", bytes_text("two"));
       store.kv_put("/alpha/b", bytes_text("three"));
       store.sql_run("alpha", [{ sql: "DELETE FROM t", params: [] }]);
-      this.assertEqual(store.seq_get("alpha"), 5);
-      this.lines_answer(store);
-      this.assertEqual(store.db_restore("alpha", snapshot.data), 2);
-      this.assertEqual(store.seq_get("alpha"), 2);
+      this.pushes_taken(store);
+      store.db_restore("alpha", snapshot.data, []);
       this.assertEqual(store.kv_get("/alpha/a").data, bytes_text("one"));
-      this.raised_assert(i18n("substrate.key_missing", "b", "alpha"), () =>
+      this.raised_assert(gold_text("substrate_key_missing_b"), () =>
         store.kv_get("/alpha/b"),
       );
       this.assertEqual(content_dump(store, "alpha"), dump);
-      this.assertEqual(this.lines_of(store), []);
+      this.assertEqual(this.pushes_of(store), []);
       const cache = cache_make();
-      const second = this.store_make(this.root_make(), cache, true);
+      const second = this.store_make(this.root_make(), cache);
       const handle = sink_fill(cache, snapshot.data);
-      this.assertEqual(second.db_restore("alpha", handle), 2);
-      this.raised_assert(i18n("substrate.cache_unknown", handle), () =>
+      second.db_restore("alpha", handle, []);
+      this.raised_assert(unknown_text(handle), () =>
         cache.cache_read(handle, 0, 1),
       );
       this.assertEqual(content_dump(second, "alpha"), dump);
+      this.assertEqual(this.pushes_of(second), []);
     }
 
     // A file without the substrate's tables throws and the old one stays.
     test_restore_foreign(): void {
       const root = this.root_make();
-      const store = this.store_make(root, cache_make(), true);
+      const store = this.store_make(root, cache_make());
       store.db_create("alpha");
       store.kv_put("/alpha/a", bytes_text("one"));
       const foreign = `${root}/foreign.sqlite`;
       this.raw_run(foreign, "c", [{ sql: "CREATE TABLE note (x TEXT)" }]);
       const data = this.raw_export(foreign);
       const files = this.files_under(root);
-      this.raised_assert(i18n("substrate.schema_partial", "[]"), () =>
-        store.db_restore("alpha", data),
+      this.raised_assert(gold_text("substrate_schema_partial_none"), () =>
+        store.db_restore("alpha", data, []),
       );
       this.assertEqual(store.db_list(), ["alpha"]);
       this.assertEqual(store.kv_get("/alpha/a").data, bytes_text("one"));
-      this.assertEqual(store.seq_get("alpha"), 1);
       this.assertEqual(this.files_under(root), files);
     }
 
     // A restore file left by an earlier restore throws, and stays.
     test_restore_left(): void {
       const root = this.root_make();
-      const store = this.store_make(root, cache_make(), true);
+      const store = this.store_make(root, cache_make());
       store.db_create("alpha");
       const data = store.db_snapshot("alpha").data;
       const left = `${root}/alpha.sqlite-restore`;
       this.raw_run(left, "c", [{ sql: "CREATE TABLE note (x TEXT)" }]);
-      this.raised_assert(i18n("substrate.restore_left", left), () =>
-        store.db_restore("alpha", data),
-      );
+      const text = gold_text("substrate_restore_left").replaceAll("{0}", left);
+      this.raised_assert(text, () => store.db_restore("alpha", data, []));
       this.assertEqual(this.files_under(root), [
         "alpha.sqlite",
         "alpha.sqlite-restore",
       ]);
-      this.assertEqual(store.seq_get("alpha"), 0);
+      this.assertEqual(store.db_list(), ["alpha"]);
     }
 
-    // Two snapshots of one database taken apart hold their own bytes and seq.
+    // Two snapshots of one database taken apart hold their own bytes.
     test_snapshots_apart(): void {
       const store = this.store_fresh();
       store.db_create("alpha");
       const first = store.db_snapshot("alpha");
       store.kv_put("/alpha/a", bytes_text("one"));
       const second = store.db_snapshot("alpha");
-      this.assertEqual([first.seq, second.seq], [0, 1]);
-      this.assertFalse(
-        utility.sha256_hex(first.data) === utility.sha256_hex(second.data),
-      );
+      this.assertEqual([first.files, second.files], [[], []]);
+      const same =
+        first.data.length === second.data.length &&
+        first.data.every((byte, index) => byte === second.data[index]);
+      this.assertFalse(same);
     }
 
-    // A cached value stays held through a snapshot and its restore.
+    // A cached value stays held through a snapshot and a restore of no file.
     test_value_held(): void {
       const cache = cache_make();
-      const store = this.store_make(this.root_make(), cache, true);
+      const store = this.store_make(this.root_make(), cache);
       store.db_create("alpha");
       store.kv_put("/alpha/big", value_over());
-      this.lines_answer(store);
       const snapshot = store.db_snapshot("alpha");
-      this.assertEqual(store.db_restore("alpha", snapshot.data), snapshot.seq);
-      const name = utility.sha256_hex(value_over());
-      const size = constants.overflow_bytes + 1;
+      const name = digest_entry("value_over").sha256;
+      this.assertEqual(snapshot.files, [name]);
+      store.db_restore("alpha", snapshot.data, []);
+      const size = overflow_get() + 1;
       this.assertEqual(store.kv_get("/alpha/big"), {
         data: name,
         size,
@@ -2348,763 +2037,234 @@ namespace test_substrate {
       });
       this.assertEqual(cache.cache_read(name, 0, size), value_over());
     }
+
+    // A restore given one of two cache files reads all but the lost value.
+    test_restore_files_lost(): void {
+      const source_cache = cache_make();
+      const source = this.store_make(this.root_make(), source_cache);
+      source.db_create("alpha");
+      const big: [string, string][] = [
+        ["/alpha/one", "value_over"],
+        ["/alpha/two", "value_other"],
+      ];
+      for (const [ref, entry] of big) {
+        source.kv_put(ref, digest_entry(entry).data);
+      }
+      source.kv_put("/alpha/small", bytes_text("small"));
+      const image = source.db_snapshot("alpha");
+      const names = big.map(([, entry]) => digest_entry(entry).sha256);
+      this.assertEqual(image.files, [...names].sort());
+      const size = overflow_get() + 1;
+      const [first, second] = image.files;
+      const kept = source_cache.cache_read(first, 0, size);
+      const cache = cache_make();
+      const store = this.store_make(this.root_make(), cache);
+      store.db_restore("alpha", image.data, [kept]);
+      // The refs of the value whose file came and of the one whose did not.
+      const kept_ref = big[names.indexOf(first)][0];
+      const lost_ref = big[names.indexOf(second)][0];
+      this.assertEqual(store.kv_get(kept_ref).data, first);
+      this.assertEqual(cache.cache_read(first, 0, size), kept);
+      this.assertEqual(store.kv_get("/alpha/small").data, bytes_text("small"));
+      this.raised_assert(lost_text(lost_ref, second), () =>
+        store.kv_get(lost_ref),
+      );
+      this.assertEqual(
+        store.kv_list("alpha", ""),
+        source.kv_list("alpha", ""),
+      );
+      this.assertEqual(store.kv_list("alpha", "").length, 3);
+      store.kv_put(lost_ref, bytes_text("again"));
+      this.assertEqual(store.kv_get(lost_ref).data, bytes_text("again"));
+      this.assertEqual(store.kv_check("alpha"), 0);
+    }
+
+    // A restore takes the database and a file as handles of its own cache.
+    test_restore_handle(): void {
+      const source_cache = cache_make();
+      const source = this.store_make(this.root_make(), source_cache);
+      source.db_create("alpha");
+      source.kv_put("/alpha/big", value_over());
+      const image = source.db_snapshot("alpha");
+      const name = digest_entry("value_over").sha256;
+      const size = overflow_get() + 1;
+      const cache = cache_make();
+      const store = this.store_make(this.root_make(), cache);
+      const data = sink_fill(cache, image.data);
+      const file = sink_fill(cache, source_cache.cache_read(name, 0, size));
+      store.db_restore("alpha", data, [file]);
+      this.assertEqual(store.kv_get("/alpha/big").data, name);
+      this.assertEqual(cache.cache_read(name, 0, size), value_over());
+      for (const handle of [data, file]) {
+        this.raised_assert(unknown_text(handle), () =>
+          cache.cache_read(handle, 0, 1),
+        );
+      }
+      store.db_restore("alpha", image.data, [name]);
+      this.assertEqual(cache.cache_read(name, 0, size), value_over());
+      const absent = digest_entry("absent").sha256;
+      this.raised_assert(unknown_text(absent), () =>
+        store.db_restore("alpha", image.data, [absent]),
+      );
+    }
+
+    // A snapshot names only the cache files its store holds, throwing none.
+    test_snapshot_missing_file(): void {
+      const root = this.root_make();
+      const store = this.store_make(root, cache_make());
+      store.db_create("alpha");
+      store.kv_put("/alpha/one", value_over());
+      store.kv_put("/alpha/two", value_other());
+      store.db_close("alpha");
+      const name = digest_entry("value_over").sha256;
+      const slots = [
+        slot_stored(name, value_over()),
+        ...slots_make(slot_count() - 1),
+      ];
+      const second = this.store_make(root, new substrate.CacheFiles(slots));
+      second.db_open("alpha");
+      this.assertEqual(second.db_snapshot("alpha").files, [name]);
+    }
   }
 
-  // Forwarded lines: after the commit, in order, with `since`, held files.
-  export class TestForward extends StoreCase {
-    // Each modifying operation forwards its line, a copy of its bytes.
-    test_lines_after(): void {
+  // The push of each committed operation: its line, its owner, its timing.
+  export class TestPush extends StoreCase {
+    // A create and a drop each push the database's name at once.
+    test_databases_pushed(): void {
       const store = this.store_fresh();
       store.db_create("alpha");
+      this.assertEqual(this.pushes_taken(store), [
+        push_gold("push_db_create"),
+      ]);
+      store.db_drop("alpha");
+      this.assertEqual(this.pushes_taken(store), [push_gold("push_db_drop")]);
+    }
+
+    // A value in its row goes as a copy of its bytes, a delete by its ref.
+    test_values_pushed(): void {
+      const store = this.store_fresh();
+      store.db_create("alpha");
+      this.pushes_taken(store);
       const value = bytes_text("one");
       store.kv_put("/alpha/a", value);
-      const forwarded = this.lines_of(store);
-      this.assertEqual(
-        forwarded.map((line) => jslb.line_render(line)),
-        [
-          '{"0":{"t":"db.create"},"db":"alpha","since":0}',
-          '{"0":{"t":"kv.put","k":"/alpha/a","b":1},"1":{"s":3},"since":0}' +
-            '<blob "n"=1>',
-        ],
-      );
-      const blob = forwarded[1][1] as lines.BlobHeader;
-      this.assertEqual(blob.d, value);
-      this.assertFalse(blob.d === value);
-      this.lines_answer(store);
-      store.kv_delete("/alpha/a");
-      store.turn_append("/alpha/scene/1", "user", {
-        role: "user",
-        content: "hi",
-      });
-      store.turn_compact("/alpha/scene/1", 1, "Said hi.");
-      store.doc_put("alpha", "note", { 0: { t: "note" } });
-      this.assertEqual(this.lines_taken(store), [
-        '{"0":{"t":"kv.delete","k":"/alpha/a"},"since":1}',
-        '{"0":{"t":"turn.append"},"scene":"/alpha/scene/1","role":"user",' +
-          '"content":{"role":"user","content":"hi"},"since":2}',
-        '{"0":{"t":"turn.compact"},"scene":"/alpha/scene/1","through":1,' +
-          '"summary":"Said hi.","since":3}',
-        '{"0":{"t":"doc.put"},"db":"alpha","id":"note",' +
-          '"body":{"0":{"t":"note"}},"since":4}',
-      ]);
-    }
-
-    // The lines of one transaction go after its commit, in order.
-    test_lines_order(): void {
-      const store = this.store_fresh();
-      store.db_create("alpha");
-      this.lines_answer(store);
-      store.transaction_run(() => {
-        store.kv_put("/alpha/a", bytes_text("1"));
-        store.kv_put("/alpha/b", bytes_text("2"));
-        store.sql_run("alpha", [
-          { sql: "CREATE TABLE t (x TEXT)", params: [] },
-        ]);
-        this.assertEqual(this.lines_of(store), []);
-      });
-      this.assertEqual(this.lines_taken(store), [
-        '{"0":{"t":"kv.put","k":"/alpha/a","b":1},"1":{"s":1},"since":0}' +
-          '<blob "n"=1>',
-        '{"0":{"t":"kv.put","k":"/alpha/b","b":1},"1":{"s":1},"since":1}' +
-          '<blob "n"=1>',
-        '{"0":{"t":"sql.run"},"db":"alpha","statements":[{"sql":' +
-          '"CREATE TABLE t (x TEXT)","params":[]}],"since":2}',
-      ]);
-    }
-
-    // A transaction rolled back forwards nothing, a change nothing either.
-    test_lines_unsent(): void {
-      const store = this.store_fresh();
-      store.db_create("alpha");
-      store.kv_put("/alpha/a", bytes_text("one"));
-      this.lines_answer(store);
-      this.raised_assert("rolled back", () =>
-        store.transaction_run(() => {
-          store.kv_put("/alpha/b", bytes_text("two"));
-          throw new Error("rolled back");
-        }),
-      );
+      const pushed = this.pushes_taken(store);
+      this.assertEqual(pushed, [push_bytes("push_kv_put_a", value)]);
+      this.assertFalse((pushed[0][0][1] as lines.BlobHeader).d === value);
       store.kv_put("/alpha/a", bytes_text("one"));
       store.kv_delete("/alpha/absent");
       store.sql_run("alpha", [{ sql: "SELECT 1", params: [] }]);
-      this.assertEqual(this.lines_of(store), []);
-      this.assertEqual(store.seq_get("alpha"), 1);
+      this.assertEqual(this.pushes_of(store), []);
+      store.kv_delete("/alpha/a");
+      this.assertEqual(this.pushes_taken(store), [
+        push_gold("push_kv_delete_a"),
+      ]);
     }
 
-    // A cached value's line holds its file until the reply comes.
-    test_handle_held(): void {
-      const root = this.root_make();
+    // A value over `overflow_bytes` goes as its file's bytes, never a handle.
+    test_files_pushed(): void {
       const cache = cache_make();
-      const store = this.store_make(root, cache, true);
+      const store = this.store_make(this.root_make(), cache);
       store.db_create("alpha");
-      this.lines_answer(store);
-      const name = utility.sha256_hex(value_over());
+      this.pushes_taken(store);
       store.kv_put("/alpha/big", value_over());
-      store.kv_put("/alpha/big", bytes_text("small"));
-      const [held, small] = this.lines_of(store).splice(0);
-      this.assertEqual(
-        jslb.line_render(held),
-        '{"0":{"t":"kv.put","k":"/alpha/big","b":1},"1":{"s":131073},' +
-          '"since":0}<blob "n"=1>',
-      );
-      this.assertEqual((held[1] as lines.BlobHeader).d, name);
-      this.assertEqual(
-        cache.cache_read(name, 0, constants.overflow_bytes + 1),
-        value_over(),
-      );
-      store.forward_done(held, reply_make(held));
-      this.raised_assert(i18n("substrate.cache_unknown", name), () =>
-        cache.cache_read(name, 0, 1),
-      );
-      store.forward_done(small, reply_make(small));
-    }
-
-    // A reply with another `seq`, or to no line in flight, throws.
-    test_replies_checked(): void {
-      const store = this.store_fresh();
-      store.db_create("alpha");
-      this.lines_answer(store);
-      store.kv_put("/alpha/a", bytes_text("one"));
-      const [line] = this.lines_of(store).splice(0);
-      const wrong = jslb.line_make(
-        jslb.header_make("kv.put", { reply: 1 }),
-        [],
-        { seq: 5 },
-      );
-      this.raised_assert(
-        i18n("substrate.reply_desync", "kv.put", 5, 1, "alpha"),
-        () => store.forward_done(line, wrong),
-      );
-      store.forward_done(line, reply_make(line));
-      this.raised_assert(i18n("substrate.forward_unknown", "kv.put"), () =>
-        store.forward_done(line, reply_make(line)),
-      );
-    }
-
-    // A store with no function to forward to writes nothing, and throws.
-    test_forward_unset(): void {
-      const root = this.root_make();
-      const store = this.store_make(root, cache_make(), true);
-      store.db_create("alpha");
-      store.db_close("alpha");
-      const bare = this.store_make(root, cache_make(), false);
-      this.raised_assert(i18n("substrate.forward_unset", "db.create"), () =>
-        bare.db_create("beta"),
-      );
-      this.assertEqual(this.files_under(root), ["alpha.sqlite"]);
-      this.assertEqual(bare.db_open("alpha"), 0);
-      this.raised_assert(i18n("substrate.forward_unset", "kv.put"), () =>
-        bare.kv_put("/alpha/a", bytes_text("one")),
-      );
-      this.assertEqual(bare.seq_get("alpha"), 0);
-      this.raised_assert(i18n("substrate.key_missing", "a", "alpha"), () =>
-        bare.kv_get("/alpha/a"),
-      );
-      this.raised_assert(i18n("substrate.forward_twice"), () =>
-        store.forward_set(() => undefined, false),
-      );
-    }
-
-    // Lines use full names when the store is told to.
-    test_names_full(): void {
-      const root = this.root_make();
-      const store = this.store_make(root, cache_make(), false);
-      const forwarded: lines.Line[] = [];
-      store.forward_set((line) => {
-        forwarded.push(line);
-      }, true);
-      store.db_create("alpha");
-      store.kv_put("/alpha/a", bytes_text("one"));
-      this.assertEqual(
-        forwarded.map((line) => jslb.line_render(line)),
-        [
-          '{"0":{"type":"db.create"},"db":"alpha","since":0}',
-          '{"0":{"type":"kv.put","key":"/alpha/a","blobs":1},' +
-            '"1":{"size":3},"since":0}<blob "n"=1>',
-        ],
-      );
-    }
-
-    // A drop forwards its `seq`, and replies with no `seq` are taken.
-    test_create_drop(): void {
-      const store = this.store_fresh();
-      store.db_create("alpha");
-      store.kv_put("/alpha/a", bytes_text("one"));
-      store.db_drop("alpha");
-      const forwarded = this.lines_of(store);
-      this.assertEqual(
-        jslb.line_render(forwarded[2]),
-        '{"0":{"t":"db.drop"},"db":"alpha","since":1}',
-      );
-      this.lines_answer(store);
-      this.assertEqual(store.db_list(), []);
-    }
-  }
-
-  // Replication: known sequences replayed, stale lines, bad lines.
-  export class TestReplay extends StoreCase {
-    // The castle turn's operations and two more give their lines and `seq`.
-    test_recorded_replay(): void {
-      const first_root = this.root_make();
-      const second_root = this.root_make();
-      const first_cache = cache_make();
-      const second_cache = cache_make();
-      const first = this.store_make(first_root, first_cache, true);
-      const second = this.store_make(second_root, second_cache, true);
-      this.hello_make(first);
-      this.hello_make(second);
-      for (const record of recorded_make()) {
-        const line = this.modifier_call(first, record);
-        const note = `${record.type} since ${String(record.since)}`;
-        this.assertEqual(jslb.payload_of(line).since, record.since, note);
-        const db = target_database(record);
-        this.assertEqual(first.seq_get(db), record.seq, note);
-        if (record.text !== undefined) {
-          this.assertEqual(jslb.line_render(line), record.text, note);
-        }
-        if (record.sha256 !== undefined) {
-          const k = record.fields.k as string;
-          this.assertEqual(first.kv_get(k).sha256, record.sha256, note);
-        }
-        const payload = payload_replayed(line, first_cache, second_cache);
-        this.assertEqual(
-          second.operation_apply(record.type, record.since, payload),
-          record.seq,
-          note,
-        );
-        this.assertEqual(
-          this.lines_taken(second),
-          [jslb.line_render(line)],
-          note,
-        );
-      }
-      const names = first.db_list();
-      this.assertEqual(names, [
-        "_files",
-        "castle",
-        "castle_gatehouse",
-        "castle_world",
-        "metaverse",
+      const other = value_other();
+      store.kv_put("/alpha/streamed", sink_fill(cache, other));
+      const pushed = this.pushes_taken(store);
+      this.assertEqual(pushed, [
+        push_bytes("push_kv_put_big", value_over()),
+        push_bytes("push_kv_put_streamed", other),
       ]);
-      this.assertEqual(second.db_list(), names);
-      for (const name of names) {
-        this.assertEqual(
-          content_dump(first, name),
-          content_dump(second, name),
-          name,
-        );
+      for (const [line] of pushed) {
+        const blob = line[1] as lines.BlobHeader;
+        this.assertTrue(blob.d instanceof Uint8Array, "bytes were expected");
       }
-      const map = bytes_pattern(constants.map_bytes);
-      for (const cache of [first_cache, second_cache]) {
-        this.assertEqual(
-          cache.cache_read(constants.map_sha256, 0, constants.map_bytes),
-          map,
-        );
-      }
-      const k = "/_files/script/step_tide.js";
-      const data = bytes_text(constants.step_script);
-      second.kv_put(k, data);
-      this.raised_assert(
-        i18n("substrate.since_stale", "kv.put", 3, 4, "_files"),
-        () => second.operation_apply("kv.put", 3, { k, data }),
-      );
-      this.assertEqual(second.seq_get("_files"), 4);
     }
 
-    // A `since` that is not the `seq` throws the desync and changes nothing.
-    test_since_stale(): void {
-      const root = this.root_make();
-      const store = this.store_make(root, cache_make(), true);
-      store.db_create("alpha");
-      const data = bytes_text("x");
-      this.raised_assert(
-        i18n("substrate.since_stale", "kv.put", 1, 0, "alpha"),
-        () => store.operation_apply("kv.put", 1, { k: "/alpha/a", data }),
-      );
-      this.raised_assert(
-        i18n("substrate.since_stale", "db.create", 1, 0, "beta"),
-        () => store.operation_apply("db.create", 1, { db: "beta" }),
-      );
-      this.assertEqual(this.files_under(root), ["alpha.sqlite"]);
-      this.raised_assert(
-        i18n("substrate.since_stale", "db.drop", 1, 0, "alpha"),
-        () => store.operation_apply("db.drop", 1, { db: "alpha" }),
-      );
-      this.assertEqual(store.db_list(), ["alpha"]);
-      this.assertEqual(store.seq_get("alpha"), 0);
-      this.raised_assert(i18n("substrate.key_missing", "a", "alpha"), () =>
-        store.kv_get("/alpha/a"),
-      );
-      this.assertEqual(
-        store.operation_apply("kv.put", 0, { k: "/alpha/a", data }),
-        1,
-      );
-      const dropped = store.operation_apply("db.drop", 1, { db: "alpha" });
-      this.assertEqual(dropped, 0);
-      this.assertEqual(store.db_list(), []);
-    }
-
-    // A stale `doc.put` throws and writes no version.
-    test_stale_document(): void {
+    // Documents, turns and statements that change something push payloads.
+    test_writes_pushed(): void {
       const store = this.store_fresh();
       store.db_create("alpha");
-      this.raised_assert(
-        i18n("substrate.since_stale", "doc.put", 1, 0, "alpha"),
-        () =>
-          store.operation_apply("doc.put", 1, {
-            db: "alpha",
-            id: "note",
-            body: { 0: { t: "note" } },
-          }),
-      );
-      this.raised_assert(i18n("substrate.id_missing", "note", "alpha"), () =>
-        store.doc_head("alpha", "note"),
-      );
-      this.assertEqual(store.seq_get("alpha"), 0);
+      this.pushes_taken(store);
+      const body = { 0: { t: "note" } };
+      store.doc_put("alpha", "note", body);
+      const scene = "/alpha/scene/1";
+      const user = message_said("user", "hi");
+      store.turn_append(scene, "user", user);
+      const created: lines.SqlStatement[] = [
+        { sql: "CREATE TABLE t (x TEXT)", params: [] },
+      ];
+      const inserted: lines.SqlStatement[] = [
+        { sql: "INSERT INTO t VALUES (?)", params: ["a"] },
+      ];
+      store.sql_run("alpha", created);
+      store.sql_run("alpha", inserted);
+      store.sql_run("alpha", [{ sql: "SELECT x FROM t", params: [] }]);
+      store.sql_run("alpha", [
+        { sql: "UPDATE t SET x = ? WHERE x = ?", params: ["b", "absent"] },
+      ]);
+      const pushed = this.pushes_taken(store);
+      this.assertEqual(pushed, [
+        push_gold("push_doc_put"),
+        push_gold("push_turn_append_hi"),
+        push_gold("push_sql_run_create"),
+        push_gold("push_sql_run_insert"),
+      ]);
+      this.assertFalse(pushed[2][0].statements === created);
     }
 
-    // A stale `turn.append` throws and appends no turn.
-    test_stale_turn(): void {
+    // The pushes of one transaction follow its commit, in order, or none.
+    test_transaction_pushed(): void {
       const store = this.store_fresh();
+      store.db_create("alpha");
+      this.pushes_taken(store);
+      const value = bytes_text("1");
+      store.transaction_run(() => {
+        store.kv_put("/alpha/a", value);
+        store.kv_delete("/alpha/a");
+        this.assertEqual(this.pushes_of(store), []);
+      });
+      this.assertEqual(this.pushes_taken(store), [
+        push_bytes("push_kv_put_a", value),
+        push_gold("push_kv_delete_a"),
+      ]);
+      this.raised_assert("rolled back", () =>
+        store.transaction_run(() => {
+          store.kv_put("/alpha/b", bytes_text("2"));
+          throw new Error("rolled back");
+        }),
+      );
+      this.assertEqual(this.pushes_of(store), []);
+    }
+
+    // A `user` turn at the threshold compacts first and pushes only itself.
+    test_threshold_pushed(): void {
+      const store = this.store_make(
+        this.root_make(),
+        cache_make(),
+        this.pool_get(),
+        constants.compact_small,
+      );
       store.db_create("alpha");
       const scene = "/alpha/scene/1";
-      this.raised_assert(
-        i18n("substrate.since_stale", "turn.append", 1, 0, "alpha"),
-        () =>
-          store.operation_apply("turn.append", 1, {
-            scene,
-            role: "user",
-            content: { role: "user", content: "1" },
-          }),
-      );
-      this.assertEqual(store.turn_list(scene), []);
-      this.assertEqual(store.seq_get("alpha"), 0);
-    }
-
-    // A stale `sql.run` throws and runs no statement.
-    test_stale_sql(): void {
-      const store = this.store_fresh();
-      store.db_create("alpha");
-      this.raised_assert(
-        i18n("substrate.since_stale", "sql.run", 1, 0, "alpha"),
-        () =>
-          store.operation_apply("sql.run", 1, {
-            db: "alpha",
-            statements: [{ sql: "CREATE TABLE note (x TEXT)", params: [] }],
-          }),
-      );
-      this.assertEqual(tables_list(store, "alpha"), [
-        "_head",
-        "_kv",
-        "_meta",
-        "_turn",
+      for (const text of ["1", "2", "3"]) {
+        store.turn_append(scene, "assistant", message_said("assistant", text));
+      }
+      this.pushes_taken(store);
+      const user = message_said("user", "4");
+      this.assertEqual(store.turn_append(scene, "user", user), { n: 2 });
+      this.assertEqual(this.pushes_taken(store), [
+        push_gold("push_turn_append_four"),
       ]);
-      this.assertEqual(store.seq_get("alpha"), 0);
-    }
-
-    // A delete, a compaction and a drop, which the replay lacks, apply.
-    test_operations_unrecorded(): void {
-      const store = this.store_fresh();
-      const scene = "/alpha/scene/1";
-      const created = store.operation_apply("db.create", 0, { db: "alpha" });
-      this.assertEqual(created, 0);
-      this.assertEqual(
-        store.operation_apply("kv.put", 0, {
-          k: "/alpha/a",
-          data: bytes_text("one"),
-        }),
-        1,
-      );
-      this.assertEqual(
-        store.operation_apply("kv.delete", 1, { k: "/alpha/a" }),
-        2,
-      );
-      this.assertEqual(
-        store.operation_apply("turn.append", 2, {
-          scene,
-          role: "user",
-          content: { role: "user", content: "1" },
-        }),
-        3,
-      );
-      this.assertEqual(
-        store.operation_apply("turn.compact", 3, {
-          scene,
-          through: 1,
-          summary: "Answered 1.",
-        }),
-        4,
-      );
+      const summary = gold_text("substrate_turns_compacted_three");
       this.assertEqual(store.turn_list(scene), [
         {
           scene,
           n: 1,
           role: "system",
-          content: { role: "system", content: "Answered 1." },
+          content: message_said("system", summary),
         },
+        { scene, n: 2, role: "user", content: user },
       ]);
-      const dropped = store.operation_apply("db.drop", 4, { db: "alpha" });
-      this.assertEqual(dropped, 0);
-      this.assertEqual(store.db_list(), []);
-    }
-
-    // An unknown type, other fields or an internal ref throw.
-    test_operation_bad(): void {
-      const store = this.store_fresh();
-      store.db_create("alpha");
-      this.raised_assert(i18n("substrate.operation_type", "kv.get"), () =>
-        store.operation_apply("kv.get", 0, { k: "/alpha/a" }),
-      );
-      this.raised_assert(
-        i18n("substrate.payload_keys", "kv.put", "data,k", "k"),
-        () => store.operation_apply("kv.put", 0, { k: "/alpha/a" }),
-      );
-      const extra = { k: "/alpha/a", db: "alpha" };
-      this.raised_assert(
-        i18n("substrate.payload_keys", "kv.delete", "k", "db,k"),
-        () => store.operation_apply("kv.delete", 0, extra),
-      );
-      this.raised_assert(i18n("substrate.ref_internal", "a"), () =>
-        store.operation_apply("kv.delete", 0, { k: "a" }),
-      );
-      this.raised_assert(
-        i18n("substrate.payload_keys", "sql.run", "params,sql", "sql"),
-        () =>
-          store.operation_apply("sql.run", 0, {
-            db: "alpha",
-            statements: [{ sql: "SELECT 1" }],
-          }),
-      );
-      this.assertEqual(store.seq_get("alpha"), 0);
-    }
-
-    // Makes the databases the replay starts from by writes, each counted.
-    hello_make(store: substrate.Store): void {
-      store.db_create("_files");
-      store.db_create("metaverse");
-      store.sql_run("metaverse", [
-        { sql: constants.universe_sql, params: [] },
-      ]);
-      store.doc_put("metaverse", "hyperposition", {
-        0: { t: "scene" },
-        subtitle: "How can I help you?",
-      });
-      const values: [string, string][] = [
-        ["/_files/script/bootstrap.js", "// Makes a universe.\n"],
-        ["/metaverse/player", "player"],
-        ["/metaverse/world", "metaverse"],
-        ["/metaverse/scene", constants.scene],
-      ];
-      for (const [ref, text] of values) {
-        store.kv_put(ref, bytes_text(text));
-      }
-      this.assertEqual(store.seq_get("_files"), 1);
-      this.assertEqual(store.seq_get("metaverse"), 5);
-      this.lines_of(store).splice(0);
-    }
-
-    // Makes a forwarded operation's call and returns the one line it sent.
-    modifier_call(
-      store: substrate.Store,
-      record: RecordedOperation,
-    ): lines.Line {
-      const fields = record.fields;
-      const calls: { [type: string]: () => unknown } = {
-        // A value under an external ref.
-        "kv.put": () =>
-          store.kv_put(fields.k as string, fields.data as Uint8Array),
-        // A document.
-        "doc.put": () =>
-          store.doc_put(
-            fields.db as string,
-            fields.id as string,
-            fields.body as lines.Document,
-          ),
-        // A database.
-        "db.create": () => store.db_create(fields.db as string),
-        // A turn.
-        "turn.append": () =>
-          store.turn_append(
-            fields.scene as string,
-            fields.role as provider.Role,
-            fields.content as provider.ChatMessage,
-          ),
-        // Statements.
-        "sql.run": () =>
-          store.sql_run(
-            fields.db as string,
-            fields.statements as lines.SqlStatement[],
-          ),
-      };
-      calls[record.type]();
-      const forwarded = this.lines_of(store).splice(0);
-      this.assertEqual(forwarded.length, 1, record.type);
-      return forwarded[0];
-    }
-  }
-
-  // Administration: the measure, compaction, unloading, loading, the start.
-  export class TestAdmin extends StoreCase {
-    // Each open database is measured by pages and cached values, then all.
-    test_stats_measured(): void {
-      const store = this.store_fresh();
-      store.db_create("alpha");
-      store.db_create("beta");
-      store.kv_put("/alpha/big", value_over());
-      store.kv_put("/alpha/small", bytes_text("small"));
-      store.kv_put("/beta/big", bytes_reversed(value_over()));
-      const cached = constants.overflow_bytes + 1;
-      const databases = [
-        stats_measured(store, "alpha", cached),
-        stats_measured(store, "beta", cached),
-      ];
-      const total = databases[0].bytes + databases[1].bytes;
-      this.assertEqual(store.db_stats(constants.soft_bytes), {
-        databases,
-        total_bytes: total,
-        soft_bytes: constants.soft_bytes,
-        over: false,
-      });
-      this.assertTrue(store.db_stats(total - 1).over);
-      this.assertFalse(store.db_stats(total).over);
-    }
-
-    // `VACUUM` frees pages, keeps content and `seq`, and forwards nothing.
-    test_compact_vacuum(): void {
-      const store = this.store_fresh();
-      store.db_create("alpha");
-      store.sql_run("alpha", [
-        { sql: "CREATE TABLE note (x TEXT)", params: [] },
-        {
-          sql:
-            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL" +
-            " SELECT i + 1 FROM n WHERE i < 2000)" +
-            " INSERT INTO note SELECT printf('%0100d', i) FROM n",
-          params: [],
-        },
-      ]);
-      store.sql_run("alpha", [{ sql: "DELETE FROM note", params: [] }]);
-      this.lines_answer(store);
-      const seq = store.seq_get("alpha");
-      const dump = content_dump(store, "alpha");
-      const before = store.db_stats(constants.soft_bytes).databases[0];
-      this.assertTrue(before.free_bytes > 0);
-      const compacted = store.db_compact("alpha");
-      const after = store.db_stats(constants.soft_bytes).databases[0];
-      this.assertEqual(compacted, {
-        before: before.bytes,
-        after: after.bytes,
-      });
-      this.assertTrue(after.bytes < before.bytes);
-      this.assertEqual(after.free_bytes, 0);
-      this.assertEqual(store.seq_get("alpha"), seq);
-      this.assertEqual(content_dump(store, "alpha"), dump);
-      this.assertEqual(this.lines_of(store), []);
-      this.raised_assert(i18n("substrate.db_busy", "alpha"), () =>
-        store.transaction_run(() => {
-          store.kv_put("/alpha/a", bytes_text("one"));
-          store.db_compact("alpha");
-        }),
-      );
-    }
-
-    // Unloading deletes the copy and the files only it names, until loaded.
-    test_unload_files(): void {
-      const root = this.root_make();
-      const cache = cache_make();
-      const store = this.store_make(root, cache, true);
-      store.db_create("alpha");
-      store.db_create("beta");
-      const alone = bytes_reversed(value_over());
-      const alone_name = utility.sha256_hex(alone);
-      const shared_name = utility.sha256_hex(value_over());
-      store.kv_put("/alpha/shared", value_over());
-      store.kv_put("/alpha/alone", alone);
-      store.kv_put("/beta/shared", value_over());
-      this.lines_answer(store);
-      store.db_unload("alpha");
-      this.assertEqual(this.files_under(root), ["beta.sqlite"]);
-      this.raised_assert(i18n("substrate.cache_unknown", alone_name), () =>
-        cache.cache_read(alone_name, 0, 1),
-      );
-      this.assertEqual(cache.cache_read(shared_name, 0, 1).length, 1);
-      this.assertEqual(this.lines_of(store), []);
-      this.assertEqual(store.db_list(), ["beta"]);
-      const unloaded = i18n("substrate.db_unloaded", "alpha");
-      const calls: (() => unknown)[] = [
-        () => store.kv_get("/alpha/shared"),
-        () => store.db_open("alpha"),
-        () => store.db_create("alpha"),
-        () => store.db_drop("alpha"),
-        () => store.seq_get("alpha"),
-        () => store.db_unload("alpha"),
-      ];
-      for (const call of calls) {
-        this.raised_assert(unloaded, call);
-      }
-      const measured = store.db_stats(constants.soft_bytes).databases;
-      this.assertEqual(
-        measured.map((stats) => stats.name),
-        ["beta"],
-      );
-    }
-
-    // Unloading and loading go on with lines in flight, which end after.
-    test_load_pending(): void {
-      const cache = cache_make();
-      const store = this.store_make(this.root_make(), cache, true);
-      store.db_create("alpha");
-      store.kv_put("/alpha/a", bytes_text("one"));
-      const snapshot = store.db_snapshot("alpha");
-      this.lines_answer(store);
-      store.kv_put("/alpha/big", value_over());
-      store.db_unload("alpha");
-      const name = utility.sha256_hex(value_over());
-      this.assertEqual(cache.cache_read(name, 0, 1).length, 1);
-      this.assertEqual(store.db_load("alpha", snapshot.data), 1);
-      this.assertEqual(store.db_list(), ["alpha"]);
-      this.assertEqual(store.kv_get("/alpha/a").data, bytes_text("one"));
-      this.raised_assert(i18n("substrate.key_missing", "big", "alpha"), () =>
-        store.kv_get("/alpha/big"),
-      );
-      this.assertEqual(store.kv_put("/alpha/b", bytes_text("two")).seq, 2);
-      this.assertEqual(this.lines_of(store).length, 2);
-      this.lines_answer(store);
-      this.raised_assert(i18n("substrate.cache_unknown", name), () =>
-        cache.cache_read(name, 0, 1),
-      );
-      this.assertEqual(this.lines_of(store), []);
-    }
-
-    // At start the held files that match open, the rest wait for a load.
-    test_start_open(): void {
-      const root = this.root_make();
-      const slots = slots_make(constants.slot_count);
-      const held = new substrate.CacheFiles(slots);
-      const first = this.store_make(root, held, true);
-      first.db_create("alpha");
-      first.db_create("beta");
-      first.db_create("gamma");
-      first.kv_put("/alpha/a", bytes_text("one"));
-      first.kv_put("/beta/a", bytes_text("one"));
-      first.kv_put("/beta/b", bytes_text("two"));
-      const snapshot = first.db_snapshot("beta");
-      for (const name of first.db_list()) {
-        first.db_close(name);
-      }
-      const cache = new substrate.CacheFiles(slots);
-      const second = this.store_make(root, cache, true);
-      this.assertEqual(second.start_open({ alpha: 1, beta: 3, delta: 4 }), [
-        "beta",
-      ]);
-      this.assertEqual(second.db_list(), ["alpha"]);
-      this.assertEqual(second.seq_get("alpha"), 1);
-      this.assertEqual(this.files_under(root), [
-        "alpha.sqlite",
-        "beta.sqlite",
-      ]);
-      this.raised_assert(i18n("substrate.db_unloaded", "beta"), () =>
-        second.kv_get("/beta/a"),
-      );
-      this.raised_assert(i18n("substrate.db_unloaded", "delta"), () =>
-        second.seq_get("delta"),
-      );
-      this.assertEqual(second.db_load("beta", snapshot.data), 2);
-      this.assertEqual(second.kv_get("/beta/b").data, bytes_text("two"));
-      this.assertEqual(second.db_list(), ["alpha", "beta"]);
-      this.assertEqual(this.lines_of(second), []);
-    }
-
-    // Cached values an unload freed are held again once filled after a load.
-    test_value_filled(): void {
-      const cache = cache_make();
-      const store = this.store_make(this.root_make(), cache, true);
-      const other = bytes_reversed(value_over());
-      store.db_create("alpha");
-      store.kv_put("/alpha/big", value_over());
-      store.kv_put("/alpha/other", other);
-      store.kv_put("/alpha/small", bytes_text("small"));
-      this.lines_answer(store);
-      const snapshot = store.db_snapshot("alpha");
-      store.db_unload("alpha");
-      this.assertEqual(store.db_load("alpha", snapshot.data), 3);
-      this.assertFalse(store.kv_held("/alpha/big"));
-      this.assertFalse(store.kv_held("/alpha/other"));
-      this.assertTrue(store.kv_held("/alpha/small"));
-      const name = utility.sha256_hex(value_over());
-      this.raised_assert(i18n("substrate.cache_unknown", name), () =>
-        cache.cache_read(name, 0, 1),
-      );
-      const wrong = utility.sha256_hex(other);
-      this.raised_assert(
-        i18n("substrate.fill_desync", "/alpha/big", wrong, name),
-        () => store.cache_fill("/alpha/big", other),
-      );
-      this.assertFalse(store.kv_held("/alpha/big"));
-      store.cache_fill("/alpha/big", sink_fill(cache, value_over()));
-      store.cache_fill("/alpha/other", other.slice());
-      this.assertTrue(store.kv_held("/alpha/big"));
-      this.assertTrue(store.kv_held("/alpha/other"));
-      const size = value_over().length;
-      this.assertEqual(cache.cache_read(name, 0, size), value_over());
-      this.assertEqual(cache.cache_read(wrong, 0, size), other);
-      this.assertEqual(store.seq_get("alpha"), 3);
-      this.assertEqual(this.lines_of(store), []);
-    }
-  }
-
-  // The cached values of a database freed by key until they fit a budget.
-  export class TestEvict extends StoreCase {
-    // Values go by key until the rest fit, the kept ones and the rows staying.
-    test_evict_budget(): void {
-      const store = this.store_fresh();
-      store.db_create("_files");
-      const values: [string, Uint8Array][] = [
-        ["a", value_over()],
-        ["b", bytes_reversed(value_over())],
-        ["c", bytes_pattern(constants.overflow_bytes + 2)],
-      ];
-      for (const [key, data] of values) {
-        store.kv_put(`/_files/${key}`, data);
-      }
-      this.lines_answer(store);
-      // The kept refs: one of `_files`, one of another database, one internal.
-      const keep = ["/_files/b", "/metaverse/c", "c"];
-      const each = constants.overflow_bytes + 1;
-      // Whether each value is held, in the order of their keys.
-      const values_held = (): boolean[] =>
-        values.map(([key]) => store.kv_held(`/_files/${key}`));
-      this.assertEqual(store.cache_evict("_files", keep, 3 * each + 1), 0);
-      this.assertEqual(values_held(), [true, true, true]);
-      this.assertEqual(store.cache_evict("_files", keep, 2 * each + 1), 1);
-      this.assertEqual(values_held(), [false, true, true]);
-      this.assertEqual(store.cache_evict("_files", keep, 0), 1);
-      this.assertEqual(values_held(), [false, true, false]);
-      this.assertEqual(store.kv_list("_files", "").length, 3);
-      this.assertEqual(store.seq_get("_files"), 3);
-      this.assertEqual(this.lines_of(store), []);
-    }
-
-    // A value another database names or a line in flight holds stays.
-    test_evict_named(): void {
-      const store = this.store_fresh();
-      store.db_create("_files");
-      store.db_create("beta");
-      store.kv_put("/_files/shared", value_over());
-      store.kv_put("/beta/shared", value_over());
-      store.kv_put("/_files/alone", bytes_reversed(value_over()));
-      this.lines_answer(store);
-      const flying = bytes_pattern(constants.overflow_bytes + 2);
-      store.kv_put("/_files/flying", flying);
-      this.assertEqual(store.cache_evict("_files", [], 0), 1);
-      this.assertFalse(store.kv_held("/_files/alone"));
-      this.assertTrue(store.kv_held("/_files/flying"));
-      this.assertTrue(store.kv_held("/_files/shared"));
-      this.lines_answer(store);
-      this.assertEqual(store.cache_evict("_files", [], 0), 1);
-      this.assertFalse(store.kv_held("/_files/flying"));
-      this.assertTrue(store.kv_held("/_files/shared"));
-      this.assertTrue(store.kv_held("/beta/shared"));
     }
   }
 
@@ -3113,33 +2273,32 @@ namespace test_substrate {
     // The stopped put leaves a file and no row, and `kv_check` removes it.
     test_kill_between(): void {
       const root = this.root_make();
-      const slots = slots_make(constants.slot_count);
+      const slots = slots_make(slot_count());
       // The stop that stands for the kill: it throws where the rung kills.
       const kill_stop = (): never => {
         throw new Error(constants.kill_message);
       };
       const pool = kill_pool(this.pool_get(), kill_stop);
       const cache = new substrate.CacheFiles(slots);
-      const paused = this.store_make(root, cache, true, pool);
+      const paused = this.store_make(root, cache, pool);
       this.raised_assert(constants.kill_message, () => kill_put(paused));
       paused.db_close(constants.kill_db);
-      const name = utility.sha256_hex(value_over());
+      const name = digest_entry("value_over").sha256;
       const after = new substrate.CacheFiles(slots);
       this.assertEqual(
         after.cache_read(name, 0, 8),
         value_over().subarray(0, 8),
       );
-      const checked = this.store_make(root, after, true);
+      const checked = this.store_make(root, after);
       this.assertEqual(kill_check(checked), { rows: 0, removed: 1 });
-      this.assertEqual(checked.seq_get(constants.kill_db), 0);
-      this.raised_assert(i18n("substrate.cache_unknown", name), () =>
+      this.raised_assert(unknown_text(name), () =>
         after.cache_read(name, 0, 1),
       );
       this.assertEqual(checked.kv_check(constants.kill_db), 0);
     }
   }
 
-  // The handlers of the lines the UI thread submits to the AI thread.
+  // The handlers of the UI thread's requests and of the server's pushes.
   export class TestHandlers extends StoreCase {
     // Every type is registered at version 0.
     test_types_registered(): void {
@@ -3147,7 +2306,8 @@ namespace test_substrate {
       this.assertEqual([...table.keys()].sort(), [
         "db.create",
         "db.drop",
-        "db.snapshot",
+        "db.file",
+        "db.restore",
         "doc.head",
         "doc.put",
         "kv.delete",
@@ -3156,7 +2316,6 @@ namespace test_substrate {
         "kv.put",
         "sql.run",
         "turn.append",
-        "turn.compact",
       ]);
     }
 
@@ -3165,178 +2324,127 @@ namespace test_substrate {
       const store = this.store_fresh();
       const table = this.handlers_get(store);
       store.db_create("metaverse");
-      const world = bytes_text("castle_world");
+      const { data: world, sha256 } = digest_entry("castle_world");
       const put = this.answer_get(
         table,
-        request_make("kv.put", 7, {}, "/metaverse/world", [
-          jslb.blob_make(world.slice()),
-        ]),
+        line_blob("request_kv_put_world", world.slice()),
       );
       this.assertEqual(
-        jslb.line_render(put),
-        '{"0":{"t":"kv.put","r":7},"sha256":"' +
-          constants.world_sha256 +
-          '","seq":1}',
+        line_text(put),
+        gold_text("reply_kv_put").replaceAll("{0}", sha256),
       );
-      const got = this.answer_get(
-        table,
-        request_make("kv.get", 8, {}, "/metaverse/world"),
-      );
+      const got = this.answer_get(table, gold_line("request_kv_get_world"));
       this.assertEqual(
-        jslb.line_render(got),
-        '{"0":{"t":"kv.get","r":8,"b":1},"1":{"s":12},"size":12,"sha256":"' +
-          constants.world_sha256 +
-          '"}<blob "n"=1>',
+        line_text(got),
+        gold_text("reply_kv_get").replaceAll("{0}", sha256),
       );
       this.assertEqual((got[1] as lines.BlobHeader).d, world);
-      this.answer_get(
-        table,
-        request_make("kv.put", 9, {}, "/metaverse/big", [
-          jslb.blob_make(value_over().slice()),
-        ]),
-      );
-      const big = this.answer_get(
-        table,
-        request_make("kv.get", 10, {}, "/metaverse/big"),
-      );
+      this.answer_get(table, line_blob("request_kv_put_big", value_over()));
+      const big = this.answer_get(table, gold_line("request_kv_get_big"));
       this.assertEqual((big[1] as lines.BlobHeader).d, value_over());
     }
 
-    // `sql.run`, `kv.list` and `kv.delete` answer their results and `seq`.
+    // `sql.run`, `kv.list` and `kv.delete` answer their results.
     test_rows_answered(): void {
       const store = this.store_fresh();
       const table = this.handlers_get(store);
       store.db_create("castle");
-      const statements: lines.SqlStatement[] = [
-        { sql: constants.world_sql, params: [] },
-        {
-          sql: "INSERT INTO world VALUES (?, ?)",
-          params: ["castle_world", "The castle"],
-        },
-      ];
-      const ran = this.answer_get(
-        table,
-        request_make("sql.run", 4, { db: "castle", statements }),
-      );
+      const ran = this.answer_get(table, gold_line("request_sql_run"));
+      this.assertEqual(line_text(ran), gold_text("reply_sql_run"));
+      const { data: world, sha256 } = digest_entry("castle_world");
+      store.kv_put("/castle/world", world);
+      const listed = this.answer_get(table, gold_line("request_kv_list"));
       this.assertEqual(
-        jslb.line_render(ran),
-        '{"0":{"t":"sql.run","r":4},"results":[{"columns":[],"rows":[],' +
-          '"changes":0},{"columns":[],"rows":[],"changes":1}],"seq":1}',
+        line_text(listed),
+        gold_text("reply_kv_list").replaceAll("{0}", sha256),
       );
-      store.kv_put("/castle/world", bytes_text("castle_world"));
-      const listed = this.answer_get(
-        table,
-        request_make("kv.list", 5, { db: "castle", prefix: "wor" }),
-      );
-      this.assertEqual(
-        jslb.line_render(listed),
-        '{"0":{"t":"kv.list","r":5},"keys":[{"k":"world","size":12,' +
-          '"sha256":"' +
-          constants.world_sha256 +
-          '"}]}',
-      );
-      const deleted = this.answer_get(
-        table,
-        request_make("kv.delete", 6, {}, "/castle/world"),
-      );
-      this.assertEqual(
-        jslb.line_render(deleted),
-        '{"0":{"t":"kv.delete","r":6},"seq":3}',
-      );
+      const deleted = this.answer_get(table, gold_line("request_kv_delete"));
+      this.assertEqual(line_text(deleted), gold_text("reply_kv_delete"));
     }
 
-    // Documents and turns answer with their refs, numbers and `seq`.
+    // Documents and turns answer with their refs and numbers.
     test_documents_answered(): void {
       const store = this.store_fresh();
       const table = this.handlers_get(store);
       store.db_create("castle_gatehouse");
       store.db_create("metaverse");
-      const db = "castle_gatehouse";
-      const id = "scene/arrival";
-      const put = this.answer_get(
-        table,
-        request_make("doc.put", 13, { db, id, body: arrival_make() }),
-      );
-      this.assertEqual(
-        jslb.line_render(put),
-        '{"0":{"t":"doc.put","r":13},' +
-          '"ref":"/castle_gatehouse/scene/arrival/1","seq":1}',
-      );
-      const head = this.answer_get(
-        table,
-        request_make("doc.head", 14, { db, id }),
-      );
-      this.assertEqual(
-        jslb.line_render(head),
-        '{"0":{"t":"doc.head","r":14},' +
-          '"ref":"/castle_gatehouse/scene/arrival/1"}',
-      );
-      const scene = constants.scene;
+      const put = this.answer_get(table, gold_line("request_doc_put"));
+      this.assertEqual(line_text(put), gold_text("reply_doc_put"));
+      const head = this.answer_get(table, gold_line("request_doc_head"));
+      this.assertEqual(line_text(head), gold_text("reply_doc_head"));
       const appended = this.answer_get(
         table,
-        request_make("turn.append", 15, {
-          scene,
-          role: "user",
-          content: { role: "user", content: "1" },
-        }),
+        gold_line("request_turn_append"),
       );
-      this.assertEqual(
-        jslb.line_render(appended),
-        '{"0":{"t":"turn.append","r":15},"n":1,"seq":1}',
-      );
-      const compacted = this.answer_get(
-        table,
-        request_make("turn.compact", 16, {
-          scene,
-          through: 1,
-          summary: "Answered 1.",
-        }),
-      );
-      this.assertEqual(
-        jslb.line_render(compacted),
-        '{"0":{"t":"turn.compact","r":16},"seq":2}',
-      );
+      this.assertEqual(line_text(appended), gold_text("reply_turn_append"));
     }
 
-    // Databases are created, sent as one blob and dropped by their lines.
+    // Databases are created and dropped by their lines.
     test_databases_answered(): void {
       const store = this.store_fresh();
       const table = this.handlers_get(store);
-      const created = this.answer_get(
-        table,
-        request_make("db.create", 17, { db: "alpha" }),
-      );
-      this.assertEqual(
-        jslb.line_render(created),
-        '{"0":{"t":"db.create","r":17}}',
-      );
+      const created = this.answer_get(table, gold_line("request_db_create"));
+      this.assertEqual(line_text(created), gold_text("reply_db_create"));
       this.assertEqual(store.db_list(), ["alpha"]);
-      const data = store.db_snapshot("alpha").data;
-      const snapshot = this.answer_get(
-        table,
-        request_make("db.snapshot", 18, { db: "alpha" }),
+      const dropped = this.answer_get(table, gold_line("request_db_drop"));
+      this.assertEqual(line_text(dropped), gold_text("reply_db_drop"));
+      this.assertEqual(store.db_list(), []);
+    }
+
+    // A restore waits for its `db.file` lines, or runs at once with none.
+    test_restore_answered(): void {
+      const source_cache = cache_make();
+      const source = this.store_make(this.root_make(), source_cache);
+      source.db_create("alpha");
+      source.db_create("beta");
+      source.kv_put("/alpha/one", value_over());
+      source.kv_put("/alpha/two", value_other());
+      source.kv_put("/beta/small", bytes_text("small"));
+      const alpha = source.db_snapshot("alpha");
+      const beta = source.db_snapshot("beta");
+      const size = overflow_get() + 1;
+      const files = alpha.files.map((name) =>
+        source_cache.cache_read(name, 0, size),
       );
-      this.assertEqual(snapshot[0], { t: "db.snapshot", r: 18, b: 1 });
-      this.assertEqual(jslb.payload_of(snapshot), {
-        sha256: utility.sha256_hex(data),
-        seq: 0,
-      });
-      const size = String(data.length);
+      const cache = cache_make();
+      const store = this.store_make(this.root_make(), cache);
+      const table = this.handlers_get(store);
+      this.push_give(table, line_blob("restore_alpha", alpha.data));
+      this.push_give(table, line_blob("file_alpha", files[0]));
+      this.assertEqual(store.db_list(), []);
+      this.push_give(table, line_blob("file_alpha", files[1]));
+      this.assertEqual(store.db_list(), ["alpha"]);
       this.assertEqual(
-        jslb.line_render(snapshot),
-        `{"0":{"t":"db.snapshot","r":18,"b":1},"1":{"s":${size}},` +
-          `"sha256":"${utility.sha256_hex(data)}","seq":0}<blob "n"=1>`,
+        store.kv_list("alpha", ""),
+        source.kv_list("alpha", ""),
       );
-      this.assertEqual((snapshot[1] as lines.BlobHeader).d, data);
-      this.assertEqual(data.subarray(0, 15), bytes_text(constants.file_magic));
-      this.assertFalse(table.has("db.chunk"));
-      const dropped = this.answer_get(
-        table,
-        request_make("db.drop", 21, { db: "alpha" }),
+      for (const [index, name] of alpha.files.entries()) {
+        this.assertEqual(cache.cache_read(name, 0, size), files[index]);
+      }
+      this.push_give(table, line_blob("restore_beta_none", beta.data));
+      this.assertEqual(store.db_list(), ["alpha", "beta"]);
+      this.assertEqual(store.kv_get("/beta/small").data, bytes_text("small"));
+      this.assertEqual(this.pushes_of(store), []);
+    }
+
+    // A restore while one waits, or a file no restore waits for, throws.
+    test_restore_refused(): void {
+      const source = this.store_fresh();
+      source.db_create("alpha");
+      const data = source.db_snapshot("alpha").data;
+      const store = this.store_fresh();
+      const table = this.handlers_get(store);
+      const file = value_over();
+      this.raised_assert(gold_text("substrate_file_unexpected_alpha"), () =>
+        this.push_give(table, line_blob("file_alpha", file)),
       );
-      this.assertEqual(
-        jslb.line_render(dropped),
-        '{"0":{"t":"db.drop","r":21}}',
+      this.push_give(table, line_blob("restore_alpha", data));
+      const again = line_blob("restore_beta_one", data);
+      this.raised_assert(gold_text("substrate_restore_pending"), () =>
+        this.push_give(table, again),
+      );
+      this.raised_assert(gold_text("substrate_file_unexpected_beta"), () =>
+        this.push_give(table, line_blob("file_beta", file)),
       );
       this.assertEqual(store.db_list(), []);
     }
@@ -3351,14 +2459,19 @@ namespace test_substrate {
       return table;
     }
 
-    // The reply line the handler of a request's type returns.
+    // The reply line the handler of a request's type, its short `t`, returns.
     answer_get(
       table: Map<string, dispatch.Handler>,
       request: lines.Line,
     ): lines.Line {
-      const type = jslb.field_get(request[0], "type") as string;
-      const fn = table.get(type) as dispatch.Handler;
+      const fn = table.get(request[0].t) as dispatch.Handler;
       return fn(request) as lines.Line;
+    }
+
+    // Gives a push to the handler of its type, which must return nothing.
+    push_give(table: Map<string, dispatch.Handler>, push: lines.Line): void {
+      const fn = table.get(push[0].t) as dispatch.Handler;
+      this.assertEqual(fn(push), undefined);
     }
   }
 
@@ -3377,37 +2490,25 @@ namespace test_substrate {
       this.assertEqual(
         Object.getOwnPropertyNames(substrate.Store.prototype).sort(),
         [
-          "cache_evict",
-          "cache_fill",
           "constructor",
           "db_close",
-          "db_compact",
           "db_create",
           "db_drop",
           "db_list",
-          "db_load",
           "db_open",
           "db_restore",
           "db_snapshot",
-          "db_stats",
-          "db_unload",
           "doc_get",
           "doc_head",
           "doc_put",
-          "forward_done",
-          "forward_set",
           "handlers_register",
           "kv_check",
           "kv_delete",
           "kv_get",
-          "kv_held",
           "kv_list",
           "kv_put",
-          "operation_apply",
-          "seq_get",
           "sink",
           "sql_run",
-          "start_open",
           "transaction_run",
           "turn_append",
           "turn_compact",

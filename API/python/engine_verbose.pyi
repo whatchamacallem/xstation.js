@@ -9,3 +9,6 @@ def verbose_put(
 def verbose_tail(
     line: jslb.Object, *, thread: str, count: int
 ) -> jslb.Object: ...
+
+# Registers both handlers, with debug mode as the gate of `verbose.put`.
+def handlers_register(debug: bool) -> None: ...

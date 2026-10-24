@@ -8,12 +8,14 @@
 // clients, and once every result is in the reply and its results are stored
 // together, so that no stored call lacks its answer, and go back to the
 // provider. The reply with no tool calls is stored and ends the turn with its
-// text as the subtitle. After each turn the open databases are measured
-// against the soft limit, and a measurement over it goes to the provider with
-// the next request.
+// text as the subtitle. Nothing measures the databases: no request carries
+// their sizes, and the loop reads no setting. A tool call's arguments are
+// read by `jslb.json_decode`. Two `universe` rows cannot name one world: the
+// triggers of API/sql/metaverse.sql refuse the second with
+// `agent.content_ambiguous` before it is added.
 
 namespace agent {
-  // The line types, refs, ids, settings and statements the loop uses.
+  // The line types, refs, ids and statements the loop uses.
   const constants = Object.freeze({
     say_type: "ai.say",
     click_type: "ai.click",
@@ -26,15 +28,11 @@ namespace agent {
     prompt_id: "prompt",
     part_separator: "\n",
     tool_choice: "auto" as const,
-    soft_setting: "db_soft_bytes",
-    // The universes whose row names a world.
+    // The universe whose row names a world, one at most by the triggers.
     universe_sql: "SELECT name FROM universe WHERE world = ?",
     // The version of the head of a document id, in the substrate's own table.
     head_sql: "SELECT version FROM _head WHERE id = ?",
   });
-
-  // Reads a setting by id, as `settings.settings_get` does.
-  type SettingsRead = (id: settings.Id) => unknown;
 
   // Registers the handler of one line type and version.
   type HandlerRegister = (
@@ -84,9 +82,6 @@ namespace agent {
     const world = world_current(store);
     const statement = { sql: constants.universe_sql, params: [world] };
     const rows = store.sql_run(constants.metaverse, [statement])[0].rows;
-    if (rows.length > 1) {
-      throw new Error(i18n("agent.universe_ambiguous", rows.length, world));
-    }
     return rows.length === 0 ? undefined : (rows[0][0] as string);
   }
 
@@ -137,10 +132,6 @@ namespace agent {
     readonly #provider_owner: queue.ThreadName;
     // The provider's address and the model every chat request names.
     readonly #info: lines.ProviderInfo;
-    // The reader of the settings.
-    readonly #settings_get: SettingsRead;
-    // The measurement over the soft limit that the next request carries.
-    #stats_pending: substrate.StoreStats | undefined = undefined;
 
     // Takes what the handlers work with.
     constructor(
@@ -149,14 +140,12 @@ namespace agent {
       tasks: queue.TaskQueue,
       provider_owner: queue.ThreadName,
       info: lines.ProviderInfo,
-      settings_get: SettingsRead,
     ) {
       this.#store = store;
       this.#clients = clients;
       this.#tasks = tasks;
       this.#provider_owner = provider_owner;
       this.#info = info;
-      this.#settings_get = settings_get;
     }
 
     // Starts a turn with the text the player said.
@@ -192,7 +181,6 @@ namespace agent {
       const store = this.#store;
       const appended = store.turn_append(state.scene, message.role, message);
       const scene = scene_current(store);
-      this.limit_check();
       return dispatch.reply_make(state.request, {
         turn: appended.n,
         scene,
@@ -237,11 +225,6 @@ namespace agent {
     request_submit(request: lines.Line, scene: lines.DocRef): dispatch.Sleep {
       const store = this.#store;
       const messages = prompt_build(store);
-      const stats = this.#stats_pending;
-      if (stats !== undefined) {
-        messages.push({ role: "system", content: utility.json_text(stats) });
-        this.#stats_pending = undefined;
-      }
       for (const row of store.turn_list(scene)) {
         messages.push(row.content);
       }
@@ -263,7 +246,7 @@ namespace agent {
       const text = call.function.arguments;
       let args: unknown;
       try {
-        args = JSON.parse(text);
+        args = jslb.json_decode(text);
       } catch (error) {
         throw utility.error_wrap(
           i18n("agent.arguments_invalid", call.id, name, text),
@@ -275,15 +258,6 @@ namespace agent {
       }
       return this.#clients.tool_call(name, args as { [key: string]: unknown });
     }
-
-    // Measures the open databases and keeps a measurement over the limit.
-    limit_check(): void {
-      const soft_bytes = this.#settings_get(constants.soft_setting) as number;
-      const stats = this.#store.db_stats(soft_bytes);
-      if (stats.over) {
-        this.#stats_pending = stats;
-      }
-    }
   }
 
   // Registers the handlers of a turn's lines with the register given.
@@ -293,17 +267,9 @@ namespace agent {
     tasks: queue.TaskQueue,
     provider_owner: queue.ThreadName,
     info: lines.ProviderInfo,
-    settings_get: SettingsRead,
     register: HandlerRegister,
   ): void {
-    const loop = new TurnLoop(
-      store,
-      clients,
-      tasks,
-      provider_owner,
-      info,
-      settings_get,
-    );
+    const loop = new TurnLoop(store, clients, tasks, provider_owner, info);
     const version = constants.handler_version;
     register(constants.say_type, version, (line) => loop.say_handle(line));
     register(constants.click_type, version, (line) => loop.click_handle(line));

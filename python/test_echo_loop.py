@@ -3,13 +3,15 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the echo main loop in forked children over pipes, with roots in
-# `build/`. Each child kills itself when its work ends, so the handler it
-# registers never reaches another test.
+# `build/` whose settings are the checkout's with the gold's sizes, and its
+# error texts against the gold. Each child writes how its work ended to a
+# file, or to stderr with the failure when that write fails, then kills
+# itself whatever happened, so the handlers it registers never reach another
+# test.
 
-import echo_loop, functools, json, os, signal, sys, tempfile, traceback
-import unittest
+import echo_loop, functools, harness, json, os, signal, sys, tempfile
+import traceback, unittest, unittest.mock
 from collections.abc import Callable
-from i18n import i18n
 from typing import Any, NamedTuple
 
 # The checkout's top directory, above this file's `python/`.
@@ -18,20 +20,20 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
-# The settings file of the checkout, which holds a valid settings object.
-_SETTINGS_PATH = os.path.join(_ROOT_PATH, "settings.json")
+# The id of this module's gold in `test_settings.json`.
+_GOLD_ID = "python.test_echo_loop"
 
 # A size chosen by its writer, small: a blob over it streams to the cache.
-_OVERFLOW_BYTES = 4096
+_OVERFLOW_BYTES: int = harness.gold_get(f"{_GOLD_ID}.overflow_bytes")
 
 # A size chosen by its writer: the most the loop reads, so lines split.
-_CHUNK_BYTES = 1000
+_CHUNK_BYTES: int = harness.gold_get(f"{_GOLD_ID}.chunk_bytes")
 
-# A size chosen by its writer: a blob that streams, over `_OVERFLOW_BYTES`.
+# A blob that streams, over `_OVERFLOW_BYTES`.
 _STREAMED_BYTES = _OVERFLOW_BYTES * 2 + 1
 
 # A size chosen by its writer: the most the test reads from the pipe.
-_READ_BYTES = 65536
+_READ_BYTES: int = harness.gold_get(f"{_GOLD_ID}.read_bytes")
 
 # How a child ends when the loop returns at the end of its input.
 _ENDING_RETURNED = "returned"
@@ -45,14 +47,38 @@ _PAYLOAD: dict[str, Any] = {"text": "the payload of the test", "count": 3}
 # A reply on the engine tty, which the echo loop awaits none of.
 _REPLY_STRAY = b'{"0":{"t":"echo","r":1}}\r'
 
-# How that reply is rendered in a message.
-_STRAY_RENDERED = '{"0":{"t":"echo","r":1}}'
-
 # A request of a type the echo loop has no handler for.
 _TYPE_UNKNOWN = b'{"0":{"t":"no.such","i":1}}\r'
 
 # A request cut before the CR that ends its line.
 _LINE_CUT = b'{"0":{"t":"echo","i":1}}'
+
+# A `tap.line` push of the TypeScript stream.
+_TAP_LINE = (
+    b'{"0":{"t":"tap.line"},"language":"typescript","text":"ok 1 - x"}\r'
+)
+
+# The TAP file of the TypeScript stream in a root.
+_TAP_FILE = os.path.join("tap", "typescript.tap")
+
+# The browser's `error` line: a message, a stack and a cause, no `r`.
+_BROWSER_ERROR = (
+    b'{"0":{"t":"error"},"message":"page fault","stack":"at page",'
+    b'"cause":{"message":"first fault","stack":"at first"}}\r'
+)
+
+# The arguments `engine_tap.error_take` is due for that line.
+_ERROR_TAKEN: list[Any] = [
+    "page fault",
+    "at page",
+    {"message": "first fault", "stack": "at first"},
+]
+
+
+# A text of this module's gold.
+def _text_get(name: str) -> str:
+    text: str = harness.gold_get(f"{_GOLD_ID}.texts.{name}")
+    return text
 
 
 # A line's JSON object and the bytes of each of its blobs.
@@ -102,14 +128,23 @@ def _child_end(
     work: Callable[[int, int], str], read_fd: int, write_fd: int, path: str
 ) -> None:
     try:
-        ending = work(read_fd, write_fd)
-    except SystemExit as error:
-        ending = f"exit {error.code}"
-    except BaseException:
-        ending = traceback.format_exc()
-    with open(path, "w", encoding="utf-8") as file:
-        file.write(ending)
-    os.kill(os.getpid(), signal.SIGKILL)
+        try:
+            ending = work(read_fd, write_fd)
+        except SystemExit as error:
+            ending = f"exit {error.code}"
+        except BaseException:
+            ending = traceback.format_exc()
+        try:
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(ending)
+        except BaseException:
+            # The parent finds no ending, so the failure and it go to stderr.
+            sys.stderr.write(
+                f"{traceback.format_exc()}the ending not written: {ending}\n"
+            )
+            sys.stderr.flush()
+    finally:
+        os.kill(os.getpid(), signal.SIGKILL)
 
 
 # The work of a child that prepares the root and says what it returned.
@@ -124,6 +159,21 @@ def _echo_serve(root: str, read_fd: int, write_fd: int) -> str:
     return _ENDING_RETURNED
 
 
+# The work of a child whose `error_take` writes its arguments to a file.
+def _error_serve(root: str, path: str, read_fd: int, write_fd: int) -> str:
+    # Appends the arguments as one line of JSON, in place of the real work.
+    def taken_write(
+        message: str, stack: str, cause: dict[str, object] | None
+    ) -> None:
+        with open(path, "a", encoding="utf-8") as file:
+            file.write(json.dumps([message, stack, cause]) + "\n")
+
+    with unittest.mock.patch.object(
+        echo_loop.engine_tap, "error_take", taken_write
+    ):
+        return _echo_serve(root, read_fd, write_fd)
+
+
 # Gives each test a scratch root in `build/` whose settings stream small.
 class ScratchCase(unittest.TestCase):
     # Makes the scratch directory and the root with the changed settings.
@@ -134,8 +184,7 @@ class ScratchCase(unittest.TestCase):
         self.scratch = scratch.name
         self.root = os.path.join(scratch.name, "root")
         os.mkdir(self.root)
-        with open(_SETTINGS_PATH, encoding="utf-8") as file:
-            values: dict[str, Any] = json.load(file)
+        values = harness.settings_copy()
         values["overflow_bytes"] = _OVERFLOW_BYTES
         values["chunk_bytes"] = _CHUNK_BYTES
         path = os.path.join(self.root, "settings.json")
@@ -171,12 +220,12 @@ class ScratchCase(unittest.TestCase):
 
 # `loop_prepare`: the cache directory made, no database, no `seq`.
 class TestPrepare(ScratchCase):
-    # The root gains only the empty cache directory, and the map is empty.
+    # The root gains only the empty cache directory, and nothing is returned.
     def test_prepare_bare(self) -> None:
         work = functools.partial(_prepare_once, self.root)
         ending, output = self.child_run(work, b"")
         self.assertEqual(output, b"")
-        self.assertEqual(json.loads(ending), {})
+        self.assertIsNone(json.loads(ending))
         names = sorted(os.listdir(self.root))
         self.assertEqual(names, ["cache", "settings.json"])
         self.assertEqual(os.listdir(os.path.join(self.root, "cache")), [])
@@ -236,19 +285,39 @@ class TestEcho(ScratchCase):
     def test_reply_refused(self) -> None:
         ending, lines = self.echo_read(_REPLY_STRAY)
         self.assertEqual(ending, _ENDING_FAILED)
-        message = i18n("echo_loop.reply_unknown", _STRAY_RENDERED)
+        message = _text_get("echo_loop_reply_unknown")
         self.error_check(lines, {"t": "error"}, message)
 
     # A type with no handler gets one `error` line with its id.
     def test_type_unknown(self) -> None:
         ending, lines = self.echo_read(_TYPE_UNKNOWN)
         self.assertEqual(ending, _ENDING_FAILED)
-        message = i18n("dispatch.handler_unknown", "no.such", 0)
+        message = _text_get("dispatch_handler_unknown")
         self.error_check(lines, {"t": "error", "r": 1}, message)
 
-    # The end of the input inside a line is an `error` line with no id.
+    # The input ending inside a line: an `error` line, no id, full names.
     def test_end_partial(self) -> None:
         ending, lines = self.echo_read(_LINE_CUT)
         self.assertEqual(ending, _ENDING_FAILED)
-        message = i18n("echo_loop.input_partial")
-        self.error_check(lines, {"t": "error"}, message)
+        message = _text_get("echo_loop_input_partial")
+        self.error_check(lines, {"type": "error"}, message)
+
+    # A `tap.line` push is appended as a line to its file, nothing written.
+    def test_tap_line(self) -> None:
+        ending, lines = self.echo_read(_TAP_LINE)
+        self.assertEqual(ending, _ENDING_RETURNED)
+        self.assertEqual(lines, [])
+        path = os.path.join(self.root, _TAP_FILE)
+        with open(path, encoding="utf-8") as file:
+            self.assertEqual(file.read(), "ok 1 - x\n")
+
+    # The browser's `error` line goes to `error_take` once, then exit 1.
+    def test_browser_error(self) -> None:
+        path = os.path.join(self.scratch, "taken.json")
+        work = functools.partial(_error_serve, self.root, path)
+        ending, output = self.child_run(work, _BROWSER_ERROR)
+        self.assertEqual(ending, _ENDING_FAILED)
+        self.assertEqual(output, b"")
+        with open(path, encoding="utf-8") as file:
+            taken = [json.loads(text) for text in file.read().splitlines()]
+        self.assertEqual(taken, [_ERROR_TAKEN])

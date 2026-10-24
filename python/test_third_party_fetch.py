@@ -3,11 +3,15 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests of third_party_fetch: `file_fetch` against file URLs and a scratch
-# directory under build/, and the table of pinned files.
+# directory under build/, and the table of pinned files, which holds the
+# two archives the page reads as the gold names them.
 
-import hashlib, os, page_build, pathlib, re, tempfile, third_party_fetch
+import harness, hashlib, os, pathlib, re, tempfile, third_party_fetch
 import unittest.mock
 from typing import cast
+
+# The id of the gold's list of the archives `page_build` reads.
+_ARCHIVES_ID = "python.test_third_party_fetch.archives_read"
 
 # The checkout's build directory, where each test makes its scratch directory.
 _BUILD_PATH = os.path.join(
@@ -138,12 +142,13 @@ class TestPins(unittest.TestCase):
         )
         return pins
 
-    # The two archives `page_build` reads are names of the table.
+    # The two archives `page_build` reads, by the gold, are names of the table.
     def test_archives_pinned(self) -> None:
         names = [name for name, _url, _sha256 in self.pins_get()]
-        for constant in ("_SQLITE_ARCHIVE", "_XTERM_ARCHIVE"):
-            archive: str = getattr(page_build, constant)
-            self.assertIn(archive, names, constant)
+        archives: list[str] = harness.gold_get(_ARCHIVES_ID)
+        self.assertEqual(len(archives), 2)
+        for archive in archives:
+            self.assertIn(archive, names)
 
     # The ttyd archive that `xsjs_install.ps1` unpacks is a name of the table.
     def test_install_pinned(self) -> None:

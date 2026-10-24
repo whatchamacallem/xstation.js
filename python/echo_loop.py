@@ -2,19 +2,23 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# A main loop file that opens no database and serves one line type, `echo`,
-# whose reply carries the payload of its request and the bytes of each of its
-# blobs. bootstrap.py runs it from the root's main_loop directory when
-# --main-loop names it in debug mode, or when system.restart names it after
-# source.put stored it there. loop_prepare reads the settings for the
-# decoder's limits and returns no seq, as it opens no database; loop_run
-# decodes each line, refuses any reply, dispatches the rest and writes each
-# reply, a blob over overflow_bytes going through a file in the root's cache
-# directory both ways. A failure writes one error line and exits 1, as the
-# stock main loop does.
+# A main loop file with no database and no seq, the echo root of the wire
+# test and of the browser test. bootstrap.py runs it from the root's
+# main_loop directory when --main-loop names it in debug mode, or when
+# system.restart names it after source.put stored it there, and writes the
+# first line, `tap.start`. loop_prepare reads the settings for the decoder's
+# limits and makes the cache directory. loop_run decodes each line and
+# refuses any reply. The browser's `error` line, its failure, goes to
+# `engine_tap.error_take`, then the loop exits 1 with nothing written back:
+# the browser waits for the server to end, which ttyd's close of the socket
+# gives it. A `tap.line` is appended through `engine_tap`, and an `echo` is
+# answered with the payload of its request and the bytes of each of its
+# blobs, a blob over overflow_bytes going through a file in the root's cache
+# directory both ways. A failure of its own writes one error line and exits
+# 1, as the stock main loop does.
 
-import dispatch, functools, jslb, os, select, settings, uuid
-from i18n import i18n
+import dispatch, engine_tap, functools, jslb, os, select, settings, uuid
+from internationalization import i18n
 from typing import Any, NoReturn, cast
 
 # The settings file in the root.
@@ -28,6 +32,9 @@ _ECHO_TYPE = "echo"
 
 # The version of the `echo` line.
 _ECHO_VERSION = 0
+
+# The type of the line that carries the browser's failure.
+_ERROR_TYPE = "error"
 
 # The exit code of a failure.
 _EXIT_FAILED = 1
@@ -45,10 +52,9 @@ _STATE = _EchoState()
 
 
 # Reads the settings and makes the cache directory. Opens no database.
-def loop_prepare(root: str) -> dict[str, int]:
+def loop_prepare(root: str) -> None:
     _STATE.values = settings.settings_load(os.path.join(root, _SETTINGS_NAME))
     os.makedirs(os.path.join(root, _CACHE_DIRECTORY), exist_ok=True)
-    return {}
 
 
 # Replies with the payload of the request and the bytes of each of its blobs.
@@ -84,17 +90,25 @@ def _line_write(line: jslb.Object, write_fd: int, chunk: int) -> None:
                     _bytes_write(data, write_fd)
 
 
-# Writes the one `error` line of a failure and exits 1.
+# Writes the one `error` line of a failure, full names if `full`, exits 1.
 def _failure_exit(
-    line: jslb.Object | None, error: Exception, write_fd: int, chunk: int
+    line: jslb.Object | None,
+    error: Exception,
+    write_fd: int,
+    chunk: int,
+    full: bool,
 ) -> NoReturn:
-    _line_write(dispatch.error_make(line, error), write_fd, chunk)
+    _line_write(dispatch.error_make(line, error, full), write_fd, chunk)
     raise SystemExit(_EXIT_FAILED) from error
 
 
-# Echoes the lines one read finished, then feeds nothing to raise a fault.
+# Serves the lines one read finished, then feeds nothing to raise a fault.
 def _bytes_serve(
-    decoder: jslb.LineDecoder, data: bytes, write_fd: int, chunk: int
+    decoder: jslb.LineDecoder,
+    data: bytes,
+    write_fd: int,
+    chunk: int,
+    full: bool,
 ) -> None:
     line: jslb.Object | None = None
     try:
@@ -107,17 +121,28 @@ def _bytes_serve(
                     raise LookupError(
                         i18n("echo_loop.reply_unknown", rendered)
                     )
-                reply = cast(jslb.Object, dispatch.line_dispatch(line))
-                _line_write(reply, write_fd, chunk)
+                if jslb.field_get(line[0], "type") == _ERROR_TYPE:
+                    # The browser failed: logged, the TAP file ended, exit 1.
+                    payload = jslb.payload_of(line)
+                    engine_tap.error_take(
+                        payload["message"],
+                        payload["stack"],
+                        payload.get("cause"),
+                    )
+                    raise SystemExit(_EXIT_FAILED)
+                reply = dispatch.line_dispatch(line)
+                if reply is not None:
+                    _line_write(cast(jslb.Object, reply), write_fd, chunk)
             line = None
     except Exception as error:
-        _failure_exit(line, error, write_fd, chunk)
+        _failure_exit(line, error, write_fd, chunk, full)
 
 
 # The select loop: reads the pty, decodes, writes the echo of each request.
 def loop_run(read_fd: int, write_fd: int, root: str) -> None:
     values = cast(dict[str, Any], _STATE.values)
     dispatch.handler_register(_ECHO_TYPE, _ECHO_VERSION, echo_reply)
+    engine_tap.handlers_register(root)
     decoder = jslb.LineDecoder(
         values["line_max"],
         values["blob_max"],
@@ -125,9 +150,10 @@ def loop_run(read_fd: int, write_fd: int, root: str) -> None:
         functools.partial(_sink_make, os.path.join(root, _CACHE_DIRECTORY)),
     )
     chunk: int = values["chunk_bytes"]
+    full: bool = values["debug"]
     while True:
         select.select([read_fd], [], [])
         data = os.read(read_fd, chunk)
-        _bytes_serve(decoder, data, write_fd, chunk)
+        _bytes_serve(decoder, data, write_fd, chunk, full)
         if not data:
             return

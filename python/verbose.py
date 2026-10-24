@@ -10,7 +10,7 @@
 # engine module but the strings.
 
 import collections, os, shlex, sqlite3, subprocess, sys, time
-from i18n import i18n
+from internationalization import i18n
 from typing import NamedTuple
 
 # The file in the root that holds the lines.

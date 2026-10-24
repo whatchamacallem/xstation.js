@@ -17,17 +17,20 @@
 #     powershell.exe -ExecutionPolicy Bypass -File .\powershell\test_lint.ps1
 param()
 
-$ErrorActionPreference = 'Stop'
-$progressPreference = 'silentlyContinue'
-[Net.ServicePointManager]::SecurityProtocol = (
-    [Net.ServicePointManager]::SecurityProtocol -bor
-    [Net.SecurityProtocolType]::Tls12
-)
-$preset_ = 'CodeFormattingOTBS'
-# The extensions of the `windows` rows of `reformat_table.json`.
-$extensions_ = '.ps1', '.psd1'
+. (Join-Path $PSScriptRoot 'xsjs_util.ps1')
+
 # The project's top directory, which holds the files to check.
 $root_path_ = Split-Path -Parent $PSScriptRoot
+$test_settings_json_ = xsjs_util_read_json (
+    Join-Path $root_path_ 'test_settings.json')
+$lint_module_ = (
+    xsjs_util_get_setting $test_settings_json_ 'powershell.lint_module')
+$preset_ = xsjs_util_get_setting $test_settings_json_ 'powershell.lint_preset'
+# The extensions of the `windows` rows of `reformat_table.json`.
+$extensions_ = (
+    xsjs_util_get_setting $test_settings_json_ 'powershell.lint_extensions')
+$line_length_ = (
+    xsjs_util_get_setting $test_settings_json_ 'powershell.lint_line_length')
 # The whitelist that `reformat.py` reads too.
 $whitelist_path_ = Join-Path $root_path_ 'python\reformat_whitelist.txt'
 # A whitelist line: a path from the top, with `*` or `?` in its last part only.
@@ -60,17 +63,17 @@ function _test_lint_format_file ([string]$path_) {
     }
 }
 
-# Returns the OTBS preset's settings with the default rules and 79 columns.
+# Returns the OTBS preset's settings with the default rules and line length.
 function _test_lint_get_lint_settings {
-    $module_base_ = (Get-Module PSScriptAnalyzer).ModuleBase
+    $module_base_ = (Get-Module $lint_module_).ModuleBase
     $preset_path_ = Join-Path $module_base_ "Settings\$preset_.psd1"
     $settings_ = Import-PowerShellDataFile $preset_path_
     # Dropping the preset's list of its own rules runs the default rules too.
     $settings_.Remove('IncludeRules')
-    # Lines over 79 columns are reported but have to be wrapped by hand.
+    # Longer lines are reported but have to be wrapped by hand.
     $settings_.Rules.PSAvoidLongLines = @{
         Enable            = $true
-        MaximumLineLength = 79
+        MaximumLineLength = $line_length_
     }
     $settings_
 }
@@ -137,16 +140,16 @@ function _test_lint_get_paths {
 
 # Installs PSScriptAnalyzer if missing, then checks, formats and lints.
 function _test_lint_main {
-    if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
+    if (-not (Get-Module -ListAvailable -Name $lint_module_)) {
         $module_ = @{
-            Name       = 'PSScriptAnalyzer'
+            Name       = $lint_module_
             Repository = 'PSGallery'
             Scope      = 'CurrentUser'
         }
         $null = Install-PackageProvider -Name NuGet -Force -Scope CurrentUser
         Install-Module @module_ -Force
     }
-    Import-Module PSScriptAnalyzer
+    Import-Module $lint_module_
 
     $paths_ = @(_test_lint_get_paths)
     foreach ($path_ in $paths_) {
@@ -162,11 +165,12 @@ function _test_lint_main {
     foreach ($path_ in $paths_) {
         $results_ = Invoke-ScriptAnalyzer -Path $path_ -Settings $settings_
         if ($results_) {
-            $results_ | Format-Table -AutoSize -Wrap | Out-String -Width 200
+            $results_ | Format-Table -AutoSize -Wrap |
+                Out-String -Width $output_width_
             exit 1
         }
     }
-    'PSScriptAnalyzer found nothing to fix.'
+    '{0} found nothing to fix.' -f $lint_module_
 }
 
 _test_lint_main

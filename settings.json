@@ -9,12 +9,69 @@
   "chunk_bytes": 1048576,
   "srv_buf_size": 1048576,
   "media_db_bytes": 268435456,
-  "files_browser_bytes": 1073741824,
-  "db_soft_bytes": 1073741824,
   "turn_compact_turns": 64,
-  "long_task_ms": 5,
   "provider": {
     "scripted": true,
-    "timeout_seconds": 120
+    "timeout_seconds": 120,
+    "variable": "XSJS_PROVIDER_KEY"
+  },
+  "powershell": {
+    "windows_port": 5768,
+    "linux_port": 5769,
+    "bind_address": "127.0.0.1",
+    "bootstrap_script": "bootstrap.py",
+    "engine_page": "hyperposition-engine.html",
+    "ttyd_build": "build/ttyd",
+    "ttyd_archive": "third_party/ttyd-1.7.7.tar.gz",
+    "ttyd_patches": "third_party/ttyd",
+    "terminal_type": "dumb",
+    "linux_folder": ".cache/xsjs",
+    "distribution": "Ubuntu",
+    "task_name": "xstation.js",
+    "firewall_rule": "xstation.js",
+    "state_folder": "xstation.js",
+    "certificate_file": "_cached_cert.pem",
+    "key_file": "_cached_key.pem",
+    "certificate_days": 825,
+    "runner_file": "serve.ps1",
+    "ttyd_log_file": "ttyd.log",
+    "poll_tries": 30,
+    "poll_milliseconds": 500,
+    "output_width": 200,
+    "root_files": ["settings.json", "test_settings.json", "provider.json"],
+    "runtime_modules": [
+      "internationalization",
+      "jslb",
+      "verbose",
+      "settings",
+      "substrate",
+      "dispatch",
+      "mcp",
+      "mcp_stdio",
+      "engine_kv",
+      "engine_doc",
+      "engine_db",
+      "engine_turn",
+      "engine_sql",
+      "engine_verbose",
+      "engine_tap",
+      "engine_mcp",
+      "engine_system",
+      "main_loop",
+      "bootstrap"
+    ],
+    "build_tools": {
+      "cmake": "cmake",
+      "cc": "build-essential",
+      "make": "build-essential",
+      "patch": "patch"
+    },
+    "build_headers": {
+      "uv.h": "libuv1-dev",
+      "json-c/json.h": "libjson-c-dev",
+      "zlib.h": "zlib1g-dev",
+      "libwebsockets.h": "libwebsockets-dev",
+      "openssl/ssl.h": "libssl-dev"
+    }
   }
 }

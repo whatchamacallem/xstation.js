@@ -3,14 +3,16 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests of the server substrate on scratch roots under build/: the tables on
-# first use, both ref forms, documents and heads, overflow to the cache, a
-# kill between a cache file and its row, snapshots, turns, SQL, the rules of
-# `seq` and a recorded sequence of forwarded operations replayed.
+# first use, both ref forms, documents and heads, a document's stored text
+# against the body of a doc.put line of the gold, overflow to the cache at
+# the setting overflow_bytes, a lost cache file, a kill between a cache file
+# and its row, snapshots and restores with their cache files, some lost,
+# turns, SQL, a trigger's refusal, and transactions over several databases.
+# Each text a refusal is checked against is the gold's.
 
-import base64, hashlib, jslb, json, math, os, signal, sqlite3, substrate
-import tempfile, unittest, unittest.mock
+import harness, hashlib, json, os, signal, sqlite3, substrate, tempfile
+import unittest, unittest.mock
 from collections.abc import Callable
-from i18n import i18n
 from typing import Any, NoReturn, cast
 
 # The checkout's build directory, where each test makes its scratch roots.
@@ -18,8 +20,11 @@ _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
 )
 
-# The `overflow_bytes` of the settings, 128 KiB.
-_OVERFLOW_BYTES = 131072
+# The id of this module's gold in `test_settings.json`.
+_GOLD_ID = "python.test_substrate"
+
+# The `overflow_bytes` of the settings.
+_OVERFLOW_BYTES: int = harness.setting_get("overflow_bytes")
 
 # The hyperposition scene, whose conversation the turn tests append to.
 _SCENE = "/metaverse/hyperposition/1"
@@ -28,13 +33,10 @@ _SCENE = "/metaverse/hyperposition/1"
 _WIDE_TEXT = chr(0x4E2D) + chr(0x6587) + chr(0x1F600)
 
 # A value of exactly `overflow_bytes`, which stays in its row.
-_VALUE_EXACT = bytes(range(256)) * (_OVERFLOW_BYTES // 256)
+_VALUE_EXACT = bytes(index % 256 for index in range(_OVERFLOW_BYTES))
 
 # A value one byte over `overflow_bytes`, which goes to the cache.
 _VALUE_OVER = _VALUE_EXACT + bytes(1)
-
-# A size chosen by its writer: a map of 204800 bytes, over `overflow_bytes`.
-_MAP_BYTES = bytes(range(256)) * 800
 
 # The real `os.replace`, which the patched one of the forked child calls.
 _OS_REPLACE = os.replace
@@ -60,17 +62,17 @@ _ARRIVAL_TEXT = (
     + '","image":{"$ref":1}}'
 )
 
-# A document with integer keys below the top level, out of order.
+# A document, integer keys below the top level out of order, names sorted.
 _NESTED_BODY: dict[int | str, Any] = {
     0: {"t": "nest"},
     1: "/_files/fog.png",
+    "count": -3,
     "inner": {
-        "b": 1,
-        2: _WIDE_TEXT,
         "a": [{"z": None, 0: 0.5}],
+        2: _WIDE_TEXT,
+        "b": 1,
         1: {"$ref": 1},
     },
-    "count": -3,
 }
 
 # The `_meta` table alone, as the substrate's SQL file creates it.
@@ -85,294 +87,27 @@ _UNIVERSE_SQL = (
     " player TEXT NOT NULL, world TEXT NOT NULL) WITHOUT ROWID, STRICT"
 )
 
+# The universe table's trigger on insert, as the metaverse SQL file has it.
+_UNIVERSE_TRIGGER = (
+    "CREATE TRIGGER universe_world_insert BEFORE INSERT ON universe"
+    " WHEN EXISTS (SELECT 1 FROM universe"
+    " WHERE world = NEW.world AND name <> NEW.name)"
+    " BEGIN SELECT RAISE(ABORT, 'agent.content_ambiguous'); END"
+)
+
+# The insert of one row of the universe table.
+_UNIVERSE_INSERT = "INSERT INTO universe VALUES (?, ?, ?, ?)"
+
 # The world table of the castle universe database.
 _WORLD_SQL = (
     "CREATE TABLE world (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT"
 )
 
-# The region table of the castle world database.
-_REGION_SQL = (
-    "CREATE TABLE region"
-    " (name TEXT PRIMARY KEY, tide INTEGER NOT NULL DEFAULT 0) STRICT"
-)
 
-# The hyperposition, the scene whose conversation the replay appends to.
-_HYPERPOSITION_BODY: dict[int | str, Any] = {
-    0: {"t": "scene"},
-    "subtitle": "How can I help you?",
-}
-
-# The values the replay starts from, chosen by its writer: a script, refs.
-_HELLO_VALUES: list[tuple[str, bytes]] = [
-    ("/_files/script/bootstrap.js", b"// Makes a universe.\n"),
-    ("/metaverse/player", b"player"),
-    ("/metaverse/world", b"metaverse"),
-    ("/metaverse/scene", _SCENE.encode("utf-8")),
-]
-
-# The arguments of the first tool call, the bootstrap script run.
-_SCRIPT_ARGUMENTS = (
-    '{"name":"bootstrap","args":{"universe":"castle","title":"The castle",'
-    '"world":"castle_world","region":"castle_gatehouse"}}'
-)
-
-# The prompt of the image of the arrival scene.
-_IMAGE_PROMPT = (
-    "A rain dark castle gatehouse at dusk seen from the far side of a moat,"
-    " one lantern lit, painted, wide still frame, no people"
-)
-
-# The arguments of the second tool call, the image made.
-_IMAGE_ARGUMENTS = (
-    '{"prompt":"' + _IMAGE_PROMPT + '","key":"/_files/gatehouse/arrival.png"}'
-)
-
-# The arguments of the third tool call, the arrival scene put.
-_DOCUMENT_ARGUMENTS = (
-    '{"db":"castle_gatehouse","id":"scene/arrival","body":'
-    + _ARRIVAL_TEXT
-    + "}"
-)
-
-# The arguments of the fourth tool call, the current scene of the world.
-_SCENE_ARGUMENTS = (
-    '{"ref":"/castle_world/scene","text":"/castle_gatehouse/scene/arrival/1"}'
-)
-
-# The arguments of the fifth tool call, the arrival scene rendered.
-_RENDER_ARGUMENTS = (
-    '{"image":"/_files/gatehouse/arrival.png","subtitle":"'
-    + _ARRIVAL_SUBTITLE
-    + '"}'
-)
-
-# A small PNG image as a provider answers it, its `b64_json`.
-_IMAGE_BASE64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAH0lEQVR42mP4jwQYkAAuc"
-    "YZBqGGQO48oDaPxMCg0AADZV36QzYI8swAAAABJRU5ErkJggg=="
-)
-
-# The bytes of that image, which the replay puts in `_files`.
-_IMAGE_BYTES = base64.b64decode(_IMAGE_BASE64)
-
-# A script that advances the tide in the region table of the world.
-_STEP_SCRIPT = (
-    "// Advances the tide by args.hours in the region table of the world.\n"
-    'const results = engine.store.sql_run("castle_world", [\n'
-    '  {sql: "UPDATE region SET tide = tide + ? WHERE name = ?",\n'
-    '    params: [args.hours, "castle_gatehouse"]},\n'
-    "]);\n"
-    'engine.log("tide advanced by " + args.hours);\n'
-    "return {changes: results[0].changes};\n"
-)
-
-# The user's first message.
-_MESSAGE_USER: dict[str, Any] = {"role": "user", "content": "1"}
-
-# The assistant's message with the first tool call, the bootstrap script.
-_MESSAGE_SCRIPT: dict[str, Any] = {
-    "role": "assistant",
-    "content": None,
-    "tool_calls": [
-        {
-            "id": "call_1",
-            "type": "function",
-            "function": {
-                "name": "browser.script_run",
-                "arguments": _SCRIPT_ARGUMENTS,
-            },
-        }
-    ],
-}
-
-# The assistant's message with the second tool call, the image.
-_MESSAGE_IMAGE: dict[str, Any] = {
-    "role": "assistant",
-    "content": None,
-    "tool_calls": [
-        {
-            "id": "call_2",
-            "type": "function",
-            "function": {
-                "name": "browser.image_make",
-                "arguments": _IMAGE_ARGUMENTS,
-            },
-        }
-    ],
-}
-
-# The assistant's message with the three tool calls of the arrival scene.
-_MESSAGE_SCENE: dict[str, Any] = {
-    "role": "assistant",
-    "content": None,
-    "tool_calls": [
-        {
-            "id": "call_3",
-            "type": "function",
-            "function": {
-                "name": "browser.doc_put",
-                "arguments": _DOCUMENT_ARGUMENTS,
-            },
-        },
-        {
-            "id": "call_4",
-            "type": "function",
-            "function": {
-                "name": "browser.kv_put",
-                "arguments": _SCENE_ARGUMENTS,
-            },
-        },
-        {
-            "id": "call_5",
-            "type": "function",
-            "function": {
-                "name": "browser.render",
-                "arguments": _RENDER_ARGUMENTS,
-            },
-        },
-    ],
-}
-
-# The assistant's last message, the subtitle of the arrival scene.
-_MESSAGE_FINAL: dict[str, Any] = {
-    "role": "assistant",
-    "content": _ARRIVAL_SUBTITLE,
-}
-
-# The forwarded operations to replay: each type, `since`, fields and `seq`.
-_RECORDED: list[tuple[str, int, dict[str, Any], int]] = [
-    (
-        "turn.append",
-        5,
-        {"scene": _SCENE, "role": "user", "content": _MESSAGE_USER},
-        6,
-    ),
-    (
-        "turn.append",
-        6,
-        {"scene": _SCENE, "role": "assistant", "content": _MESSAGE_SCRIPT},
-        7,
-    ),
-    ("db.create", 0, {"db": "castle"}, 0),
-    (
-        "sql.run",
-        0,
-        {
-            "db": "castle",
-            "statements": [
-                {"sql": _WORLD_SQL, "params": []},
-                {
-                    "sql": "INSERT INTO world VALUES (?, ?)",
-                    "params": ["castle_world", "The castle"],
-                },
-            ],
-        },
-        1,
-    ),
-    ("db.create", 0, {"db": "castle_world"}, 0),
-    (
-        "sql.run",
-        0,
-        {
-            "db": "castle_world",
-            "statements": [
-                {"sql": _REGION_SQL, "params": []},
-                {
-                    "sql": "INSERT INTO region (name) VALUES (?)",
-                    "params": ["castle_gatehouse"],
-                },
-            ],
-        },
-        1,
-    ),
-    ("db.create", 0, {"db": "castle_gatehouse"}, 0),
-    (
-        "sql.run",
-        7,
-        {
-            "db": "metaverse",
-            "statements": [
-                {
-                    "sql": "INSERT INTO universe VALUES (?, ?, ?, ?)",
-                    "params": [
-                        "castle",
-                        "The castle",
-                        "player",
-                        "castle_world",
-                    ],
-                }
-            ],
-        },
-        8,
-    ),
-    ("kv.put", 8, {"k": "/metaverse/world", "data": b"castle_world"}, 9),
-    (
-        "turn.append",
-        9,
-        {"scene": _SCENE, "role": "assistant", "content": _MESSAGE_IMAGE},
-        10,
-    ),
-    (
-        "kv.put",
-        1,
-        {"k": "/_files/gatehouse/arrival.png", "data": _IMAGE_BYTES},
-        2,
-    ),
-    (
-        "turn.append",
-        10,
-        {"scene": _SCENE, "role": "assistant", "content": _MESSAGE_SCENE},
-        11,
-    ),
-    (
-        "doc.put",
-        0,
-        {
-            "db": "castle_gatehouse",
-            "id": "scene/arrival",
-            "body": _ARRIVAL_BODY,
-        },
-        1,
-    ),
-    (
-        "kv.put",
-        1,
-        {
-            "k": "/castle_world/scene",
-            "data": b"/castle_gatehouse/scene/arrival/1",
-        },
-        2,
-    ),
-    (
-        "turn.append",
-        11,
-        {"scene": _SCENE, "role": "assistant", "content": _MESSAGE_FINAL},
-        12,
-    ),
-    (
-        "sql.run",
-        1,
-        {
-            "db": "castle",
-            "statements": [
-                {
-                    "sql": "UPDATE world SET title = ? WHERE name = ?",
-                    "params": ["The castle at dusk", "castle_world"],
-                }
-            ],
-        },
-        2,
-    ),
-    ("kv.put", 2, {"k": "/_files/maps/castle.bin", "data": _MAP_BYTES}, 3),
-]
-
-# A put that finds the server's `seq` one ahead.
-_DESYNC: tuple[str, int, dict[str, Any], int] = (
-    "kv.put",
-    3,
-    {"k": "/_files/script/step_tide.js", "data": _STEP_SCRIPT.encode()},
-    4,
-)
+# A text of this module's gold.
+def _text_get(name: str) -> str:
+    text: str = harness.gold_get(f"{_GOLD_ID}.texts.{name}")
+    return text
 
 
 # Makes a scratch root under build/, removed when the test ends.
@@ -409,13 +144,6 @@ def _error_check(
 # One statement with its parameters.
 def _statement_make(sql: str, *params: Any) -> substrate.SqlStatement:
     return substrate.SqlStatement(sql, list(params))
-
-
-# The statements of a forwarded `sql.run`, each `sql` and `params`.
-def _statements_parse(
-    statements: list[dict[str, Any]],
-) -> list[substrate.SqlStatement]:
-    return [substrate.SqlStatement(**statement) for statement in statements]
 
 
 # The rows one statement returns.
@@ -461,16 +189,6 @@ def _names_read(path: str) -> list[str]:
     return [row[0] for row in rows]
 
 
-# Makes the databases the replay starts from by writes, each counted.
-def _hello_make(store: substrate.Store) -> None:
-    store.db_create("_files")
-    store.db_create("metaverse")
-    store.sql_run("metaverse", [_statement_make(_UNIVERSE_SQL)])
-    store.doc_put("metaverse", "hyperposition", _HYPERPOSITION_BODY)
-    for ref, value in _HELLO_VALUES:
-        store.kv_put(ref, value)
-
-
 # Writes a row of `alpha`, then makes the call in the same transaction.
 def _busy_call(store: substrate.Store, call: Callable[[], object]) -> None:
     store.kv_put("/alpha/busy", b"busy")
@@ -482,9 +200,35 @@ def _json_text(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
+# The bytes a reader is fed for a line of the gold with no blob.
+def _line_bytes(line: dict[str, Any]) -> bytes:
+    return _json_text(line).encode("utf-8") + b"\r"
+
+
 # The path of the cache file of a value under a root.
 def _cache_file(root: str, value: bytes) -> str:
     return os.path.join(root, "cache", hashlib.sha256(value).hexdigest())
+
+
+# The bytes of a value as a store holds it: its row's or its cache file's.
+def _value_bytes(value: substrate.KvValue) -> bytes:
+    if isinstance(value.data, bytes):
+        return value.data
+    with open(value.data, "rb") as file:
+        return file.read()
+
+
+# Makes `alpha` with two values over `overflow_bytes` and one under, by ref.
+def _alpha_fill(store: substrate.Store) -> dict[str, bytes]:
+    values = {
+        "/alpha/one": _VALUE_OVER,
+        "/alpha/small": b"small",
+        "/alpha/two": bytes(reversed(_VALUE_OVER)),
+    }
+    store.db_create("alpha")
+    for ref, value in values.items():
+        store.kv_put(ref, value)
+    return values
 
 
 # Every statement of the dump of a database file: its schema and its rows.
@@ -494,43 +238,6 @@ def _database_dump(path: str) -> list[str]:
         return list(connection.iterdump())
     finally:
         connection.close()
-
-
-# The name and the bytes of every file in a directory, by name.
-def _files_read(directory: str) -> list[tuple[str, bytes]]:
-    contents: list[tuple[str, bytes]] = []
-    for name in sorted(os.listdir(directory)):
-        with open(os.path.join(directory, name), "rb") as file:
-            contents.append((name, file.read()))
-    return contents
-
-
-# The database a recorded operation modifies.
-def _target_database(fields: dict[str, Any]) -> str:
-    if "db" in fields:
-        return fields["db"]
-    ref = fields["k"] if "k" in fields else fields["scene"]
-    return cast(str, substrate.ref_split(ref).db)
-
-
-# Makes on a store the direct call a modifier made for a recorded operation.
-def _modifier_call(
-    store: substrate.Store, kind: str, fields: dict[str, Any]
-) -> None:
-    calls: dict[str, Callable[[], object]] = {
-        "kv.put": lambda: store.kv_put(fields["k"], fields["data"]),
-        "doc.put": lambda: store.doc_put(
-            fields["db"], fields["id"], fields["body"]
-        ),
-        "db.create": lambda: store.db_create(fields["db"]),
-        "turn.append": lambda: store.turn_append(
-            fields["scene"], fields["role"], _json_text(fields["content"])
-        ),
-        "sql.run": lambda: store.sql_run(
-            fields["db"], _statements_parse(fields["statements"])
-        ),
-    }
-    calls[kind]()
 
 
 # Renames as `os.replace` does, then kills the process before the row.
@@ -552,7 +259,7 @@ def _child_put(root: str, value: bytes) -> NoReturn:
 
 # Databases: the tables on first use, names, creating, opening, dropping.
 class TestDatabases(unittest.TestCase):
-    # A new database gets the substrate's tables, `seq` 0 and `schema` 1.
+    # A new database gets the substrate's tables and the `schema` row 1 alone.
     def test_tables_created(self) -> None:
         store = _store_make(self, _root_make(self))
         store.db_create("alpha")
@@ -562,9 +269,8 @@ class TestDatabases(unittest.TestCase):
         rows = _rows_query(
             store, "alpha", "SELECT name, value FROM _meta ORDER BY name"
         )
-        self.assertEqual(rows, [["schema", "1"], ["seq", "0"]])
+        self.assertEqual(rows, [["schema", "1"]])
         self.assertEqual(store.db_list(), ["alpha"])
-        self.assertEqual(store.seq_get("alpha"), 0)
 
     # A database file made elsewhere gets the tables when first opened.
     def test_tables_foreign(self) -> None:
@@ -577,7 +283,7 @@ class TestDatabases(unittest.TestCase):
         finally:
             connection.close()
         store = _store_make(self, root)
-        self.assertEqual(store.db_open("beta"), 0)
+        store.db_open("beta")
         self.assertEqual(
             _tables_list(store, "beta"),
             ["_head", "_kv", "_meta", "_turn", "note"],
@@ -590,9 +296,17 @@ class TestDatabases(unittest.TestCase):
     def test_names_bad(self) -> None:
         root = _root_make(self)
         store = _store_make(self, root)
-        names = ["", "1abc", "a-b", "a b", "a.b", "a/b", "caf" + chr(0xE9)]
-        for name in names:
-            message = i18n("substrate.name_bad", name)
+        names = {
+            "empty": "",
+            "digit": "1abc",
+            "dash": "a-b",
+            "space": "a b",
+            "dot": "a.b",
+            "slash": "a/b",
+            "accent": "caf" + chr(0xE9),
+        }
+        for case, name in names.items():
+            message = _text_get(f"substrate_name_bad_{case}")
             _error_check(
                 self, ValueError, message, lambda: store.db_create(name)
             )
@@ -611,7 +325,7 @@ class TestDatabases(unittest.TestCase):
             store.db_create("alpha")
         path = os.path.join(root, "alpha.sqlite")
         self.assertEqual(caught.exception.filename, path)
-        message = i18n("substrate.db_open", "alpha")
+        message = _text_get("substrate_db_open")
         _error_check(
             self, RuntimeError, message, lambda: store.db_open("alpha")
         )
@@ -622,11 +336,11 @@ class TestDatabases(unittest.TestCase):
             lambda: store.db_open("gamma"),
         )
         self.assertFalse(os.path.exists(os.path.join(root, "gamma.sqlite")))
-        message = i18n("substrate.db_closed", "gamma")
+        message = _text_get("substrate_db_closed_close")
         _error_check(
             self, LookupError, message, lambda: store.db_close("gamma")
         )
-        self.assertEqual(store.seq_get("alpha"), 0)
+        self.assertEqual(store.db_list(), ["alpha"])
 
     # A create whose open fails removes its file, so a later create succeeds.
     def test_create_failed(self) -> None:
@@ -642,7 +356,7 @@ class TestDatabases(unittest.TestCase):
         self.assertEqual(os.listdir(root), ["cache"])
         self.assertEqual(store.db_list(), [])
         store.db_create("alpha")
-        self.assertEqual(store.seq_get("alpha"), 0)
+        self.assertEqual(store.db_list(), ["alpha"])
 
     # A file with only some of the substrate's tables raises, its tables kept.
     def test_schema_partial(self) -> None:
@@ -650,7 +364,7 @@ class TestDatabases(unittest.TestCase):
         path = os.path.join(root, "beta.sqlite")
         _file_make(path, False, [_statement_make(_META_SQL)])
         store = _store_make(self, root)
-        message = i18n("substrate.schema_partial", ["_meta"])
+        message = _text_get("substrate_schema_partial_meta")
         _error_check(
             self, RuntimeError, message, lambda: store.db_open("beta")
         )
@@ -670,7 +384,7 @@ class TestDatabases(unittest.TestCase):
             ],
         )
         store = _store_make(self, root)
-        message = i18n("substrate.schema_version", ("2",), "1")
+        message = _text_get("substrate_schema_version")
         _error_check(
             self, RuntimeError, message, lambda: store.db_open("beta")
         )
@@ -681,13 +395,13 @@ class TestDatabases(unittest.TestCase):
         root = _root_make(self)
         store = _store_make(self, root)
         store.db_create("alpha")
-        data = store.db_snapshot("alpha")[0]
+        data = store.db_snapshot("alpha").data
         listed = sorted(os.listdir(root))
-        message = i18n("substrate.db_busy", "alpha")
+        message = _text_get("substrate_db_busy")
         calls: list[Callable[[], object]] = [
             lambda: store.db_close("alpha"),
             lambda: store.db_drop("alpha"),
-            lambda: store.db_restore("alpha", data),
+            lambda: store.db_restore("alpha", data, []),
         ]
         for call in calls:
             _error_check(
@@ -697,7 +411,7 @@ class TestDatabases(unittest.TestCase):
                 lambda: store.transaction_run(lambda: _busy_call(store, call)),
             )
             self.assertEqual(store.db_list(), ["alpha"])
-            self.assertEqual(store.seq_get("alpha"), 0)
+            self.assertEqual(store.kv_list("alpha", ""), [])
             self.assertEqual(sorted(os.listdir(root)), listed)
 
     # A write ahead log another connection keeps beside a dropped file raises.
@@ -710,7 +424,7 @@ class TestDatabases(unittest.TestCase):
         self.addCleanup(reader.close)
         reader.execute("BEGIN")
         reader.execute("SELECT value FROM _meta").fetchall()
-        message = i18n("substrate.wal_left", "alpha")
+        message = _text_get("substrate_wal_left")
         _error_check(
             self, RuntimeError, message, lambda: store.db_drop("alpha")
         )
@@ -718,7 +432,7 @@ class TestDatabases(unittest.TestCase):
         self.assertTrue(os.path.isfile(path))
         reader.execute("COMMIT")
         reader.close()
-        self.assertEqual(store.db_open("alpha"), 0)
+        store.db_open("alpha")
 
     # Dropping removes the file and the cache files no other database names.
     def test_drop_files(self) -> None:
@@ -773,18 +487,18 @@ class TestRefs(unittest.TestCase):
 
     # An empty ref, a missing key and a bad database name raise.
     def test_refs_bad(self) -> None:
-        refs = [
-            "",
-            "/",
-            "//key",
-            "/metaverse",
-            "/metaverse/",
-            "/1db/key",
-            "/d-b/key",
-            "/caf" + chr(0xE9) + "/key",
-        ]
-        for ref in refs:
-            message = i18n("substrate.ref_bad", ref)
+        refs = {
+            "empty": "",
+            "slash": "/",
+            "database_empty": "//key",
+            "key_missing": "/metaverse",
+            "key_empty": "/metaverse/",
+            "digit": "/1db/key",
+            "dash": "/d-b/key",
+            "accent": "/caf" + chr(0xE9) + "/key",
+        }
+        for case, ref in refs.items():
+            message = _text_get(f"substrate_ref_bad_{case}")
             _error_check(
                 self, ValueError, message, lambda: substrate.ref_split(ref)
             )
@@ -793,11 +507,11 @@ class TestRefs(unittest.TestCase):
     def test_ref_database(self) -> None:
         store = _store_make(self, _root_make(self))
         store.db_create("alpha")
-        message = i18n("substrate.ref_internal", "world")
+        message = _text_get("substrate_ref_internal")
         _error_check(
             self, ValueError, message, lambda: store.kv_put("world", b"x")
         )
-        message = i18n("substrate.ref_both", "/alpha/world", "alpha")
+        message = _text_get("substrate_ref_both")
         _error_check(
             self,
             ValueError,
@@ -810,46 +524,52 @@ class TestRefs(unittest.TestCase):
             message,
             lambda: store.kv_get("/alpha/world", "alpha"),
         )
-        message = i18n("substrate.db_closed", "beta")
+        message = _text_get("substrate_db_closed_put")
         _error_check(
             self,
             LookupError,
             message,
             lambda: store.kv_put("/beta/world", b"x"),
         )
-        message = i18n("substrate.document_ref", "/alpha/world")
+        message = _text_get("substrate_document_ref_value")
         _error_check(
             self, ValueError, message, lambda: store.doc_get("/alpha/world")
         )
-        self.assertEqual(store.seq_get("alpha"), 0)
+        self.assertEqual(store.kv_list("alpha", ""), [])
 
 
 # Values: both ref forms, the overflow limit, shared cache files, streams.
 class TestValues(unittest.TestCase):
-    # A value put by one ref form is read by the other, listed and deleted.
+    # A value put by one ref form is read by the other, listed, deleted twice.
     def test_refs_both(self) -> None:
         store = _store_make(self, _root_make(self))
         store.db_create("alpha")
         key = "greeting/" + _WIDE_TEXT
         value = ("hello " + _WIDE_TEXT).encode("utf-8")
         digest = hashlib.sha256(value).digest()
-        row, seq = store.kv_put("/alpha/" + key, value)
+        row = store.kv_put("/alpha/" + key, value)
         self.assertEqual(row, substrate.KvRow(key, len(value), digest))
-        self.assertEqual(seq, 1)
         self.assertEqual(
             store.kv_get(key, "alpha"),
             substrate.KvValue(value, len(value), digest),
         )
-        self.assertEqual(store.kv_put("place/a/b", b"world", "alpha")[1], 2)
+        world = hashlib.sha256(b"world").digest()
+        self.assertEqual(
+            store.kv_put("place/a/b", b"world", "alpha"),
+            substrate.KvRow("place/a/b", 5, world),
+        )
         self.assertEqual(store.kv_get("/alpha/place/a/b").data, b"world")
         self.assertEqual(store.kv_list("alpha", "greeting/"), [row])
         keys = [listed.key for listed in store.kv_list("alpha", "")]
         self.assertEqual(keys, [key, "place/a/b"])
-        self.assertEqual(store.kv_delete(key, "alpha"), 3)
-        message = i18n("substrate.key_missing", key, "alpha")
+        self.assertIsNone(store.kv_delete(key, "alpha"))
+        message = _text_get("substrate_key_missing_deleted")
         _error_check(
             self, LookupError, message, lambda: store.kv_get("/alpha/" + key)
         )
+        self.assertIsNone(store.kv_delete(key, "alpha"))
+        keys = [listed.key for listed in store.kv_list("alpha", "")]
+        self.assertEqual(keys, ["place/a/b"])
 
     # A value of exactly `overflow_bytes` stays in its row, one byte more not.
     def test_overflow_boundary(self) -> None:
@@ -905,13 +625,12 @@ class TestValues(unittest.TestCase):
         sink = os.path.join(root, "cache", "sink")
         with open(sink, "wb") as file:
             file.write(_VALUE_OVER)
-        row, seq = store.kv_put("/alpha/streamed", sink)
+        row = store.kv_put("/alpha/streamed", sink)
         self.assertFalse(os.path.exists(sink))
         digest = hashlib.sha256(_VALUE_OVER).digest()
         self.assertEqual(
             row, substrate.KvRow("streamed", _OVERFLOW_BYTES + 1, digest)
         )
-        self.assertEqual(seq, 1)
         self.assertEqual(
             store.kv_get("/alpha/streamed").data,
             _cache_file(root, _VALUE_OVER),
@@ -919,8 +638,11 @@ class TestValues(unittest.TestCase):
         small = os.path.join(root, "cache", "small")
         with open(small, "wb") as file:
             file.write(_VALUE_EXACT)
-        message = i18n(
-            "substrate.file_small", small, _OVERFLOW_BYTES, _OVERFLOW_BYTES
+        message = (
+            _text_get("substrate_file_small")
+            .replace("{0}", small)
+            .replace("{1}", str(_OVERFLOW_BYTES))
+            .replace("{2}", str(_OVERFLOW_BYTES))
         )
         _error_check(
             self,
@@ -928,9 +650,26 @@ class TestValues(unittest.TestCase):
             message,
             lambda: store.kv_put("/alpha/small", small),
         )
-        self.assertEqual(store.seq_get("alpha"), 1)
+        self.assertEqual(store.kv_list("alpha", ""), [row])
         self.assertEqual(store.kv_check("alpha"), 1)
         self.assertFalse(os.path.exists(small))
+
+    # A row whose cache file is gone stays listed and put over, its get raises.
+    def test_file_lost(self) -> None:
+        root = _root_make(self)
+        store = _store_make(self, root)
+        store.db_create("alpha")
+        row = store.kv_put("/alpha/big", _VALUE_OVER)
+        os.remove(_cache_file(root, _VALUE_OVER))
+        message = _text_get("substrate_file_lost_removed").replace(
+            "{1}", row.sha256.hex()
+        )
+        _error_check(
+            self, LookupError, message, lambda: store.kv_get("/alpha/big")
+        )
+        self.assertEqual(store.kv_list("alpha", ""), [row])
+        store.kv_put("/alpha/big", b"small")
+        self.assertEqual(store.kv_get("/alpha/big").data, b"small")
 
 
 # Documents: versions and heads, the encoded round trip, bad documents.
@@ -942,49 +681,43 @@ class TestDocuments(unittest.TestCase):
         first = store.doc_put(
             "castle_gatehouse", "scene/arrival", _ARRIVAL_BODY
         )
-        self.assertEqual(first, ("/castle_gatehouse/scene/arrival/1", 1))
+        self.assertEqual(first, "/castle_gatehouse/scene/arrival/1")
         self.assertEqual(
-            store.doc_head("castle_gatehouse", "scene/arrival"), first[0]
+            store.doc_head("castle_gatehouse", "scene/arrival"), first
         )
         self.assertEqual(
-            store.kv_get(first[0]).data, _ARRIVAL_TEXT.encode("utf-8")
+            store.kv_get(first).data, _ARRIVAL_TEXT.encode("utf-8")
         )
         changed = dict(_ARRIVAL_BODY)
         changed["subtitle"] = "The keeper waves."
         second = store.doc_put("castle_gatehouse", "scene/arrival", changed)
-        self.assertEqual(second, ("/castle_gatehouse/scene/arrival/2", 2))
+        self.assertEqual(second, "/castle_gatehouse/scene/arrival/2")
         self.assertEqual(
-            store.doc_head("castle_gatehouse", "scene/arrival"), second[0]
+            store.doc_head("castle_gatehouse", "scene/arrival"), second
         )
-        self.assertEqual(store.doc_get(first[0]), _ARRIVAL_BODY)
+        self.assertEqual(store.doc_get(first), _ARRIVAL_BODY)
         self.assertEqual(
-            _json_text(store.doc_get(first[0])), _json_text(_ARRIVAL_BODY)
+            _json_text(store.doc_get(first)), _json_text(_ARRIVAL_BODY)
         )
         self.assertEqual(
             _json_text(store.doc_get("scene/arrival/2", "castle_gatehouse")),
             _json_text(changed),
         )
-        message = i18n(
-            "substrate.id_missing", "scene/absent", "castle_gatehouse"
-        )
+        message = _text_get("substrate_id_missing_absent")
         _error_check(
             self,
             LookupError,
             message,
             lambda: store.doc_head("castle_gatehouse", "scene/absent"),
         )
-        message = i18n(
-            "substrate.key_missing", "scene/arrival/3", "castle_gatehouse"
-        )
+        message = _text_get("substrate_key_missing_version")
         _error_check(
             self,
             LookupError,
             message,
             lambda: store.doc_get("/castle_gatehouse/scene/arrival/3"),
         )
-        message = i18n(
-            "substrate.document_ref", "/castle_gatehouse/scene/arrival"
-        )
+        message = _text_get("substrate_document_ref_head")
         _error_check(
             self,
             ValueError,
@@ -1031,8 +764,8 @@ class TestDocuments(unittest.TestCase):
         self.assertEqual(_json_text(decoded), _json_text(normal))
         store = _store_make(self, _root_make(self))
         store.db_create("metaverse")
-        ref, seq = store.doc_put("metaverse", "fog", encoded)
-        self.assertEqual((ref, seq), ("/metaverse/fog/1", 1))
+        ref = store.doc_put("metaverse", "fog", encoded)
+        self.assertEqual(ref, "/metaverse/fog/1")
         stored = store.doc_get(ref)
         self.assertEqual(_json_text(stored), _json_text(expected))
         self.assertEqual(
@@ -1042,28 +775,28 @@ class TestDocuments(unittest.TestCase):
     # Documents that would not round trip, or are malformed, raise.
     def test_documents_bad(self) -> None:
         normals: list[tuple[dict[int | str, Any], str]] = [
-            ({"subtitle": "x"}, i18n("substrate.header_missing")),
+            ({"subtitle": "x"}, _text_get("substrate_header_missing")),
             (
                 {0: {"t": "scene", "v": 0}},
-                i18n("substrate.header_bad", {"t": "scene", "v": 0}),
+                _text_get("substrate_header_bad_version"),
             ),
-            ({0: {"v": 2}}, i18n("substrate.header_bad", {"v": 2})),
+            ({0: {"v": 2}}, _text_get("substrate_header_bad_typeless")),
             (
                 {0: {"t": "scene", "x": 1}},
-                i18n("substrate.header_bad", {"t": "scene", "x": 1}),
+                _text_get("substrate_header_bad_field"),
             ),
-            ({0: "scene"}, i18n("substrate.header_bad", "scene")),
+            ({0: "scene"}, _text_get("substrate_header_bad_text")),
             (
                 {0: {"t": "scene"}, 1: "/a/b"},
-                i18n("substrate.header_normal", 1),
+                _text_get("substrate_header_normal"),
             ),
             (
                 {0: {"t": "scene"}, "12": "x"},
-                i18n("substrate.key_digits", "12"),
+                _text_get("substrate_key_digits_encode"),
             ),
             (
                 {0: {"t": "scene"}, "x": {"$ref": 1}},
-                i18n("substrate.ref_shape", {"$ref": 1}),
+                _text_get("substrate_ref_shape"),
             ),
         ]
         for normal, message in normals:
@@ -1073,27 +806,27 @@ class TestDocuments(unittest.TestCase):
         encodeds: list[tuple[dict[int | str, Any], str]] = [
             (
                 {0: {"t": "scene"}, 1: "/a/b", "x": {"$ref": 2}},
-                i18n("substrate.ref_index", 2),
+                _text_get("substrate_ref_index_two"),
             ),
             (
                 {0: {"t": "scene"}, 2: "/a/b", "x": {"$ref": 2}},
-                i18n("substrate.header_gap", 2),
+                _text_get("substrate_header_gap"),
             ),
             (
                 {0: {"t": "scene"}, 1: 5, "x": {"$ref": 1}},
-                i18n("substrate.header_ref", 1),
+                _text_get("substrate_header_ref"),
             ),
             (
                 {0: {"t": "scene"}, 1: "world", "x": {"$ref": 1}},
-                i18n("substrate.header_ref", 1),
+                _text_get("substrate_header_ref"),
             ),
             (
                 {0: {"t": "scene"}, 1: "/a/b", "x": {"$ref": True}},
-                i18n("substrate.ref_index", True),
+                _text_get("substrate_ref_index_true"),
             ),
             (
                 {0: {"t": "scene"}, "07": "x"},
-                i18n("substrate.key_digits", "07"),
+                _text_get("substrate_key_digits_decode"),
             ),
         ]
         for encoded, message in encodeds:
@@ -1105,23 +838,14 @@ class TestDocuments(unittest.TestCase):
             )
         store = _store_make(self, _root_make(self))
         store.db_create("alpha")
-        message = i18n("substrate.integer_range", 2**53 + 1)
-        _error_check(
-            self,
-            ValueError,
-            message,
-            lambda: store.doc_put(
-                "alpha", "big", {0: {"t": "n"}, "n": 2**53 + 1}
-            ),
-        )
-        message = i18n("substrate.id_empty")
+        message = _text_get("substrate_id_empty")
         _error_check(
             self,
             ValueError,
             message,
             lambda: store.doc_put("alpha", "", {0: {"t": "note"}}),
         )
-        message = i18n("substrate.header_gap", 2)
+        message = _text_get("substrate_header_gap")
         _error_check(
             self,
             ValueError,
@@ -1130,7 +854,7 @@ class TestDocuments(unittest.TestCase):
                 "alpha", "gap", {0: {"t": "note"}, 2: "/a/b"}
             ),
         )
-        self.assertEqual(store.seq_get("alpha"), 0)
+        self.assertEqual(store.kv_list("alpha", ""), [])
 
     # A string whose key part holds white space stays text in the body.
     def test_spaces_kept(self) -> None:
@@ -1150,7 +874,7 @@ class TestDocuments(unittest.TestCase):
         }
         self.assertEqual(substrate.doc_encode(normal), expected)
         self.assertEqual(substrate.doc_decode(expected), normal)
-        message = i18n("substrate.header_ref", 1)
+        message = _text_get("substrate_header_ref")
         for text in ["/me waves/ and leaves", *lines]:
             _error_check(
                 self,
@@ -1164,61 +888,46 @@ class TestDocuments(unittest.TestCase):
         store = _store_make(self, _root_make(self))
         store.db_create("alpha")
         store.kv_put("/alpha/note/1", b"{}")
-        message = i18n("substrate.version_exists", "note/1", "alpha")
+        message = _text_get("substrate_version_exists")
         _error_check(
             self,
             RuntimeError,
             message,
             lambda: store.doc_put("alpha", "note", {0: {"t": "note"}}),
         )
-        message = i18n("substrate.id_missing", "note", "alpha")
+        message = _text_get("substrate_id_missing_note")
         _error_check(
             self, LookupError, message, lambda: store.doc_head("alpha", "note")
         )
-        self.assertEqual(store.seq_get("alpha"), 1)
+        self.assertEqual(store.kv_get("/alpha/note/1").data, b"{}")
 
-    # A nested document is stored as the text the wire's encoder writes.
+    # A nested document is stored as the body's text in its doc.put line.
     def test_nested_text(self) -> None:
         store = _store_make(self, _root_make(self))
         store.db_create("alpha")
-        ref = store.doc_put("alpha", "nest", _NESTED_BODY)[0]
+        ref = store.doc_put("alpha", "nest", _NESTED_BODY)
         stored = cast(bytes, store.kv_get(ref).data)
-        line = jslb.line_make(
-            jslb.header_make("doc.put"),
-            [],
-            db="alpha",
-            id="nest",
-            body=_NESTED_BODY,
-        )
+        line = harness.gold_get(f"{_GOLD_ID}.lines.doc_put")
         self.assertEqual(
-            list(jslb.line_encode(line)),
-            [
-                b'{"0":{"t":"doc.put"},"db":"alpha","id":"nest","body":'
-                + stored
-                + b"}\r"
-            ],
+            _line_bytes(line),
+            b'{"0":{"t":"doc.put"},"body":'
+            + stored
+            + b',"db":"alpha","id":"nest"}\r',
         )
         self.assertEqual(store.doc_get(ref), _NESTED_BODY)
         digits: dict[int | str, Any] = {0: {"t": "note"}, "x": {"12": 1}}
-        message = i18n("substrate.key_refused", repr("12"))
+        message = _text_get("substrate_key_refused")
         _error_check(
             self,
             ValueError,
             message,
             lambda: store.doc_put("alpha", "digits", digits),
         )
-        infinite: dict[int | str, Any] = {0: {"t": "note"}, "x": [math.inf]}
-        message = i18n("substrate.number_refused", math.inf)
-        _error_check(
-            self,
-            ValueError,
-            message,
-            lambda: store.doc_put("alpha", "infinite", infinite),
-        )
-        self.assertEqual(store.seq_get("alpha"), 1)
+        keys = [row.key for row in store.kv_list("alpha", "")]
+        self.assertEqual(keys, ["nest/1"])
 
 
-# Turns: appended in order, listed, and compacted into one summary.
+# Turns: appended in order and listed.
 class TestTurns(unittest.TestCase):
     # Turns number from 1 in their scene, a bad scene or content raises.
     def test_turns_append(self) -> None:
@@ -1226,10 +935,8 @@ class TestTurns(unittest.TestCase):
         store.db_create("metaverse")
         user = '{"role":"user","content":"1"}'
         answer = _json_text({"role": "assistant", "content": _WIDE_TEXT})
-        self.assertEqual(store.turn_append(_SCENE, "user", user), (1, 1))
-        self.assertEqual(
-            store.turn_append(_SCENE, "assistant", answer), (2, 2)
-        )
+        self.assertEqual(store.turn_append(_SCENE, "user", user), 1)
+        self.assertEqual(store.turn_append(_SCENE, "assistant", answer), 2)
         self.assertEqual(
             store.turn_list(_SCENE),
             [
@@ -1238,8 +945,9 @@ class TestTurns(unittest.TestCase):
             ],
         )
         self.assertEqual(store.turn_list("/metaverse/elsewhere/1"), [])
-        for scene in ("hyperposition/1", "/metaverse/world"):
-            message = i18n("substrate.scene_bad", scene)
+        scenes = {"internal": "hyperposition/1", "value": "/metaverse/world"}
+        for case, scene in scenes.items():
+            message = _text_get(f"substrate_scene_bad_{case}")
             _error_check(
                 self,
                 ValueError,
@@ -1252,46 +960,12 @@ class TestTurns(unittest.TestCase):
             "CHECK constraint failed: json_valid(content)",
             lambda: store.turn_append(_SCENE, "user", "not json"),
         )
-        self.assertEqual(store.seq_get("metaverse"), 2)
-
-    # Compaction replaces turns 1 to `through` by one summary turn at 1.
-    def test_turns_compact(self) -> None:
-        store = _store_make(self, _root_make(self))
-        store.db_create("metaverse")
-        for text in ("1", "2", "3", "4"):
-            message = _json_text({"role": "user", "content": text})
-            store.turn_append(_SCENE, "user", message)
-        self.assertEqual(store.turn_compact(_SCENE, 3, "Asked thrice."), 5)
-        summary = '{"role":"system","content":"Asked thrice."}'
-        fourth = '{"role":"user","content":"4"}'
-        self.assertEqual(
-            store.turn_list(_SCENE),
-            [
-                substrate.TurnRow(_SCENE, 1, "system", summary),
-                substrate.TurnRow(_SCENE, 4, "user", fourth),
-            ],
-        )
-        self.assertEqual(store.turn_append(_SCENE, "user", fourth), (5, 6))
-        message = i18n("substrate.through_bad", 0)
-        _error_check(
-            self,
-            ValueError,
-            message,
-            lambda: store.turn_compact(_SCENE, 0, "None."),
-        )
-        message = i18n("substrate.turns_none", "/metaverse/elsewhere/1", 2)
-        _error_check(
-            self,
-            LookupError,
-            message,
-            lambda: store.turn_compact("/metaverse/elsewhere/1", 2, "None."),
-        )
-        self.assertEqual(store.seq_get("metaverse"), 6)
+        self.assertEqual([row.n for row in store.turn_list(_SCENE)], [1, 2])
 
 
-# SQL: the results of statements and the changes they count.
+# SQL: the results of statements, the changes they make, a trigger's refusal.
 class TestSql(unittest.TestCase):
-    # Statements return columns, rows and changes, and only writes count.
+    # Statements return columns, rows and changes, a read changing none.
     def test_sql_results(self) -> None:
         store = _store_make(self, _root_make(self))
         store.db_create("castle")
@@ -1310,7 +984,6 @@ class TestSql(unittest.TestCase):
             results,
             [substrate.SqlResult([], [], 0), substrate.SqlResult([], [], 1)],
         )
-        self.assertEqual(store.seq_get("castle"), 1)
         selected = store.sql_run(
             "castle", [_statement_make("SELECT name, title FROM world")]
         )
@@ -1322,49 +995,40 @@ class TestSql(unittest.TestCase):
                 )
             ],
         )
-        self.assertEqual(store.seq_get("castle"), 1)
 
-
-# The rules of `seq`: what counts, what does not, and transactions.
-class TestSeq(unittest.TestCase):
-    # Changes count once each, no change and a failure count nothing.
-    def test_seq_rules(self) -> None:
+    # A trigger raising a string's name raises that string, adding no row.
+    def test_trigger_name(self) -> None:
         store = _store_make(self, _root_make(self))
-        store.db_create("alpha")
-        self.assertEqual(store.kv_put("/alpha/a", b"one")[1], 1)
-        self.assertEqual(store.kv_put("/alpha/a", b"one")[1], 1)
-        self.assertEqual(store.kv_put("/alpha/a", b"two")[1], 2)
-        self.assertEqual(store.kv_delete("/alpha/absent"), 2)
-        self.assertEqual(store.kv_delete("/alpha/a"), 3)
-        store.sql_run("alpha", [_statement_make("SELECT 1")])
-        self.assertEqual(store.seq_get("alpha"), 3)
-        store.sql_run("alpha", [_statement_make("CREATE TABLE t (x TEXT)")])
-        self.assertEqual(store.seq_get("alpha"), 4)
+        store.db_create("metaverse")
         store.sql_run(
-            "alpha", [_statement_make("INSERT INTO t VALUES (?)", "a")]
+            "metaverse",
+            [
+                _statement_make(_UNIVERSE_SQL),
+                _statement_make(_UNIVERSE_TRIGGER),
+                _statement_make(
+                    _UNIVERSE_INSERT,
+                    "castle",
+                    "The castle",
+                    "player",
+                    "castle_world",
+                ),
+            ],
         )
-        self.assertEqual(store.seq_get("alpha"), 5)
-        store.sql_run(
-            "alpha",
-            [_statement_make("UPDATE t SET x = ? WHERE x = ?", "b", "absent")],
+        second = _statement_make(
+            _UNIVERSE_INSERT, "tower", "The tower", "player", "castle_world"
         )
-        self.assertEqual(store.seq_get("alpha"), 5)
-        _error_check(
-            self,
-            sqlite3.OperationalError,
-            "no such table: absent",
-            lambda: store.sql_run(
-                "alpha",
-                [
-                    _statement_make("INSERT INTO t VALUES (?)", "b"),
-                    _statement_make("INSERT INTO absent VALUES (1)"),
-                ],
-            ),
-        )
-        self.assertEqual(store.seq_get("alpha"), 5)
-        rows = _rows_query(store, "alpha", "SELECT x FROM t")
-        self.assertEqual(rows, [["a"]])
+        with self.assertRaises(ValueError) as caught:
+            store.sql_run("metaverse", [second])
+        message = _text_get("agent_content_ambiguous")
+        self.assertEqual(str(caught.exception), message)
+        cause = caught.exception.__cause__
+        self.assertIsInstance(cause, sqlite3.IntegrityError)
+        rows = _rows_query(store, "metaverse", "SELECT name FROM universe")
+        self.assertEqual(rows, [["castle"]])
 
+
+# Transactions: writes in several databases commit or roll back together.
+class TestTransactions(unittest.TestCase):
     # Writes in one `transaction_run` commit together or roll back together.
     def test_transaction_whole(self) -> None:
         store = _store_make(self, _root_make(self))
@@ -1378,8 +1042,10 @@ class TestSeq(unittest.TestCase):
             store.kv_put("/alpha/c", b"3")
 
         store.transaction_run(puts_three)
-        self.assertEqual(store.seq_get("alpha"), 2)
-        self.assertEqual(store.seq_get("beta"), 1)
+        keys = [row.key for row in store.kv_list("alpha", "")]
+        self.assertEqual(keys, ["a", "c"])
+        keys = [row.key for row in store.kv_list("beta", "")]
+        self.assertEqual(keys, ["b"])
 
         # Puts a value to the cache, deletes another, then raises.
         def puts_raise() -> None:
@@ -1393,9 +1059,8 @@ class TestSeq(unittest.TestCase):
             "rolled back",
             lambda: store.transaction_run(puts_raise),
         )
-        self.assertEqual(store.seq_get("alpha"), 2)
         self.assertEqual(store.kv_get("/alpha/a").data, b"1")
-        message = i18n("substrate.key_missing", "d", "alpha")
+        message = _text_get("substrate_key_missing_rolled")
         _error_check(
             self, LookupError, message, lambda: store.kv_get("/alpha/d")
         )
@@ -1424,9 +1089,7 @@ class TestSeq(unittest.TestCase):
             "no such table: absent",
             lambda: store.transaction_run(writes_split),
         )
-        self.assertEqual(store.seq_get("alpha"), 0)
-        self.assertEqual(store.seq_get("beta"), 0)
-        message = i18n("substrate.key_missing", "a", "alpha")
+        message = _text_get("substrate_key_missing_split")
         _error_check(
             self, LookupError, message, lambda: store.kv_get("/alpha/a")
         )
@@ -1434,29 +1097,60 @@ class TestSeq(unittest.TestCase):
             _tables_list(store, "beta"), ["_head", "_kv", "_meta", "_turn"]
         )
 
-    # `seq` survives closing, reopening and a new store on the same root.
-    def test_seq_reopen(self) -> None:
-        root = _root_make(self)
-        store = _store_make(self, root)
-        store.db_create("alpha")
-        store.kv_put("/alpha/a", b"one")
-        store.doc_put("alpha", "note", {0: {"t": "note"}, "text": _WIDE_TEXT})
-        store.turn_append(
-            "/alpha/scene/1", "user", '{"role":"user","content":"hi"}'
-        )
-        self.assertEqual(store.seq_get("alpha"), 3)
-        store.db_close("alpha")
-        self.assertEqual(store.db_list(), [])
-        self.assertEqual(store.db_open("alpha"), 3)
-        _store_close(store)
-        again = _store_make(self, root)
-        self.assertEqual(again.db_open("alpha"), 3)
-        self.assertEqual(again.kv_get("/alpha/a").data, b"one")
 
-
-# Snapshots: serialized bytes with `seq`, restored from bytes or a file.
+# Snapshots with the held cache files, restored from bytes or files.
 class TestSnapshot(unittest.TestCase):
-    # A restore brings back the rows and the `seq` of the snapshot.
+    # Restores `alpha` on a second root with the first of its two cache files.
+    def files_lost_check(self, streamed: bool) -> None:
+        first_root = _root_make(self)
+        first = _store_make(self, first_root)
+        values = _alpha_fill(first)
+        image = first.db_snapshot("alpha")
+        big = [values["/alpha/one"], values["/alpha/two"]]
+        expected = sorted(_cache_file(first_root, value) for value in big)
+        self.assertEqual(image.files, expected)
+        refs = {
+            hashlib.sha256(value).hexdigest(): ref
+            for ref, value in values.items()
+        }
+        came = refs[os.path.basename(image.files[0])]
+        lost = refs[os.path.basename(image.files[1])]
+        with open(image.files[0], "rb") as file:
+            sent = file.read()
+        root = _root_make(self)
+        second = _store_make(self, root)
+        if streamed:
+            sink = os.path.join(root, "cache", "sink")
+            with open(sink, "wb") as file:
+                file.write(sent)
+            second.db_restore("alpha", image.data, [sink])
+            self.assertFalse(os.path.exists(sink))
+        else:
+            second.db_restore("alpha", image.data, [sent])
+        self.assertEqual(_value_bytes(second.kv_get(came)), values[came])
+        small = second.kv_get("/alpha/small").data
+        self.assertEqual(small, values["/alpha/small"])
+        lost_hex = os.path.basename(image.files[1])
+        message = (
+            _text_get("substrate_file_lost_restored")
+            .replace("{0}", lost)
+            .replace("{1}", lost_hex)
+        )
+        _error_check(self, LookupError, message, lambda: second.kv_get(lost))
+        rows = [
+            substrate.KvRow(
+                ref.removeprefix("/alpha/"),
+                len(value),
+                hashlib.sha256(value).digest(),
+            )
+            for ref, value in values.items()
+        ]
+        self.assertEqual(second.kv_list("alpha", ""), rows)
+        second.kv_put(lost, b"again")
+        self.assertEqual(second.kv_get(lost).data, b"again")
+        self.assertEqual(second.kv_check("alpha"), 0)
+
+    # A restore brings back the rows of the snapshot.
     def test_snapshot_restore(self) -> None:
         root = _root_make(self)
         store = _store_make(self, root)
@@ -1469,19 +1163,18 @@ class TestSnapshot(unittest.TestCase):
                 _statement_make("INSERT INTO t VALUES (?)", _WIDE_TEXT),
             ],
         )
-        data, seq = store.db_snapshot("alpha")
+        image = store.db_snapshot("alpha")
+        data = image.data
         self.assertEqual(data[:16], b"SQLite format 3\x00")
-        self.assertEqual(seq, 2)
+        self.assertEqual(image.files, [])
         path = os.path.join(root, "alpha.sqlite")
         dump = _database_dump(path)
         store.kv_put("/alpha/a", b"two")
         store.kv_put("/alpha/b", b"three")
         store.sql_run("alpha", [_statement_make("DELETE FROM t")])
-        self.assertEqual(store.seq_get("alpha"), 5)
-        self.assertEqual(store.db_restore("alpha", data), 2)
-        self.assertEqual(store.seq_get("alpha"), 2)
+        self.assertIsNone(store.db_restore("alpha", data, []))
         self.assertEqual(store.kv_get("/alpha/a").data, b"one")
-        message = i18n("substrate.key_missing", "b", "alpha")
+        message = _text_get("substrate_key_missing_restored")
         _error_check(
             self, LookupError, message, lambda: store.kv_get("/alpha/b")
         )
@@ -1491,7 +1184,7 @@ class TestSnapshot(unittest.TestCase):
         sink = os.path.join(other, "cache", "sink")
         with open(sink, "wb") as file:
             file.write(data)
-        self.assertEqual(second.db_restore("alpha", sink), 2)
+        second.db_restore("alpha", sink, [])
         self.assertFalse(os.path.exists(sink))
         self.assertEqual(
             _database_dump(os.path.join(other, "alpha.sqlite")), dump
@@ -1508,27 +1201,25 @@ class TestSnapshot(unittest.TestCase):
         self.addCleanup(memory.close)
         memory.execute("CREATE TABLE note (x TEXT)")
         data = memory.serialize()
-        message = i18n("substrate.schema_partial", [])
+        message = _text_get("substrate_schema_partial_none")
         _error_check(
             self,
             RuntimeError,
             message,
-            lambda: store.db_restore("alpha", data),
+            lambda: store.db_restore("alpha", data, []),
         )
         self.assertEqual(store.db_list(), ["alpha"])
         self.assertEqual(store.kv_get("/alpha/a").data, b"one")
-        self.assertEqual(store.seq_get("alpha"), 1)
         self.assertEqual(sorted(os.listdir(root)), listed)
 
-    # Two snapshots of one database taken apart hold their own bytes and seq.
+    # Two snapshots of one database taken apart hold their own bytes.
     def test_snapshots_apart(self) -> None:
         store = _store_make(self, _root_make(self))
         store.db_create("alpha")
-        first_data, first_seq = store.db_snapshot("alpha")
+        first = store.db_snapshot("alpha")
         store.kv_put("/alpha/a", b"one")
-        second_data, second_seq = store.db_snapshot("alpha")
-        self.assertEqual((first_seq, second_seq), (0, 1))
-        self.assertNotEqual(first_data, second_data)
+        second = store.db_snapshot("alpha")
+        self.assertNotEqual(first.data, second.data)
 
     # A cached value stays held through a snapshot and its restore.
     def test_value_held(self) -> None:
@@ -1536,9 +1227,10 @@ class TestSnapshot(unittest.TestCase):
         store = _store_make(self, root)
         store.db_create("alpha")
         store.kv_put("/alpha/big", _VALUE_OVER)
-        data, seq = store.db_snapshot("alpha")
-        self.assertEqual(store.db_restore("alpha", data), seq)
         path = _cache_file(root, _VALUE_OVER)
+        image = store.db_snapshot("alpha")
+        self.assertEqual(image.files, [path])
+        store.db_restore("alpha", image.data, [])
         digest = hashlib.sha256(_VALUE_OVER).digest()
         self.assertEqual(
             store.kv_get("/alpha/big"),
@@ -1546,6 +1238,24 @@ class TestSnapshot(unittest.TestCase):
         )
         with open(path, "rb") as file:
             self.assertEqual(file.read(), _VALUE_OVER)
+
+    # A restore with one of its two cache files streamed loses one value.
+    def test_restore_files_lost(self) -> None:
+        self.files_lost_check(True)
+
+    # The same restore with the cache file given as its bytes.
+    def test_restore_bytes(self) -> None:
+        self.files_lost_check(False)
+
+    # A snapshot leaves out a deleted cache file, without raising.
+    def test_snapshot_missing_file(self) -> None:
+        root = _root_make(self)
+        store = _store_make(self, root)
+        values = _alpha_fill(store)
+        os.remove(_cache_file(root, values["/alpha/one"]))
+        image = store.db_snapshot("alpha")
+        kept = _cache_file(root, values["/alpha/two"])
+        self.assertEqual(image.files, [kept])
 
 
 # A kill between a cache file and its row.
@@ -1563,244 +1273,11 @@ class TestCrash(unittest.TestCase):
         self.assertEqual(os.waitstatus_to_exitcode(status), -signal.SIGKILL)
         path = _cache_file(root, _VALUE_OVER)
         self.assertTrue(os.path.isfile(path))
-        self.assertEqual(store.db_open("alpha"), 0)
-        message = i18n("substrate.key_missing", "big", "alpha")
+        store.db_open("alpha")
+        message = _text_get("substrate_key_missing_killed")
         _error_check(
             self, LookupError, message, lambda: store.kv_get("/alpha/big")
         )
         self.assertEqual(store.kv_check("alpha"), 1)
         self.assertFalse(os.path.exists(path))
         self.assertEqual(store.kv_check("alpha"), 0)
-
-
-# Replication: the recorded sequences replayed, a stale `since`, bad lines.
-class TestReplay(unittest.TestCase):
-    # The recorded operations give the recorded `seq`, and the copies agree.
-    def test_recorded_replay(self) -> None:
-        first_root = _root_make(self)
-        second_root = _root_make(self)
-        first = _store_make(self, first_root)
-        second = _store_make(self, second_root)
-        for store in (first, second):
-            _hello_make(store)
-            self.assertEqual(store.seq_get("_files"), 1)
-            self.assertEqual(store.seq_get("metaverse"), 5)
-        sink = os.path.join(second_root, "cache", "sink")
-        for kind, since, fields, seq in _RECORDED:
-            _modifier_call(first, kind, fields)
-            self.assertEqual(first.seq_get(_target_database(fields)), seq)
-            replayed = dict(fields)
-            if kind == "kv.put" and len(fields["data"]) > _OVERFLOW_BYTES:
-                with open(sink, "wb") as file:
-                    file.write(fields["data"])
-                replayed["data"] = sink
-            applied = second.operation_apply(kind, since, **replayed)
-            self.assertEqual(applied, seq, kind)
-        names = first.db_list()
-        self.assertEqual(
-            names,
-            [
-                "_files",
-                "castle",
-                "castle_gatehouse",
-                "castle_world",
-                "metaverse",
-            ],
-        )
-        self.assertEqual(second.db_list(), names)
-        _store_close(first)
-        _store_close(second)
-        for name in names:
-            self.assertEqual(
-                _database_dump(os.path.join(first_root, name + ".sqlite")),
-                _database_dump(os.path.join(second_root, name + ".sqlite")),
-                name,
-            )
-        self.assertEqual(
-            _files_read(os.path.join(first_root, "cache")),
-            _files_read(os.path.join(second_root, "cache")),
-        )
-        self.assertEqual(
-            sorted(os.listdir(first_root)), sorted(os.listdir(second_root))
-        )
-        kind, since, fields, seq = _DESYNC
-        self.assertEqual(second.db_open("_files"), since)
-        second.kv_put(fields["k"], fields["data"])
-        message = i18n("substrate.since_stale", kind, since, seq, "_files")
-        _error_check(
-            self,
-            RuntimeError,
-            message,
-            lambda: second.operation_apply(kind, since, **fields),
-        )
-        self.assertEqual(second.seq_get("_files"), seq)
-
-    # A `since` that is not the `seq` raises the desync and changes nothing.
-    def test_since_stale(self) -> None:
-        root = _root_make(self)
-        store = _store_make(self, root)
-        store.db_create("alpha")
-        message = i18n("substrate.since_stale", "kv.put", 1, 0, "alpha")
-        _error_check(
-            self,
-            RuntimeError,
-            message,
-            lambda: store.operation_apply(
-                "kv.put", 1, k="/alpha/a", data=b"x"
-            ),
-        )
-        message = i18n("substrate.since_stale", "db.create", 1, 0, "beta")
-        _error_check(
-            self,
-            RuntimeError,
-            message,
-            lambda: store.operation_apply("db.create", 1, db="beta"),
-        )
-        self.assertFalse(os.path.exists(os.path.join(root, "beta.sqlite")))
-        message = i18n("substrate.since_stale", "db.drop", 1, 0, "alpha")
-        _error_check(
-            self,
-            RuntimeError,
-            message,
-            lambda: store.operation_apply("db.drop", 1, db="alpha"),
-        )
-        self.assertEqual(store.db_list(), ["alpha"])
-        self.assertEqual(store.seq_get("alpha"), 0)
-        message = i18n("substrate.key_missing", "a", "alpha")
-        _error_check(
-            self, LookupError, message, lambda: store.kv_get("/alpha/a")
-        )
-        self.assertEqual(
-            store.operation_apply("kv.put", 0, k="/alpha/a", data=b"x"), 1
-        )
-        self.assertEqual(store.operation_apply("db.drop", 1, db="alpha"), 0)
-        self.assertEqual(store.db_list(), [])
-
-    # A stale `doc.put` raises and writes no version.
-    def test_stale_document(self) -> None:
-        store = _store_make(self, _root_make(self))
-        store.db_create("alpha")
-        body: dict[int | str, Any] = {0: {"t": "note"}}
-        message = i18n("substrate.since_stale", "doc.put", 1, 0, "alpha")
-        _error_check(
-            self,
-            RuntimeError,
-            message,
-            lambda: store.operation_apply(
-                "doc.put", 1, db="alpha", id="note", body=body
-            ),
-        )
-        message = i18n("substrate.id_missing", "note", "alpha")
-        _error_check(
-            self, LookupError, message, lambda: store.doc_head("alpha", "note")
-        )
-        self.assertEqual(store.seq_get("alpha"), 0)
-
-    # A stale `turn.append` raises and appends no turn.
-    def test_stale_turn(self) -> None:
-        store = _store_make(self, _root_make(self))
-        store.db_create("alpha")
-        scene = "/alpha/scene/1"
-        message = i18n("substrate.since_stale", "turn.append", 1, 0, "alpha")
-        _error_check(
-            self,
-            RuntimeError,
-            message,
-            lambda: store.operation_apply(
-                "turn.append",
-                1,
-                scene=scene,
-                role="user",
-                content=_MESSAGE_USER,
-            ),
-        )
-        self.assertEqual(store.turn_list(scene), [])
-        self.assertEqual(store.seq_get("alpha"), 0)
-
-    # A stale `sql.run` raises and runs no statement.
-    def test_stale_sql(self) -> None:
-        store = _store_make(self, _root_make(self))
-        store.db_create("alpha")
-        statements: list[dict[str, Any]] = [
-            {"sql": "CREATE TABLE note (x TEXT)", "params": []}
-        ]
-        message = i18n("substrate.since_stale", "sql.run", 1, 0, "alpha")
-        _error_check(
-            self,
-            RuntimeError,
-            message,
-            lambda: store.operation_apply(
-                "sql.run", 1, db="alpha", statements=statements
-            ),
-        )
-        self.assertEqual(
-            _tables_list(store, "alpha"), ["_head", "_kv", "_meta", "_turn"]
-        )
-        self.assertEqual(store.seq_get("alpha"), 0)
-
-    # A delete, a compaction and a drop, which the replay lacks, apply.
-    def test_operations_unrecorded(self) -> None:
-        store = _store_make(self, _root_make(self))
-        scene = "/alpha/scene/1"
-        summary = '{"role":"system","content":"Answered 1."}'
-        self.assertEqual(store.operation_apply("db.create", 0, db="alpha"), 0)
-        self.assertEqual(
-            store.operation_apply("kv.put", 0, k="/alpha/a", data=b"one"), 1
-        )
-        self.assertEqual(
-            store.operation_apply("kv.delete", 1, k="/alpha/a"), 2
-        )
-        self.assertEqual(
-            store.operation_apply(
-                "turn.append",
-                2,
-                scene=scene,
-                role="user",
-                content=_MESSAGE_USER,
-            ),
-            3,
-        )
-        self.assertEqual(
-            store.operation_apply(
-                "turn.compact",
-                3,
-                scene=scene,
-                through=1,
-                summary="Answered 1.",
-            ),
-            4,
-        )
-        self.assertEqual(
-            store.turn_list(scene),
-            [substrate.TurnRow(scene, 1, "system", summary)],
-        )
-        self.assertEqual(store.operation_apply("db.drop", 4, db="alpha"), 0)
-        self.assertEqual(store.db_list(), [])
-
-    # An unknown type, wrong keywords or an internal ref raise.
-    def test_operation_bad(self) -> None:
-        store = _store_make(self, _root_make(self))
-        store.db_create("alpha")
-        message = i18n("substrate.operation_type", "kv.get")
-        _error_check(
-            self,
-            ValueError,
-            message,
-            lambda: store.operation_apply("kv.get", 0, k="/alpha/a"),
-        )
-        with self.assertRaisesRegex(TypeError, "'data'"):
-            store.operation_apply("kv.put", 0, k="/alpha/a")
-        with self.assertRaisesRegex(TypeError, "'db'"):
-            store.operation_apply("kv.delete", 0, k="/alpha/a", db="alpha")
-        message = i18n("substrate.ref_internal", "a")
-        _error_check(
-            self,
-            ValueError,
-            message,
-            lambda: store.operation_apply("kv.delete", 0, k="a"),
-        )
-        with self.assertRaisesRegex(TypeError, "'params'"):
-            store.operation_apply(
-                "sql.run", 0, db="alpha", statements=[{"sql": "SELECT 1"}]
-            )
-        self.assertEqual(store.seq_get("alpha"), 0)

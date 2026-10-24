@@ -4,7 +4,36 @@
 //
 // The ports over ttyd's WebSocket: the wire to the server on tty 1, which
 // carries JSLB, and the console on tty 0, which relays ttyd's own protocol.
-// One of the four modules that turn platform events into lines.
+// One of the four modules that turn platform events into lines. Every line
+// they build takes the form `settings.names_full()` picks.
+//
+// ttyd 1.7.7's protocol, the same on both ttys. The client fetches `/token`,
+// opens `/ws`, or `/ws?arg=console` for tty 0, with the subprotocol `tty`,
+// and sends one first message of JSON text: on tty 1 only `AuthToken`, on
+// tty 0 also `columns` and `rows`, the console view's. That ttyd 1.7.7
+// accepts a first message without a size is from memory, owed to testing.
+// After it, each client message is one kind byte and its body: '0' input,
+// '1' a resize, which the page never sends. Each server message is one kind
+// byte and its body: '0' output, '1' the window title, '2' the preferences
+// as JSON. ttyd runs the command once the first message is in, and ends the
+// socket when the command exits.
+//
+// tty 1 carries JSLB in the bodies of '0' messages both ways, split into
+// input frames of `chunk_bytes`, each sent once `bufferedAmount` is under
+// one chunk. Every blob it sends is bytes in memory, never a cache handle.
+// The first line, `tap.start`, is read before the settings exist, under
+// fixed bounds: `first_line_max` 10 MiB, no blob. The settings then size the
+// decoder. A second `tap.start`, as `system.restart` makes, throws
+// `wire.start_twice`: only a reload of the page takes a new first line. The
+// JSON of ttyd's token answer and of its preferences is read by
+// `jslb.json_decode`.
+//
+// A fault while the port takes a message stops it taking more but leaves the
+// socket open, so that the worker's report can still send the `error` line
+// by `wire_end`. `wire_end` never closes the socket: the server ends it by
+// its exit once it has logged the failure, and `fn` runs at that close, or
+// at once on a socket already closed. Its wait runs under the drain timer,
+// whose expiry is a fault met while a fault is reported.
 
 namespace wire {
   // The paths, protocol bytes, codes, line types, setting ids and limits.
@@ -27,39 +56,31 @@ namespace wire {
     token_seconds: 120,
     // A socket opening: 120 s, a default kept from the earlier code.
     open_seconds: 120,
-    // Hello once the socket opens: 120 s, a default kept from earlier code.
-    hello_seconds: 120,
+    // The first line once the socket opens: 120 s, kept from earlier code.
+    first_seconds: 120,
     // A drained socket buffer: 120 s, a default kept from the earlier code.
     drain_seconds: 120,
     // A poll of the socket buffer: 0 ms, a default chosen by its writer.
     poll_ms: 0,
-    // The longest delay a timer holds: 2^31 - 1 ms, the platform's limit.
+    // The longest delay a timer holds: `2^31 - 1` ms, the platform's limit.
     timer_max_ms: 2 ** 31 - 1,
-    // The longest hello phase line: 10 MiB, a default kept from earlier code.
-    hello_line_max: 10485760,
-    // The hello phase blob bytes of a message: none, as hello has no blob.
-    hello_blob_max: 0,
-    // The hello phase blob bytes held in memory: none.
-    hello_overflow_bytes: 0,
-    hello_type: "hello",
+    // The longest first line: 10 MiB, a default kept from earlier code.
+    first_line_max: 10485760,
+    // The first phase blob bytes of a message: none, as the first has none.
+    first_blob_max: 0,
+    // The first phase blob bytes held in memory: none.
+    first_overflow_bytes: 0,
+    first_type: "tap.start",
     error_type: "error",
     open_type: "console.open",
     input_type: "console.input",
     output_type: "console.output",
     read_type: "console.read",
-    debug_setting: "debug",
     chunk_setting: "chunk_bytes",
     line_setting: "line_max",
     blob_setting: "blob_max",
     overflow_setting: "overflow_bytes",
   });
-
-  // Reads a cache file: `length` bytes from `offset`, fewer only at its end.
-  type CacheRead = (
-    handle: string,
-    offset: number,
-    length: number,
-  ) => Uint8Array;
 
   // A timer that throws, naming what was awaited, unless stopped in time.
   class WaitTimer {
@@ -195,7 +216,7 @@ namespace wire {
   // The token in ttyd's JSON answer, read as strict `UTF-8`.
   function token_parse(url: string, body: ArrayBuffer): string {
     const text = utility.utf8_decode(new Uint8Array(body));
-    const value: unknown = JSON.parse(text);
+    const value: unknown = jslb.json_decode(text);
     const token =
       typeof value === "object" && value !== null && "token" in value
         ? value.token
@@ -263,66 +284,17 @@ namespace wire {
     }
   }
 
-  // A cache file of an encoded line, whose ranges must be read whole.
-  class CachePiece {
-    readonly size: number;
-    private readonly handle: string;
-    private readonly read: CacheRead;
-
-    // Takes the handle, the size its blob header gives, and the reader.
-    constructor(handle: string, size: number, read: CacheRead) {
-      this.handle = handle;
-      this.size = size;
-      this.read = read;
-    }
-
-    // The bytes of the range, which must number exactly its length.
-    range_read(offset: number, length: number): Uint8Array {
-      const bytes = this.read(this.handle, offset, length);
-      if (bytes.length !== length) {
-        throw new Error(
-          i18n(
-            "wire.handle_differs",
-            this.handle,
-            offset,
-            length,
-            bytes.length,
-          ),
-        );
-      }
-      // The last range also reads past the end, where a longer file has bytes.
-      if (offset + length === this.size) {
-        const tail = this.read(this.handle, this.size, 1).length;
-        if (tail !== 0) {
-          throw new Error(
-            i18n("wire.handle_differs", this.handle, this.size, 0, tail),
-          );
-        }
-      }
-      return bytes;
-    }
-  }
-
-  // The encoded piece `number` of a line, a cache handle read by `read`.
-  function piece_make(
-    line: lines.Line,
-    number: number,
-    data: Uint8Array | string,
-    read: CacheRead | undefined,
-  ): MemoryPiece | CachePiece {
-    if (typeof data !== "string") {
-      return new MemoryPiece(data);
-    }
-    if (read === undefined) {
+  // An encoded piece of a line, which must be bytes: no cache handle is sent.
+  function piece_make(data: Uint8Array | string): MemoryPiece {
+    if (typeof data === "string") {
       throw new Error(i18n("wire.handle_unsent", data));
     }
-    const blob = line[number] as lines.BlobHeader;
-    return new CachePiece(data, jslb.field_get(blob, "size") as number, read);
+    return new MemoryPiece(data);
   }
 
   // A piece waiting in the frame queue, and whether it is a blob's bytes.
   interface QueuedPiece {
-    piece: MemoryPiece | CachePiece;
+    piece: MemoryPiece;
     blob: boolean;
   }
 
@@ -347,12 +319,12 @@ namespace wire {
     }
 
     // Queues a line, refused over `line_max` or with blobs over `blob_max`.
-    line_add(line: lines.Line, read: CacheRead | undefined): void {
+    line_add(line: lines.Line): void {
       const type = jslb.field_get(line[0], "type");
       const encoded = jslb.line_encode(line);
       const pieces: QueuedPiece[] = [];
       for (let number = 0; number < encoded.length; number += 1) {
-        const piece = piece_make(line, number, encoded[number], read);
+        const piece = piece_make(encoded[number]);
         pieces.push({ piece, blob: number > 0 });
       }
       const bytes = pieces[0].piece.size;
@@ -470,7 +442,7 @@ namespace wire {
     }
   }
 
-  // The parts of the wire port that the settings size, built after hello.
+  // The parts of the wire port that the settings size, built after the first.
   interface SettingsParts {
     chunk_bytes: number;
     frames: FrameQueue;
@@ -487,22 +459,25 @@ namespace wire {
     private readonly socket_url: string;
     private readonly token_timer: WaitTimer;
     private readonly open_timer: WaitTimer;
-    private readonly hello_timer: WaitTimer;
+    private readonly first_timer: WaitTimer;
     private readonly drain_timer: WaitTimer;
-    // The hello phase decoder until the settings size one, then that one.
+    // The first phase decoder until the settings size one, then that one.
     private decoder: jslb.LineDecoder;
     private parts: SettingsParts | undefined = undefined;
-    private cache_read: CacheRead | undefined = undefined;
     private socket: WebSocket | undefined = undefined;
     private poll_id: number | undefined = undefined;
-    private hello_fn: ((hello: lines.Line) => void) | undefined = undefined;
+    private first_fn: ((first: lines.Line) => void) | undefined = undefined;
     private line_fn: ((line: lines.Line) => void) | undefined = undefined;
     private close_fn:
       ((code: number, had_error: boolean) => void) | undefined = undefined;
-    private hello_seen = false;
+    // What `wire_end` calls at the server's close, set by its call.
+    private end_fn: (() => void) | undefined = undefined;
+    private first_seen = false;
     private error_seen = false;
-    // Set once this side closes the socket, on request or on a fault.
+    // Set once the socket is done with: closed by either side or ended.
     private shut = false;
+    // Cleared by a fault in a message, after which no message is taken.
+    private taking = true;
 
     // Takes the page's address, the sink of streamed blobs, the settings.
     constructor(
@@ -513,9 +488,9 @@ namespace wire {
       this.sink = sink;
       this.settings_get = settings_get;
       this.decoder = new jslb.LineDecoder(
-        constants.hello_line_max,
-        constants.hello_blob_max,
-        constants.hello_overflow_bytes,
+        constants.first_line_max,
+        constants.first_blob_max,
+        constants.first_overflow_bytes,
         sink,
       );
       this.token_url = new URL(constants.token_path, base_url).href;
@@ -528,9 +503,9 @@ namespace wire {
         i18n("wire.what_open", this.socket_url),
         constants.open_seconds,
       );
-      this.hello_timer = new WaitTimer(
-        i18n("wire.what_hello"),
-        constants.hello_seconds,
+      this.first_timer = new WaitTimer(
+        i18n("wire.what_first"),
+        constants.first_seconds,
       );
       this.drain_timer = new WaitTimer(
         i18n("wire.what_drain", this.socket_url),
@@ -538,12 +513,12 @@ namespace wire {
       );
     }
 
-    // Fetches the token, opens the socket and passes `hello` to `fn`, once.
-    wire_open(fn: (hello: lines.Line) => void): void {
-      if (this.hello_fn !== undefined) {
+    // Fetches the token, opens the socket, gives the first line to `fn`, once.
+    wire_open(fn: (first: lines.Line) => void): void {
+      if (this.first_fn !== undefined) {
         throw new Error(i18n("wire.open_twice", this.socket_url));
       }
-      this.hello_receive(fn);
+      this.first_receive(fn);
       token_fetch(this.token_url, this.token_timer, (token) =>
         this.socket_start(token),
       );
@@ -554,18 +529,37 @@ namespace wire {
       this.port_shut();
     }
 
-    // Encodes the line and sends it as input frames, once `hello` is in.
+    // Sends the line, awaits the server's end of the socket, calls `fn`.
+    wire_end(line: lines.Line, fn: () => void): void {
+      receiver_unset(this.end_fn, "wire_end");
+      this.end_fn = fn;
+      const socket = this.socket;
+      if (
+        this.shut ||
+        socket === undefined ||
+        socket.readyState !== WebSocket.OPEN
+      ) {
+        this.shut = true;
+        this.timers_stop();
+        fn();
+        return;
+      }
+      // The drain timer starts once the last frame is sent, in `frames_send`.
+      this.line_post(line, []);
+    }
+
+    // Encodes the line and sends it as input frames, once the first is in.
     line_post(line: lines.Line, _transfer: ArrayBuffer[]): void {
-      if (!this.hello_seen) {
+      if (!this.first_seen) {
         throw new Error(
           i18n("wire.post_early", jslb.field_get(line[0], "type")),
         );
       }
-      this.parts_live().frames.line_add(line, this.cache_read);
+      this.parts_live().frames.line_add(line);
       this.frames_send();
     }
 
-    // Sets the one receiver of the lines after `hello`.
+    // Sets the one receiver of the lines after the first.
     line_receive(fn: (line: lines.Line) => void): void {
       receiver_unset(this.line_fn, "line_receive");
       this.line_fn = fn;
@@ -577,16 +571,10 @@ namespace wire {
       this.close_fn = fn;
     }
 
-    // Sets the one receiver of `hello`, which `wire_open` does.
-    hello_receive(fn: (hello: lines.Line) => void): void {
-      receiver_unset(this.hello_fn, "hello_receive");
-      this.hello_fn = fn;
-    }
-
-    // Sets the one reader of cache files, which sends a blob held as a handle.
-    cache_attach(read: CacheRead): void {
-      receiver_unset(this.cache_read, "cache_attach");
-      this.cache_read = read;
+    // Sets the one receiver of the first line, which `wire_open` does.
+    first_receive(fn: (first: lines.Line) => void): void {
+      receiver_unset(this.first_fn, "first_receive");
+      this.first_fn = fn;
     }
 
     // Takes one message of ttyd's: keeps a title or preferences, or decodes.
@@ -596,19 +584,24 @@ namespace wire {
       if (kind === constants.title_kind) {
         this.title = utility.utf8_decode(body);
       } else if (kind === constants.preferences_kind) {
-        this.preferences = JSON.parse(utility.utf8_decode(body));
+        this.preferences = jslb.json_decode(utility.utf8_decode(body));
       } else {
         this.output_take(body);
       }
     }
 
-    // Takes the close of the socket, a fault unless an error line came first.
+    // The close: what `wire_end` awaits, else a fault without an error line.
     close_take(code: number): void {
       this.timers_stop();
       if (this.shut) {
         return;
       }
       this.shut = true;
+      const end = this.end_fn;
+      if (end !== undefined) {
+        end();
+        return;
+      }
       const fn = this.close_fn;
       if (fn !== undefined) {
         fn(code, this.error_seen);
@@ -634,71 +627,72 @@ namespace wire {
       this.socket = socket;
     }
 
-    // Sends ttyd's first message once the socket is open, then awaits hello.
+    // Sends ttyd's first message once the socket is open, then awaits ours.
     private open_take(socket: WebSocket, token: string): void {
       this.open_timer.timer_stop();
       socket.send(start_message(token));
-      this.hello_timer.timer_start();
+      this.first_timer.timer_start();
     }
 
-    // Takes a message of the socket, and closes the port when anything throws.
+    // Takes a socket message: a fault stops the taking but not the socket.
     private message_event(event: MessageEvent): void {
-      // A port that closed itself takes nothing more.
-      if (this.shut) {
+      // A port done with its socket, or after a fault, takes nothing more.
+      if (this.shut || !this.taking) {
         return;
       }
       try {
         this.message_take(message_bytes(event));
       } catch (error) {
-        this.port_shut();
+        this.taking = false;
+        this.timers_stop();
         throw error;
       }
     }
 
     // Decodes output, passes the lines on, then raises any fault held.
     private output_take(body: Uint8Array): void {
-      const hello_phase = !this.hello_seen;
-      // After hello the settings size the decoder, built here at the latest.
-      if (!hello_phase) {
+      const first_phase = !this.first_seen;
+      // After the first the settings size the decoder, built here at latest.
+      if (!first_phase) {
         this.parts_live();
       }
       const decoder = this.decoder;
       for (const line of decoder.bytes_feed(body)) {
-        // Bytes after hello are the settings decoder's, so none may come yet.
-        if (hello_phase && this.hello_seen) {
-          throw new Error(i18n("wire.hello_trailing"));
+        // Bytes after the first are the settings decoder's, so none come yet.
+        if (first_phase && this.first_seen) {
+          throw new Error(i18n("wire.start_trailing"));
         }
         this.line_take(line);
       }
       // Empty bytes finish no line and raise a fault met after the lines.
       decoder.bytes_feed(new Uint8Array(0));
-      if (hello_phase && this.hello_seen && !decoder.idle()) {
-        throw new Error(i18n("wire.hello_trailing"));
+      if (first_phase && this.first_seen && !decoder.idle()) {
+        throw new Error(i18n("wire.start_trailing"));
       }
     }
 
-    // Passes hello to its receiver, the rest on, and throws an early error.
+    // The first line to its receiver, the rest on, and an early error thrown.
     private line_take(line: lines.Line): void {
       const type = jslb.field_get(line[0], "type");
       if (type === constants.error_type) {
         this.error_seen = true;
-        // Before hello no queue reads lines, so the port raises the message.
-        if (!this.hello_seen) {
+        // Before the first no queue reads lines, so the port raises it.
+        if (!this.first_seen) {
           const payload = jslb.payload_of(line);
           throw new Error(
             i18n("wire.error_first", payload.message, payload.stack),
           );
         }
-      } else if (!this.hello_seen) {
-        if (type !== constants.hello_type) {
-          throw new Error(i18n("wire.hello_missing", type));
+      } else if (!this.first_seen) {
+        if (type !== constants.first_type) {
+          throw new Error(i18n("wire.start_missing", type));
         }
-        this.hello_seen = true;
-        this.hello_timer.timer_stop();
-        receiver_known(this.hello_fn, type)(line);
+        this.first_seen = true;
+        this.first_timer.timer_stop();
+        receiver_known(this.first_fn, type)(line);
         return;
-      } else if (type === constants.hello_type) {
-        throw new Error(i18n("wire.hello_twice"));
+      } else if (type === constants.first_type) {
+        throw new Error(i18n("wire.start_twice"));
       }
       receiver_known(this.line_fn, type)(line);
     }
@@ -724,7 +718,7 @@ namespace wire {
       return parts;
     }
 
-    // A number of the settings, which the server checked before hello.
+    // A number of the settings, which the server checked before the first.
     private setting_number(id: string): number {
       return this.settings_get(id) as number;
     }
@@ -740,6 +734,10 @@ namespace wire {
         }
         socket.send(parts.frames.frame_next());
         this.drain_timer.timer_stop();
+      }
+      // All is sent, so a `wire_end` waits for the close under the timer.
+      if (this.end_fn !== undefined) {
+        this.drain_timer.timer_start();
       }
     }
 
@@ -772,7 +770,7 @@ namespace wire {
     private timers_stop(): void {
       this.token_timer.timer_stop();
       this.open_timer.timer_stop();
-      this.hello_timer.timer_stop();
+      this.first_timer.timer_stop();
       this.drain_timer.timer_stop();
       if (this.poll_id !== undefined) {
         clearTimeout(this.poll_id);
@@ -783,7 +781,6 @@ namespace wire {
 
   // The port to the console on tty 0, relaying ttyd's own protocol as lines.
   export class ConsolePort implements queue.Port {
-    private readonly settings_get: (id: string) => unknown;
     private readonly token_url: string;
     private readonly socket_url: string;
     private readonly token_timer: WaitTimer;
@@ -797,9 +794,8 @@ namespace wire {
     private read_id: number | undefined = undefined;
     private read_timer: number | undefined = undefined;
 
-    // Takes the page's address and the reader of the settings.
-    constructor(base_url: string, settings_get: (id: string) => unknown) {
-      this.settings_get = settings_get;
+    // Takes the page's address.
+    constructor(base_url: string) {
       this.token_url = new URL(constants.token_path, base_url).href;
       this.socket_url = socket_address(base_url, constants.console_path);
       this.token_timer = new WaitTimer(
@@ -848,7 +844,7 @@ namespace wire {
     message_take(message: Uint8Array): void {
       const reply = this.reader.message_take(message);
       const header = jslb.header_make(constants.output_type, {
-        full: this.names_full(),
+        full: settings.names_full(),
       });
       const line = jslb.line_make(header, [jslb.blob_make(message)], {});
       receiver_known(this.line_fn, constants.output_type)(line);
@@ -903,7 +899,7 @@ namespace wire {
       this.open_id = undefined;
       const header = jslb.header_make(constants.open_type, {
         reply: id,
-        full: this.names_full(),
+        full: settings.names_full(),
       });
       const line = jslb.line_make(header, [], { token });
       receiver_known(this.line_fn, constants.open_type)(line);
@@ -920,7 +916,6 @@ namespace wire {
       }
       if (
         typeof seconds !== "number" ||
-        !Number.isFinite(seconds) ||
         seconds < 0 ||
         seconds * constants.second_ms > constants.timer_max_ms
       ) {
@@ -950,18 +945,13 @@ namespace wire {
       this.read_id = undefined;
       const header = jslb.header_make(constants.read_type, {
         reply: id,
-        full: this.names_full(),
+        full: settings.names_full(),
       });
       const line = jslb.line_make(header, [], {
         text: reply.text,
         timed_out: reply.timed_out,
       });
       receiver_known(this.line_fn, constants.read_type)(line);
-    }
-
-    // Whether lines use full header names, which is debug mode.
-    private names_full(): boolean {
-      return this.settings_get(constants.debug_setting) as boolean;
     }
   }
 }

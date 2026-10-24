@@ -3,55 +3,47 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // Tests of the HTTP port that need no network. No test here posts a request
-// that passes the checks, so no test starts a `fetch`.
+// that passes the checks, so no test starts a `fetch`. The request lines,
+// the expected replies and every thrown or carried text are entries of the
+// gold record, test_settings.json; a text that holds a platform's message
+// keeps a placeholder that the test fills.
 
 namespace test_http {
   // The values the tests share.
   const constants = Object.freeze({
     url: "https://api.x.ai/v1/chat/completions",
-    id: 7,
     authorization: "Bearer test-key",
   });
 
   // A payload of fields by name.
   type LinePayload = { [key: string]: unknown };
 
-  // The header options of a line: its id and whether it has full names.
-  type HeaderOptions = { id?: number; full?: boolean };
-
-  // A line of the type with the payload and the header options given.
-  function line_build(
-    type: string,
-    payload: LinePayload,
-    options: HeaderOptions,
-  ): lines.Line {
-    return jslb.line_make(jslb.header_make(type, options), [], payload);
+  // A copy of a value of this module's gold, which the harness keeps frozen.
+  function gold_value(name: string): unknown {
+    return structuredClone(harness.gold_get(`typescript.test_http.${name}`));
   }
 
-  // The headers a chat request carries.
-  function headers_make(): { [name: string]: string } {
-    return {
-      authorization: constants.authorization,
-      "content-type": "application/json",
-    };
+  // A text of this module's gold, a run time `{n}` left for the test to fill.
+  function gold_text(name: string): string {
+    return harness.gold_get(`typescript.test_http.texts.${name}`) as string;
   }
 
-  // The payload of a chat request, with the extra fields added or replaced.
-  function payload_make(extra: LinePayload): LinePayload {
-    return {
-      method: "POST",
-      url: constants.url,
-      headers: headers_make(),
-      ...extra,
-    };
+  // A copy of a line of this module's gold, a run time part set on the copy.
+  function gold_line(name: string): lines.Line {
+    return gold_value(`lines.${name}`) as lines.Line;
   }
 
-  // The exchange of a request line, numbered 7 and in short names by default.
+  // A copy of the gold request line named, with the payload fields given set.
+  function request_make(name: string, extra: LinePayload): lines.Line {
+    return Object.assign(gold_line(name), extra);
+  }
+
+  // The exchange of a request line, the gold's numbered 7 in short names.
   function exchange_make(
-    payload: LinePayload,
-    options: HeaderOptions = { id: constants.id },
+    extra: LinePayload,
+    name = "request",
   ): http.HttpExchange {
-    return new http.HttpExchange(line_build("http.request", payload, options));
+    return new http.HttpExchange(request_make(name, extra));
   }
 
   // A finished response with the content type, or none, and the body text.
@@ -65,6 +57,16 @@ namespace test_http {
       headers["content-type"] = content_type;
     }
     return { status, headers, text };
+  }
+
+  // The error `JSON.parse` throws for the text, which must throw.
+  function parse_thrown(text: string): Error {
+    try {
+      JSON.parse(text);
+    } catch (error) {
+      return error as Error;
+    }
+    throw new Error(`The text ${text} was parsed.`);
   }
 
   // The message of an error line, which the tests read as text.
@@ -93,9 +95,9 @@ namespace test_http {
   export class TestRequestTranslate extends unittest.TestCase {
     // A `json` field is serialized as the body, with no white space.
     test_json_body(): void {
-      const sent = exchange_make(
-        payload_make({ json: { model: "grok-4", n: 1 } }),
-      ).arguments_make();
+      const sent = exchange_make({
+        json: { model: "grok-4", n: 1 },
+      }).arguments_make();
       this.assertEqual(sent.url, constants.url);
       this.assertEqual(sent.init.method, "POST");
       this.assertEqual(sent.init.body, '{"model":"grok-4","n":1}');
@@ -104,39 +106,35 @@ namespace test_http {
     // A `body` field is sent as it is, white space and all.
     test_text_body(): void {
       const body = '  { "a": 1 }\n';
-      const sent = exchange_make(payload_make({ body })).arguments_make();
+      const sent = exchange_make({ body }).arguments_make();
       this.assertEqual(sent.init.body, body);
     }
 
     // When both fields are present the `json` field is the body.
     test_json_wins(): void {
-      const sent = exchange_make(
-        payload_make({ json: { a: 1 }, body: "text" }),
-      ).arguments_make();
+      const sent = exchange_make({
+        json: { a: 1 },
+        body: "text",
+      }).arguments_make();
       this.assertEqual(sent.init.body, '{"a":1}');
     }
 
     // A `json` field of `null` is present, so the body is the text `null`.
     test_json_null(): void {
-      const sent = exchange_make(
-        payload_make({ json: null }),
-      ).arguments_make();
+      const sent = exchange_make({ json: null }).arguments_make();
       this.assertEqual(sent.init.body, "null");
     }
 
     // Text outside ASCII is written as it is and not as an escape.
     test_json_unicode(): void {
       const letter = String.fromCodePoint(0xe9);
-      const sent = exchange_make(
-        payload_make({ json: { text: letter } }),
-      ).arguments_make();
+      const sent = exchange_make({ json: { text: letter } }).arguments_make();
       this.assertEqual(sent.init.body, '{"text":"' + letter + '"}');
     }
 
     // A request with neither field has no body at all.
     test_body_absent(): void {
-      const payload = payload_make({ method: "GET" });
-      const sent = exchange_make(payload).arguments_make();
+      const sent = exchange_make({ method: "GET" }).arguments_make();
       this.assertEqual(sent.init.method, "GET");
       this.assertFalse(Object.hasOwn(sent.init, "body"));
     }
@@ -147,21 +145,22 @@ namespace test_http {
         Authorization: constants.authorization,
         "X-Mixed": "a",
       };
-      const sent = exchange_make(payload_make({ headers })).arguments_make();
+      const sent = exchange_make({ headers }).arguments_make();
       this.assertEqual(sent.init.headers, headers);
     }
 
     // A `json` field that JSON cannot carry throws and sends nothing.
     test_json_refused(): void {
-      const expected = new Map<unknown, string>([
-        [NaN, i18n("utility.number_refused", NaN)],
-        [Infinity, i18n("utility.number_refused", Infinity)],
-        [undefined, i18n("utility.value_refused")],
-      ]);
-      for (const [json, text] of expected) {
-        const exchange = exchange_make(payload_make({ json }));
-        const message = message_thrown(this, () => exchange.arguments_make());
-        this.assertEqual(message, text);
+      const exchange = exchange_make({ json: undefined });
+      const message = message_thrown(this, () => exchange.arguments_make());
+      this.assertEqual(message, gold_text("utility_value_refused"));
+    }
+
+    // NaN and the infinities, which no decoder lets in, are sent as null.
+    test_json_unchecked(): void {
+      for (const json of [NaN, Infinity]) {
+        const exchange = exchange_make({ json });
+        this.assertEqual(exchange.arguments_make().init.body, "null");
       }
     }
   }
@@ -170,41 +169,34 @@ namespace test_http {
   export class TestRequestChecks extends unittest.TestCase {
     // The smallest request is accepted.
     test_fields_least(): void {
-      const exchange = exchange_make({
-        method: "GET",
-        url: constants.url,
-        headers: {},
-      });
+      const exchange = exchange_make({ method: "GET", headers: {} });
       this.assertEqual(exchange.arguments_make().init.headers, {});
     }
 
     // A line of another type is refused.
     test_type_other(): void {
-      const line = line_build("kv.get", payload_make({}), {
-        id: constants.id,
-      });
+      const line = request_make("request_kv_get", {});
       this.assertEqual(
         message_thrown(this, () => new http.HttpExchange(line)),
-        i18n("http.type_invalid", "kv.get", "http.request"),
+        gold_text("http_type_invalid"),
       );
     }
 
     // A request with no id is refused, as nothing could answer it.
     test_id_missing(): void {
       this.assertEqual(
-        message_thrown(this, () => exchange_make(payload_make({}), {})),
-        i18n("http.id_missing", "http.request"),
+        message_thrown(this, () => exchange_make({}, "request_unnumbered")),
+        gold_text("http_id_missing"),
       );
     }
 
     // A request that carries a blob is refused.
     test_blobs_refused(): void {
-      const header = jslb.header_make("http.request", { id: constants.id });
-      const blob = jslb.blob_make(new Uint8Array(1));
-      const line = jslb.line_make(header, [blob], payload_make({}));
+      const line = request_make("request_blob", {});
+      (line[1] as lines.BlobHeader).d = new Uint8Array(1);
       this.assertEqual(
         message_thrown(this, () => new http.HttpExchange(line)),
-        i18n("http.blobs_refused", "http.request"),
+        gold_text("http_blobs_refused"),
       );
     }
 
@@ -212,8 +204,8 @@ namespace test_http {
     test_method_invalid(): void {
       for (const method of [undefined, null, "PUT", "get", "", 5]) {
         this.assertEqual(
-          message_thrown(this, () => exchange_make(payload_make({ method }))),
-          i18n("http.field_invalid", "method"),
+          message_thrown(this, () => exchange_make({ method })),
+          gold_text("http_field_invalid_method"),
         );
       }
     }
@@ -222,8 +214,8 @@ namespace test_http {
     test_url_invalid(): void {
       for (const url of [undefined, null, 5, {}, ["https://a.test/"]]) {
         this.assertEqual(
-          message_thrown(this, () => exchange_make(payload_make({ url }))),
-          i18n("http.field_invalid", "url"),
+          message_thrown(this, () => exchange_make({ url })),
+          gold_text("http_field_invalid_url"),
         );
       }
     }
@@ -233,24 +225,22 @@ namespace test_http {
       const bad = [undefined, null, [], "a", 5, { a: 1 }, { a: null }];
       for (const headers of bad) {
         this.assertEqual(
-          message_thrown(this, () => exchange_make(payload_make({ headers }))),
-          i18n("http.field_invalid", "headers"),
+          message_thrown(this, () => exchange_make({ headers })),
+          gold_text("http_field_invalid_headers"),
         );
       }
     }
 
     // A `body` that is not text is refused, even beside a `json` field.
     test_body_invalid(): void {
-      const refused = i18n("http.field_invalid", "body");
+      const refused = gold_text("http_field_invalid_body");
       for (const body of [undefined, null, 5, {}]) {
         this.assertEqual(
-          message_thrown(this, () => exchange_make(payload_make({ body }))),
+          message_thrown(this, () => exchange_make({ body })),
           refused,
         );
         this.assertEqual(
-          message_thrown(this, () =>
-            exchange_make(payload_make({ body, json: 1 })),
-          ),
+          message_thrown(this, () => exchange_make({ body, json: 1 })),
           refused,
         );
       }
@@ -266,13 +256,8 @@ namespace test_http {
         "application/json",
         '{"id":"c1","n":[1,2]}',
       );
-      const reply = exchange_make(payload_make({})).answer_reply(answer);
-      this.assertEqual(reply, {
-        0: { t: "http.request", r: constants.id },
-        status: 200,
-        headers: { "content-type": "application/json" },
-        json: { id: "c1", n: [1, 2] },
-      });
+      const reply = exchange_make({}).answer_reply(answer);
+      this.assertEqual(reply, gold_line("answer_json"));
       this.assertEqual(Object.keys(reply).join(","), "0,status,headers,json");
     }
 
@@ -281,7 +266,7 @@ namespace test_http {
       const types = ["application/json; charset=utf-8", "Application/JSON "];
       for (const type of types) {
         const answer = answer_make(200, type, "[1]");
-        const reply = exchange_make(payload_make({})).answer_reply(answer);
+        const reply = exchange_make({}).answer_reply(answer);
         this.assertEqual(reply.json, [1]);
         this.assertFalse(Object.hasOwn(reply, "text"));
       }
@@ -298,7 +283,7 @@ namespace test_http {
       ];
       for (const type of types) {
         const answer = answer_make(200, type, '{"a":1}');
-        const reply = exchange_make(payload_make({})).answer_reply(answer);
+        const reply = exchange_make({}).answer_reply(answer);
         this.assertEqual(reply.text, '{"a":1}');
         this.assertFalse(Object.hasOwn(reply, "json"));
         this.assertEqual(
@@ -310,20 +295,15 @@ namespace test_http {
 
     // A success with no body and no headers is an empty `text`.
     test_empty_answer(): void {
-      const reply = exchange_make(payload_make({})).answer_reply(
+      const reply = exchange_make({}).answer_reply(
         answer_make(204, undefined, ""),
       );
-      this.assertEqual(reply, {
-        0: { t: "http.request", r: constants.id },
-        status: 204,
-        headers: {},
-        text: "",
-      });
+      this.assertEqual(reply, gold_line("answer_empty"));
     }
 
     // Statuses 200 to 299 are replies and every other status is an error.
     test_status_range(): void {
-      const exchange = exchange_make(payload_make({}));
+      const exchange = exchange_make({});
       const expected = new Map<number, string>([
         [199, "error"],
         [200, "http.request"],
@@ -336,20 +316,17 @@ namespace test_http {
       for (const [status, type] of expected) {
         const answer = answer_make(status, "text/plain", "");
         const reply = exchange.answer_reply(answer);
-        this.assertEqual(jslb.field_get(reply[0], "type"), type);
+        this.assertEqual(reply[0].t, type);
       }
     }
 
     // A failed status is an `error` line naming the url, status and body.
     test_status_error(): void {
       const answer = answer_make(404, "text/plain", "no such model");
-      const reply = exchange_make(payload_make({})).answer_reply(answer);
-      this.assertEqual(reply[0], { t: "error", r: constants.id });
+      const reply = exchange_make({}).answer_reply(answer);
+      this.assertEqual(reply[0], gold_value("lines.header_error"));
       this.assertEqual(Object.keys(reply).join(","), "0,message,stack");
-      this.assertEqual(
-        message_get(reply),
-        i18n("http.status_failed", constants.url, 404, "no such model"),
-      );
+      this.assertEqual(message_get(reply), gold_text("http_status_failed"));
       this.assertEqual(typeof reply.stack, "string");
       this.assertTrue(String(reply.stack).length > 0);
     }
@@ -358,40 +335,50 @@ namespace test_http {
     test_json_malformed(): void {
       for (const text of ["", "{", '{"a":', "nope"]) {
         const answer = answer_make(200, "application/json", text);
-        const reply = exchange_make(payload_make({})).answer_reply(answer);
-        const parsed = message_thrown(this, () => JSON.parse(text));
-        const cause = String(new SyntaxError(parsed));
-        this.assertEqual(reply[0], { t: "error", r: constants.id });
+        const reply = exchange_make({}).answer_reply(answer);
+        const parsed = String(parse_thrown(text));
+        this.assertEqual(reply[0], gold_value("lines.header_error"));
         this.assertEqual(
           message_get(reply),
-          i18n("http.json_invalid", constants.url, cause),
+          gold_text("http_json_invalid_malformed").replaceAll("{0}", parsed),
         );
       }
     }
 
+    // A JSON body holding a number that overflows a double is refused too.
+    test_json_overflow(): void {
+      const text = '{"a":1e400}';
+      const answer = answer_make(200, "application/json", text);
+      const reply = exchange_make({}).answer_reply(answer);
+      this.assertEqual(reply[0], gold_value("lines.header_error"));
+      this.assertEqual(
+        message_get(reply),
+        gold_text("http_json_invalid_overflow"),
+      );
+    }
+
     // The reply carries the id of its own request, and no id of its own.
     test_reply_number(): void {
-      for (const id of [1, 2, 41]) {
-        const exchange = exchange_make(payload_make({}), { id });
+      const requests: [number, string][] = [
+        [1, "request_id_1"],
+        [2, "request_id_2"],
+        [41, "request_id_41"],
+      ];
+      for (const [id, name] of requests) {
+        const exchange = exchange_make({}, name);
         const reply = exchange.answer_reply(answer_make(200, undefined, ""));
-        this.assertEqual(jslb.field_get(reply[0], "reply"), id);
+        this.assertEqual(reply[0].r, id);
         this.assertFalse(Object.hasOwn(reply[0], "i"));
       }
     }
 
     // A request in full names is answered in full names, error lines too.
     test_full_names(): void {
-      const exchange = exchange_make(payload_make({}), {
-        id: constants.id,
-        full: true,
-      });
+      const exchange = exchange_make({}, "request_full");
       const reply = exchange.answer_reply(answer_make(200, undefined, ""));
-      this.assertEqual(reply[0], {
-        type: "http.request",
-        reply: constants.id,
-      });
+      this.assertEqual(reply[0], gold_value("lines.header_full"));
       const failed = exchange.answer_reply(answer_make(500, undefined, ""));
-      this.assertEqual(failed[0], { type: "error", reply: constants.id });
+      this.assertEqual(failed[0], gold_value("lines.header_error_full"));
     }
   }
 
@@ -399,55 +386,58 @@ namespace test_http {
   export class TestFailureReply extends unittest.TestCase {
     // A rejected fetch is an `error` line naming the url and the cause.
     test_failure_text(): void {
-      const exchange = exchange_make(payload_make({}));
+      const exchange = exchange_make({});
       const cause = new TypeError("Failed to fetch");
       const reply = exchange.failure_reply(cause);
-      this.assertEqual(reply[0], { t: "error", r: constants.id });
+      this.assertEqual(reply[0], gold_value("lines.header_error"));
       this.assertEqual(Object.keys(reply).join(","), "0,message,stack");
       this.assertEqual(
         message_get(reply),
-        i18n("http.fetch_failed", constants.url, String(cause)),
+        gold_text("http_fetch_failed_error"),
       );
       this.assertTrue(String(reply.stack).length > 0);
     }
 
     // A cause that is no error is named by its text.
     test_failure_other(): void {
-      const exchange = exchange_make(payload_make({}));
-      for (const cause of ["boom", 5, undefined, null]) {
+      const exchange = exchange_make({});
+      const causes: [unknown, string][] = [
+        ["boom", "http_fetch_failed_text"],
+        [5, "http_fetch_failed_number"],
+        [undefined, "http_fetch_failed_undefined"],
+        [null, "http_fetch_failed_null"],
+      ];
+      for (const [cause, name] of causes) {
         const reply = exchange.failure_reply(cause);
-        this.assertEqual(
-          message_get(reply),
-          i18n("http.fetch_failed", constants.url, String(cause)),
-        );
+        this.assertEqual(message_get(reply), gold_text(name));
       }
     }
 
     // The timeout is an `error` line naming the url and the seconds.
     test_timeout_text(): void {
-      const exchange = exchange_make(payload_make({}));
+      const exchange = exchange_make({});
       const reply = exchange.timeout_reply(5);
-      this.assertEqual(reply[0], { t: "error", r: constants.id });
+      this.assertEqual(reply[0], gold_value("lines.header_error"));
       this.assertEqual(Object.keys(reply).join(","), "0,message,stack");
       this.assertEqual(
         message_get(reply),
-        i18n("http.timeout_expired", constants.url, 5),
+        gold_text("http_timeout_expired_whole"),
       );
       this.assertTrue(String(reply.stack).length > 0);
     }
 
     // Fractions of a second are named as they are.
     test_timeout_fraction(): void {
-      const exchange = exchange_make(payload_make({}));
+      const exchange = exchange_make({});
       this.assertEqual(
         message_get(exchange.timeout_reply(0.5)),
-        i18n("http.timeout_expired", constants.url, 0.5),
+        gold_text("http_timeout_expired_fraction"),
       );
     }
 
     // The timeout message differs from the message of a failed fetch.
     test_timeout_distinct(): void {
-      const exchange = exchange_make(payload_make({}));
+      const exchange = exchange_make({});
       const timeout = message_get(exchange.timeout_reply(5));
       const failure = message_get(exchange.failure_reply(new Error("x")));
       this.assertFalse(timeout === failure);
@@ -455,11 +445,8 @@ namespace test_http {
 
     // Both error lines follow the name form of the request.
     test_error_full(): void {
-      const exchange = exchange_make(payload_make({}), {
-        id: constants.id,
-        full: true,
-      });
-      const expected = { type: "error", reply: constants.id };
+      const exchange = exchange_make({}, "request_full");
+      const expected = gold_value("lines.header_error_full");
       this.assertEqual(exchange.timeout_reply(5)[0], expected);
       this.assertEqual(exchange.failure_reply("x")[0], expected);
     }
@@ -474,12 +461,17 @@ namespace test_http {
       }
     }
 
-    // Timeouts that are 0, negative, not finite or too long for a timer throw.
+    // Timeouts that are 0, negative or too long for a timer throw.
     test_timeout_invalid(): void {
-      for (const seconds of [0, -1, NaN, Infinity, 2147484]) {
+      const timeouts: [number, string][] = [
+        [0, "http_timeout_invalid_zero"],
+        [-1, "http_timeout_invalid_negative"],
+        [2147484, "http_timeout_invalid_long"],
+      ];
+      for (const [seconds, name] of timeouts) {
         this.assertEqual(
           message_thrown(this, () => new http.HttpPort(seconds)),
-          i18n("http.timeout_invalid", seconds),
+          gold_text(name),
         );
       }
     }
@@ -490,19 +482,17 @@ namespace test_http {
       port.line_receive(() => {});
       this.assertEqual(
         message_thrown(this, () => port.line_receive(() => {})),
-        i18n("http.receiver_twice"),
+        gold_text("http_receiver_twice"),
       );
     }
 
     // A request posted before a receiver is set throws.
     test_post_unreceived(): void {
       const port = new http.HttpPort(1);
-      const line = line_build("http.request", payload_make({}), {
-        id: constants.id,
-      });
+      const line = request_make("request", {});
       this.assertEqual(
         message_thrown(this, () => port.line_post(line, [])),
-        i18n("http.receiver_missing"),
+        gold_text("http_receiver_missing"),
       );
     }
 
@@ -514,25 +504,15 @@ namespace test_http {
         received += 1;
       });
       const refused: [lines.Line, string][] = [
+        [request_make("request_kv_get", {}), gold_text("http_type_invalid")],
+        [request_make("request_unnumbered", {}), gold_text("http_id_missing")],
         [
-          line_build("kv.get", payload_make({}), { id: constants.id }),
-          i18n("http.type_invalid", "kv.get", "http.request"),
+          request_make("request", { url: 5 }),
+          gold_text("http_field_invalid_url"),
         ],
         [
-          line_build("http.request", payload_make({}), {}),
-          i18n("http.id_missing", "http.request"),
-        ],
-        [
-          line_build("http.request", payload_make({ url: 5 }), {
-            id: constants.id,
-          }),
-          i18n("http.field_invalid", "url"),
-        ],
-        [
-          line_build("http.request", payload_make({ json: NaN }), {
-            id: constants.id,
-          }),
-          i18n("utility.number_refused", NaN),
+          request_make("request", { json: undefined }),
+          gold_text("utility_value_refused"),
         ],
       ];
       for (const [line, text] of refused) {

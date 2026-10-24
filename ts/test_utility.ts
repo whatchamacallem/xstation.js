@@ -3,7 +3,35 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // Tests of the shared routines in `utility.ts`. Every one is synchronous.
+// The digest vectors of build/vectors, inputs at the edges of the padding of
+// `SHA-256`, which the test page carries in test_vectors as sha256.json, are
+// checked by `sha256_hex` and by `HashStream` fed whole and in pieces. The
+// texts of the refusals are compared to the gold record, test_settings.json.
 namespace test_utility {
+  // The vector files by name, as base64 text, a global the test page sets.
+  declare const test_vectors: { readonly [name: string]: string };
+
+  // The file of the digest vectors and the size of each vector's input.
+  const constants = Object.freeze({
+    digests_name: "sha256.json",
+    digest_sizes: Object.freeze<{ readonly [name: string]: number }>({
+      sha256_55: 55,
+      sha256_56: 56,
+      sha256_64: 64,
+    }),
+  });
+
+  // A digest vector: its input and that input's `SHA-256`, in lowercase hex.
+  interface DigestVector {
+    data: string;
+    sha256: string;
+  }
+
+  // A text of this module's gold, a run time `{n}` left for the test to fill.
+  function gold_text(name: string): string {
+    return harness.gold_get(`typescript.test_utility.texts.${name}`) as string;
+  }
+
   // The bytes of ASCII only text, made without the code under test.
   function ascii_bytes(text: string): Uint8Array {
     return Uint8Array.from(text, (character) => character.charCodeAt(0));
@@ -27,6 +55,39 @@ namespace test_utility {
       return (error as Error).message;
     }
     return test.fail("Nothing was thrown.");
+  }
+
+  // The bytes as lowercase hex, two characters each.
+  function hex_of(data: Uint8Array): string {
+    return Array.from(data, (byte) => byte.toString(16).padStart(2, "0")).join(
+      "",
+    );
+  }
+
+  // The bytes `index % 256` for each index below the count.
+  function pattern_make(count: number): Uint8Array {
+    return Uint8Array.from({ length: count }, (_item, index) => index % 256);
+  }
+
+  // The ways to feed bytes: whole, by single bytes, split at each offset.
+  function feeds_make(data: Uint8Array): Uint8Array[][] {
+    const feeds: Uint8Array[][] = [[data]];
+    feeds.push(
+      Array.from(data, (_byte, index) => data.subarray(index, index + 1)),
+    );
+    for (let index = 0; index <= data.length; index += 1) {
+      feeds.push([data.subarray(0, index), data.subarray(index)]);
+    }
+    return feeds;
+  }
+
+  // The digest a new `HashStream` gives for the pieces fed one after another.
+  function stream_digest(pieces: readonly Uint8Array[]): string {
+    const hash = new utility.HashStream();
+    for (const piece of pieces) {
+      hash.bytes_add(piece);
+    }
+    return hash.digest_hex();
   }
 
   // The digests of the standard test messages, empty, short, long and huge.
@@ -85,6 +146,61 @@ namespace test_utility {
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
       );
     }
+
+    // Inputs of 55, 56 and 64 bytes, whole and in pieces, give their digest.
+    test_padding_vectors(): void {
+      const name = constants.digests_name;
+      if (!Object.hasOwn(test_vectors, name)) {
+        throw new Error(`test_vectors has no file ${name}`);
+      }
+      const file = utility.base64_decode(test_vectors[name]);
+      const vectors = JSON.parse(utility.utf8_decode(file)) as {
+        [name: string]: DigestVector;
+      };
+      const sizes = constants.digest_sizes;
+      this.assertEqual(Object.keys(vectors).sort(), Object.keys(sizes).sort());
+      for (const [key, size] of Object.entries(sizes)) {
+        const vector = vectors[key];
+        const data = pattern_make(size);
+        this.assertEqual(vector.data, hex_of(data), key);
+        this.assertEqual(utility.sha256_hex(data), vector.sha256, key);
+        for (const pieces of feeds_make(data)) {
+          this.assertEqual(stream_digest(pieces), vector.sha256, key);
+        }
+      }
+    }
+  }
+
+  // The streamed `SHA-256`, fed in pieces.
+  export class TestHashStream extends unittest.TestCase {
+    // A digest taken midway leaves the stream to go on to the whole digest.
+    test_digest_midway(): void {
+      const hash = new utility.HashStream();
+      hash.bytes_add(ascii_bytes("abc"));
+      this.assertEqual(
+        hash.digest_hex(),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      );
+      hash.bytes_add(
+        ascii_bytes("dbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+      );
+      this.assertEqual(
+        hash.digest_hex(),
+        "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
+      );
+    }
+
+    // A view into a larger buffer is read from its offset, and not kept.
+    test_view_offset(): void {
+      const padded = Uint8Array.of(0, 0x61, 0x62, 0x63, 0);
+      const hash = new utility.HashStream();
+      hash.bytes_add(padded.subarray(1, 4));
+      padded.fill(0);
+      this.assertEqual(
+        hash.digest_hex(),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      );
+    }
   }
 
   // The `UTF-8` routines, with characters of every length.
@@ -93,7 +209,7 @@ namespace test_utility {
     bytes_refused(bytes: Uint8Array): void {
       this.assertEqual(
         message_thrown(this, () => utility.utf8_decode(bytes)),
-        i18n("utility.bytes_refused"),
+        gold_text("utility_bytes_refused"),
         bytes_text(bytes),
       );
     }
@@ -171,7 +287,7 @@ namespace test_utility {
       for (const [index, text] of texts.entries()) {
         this.assertEqual(
           message_thrown(this, () => utility.utf8_encode(text)),
-          i18n("utility.text_refused"),
+          gold_text("utility_text_refused"),
           String(index),
         );
       }
@@ -215,7 +331,7 @@ namespace test_utility {
       for (const text of texts) {
         this.assertEqual(
           message_thrown(this, () => utility.base64_decode(text)),
-          i18n("utility.base64_refused"),
+          gold_text("utility_base64_refused"),
           codes_text(text),
         );
       }
@@ -276,14 +392,6 @@ namespace test_utility {
 
   // The JSON text routine.
   export class TestJsonText extends unittest.TestCase {
-    // Checks that writing the value throws the message of the number.
-    number_refused(value: unknown, number: number): void {
-      this.assertEqual(
-        message_thrown(this, () => utility.json_text(value)),
-        i18n("utility.number_refused", number),
-      );
-    }
-
     // No whitespace is written outside strings, and inside them it is kept.
     test_compact_output(): void {
       const value = { list: [1, 2, 3], text: "a b", flag: true, none: null };
@@ -312,14 +420,6 @@ namespace test_utility {
       this.assertEqual(utility.json_text("a\nb"), '"a\\nb"');
     }
 
-    // NaN and the infinities throw, at any depth.
-    test_non_finite(): void {
-      this.number_refused(NaN, NaN);
-      this.number_refused(Infinity, Infinity);
-      this.number_refused(-Infinity, -Infinity);
-      this.number_refused({ nested: [1, NaN] }, NaN);
-    }
-
     // Every finite double is written, those beyond 2 to the 53 too.
     test_double_range(): void {
       this.assertEqual(utility.json_text(2 ** 53), "9007199254740992");
@@ -339,7 +439,7 @@ namespace test_utility {
       for (const value of values) {
         this.assertEqual(
           message_thrown(this, () => utility.json_text(value)),
-          i18n("utility.value_refused"),
+          gold_text("utility_value_refused"),
         );
       }
     }
@@ -370,6 +470,51 @@ namespace test_utility {
     }
   }
 
+  // The cascade of a fault met while another fault is handled.
+  export class TestCauseAppend extends unittest.TestCase {
+    // An `Error` with no `cause` takes `first` as it, and is returned itself.
+    test_no_cause(): void {
+      const error = new Error("second");
+      const first = new Error("first");
+      const top = utility.cause_append(error, first);
+      this.assertTrue(top === error);
+      this.assertTrue(error.cause === first);
+    }
+
+    // In a chain of two, `first` goes under the innermost.
+    test_chain(): void {
+      const inner = new Error("inner");
+      const error = new Error("outer", { cause: inner });
+      const first = new Error("first");
+      const top = utility.cause_append(error, first);
+      this.assertTrue(top === error);
+      this.assertTrue(error.cause === inner);
+      this.assertTrue(inner.cause === first);
+    }
+
+    // A thrown value that is no `Error` becomes one, its text the message.
+    test_value_thrown(): void {
+      const first = new Error("first");
+      const top = utility.cause_append("second", first);
+      this.assertTrue(top instanceof Error);
+      this.assertEqual(top.message, "second");
+      this.assertTrue(top.cause === first);
+    }
+
+    // An innermost `cause` that is no `Error` becomes an `Error` of its text.
+    test_cause_value(): void {
+      const error = new Error("outer", { cause: 7 });
+      const first = new Error("first");
+      this.assertTrue(utility.cause_append(error, first) === error);
+      const kept = error.cause;
+      if (!(kept instanceof Error)) {
+        throw new TypeError("the cause is no Error", { cause: kept });
+      }
+      this.assertEqual(kept.message, "7");
+      this.assertTrue(kept.cause === first);
+    }
+  }
+
   // The clock.
   export class TestClock extends unittest.TestCase {
     // The time is a whole number between two readings of the platform clock.
@@ -384,10 +529,12 @@ namespace test_utility {
 
   // The shape of the module object.
   export class TestSurface extends unittest.TestCase {
-    // The module is frozen and holds the eight routines of its declaration.
+    // The module is frozen and holds the ten names of its declaration.
     test_frozen_names(): void {
       const names = [
+        "HashStream",
         "base64_decode",
+        "cause_append",
         "error_wrap",
         "fail_now",
         "json_text",

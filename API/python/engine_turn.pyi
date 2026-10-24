@@ -1,16 +1,17 @@
-import jslb
+# The handler of `turn.append`, the browser's commit, which the server
+# applies to its own store as a plain message and never answers. The server
+# keeps every turn: it never compacts, and no compaction crosses the wire.
 
-# `turn.append`: a forwarded operation. Reply with `n` and `seq`.
+import jslb, substrate
+
+# `turn.append`: appends the turn after the scene's last on this side.
 def turn_append(
     line: jslb.Object,
     *,
     scene: str,
     role: str,
     content: dict[str, object],
-    since: int,
-) -> jslb.Object: ...
+) -> None: ...
 
-# `turn.compact`: a forwarded operation. Reply with `seq`.
-def turn_compact(
-    line: jslb.Object, *, scene: str, through: int, summary: str, since: int
-) -> jslb.Object: ...
+# Registers the handler on the store given.
+def handlers_register(store: substrate.Store) -> None: ...

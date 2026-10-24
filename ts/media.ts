@@ -39,7 +39,7 @@ namespace media {
 
     // Takes the budget in bytes, which must be above 0.
     constructor(budget_bytes: number) {
-      if (!Number.isFinite(budget_bytes) || budget_bytes <= 0) {
+      if (budget_bytes <= 0) {
         throw new Error(i18n("media.budget_invalid", budget_bytes));
       }
       this.budget_bytes = budget_bytes;
@@ -244,7 +244,6 @@ namespace media {
     // Takes the cache budget in bytes and the seconds a download may last.
     constructor(budget_bytes: number, timeout_seconds: number) {
       if (
-        !Number.isFinite(timeout_seconds) ||
         timeout_seconds <= 0 ||
         timeout_seconds * constants.second_ms > constants.timer_max_ms
       ) {

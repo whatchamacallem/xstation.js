@@ -4,10 +4,11 @@
 #
 # The handler of the `mcp` line: the payload is one `JSON-RPC` message for the
 # server's MCP server, and the payload of the reply is its response, if it
-# gives one.
+# gives one. After an exception the handler returns a `dispatch.Failure` of
+# that reply and the exception, which the main loop writes, then raises.
 
 import dispatch, jslb, mcp
-from i18n import i18n
+from internationalization import i18n
 
 
 # The state the registration sets, which is empty until then.
@@ -29,11 +30,21 @@ def _server_get() -> mcp.Server:
 
 
 # Passes the message to the MCP server and replies with its response.
-def mcp_message(line: jslb.Object, **message: object) -> jslb.Object | None:
-    response = _server_get().message_handle(message)
+def mcp_message(
+    line: jslb.Object, **message: object
+) -> jslb.Object | dispatch.Failure | None:
+    server = _server_get()
+    response = server.message_handle(message)
+    error = server.failure_take()
     if response is None:
+        # A notification never runs, so a failure here cannot arise.
+        if error is not None:
+            raise error
         return None
-    return dispatch.reply_make(line, **response)
+    reply = dispatch.reply_make(line, **response)
+    if error is not None:
+        return dispatch.Failure(reply, error)
+    return reply
 
 
 # Registers the handler, with the MCP server that answers the messages.

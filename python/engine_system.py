@@ -8,7 +8,7 @@
 # beside its target, which is then renamed over it.
 
 import dispatch, functools, hashlib, jslb, json, mcp, os, settings, sys
-from i18n import i18n
+from internationalization import i18n
 from typing import Any, NoReturn
 
 # The file in the root that holds the settings.

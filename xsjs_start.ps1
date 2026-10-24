@@ -12,11 +12,11 @@
 #     .\xsjs_start.ps1 username:password  https://<this PC>:5768/
 #
 # Each run copies the ttyd that xsjs_install.ps1 built, the engine's modules
-# and seeds from python\, i18n\en-US.json, settings.json, provider.json and
-# the page into ~/.cache/xsjs in Linux, and ttyd runs that copy on port 5769
-# of WSL's 127.0.0.1. A Windows port proxy forwards port 5768 to it. The
-# environment variable XSJS_PROVIDER_KEY of your user account, when set, is
-# passed on to ttyd.
+# and seeds from python\, i18n\en-US.json, settings.json, test_settings.json,
+# provider.json and the page into ~/.cache/xsjs in Linux, and ttyd runs that
+# copy on port 5769 of WSL's 127.0.0.1. A Windows port proxy forwards port
+# 5768 to it. The environment variable XSJS_PROVIDER_KEY of your user
+# account, when set, is passed on to ttyd.
 #
 # With a username and password, ttyd serves HTTPS and asks for them, the
 # port proxy listens on every network interface, and a Windows Firewall
@@ -40,14 +40,12 @@ $checkout_path_ = $PSScriptRoot
 # Where the engine's Python modules and seeds are copied from.
 $python_path_ = Join-Path $PSScriptRoot 'python'
 # The modules the server runs, by name in `python`, which start copies.
-$runtime_modules_ = @(
-    'i18n', 'jslb', 'verbose', 'settings', 'substrate', 'dispatch', 'mcp'
-    'mcp_stdio', 'engine_kv', 'engine_doc', 'engine_db', 'engine_turn'
-    'engine_sql', 'engine_verbose', 'engine_tap', 'engine_mcp'
-    'engine_system', 'main_loop', 'bootstrap'
-)
+$runtime_modules_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.runtime_modules')
 # The user's environment variable that ttyd passes on as the provider key.
-$provider_key_name_ = 'XSJS_PROVIDER_KEY'
+$provider_key_name_ = xsjs_util_get_setting $settings_json_ 'provider.variable'
+# The checkout's files that every root holds, beside ttyd and the page.
+$root_files_ = xsjs_util_get_setting $settings_json_ 'powershell.root_files'
 
 # Throws unless the files, ttyd, Python 3 and, for HTTPS, OpenSSL are present.
 function _xsjs_start_step_check_installed {
@@ -55,7 +53,10 @@ function _xsjs_start_step_check_installed {
     $path_ = Join-Path $python_path_ $bootstrap_script_
     if (-not (Test-Path $path_)) { throw ($i18n_.bootstrap_missing -f $path_) }
     $path_ = Join-Path $checkout_path_ "build\$engine_page_"
-    if (-not (Test-Path $path_)) { throw ($i18n_.page_missing -f $path_) }
+    if (-not (Test-Path $path_)) {
+        $page_name_ = [IO.Path]::GetFileNameWithoutExtension($engine_page_)
+        throw ($i18n_.page_missing -f $path_, $page_name_)
+    }
     $version_ = '-e', $ttyd_binary_path_, '--version'
     xsjs_util_invoke_native { wsl --cd $checkout_path_ @version_ }
     if ($LASTEXITCODE -ne 0) { throw ($i18n_.not_installed -f 'ttyd') }
@@ -118,11 +119,8 @@ function _xsjs_start_step_install_server {
         throw ($i18n_.bootstrap_not_installed -f $linux_path_)
     }
     $modules_ = @($runtime_modules_ | ForEach-Object { "python/$_.py" })
-    $root_files_ = @(
-        $ttyd_binary_path_, 'settings.json', 'provider.json'
-        "build/$engine_page_"
-    )
-    _xsjs_start_copy_files $root_files_ $linux_path_
+    $files_ = @($ttyd_binary_path_) + $root_files_ + "build/$engine_page_"
+    _xsjs_start_copy_files $files_ $linux_path_
     _xsjs_start_copy_files ($modules_ + 'python/seed') "$linux_path_/python"
     _xsjs_start_copy_files 'i18n/en-US.json' "$linux_path_/i18n"
     xsjs_util_write_log ($i18n_.server_installed -f $linux_path_)
@@ -207,11 +205,12 @@ function _xsjs_start_step_add_proxy {
     $add_ = @(
         'interface', 'portproxy', 'add', 'v4tov4'
         "listenaddress=$address_", "listenport=$port_"
-        'connectaddress=127.0.0.1', "connectport=$linux_port_"
+        "connectaddress=$bind_address_", "connectport=$linux_port_"
     )
     xsjs_util_invoke_native { netsh @add_ }
     if ($LASTEXITCODE -ne 0) { throw $i18n_.proxy_failed }
-    $added_ = $i18n_.proxy_added -f $address_, $port_, $linux_port_
+    $added_ = $i18n_.proxy_added -f (
+        $address_, $port_, $linux_port_, $bind_address_)
     xsjs_util_write_log $added_
 }
 
@@ -318,7 +317,7 @@ function _xsjs_start_step_register_task {
     }
     $task_ = @{
         TaskName    = $task_name_
-        Description = $i18n_.task_description -f $port_
+        Description = $i18n_.task_description -f $port_, $bootstrap_script_
         Action      = New-ScheduledTaskAction @action_
         Trigger     = New-ScheduledTaskTrigger -AtLogOn -User $user_
         Principal   = New-ScheduledTaskPrincipal @principal_

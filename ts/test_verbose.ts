@@ -2,18 +2,37 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the verbose module.
+// Tests of the verbose module: the ring, its size setting read at each line,
+// its history and its one sink. The ring sizes the tests set and the texts
+// they expect are read from the gold record.
 
 namespace test_verbose {
-  // The ring sizes the tests set.
-  const constants = Object.freeze({
-    // A ring larger than the lines any test logs, its writer's choice.
-    ring_wide: 10,
-    // A ring smaller than the lines some tests log, its writer's choice.
-    ring_narrow: 3,
-    // A ring of two lines, its writer's choice.
-    ring_pair: 2,
-  });
+  // A copy of a value of this module's gold, which the harness keeps frozen.
+  function gold_value(name: string): unknown {
+    return structuredClone(
+      harness.gold_get(`typescript.test_verbose.${name}`),
+    );
+  }
+
+  // A text of this module's gold, a run time `{n}` left for the test to fill.
+  function gold_text(name: string): string {
+    return harness.gold_get(`typescript.test_verbose.texts.${name}`) as string;
+  }
+
+  // A ring larger than the lines any test logs, its writer's choice.
+  function ring_wide(): number {
+    return gold_value("ring_wide") as number;
+  }
+
+  // A ring smaller than the lines some tests log, its writer's choice.
+  function ring_narrow(): number {
+    return gold_value("ring_narrow") as number;
+  }
+
+  // A ring of two lines, its writer's choice.
+  function ring_pair(): number {
+    return gold_value("ring_pair") as number;
+  }
 
   // A ring that reads the given value as the ring size setting.
   function ring_make(size: unknown): verbose.LineRing {
@@ -46,17 +65,17 @@ namespace test_verbose {
   export class TestRingSize extends unittest.TestCase {
     // Lines come back oldest first.
     test_order_oldest(): void {
-      const ring = ring_make(constants.ring_wide);
+      const ring = ring_make(ring_wide());
       texts_log(ring, "a", "b", "c");
       this.assertEqual(texts_join(ring.history_get(3)), "a,b,c");
     }
 
     // The ring holds the newest lines up to its size and no more.
     test_size_limit(): void {
-      const ring = ring_make(constants.ring_narrow);
+      const ring = ring_make(ring_narrow());
       texts_log(ring, "a", "b", "c", "d", "e");
-      const list = ring.history_get(constants.ring_wide);
-      this.assertEqual(list.length, constants.ring_narrow);
+      const list = ring.history_get(ring_wide());
+      this.assertEqual(list.length, ring_narrow());
       this.assertEqual(texts_join(list), "c,d,e");
     }
 
@@ -68,7 +87,7 @@ namespace test_verbose {
         seen.push(line);
       });
       texts_log(ring, "a", "b");
-      this.assertEqual(ring.history_get(constants.ring_wide).length, 0);
+      this.assertEqual(ring.history_get(ring_wide()).length, 0);
       this.assertEqual(texts_join(seen), "a,b");
     }
 
@@ -89,22 +108,30 @@ namespace test_verbose {
         unset,
       );
       this.assertEqual(reads, 1);
-      this.assertEqual(ring.history_get(constants.ring_wide).length, 0);
+      this.assertEqual(ring.history_get(ring_wide()).length, 0);
       this.assertEqual(seen.length, 0);
     }
 
     // A size that is not a whole number from 0 up throws and writes nothing.
     test_size_invalid(): void {
-      const bad = [-1, 1.5, NaN, Infinity, "3", null, undefined];
-      for (const value of bad) {
+      const bad: [unknown, string][] = [
+        [-1, "verbose_ring_invalid_negative"],
+        [1.5, "verbose_ring_invalid_fraction"],
+        [NaN, "verbose_ring_invalid_nan"],
+        [Infinity, "verbose_ring_invalid_infinity"],
+        ["3", "verbose_ring_invalid_text"],
+        [null, "verbose_ring_invalid_null"],
+        [undefined, "verbose_ring_invalid_undefined"],
+      ];
+      for (const [value, name] of bad) {
         const ring = ring_make(value);
         this.assertEqual(
           message_thrown(this, () => ring.log("x")),
-          i18n("verbose.ring_invalid", value),
+          gold_text(name),
         );
-        this.assertEqual(ring.history_get(constants.ring_wide).length, 0);
+        this.assertEqual(ring.history_get(ring_wide()).length, 0);
       }
-      let size: unknown = constants.ring_pair;
+      let size: unknown = ring_pair();
       const seen: lines.VerboseLine[] = [];
       const ring = new verbose.LineRing(() => size);
       ring.sink_set((line) => {
@@ -114,38 +141,32 @@ namespace test_verbose {
       size = -1;
       this.assertEqual(
         message_thrown(this, () => ring.log("b")),
-        i18n("verbose.ring_invalid", size),
+        gold_text("verbose_ring_invalid_negative"),
       );
-      this.assertEqual(texts_join(ring.history_get(constants.ring_wide)), "a");
+      this.assertEqual(texts_join(ring.history_get(ring_wide())), "a");
       this.assertEqual(texts_join(seen), "a");
     }
 
     // The size is read again for each line, so a change shows at once.
     test_size_live(): void {
-      let size = constants.ring_narrow;
+      let size = ring_narrow();
       const ring = new verbose.LineRing(() => size);
       texts_log(ring, "a", "b", "c", "d");
-      this.assertEqual(
-        texts_join(ring.history_get(constants.ring_wide)),
-        "b,c,d",
-      );
+      this.assertEqual(texts_join(ring.history_get(ring_wide())), "b,c,d");
       size = 1;
       ring.log("e");
-      this.assertEqual(texts_join(ring.history_get(constants.ring_wide)), "e");
-      size = constants.ring_pair;
+      this.assertEqual(texts_join(ring.history_get(ring_wide())), "e");
+      size = ring_pair();
       ring.log("f");
-      this.assertEqual(
-        texts_join(ring.history_get(constants.ring_wide)),
-        "e,f",
-      );
+      this.assertEqual(texts_join(ring.history_get(ring_wide())), "e,f");
     }
 
     // A line has the fields at and text only and cannot be changed.
     test_line_fields(): void {
-      const ring = ring_make(constants.ring_wide);
-      const before = utility.time_now();
+      const ring = ring_make(ring_wide());
+      const before = Date.now();
       ring.log("progress");
-      const after = utility.time_now();
+      const after = Date.now();
       const line = ring.history_get(1)[0];
       this.assertEqual(Object.keys(line).join(","), "at,text");
       this.assertEqual(line.text, "progress");
@@ -162,7 +183,7 @@ namespace test_verbose {
   export class TestHistoryGet extends unittest.TestCase {
     // A count gives that many of the newest lines, or all there are.
     test_count_values(): void {
-      const ring = ring_make(constants.ring_wide);
+      const ring = ring_make(ring_wide());
       texts_log(ring, "a", "b", "c", "d");
       this.assertEqual(ring.history_get(0).length, 0);
       this.assertEqual(texts_join(ring.history_get(1)), "d");
@@ -173,19 +194,25 @@ namespace test_verbose {
 
     // A ring with no line gives no line.
     test_ring_empty(): void {
-      const ring = ring_make(constants.ring_wide);
+      const ring = ring_make(ring_wide());
       this.assertEqual(ring.history_get(0).length, 0);
       this.assertEqual(ring.history_get(3).length, 0);
     }
 
     // A count that is not a whole number from 0 up throws.
     test_count_invalid(): void {
-      const ring = ring_make(constants.ring_wide);
+      const ring = ring_make(ring_wide());
       texts_log(ring, "a", "b");
-      for (const count of [-1, 1.5, NaN, Infinity]) {
+      const bad: [number, string][] = [
+        [-1, "verbose_count_invalid_negative"],
+        [1.5, "verbose_count_invalid_fraction"],
+        [NaN, "verbose_count_invalid_nan"],
+        [Infinity, "verbose_count_invalid_infinity"],
+      ];
+      for (const [count, name] of bad) {
         this.assertEqual(
           message_thrown(this, () => ring.history_get(count)),
-          i18n("verbose.count_invalid", count),
+          gold_text(name),
         );
       }
       this.assertEqual(texts_join(ring.history_get(2)), "a,b");
@@ -193,7 +220,7 @@ namespace test_verbose {
 
     // Changing the returned list leaves the ring as it was.
     test_list_copy(): void {
-      const ring = ring_make(constants.ring_wide);
+      const ring = ring_make(ring_wide());
       texts_log(ring, "a", "b", "c");
       const list = ring.history_get(3);
       list.pop();
@@ -206,14 +233,14 @@ namespace test_verbose {
   export class TestSinkRules extends unittest.TestCase {
     // The sink gets every line once, in order, the same line the ring keeps.
     test_each_once(): void {
-      const ring = ring_make(constants.ring_wide);
+      const ring = ring_make(ring_wide());
       const seen: lines.VerboseLine[] = [];
       ring.sink_set((line) => {
         seen.push(line);
       });
       texts_log(ring, "a", "b", "c");
       this.assertEqual(texts_join(seen), "a,b,c");
-      const kept = ring.history_get(constants.ring_wide);
+      const kept = ring.history_get(ring_wide());
       this.assertEqual(texts_join(kept), "a,b,c");
       for (let index = 0; index < seen.length; index += 1) {
         this.assertTrue(seen[index] === kept[index]);
@@ -222,7 +249,7 @@ namespace test_verbose {
 
     // A sink gets the lines written after it is set and none before.
     test_sink_late(): void {
-      const ring = ring_make(constants.ring_wide);
+      const ring = ring_make(ring_wide());
       const seen: lines.VerboseLine[] = [];
       ring.log("a");
       ring.sink_set((line) => {
@@ -230,22 +257,19 @@ namespace test_verbose {
       });
       ring.log("b");
       this.assertEqual(texts_join(seen), "b");
-      this.assertEqual(
-        texts_join(ring.history_get(constants.ring_wide)),
-        "a,b",
-      );
+      this.assertEqual(texts_join(ring.history_get(ring_wide())), "a,b");
     }
 
     // A second sink throws and the first one stays.
     test_sink_twice(): void {
-      const ring = ring_make(constants.ring_wide);
+      const ring = ring_make(ring_wide());
       const seen: lines.VerboseLine[] = [];
       ring.sink_set((line) => {
         seen.push(line);
       });
       this.assertEqual(
         message_thrown(this, () => ring.sink_set(() => {})),
-        i18n("verbose.sink_twice"),
+        gold_text("verbose_sink_twice"),
       );
       ring.log("a");
       this.assertEqual(texts_join(seen), "a");
@@ -253,7 +277,7 @@ namespace test_verbose {
 
     // A sink that throws fails the call, after the ring took the line.
     test_sink_throws(): void {
-      const ring = ring_make(constants.ring_wide);
+      const ring = ring_make(ring_wide());
       const failed = "The sink failed.";
       let calls = 0;
       ring.sink_set(() => {
@@ -269,10 +293,7 @@ namespace test_verbose {
         failed,
       );
       this.assertEqual(calls, 2);
-      this.assertEqual(
-        texts_join(ring.history_get(constants.ring_wide)),
-        "a,b",
-      );
+      this.assertEqual(texts_join(ring.history_get(ring_wide())), "a,b");
     }
   }
 
@@ -282,7 +303,7 @@ namespace test_verbose {
     test_count_invalid(): void {
       this.assertEqual(
         message_thrown(this, () => verbose.history_get(-1)),
-        i18n("verbose.count_invalid", -1),
+        gold_text("verbose_count_invalid_negative"),
       );
     }
   }

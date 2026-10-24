@@ -5,10 +5,24 @@
 // JSLB, the wire format: a line is one JSON object ending in CR, its headers
 // at the integer keys 0, 1, ... and its payload at the other keys, followed
 // by the bytes of each blob the line header counts. The builders, field
-// access, the encoder, the debug rendering, and the decoder, which bounds the
-// blobs of a message by blob_max, streams a blob over overflow_bytes into a
-// sink that hashes it on the way, and holds a fault met after finished lines
-// for the next feed.
+// access, the encoder, the debug rendering, json_decode, and the decoder,
+// which bounds the blobs of a message by blob_max, streams a blob over
+// overflow_bytes into a sink that hashes it on the way, and holds a fault met
+// after finished lines for the next feed.
+//
+// The decoders are the single door for bad numbers: no other layer checks a
+// number. At read, an integer token, digits without a fraction or an
+// exponent, beyond 2^53 either way is refused with jslb.integer_refused, its
+// text compared by BigInt, and a number token whose double overflows to an
+// infinity, such as 1e400, with jslb.number_overflow, both as WireError. The
+// tokens are found by scanning the text JSON.parse accepted, strings
+// skipped. json_decode applies the same rules to a JSON text read from
+// anywhere but a line. The encoder keeps its own refusal of NaN and the
+// infinities, jslb.number_refused, inside the same layer.
+//
+// A sink_close that throws while the decoder shuts a stream after a fault is
+// thrown with the first fault under its innermost cause, by
+// utility.cause_append, so one error holds both.
 namespace jslb {
   // A line: header 0, blob headers 1 on, the payload at the other keys.
   export type Line = lines.Line;
@@ -103,9 +117,15 @@ namespace jslb {
     ),
     // The byte that ends a line, CR.
     line_end: 0x0d,
+    // A whole string or a number token of a JSON text.
+    number_token: /"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g,
+    // A number token without a fraction or an exponent.
+    integer_token: /^-?\d+$/,
+    // The largest magnitude an integer token may have, 2^53.
+    integer_limit: 2n ** 53n,
   });
 
-  // A framing or header fault. The port that fed the decoder closes on it.
+  // A framing, header or number fault. The port that fed the decoder closes.
   export class WireError extends Error {
     // Names the class on its prototype, read when the stack header is made.
     static {
@@ -155,14 +175,13 @@ namespace jslb {
     return Object.fromEntries(named) as unknown as LineHeader;
   }
 
-  // Builds a blob header with `d` set and `s` measured, or given for a handle.
+  // Builds a blob header with `d` the bytes and `s` their length.
   export function blob_make(
-    data: Uint8Array | string,
+    data: Uint8Array,
     key?: string,
     fields: { [field: string]: unknown } = {},
-    size?: number,
   ): BlobHeader {
-    const entries: [string, unknown][] = [["s", size_get(data, size)]];
+    const entries: [string, unknown][] = [["s", data.length]];
     if (key !== undefined) {
       entries.push(["k", key]);
     }
@@ -283,26 +302,23 @@ namespace jslb {
     return line_text(line, count) + tags;
   }
 
+  // Parses a JSON text by the decoder's number rules, any JSON value.
+  export function json_decode(text: string): unknown {
+    let value: unknown;
+    try {
+      value = JSON.parse(text) as unknown;
+    } catch (error) {
+      throw new WireError(i18n("jslb.text_not_json", String(error)), {
+        cause: error,
+      });
+    }
+    numbers_check(text);
+    return value;
+  }
+
   // Views a header as the plain object of fields that it is.
   function fields_of(header: object): { [key: string]: unknown } {
     return header as { [key: string]: unknown };
-  }
-
-  // The size of a blob's bytes, or the size its caller gives a cache handle.
-  function size_get(
-    data: Uint8Array | string,
-    size: number | undefined,
-  ): number {
-    if (typeof data === "string") {
-      if (size === undefined) {
-        throw new Error(i18n("jslb.handle_unmeasured", data));
-      }
-      return size;
-    }
-    if (size !== undefined) {
-      throw new Error(i18n("jslb.size_unwanted", size));
-    }
-    return data.length;
   }
 
   // Whether the value is a plain object, from a literal or `JSON.parse`.
@@ -496,9 +512,30 @@ namespace jslb {
     }
   }
 
+  // Refuses the first number token of a parsed text that is a bad number.
+  function numbers_check(text: string): void {
+    for (const match of text.matchAll(constants.number_token)) {
+      const token = match[0];
+      if (token.startsWith('"')) {
+        continue;
+      }
+      if (constants.integer_token.test(token)) {
+        const value = BigInt(token);
+        const limit = constants.integer_limit;
+        if (value > limit || value < -limit) {
+          throw new WireError(i18n("jslb.integer_refused", token));
+        }
+      } else if (!Number.isFinite(Number(token))) {
+        throw new WireError(i18n("jslb.number_overflow", token));
+      }
+    }
+  }
+
   // Parses line bytes as strict `UTF-8` JSON into a plain object.
   function line_decode(data: Uint8Array): { [key: string]: unknown } {
-    const value = json_parse(text_decode(data));
+    const text = text_decode(data);
+    const value = json_parse(text);
+    numbers_check(text);
     if (!object_plain(value)) {
       throw new WireError(i18n("jslb.line_not_object"));
     }
@@ -567,11 +604,16 @@ namespace jslb {
         this.#bytes_read(data, found);
         this.#failed = false;
       } catch (error) {
-        this.#stream_shut();
-        if (found.length === 0) {
-          throw error;
+        let fault: unknown = error;
+        try {
+          this.#stream_shut();
+        } catch (second) {
+          fault = utility.cause_append(second, error);
         }
-        this.#fault = { thrown: error };
+        if (found.length === 0) {
+          throw fault;
+        }
+        this.#fault = { thrown: fault };
       }
       return found;
     }

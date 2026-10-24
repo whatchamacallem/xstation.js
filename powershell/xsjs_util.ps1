@@ -27,42 +27,89 @@ $i18n_arguments_ = @{
 }
 Import-LocalizedData @i18n_arguments_
 
-$port_ = 5768
-# Linux ttyd's port on WSL's 127.0.0.1, which a port proxy forwards to.
-$linux_port_ = 5769
-$bootstrap_script_ = 'bootstrap.py'
+# Returns the JSON file parsed, with its path for the errors of its settings.
+function xsjs_util_read_json ([string]$path_) {
+    $value_ = [IO.File]::ReadAllText($path_) | ConvertFrom-Json
+    [pscustomobject]@{ Path = $path_; Value = $value_ }
+}
+
+# Returns the setting of the id, its keys joined by `.`, or throws if none.
+function xsjs_util_get_setting ([object]$file_, [string]$id_) {
+    $value_ = $file_.Value
+    foreach ($part_ in $id_.Split('.')) {
+        $property_ = $value_.PSObject.Properties | Where-Object {
+            $_.MemberType -eq 'NoteProperty' -and $_.Name -ceq $part_
+        }
+        # Windows PowerShell reads a missing property as `$null`, a default.
+        if (-not $property_) {
+            throw ($i18n_.setting_missing -f $file_.Path, $id_)
+        }
+        $value_ = $property_.Value
+    }
+    # The comma returns an array whole, a one item array too.
+    ,$value_
+}
+
+# Not `$settings_`, the name of a local in two scripts, which callees see.
+$settings_json_ = xsjs_util_read_json (
+    Join-Path (Split-Path -Parent $PSScriptRoot) 'settings.json')
+$port_ = xsjs_util_get_setting $settings_json_ 'powershell.windows_port'
+# Linux ttyd's port on WSL's `bind_address`, which a port proxy forwards to.
+$linux_port_ = xsjs_util_get_setting $settings_json_ 'powershell.linux_port'
+$bind_address_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.bind_address')
+$bootstrap_script_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.bootstrap_script')
 # The page ttyd serves, which `page_build.py` writes into `build/`.
-$engine_page_ = 'hyperposition-engine.html'
+$engine_page_ = xsjs_util_get_setting $settings_json_ 'powershell.engine_page'
 # Where install builds ttyd and the binary it makes, relative to the checkout.
-$ttyd_build_path_ = 'build/ttyd'
+$ttyd_build_path_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.ttyd_build')
 $ttyd_binary_path_ = "$ttyd_build_path_/ttyd"
+$terminal_type_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.terminal_type')
+$srv_buf_size_ = xsjs_util_get_setting $settings_json_ 'srv_buf_size'
 # Where start installs the server, below the Linux user's home.
-$linux_folder_ = '.cache/xsjs'
-$task_name_ = 'xstation.js'
-$firewall_rule_name_ = 'xstation.js'
+$linux_folder_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.linux_folder')
+$task_name_ = xsjs_util_get_setting $settings_json_ 'powershell.task_name'
+$firewall_rule_name_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.firewall_rule')
 # The TLS key and ttyd password live outside the repo, for this user only.
-$state_path_ = Join-Path $env:LOCALAPPDATA 'xstation.js'
-$certificate_path_ = Join-Path $state_path_ '_cached_cert.pem'
-$key_path_ = Join-Path $state_path_ '_cached_key.pem'
+$state_path_ = Join-Path $env:LOCALAPPDATA (
+    xsjs_util_get_setting $settings_json_ 'powershell.state_folder')
+$certificate_path_ = Join-Path $state_path_ (
+    xsjs_util_get_setting $settings_json_ 'powershell.certificate_file')
+$key_path_ = Join-Path $state_path_ (
+    xsjs_util_get_setting $settings_json_ 'powershell.key_file')
 # How long a new TLS certificate lasts. Apple devices refuse longer ones.
-$certificate_days_ = 825
-$runner_path_ = Join-Path $state_path_ 'serve.ps1'
-$ttyd_log_path_ = Join-Path $state_path_ 'ttyd.log'
-# The tries of each poll: 30, a default chosen by its writer.
-$poll_tries_ = 30
-# The wait before each try of a poll: 500 ms, a default chosen by its writer.
-$poll_milliseconds_ = 500
-# The width of an object logged as text: 200, a default chosen by its writer.
-$output_width_ = 200
+$certificate_days_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.certificate_days')
+$runner_path_ = Join-Path $state_path_ (
+    xsjs_util_get_setting $settings_json_ 'powershell.runner_file')
+$ttyd_log_path_ = Join-Path $state_path_ (
+    xsjs_util_get_setting $settings_json_ 'powershell.ttyd_log_file')
+# The tries of each poll, a default chosen by its writer.
+$poll_tries_ = xsjs_util_get_setting $settings_json_ 'powershell.poll_tries'
+# The wait before each try of a poll, a default chosen by its writer.
+$poll_milliseconds_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.poll_milliseconds')
+# The width of an object logged as text, a default chosen by its writer.
+$output_width_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.output_width')
 
 # Returns the command of the script block with its variables' values.
-function xsjs_util_get_command_text ([scriptblock]$command_) {
-    $type_ = [Management.Automation.Language.VariableExpressionAst]
-    $pipeline_ = $command_.Ast.EndBlock.Statements[0].PipelineElements[0]
-    $words_ = foreach ($element_ in $pipeline_.CommandElements) {
+function xsjs_util_get_command_text {
+    # Private, so a child scope's lookup of a command's variable skips them.
+    [scriptblock]$private:command_ = $args[0]
+    $private:type_ = [Management.Automation.Language.VariableExpressionAst]
+    $private:pipeline_ = (
+        $command_.Ast.EndBlock.Statements[0].PipelineElements[0])
+    $private:elements_ = $pipeline_.CommandElements
+    $private:words_ = foreach ($private:element_ in $elements_) {
         if ($element_ -is $type_) {
-            $value_ = Get-Variable $element_.VariablePath.UserPath -ValueOnly
-            $value_ -join ' '
+            $private:name_ = $element_.VariablePath.UserPath
+            (& { Get-Variable $args[0] -ValueOnly } $name_) -join ' '
         } else {
             $element_.Extent.Text
         }
@@ -81,7 +128,7 @@ function xsjs_util_get_credential ([object[]]$arguments_) {
 
 # Returns WSL's default distribution's name and state, or nothing if none.
 function xsjs_util_get_distribution {
-    foreach ($line_ in xsjs_util_get_wsl_lines '--list', '--verbose') {
+    foreach ($line_ in xsjs_util_get_wsl 0 '--list', '--verbose') {
         if ($line_ -match '^\*\s*(\S+)\s+(\S+)') {
             $name_ = $Matches[1]
             $state_ = $Matches[2]
@@ -90,7 +137,7 @@ function xsjs_util_get_distribution {
             return [pscustomobject]@{
                 Name    = $name_
                 State   = $state_
-                Running = $name_ -in @(xsjs_util_get_wsl_lines $list_)
+                Running = $name_ -in @(xsjs_util_get_wsl 0 $list_)
             }
         }
     }
@@ -147,13 +194,13 @@ function xsjs_util_get_ttyd_command ([string]$linux_path_) {
 function xsjs_util_get_ttyd_options ([string]$linux_path_) {
     "$linux_path_/ttyd"
     # `-W` lets input in, `-O` checks Origin. `-i lo` binds 10.255.255.254.
-    '-p', "$linux_port_", '-i', '127.0.0.1', '-W', '-O'
+    '-p', "$linux_port_", '-i', $bind_address_, '-W', '-O'
     # `-T dumb` reports a terminal that shows lines, not escape sequences.
-    '-T', 'dumb', '--index', "$linux_path_/$engine_page_"
+    '-T', $terminal_type_, '--index', "$linux_path_/$engine_page_"
     # `--url-arg` lets the page append a role to the command.
     '--url-arg'
-    # `--srv-buf-size`: the receive chunk size, 1 MiB, that a patch adds.
-    '--srv-buf-size', '1048576'
+    # `--srv-buf-size`: the receive chunk, `srv_buf_size`, that a patch adds.
+    '--srv-buf-size', "$srv_buf_size_"
 }
 
 # Returns the lines WSL prints, throwing unless it exits with one of the codes.
@@ -176,7 +223,9 @@ function xsjs_util_get_wsl_lines ([string[]]$wsl_arguments_) {
 }
 
 # Runs a native command and logs it expanded, then its exit code and output.
-function xsjs_util_invoke_native ([scriptblock]$command_) {
+function xsjs_util_invoke_native {
+    # Private, so the expansion and the run of a command look past it.
+    [scriptblock]$private:command_ = $args[0]
     xsjs_util_write_log ('`{0}`' -f (xsjs_util_get_command_text $command_))
     $ErrorActionPreference = 'Continue'
     $output_ = & $command_ 2>&1
@@ -224,7 +273,7 @@ function xsjs_util_remove_proxy {
         $names_ = @(
             $key_.GetValueNames() | Where-Object {
                 $_ -like "*/$port_" -and
-                $key_.GetValue($_) -eq "127.0.0.1/$linux_port_"
+                $key_.GetValue($_) -eq "$bind_address_/$linux_port_"
             }
         )
     }

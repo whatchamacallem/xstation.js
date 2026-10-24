@@ -3,15 +3,15 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Builds the one file page build/<name>.html. tsc compiles ts/ into one
-# bundle, the engine's or the test bundle, the text of i18n/en-US.json takes
-# the place of the bundle's strings table identifier, and the page template
-# of html/ the caller names receives html/engine.css, the bundle, SQLite's
-# JavaScript glue, its wasm as base64, and xterm.js and its css, read from the
-# archives third_party_fetch.py places in third_party/. A page of the test
-# bundle, the test page or the test engine page, also carries every file of
-# build/vectors/ as base64, written anew by vectors_make.py first. Prints the
-# SHA-256 of the page.
+# `python3 python/page_build.py NAME` builds build/NAME.html, the one page
+# there is, the bring up. tsc compiles the test bundle by
+# ts/tsconfig.test.json, the text of i18n/en-US.json takes the place of the
+# bundle's strings table identifier, and the template html/test.html
+# receives html/engine.css, the bundle, every file of build/vectors/ as
+# base64, written anew by vectors_make.py first, SQLite's JavaScript glue,
+# its wasm as base64, and xterm.js and its css, read from the archives
+# third_party_fetch.py places in third_party/. The start script serves the
+# page as hyperposition-engine.html. Prints the SHA-256 of the page.
 
 import argparse, base64, hashlib, json, os, re, shutil, subprocess, sys
 import tarfile, zipfile
@@ -28,7 +28,10 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 # The page templates.
 _HTML_PATH = os.path.join(_ROOT_PATH, "html")
 
-# The engine's style, which both pages carry.
+# The page template, the one there is.
+_TEMPLATE_NAME = "test.html"
+
+# The engine's style, which the one page carries.
 _ENGINE_CSS_PATH = os.path.join(_HTML_PATH, "engine.css")
 
 # The strings table, the same file the server reads.
@@ -37,10 +40,13 @@ _TABLE_PATH = os.path.join(_ROOT_PATH, "i18n", "en-US.json")
 # The archives `third_party_fetch.py` places.
 _THIRD_PARTY_PATH = os.path.join(_ROOT_PATH, "third_party")
 
-# The TypeScript sources and their two `tsc` configurations.
+# The TypeScript sources.
 _TS_PATH = os.path.join(_ROOT_PATH, "ts")
 
-# The vectors written for the test page, which carries them as `test_vectors`.
+# The `tsc` configuration of the test bundle, whose `outFile` the page takes.
+_CONFIG_NAME = "tsconfig.test.json"
+
+# The vectors written for the page, which carries them as `test_vectors`.
 _VECTORS_PATH = os.path.join(_BUILD_PATH, "vectors")
 
 # The SQLite release archive.
@@ -135,12 +141,11 @@ def member_find(names: list[str], suffix: str) -> str:
     return matches[0]
 
 
-# Builds `build/<name>.html` from the template, the test bundle when `test`.
-def page_build(name: str, test: bool, template: str) -> str:
+# Builds `build/<name>.html`, the one page. Returns its `SHA-256` hex.
+def page_build(name: str) -> str:
     # Read first, so a template `html/` lacks fails before `tsc` starts.
-    shell = text_read(os.path.join(_HTML_PATH, template))
-    config = "tsconfig.test.json" if test else "tsconfig.json"
-    bundle = bundle_compile(os.path.join(_TS_PATH, config))
+    shell = text_read(os.path.join(_HTML_PATH, _TEMPLATE_NAME))
+    bundle = bundle_compile(os.path.join(_TS_PATH, _CONFIG_NAME))
     sqlite_js, sqlite_wasm = zip_read(
         os.path.join(_THIRD_PARTY_PATH, _SQLITE_ARCHIVE),
         [_SQLITE_JS, _SQLITE_WASM],
@@ -155,11 +160,10 @@ def page_build(name: str, test: bool, template: str) -> str:
         "XSJS_BUILD_ENGINE_CSS": text_read(_ENGINE_CSS_PATH),
         "XSJS_BUILD_SQLITE3_JS": sqlite_js.decode("utf-8"),
         "XSJS_BUILD_SQLITE3_WASM": base64.b64encode(sqlite_wasm).decode(),
+        "XSJS_BUILD_TEST_VECTORS": vectors_build(_VECTORS_PATH),
         "XSJS_BUILD_XTERM_CSS": xterm_css.decode("utf-8"),
         "XSJS_BUILD_XTERM_JS": xterm_js.decode("utf-8"),
     }
-    if test:
-        pieces["XSJS_BUILD_TEST_VECTORS"] = vectors_build(_VECTORS_PATH)
     page = page_merge(shell, pieces)
     digest = page_write(os.path.join(_BUILD_PATH, f"{name}.html"), page)
     print(digest)
@@ -246,20 +250,14 @@ def zip_read(path: str, suffixes: list[str]) -> list[bytes]:
 # Builds the page the command line names.
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Build build/NAME.html from a template of html/, the"
-        " bundle tsc compiles from ts/ and the archives of third_party/, and"
-        " print its SHA-256."
+        description="Build build/NAME.html, the one page, from html/test.html,"
+        " the test bundle tsc compiles from ts/, the vectors, written anew"
+        " into build/vectors/, and the archives of third_party/, and print"
+        " its SHA-256."
     )
     parser.add_argument("name", help="the page's file name without .html")
-    parser.add_argument(
-        "--test",
-        action="store_true",
-        help="build the test page from html/test.html, the test bundle and"
-        " the vectors, written anew into build/vectors/",
-    )
     arguments = parser.parse_args()
-    template = "test.html" if arguments.test else "engine.html"
-    page_build(arguments.name, arguments.test, template)
+    page_build(arguments.name)
 
 
 if __name__ == "__main__":

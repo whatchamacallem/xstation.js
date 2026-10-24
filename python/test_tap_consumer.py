@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests the TAP consumer: the kind it reads from each line, and the stats of
+# Tests the TAP consumer: the kind it reads from each line, the stats of
 # streams as the producers write them, passing, failing, bailed out and with
-# expected failures, then of streams with one fault each.
+# expected failures, a bail out wherever it stands counting one failure
+# unless it follows a failed point, the stream reader fed line by line, then
+# streams with one fault each.
 
 import tap_consumer, unittest
 from collections.abc import Sequence
@@ -57,6 +59,21 @@ _PASSING_LINES = (
     "ok 2 - test_second",
     "1..2",
 )
+
+# The bail out the server appends when the browser fails.
+_BROWSER_BAIL = "Bail out! The browser failed: boom"
+
+# The counts of `passed`, `failed` and `skipped` after each passing line.
+_PASSING_COUNTS = [
+    (0, 0, 0),
+    (0, 0, 0),
+    (1, 0, 0),
+    (1, 0, 1),
+    (1, 0, 1),
+    (1, 0, 1),
+    (1, 0, 1),
+    (1, 0, 1),
+]
 
 # A block with an expected failure, which passes, and an unexpected success.
 _TODO_LINES = (
@@ -228,6 +245,73 @@ class TestStats(unittest.TestCase):
         stats = stats_read(_TODO_LINES)
         self.assertEqual(stats, tap_consumer.TapStats(2, 1, 1, 0, True))
 
+    # A bail out alone, before any version line, ends a stream of one failure.
+    def test_bail_alone(self) -> None:
+        stats = stats_read((_BROWSER_BAIL,))
+        self.assertEqual(stats, tap_consumer.TapStats(0, 0, 1, 0, True))
+
+    # A bail out right after the version line counts one failure.
+    def test_bail_versioned(self) -> None:
+        stats = stats_read((_PASSING_LINES[0], _BROWSER_BAIL))
+        self.assertEqual(stats, tap_consumer.TapStats(0, 0, 1, 0, True))
+
+    # A bail out between blocks ends the stream and counts one failure.
+    def test_bail_between(self) -> None:
+        stats = stats_read(line_insert(_PASSING_LINES, 5, _BROWSER_BAIL))
+        self.assertEqual(stats, tap_consumer.TapStats(2, 1, 1, 1, True))
+
+    # A bail out after a passing point ends the stream with one failure.
+    def test_bail_passed(self) -> None:
+        stats = stats_read(line_insert(_PASSING_LINES, 3, _BROWSER_BAIL))
+        self.assertEqual(stats, tap_consumer.TapStats(2, 1, 1, 0, True))
+
+    # A bail out before the first point of a block counts one failure.
+    def test_bail_planned(self) -> None:
+        stats = stats_read(line_insert(_PASSING_LINES, 2, _BROWSER_BAIL))
+        self.assertEqual(stats, tap_consumer.TapStats(2, 0, 1, 0, True))
+
+    # A bail out after an expected failure counts one failure.
+    def test_bail_todo(self) -> None:
+        stats = stats_read(line_insert(_TODO_LINES, 4, _BROWSER_BAIL))
+        self.assertEqual(stats, tap_consumer.TapStats(2, 1, 1, 0, True))
+
+
+# Tests the stream reader fed one line at a time, as the wire test feeds it.
+class TestStreamReader(unittest.TestCase):
+    # Each line fits, the counts grow as the points come, and the plan ends it.
+    def test_lines_read(self) -> None:
+        parser = tap_consumer.Parser()
+        reader = tap_consumer.StreamReader()
+        counts: list[tuple[int, int, int]] = []
+        for text in _PASSING_LINES:
+            self.assertFalse(reader.stream_ended(), text)
+            self.assertTrue(reader.line_read(parser.parse_line(text)), text)
+            counts.append((reader.passed, reader.failed, reader.skipped))
+        self.assertTrue(reader.stream_ended())
+        self.assertEqual(reader.plan, 2)
+        self.assertEqual(counts, _PASSING_COUNTS)
+
+    # A bail out ends the stream, and a line after it does not fit.
+    def test_bail_ended(self) -> None:
+        parser = tap_consumer.Parser()
+        reader = tap_consumer.StreamReader()
+        for text in _PASSING_LINES[:3] + (_BROWSER_BAIL,):
+            self.assertTrue(reader.line_read(parser.parse_line(text)), text)
+        self.assertTrue(reader.stream_ended())
+        counts = (reader.plan, reader.passed, reader.failed)
+        self.assertEqual(counts, (2, 1, 1))
+        later = parser.parse_line(_PASSING_LINES[3])
+        self.assertFalse(reader.line_read(later))
+
+    # A line that does not fit where it stands is refused and counts nothing.
+    def test_line_refused(self) -> None:
+        parser = tap_consumer.Parser()
+        reader = tap_consumer.StreamReader()
+        self.assertFalse(reader.line_read(parser.parse_line("    1..2")))
+        self.assertFalse(reader.stream_ended())
+        counts = (reader.plan, reader.passed, reader.failed)
+        self.assertEqual(counts, (0, 0, 0))
+
 
 # Tests streams with one fault each: reading stops at the fault.
 class TestFaults(unittest.TestCase):
@@ -252,9 +336,9 @@ class TestFaults(unittest.TestCase):
         stats = stats_read(line_insert(_PASSING_LINES, 5, "# note"))
         self.assertEqual(stats, tap_consumer.TapStats(2, 1, 0, 1, False))
 
-    # A bail out after a passing point is a fault.
-    def test_bail_misplaced(self) -> None:
-        line = "Bail out! failfast"
+    # A bail out indented into a block is a fault.
+    def test_bail_indented(self) -> None:
+        line = "    Bail out! failfast"
         stats = stats_read(line_insert(_PASSING_LINES, 3, line))
         self.assertEqual(stats, tap_consumer.TapStats(2, 1, 0, 0, False))
 

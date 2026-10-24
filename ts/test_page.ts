@@ -4,80 +4,86 @@
 //
 // Tests of the UI thread on the test page's document: the owner table, the
 // reading of the worker's first line and faults, the DOM port's listeners
-// and permit buttons, the handlers on a synchronous queue with port, image,
-// console and overlay doubles, and the column the style lays the page out in.
+// and permit buttons, the handlers called through a register double with
+// queue, image, console and overlay doubles, each line, sleep and text
+// compared to the gold, the column the style lays the page out in, and the
+// frozen module.
 
 namespace test_page {
-  // The types the page registers, routed by the tests, and the values used.
+  // The text the band shows, the ids the queue double answers, the settings.
   const constants = Object.freeze({
-    routed_types: Object.freeze([
-      "render",
-      "media.store",
-      "media.fetch",
-      "ui.media_reply",
-      "permit.ask",
-      "ui.permit_reply",
-      "ui.input",
-      "ui.turn_end",
-      "ui.control_key",
-      "console.output",
-      "console.exit",
-      "overlay.line",
-      "boot.hello",
-    ]),
-    hyperposition: "/metaverse/hyperposition/1",
     greeting: "How can I help you?",
-    scene: "/castle_gatehouse/scene/arrival/1",
-    subtitle:
-      "Mind the moat. The gatehouse keeper has been expecting someone," +
-      " though not necessarily you.",
-    image: "/_files/gatehouse/arrival.png",
-    image_sha256:
-      "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0",
-    bootstrap: "/home/t/.cache/xsjs/bootstrap.py",
-    bootstrap_sha256:
-      "ab30a921f2faeb729bc35cdbc0a4f5a8bb70c95624eb5bfc2ff778db2cb22f88",
-    root: "/home/t/.cache/xsjs",
-    pid: 4242,
-    tool: "browser.console_run",
+    submit_ids: Object.freeze([21, 22]),
+    // The members of `settings.json`, each read by the harness.
+    settings_names: Object.freeze([
+      "debug",
+      "queue_synchronous",
+      "verbose_level",
+      "verbose_ring",
+      "line_max",
+      "blob_max",
+      "overflow_bytes",
+      "chunk_bytes",
+      "srv_buf_size",
+      "media_db_bytes",
+      "turn_compact_turns",
+      "provider",
+      "powershell",
+    ]),
   });
 
-  // An object of fields by name.
-  type FieldTable = { [key: string]: unknown };
-
-  // The header options the tests set.
-  type HeaderOptions = { id?: number; reply?: number; full?: boolean };
-
-  // The handlers the code under test registered, by line type.
-  const routed = new Map<string, dispatch.Handler>();
-
-  // Whether dispatch's registry routes the page's types to `routed`.
-  let router_installed = false;
-
-  // Routes the page's types from dispatch's registry, once per thread.
-  function router_install(): void {
-    if (router_installed) {
-      return;
-    }
-    router_installed = true;
-    for (const type of constants.routed_types) {
-      dispatch.handler_register(type, 0, (line: lines.Line) => {
-        const fn = routed.get(type);
-        if (fn === undefined) {
-          throw new Error(`No handler is routed for ${type}.`);
-        }
-        return fn(line);
-      });
-    }
+  // A copy of a value of this module's gold, which the harness keeps frozen.
+  function gold_value(name: string): unknown {
+    return structuredClone(harness.gold_get(`typescript.test_page.${name}`));
   }
 
-  // A register that keeps each handler in `routed`.
-  function register_route(
-    type: string,
-    _version: number,
-    fn: dispatch.Handler,
-  ): void {
-    routed.set(type, fn);
+  // A text of this module's gold, a run time `{n}` left for the test to fill.
+  function gold_text(name: string): string {
+    return harness.gold_get(`typescript.test_page.texts.${name}`) as string;
+  }
+
+  // A copy of a line of this module's gold, a run time part set on the copy.
+  function gold_line(name: string): lines.Line {
+    return gold_value(`lines.${name}`) as lines.Line;
+  }
+
+  // A copy of a sleep of this module's gold, its run time parts set on it.
+  function gold_sleep(name: string): dispatch.Sleep {
+    return gold_value(`lines.${name}`) as dispatch.Sleep;
+  }
+
+  // Sets the reply field of a line's header in the header's own name form.
+  function reply_set(line: lines.Line, id: number): lines.Line {
+    const header = line[0] as { [field: string]: unknown };
+    header[Object.hasOwn(header, "type") ? "reply" : "r"] = id;
+    return line;
+  }
+
+  // Sets the bytes of a line's blob 1, which its gold header gives the size.
+  function blob_set(line: lines.Line, data: Uint8Array): lines.Line {
+    (line[1] as lines.BlobHeader).d = data;
+    return line;
+  }
+
+  // A wake of the gold with the sleep's state and the replies it waited for.
+  function wake_make(
+    name: string,
+    sleep: dispatch.Sleep,
+    replies: lines.Line[],
+  ): lines.Line {
+    const wake = gold_line(name);
+    wake.state = sleep.state;
+    wake.replies = replies;
+    return wake;
+  }
+
+  // The settings of `settings.json` as the harness reads them, a copy.
+  function settings_copy(): settings.Settings {
+    const entries = constants.settings_names.map((name) => [
+      name,
+      structuredClone(harness.setting_get(name)),
+    ]);
+    return Object.fromEntries(entries) as settings.Settings;
   }
 
   // The error the function throws, and an error of its own when it doesn't.
@@ -93,28 +99,26 @@ namespace test_page {
     throw new Error("Nothing was thrown.");
   }
 
-  // A port double: it keeps what the queue posts and hands it lines.
-  class PortDouble implements queue.Port {
-    readonly posted: lines.Line[] = [];
-    private receiver: ((line: lines.Line) => void) | undefined;
+  // A queue double: it keeps each line submitted and answers the test's ids.
+  class TasksDouble {
+    // Each line submitted and its owner, in order.
+    readonly submitted: [lines.Line, string | undefined][] = [];
+    // The ids still to answer, in order.
+    readonly #ids: number[];
 
-    // Keeps a posted line.
-    line_post(line: lines.Line, _transfer: ArrayBuffer[]): void {
-      this.posted.push(line);
+    // Takes the ids the double answers, in order.
+    constructor(ids: readonly number[]) {
+      this.#ids = [...ids];
     }
 
-    // Takes the receiver, which is the queue.
-    line_receive(fn: (line: lines.Line) => void): void {
-      this.receiver = fn;
-    }
-
-    // Hands a line to the queue as if it came on this port.
-    line_send(line: lines.Line): void {
-      const receiver = this.receiver;
-      if (receiver === undefined) {
-        throw new Error("The port double has no receiver.");
+    // Keeps the line and its owner and answers the next id.
+    task_submit(line: lines.Line, owner?: string): number {
+      const id = this.#ids.shift();
+      if (id === undefined) {
+        throw new Error("The queue double has no id left to answer.");
       }
-      receiver(line);
+      this.submitted.push([line, owner]);
+      return id;
     }
   }
 
@@ -133,14 +137,16 @@ namespace test_page {
     readonly calls: string[] = [];
     readonly fed: Uint8Array[] = [];
     readonly wakes: lines.Line[] = [];
-    private readonly tasks: queue.TaskQueue;
+    // Whether tty 0 is open, which the tests set.
+    open = false;
+    // Whether tty 0 was asked for and has not ended since.
+    asked = false;
+    private readonly tasks: TasksDouble;
     // Whether the double is shown, which each toggle changes.
     private shown = false;
-    // Whether tty 0 was asked for and has not ended since.
-    private asked = false;
 
-    // Takes the queue the opening is submitted on.
-    constructor(tasks: queue.TaskQueue) {
+    // Takes the queue double the opening is submitted on.
+    constructor(tasks: TasksDouble) {
       this.tasks = tasks;
     }
 
@@ -150,18 +156,30 @@ namespace test_page {
       this.shown = !this.shown;
     }
 
+    // Records a show and shows the double.
+    view_show(): void {
+      this.calls.push("show");
+      this.shown = true;
+    }
+
     // Whether the double is shown and tty 0 is not asked for.
     open_wanted(): boolean {
       return this.shown && !this.asked;
+    }
+
+    // Whether the tests set tty 0 open.
+    open_is(): boolean {
+      return this.open;
     }
 
     // Submits `console.open` to the AI worker and returns the sleep on it.
     open_request(): dispatch.Sleep {
       this.calls.push("open");
       this.asked = true;
-      const line = jslb.line_make(jslb.header_make("console.open"), [], {});
-      const id = this.tasks.task_submit(line, "ai");
-      return dispatch.task_sleep(null, [id], "ui.console_reply");
+      const id = this.tasks.task_submit(gold_line("console_open"), "ai");
+      const sleep = gold_sleep("sleep_console");
+      sleep.wait_ids = [id];
+      return sleep;
     }
 
     // Records the wake of the opening.
@@ -230,115 +248,54 @@ namespace test_page {
     return { container, canvas, subtitle, form, input, permit };
   }
 
-  // A synchronous UI queue, its port doubles and the doubles of its parts.
-  interface HandlerBench {
-    tasks: queue.TaskQueue;
-    ai: PortDouble;
-    media: PortDouble;
-    dom: PortDouble;
-    images: ImageDouble;
-    view: ViewDouble;
-    overlays: OverlayDouble;
-    logs: string[];
-  }
+  // The page's handlers on the elements, with doubles of the queue and parts.
+  class HandlerBench {
+    readonly tasks = new TasksDouble(constants.submit_ids);
+    readonly images = new ImageDouble();
+    readonly view = new ViewDouble(this.tasks);
+    readonly overlays = new OverlayDouble();
+    // The handlers the page registered, by line type.
+    readonly #handlers = new Map<string, dispatch.Handler>();
 
-  // Makes a bench whose handlers work on the elements, in debug mode or not.
-  function bench_make(
-    elements: FixtureElements,
-    debug: boolean,
-  ): HandlerBench {
-    router_install();
-    routed.clear();
-    const tasks = new queue.TaskQueue("ui", page.owners_make(false), true);
-    const bench: HandlerBench = {
-      tasks,
-      ai: new PortDouble(),
-      media: new PortDouble(),
-      dom: new PortDouble(),
-      images: new ImageDouble(),
-      view: new ViewDouble(tasks),
-      overlays: new OverlayDouble(),
-      logs: [],
-    };
-    tasks.port_add("ai", bench.ai);
-    tasks.port_add("media", bench.media);
-    tasks.port_add("dom", bench.dom);
-    page.handlers_register(
-      {
-        tasks,
-        canvas: elements.canvas,
-        subtitle: elements.subtitle,
-        input: elements.input,
-        permit: elements.permit,
-        images: bench.images,
-        view: bench.view,
-        overlays: bench.overlays,
-        debug,
-        full: false,
-        log: (text: string) => {
-          bench.logs.push(text);
+    // Registers the page's handlers on the elements, in debug mode or not.
+    constructor(elements: FixtureElements, debug: boolean) {
+      page.handlers_register(
+        {
+          tasks: this.tasks as unknown as queue.TaskQueue,
+          canvas: elements.canvas,
+          subtitle: elements.subtitle,
+          input: elements.input,
+          permit: elements.permit,
+          images: this.images,
+          view: this.view,
+          overlays: this.overlays,
+          debug,
         },
-      },
-      register_route,
-    );
-    return bench;
-  }
+        (type, _version, fn) => this.handler_keep(type, fn),
+      );
+    }
 
-  // The type of a line.
-  function type_of(line: lines.Line): unknown {
-    return jslb.field_get(line[0], "type");
-  }
+    // Keeps a handler the page registered, once per type as dispatch does.
+    private handler_keep(type: string, fn: dispatch.Handler): void {
+      if (this.#handlers.has(type)) {
+        throw new Error(`The page registered ${type} twice.`);
+      }
+      this.#handlers.set(type, fn);
+    }
 
-  // A line in short names from its type, payload, header options and blobs.
-  function line_short(
-    type: string,
-    payload: FieldTable = {},
-    options: HeaderOptions = {},
-    blobs: lines.BlobHeader[] = [],
-  ): lines.Line {
-    return jslb.line_make(jslb.header_make(type, options), blobs, payload);
-  }
-
-  // The reply to a request a double received, with its payload and blobs.
-  function reply_to(
-    request: lines.Line,
-    payload: FieldTable,
-    blobs: lines.BlobHeader[] = [],
-  ): lines.Line {
-    const header = jslb.header_make(type_of(request) as string, {
-      reply: jslb.field_get(request[0], "id") as number,
-      full: Object.hasOwn(request[0], "type"),
-    });
-    return jslb.line_make(header, blobs, payload);
+    // Runs the handler of the type on the line, as the queue would.
+    line_run(type: string, line: lines.Line): unknown {
+      const fn = this.#handlers.get(type);
+      if (fn === undefined) {
+        throw new Error(`The page registered no handler for ${type}.`);
+      }
+      return fn(line);
+    }
   }
 
   // A decoded image of the size given, made at once.
   function bitmap_make(width: number, height: number): ImageBitmap {
     return new OffscreenCanvas(width, height).transferToImageBitmap();
-  }
-
-  // The settings of `settings.json`, every key with its value.
-  function settings_make(): settings.Settings {
-    return {
-      debug: true,
-      queue_synchronous: false,
-      verbose_level: 1,
-      verbose_ring: 1000,
-      line_max: 1048576,
-      blob_max: 2147483391,
-      overflow_bytes: 131072,
-      chunk_bytes: 1048576,
-      srv_buf_size: 1048576,
-      media_db_bytes: 268435456,
-      files_browser_bytes: 1073741824,
-      db_soft_bytes: 1073741824,
-      turn_compact_turns: 64,
-      long_task_ms: 5,
-      provider: {
-        scripted: true,
-        timeout_seconds: 120,
-      },
-    };
   }
 
   // A test on elements put in the document in `setUp` and removed after.
@@ -362,50 +319,61 @@ namespace test_page {
     }
   }
 
-  // The owner table of the UI thread and the test page's.
+  // The owner table of the UI thread.
   export class TestOwnerTable extends unittest.TestCase {
-    // The console goes to the worker but for its output and its end.
+    // The console goes to the worker but for its output, end and show.
     test_console_routes(): void {
-      const owners = page.owners_make(false);
+      const owners = page.owners_make();
       this.assertEqual(owners["console."], "ai");
       this.assertEqual(owners["console.output"], "ui");
       this.assertEqual(owners["console.exit"], "ui");
+      this.assertEqual(owners["console.show"], "ui");
       this.assertEqual(owners["media."], "ui");
       this.assertEqual(owners["render"], "ui");
       this.assertEqual(owners["ui."], "ui");
       this.assertEqual(owners["dom."], "dom");
       this.assertEqual(owners["verbose."], "ai");
-      this.assertFalse(Object.hasOwn(owners, "tap."));
+      this.assertFalse(Object.hasOwn(owners, "boot."));
     }
 
-    // The test page's table sends `tap.` lines to the worker.
+    // The table sends `tap.` lines to the worker.
     test_tap_route(): void {
-      this.assertEqual(page.owners_make(true)["tap."], "ai");
+      this.assertEqual(page.owners_make()["tap."], "ai");
     }
   }
 
   // The first line of the worker and the messages of its faults.
   export class TestWorkerLines extends unittest.TestCase {
-    // The first line must be `settings.set`, whose settings are taken.
+    // The first line must be `settings.set`, which is taken whole.
     test_settings_taken(): void {
-      const value = settings_make();
-      const set = line_short("settings.set", { settings: value });
-      this.assertEqual(page.settings_take(set), value);
-      const other = line_short("boot.hello", {});
+      const value = settings_copy();
+      const set = gold_line("settings_set");
+      set.settings = value;
+      this.assertEqual(page.settings_take(set), { settings: value });
+      const other = gold_line("ui_tests");
       const error = thrown_get(() => page.settings_take(other));
-      this.assertEqual(
-        error.message,
-        i18n("page.settings_missing", "boot.hello"),
-      );
+      this.assertEqual(error.message, gold_text("page_settings_missing"));
+    }
+
+    // The gold record that comes with the settings is taken with them.
+    test_test_settings(): void {
+      const value = settings_copy();
+      const set = gold_line("settings_set_gold");
+      const gold = structuredClone(set.test_settings);
+      set.settings = value;
+      this.assertEqual(page.settings_take(set), {
+        settings: value,
+        test_settings: gold,
+      });
     }
 
     // A message of the worker must be a fault line.
     test_fault_read(): void {
-      const fields = { thread: "ai", message: "Broken.", stack: "at x" };
-      const fault = line_short("fault", fields);
-      this.assertEqual(page.fault_read(fault), fields);
-      const error = thrown_get(() => page.fault_read(line_short("render")));
-      this.assertEqual(error.message, i18n("page.message_unknown", "render"));
+      const { 0: header, ...fields } = gold_line("fault");
+      this.assertEqual(page.fault_read({ 0: header, ...fields }), fields);
+      const render = gold_line("render_bare");
+      const error = thrown_get(() => page.fault_read(render));
+      this.assertEqual(error.message, gold_text("page_message_unknown"));
     }
   }
 
@@ -426,9 +394,7 @@ namespace test_page {
       });
       elements.form.dispatchEvent(submit);
       this.assertTrue(submit.defaultPrevented);
-      this.assertEqual(received.length, 1);
-      this.assertEqual(type_of(received[0]), "ui.input");
-      this.assertEqual(jslb.payload_of(received[0]), { text: "1" });
+      this.assertEqual(received, [gold_line("ui_input_text")]);
       this.assertEqual(elements.input.value, "");
     }
 
@@ -453,8 +419,7 @@ namespace test_page {
         bubbles: true,
       });
       canvas.dispatchEvent(click);
-      this.assertEqual(received.length, 1);
-      this.assertEqual(jslb.payload_of(received[0]), { x: 1, y: 0 });
+      this.assertEqual(received, [gold_line("ui_input_click")]);
     }
 
     // A click while the input is closed is not taken.
@@ -489,9 +454,7 @@ namespace test_page {
       this.assertTrue(key.defaultPrevented);
       const plain = new KeyboardEvent("keydown", { key: "3", bubbles: true });
       elements.input.dispatchEvent(plain);
-      this.assertEqual(received.length, 1);
-      this.assertEqual(type_of(received[0]), "ui.control_key");
-      this.assertEqual(jslb.payload_of(received[0]), { digit: 3 });
+      this.assertEqual(received, [gold_line("ui_control_key_3")]);
     }
 
     // A `dom.choice` shows its buttons and answers with the one clicked.
@@ -502,42 +465,35 @@ namespace test_page {
       port.line_receive((line) => {
         received.push(line);
       });
-      const choices = ["accept", "deny", "always"];
-      const ask = line_short("dom.choice", { permit: 1, choices }, { id: 4 });
-      port.line_post(ask, []);
+      port.line_post(gold_line("dom_choice"), []);
       const buttons = Array.from(elements.permit.querySelectorAll("button"));
       this.assertEqual(
         buttons.map((button) => button.textContent),
         [
-          i18n("page.choice_accept"),
-          i18n("page.choice_deny"),
-          i18n("page.choice_always"),
+          gold_text("page_choice_accept"),
+          gold_text("page_choice_deny"),
+          gold_text("page_choice_always"),
         ],
       );
       buttons[1].click();
       this.assertEqual(elements.permit.children.length, 0);
-      this.assertEqual(received.length, 1);
-      this.assertEqual(jslb.field_get(received[0][0], "reply"), 4);
-      this.assertEqual(jslb.payload_of(received[0]), { choice: "deny" });
+      // The answer keeps the form of the line it answers.
+      this.assertEqual(received, [gold_line("dom_choice_answer")]);
     }
 
     // Another type, a missing id and an unknown choice are refused.
     test_post_refused(): void {
       const elements = this.elements_get();
       const port = new page.DomPort(elements.container);
-      const other = line_short("dom.other", {}, { id: 1 });
+      const other = gold_line("dom_other");
       let error = thrown_get(() => port.line_post(other, []));
-      this.assertEqual(error.message, i18n("page.dom_type", "dom.other"));
-      const unasked = line_short("dom.choice", { permit: 1, choices: [] });
+      this.assertEqual(error.message, gold_text("page_dom_type"));
+      const unasked = gold_line("dom_choice_unasked");
       error = thrown_get(() => port.line_post(unasked, []));
-      this.assertEqual(error.message, i18n("page.id_missing", "dom.choice"));
-      const unknown = line_short(
-        "dom.choice",
-        { permit: 1, choices: ["maybe"] },
-        { id: 2 },
-      );
+      this.assertEqual(error.message, gold_text("page_id_missing"));
+      const unknown = gold_line("dom_choice_unknown");
       error = thrown_get(() => port.line_post(unknown, []));
-      this.assertEqual(error.message, i18n("page.choice_unknown", "maybe"));
+      this.assertEqual(error.message, gold_text("page_choice_unknown"));
       this.assertEqual(elements.permit.children.length, 0);
     }
 
@@ -547,199 +503,158 @@ namespace test_page {
       const port = new page.DomPort(elements.container);
       port.line_receive(() => {});
       const twice = thrown_get(() => port.line_receive(() => {}));
-      this.assertEqual(twice.message, i18n("page.receiver_twice"));
+      this.assertEqual(twice.message, gold_text("page_receiver_twice"));
       const empty = elements.container.ownerDocument.createElement("div");
       const missing = thrown_get(() => new page.DomPort(empty));
-      this.assertEqual(missing.message, i18n("page.element_missing", "image"));
+      this.assertEqual(missing.message, gold_text("page_element_missing"));
     }
   }
 
-  // The handlers of the UI thread on a synchronous queue.
+  // The handlers of the UI thread, called as the queue would call them.
   export class TestPageHandlers extends ElementsCase {
     // A render paints its image, shows its subtitle and opens the input.
     test_render_image(): void {
       const elements = this.elements_get();
       elements.input.disabled = true;
-      const bench = bench_make(elements, true);
-      bench.images.images.set(constants.image, bitmap_make(3, 2));
-      const render = line_short(
-        "render",
-        {
-          scene: constants.scene,
-          subtitle: constants.subtitle,
-          image: constants.image,
-        },
-        { id: 2 },
-      );
-      bench.ai.line_send(render);
-      const reply = bench.ai.posted[0];
-      this.assertEqual(type_of(reply), "render");
-      this.assertEqual(jslb.field_get(reply[0], "reply"), 2);
-      this.assertEqual(jslb.payload_of(reply), {});
+      const bench = new HandlerBench(elements, true);
+      const render = gold_line("render_image");
+      bench.images.images.set(render.image as string, bitmap_make(3, 2));
+      const reply = bench.line_run("render", render);
+      this.assertEqual(reply, gold_line("render_reply"));
       const canvas = elements.canvas;
       this.assertEqual([canvas.width, canvas.height], [3, 2]);
       this.assertFalse(elements.canvas.hidden);
-      this.assertEqual(elements.subtitle.textContent, constants.subtitle);
+      this.assertEqual(elements.subtitle.textContent, render.subtitle);
       this.assertFalse(elements.input.disabled);
     }
 
     // A render with no image shows black, which hides the image.
     test_render_black(): void {
       const elements = this.elements_get();
-      const bench = bench_make(elements, true);
-      const render = line_short(
-        "render",
-        { scene: constants.hyperposition, subtitle: constants.greeting },
-        { id: 1 },
-      );
-      bench.ai.line_send(render);
+      const bench = new HandlerBench(elements, true);
+      const render = gold_line("render_black");
+      bench.line_run("render", render);
       this.assertTrue(elements.canvas.hidden);
-      this.assertEqual(elements.subtitle.textContent, constants.greeting);
+      this.assertEqual(elements.subtitle.textContent, render.subtitle);
     }
 
     // A render of an image the cache does not hold is a fault.
     test_image_missing(): void {
-      const bench = bench_make(this.elements_get(), true);
-      const render = line_short(
-        "render",
-        {
-          scene: constants.scene,
-          subtitle: constants.subtitle,
-          image: constants.image,
-        },
-        { id: 1 },
-      );
-      const error = thrown_get(() => bench.ai.line_send(render));
-      this.assertEqual(
-        error.message,
-        i18n("page.image_missing", constants.scene, constants.image),
-      );
+      const bench = new HandlerBench(this.elements_get(), true);
+      const render = gold_line("render_image");
+      const error = thrown_get(() => bench.line_run("render", render));
+      this.assertEqual(error.message, gold_text("page_image_missing"));
     }
 
     // An image to keep goes to the media port, whose answer goes back.
     test_media_stored(): void {
-      const bench = bench_make(this.elements_get(), true);
-      const blob = jslb.blob_make(new Uint8Array([1, 2, 3]));
-      const store = line_short(
-        "media.store",
-        { k: constants.image },
-        { id: 1 },
-        [blob],
-      );
-      bench.ai.line_send(store);
-      const copy = bench.media.posted[0];
-      this.assertEqual(type_of(copy), "media.store");
-      this.assertTrue(copy !== store);
-      this.assertEqual(copy.k, constants.image);
-      const kept = { k: constants.image, size: 3, sha256: "" };
-      bench.media.line_send(reply_to(copy, kept));
-      const reply = bench.ai.posted[0];
-      this.assertEqual(jslb.field_get(reply[0], "reply"), 1);
-      this.assertEqual(jslb.payload_of(reply), kept);
-      this.assertEqual(jslb.headers_of(reply).length, 1);
-      this.assertEqual(bench.tasks.depth(), 0);
+      const bench = new HandlerBench(this.elements_get(), true);
+      const bytes = new Uint8Array([1, 2, 3]);
+      const store = blob_set(gold_line("media_store"), bytes);
+      const sleep = bench.line_run("media.store", store);
+      const copy = blob_set(gold_line("media_store_copy"), bytes);
+      this.assertEqual(bench.tasks.submitted, [[copy, "media"]]);
+      this.assertTrue(bench.tasks.submitted[0][0] !== store);
+      const id = constants.submit_ids[0];
+      const expected = gold_sleep("sleep_media");
+      expected.state = { request: store };
+      expected.wait_ids = [id];
+      this.assertEqual(sleep, expected);
+      const answer = reply_set(gold_line("media_store_answer"), id);
+      const wake = wake_make("wake_media", expected, [answer]);
+      const reply = bench.line_run("ui.media_reply", wake);
+      this.assertEqual(reply, gold_line("media_store_reply"));
     }
 
     // A download's answer goes back with the bytes as its blob.
     test_media_fetched(): void {
-      const bench = bench_make(this.elements_get(), true);
-      const fetch_line = line_short(
-        "media.fetch",
-        { url: "https://example.invalid/a.png", k: constants.image },
-        { id: 5 },
-      );
-      bench.ai.line_send(fetch_line);
-      const copy = bench.media.posted[0];
-      this.assertEqual(type_of(copy), "media.fetch");
-      const kept = {
-        k: constants.image,
-        size: 2,
-        sha256: constants.image_sha256,
-      };
-      const blob = jslb.blob_make(new Uint8Array([8, 9]));
-      bench.media.line_send(reply_to(copy, kept, [blob]));
-      const reply = bench.ai.posted[0];
-      this.assertEqual(jslb.field_get(reply[0], "reply"), 5);
-      this.assertEqual(jslb.payload_of(reply), kept);
-      const data = jslb.field_get(reply[1] as lines.BlobHeader, "data");
-      this.assertEqual(data, new Uint8Array([8, 9]));
+      const bench = new HandlerBench(this.elements_get(), true);
+      const fetch_line = gold_line("media_fetch");
+      const sleep = bench.line_run("media.fetch", fetch_line);
+      const copy = gold_line("media_fetch_copy");
+      this.assertEqual(bench.tasks.submitted, [[copy, "media"]]);
+      const id = constants.submit_ids[0];
+      const expected = gold_sleep("sleep_media");
+      expected.state = { request: fetch_line };
+      expected.wait_ids = [id];
+      this.assertEqual(sleep, expected);
+      const bytes = new Uint8Array([8, 9]);
+      const answer = blob_set(gold_line("media_fetch_answer"), bytes);
+      const wake = wake_make("wake_media", expected, [reply_set(answer, id)]);
+      const reply = bench.line_run("ui.media_reply", wake);
+      this.assertEqual(reply, blob_set(gold_line("media_fetch_reply"), bytes));
     }
 
     // A permit shows its request, asks the DOM port, answers its choice.
     test_permit_answered(): void {
       const elements = this.elements_get();
-      const bench = bench_make(elements, true);
-      const input = { text: "ls", timeout_seconds: 5 };
-      const ask = line_short(
-        "permit.ask",
-        { permit: 1, tool: constants.tool, input },
-        { id: 3 },
-      );
-      bench.ai.line_send(ask);
+      const bench = new HandlerBench(elements, true);
+      const ask = gold_line("permit_ask");
+      const sleep = bench.line_run("permit.ask", ask);
       this.assertEqual(
         elements.permit.textContent,
-        i18n("page.permit_text", constants.tool, utility.json_text(input)),
+        gold_text("page_permit_text"),
       );
-      const choose = bench.dom.posted[0];
-      this.assertEqual(type_of(choose), "dom.choice");
-      this.assertEqual(jslb.payload_of(choose), {
-        permit: 1,
-        choices: ["accept", "deny", "always"],
-      });
-      bench.dom.line_send(reply_to(choose, { choice: "always" }));
-      const reply = bench.ai.posted[0];
-      this.assertEqual(jslb.field_get(reply[0], "reply"), 3);
-      this.assertEqual(jslb.payload_of(reply), {
-        permit: 1,
-        choice: "always",
-      });
+      const choose = gold_line("dom_choice_permit");
+      this.assertEqual(bench.tasks.submitted, [[choose, "dom"]]);
+      const id = constants.submit_ids[0];
+      const expected = gold_sleep("sleep_permit");
+      expected.state = { request: ask, text: elements.permit.firstChild };
+      expected.wait_ids = [id];
+      this.assertEqual(sleep, expected);
+      const answer = reply_set(gold_line("dom_choice_always"), id);
+      const wake = wake_make("wake_permit", expected, [answer]);
+      const reply = bench.line_run("ui.permit_reply", wake);
+      this.assertEqual(reply, gold_line("permit_reply"));
       this.assertEqual(elements.permit.children.length, 0);
     }
 
     // The player's text starts a turn, whose end shows the subtitle.
     test_turn_said(): void {
       const elements = this.elements_get();
-      const bench = bench_make(elements, true);
-      bench.dom.line_send(line_short("ui.input", { text: "1" }));
-      const say = bench.ai.posted[0];
-      this.assertEqual(type_of(say), "ai.say");
-      this.assertEqual(jslb.payload_of(say), { text: "1" });
+      const bench = new HandlerBench(elements, true);
+      const sleep = bench.line_run("ui.input", gold_line("ui_input_said"));
+      this.assertEqual(bench.tasks.submitted, [[gold_line("ai_say"), "ai"]]);
       this.assertTrue(elements.input.disabled);
-      const end = { turn: 7, scene: constants.scene, subtitle: "Fog." };
-      bench.ai.line_send(reply_to(say, end));
-      this.assertEqual(elements.subtitle.textContent, "Fog.");
+      const id = constants.submit_ids[0];
+      const expected = gold_sleep("sleep_turn");
+      expected.wait_ids = [id];
+      this.assertEqual(sleep, expected);
+      const end = reply_set(gold_line("ai_say_end"), id);
+      const wake = wake_make("wake_turn", expected, [end]);
+      this.assertEqual(bench.line_run("ui.turn_end", wake), undefined);
+      this.assertEqual(elements.subtitle.textContent, end.subtitle);
       this.assertFalse(elements.input.disabled);
-      this.assertEqual(bench.tasks.depth(), 0);
     }
 
     // The player's click starts a turn with its point.
     test_turn_clicked(): void {
-      const bench = bench_make(this.elements_get(), true);
-      bench.dom.line_send(line_short("ui.input", { x: 3, y: 4 }));
-      const click = bench.ai.posted[0];
-      this.assertEqual(type_of(click), "ai.click");
-      this.assertEqual(jslb.payload_of(click), { x: 3, y: 4 });
+      const bench = new HandlerBench(this.elements_get(), true);
+      bench.line_run("ui.input", gold_line("ui_input_clicked"));
+      const click = gold_line("ai_click");
+      this.assertEqual(bench.tasks.submitted, [[click, "ai"]]);
     }
 
     // Control 0 toggles the console and asks for tty 0, 2 toggles its overlay.
     test_keys_debug(): void {
-      const bench = bench_make(this.elements_get(), true);
-      for (const digit of [0, 0, 2]) {
-        bench.dom.line_send(line_short("ui.control_key", { digit }));
+      const bench = new HandlerBench(this.elements_get(), true);
+      for (const name of ["control_key_0", "control_key_0", "control_key_2"]) {
+        bench.line_run("ui.control_key", gold_line(name));
       }
       this.assertEqual(bench.view.calls, ["toggle", "open", "toggle"]);
       this.assertEqual(bench.overlays.calls, ["toggle 2"]);
-      this.assertEqual(bench.ai.posted.length, 1);
-      this.assertEqual(type_of(bench.ai.posted[0]), "console.open");
+      const open = gold_line("console_open");
+      this.assertEqual(bench.tasks.submitted, [[open, "ai"]]);
     }
 
     // After the end of tty 0, the next show by control 0 asks for it again.
     test_keys_reopen(): void {
-      const bench = bench_make(this.elements_get(), true);
-      bench.dom.line_send(line_short("ui.control_key", { digit: 0 }));
-      bench.ai.line_send(line_short("console.exit", { code: 0 }));
+      const bench = new HandlerBench(this.elements_get(), true);
+      bench.line_run("ui.control_key", gold_line("control_key_0"));
+      bench.line_run("console.exit", gold_line("console_exit"));
+      let sleep: unknown = undefined;
       for (let count = 0; count < 2; count += 1) {
-        bench.dom.line_send(line_short("ui.control_key", { digit: 0 }));
+        sleep = bench.line_run("ui.control_key", gold_line("control_key_0"));
       }
       this.assertEqual(bench.view.calls, [
         "toggle",
@@ -749,66 +664,94 @@ namespace test_page {
         "toggle",
         "open",
       ]);
-      const opened = bench.ai.posted.filter(
-        (line) => type_of(line) === "console.open",
-      );
-      this.assertEqual(opened.length, 2);
-      this.assertEqual(jslb.field_get(opened[1][0], "id"), 2);
+      const open = gold_line("console_open");
+      this.assertEqual(bench.tasks.submitted, [
+        [open, "ai"],
+        [open, "ai"],
+      ]);
+      const expected = gold_sleep("sleep_console");
+      expected.wait_ids = [constants.submit_ids[1]];
+      this.assertEqual(sleep, expected);
     }
 
     // Outside debug mode the keys toggle nothing.
     test_keys_gated(): void {
-      const bench = bench_make(this.elements_get(), false);
-      for (const digit of [0, 1]) {
-        bench.dom.line_send(line_short("ui.control_key", { digit }));
+      const bench = new HandlerBench(this.elements_get(), false);
+      for (const name of ["control_key_0", "control_key_1"]) {
+        bench.line_run("ui.control_key", gold_line(name));
       }
       this.assertEqual(bench.view.calls, []);
       this.assertEqual(bench.overlays.calls, []);
-      this.assertEqual(bench.ai.posted.length, 0);
+      this.assertEqual(bench.tasks.submitted.length, 0);
     }
 
     // The console's output, end, opening and close, and overlay lines arrive.
     test_debug_lines(): void {
-      const bench = bench_make(this.elements_get(), true);
+      const bench = new HandlerBench(this.elements_get(), true);
       const bytes = new Uint8Array([0x30, 0x24]);
-      const output = line_short("console.output", {}, {}, [
-        jslb.blob_make(bytes),
-      ]);
-      bench.ai.line_send(output);
+      const output = blob_set(gold_line("console_output"), bytes);
+      bench.line_run("console.output", output);
       this.assertEqual(bench.view.fed, [new Uint8Array([0x30, 0x24])]);
-      bench.ai.line_send(line_short("console.exit", { code: 0 }));
-      bench.ai.line_send(line_short("overlay.line", { tty: 1, text: "> x" }));
-      const woken = { state: null, replies: [] };
-      const wake = line_short("ui.console_reply", woken);
-      const done = routed.get("ui.console_reply") as dispatch.Handler;
-      this.assertEqual(done(wake), undefined);
-      const closed = line_short("ui.console_closed", woken);
-      const close = routed.get("ui.console_closed") as dispatch.Handler;
-      this.assertEqual(close(closed), undefined);
+      bench.line_run("console.exit", gold_line("console_exit"));
+      bench.line_run("overlay.line", gold_line("overlay_line"));
+      const wake = gold_line("wake_console_reply");
+      this.assertEqual(bench.line_run("ui.console_reply", wake), undefined);
+      const closed = gold_line("wake_console_closed");
+      this.assertEqual(bench.line_run("ui.console_closed", closed), undefined);
       this.assertEqual(bench.view.calls, ["exit", "done", "closed"]);
       this.assertTrue(bench.view.wakes[0] === wake);
       this.assertTrue(bench.view.wakes[1] === closed);
       this.assertEqual(bench.overlays.calls, ["line 1 > x"]);
     }
 
-    // What the hello says of the server is written as a verbose line.
-    test_hello_logged(): void {
-      const bench = bench_make(this.elements_get(), true);
-      const hello = {
-        bootstrap: constants.bootstrap,
-        sha256: constants.bootstrap_sha256,
-        pid: constants.pid,
-        root: constants.root,
-      };
-      bench.ai.line_send(line_short("boot.hello", hello));
-      const text = i18n(
-        "page.hello_shown",
-        constants.bootstrap,
-        constants.bootstrap_sha256,
-        constants.pid,
-        constants.root,
-      );
-      this.assertEqual(bench.logs, [text]);
+    // `console.show` shows an open console and answers at once.
+    test_show_open(): void {
+      const bench = new HandlerBench(this.elements_get(), true);
+      bench.view.open = true;
+      const show = gold_line("console_show_6");
+      const reply = bench.line_run("console.show", show);
+      this.assertEqual(bench.view.calls, ["show"]);
+      this.assertEqual(reply, gold_line("console_show_reply"));
+      this.assertEqual(bench.tasks.submitted.length, 0);
+    }
+
+    // An idle console is asked for, and the show is answered once it opens.
+    test_show_idle(): void {
+      const bench = new HandlerBench(this.elements_get(), true);
+      const show = gold_line("console_show_6");
+      const sleep = bench.line_run("console.show", show);
+      this.assertEqual(bench.view.calls, ["show", "open"]);
+      const open = gold_line("console_open");
+      this.assertEqual(bench.tasks.submitted, [[open, "ai"]]);
+      const id = constants.submit_ids[0];
+      const expected = gold_sleep("sleep_shown");
+      expected.state = { request: show };
+      expected.wait_ids = [id];
+      this.assertEqual(sleep, expected);
+      const state = (sleep as dispatch.Sleep).state as { request: unknown };
+      this.assertTrue(state.request === show);
+      const answer = reply_set(gold_line("console_open_answer"), id);
+      const wake = wake_make("wake_console_shown", expected, [answer]);
+      const reply = bench.line_run("ui.console_shown", wake);
+      this.assertEqual(bench.view.calls, ["show", "open", "done"]);
+      this.assertTrue(bench.view.wakes[0] === wake);
+      this.assertEqual(reply, gold_line("console_show_reply"));
+    }
+
+    // A console opening or closing can neither answer nor be asked for.
+    test_show_busy(): void {
+      const opening = new HandlerBench(this.elements_get(), true);
+      opening.line_run("console.show", gold_line("console_show_6"));
+      const second = gold_line("console_show_7");
+      const early = thrown_get(() => opening.line_run("console.show", second));
+      this.assertEqual(early.message, gold_text("page_console_busy"));
+      this.assertEqual(opening.tasks.submitted.length, 1);
+      const closing = new HandlerBench(this.elements_get(), true);
+      closing.view.asked = true;
+      const show = gold_line("console_show_8");
+      const late = thrown_get(() => closing.line_run("console.show", show));
+      this.assertEqual(late.message, gold_text("page_console_busy"));
+      this.assertEqual(closing.tasks.submitted.length, 0);
     }
   }
 
@@ -832,7 +775,7 @@ namespace test_page {
       permit.id = "permit";
       const button = document.createElement("button");
       button.type = "button";
-      button.textContent = i18n("page.choice_accept");
+      button.textContent = gold_text("page_choice_accept");
       permit.append(button);
       const form = document.createElement("form");
       const input = document.createElement("input");
@@ -868,6 +811,14 @@ namespace test_page {
           `the ${element.localName} at ${x}, ${y} is covered or unseen`,
         );
       }
+    }
+  }
+
+  // The shape of the module object.
+  export class TestSurface extends unittest.TestCase {
+    // The module object is frozen.
+    test_module_frozen(): void {
+      this.assertTrue(Object.isFrozen(page));
     }
   }
 }

@@ -1,6 +1,9 @@
-import jslb
+import dispatch, jslb, mcp
 
-# `mcp`: the payload is a `JSON-RPC` message for the server's MCP server.
+# `mcp`: a `JSON-RPC` message, after an exception a `dispatch.Failure`.
 def mcp_message(
     line: jslb.Object, **message: object
-) -> jslb.Object | None: ...
+) -> jslb.Object | dispatch.Failure | None: ...
+
+# Registers the handler of `mcp` lines for the server given.
+def handlers_register(server: mcp.Server) -> None: ...

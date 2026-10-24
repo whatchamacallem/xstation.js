@@ -14,5 +14,3 @@ ts/*.ts
 html/*.html
 API/python/*.pyi
 API/ts/*.ts
-LICENSE.md
-README.md

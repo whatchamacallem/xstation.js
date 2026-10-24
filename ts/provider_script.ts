@@ -300,7 +300,7 @@ namespace provider_script {
     const count = body.n;
     if (
       typeof count !== "number" ||
-      !Number.isSafeInteger(count) ||
+      !Number.isInteger(count) ||
       count < 1
     ) {
       return field_invalid("json.n");

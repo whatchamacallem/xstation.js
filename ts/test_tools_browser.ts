@@ -2,23 +2,22 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of tools_browser.ts on a store of the sqlite3.wasm module and OPFS
-// pool the test page sets as globals, with a server double that keeps the
-// tools and wakes registered on it and a queue double that keeps what the
-// tools submit: the tools in their listed order and texts, the result of
-// every tool, the requests of the tools that sleep and the results of their
-// wakes on the values of the castle turn, which builds the gatehouse scene,
-// of a console command and of the step script, the administration of the
-// databases with a snapshot loaded as one blob, values asked of the server
-// again after an unload and a load, the values of `_files` freed when a
-// render leaves its scene, and every error.
+// Tests of tools_browser.ts on doubles: a server double that keeps the tools
+// and wakes registered on it, a store double and its cache double that keep
+// every call and give the answers each test chose, a queue double that keeps
+// what the tools send and gives the ids the test picked, and a settings
+// reader of harness.setting_get. They check the tools in the order and texts
+// of API/mcp/tools.json, the result of every tool on the store's answers and
+// the calls it made of the store, every line a tool sends against the gold
+// record in full names, the results of the wakes for the castle turn's image
+// and render, a console command shown first as ctrl 0 shows it, the step
+// script, the store's error for a lost cache file passed on, and every
+// error. The inputs and digests are those of test_digests.json. The provider
+// key is set by provider.key_set, which keeps it.
 
 namespace test_tools_browser {
-  // The initialized sqlite3.wasm module, a global the test page sets.
-  declare const test_sqlite3: substrate.SqliteModule;
-
-  // Its installed OPFS SAH pool, a global the test page sets.
-  declare const test_pool: substrate.SqlitePool;
+  // The vectors the test page carries, each file's bytes in base64.
+  declare const test_vectors: { readonly [name: string]: string };
 
   // Finishes a tool's result from the state and replies of its wake.
   type WakeFinish = (
@@ -33,25 +32,53 @@ namespace test_tools_browser {
     id: number | undefined;
   }
 
-  // The store of one test and the doubles its tools are registered on.
+  // What a double gives for one call: the value the test chose, or a throw.
+  type Answer = { value: unknown } | { error: Error };
+
+  // One call a double was given: the method's name and its arguments.
+  type Call = [string, unknown[]];
+
+  // An input of the digest vector and its `SHA-256`.
+  interface DigestEntry {
+    data: Uint8Array;
+    sha256: string;
+  }
+
+  // The doubles one test registers the tools on.
   interface ToolBench {
-    store: substrate.Store;
+    store: StoreDouble;
     server: ServerDouble;
     tasks: TasksDouble;
   }
 
-  // The settings, names, texts and digests the tests use.
+  // The names, texts and data the tests use.
   const constants = Object.freeze({
-    // The `overflow_bytes` of `settings.json`, 128 KiB.
-    overflow_bytes: 131072,
-    // The `db_soft_bytes` of `settings.json`, 1 GiB.
-    soft_bytes: 1073741824,
-    // The `turn_compact_turns` of `settings.json`, 64.
-    compact_turns: 64,
-    // The start of the root of each store a test makes in the pool.
-    root_prefix: "/test_tools_browser/",
-    // The files of the cache of each store a test makes.
-    slot_count: 8,
+    // The id of this module's gold in `test_settings.json`.
+    gold_id: "typescript.test_tools_browser",
+    // The file of the digest vectors and this module's object in it.
+    digests_name: "test_digests.json",
+    digests_module: "test_tools_browser",
+    // The store's methods the tools and the script module call or bind.
+    store_methods: Object.freeze<readonly string[]>([
+      "sql_run",
+      "db_list",
+      "db_create",
+      "db_drop",
+      "kv_get",
+      "kv_put",
+      "kv_delete",
+      "kv_list",
+      "doc_get",
+      "doc_put",
+      "doc_head",
+      "turn_append",
+      "turn_list",
+      "turn_compact",
+      "transaction_run",
+      "sink",
+    ]),
+    // The handle the store double gives for a value held in the cache.
+    cache_handle: "cache/0001",
     // A synthetic provider key, which every image request carries.
     key: "xai-SYNTHETIC-KEY",
     // The provider's address and models a hello carries when not scripted.
@@ -62,7 +89,7 @@ namespace test_tools_browser {
     }),
     // The owner the image requests go to.
     provider_owner: "http" as const,
-    // The first tools of `tools/list` as `API/mcp/tools.json` holds them.
+    // The tools of `tools/list` as `API/mcp/tools.json` holds them.
     recorded_tools: Object.freeze<readonly string[]>([
       '{"name":"sql_run","description":"Run SQL statements in one' +
         " transaction on a database. DDL is allowed: your scripts are the" +
@@ -81,7 +108,8 @@ namespace test_tools_browser {
         ' names, /$db/$key, as text.","inputSchema":{"type":"object",' +
         '"properties":{"ref":{"type":"string"}},"required":["ref"]}}',
       '{"name":"kv_put","description":"Write text under a Key-Value-Ref,' +
-        ' /$db/$key. A script is the row /_files/script/<name>.js.",' +
+        " /$db/$key, and return its sha256. A script is the row" +
+        ' /_files/script/<name>.js.",' +
         '"inputSchema":{"type":"object","properties":{"ref":' +
         '{"type":"string"},"text":{"type":"string"}},"required":' +
         '["ref","text"]}}',
@@ -127,9 +155,10 @@ namespace test_tools_browser {
         '"inputSchema":{"type":"object","properties":{"image":' +
         '{"type":"string"},"subtitle":{"type":"string"}},"required":' +
         '["subtitle"]}}',
-      '{"name":"console_run","description":"Run one command line in the' +
-        " debug console's dash and return its output until the next" +
-        ' prompt or the timeout. Debug mode.","inputSchema":' +
+      '{"name":"console_run","description":"Show the debug console as' +
+        " ctrl-0 does, run one command line in its dash and return its" +
+        " output until the next prompt or the timeout. Debug mode." +
+        '","inputSchema":' +
         '{"type":"object","properties":{"text":{"type":"string"},' +
         '"timeout_seconds":{"type":"number"}},"required":' +
         '["text","timeout_seconds"]},"_meta":{"xsjs":{"permit":true}}}',
@@ -138,8 +167,6 @@ namespace test_tools_browser {
         '{"type":"object","properties":{"thread":{"type":"string"},' +
         '"count":{"type":"integer"}},"required":["thread","count"]}}',
     ]),
-    // The tools that follow the first ones, in order.
-    added_tools: ["db_stats", "db_compact", "db_unload", "db_load"],
     // The wake types the tools sleep with.
     wake_types: [
       "tools.image_reply",
@@ -149,21 +176,16 @@ namespace test_tools_browser {
       "tools.permit_reply",
       "tools.console_reply",
       "tools.tail_reply",
-      "tools.snapshot_reply",
-      "tools.value_reply",
+      "tools.show_reply",
     ],
     // The world table of the castle universe.
     world_sql:
       "CREATE TABLE world" +
       " (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT",
-    // The region table of the castle world.
-    region_sql:
-      "CREATE TABLE region" +
-      " (name TEXT PRIMARY KEY, tide INTEGER NOT NULL DEFAULT 0) STRICT",
-    // The result of the castle's two statements and the `seq` after them.
+    // The result of the castle's two statements.
     castle_reply:
       '{"results":[{"columns":[],"rows":[],"changes":0},' +
-      '{"columns":[],"rows":[],"changes":1}],"seq":1}',
+      '{"columns":[],"rows":[],"changes":1}]}',
     // The ref of the arrival scene of the castle turn.
     arrival_ref: "/castle_gatehouse/scene/arrival/1",
     // The result of `doc_put` for the arrival scene, its first version.
@@ -172,24 +194,8 @@ namespace test_tools_browser {
     arrival_subtitle:
       "Mind the moat. The gatehouse keeper has been expecting someone," +
       " though not necessarily you.",
-    // The `SHA-256` of the text `castle_world`.
-    world_sha256:
-      "6d0be246127ef7993924a9ce127c6fa6c093dca368163093ab31c80273336ecd",
-    // The `SHA-256` of the arrival scene's ref as text.
-    scene_sha256:
-      "1e2806a1029564579de9739ef0014f0332c5a8026bca9373e473224a3b094d8b",
     // The ref of the step script, which advances the tide of a region.
     step_ref: "/_files/script/step_tide.js",
-    // The step script, 319 bytes.
-    step_script:
-      "// Advances the tide by args.hours in the region table" +
-      " of the world.\n" +
-      'const results = engine.store.sql_run("castle_world", [\n' +
-      '  {sql: "UPDATE region SET tide = tide + ? WHERE name = ?",\n' +
-      '    params: [args.hours, "castle_gatehouse"]},\n' +
-      "]);\n" +
-      'engine.log("tide advanced by " + args.hours);\n' +
-      "return {changes: results[0].changes};\n",
     // The line the step script logs when it advances the tide by 1.
     step_line: "tide advanced by 1",
     // The arguments of the step script's call of the store, as JSON.
@@ -204,55 +210,17 @@ namespace test_tools_browser {
     image_key: "gatehouse/arrival.png",
     // The ref of that image.
     image_ref: "/_files/gatehouse/arrival.png",
-    // The image the provider answers, a checkerboard PNG, in base64.
-    image_base64:
-      "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAH0lEQVR42mP4jwQYkAAuc" +
-      "YZBqGGQO48oDaPxMCg0AADZV36QzYI8swAAAABJRU5ErkJggg==",
-    // The size of the image in bytes.
-    image_size: 88,
-    // The `SHA-256` of the image.
-    image_sha256:
-      "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0",
     // The body of the image request of the castle turn.
     image_json:
       '{"model":"grok-2-image","prompt":"A rain dark castle gatehouse at' +
       " dusk seen from the far side of a moat, one lantern lit, painted," +
       ' wide still frame, no people","n":1,"response_format":"b64_json"}',
-    // The result of `image_make`: the image's ref, size and digest.
-    image_result:
-      '{"key":"/_files/gatehouse/arrival.png","size":88,"sha256":' +
-      '"90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0"}',
-    // A url an image answer may hold instead of base64, a reserved name.
-    image_url: "https://images.invalid/gatehouse/arrival.png",
-    // The payload of the render of the arrival scene.
-    render_payload:
-      '{"scene":"/castle_gatehouse/scene/arrival/1","subtitle":"Mind the' +
-      " moat. The gatehouse keeper has been expecting someone, though not" +
-      ' necessarily you.","image":"/_files/gatehouse/arrival.png"}',
-    // The hyperposition, the scene the boot renders.
-    hyperposition_ref: "/metaverse/hyperposition/1",
-    // The subtitle of the hyperposition.
+    // The subtitle of the hyperposition, the scene the boot renders.
     hyperposition_subtitle: "How can I help you?",
-    // The payload of the render of the hyperposition, black.
-    black_payload:
-      '{"scene":"/metaverse/hyperposition/1",' +
-      '"subtitle":"How can I help you?"}',
-    // The payload of the first permit request, for `echo hi`.
-    permit_payload:
-      '{"permit":1,"tool":"browser.console_run",' +
-      '"input":{"text":"echo hi","timeout_seconds":5}}',
-    // The input message of ttyd's protocol that types `echo hi`, 9 bytes.
+    // The input message of ttyd's protocol that types `echo hi`.
     console_input: "0echo hi\n",
-    // The size of that message.
-    input_size: 9,
-    // The payload of the console read that waits for the prompt.
-    read_payload: '{"until":"$ ","timeout_seconds":5}',
-    // The output of `echo hi`: its echo, its line and the prompt.
-    console_text: "echo hi\r\nhi\r\n$ ",
-    // The result of `console_run` for that output, trimmed.
+    // The result of `console_run` for the output of `echo hi`, trimmed.
     console_result: '{"output":"hi\\n","timed_out":false}',
-    // A verbose line the step script logs, with a time.
-    verbose_line: { at: 1760800000000, text: "tide advanced by 1" },
   });
 
   // The stored text of the arrival scene, its encoded document as JSON.
@@ -261,53 +229,167 @@ namespace test_tools_browser {
     constants.arrival_subtitle +
     '","image":{"$ref":1}}';
 
-  // The number of the last root a test made, so each store has its own.
-  let root_count = 0;
+  // This module's object of the digest vector, parsed at the first read.
+  let digests: { [name: string]: unknown } | undefined = undefined;
 
-  // A cache file double kept in memory, with the calls OPFS gives.
-  class MemorySlot implements substrate.SlotHandle {
-    // The storage, grown by doubling, zero beyond the file.
-    #store = new Uint8Array(0);
-    // The size of the file.
-    #size = 0;
+  // A copy of a value of this module's gold, which the harness keeps frozen.
+  function gold_value(name: string): unknown {
+    return structuredClone(harness.gold_get(`${constants.gold_id}.${name}`));
+  }
 
-    // Reads into the buffer from the offset, as many bytes as the file has.
-    read(buffer: Uint8Array, options: { at: number }): number {
-      const left = this.#size - options.at;
-      const count = Math.max(0, Math.min(buffer.length, left));
-      buffer.set(this.#store.subarray(options.at, options.at + count));
-      return count;
-    }
+  // A text of this module's gold, a run time `{n}` left for the test to fill.
+  function gold_text(name: string): string {
+    return harness.gold_get(`${constants.gold_id}.texts.${name}`) as string;
+  }
 
-    // Writes the buffer at the offset, the file growing with zeros.
-    write(buffer: Uint8Array, options: { at: number }): number {
-      const end = options.at + buffer.length;
-      this.#room_make(end);
-      this.#store.set(buffer, options.at);
-      this.#size = Math.max(this.#size, end);
-      return buffer.length;
-    }
+  // A copy of a line of this module's gold, a run time part set on the copy.
+  function gold_line(name: string): lines.Line {
+    return gold_value(`lines.${name}`) as lines.Line;
+  }
 
-    // Sets the size, cutting the file or growing it with zeros.
-    truncate(size: number): void {
-      this.#room_make(size);
-      this.#store.fill(0, Math.min(size, this.#size));
-      this.#size = size;
-    }
+  // A copy of a reply line of the gold, to the request of the id.
+  function reply_gold(name: string, id: number): lines.Line {
+    const line = gold_line(name);
+    line[0].r = id;
+    return line;
+  }
 
-    // The size of the file.
-    getSize(): number {
-      return this.#size;
-    }
-
-    // Grows the storage by doubling until it holds the size.
-    #room_make(size: number): void {
-      if (size <= this.#store.length) {
-        return;
+  // This module's object of the digest vector the test page carries.
+  function digests_read(): { [name: string]: unknown } {
+    if (digests === undefined) {
+      const name = constants.digests_name;
+      if (!Object.hasOwn(test_vectors, name)) {
+        throw new Error(`test_vectors has no file ${name}`);
       }
-      const grown = new Uint8Array(Math.max(size, 2 * this.#store.length));
-      grown.set(this.#store);
-      this.#store = grown;
+      const file = Uint8Array.from(atob(test_vectors[name]), (c) =>
+        c.charCodeAt(0),
+      );
+      const vector = JSON.parse(text_decode(file)) as {
+        [module: string]: { [name: string]: unknown };
+      };
+      if (!Object.hasOwn(vector, constants.digests_module)) {
+        throw new Error(`${name} has no object ${constants.digests_module}`);
+      }
+      digests = vector[constants.digests_module];
+    }
+    return digests;
+  }
+
+  // The input and the digest of an entry of this module's digest vector.
+  function digest_entry(name: string): DigestEntry {
+    const entries = digests_read();
+    if (!Object.hasOwn(entries, name)) {
+      throw new Error(`${constants.digests_name} has no entry ${name}`);
+    }
+    const entry = entries[name] as { data: string; sha256: string };
+    const data = new Uint8Array(entry.data.length / 2);
+    for (let index = 0; index < data.length; index += 1) {
+      const pair = entry.data.slice(2 * index, 2 * index + 2);
+      data[index] = Number.parseInt(pair, 16);
+    }
+    return { data, sha256: entry.sha256 };
+  }
+
+  // The text of strict `UTF-8` bytes.
+  function text_decode(data: Uint8Array): string {
+    return new TextDecoder("utf-8", { fatal: true }).decode(data);
+  }
+
+  // The base64 text of bytes, as a provider's answer carries an image.
+  function base64_encode(data: Uint8Array): string {
+    const text = Array.from(data, (byte) => String.fromCharCode(byte));
+    return btoa(text.join(""));
+  }
+
+  // The value the store double gives for an input of the digest vector.
+  function value_answer(entry: DigestEntry): Answer {
+    const { data, sha256 } = entry;
+    return { value: { data, size: data.length, sha256 } };
+  }
+
+  // The row of an input of the digest vector kept under the key.
+  function row_make(k: string, entry: DigestEntry): lines.KvRow {
+    return { k, size: entry.data.length, sha256: entry.sha256 };
+  }
+
+  // The result of `image_make` for the image of the digest vector.
+  function image_result(image: DigestEntry): string {
+    const { image_ref } = constants;
+    const size = image.data.length;
+    return JSON.stringify({ key: image_ref, size, sha256: image.sha256 });
+  }
+
+  // The line of the gold that types a message into tty 0, its blob set.
+  function input_line(typed: string): lines.Line {
+    const data = new TextEncoder().encode(typed);
+    const line = gold_line("console_input");
+    line[1] = { size: data.length, d: data };
+    return line;
+  }
+
+  // A settings reader: the test's own values for some ids, else the harness.
+  function reader_make(values: {
+    [id: string]: unknown;
+  }): (id: string) => unknown {
+    return (id: string) =>
+      Object.hasOwn(values, id) ? values[id] : harness.setting_get(id);
+  }
+
+  // The text of each line, which leaves out the time.
+  function lines_shown(kept: lines.VerboseLine[]): string[] {
+    return kept.map((line) => line.text);
+  }
+
+  // Keeps each call and gives the next answer the test added for its method.
+  class CallDouble {
+    // The calls, in order.
+    readonly calls: Call[] = [];
+    // The answers not yet given, by method.
+    readonly #answers = new Map<string, Answer[]>();
+
+    // Adds the answer of a later call of the method, after those added.
+    answer_add(name: string, answer: Answer): void {
+      const left = this.#answers.get(name);
+      if (left === undefined) {
+        this.#answers.set(name, [answer]);
+      } else {
+        left.push(answer);
+      }
+    }
+
+    // Keeps the call and gives its answer, or throws when none is left.
+    call_answer(name: string, values: unknown[]): unknown {
+      this.calls.push([name, values]);
+      const left = this.#answers.get(name);
+      const answer = left === undefined ? undefined : left.shift();
+      if (answer === undefined) {
+        throw new Error(`the double has no answer for a call of ${name}`);
+      }
+      if ("error" in answer) {
+        throw answer.error;
+      }
+      return answer.value;
+    }
+  }
+
+  // A store double with every method the tools and the script module call.
+  class StoreDouble extends CallDouble {
+    // Makes each method of the store keep its call and give its answer.
+    constructor() {
+      super();
+      const methods = this as unknown as { [name: string]: unknown };
+      for (const name of constants.store_methods) {
+        methods[name] = (...values: unknown[]): unknown =>
+          this.call_answer(name, values);
+      }
+    }
+  }
+
+  // A cache double: `cache_read`, the one call the tools make of the cache.
+  class CacheDouble extends CallDouble {
+    // Keeps the call and gives the bytes the test chose.
+    cache_read(handle: string, offset: number, length: number): unknown {
+      return this.call_answer("cache_read", [handle, offset, length]);
     }
   }
 
@@ -332,18 +414,26 @@ namespace test_tools_browser {
     }
   }
 
-  // A queue double that keeps each line the tools submit or notify.
+  // A queue double that keeps each line and gives the ids the test picked.
   class TasksDouble {
     // The lines sent, in order.
     readonly sent: SentLine[] = [];
-    // The id of the last request.
-    #last = 0;
+    // The ids not yet given, in the order the requests get them.
+    readonly #ids: number[];
 
-    // Keeps a request and returns its id, counting from 1.
+    // Keeps the ids the test picked for the requests to come.
+    constructor(ids: number[]) {
+      this.#ids = [...ids];
+    }
+
+    // Keeps a request and gives it the next id, or throws when none is left.
     task_submit(line: lines.Line, owner?: queue.ThreadName): number {
-      this.#last += 1;
-      this.sent.push({ line, owner, id: this.#last });
-      return this.#last;
+      const id = this.#ids.shift();
+      if (id === undefined) {
+        throw new Error("the queue double has no id left for a request");
+      }
+      this.sent.push({ line, owner, id });
+      return id;
     }
 
     // Keeps a notification.
@@ -352,164 +442,30 @@ namespace test_tools_browser {
     }
   }
 
-  // A complete settings object with the values of `settings.json`.
-  function settings_make(): settings.Settings {
-    return {
-      debug: true,
-      queue_synchronous: false,
-      verbose_level: 1,
-      verbose_ring: 1000,
-      line_max: 1048576,
-      blob_max: 2147483391,
-      overflow_bytes: 131072,
-      chunk_bytes: 1048576,
-      srv_buf_size: 1048576,
-      media_db_bytes: 268435456,
-      files_browser_bytes: 1073741824,
-      db_soft_bytes: 1073741824,
-      turn_compact_turns: 64,
-      long_task_ms: 5,
-      provider: {
-        scripted: true,
-        timeout_seconds: 120,
-      },
-    };
-  }
-
-  // The reader of a settings store: the values of `settings.json`, changed.
-  function reader_make(
-    changes: Partial<settings.Settings>,
-  ): (id: string) => unknown {
-    const values = new settings.ValueStore();
-    values.value_set({ ...settings_make(), ...changes });
-    return (id: string) => values.value_get(id);
-  }
-
-  // The reply the server gives a forwarded line: `seq` one past `since`.
-  function answer_make(line: lines.Line): lines.Line {
-    const type = jslb.field_get(line[0], "type") as string;
-    const header = jslb.header_make(type, { reply: 1 });
-    if (type === "db.create" || type === "db.drop") {
-      return jslb.line_make(header, [], {});
-    }
-    const since = jslb.payload_of(line).since as number;
-    return jslb.line_make(header, [], { seq: since + 1 });
-  }
-
-  // A reply line to request `id` of the type, with its payload and blobs.
-  function reply_build(
-    type: string,
-    id: number,
-    payload: { [key: string]: unknown },
-    blobs: lines.BlobHeader[] = [],
-  ): lines.Line {
-    const header = jslb.header_make(type, { reply: id });
-    return jslb.line_make(header, blobs, payload);
-  }
-
-  // The type of a line.
-  function type_of(line: lines.Line): unknown {
-    return jslb.field_get(line[0], "type");
-  }
-
-  // The JSON text of the payload of a line.
-  function payload_text(line: lines.Line): string {
-    return utility.json_text(jslb.payload_of(line));
-  }
-
-  // The text of each line, which leaves out the time.
-  function lines_shown(kept: lines.VerboseLine[]): string[] {
-    return kept.map((line) => line.text);
-  }
-
-  // Makes the castle world database, its region table and one region.
-  function castle_make(store: substrate.Store): void {
-    store.db_create("castle_world");
-    store.sql_run("castle_world", [
-      { sql: constants.region_sql, params: [] },
-      {
-        sql: "INSERT INTO region (name) VALUES (?)",
-        params: ["castle_gatehouse"],
-      },
-    ]);
-  }
-
-  // A tool test: the module and pool read in `setUp`, its roots removed.
+  // A tool test: the provider key set, the tools on new doubles.
   class ToolCase extends unittest.TestCase {
-    // The module the test page provides, read in `setUp`.
-    #sqlite: substrate.SqliteModule | undefined = undefined;
-    // The pool the test page provides, read in `setUp`.
-    #pool: substrate.SqlitePool | undefined = undefined;
-    // The roots this test made.
-    readonly #roots: string[] = [];
-    // The stores this test made, each with the lines it forwarded.
-    readonly #stores = new Map<substrate.Store, lines.Line[]>();
-
-    // Reads the module and the pool the test page provides, and sets the key.
+    // Sets the provider key, which the image requests carry.
     setUp(): void {
-      this.#sqlite = test_sqlite3;
-      this.#pool = test_pool;
       provider.key_set(constants.key);
     }
 
-    // Closes every database of the stores and removes the roots' files.
-    tearDown(): void {
-      for (const store of this.#stores.keys()) {
-        for (const name of store.db_list()) {
-          store.db_close(name);
-        }
-      }
-      const pool = this.#pool as substrate.SqlitePool;
-      for (const root of this.#roots) {
-        for (const file of pool.getFileNames()) {
-          if (file.startsWith(`${root}/`)) {
-            pool.unlink(file);
-          }
-        }
-      }
-    }
-
-    // A store on a new root, with the tools registered on new doubles.
-    bench_make(changes: Partial<settings.Settings> = {}): ToolBench {
-      root_count += 1;
-      const root = constants.root_prefix + String(root_count);
-      this.#roots.push(root);
-      const slots = Array.from(
-        { length: constants.slot_count },
-        () => new MemorySlot(),
-      );
-      const store = new substrate.Store(
-        this.#sqlite as substrate.SqliteModule,
-        this.#pool as substrate.SqlitePool,
-        new substrate.CacheFiles(slots),
-        root,
-        constants.overflow_bytes,
-        constants.compact_turns,
-      );
-      const forwarded: lines.Line[] = [];
-      store.forward_set((line) => {
-        forwarded.push(line);
-      }, false);
-      this.#stores.set(store, forwarded);
+    // The tools registered on new doubles, the queue giving the ids picked.
+    bench_make(
+      ids: number[],
+      values: { [id: string]: unknown } = {},
+    ): ToolBench {
+      const store = new StoreDouble();
       const server = new ServerDouble();
-      const tasks = new TasksDouble();
+      const tasks = new TasksDouble(ids);
       tools_browser.tools_register(
         server as unknown as mcp.Server,
-        store,
+        store as unknown as substrate.Store,
         tasks as unknown as queue.TaskQueue,
         constants.provider_owner,
         constants.info,
-        reader_make(changes),
+        reader_make(values),
       );
       return { store, server, tasks };
-    }
-
-    // Answers every line a store forwarded, as the server would.
-    lines_answer(store: substrate.Store): void {
-      const forwarded = this.#stores.get(store) as lines.Line[];
-      for (const line of forwarded.splice(0)) {
-        store.forward_done(line, answer_make(line));
-      }
     }
 
     // Runs a tool by name on its arguments.
@@ -579,48 +535,32 @@ namespace test_tools_browser {
       }
       this.fail("Error not raised");
     }
+
+    // Gives the store's answers for reading a script of the digest vector.
+    script_answer(bench: ToolBench, entry: DigestEntry): void {
+      bench.store.answer_add("kv_get", value_answer(entry));
+      bench.store.answer_add("sink", { value: new CacheDouble() });
+    }
   }
 
   // The tools and the wakes registered on the server.
   export class TestRegistry extends ToolCase {
-    // The first tools come in their order.
+    // The tools are those of `API/mcp/tools.json`, whole and in its order.
     test_tools_recorded(): void {
-      const bench = this.bench_make();
+      const bench = this.bench_make([]);
       const recorded = constants.recorded_tools.map(
         (text) => JSON.parse(text) as mcp.Tool,
       );
-      const listed = bench.server.tools.slice(0, recorded.length);
-      this.assertEqual(utility.json_text(listed), utility.json_text(recorded));
-    }
-
-    // The four tools of the administration of the databases follow.
-    test_tools_added(): void {
-      const bench = this.bench_make();
-      const added = bench.server.tools.slice(constants.recorded_tools.length);
+      this.assertEqual(recorded.length, 16);
       this.assertEqual(
-        added.map((tool) => tool.name),
-        constants.added_tools,
+        JSON.stringify(bench.server.tools),
+        JSON.stringify(recorded),
       );
-      this.assertEqual(added[0].inputSchema, {
-        type: "object",
-        properties: {},
-      });
-      const named = {
-        type: "object",
-        properties: { db: { type: "string" } },
-        required: ["db"],
-      };
-      for (const tool of added.slice(1)) {
-        this.assertEqual(tool.inputSchema, named);
-      }
-      for (const tool of added) {
-        this.assertFalse("_meta" in tool);
-      }
     }
 
     // Every tool has its function, and every wake type has its function.
     test_functions_registered(): void {
-      const bench = this.bench_make();
+      const bench = this.bench_make([]);
       const names = bench.server.tools.map((tool) => tool.name);
       this.assertEqual([...bench.server.runs.keys()], names);
       for (const fn of bench.server.runs.values()) {
@@ -638,125 +578,159 @@ namespace test_tools_browser {
 
   // The tools of SQL and of creating and dropping databases.
   export class TestDatabases extends ToolCase {
-    // `sql_run` answers the results and the `seq` of the castle's statements.
+    // `sql_run` runs the statements on the store and answers its results.
     test_sql_recorded(): void {
-      const bench = this.bench_make();
-      bench.store.db_create("castle");
+      const bench = this.bench_make([]);
+      const statements = [
+        { sql: constants.world_sql, params: [] },
+        {
+          sql: "INSERT INTO world VALUES (?, ?)",
+          params: ["castle_world", "The castle"],
+        },
+      ];
+      const results = [
+        { columns: [], rows: [], changes: 0 },
+        { columns: [], rows: [], changes: 1 },
+      ];
+      bench.store.answer_add("sql_run", { value: results });
       const result = this.tool_run(bench, "sql_run", {
         db: "castle",
-        statements: [
-          { sql: constants.world_sql, params: [] },
-          {
-            sql: "INSERT INTO world VALUES (?, ?)",
-            params: ["castle_world", "The castle"],
-          },
-        ],
+        statements,
       });
       this.assertEqual(this.text_of(result), constants.castle_reply);
+      this.assertEqual(bench.store.calls, [
+        ["sql_run", ["castle", statements]],
+      ]);
     }
 
     // `db_create` and `db_drop` add and remove a database.
     test_create_drop(): void {
-      const bench = this.bench_make();
+      const bench = this.bench_make([]);
+      bench.store.answer_add("db_create", { value: undefined });
+      bench.store.answer_add("db_drop", { value: undefined });
       const created = this.tool_run(bench, "db_create", { db: "alpha" });
       this.assertEqual(this.text_of(created), "{}");
-      this.assertEqual(bench.store.db_list(), ["alpha"]);
       const dropped = this.tool_run(bench, "db_drop", { db: "alpha" });
       this.assertEqual(this.text_of(dropped), "{}");
-      this.assertEqual(bench.store.db_list(), []);
+      this.assertEqual(bench.store.calls, [
+        ["db_create", ["alpha"]],
+        ["db_drop", ["alpha"]],
+      ]);
     }
   }
 
   // The tools of values: put, get, delete and list.
   export class TestValues extends ToolCase {
-    // `kv_put` writes the text's bytes and returns their known digests.
+    // `kv_put` writes the text's bytes and returns the row's digest.
     test_put_recorded(): void {
-      const bench = this.bench_make();
-      for (const db of ["metaverse", "castle_world", "_files"]) {
-        bench.store.db_create(db);
-      }
-      const step_sha256 = utility.sha256_hex(
-        utility.utf8_encode(constants.step_script),
-      );
+      const bench = this.bench_make([]);
       const cases: [string, string, string][] = [
-        ["/metaverse/world", "castle_world", constants.world_sha256],
-        ["/castle_world/scene", constants.arrival_ref, constants.scene_sha256],
-        [constants.step_ref, constants.step_script, step_sha256],
+        ["/metaverse/world", "world", "castle_world"],
+        ["/castle_world/scene", "scene", "arrival_ref"],
+        [constants.step_ref, "script/step_tide.js", "step_script"],
       ];
-      for (const [ref, text, sha256] of cases) {
-        const db = substrate.ref_split(ref).db as string;
-        const since = bench.store.seq_get(db);
+      for (const [ref, key, name] of cases) {
+        const entry = digest_entry(name);
+        bench.store.answer_add("kv_put", { value: row_make(key, entry) });
+        const text = text_decode(entry.data);
         const result = this.tool_run(bench, "kv_put", { ref, text });
-        const expected = utility.json_text({ sha256, seq: since + 1 });
-        this.assertEqual(this.text_of(result), expected);
-        const data = bench.store.kv_get(ref).data;
-        this.assertEqual(data, utility.utf8_encode(text));
+        const sha256 = entry.sha256;
+        this.assertEqual(this.text_of(result), JSON.stringify({ sha256 }));
       }
+      const puts = cases.map(([ref, , name]) => [
+        "kv_put",
+        [ref, digest_entry(name).data],
+      ]);
+      this.assertEqual(bench.store.calls, puts);
     }
 
     // `kv_get` reads a value as its text.
     test_get_text(): void {
-      const bench = this.bench_make();
-      bench.store.db_create("alpha");
-      const text = String.fromCodePoint(0x4e2d, 0x6587, 0x1f600) + " text";
-      bench.store.kv_put("/alpha/a", utility.utf8_encode(text));
+      const bench = this.bench_make([]);
+      const entry = digest_entry("text_wide");
+      bench.store.answer_add("kv_get", value_answer(entry));
+      bench.store.answer_add("sink", { value: new CacheDouble() });
       const result = this.tool_run(bench, "kv_get", { ref: "/alpha/a" });
+      const text = String.fromCodePoint(0x4e2d, 0x6587, 0x1f600) + " text";
       this.assertEqual(this.text_of(result), text);
+      this.assertEqual(bench.store.calls, [
+        ["kv_get", ["/alpha/a"]],
+        ["sink", []],
+      ]);
     }
 
-    // `kv_get` reads a value held in the cache.
+    // `kv_get` reads a value held in the cache through its handle.
     test_get_cached(): void {
-      const bench = this.bench_make();
-      bench.store.db_create("alpha");
-      const text = "x".repeat(constants.overflow_bytes + 1);
-      this.tool_run(bench, "kv_put", { ref: "/alpha/big", text });
-      const value = bench.store.kv_get("/alpha/big");
-      this.assertEqual(typeof value.data, "string");
+      const bench = this.bench_make([]);
+      const { data, sha256 } = digest_entry("value_cached");
+      const cache = new CacheDouble();
+      cache.answer_add("cache_read", { value: data });
+      const handle = constants.cache_handle;
+      const value = { data: handle, size: data.length, sha256 };
+      bench.store.answer_add("kv_get", { value });
+      bench.store.answer_add("sink", { value: cache });
       const result = this.tool_run(bench, "kv_get", { ref: "/alpha/big" });
-      this.assertEqual(this.text_of(result), text);
+      this.assertEqual(this.text_of(result), text_decode(data));
+      const read = ["cache_read", [handle, 0, data.length]];
+      this.assertEqual(cache.calls, [read]);
     }
 
     // `kv_get` of bytes that are not `UTF-8` throws.
     test_get_refused(): void {
-      const bench = this.bench_make();
-      bench.store.db_create("alpha");
-      bench.store.kv_put("/alpha/raw", new Uint8Array([0xff]));
-      this.raised_assert(i18n("utility.bytes_refused"), () =>
+      const bench = this.bench_make([]);
+      bench.store.answer_add("kv_get", value_answer(digest_entry("byte_ff")));
+      bench.store.answer_add("sink", { value: new CacheDouble() });
+      this.raised_assert(gold_text("utility_bytes_refused"), () =>
         this.tool_run(bench, "kv_get", { ref: "/alpha/raw" }),
       );
     }
 
-    // `kv_delete` removes the row and returns the `seq` after.
-    test_delete_seq(): void {
-      const bench = this.bench_make();
-      bench.store.db_create("alpha");
-      bench.store.kv_put("/alpha/a", utility.utf8_encode("one"));
-      const since = bench.store.seq_get("alpha");
+    // `kv_delete` deletes the row and returns an empty object.
+    test_delete_empty(): void {
+      const bench = this.bench_make([]);
+      bench.store.answer_add("kv_delete", { value: undefined });
       const result = this.tool_run(bench, "kv_delete", { ref: "/alpha/a" });
-      const expected = utility.json_text({ seq: since + 1 });
-      this.assertEqual(this.text_of(result), expected);
-      this.raised_assert(i18n("substrate.key_missing", "a", "alpha"), () =>
-        bench.store.kv_get("/alpha/a"),
-      );
+      this.assertEqual(this.text_of(result), "{}");
+      this.assertEqual(bench.store.calls, [["kv_delete", ["/alpha/a"]]]);
+    }
+
+    // The store's throw for a value whose cache file is lost passes through.
+    test_file_lost(): void {
+      const bench = this.bench_make([]);
+      const cases: [string, string, string][] = [
+        ["kv_get", "/alpha/big", "value"],
+        ["doc_get", "/alpha/note/1", "document"],
+      ];
+      for (const [tool, lost, name] of cases) {
+        const sha256 = digest_entry(`${name}_lost`).sha256;
+        const text = gold_text(`substrate_file_lost_${name}`);
+        const message = text.replaceAll("{1}", sha256);
+        bench.store.answer_add(tool, { error: new Error(message) });
+        this.raised_assert(message, () =>
+          this.tool_run(bench, tool, { ref: lost }),
+        );
+      }
+      this.assertEqual(bench.store.calls, [
+        ["kv_get", ["/alpha/big"]],
+        ["doc_get", ["/alpha/note/1"]],
+      ]);
+      this.assertEqual(bench.tasks.sent, []);
     }
 
     // `kv_list` returns the rows under the prefix.
     test_list_keys(): void {
-      const bench = this.bench_make();
-      bench.store.db_create("alpha");
-      for (const key of ["note/a", "note/b", "other"]) {
-        bench.store.kv_put(`/alpha/${key}`, utility.utf8_encode(key));
-      }
+      const bench = this.bench_make([]);
+      const keys = [
+        row_make("note/a", digest_entry("note_a")),
+        row_make("note/b", digest_entry("note_b")),
+      ];
+      bench.store.answer_add("kv_list", { value: keys });
       const result = this.tool_run(bench, "kv_list", {
         db: "alpha",
         prefix: "note/",
       });
-      const keys = bench.store.kv_list("alpha", "note/");
-      this.assertEqual(this.text_of(result), utility.json_text({ keys }));
-      this.assertEqual(
-        keys.map((row) => row.k),
-        ["note/a", "note/b"],
-      );
+      this.assertEqual(this.text_of(result), JSON.stringify({ keys }));
+      this.assertEqual(bench.store.calls, [["kv_list", ["alpha", "note/"]]]);
     }
   }
 
@@ -764,32 +738,35 @@ namespace test_tools_browser {
   export class TestDocuments extends ToolCase {
     // The arrival scene is put, read back as its stored text, and found.
     test_doc_recorded(): void {
-      const bench = this.bench_make();
-      bench.store.db_create("castle_gatehouse");
+      const bench = this.bench_make([]);
       const body = JSON.parse(arrival_text) as lines.Document;
       const where = { db: "castle_gatehouse", id: "scene/arrival" };
+      const ref = constants.arrival_ref;
+      bench.store.answer_add("doc_put", { value: { ref } });
+      bench.store.answer_add("doc_get", { value: JSON.parse(arrival_text) });
+      bench.store.answer_add("doc_head", { value: ref });
       const put = this.tool_run(bench, "doc_put", { ...where, body });
       this.assertEqual(this.text_of(put), constants.doc_result);
-      const read = this.tool_run(bench, "doc_get", {
-        ref: constants.arrival_ref,
-      });
+      const read = this.tool_run(bench, "doc_get", { ref });
       this.assertEqual(this.text_of(read), arrival_text);
       const head = this.tool_run(bench, "doc_head", where);
       this.assertEqual(this.text_of(head), constants.doc_result);
+      this.assertEqual(bench.store.calls, [
+        ["doc_put", [where.db, where.id, body]],
+        ["doc_get", [ref]],
+        ["doc_head", [where.db, where.id]],
+      ]);
     }
   }
 
   // The tools that run scripts.
   export class TestScripts extends ToolCase {
-    // The step script returns its change and its line.
+    // The step script reads its text, runs its statement, returns its line.
     test_run_recorded(): void {
-      const bench = this.bench_make();
-      bench.store.db_create("_files");
-      castle_make(bench.store);
-      this.tool_run(bench, "kv_put", {
-        ref: constants.step_ref,
-        text: constants.step_script,
-      });
+      const bench = this.bench_make([]);
+      this.script_answer(bench, digest_entry("step_script"));
+      const changed = [{ columns: [], rows: [], changes: 1 }];
+      bench.store.answer_add("sql_run", { value: changed });
       const result = this.tool_run(bench, "script_run", {
         name: "step_tide",
         args: { hours: 1 },
@@ -798,37 +775,35 @@ namespace test_tools_browser {
       this.assertEqual(Object.keys(run), ["value", "lines"]);
       this.assertEqual(run.value, { changes: 1 });
       this.assertEqual(lines_shown(run.lines), [constants.step_line]);
+      this.assertEqual(bench.store.calls, [
+        ["kv_get", [constants.step_ref]],
+        ["sink", []],
+        ["sql_run", JSON.parse(constants.step_arguments)],
+      ]);
     }
 
     // `script_debug` traces the store's call before the script's line.
     test_debug_traced(): void {
-      const bench = this.bench_make();
-      bench.store.db_create("_files");
-      castle_make(bench.store);
-      this.tool_run(bench, "kv_put", {
-        ref: constants.step_ref,
-        text: constants.step_script,
-      });
+      const bench = this.bench_make([]);
+      this.script_answer(bench, digest_entry("step_script"));
+      const changed = [{ columns: [], rows: [], changes: 1 }];
+      bench.store.answer_add("sql_run", { value: changed });
       const result = this.tool_run(bench, "script_debug", {
         name: "step_tide",
         args: { hours: 1 },
       });
       const run = JSON.parse(this.text_of(result)) as script.ScriptResult;
       this.assertEqual(run.value, { changes: 1 });
-      const trace = i18n(
-        "script.trace_call",
-        "sql_run",
-        constants.step_arguments,
-      );
+      const trace = gold_text("script_trace_call");
       this.assertEqual(lines_shown(run.lines), [trace, constants.step_line]);
+      const statement = JSON.parse(constants.step_arguments) as unknown[];
+      this.assertEqual(bench.store.calls[2], ["sql_run", statement]);
     }
 
     // A script that throws gives a result marked as an error.
     test_error_marked(): void {
-      const bench = this.bench_make();
-      bench.store.db_create("_files");
-      const text = 'throw new Error("stop");\n';
-      this.tool_run(bench, "kv_put", { ref: "/_files/script/stop.js", text });
+      const bench = this.bench_make([]);
+      this.script_answer(bench, digest_entry("script_stop"));
       const value = this.tool_run(bench, "script_run", {
         name: "stop",
         args: {},
@@ -839,6 +814,10 @@ namespace test_tools_browser {
       const run = JSON.parse(block.text) as script.ScriptResult;
       this.assertEqual(run.error, "Error: stop");
       this.assertEqual(run.lines, []);
+      this.assertEqual(bench.store.calls, [
+        ["kv_get", ["/_files/script/stop.js"]],
+        ["sink", []],
+      ]);
     }
   }
 
@@ -846,8 +825,8 @@ namespace test_tools_browser {
   export class TestImages extends ToolCase {
     // The castle turn's image is asked for, kept, sent to the UI, returned.
     test_image_recorded(): void {
-      const bench = this.bench_make();
-      bench.store.db_create("_files");
+      const bench = this.bench_make([31, 32]);
+      const image = digest_entry("arrival_image");
       const asked = this.sleep_check(
         bench,
         this.tool_run(bench, "image_make", {
@@ -859,58 +838,39 @@ namespace test_tools_browser {
       );
       const request = bench.tasks.sent[0];
       this.assertEqual(request.owner, constants.provider_owner);
-      const expected = provider.image_request(
-        constants.info.base_url,
-        constants.key,
-        {
-          model: constants.info.image_model,
-          prompt: constants.image_prompt,
-          n: 1,
-          response_format: "b64_json",
-        },
-      );
-      this.assertEqual(
-        utility.json_text(request.line),
-        utility.json_text(expected),
-      );
-      const body = jslb.payload_of(request.line).json;
-      this.assertEqual(utility.json_text(body), constants.image_json);
-      const answer = reply_build("http.request", request.id as number, {
-        status: 200,
-        headers: { "content-type": "application/json" },
-        json: { data: [{ b64_json: constants.image_base64 }] },
-      });
+      this.assertEqual(request.line, gold_line("image_request"));
+      const body = JSON.stringify(request.line.json);
+      this.assertEqual(body, constants.image_json);
+      const answer = reply_gold("image_answer", request.id as number);
+      const images = answer.json as { data: { b64_json?: string }[] };
+      images.data[0].b64_json = base64_encode(image.data);
+      const row = row_make(constants.image_key, image);
+      bench.store.answer_add("kv_put", { value: row });
       const keeping = this.sleep_check(
         bench,
         this.wake_run(bench, asked, [answer]),
         1,
         "tools.media_reply",
       );
-      const value = bench.store.kv_get(constants.image_ref);
-      this.assertEqual(value.size, constants.image_size);
-      this.assertEqual(value.sha256, constants.image_sha256);
+      this.assertEqual(bench.store.calls, [
+        ["kv_put", [constants.image_ref, image.data]],
+      ]);
       const media = bench.tasks.sent[1];
       this.assertEqual(media.owner, "ui");
-      this.assertEqual(type_of(media.line), "media.store");
-      this.assertEqual(jslb.payload_of(media.line), {
-        k: constants.image_ref,
-      });
-      const blob = media.line[1] as lines.BlobHeader;
-      this.assertEqual(jslb.field_get(blob, "size"), constants.image_size);
-      this.assertEqual(blob.d, value.data);
-      const kept = reply_build("media.store", media.id as number, {
-        k: constants.image_ref,
-        size: constants.image_size,
-        sha256: constants.image_sha256,
-      });
+      const stored = gold_line("media_store");
+      stored[1] = { size: image.data.length, d: image.data };
+      this.assertEqual(media.line, stored);
+      const kept = reply_gold("media_store_reply", media.id as number);
+      kept.size = image.data.length;
+      kept.sha256 = image.sha256;
       const result = this.wake_run(bench, keeping, [kept]);
-      this.assertEqual(this.text_of(result), constants.image_result);
+      this.assertEqual(this.text_of(result), image_result(image));
     }
 
     // An image answered by url is downloaded by the UI and kept here.
     test_image_fetched(): void {
-      const bench = this.bench_make();
-      bench.store.db_create("_files");
+      const bench = this.bench_make([33, 34]);
+      const image = digest_entry("arrival_image");
       const asked = this.sleep_check(
         bench,
         this.tool_run(bench, "image_make", {
@@ -921,11 +881,7 @@ namespace test_tools_browser {
         "tools.image_reply",
       );
       const request = bench.tasks.sent[0];
-      const answer = reply_build("http.request", request.id as number, {
-        status: 200,
-        headers: { "content-type": "application/json" },
-        json: { data: [{ url: constants.image_url }] },
-      });
+      const answer = reply_gold("image_answer_url", request.id as number);
       const fetching = this.sleep_check(
         bench,
         this.wake_run(bench, asked, [answer]),
@@ -934,40 +890,35 @@ namespace test_tools_browser {
       );
       const download = bench.tasks.sent[1];
       this.assertEqual(download.owner, "ui");
-      this.assertEqual(type_of(download.line), "media.fetch");
-      this.assertEqual(jslb.payload_of(download.line), {
-        url: constants.image_url,
-        k: constants.image_ref,
-      });
-      const image = utility.base64_decode(constants.image_base64);
-      const fetched = reply_build(
-        "media.fetch",
-        download.id as number,
-        {
-          k: constants.image_ref,
-          size: constants.image_size,
-          sha256: constants.image_sha256,
-        },
-        [jslb.blob_make(image)],
-      );
+      this.assertEqual(download.line, gold_line("media_fetch"));
+      const fetched = reply_gold("media_fetch_reply", download.id as number);
+      fetched[1] = { s: image.data.length, d: image.data };
+      fetched.size = image.data.length;
+      fetched.sha256 = image.sha256;
+      const row = row_make(constants.image_key, image);
+      bench.store.answer_add("kv_put", { value: row });
       const result = this.wake_run(bench, fetching, [fetched]);
-      this.assertEqual(this.text_of(result), constants.image_result);
-      const value = bench.store.kv_get(constants.image_ref);
-      this.assertEqual(value.sha256, constants.image_sha256);
+      this.assertEqual(this.text_of(result), image_result(image));
+      this.assertEqual(bench.store.calls, [
+        ["kv_put", [constants.image_ref, image.data]],
+      ]);
     }
   }
 
   // The tool that renders the current scene.
   export class TestRender extends ToolCase {
+    // Gives the store's answers for the world's name and its scene's ref.
+    scene_answer(bench: ToolBench, world: string, scene: string): void {
+      for (const name of [world, scene]) {
+        bench.store.answer_add("kv_get", value_answer(digest_entry(name)));
+        bench.store.answer_add("sink", { value: new CacheDouble() });
+      }
+    }
+
     // The render names the world's scene, the image and the subtitle.
     test_render_recorded(): void {
-      const bench = this.bench_make();
-      bench.store.db_create("metaverse");
-      bench.store.db_create("castle_world");
-      const world = utility.utf8_encode("castle_world");
-      bench.store.kv_put("/metaverse/world", world);
-      const scene = utility.utf8_encode(constants.arrival_ref);
-      bench.store.kv_put("/castle_world/scene", scene);
+      const bench = this.bench_make([35]);
+      this.scene_answer(bench, "castle_world", "arrival_ref");
       const asked = this.sleep_check(
         bench,
         this.tool_run(bench, "render", {
@@ -977,23 +928,24 @@ namespace test_tools_browser {
         0,
         "tools.render_reply",
       );
+      this.assertEqual(bench.store.calls, [
+        ["kv_get", ["/metaverse/world"]],
+        ["sink", []],
+        ["kv_get", ["/castle_world/scene"]],
+        ["sink", []],
+      ]);
       const render = bench.tasks.sent[0];
       this.assertEqual(render.owner, "ui");
-      this.assertEqual(type_of(render.line), "render");
-      this.assertEqual(payload_text(render.line), constants.render_payload);
-      const shown = reply_build("render", render.id as number, {});
+      this.assertEqual(render.line, gold_line("render_arrival"));
+      const shown = reply_gold("render_reply", render.id as number);
       const result = this.wake_run(bench, asked, [shown]);
       this.assertEqual(this.text_of(result), "{}");
     }
 
     // A render with no image is black, as the boot's render is.
     test_render_black(): void {
-      const bench = this.bench_make();
-      bench.store.db_create("metaverse");
-      const world = utility.utf8_encode("metaverse");
-      bench.store.kv_put("/metaverse/world", world);
-      const scene = utility.utf8_encode(constants.hyperposition_ref);
-      bench.store.kv_put("/metaverse/scene", scene);
+      const bench = this.bench_make([36]);
+      this.scene_answer(bench, "metaverse", "hyperposition_ref");
       this.sleep_check(
         bench,
         this.tool_run(bench, "render", {
@@ -1002,57 +954,9 @@ namespace test_tools_browser {
         0,
         "tools.render_reply",
       );
+      this.assertEqual(bench.store.calls[2], ["kv_get", ["/metaverse/scene"]]);
       const render = bench.tasks.sent[0];
-      this.assertEqual(payload_text(render.line), constants.black_payload);
-    }
-
-    // Leaving a scene frees the `_files` values the new one does not name.
-    test_render_evicts(): void {
-      const each = constants.overflow_bytes + 1;
-      const bench = this.bench_make({ files_browser_bytes: each });
-      const store = bench.store;
-      store.db_create("metaverse");
-      store.db_create("_files");
-      store.kv_put("/metaverse/world", utility.utf8_encode("metaverse"));
-      const scenes: string[] = [];
-      for (const name of ["a", "b"]) {
-        const body = {
-          0: { t: "scene" },
-          1: `/_files/${name}.png`,
-          subtitle: name,
-          image: { $ref: 1 },
-        };
-        scenes.push(store.doc_put("metaverse", `scene/${name}`, body).ref);
-      }
-      for (const [index, name] of ["a", "b", "c", "d"].entries()) {
-        const data = new Uint8Array(each).fill(index + 1);
-        store.kv_put(`/_files/${name}.png`, data);
-      }
-      this.lines_answer(store);
-      // Whether each image is held, in the order of their keys.
-      const images_held = (): boolean[] =>
-        ["a", "b", "c", "d"].map((name) =>
-          store.kv_held(`/_files/${name}.png`),
-        );
-      // Makes the scene current and renders the image in it.
-      const scene_show = (scene: string, image: string): void => {
-        store.kv_put("/metaverse/scene", utility.utf8_encode(scene));
-        this.lines_answer(store);
-        this.tool_run(bench, "render", { image, subtitle: "" });
-      };
-      scene_show(scenes[0], "/_files/d.png");
-      this.assertEqual(images_held(), [true, false, false, true]);
-      store.kv_put("/_files/c.png", new Uint8Array(each).fill(9));
-      this.lines_answer(store);
-      scene_show(scenes[0], "/_files/d.png");
-      this.assertEqual(images_held(), [true, false, true, true]);
-      scene_show(scenes[1], "/_files/c.png");
-      this.assertEqual(images_held(), [false, false, true, false]);
-      this.assertEqual(store.kv_list("_files", "").length, 4);
-      const renders = bench.tasks.sent.filter(
-        (entry) => type_of(entry.line) === "render",
-      );
-      this.assertEqual(renders.length, 3);
+      this.assertEqual(render.line, gold_line("render_black"));
     }
   }
 
@@ -1069,53 +973,66 @@ namespace test_tools_browser {
       );
     }
 
-    // The permit's reply with the choice, to the last request sent.
-    choice_make(bench: ToolBench, choice: string): lines.Line {
+    // The permit's reply of the gold, to the last request sent.
+    choice_make(bench: ToolBench, name: string): lines.Line {
       const ask = bench.tasks.sent[bench.tasks.sent.length - 1];
-      const permit = jslb.payload_of(ask.line).permit;
-      return reply_build("permit.ask", ask.id as number, { permit, choice });
+      const reply = reply_gold(name, ask.id as number);
+      reply.permit = ask.line.permit;
+      return reply;
     }
 
-    // A command asks, runs and returns its output trimmed.
+    // The sleep on the `console.show` sent at `start`, then on the read.
+    show_answer(
+      bench: ToolBench,
+      value: mcp.ToolResult | dispatch.Sleep,
+      start: number,
+    ): dispatch.Sleep {
+      const wake = "tools.show_reply";
+      const showing = this.sleep_check(bench, value, start, wake);
+      const show = bench.tasks.sent[start];
+      this.assertEqual(show.owner, "ui");
+      this.assertEqual(show.line, gold_line("console_show"));
+      const shown = reply_gold("show_reply", show.id as number);
+      return this.sleep_check(
+        bench,
+        this.wake_run(bench, showing, [shown]),
+        start + 1,
+        "tools.console_reply",
+      );
+    }
+
+    // A command asks, shows the console, runs and returns its output trimmed.
     test_console_recorded(): void {
-      const bench = this.bench_make();
+      const bench = this.bench_make([41, 42, 43]);
       const asked = this.permit_start(bench, "echo hi");
       const ask = bench.tasks.sent[0];
       this.assertEqual(ask.owner, "ui");
-      this.assertEqual(type_of(ask.line), "permit.ask");
-      this.assertEqual(payload_text(ask.line), constants.permit_payload);
-      const reading = this.sleep_check(
+      this.assertEqual(ask.line, gold_line("permit_ask"));
+      const accepted = this.choice_make(bench, "permit_accept");
+      const reading = this.show_answer(
         bench,
-        this.wake_run(bench, asked, [this.choice_make(bench, "accept")]),
+        this.wake_run(bench, asked, [accepted]),
         1,
-        "tools.console_reply",
       );
-      const [input, read] = bench.tasks.sent.slice(1);
+      const [input, read] = bench.tasks.sent.slice(2);
       this.assertEqual(input.owner, "console");
       this.assertEqual(input.id, undefined);
-      this.assertEqual(type_of(input.line), "console.input");
-      const blob = input.line[1] as lines.BlobHeader;
-      this.assertEqual(jslb.field_get(blob, "size"), constants.input_size);
-      this.assertEqual(blob.d, utility.utf8_encode(constants.console_input));
+      this.assertEqual(input.line, input_line(constants.console_input));
       this.assertEqual(read.owner, "console");
-      this.assertEqual(type_of(read.line), "console.read");
-      this.assertEqual(payload_text(read.line), constants.read_payload);
-      const output = reply_build("console.read", read.id as number, {
-        text: constants.console_text,
-        timed_out: false,
-      });
+      this.assertEqual(read.line, gold_line("console_read"));
+      const output = reply_gold("read_reply", read.id as number);
       const result = this.wake_run(bench, reading, [output]);
       this.assertEqual(this.text_of(result), constants.console_result);
     }
 
     // A denial returns an error to the model and sends nothing on.
     test_permit_denied(): void {
-      const bench = this.bench_make();
+      const bench = this.bench_make([44]);
       const asked = this.permit_start(bench, "echo hi");
       const denied = this.wake_run(bench, asked, [
-        this.choice_make(bench, "deny"),
+        this.choice_make(bench, "permit_deny"),
       ]);
-      const text = i18n("tools_browser.permit_denied", "browser.console_run");
+      const text = gold_text("tools_browser_permit_denied");
       this.assertEqual(this.result_of(denied), {
         content: [{ type: "text", text }],
         isError: true,
@@ -1125,9 +1042,8 @@ namespace test_tools_browser {
 
     // Outside debug mode the tool throws and asks the player nothing.
     test_debug_off(): void {
-      const bench = this.bench_make({ debug: false });
-      const text = i18n("tools_browser.debug_off", "browser.console_run");
-      this.raised_assert(text, () =>
+      const bench = this.bench_make([], { debug: false });
+      this.raised_assert(gold_text("tools_browser_debug_off"), () =>
         this.tool_run(bench, "console_run", {
           text: "echo hi",
           timeout_seconds: 5,
@@ -1136,65 +1052,60 @@ namespace test_tools_browser {
       this.assertEqual(bench.tasks.sent.length, 0);
     }
 
-    // Always Allow runs this command and every later one with no ask.
+    // Always Allow shows and runs this command and every later one, no ask.
     test_permit_always(): void {
-      const bench = this.bench_make();
+      const bench = this.bench_make([45, 46, 47, 48, 49]);
       const asked = this.permit_start(bench, "echo hi");
-      this.sleep_check(
-        bench,
-        this.wake_run(bench, asked, [this.choice_make(bench, "always")]),
-        1,
-        "tools.console_reply",
-      );
-      this.sleep_check(
+      const always = this.choice_make(bench, "permit_always");
+      this.show_answer(bench, this.wake_run(bench, asked, [always]), 1);
+      this.show_answer(
         bench,
         this.tool_run(bench, "console_run", {
           text: "pwd",
           timeout_seconds: 5,
         }),
-        3,
-        "tools.console_reply",
+        4,
       );
-      const later = bench.tasks.sent.slice(3);
-      const types = later.map((entry) => type_of(entry.line));
-      this.assertEqual(types, ["console.input", "console.read"]);
+      const later = bench.tasks.sent.slice(4).map((entry) => entry.line);
+      this.assertEqual(later, [
+        gold_line("console_show"),
+        input_line("0pwd\n"),
+        gold_line("console_read"),
+      ]);
     }
 
     // Each permit asked has the next number, and Accept lasts one command.
     test_permits_counted(): void {
-      const bench = this.bench_make();
+      const bench = this.bench_make([51, 52, 53, 54, 55, 56]);
       for (const number of [1, 2]) {
         const start = bench.tasks.sent.length;
         const asked = this.permit_start(bench, `echo ${number}`);
         const ask = bench.tasks.sent[start];
-        this.assertEqual(jslb.payload_of(ask.line).permit, number);
-        this.sleep_check(
+        this.assertEqual(ask.line.permit, number);
+        this.show_answer(
           bench,
-          this.wake_run(bench, asked, [this.choice_make(bench, "accept")]),
+          this.wake_run(bench, asked, [
+            this.choice_make(bench, "permit_accept"),
+          ]),
           start + 1,
-          "tools.console_reply",
         );
       }
     }
 
     // A read that timed out keeps the output after the echo, with no prompt.
     test_console_expired(): void {
-      const bench = this.bench_make();
+      const bench = this.bench_make([57, 58, 59]);
       const asked = this.permit_start(bench, "sleep 600");
-      const reading = this.sleep_check(
+      const accepted = this.choice_make(bench, "permit_accept");
+      const reading = this.show_answer(
         bench,
-        this.wake_run(bench, asked, [this.choice_make(bench, "accept")]),
+        this.wake_run(bench, asked, [accepted]),
         1,
-        "tools.console_reply",
       );
-      const read = bench.tasks.sent[2];
-      const output = reply_build("console.read", read.id as number, {
-        text: "sleep 600\r\n",
-        timed_out: true,
-      });
+      const read = bench.tasks.sent[3];
+      const output = reply_gold("read_reply_expired", read.id as number);
       const result = this.wake_run(bench, reading, [output]);
-      const expected = utility.json_text({ output: "", timed_out: true });
-      this.assertEqual(this.text_of(result), expected);
+      this.assertEqual(this.text_of(result), gold_value("result_expired"));
     }
   }
 
@@ -1202,7 +1113,7 @@ namespace test_tools_browser {
   export class TestVerbose extends ToolCase {
     // No tool sets a verbose level, and none is registered to run one.
     test_level_gone(): void {
-      const bench = this.bench_make();
+      const bench = this.bench_make([]);
       const names = bench.server.tools.map((tool) => tool.name);
       this.assertFalse(names.includes("verbose_level"));
       this.assertFalse(bench.server.runs.has("verbose_level"));
@@ -1211,7 +1122,7 @@ namespace test_tools_browser {
 
     // The tail is asked of the server and its lines are returned.
     test_tail_asked(): void {
-      const bench = this.bench_make();
+      const bench = this.bench_make([61]);
       const asked = this.sleep_check(
         bench,
         this.tool_run(bench, "verbose_tail", { thread: "server", count: 5 }),
@@ -1220,274 +1131,11 @@ namespace test_tools_browser {
       );
       const request = bench.tasks.sent[0];
       this.assertEqual(request.owner, "server");
-      this.assertEqual(type_of(request.line), "verbose.tail");
-      const asked_text = '{"thread":"server","count":5}';
-      this.assertEqual(payload_text(request.line), asked_text);
-      const tail = { lines: [constants.verbose_line] };
-      const reply = reply_build("verbose.tail", request.id as number, tail);
+      this.assertEqual(request.line, gold_line("verbose_tail"));
+      const reply = reply_gold("tail_reply", request.id as number);
       const result = this.wake_run(bench, asked, [reply]);
-      this.assertEqual(this.text_of(result), utility.json_text(tail));
-    }
-  }
-
-  // The tools of the administration of the databases.
-  export class TestAdmin extends ToolCase {
-    // `db_stats` returns the measure of the open databases and the limit.
-    test_stats_measured(): void {
-      const bench = this.bench_make();
-      bench.store.db_create("alpha");
-      bench.store.db_create("beta");
-      const big = new Uint8Array(constants.overflow_bytes + 1);
-      bench.store.kv_put("/alpha/big", big);
-      bench.store.kv_put("/beta/small", utility.utf8_encode("small"));
-      const text = this.text_of(this.tool_run(bench, "db_stats", {}));
-      const measured = bench.store.db_stats(constants.soft_bytes);
-      this.assertEqual(text, utility.json_text(measured));
-      const stats = JSON.parse(text) as substrate.StoreStats;
-      this.assertEqual(
-        stats.databases.map((entry) => entry.name),
-        ["alpha", "beta"],
-      );
-      this.assertEqual(stats.databases[0].cache_bytes, big.length);
-      this.assertEqual(stats.soft_bytes, constants.soft_bytes);
-      this.assertFalse(stats.over);
-    }
-
-    // `db_compact` returns the bytes before and after, fewer after.
-    test_compact_bytes(): void {
-      const bench = this.bench_make();
-      bench.store.db_create("alpha");
-      bench.store.sql_run("alpha", [
-        { sql: "CREATE TABLE note (x TEXT)", params: [] },
-        {
-          sql:
-            "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL" +
-            " SELECT i + 1 FROM n WHERE i < 2000)" +
-            " INSERT INTO note SELECT printf('%0100d', i) FROM n",
-          params: [],
-        },
-      ]);
-      bench.store.sql_run("alpha", [{ sql: "DELETE FROM note", params: [] }]);
-      const soft = constants.soft_bytes;
-      const before = bench.store.db_stats(soft).databases[0].bytes;
-      const result = this.tool_run(bench, "db_compact", { db: "alpha" });
-      const after = bench.store.db_stats(soft).databases[0].bytes;
-      const expected = utility.json_text({ before, after });
-      this.assertEqual(this.text_of(result), expected);
-      this.assertTrue(after < before);
-    }
-
-    // `db_unload` drops this side's copy, and a later read names `db_load`.
-    test_unload_refused(): void {
-      const bench = this.bench_make();
-      bench.store.db_create("alpha");
-      bench.store.kv_put("/alpha/a", utility.utf8_encode("one"));
-      this.lines_answer(bench.store);
-      const result = this.tool_run(bench, "db_unload", { db: "alpha" });
-      this.assertEqual(this.text_of(result), "{}");
-      this.assertEqual(bench.store.db_list(), []);
-      this.raised_assert(i18n("substrate.db_unloaded", "alpha"), () =>
-        this.tool_run(bench, "kv_get", { ref: "/alpha/a" }),
-      );
-    }
-
-    // `db_load` asks the server's snapshot and opens its one blob.
-    test_load_snapshot(): void {
-      const bench = this.bench_make();
-      const snapshot = this.snapshot_unloaded(bench);
-      const asked = this.sleep_check(
-        bench,
-        this.tool_run(bench, "db_load", { db: "alpha" }),
-        0,
-        "tools.snapshot_reply",
-      );
-      const request = bench.tasks.sent[0];
-      this.assertEqual(request.owner, "server");
-      this.assertEqual(type_of(request.line), "db.snapshot");
-      this.assertEqual(payload_text(request.line), '{"db":"alpha"}');
-      const reply = this.snapshot_reply(
-        request,
-        jslb.blob_make(snapshot.data),
-        utility.sha256_hex(snapshot.data),
-        snapshot.seq,
-      );
-      const result = this.wake_run(bench, asked, [reply]);
-      this.assertEqual(bench.tasks.sent.length, 1);
-      const expected = utility.json_text({ seq: snapshot.seq });
-      this.assertEqual(this.text_of(result), expected);
-      this.assertEqual(bench.store.db_list(), ["alpha"]);
-      const read = this.tool_run(bench, "kv_get", { ref: "/alpha/a" });
-      this.assertEqual(this.text_of(read), "one");
-    }
-
-    // `db_load` of a loaded database unloads it before asking, then opens it.
-    test_load_loaded(): void {
-      const bench = this.bench_make();
-      bench.store.db_create("alpha");
-      bench.store.kv_put("/alpha/a", utility.utf8_encode("one"));
-      const snapshot = bench.store.db_snapshot("alpha");
-      this.lines_answer(bench.store);
-      const asked = this.sleep_check(
-        bench,
-        this.tool_run(bench, "db_load", { db: "alpha" }),
-        0,
-        "tools.snapshot_reply",
-      );
-      this.assertEqual(bench.store.db_list(), []);
-      this.raised_assert(i18n("substrate.db_unloaded", "alpha"), () =>
-        bench.store.kv_get("/alpha/a"),
-      );
-      const reply = this.snapshot_reply(
-        bench.tasks.sent[0],
-        jslb.blob_make(snapshot.data),
-        utility.sha256_hex(snapshot.data),
-        snapshot.seq,
-      );
-      const result = this.wake_run(bench, asked, [reply]);
-      const expected = utility.json_text({ seq: snapshot.seq });
-      this.assertEqual(this.text_of(result), expected);
-      this.assertEqual(bench.store.db_list(), ["alpha"]);
-    }
-
-    // A snapshot streamed to the cache opens from its handle, sink digest kept.
-    test_load_streamed(): void {
-      const bench = this.bench_make();
-      bench.store.db_create("alpha");
-      const text = "y".repeat(constants.overflow_bytes);
-      bench.store.kv_put("/alpha/text", utility.utf8_encode(text));
-      const snapshot = bench.store.db_snapshot("alpha");
-      this.lines_answer(bench.store);
-      bench.store.db_unload("alpha");
-      const size = snapshot.data.length;
-      this.assertTrue(size > constants.overflow_bytes);
-      const sink = bench.store.sink();
-      const handle = sink.sink_open({ s: size });
-      sink.sink_append(handle, snapshot.data);
-      const sha256 = sink.sink_close(handle);
-      const blob = jslb.blob_make(handle, undefined, { sha256 }, size);
-      const result = this.blob_load(bench, blob, sha256, snapshot.seq);
-      this.assertEqual(this.text_of(result), utility.json_text({ seq: 1 }));
-      const read = this.tool_run(bench, "kv_get", { ref: "/alpha/text" });
-      this.assertEqual(this.text_of(read), text);
-    }
-
-    // A snapshot whose bytes are not those of the digest it came with throws.
-    test_load_digest(): void {
-      const bench = this.bench_make();
-      const snapshot = this.snapshot_unloaded(bench);
-      const sha256 = utility.sha256_hex(snapshot.data);
-      const wrong = "0".repeat(64);
-      const blob = jslb.blob_make(snapshot.data);
-      this.raised_assert(
-        i18n("substrate.snapshot_digest", "alpha", sha256, wrong),
-        () => this.blob_load(bench, blob, wrong, snapshot.seq),
-      );
-      this.assertEqual(bench.store.db_list(), []);
-    }
-
-    // A snapshot that opens at another `seq` than its reply's throws.
-    test_load_desync(): void {
-      const bench = this.bench_make();
-      const snapshot = this.snapshot_unloaded(bench);
-      const sent = snapshot.seq + 1;
-      this.raised_assert(
-        i18n("tools_browser.load_desync", "alpha", snapshot.seq, sent),
-        () => this.load_run(bench, snapshot.data, sent),
-      );
-    }
-
-    // A cached value or document the unload freed is asked of the server.
-    test_value_fetched(): void {
-      const bench = this.bench_make();
-      const store = bench.store;
-      store.db_create("alpha");
-      const text = "x".repeat(constants.overflow_bytes + 1);
-      store.kv_put("/alpha/big", utility.utf8_encode(text));
-      const body = { 0: { t: "note" }, text };
-      const ref = store.doc_put("alpha", "note", body).ref;
-      this.lines_answer(store);
-      const snapshot = store.db_snapshot("alpha");
-      store.db_unload("alpha");
-      this.load_run(bench, snapshot.data, snapshot.seq);
-      this.assertFalse(store.kv_held("/alpha/big"));
-      this.assertFalse(store.kv_held(ref));
-      const cases: [string, string, string][] = [
-        ["kv_get", "/alpha/big", text],
-        ["doc_get", ref, utility.json_text(body)],
-      ];
-      for (const [tool, asked_ref, expected] of cases) {
-        const start = bench.tasks.sent.length;
-        const asking = this.sleep_check(
-          bench,
-          this.tool_run(bench, tool, { ref: asked_ref }),
-          start,
-          "tools.value_reply",
-        );
-        const request = bench.tasks.sent[start];
-        this.assertEqual(request.owner, "server");
-        this.assertEqual(type_of(request.line), "kv.get");
-        this.assertEqual(jslb.field_get(request.line[0], "key"), asked_ref);
-        const value = store.kv_get(asked_ref);
-        const reply = reply_build(
-          "kv.get",
-          request.id as number,
-          { size: value.size, sha256: value.sha256 },
-          [jslb.blob_make(utility.utf8_encode(expected))],
-        );
-        const result = this.wake_run(bench, asking, [reply]);
-        this.assertEqual(this.text_of(result), expected);
-        this.assertTrue(store.kv_held(asked_ref));
-        const again = this.tool_run(bench, tool, { ref: asked_ref });
-        this.assertEqual(this.text_of(again), expected);
-      }
-      this.assertEqual(store.seq_get("alpha"), snapshot.seq);
-    }
-
-    // The snapshot of a database `alpha` with one value, then unloaded.
-    snapshot_unloaded(bench: ToolBench): { data: Uint8Array; seq: number } {
-      bench.store.db_create("alpha");
-      bench.store.kv_put("/alpha/a", utility.utf8_encode("one"));
-      const snapshot = bench.store.db_snapshot("alpha");
-      this.lines_answer(bench.store);
-      bench.store.db_unload("alpha");
-      return snapshot;
-    }
-
-    // Runs `db_load` of `alpha` against bytes as the server sends them.
-    load_run(bench: ToolBench, data: Uint8Array, seq: number): mcp.ToolResult {
-      const sha256 = utility.sha256_hex(data);
-      return this.blob_load(bench, jslb.blob_make(data), sha256, seq);
-    }
-
-    // Runs `db_load` of `alpha` against a reply of the blob, digest and `seq`.
-    blob_load(
-      bench: ToolBench,
-      blob: lines.BlobHeader,
-      sha256: lines.Sha256,
-      seq: number,
-    ): mcp.ToolResult {
-      const start = bench.tasks.sent.length;
-      const asked = this.sleep_check(
-        bench,
-        this.tool_run(bench, "db_load", { db: "alpha" }),
-        start,
-        "tools.snapshot_reply",
-      );
-      const request = bench.tasks.sent[start];
-      const reply = this.snapshot_reply(request, blob, sha256, seq);
-      return this.result_of(this.wake_run(bench, asked, [reply]));
-    }
-
-    // The server's `db.snapshot` reply: the digest and `seq` given, the blob.
-    snapshot_reply(
-      request: SentLine,
-      blob: lines.BlobHeader,
-      sha256: lines.Sha256,
-      seq: number,
-    ): lines.Line {
-      this.assertEqual(type_of(request.line), "db.snapshot");
-      const payload = { sha256, seq };
-      return reply_build("db.snapshot", request.id as number, payload, [blob]);
+      const tail = { lines: reply.lines };
+      this.assertEqual(this.text_of(result), JSON.stringify(tail));
     }
   }
 

@@ -31,6 +31,7 @@
     check_wsl               = 'Checking WSL'
     close_firewall          = 'Closing port {0} (localhost only)'
     credential_hidden       = 'USERNAME:PASSWORD'
+    distribution_not_ready  = '{0} not ready. Restart Windows, rerun {1}.'
     done                    = 'Done'
     exit_code               = '`{0}` exited {1}'
     failed                  = 'Failed'
@@ -49,7 +50,7 @@
         'Installed. Next, run xsjs_start.ps1 as administrator.'
     )
     linux_missing           = (
-        'Installing Ubuntu. When asked, choose a Linux user name and ' +
+        'Installing {0}. When asked, choose a Linux user name and ' +
         'password. At a Linux prompt, type: exit'
     )
     localhost_mode          = 'No credentials: serving http://localhost only.'
@@ -64,14 +65,14 @@
     openssl_missing         = 'Installing OpenSSL with apt-get...'
     page_missing            = (
         '{0} is missing. In WSL, in the checkout, run ' +
-        '`python3 python/page_build.py hyperposition-engine`.'
+        '`python3 python/page_build.py {1}`.'
     )
     port_free               = 'Port {0} is free.'
     port_in_use             = (
         'Port {0} is used by {1} (PID {2}). Stop it and retry.'
     )
     proxy_added             = (
-        'Port {1} on `{0}` now forwards to port {2} on `127.0.0.1`.'
+        'Port {1} on `{0}` now forwards to port {2} on `{3}`.'
     )
     proxy_failed            = 'Adding the port proxy failed.'
     proxy_listening         = (
@@ -106,6 +107,7 @@
         'ttyd not listening on port {0}. Task result: {1}. Log (`{2}`):'
     )
     server_not_running      = 'ttyd was not running.'
+    setting_missing         = '`{0}` has no value with id `{1}`.'
     soft_stop_mode          = 'Stopping ttyd until next sign-in (--softly).'
     start_server            = 'Starting ttyd on port {0}'
     start_usage             = 'Usage: {0} [username:password]'
@@ -154,7 +156,7 @@
         'Stopped until next sign-in. Restart now: Start-ScheduledTask {0}'
     )
     task_description        = (
-        'Serves bootstrap.py with ttyd on port {0}. ' +
+        'Serves {1} with ttyd on port {0}. ' +
         'Remove with xsjs_stop.ps1.'
     )
     task_registered         = (
@@ -181,7 +183,6 @@
     ttyd_stop_failed        = 'Stopping ttyd (Linux PID {0}) failed.'
     ttyd_stopped            = 'Stopped ttyd (Linux PID {0}).'
     ttyd_unpack_failed      = 'Unpacking the ttyd source failed.'
-    ubuntu_not_working      = 'Ubuntu not ready. Restart Windows, rerun {0}.'
     windows_ttyd_left       = (
         'ttyd for Windows is no longer used and stays installed: `{0}`'
     )

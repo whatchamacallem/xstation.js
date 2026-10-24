@@ -55,7 +55,7 @@
         },
         {
           "name": "kv_put",
-          "description": "Write text under a Key-Value-Ref, /$db/$key. A script is the row /_files/script/<name>.js.",
+          "description": "Write text under a Key-Value-Ref, /$db/$key, and return its sha256. A script is the row /_files/script/<name>.js.",
           "inputSchema": {
             "type": "object",
             "properties": {
@@ -170,7 +170,7 @@
         },
         {
           "name": "console_run",
-          "description": "Run one command line in the debug console's dash and return its output until the next prompt or the timeout. Debug mode.",
+          "description": "Show the debug console as ctrl-0 does, run one command line in its dash and return its output until the next prompt or the timeout. Debug mode.",
           "inputSchema": {
             "type": "object",
             "properties": {

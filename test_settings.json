@@ -1,0 +1,5400 @@
+{
+  "long_task_ms": 5,
+  "module_seconds": 120,
+  "powershell": {
+    "lint_extensions": [".ps1", ".psd1"],
+    "lint_line_length": 79,
+    "lint_module": "PSScriptAnalyzer",
+    "lint_preset": "CodeFormattingOTBS",
+    "test_user": "xstation-test"
+  },
+  "python": {
+    "test_bootstrap": {
+      "lines": {
+        "error": {
+          "0": {
+            "type": "error"
+          }
+        },
+        "first_full": {
+          "0": {
+            "id": 101,
+            "type": "tap.start"
+          }
+        },
+        "first_short": {
+          "0": {
+            "i": 101,
+            "t": "tap.start"
+          }
+        }
+      },
+      "read_bytes": 64,
+      "texts": {
+        "bootstrap_lock_held": "Another engine holds the lock {0}.",
+        "bootstrap_loop_missing": "The main loop file {0} does not define loop_run.",
+        "bootstrap_main_loop_name_dotted": "The main loop file name .test_loop.py is not a plain file name ending in .py.",
+        "bootstrap_main_loop_name_empty": "The main loop file name  is not a plain file name ending in .py.",
+        "bootstrap_main_loop_name_nested": "The main loop file name main_loop/test_loop.py is not a plain file name ending in .py.",
+        "bootstrap_main_loop_name_parent": "The main loop file name ../test_loop.py is not a plain file name ending in .py.",
+        "bootstrap_main_loop_name_suffix": "The main loop file name test_loop.txt is not a plain file name ending in .py.",
+        "bootstrap_main_loop_refused": "The main loop file test_loop.py is refused: --main-loop is served only to the engine role with the setting debug true.",
+        "bootstrap_option_repeated_loop": "The option --main-loop is given more than once.",
+        "bootstrap_option_repeated_root": "The option --root is given more than once.",
+        "bootstrap_reply_blob": "The reply to tap.start carries a blob of {0} bytes.",
+        "bootstrap_reply_closed": "The input ended before the reply to tap.start.",
+        "bootstrap_reply_unexpected_blob_carried": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"tap.start\",\"r\":101,\"b\":1},\"1\":{\"s\":3}}<blob \"n\"=1>",
+        "bootstrap_reply_unexpected_blobs_zero": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"tap.start\",\"r\":101,\"b\":0}}",
+        "bootstrap_reply_unexpected_error_pushed": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"error\"},\"message\":\"m\",\"stack\":\"s\"}",
+        "bootstrap_reply_unexpected_error_replied": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"error\",\"r\":101},\"message\":\"m\",\"stack\":\"s\"}",
+        "bootstrap_reply_unexpected_hello": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"hello\",\"r\":101}}",
+        "bootstrap_reply_unexpected_id_given": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"tap.start\",\"i\":101,\"r\":101}}",
+        "bootstrap_reply_unexpected_payload_extra": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"tap.start\",\"r\":101},\"extra\":1}",
+        "bootstrap_reply_unexpected_reply_one": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"tap.start\",\"r\":1}}",
+        "bootstrap_reply_unexpected_reply_true": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"tap.start\",\"r\":true}}",
+        "bootstrap_run_failed": "The server failed: {0}",
+        "bootstrap_start_submit": "server submits to ai: {\"type\":\"tap.start\",\"id\":101}",
+        "bootstrap_tests_not_object": "The test settings file {0} does not hold a JSON object.",
+        "jslb_line_not_json": "The line is not JSON: Expecting value.",
+        "jslb_text_not_json": "The text is not JSON: Expecting value."
+      }
+    },
+    "test_browser": {
+      "echo_blob_bytes": 8388608,
+      "echo_seconds": 600,
+      "hold_seconds": 120,
+      "http_seconds": 2,
+      "kill_capacity": 32,
+      "kill_slots": 8,
+      "large_bytes": 134217728,
+      "lines": {
+        "console_open_reply": {
+          "0": {
+            "t": "console.open"
+          }
+        },
+        "console_open_reply_full": {
+          "0": {
+            "type": "console.open"
+          }
+        },
+        "first": {
+          "0": {
+            "id": 101,
+            "type": "tap.start"
+          }
+        }
+      },
+      "media_seconds": 2,
+      "order_count": 3,
+      "order_seconds": 30,
+      "poll_seconds": 0.1,
+      "probe_columns": 80,
+      "probe_rows": 24,
+      "quiet_seconds": 5,
+      "read_bytes": 1048576,
+      "root_debug": true,
+      "root_level": 1,
+      "root_scripted": true,
+      "rung_seconds": 120,
+      "stall_seconds": 5,
+      "stop_seconds": 5,
+      "suites_seconds": 600,
+      "texts": {
+        "bootstrap_lock_held": "Another engine holds the lock {0}.",
+        "dispatch_handler_unknown": "No handler is registered for type rung.unknown version 0.",
+        "engine_tap_browser_failed": "The browser failed: {0}",
+        "http_fetch_failed": "The request to {0} failed: {1}",
+        "http_status_failed_400": "The request to {0} answered with status 400: status 400",
+        "http_status_failed_401": "The request to {0} answered with status 401: status 401",
+        "http_status_failed_500": "The request to {0} answered with status 500: status 500",
+        "http_timeout_expired": "The request to {0} did not finish within 2 seconds.",
+        "media_decode_failed": "The image for /_files/rung/garbage.png could not be decoded: {1}",
+        "media_download_expired": "The download of {0} for /_files/rung/late.png did not finish within 2 seconds.",
+        "media_download_failed_lost": "The download of {0} for /_files/rung/lost.png failed: {2}",
+        "media_download_failed_missing": "The download of {0} for /_files/rung/missing.png failed: Error: The download of {0} answered with status 404.",
+        "overlay_ring_invalid": "The overlay ring 0 is not a whole number from 1 up.",
+        "page_worker_where": "{0} line {1} column {2}",
+        "verbose_sink_twice": "A sink is already set for the verbose lines of this thread.",
+        "wire_blobs_over": "The blobs of the kv.put line come to {1} bytes, over the blob_max of {2}.",
+        "wire_close_silent": "connection closed with code 1006 and no error line",
+        "wire_error_first": "The server sent an error before tap.start: Another engine holds the lock {0}.\n{1}",
+        "wire_open_closed": "The socket {0} closed with code 1006 before it opened.",
+        "wire_wait_expired_drain": "Gave up after 120 s waiting for the socket {0} to send its buffered bytes.",
+        "wire_wait_expired_first": "Gave up after 120 s waiting for tap.start from the server.",
+        "wire_wait_expired_open": "Gave up after 120 s waiting for the socket {0} to open.",
+        "wire_wait_expired_token": "Gave up after 120 s waiting for the token from {0}."
+      },
+      "window_height": 720,
+      "window_seconds": 600,
+      "window_width": 1280
+    },
+    "test_devtools": {
+      "expiry_seconds": 0.05,
+      "wait_seconds": 60
+    },
+    "test_dispatch": {
+      "lines": {
+        "echo_reply": {
+          "0": {
+            "b": 2,
+            "r": 3,
+            "t": "echo"
+          },
+          "1": {},
+          "2": {},
+          "n": 4
+        },
+        "echo_request": {
+          "0": {
+            "i": 3,
+            "t": "echo"
+          }
+        },
+        "error": {
+          "0": {
+            "t": "error"
+          }
+        },
+        "error_full": {
+          "0": {
+            "type": "error"
+          }
+        },
+        "error_reply": {
+          "0": {
+            "r": 7,
+            "t": "error"
+          }
+        },
+        "error_reply_full": {
+          "0": {
+            "reply": 7,
+            "type": "error"
+          }
+        },
+        "get": {
+          "0": {
+            "t": "kv.get"
+          }
+        },
+        "get_answered": {
+          "0": {
+            "r": 7,
+            "t": "kv.get"
+          }
+        },
+        "get_reply": {
+          "0": {
+            "r": 7,
+            "t": "kv.get"
+          },
+          "n": 1
+        },
+        "get_request": {
+          "0": {
+            "i": 7,
+            "t": "kv.get"
+          }
+        },
+        "get_request_full": {
+          "0": {
+            "id": 7,
+            "type": "kv.get"
+          }
+        },
+        "get_v1": {
+          "0": {
+            "t": "kv.get",
+            "v": 1
+          }
+        },
+        "keyed": {
+          "0": {
+            "i": 7,
+            "k": "/a/b",
+            "t": "kv.get",
+            "v": 1
+          },
+          "n": 1
+        },
+        "keyed_full": {
+          "0": {
+            "id": 7,
+            "key": "/a/b",
+            "type": "kv.get",
+            "version": 1
+          },
+          "n": 1
+        },
+        "keyed_reply": {
+          "0": {
+            "r": 7,
+            "t": "kv.get"
+          },
+          "found": true,
+          "size": 3
+        },
+        "keyed_reply_full": {
+          "0": {
+            "reply": 7,
+            "type": "kv.get"
+          },
+          "found": true,
+          "size": 3
+        },
+        "mcp": {
+          "0": {
+            "t": "mcp"
+          }
+        },
+        "mcp_reply": {
+          "0": {
+            "r": 7,
+            "t": "mcp"
+          }
+        },
+        "mcp_request": {
+          "0": {
+            "i": 7,
+            "t": "mcp"
+          }
+        },
+        "put": {
+          "0": {
+            "t": "kv.put"
+          }
+        },
+        "put_blob": {
+          "0": {
+            "b": 1,
+            "t": "kv.put"
+          },
+          "1": {},
+          "n": 1
+        },
+        "put_full": {
+          "0": {
+            "type": "kv.put"
+          }
+        },
+        "put_full_answered": {
+          "0": {
+            "reply": 8,
+            "type": "kv.put"
+          }
+        },
+        "put_request": {
+          "0": {
+            "i": 8,
+            "t": "kv.put"
+          }
+        },
+        "put_v1": {
+          "0": {
+            "t": "kv.put",
+            "v": 1
+          },
+          "n": 2,
+          "text": "x"
+        },
+        "verbose_put": {
+          "0": {
+            "t": "verbose.put"
+          }
+        },
+        "verbose_put_text": {
+          "0": {
+            "t": "verbose.put"
+          },
+          "text": "x"
+        }
+      },
+      "texts": {
+        "dispatch_handler_twice": "A handler is already registered for type kv.get version 0.",
+        "dispatch_handler_unknown_get": "No handler is registered for type kv.get version 1.",
+        "dispatch_handler_unknown_put": "No handler is registered for type kv.put version 0.",
+        "dispatch_id_refused_bool": "The line of type kv.get has the id True, which is not an integer of at least 1.",
+        "dispatch_id_refused_float": "The line of type kv.get has the id 1.0, which is not an integer of at least 1.",
+        "dispatch_id_refused_list": "The line of type kv.get has the id [1], which is not an integer of at least 1.",
+        "dispatch_id_refused_negative": "The line of type kv.get has the id -1, which is not an integer of at least 1.",
+        "dispatch_id_refused_text": "The line of type kv.get has the id '1', which is not an integer of at least 1.",
+        "dispatch_id_refused_zero": "The line of type kv.get has the id 0, which is not an integer of at least 1.",
+        "dispatch_notification_replied_mcp": "The handler for type mcp version 0 returned a reply to a line with no id.",
+        "dispatch_notification_replied_verbose": "The handler for type verbose.put version 0 returned a reply to a line with no id.",
+        "dispatch_request_unanswered": "The handler for type kv.get version 0 returned no reply to the request with id 7.",
+        "dispatch_version_refused_bool": "The line of type kv.get has the version True, which is not an integer.",
+        "dispatch_version_refused_float": "The line of type kv.get has the version 1.0, which is not an integer.",
+        "dispatch_version_refused_list": "The line of type kv.get has the version [1], which is not an integer.",
+        "dispatch_version_refused_null": "The line of type kv.get has the version None, which is not an integer.",
+        "dispatch_version_refused_text": "The line of type kv.get has the version '1', which is not an integer."
+      }
+    },
+    "test_echo_loop": {
+      "chunk_bytes": 1000,
+      "overflow_bytes": 4096,
+      "read_bytes": 65536,
+      "texts": {
+        "dispatch_handler_unknown": "No handler is registered for type no.such version 0.",
+        "echo_loop_input_partial": "The engine input ended inside a message.",
+        "echo_loop_reply_unknown": "The line {\"0\":{\"t\":\"echo\",\"r\":1}} replies to no request the server sent."
+      }
+    },
+    "test_engine_db": {
+      "lines": {
+        "create": {
+          "0": {
+            "t": "db.create"
+          },
+          "db": "castle"
+        },
+        "create_full": {
+          "0": {
+            "type": "db.create"
+          },
+          "db": "castle"
+        },
+        "create_request": {
+          "0": {
+            "i": 7,
+            "t": "db.create"
+          },
+          "db": "castle"
+        },
+        "drop": {
+          "0": {
+            "t": "db.drop"
+          },
+          "db": "castle"
+        },
+        "drop_full": {
+          "0": {
+            "type": "db.drop"
+          },
+          "db": "castle"
+        },
+        "drop_request": {
+          "0": {
+            "i": 7,
+            "t": "db.drop"
+          },
+          "db": "castle"
+        },
+        "file": {
+          "0": {
+            "b": 1,
+            "t": "db.file"
+          },
+          "1": {},
+          "db": "castle"
+        },
+        "file_full": {
+          "0": {
+            "blobs": 1,
+            "type": "db.file"
+          },
+          "1": {},
+          "db": "castle"
+        },
+        "restore": {
+          "0": {
+            "b": 1,
+            "t": "db.restore"
+          },
+          "1": {},
+          "db": "castle",
+          "files": 2
+        },
+        "restore_empty": {
+          "0": {
+            "b": 1,
+            "t": "db.restore"
+          },
+          "1": {},
+          "db": "castle",
+          "files": 0
+        },
+        "restore_full": {
+          "0": {
+            "blobs": 1,
+            "type": "db.restore"
+          },
+          "1": {},
+          "db": "castle",
+          "files": 2
+        }
+      },
+      "old_window": 10485760,
+      "texts": {
+        "engine_db_not_registered": "The db handlers were called before they were registered."
+      }
+    },
+    "test_engine_doc": {
+      "lines": {
+        "put": {
+          "0": {
+            "t": "doc.put"
+          },
+          "body": {
+            "0": {
+              "t": "scene"
+            },
+            "1": "/_files/gatehouse/arrival.png",
+            "image": {
+              "$ref": 1
+            },
+            "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+          },
+          "db": "castle_gatehouse",
+          "id": "scene/arrival"
+        },
+        "put_full": {
+          "0": {
+            "type": "doc.put"
+          },
+          "body": {
+            "0": {
+              "t": "scene"
+            },
+            "1": "/_files/gatehouse/arrival.png",
+            "image": {
+              "$ref": 1
+            },
+            "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+          },
+          "db": "castle_gatehouse",
+          "id": "scene/arrival"
+        },
+        "put_request": {
+          "0": {
+            "i": 7,
+            "t": "doc.put"
+          },
+          "body": {
+            "0": {
+              "t": "scene"
+            },
+            "1": "/_files/gatehouse/arrival.png",
+            "image": {
+              "$ref": 1
+            },
+            "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+          },
+          "db": "castle_gatehouse",
+          "id": "scene/arrival"
+        }
+      },
+      "texts": {
+        "engine_doc_not_registered": "The doc handlers were called before they were registered."
+      }
+    },
+    "test_engine_kv": {
+      "lines": {
+        "delete": {
+          "0": {
+            "k": "/_files/a",
+            "t": "kv.delete"
+          }
+        },
+        "delete_full": {
+          "0": {
+            "key": "/_files/a",
+            "type": "kv.delete"
+          }
+        },
+        "delete_keyless": {
+          "0": {
+            "t": "kv.delete"
+          }
+        },
+        "delete_request": {
+          "0": {
+            "i": 7,
+            "k": "/_files/a",
+            "t": "kv.delete"
+          }
+        },
+        "put": {
+          "0": {
+            "b": 1,
+            "k": "/_files/a",
+            "t": "kv.put"
+          },
+          "1": {}
+        },
+        "put_blobless": {
+          "0": {
+            "k": "/_files/a",
+            "t": "kv.put"
+          }
+        },
+        "put_full": {
+          "0": {
+            "blobs": 1,
+            "key": "/_files/a",
+            "type": "kv.put"
+          },
+          "1": {}
+        },
+        "put_image": {
+          "0": {
+            "b": 1,
+            "k": "/_files/gatehouse/arrival.png",
+            "t": "kv.put"
+          },
+          "1": {}
+        },
+        "put_keyless": {
+          "0": {
+            "b": 1,
+            "t": "kv.put"
+          },
+          "1": {}
+        },
+        "put_request": {
+          "0": {
+            "b": 1,
+            "i": 7,
+            "k": "/_files/a",
+            "t": "kv.put"
+          },
+          "1": {}
+        }
+      },
+      "texts": {
+        "engine_kv_blob_missing": "The kv.put line carries no blob 1, the value it puts.",
+        "engine_kv_key_missing_delete": "The kv.delete line has no header key k, the ref it is about.",
+        "engine_kv_key_missing_put": "The kv.put line has no header key k, the ref it is about.",
+        "engine_kv_not_registered": "The kv handlers were called before they were registered."
+      }
+    },
+    "test_engine_mcp": {
+      "lines": {
+        "call": {
+          "0": {
+            "i": 6,
+            "t": "mcp"
+          },
+          "id": 2,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {},
+            "name": "fail"
+          }
+        },
+        "call_reply": {
+          "0": {
+            "r": 6,
+            "t": "mcp"
+          },
+          "id": 2,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "boom",
+                "type": "text"
+              }
+            ],
+            "isError": true
+          }
+        },
+        "initialize": {
+          "0": {
+            "i": 7,
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "method": "initialize",
+          "params": {
+            "capabilities": {},
+            "clientInfo": {
+              "name": "hyperposition-engine",
+              "version": "0"
+            },
+            "protocolVersion": "2025-06-18"
+          }
+        },
+        "initialize_reply": {
+          "0": {
+            "r": 7,
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "result": {
+            "capabilities": {
+              "tools": {}
+            },
+            "protocolVersion": "2025-06-18",
+            "serverInfo": {
+              "name": "xsjs-server",
+              "version": "0"
+            }
+          }
+        },
+        "initialized": {
+          "0": {
+            "t": "mcp"
+          },
+          "jsonrpc": "2.0",
+          "method": "notifications/initialized"
+        },
+        "list": {
+          "0": {
+            "i": 8,
+            "t": "mcp"
+          },
+          "id": 2,
+          "jsonrpc": "2.0",
+          "method": "tools/list"
+        },
+        "list_reply": {
+          "0": {
+            "r": 8,
+            "t": "mcp"
+          },
+          "id": 2,
+          "jsonrpc": "2.0",
+          "result": {
+            "tools": [
+              {
+                "description": "Echo.",
+                "inputSchema": {
+                  "properties": {},
+                  "type": "object"
+                },
+                "name": "echo"
+              }
+            ]
+          }
+        },
+        "passed": [
+          {
+            "0": {
+              "t": "mcp"
+            },
+            "id": 1,
+            "jsonrpc": "2.0",
+            "method": "tools/list",
+            "params": {}
+          },
+          {
+            "0": {
+              "t": "mcp"
+            },
+            "id": 2,
+            "jsonrpc": "2.0",
+            "result": {
+              "tools": []
+            }
+          },
+          {
+            "0": {
+              "t": "mcp"
+            },
+            "error": {
+              "code": -32601,
+              "message": "m"
+            },
+            "id": 3,
+            "jsonrpc": "2.0"
+          },
+          {
+            "0": {
+              "t": "mcp"
+            },
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized"
+          }
+        ],
+        "ping": {
+          "0": {
+            "i": 3,
+            "t": "mcp"
+          },
+          "id": 9,
+          "jsonrpc": "2.0",
+          "method": "ping"
+        },
+        "ping_pushed": {
+          "0": {
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "method": "ping"
+        },
+        "ping_pushed_reply": {
+          "0": {
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "result": {}
+        },
+        "ping_reply": {
+          "0": {
+            "r": 3,
+            "t": "mcp"
+          },
+          "id": 9,
+          "jsonrpc": "2.0",
+          "result": {}
+        },
+        "unknown": {
+          "0": {
+            "i": 8,
+            "t": "mcp"
+          },
+          "id": 4,
+          "jsonrpc": "2.0",
+          "method": "nothing/here"
+        },
+        "unknown_reply": {
+          "0": {
+            "r": 8,
+            "t": "mcp"
+          },
+          "error": {
+            "code": -32601,
+            "message": "m"
+          },
+          "id": 4,
+          "jsonrpc": "2.0"
+        }
+      },
+      "texts": {
+        "engine_mcp_not_registered": "The MCP handler was used before it was registered."
+      }
+    },
+    "test_engine_sql": {
+      "lines": {
+        "run": {
+          "0": {
+            "t": "sql.run"
+          },
+          "db": "castle",
+          "statements": [
+            {
+              "params": [],
+              "sql": "CREATE TABLE world (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT"
+            },
+            {
+              "params": ["castle_world", "The castle"],
+              "sql": "INSERT INTO world VALUES (?, ?)"
+            }
+          ]
+        },
+        "run_extra": {
+          "0": {
+            "t": "sql.run"
+          },
+          "db": "castle",
+          "statements": [
+            {
+              "extra": 1,
+              "params": [],
+              "sql": "SELECT 1"
+            }
+          ]
+        },
+        "run_full": {
+          "0": {
+            "type": "sql.run"
+          },
+          "db": "castle",
+          "statements": [
+            {
+              "params": [],
+              "sql": "CREATE TABLE world (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT"
+            },
+            {
+              "params": ["castle_world", "The castle"],
+              "sql": "INSERT INTO world VALUES (?, ?)"
+            }
+          ]
+        },
+        "run_paramless": {
+          "0": {
+            "t": "sql.run"
+          },
+          "db": "castle",
+          "statements": [
+            {
+              "sql": "SELECT 1"
+            }
+          ]
+        },
+        "run_quoted": {
+          "0": {
+            "t": "sql.run"
+          },
+          "db": "castle",
+          "statements": [
+            {
+              "params": [],
+              "sql": "CREATE TABLE t (x TEXT) STRICT"
+            },
+            {
+              "params": ["it's 'quoted'; DROP TABLE t; --\u4e2d\ud83d\ude00"],
+              "sql": "INSERT INTO t VALUES (?)"
+            }
+          ]
+        },
+        "run_request": {
+          "0": {
+            "i": 7,
+            "t": "sql.run"
+          },
+          "db": "castle",
+          "statements": [
+            {
+              "params": [],
+              "sql": "CREATE TABLE world (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT"
+            },
+            {
+              "params": ["castle_world", "The castle"],
+              "sql": "INSERT INTO world VALUES (?, ?)"
+            }
+          ]
+        }
+      },
+      "texts": {
+        "engine_sql_not_registered": "The sql handler was called before it was registered."
+      }
+    },
+    "test_engine_system": {
+      "lines": {
+        "restart": {
+          "0": {
+            "t": "system.restart"
+          },
+          "main_loop": "b.py"
+        },
+        "settings_put": {
+          "0": {
+            "i": 3,
+            "t": "settings.put"
+          }
+        },
+        "settings_reply": {
+          "0": {
+            "r": 3,
+            "t": "settings.put"
+          }
+        },
+        "source_blobless": {
+          "0": {
+            "i": 4,
+            "t": "source.put"
+          },
+          "name": "a.py"
+        },
+        "source_put": {
+          "0": {
+            "b": 1,
+            "i": 4,
+            "t": "source.put"
+          },
+          "1": {},
+          "name": "a.py"
+        },
+        "source_reply": {
+          "0": {
+            "r": 4,
+            "t": "source.put"
+          }
+        }
+      },
+      "texts": {
+        "engine_system_argument_invalid_main_loop": "The argument main_loop of the tool system_restart is missing or is not text.",
+        "engine_system_argument_invalid_name": "The argument name of the tool source_put is missing or is not text.",
+        "engine_system_argument_invalid_text": "The argument text of the tool source_put is missing or is not text.",
+        "engine_system_blob_missing": "The source.put line carries no blob 1, the main loop file it writes.",
+        "engine_system_debug_off_restart": "system.restart needs debug mode, and the setting debug is false.",
+        "engine_system_debug_off_restart_tool": "system_restart needs debug mode, and the setting debug is false.",
+        "engine_system_debug_off_settings": "settings.put needs debug mode, and the setting debug is false.",
+        "engine_system_debug_off_source": "source.put needs debug mode, and the setting debug is false.",
+        "engine_system_debug_off_source_tool": "source_put needs debug mode, and the setting debug is false.",
+        "engine_system_main_loop_missing": "The main loop file {0} does not exist.",
+        "engine_system_name_invalid_b": "The name b is not a plain file name that ends in .py and does not start with a dot.",
+        "engine_system_name_invalid_bare": "The name .py is not a plain file name that ends in .py and does not start with a dot.",
+        "engine_system_name_invalid_empty": "The name  is not a plain file name that ends in .py and does not start with a dot.",
+        "engine_system_name_invalid_hidden": "The name .b.py is not a plain file name that ends in .py and does not start with a dot.",
+        "engine_system_name_invalid_nested": "The name d/b.py is not a plain file name that ends in .py and does not start with a dot.",
+        "engine_system_name_invalid_parent": "The name ../b.py is not a plain file name that ends in .py and does not start with a dot.",
+        "engine_system_name_invalid_parent_a": "The name ../a.py is not a plain file name that ends in .py and does not start with a dot.",
+        "engine_system_name_invalid_txt": "The name b.txt is not a plain file name that ends in .py and does not start with a dot.",
+        "engine_system_not_registered": "The system handlers were used before they were registered.",
+        "settings_key_extra": "The settings have the unexpected key other.",
+        "settings_key_missing_line_max": "The settings lack the key line_max.",
+        "settings_key_missing_linux_port": "The settings lack the key powershell.linux_port.",
+        "settings_type_wrong_build_tools": "The setting powershell.build_tools must be of type dict of str to str but is of type dict.",
+        "settings_type_wrong_root_files": "The setting powershell.root_files must be of type list of str but is of type list.",
+        "settings_type_wrong_timeout": "The setting provider.timeout_seconds must be of type int but is of type str.",
+        "settings_type_wrong_variable": "The setting provider.variable must be of type str but is of type int."
+      }
+    },
+    "test_engine_tap": {
+      "lines": {
+        "tap_line": {
+          "0": {
+            "t": "tap.line"
+          },
+          "language": "typescript"
+        }
+      },
+      "texts": {
+        "engine_tap_browser_cause_first": "caused by: first",
+        "engine_tap_browser_cause_inner": "caused by: inner",
+        "engine_tap_browser_failed_boom": "The browser failed: boom",
+        "engine_tap_browser_failed_breaks": "The browser failed: boom\nnext\r\nlast",
+        "engine_tap_language_unknown_capital": "The TAP language TypeScript is not typescript, the one stream that crosses the wire.",
+        "engine_tap_language_unknown_empty": "The TAP language  is not typescript, the one stream that crosses the wire.",
+        "engine_tap_language_unknown_path": "The TAP language ../typescript is not typescript, the one stream that crosses the wire.",
+        "engine_tap_language_unknown_python": "The TAP language python is not typescript, the one stream that crosses the wire.",
+        "engine_tap_language_unknown_rust": "The TAP language rust is not typescript, the one stream that crosses the wire.",
+        "engine_tap_not_registered": "The tap.line handler was used before it was registered.",
+        "engine_tap_write_short_bail": "Only 1 of the 15 bytes of a TAP line were written to {2}.",
+        "engine_tap_write_short_line": "Only 1 of the 3 bytes of a TAP line were written to {2}."
+      }
+    },
+    "test_engine_turn": {
+      "lines": {
+        "append_answer": {
+          "0": {
+            "t": "turn.append"
+          },
+          "content": {
+            "content": "Mind the moat.",
+            "role": "assistant"
+          },
+          "role": "assistant",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "append_call": {
+          "0": {
+            "t": "turn.append"
+          },
+          "content": {
+            "content": null,
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"name\":\"bootstrap\",\"args\":{\"universe\":\"castle\",\"title\":\"The castle\",\"world\":\"castle_world\",\"region\":\"castle_gatehouse\"}}",
+                  "name": "browser.script_run"
+                },
+                "id": "call_1",
+                "type": "function"
+              }
+            ]
+          },
+          "role": "assistant",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "append_full": {
+          "0": {
+            "type": "turn.append"
+          },
+          "content": {
+            "content": "1",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "append_request": {
+          "0": {
+            "i": 7,
+            "t": "turn.append"
+          },
+          "content": {
+            "content": "1",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "append_user": {
+          "0": {
+            "t": "turn.append"
+          },
+          "content": {
+            "content": "1",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "append_wide": {
+          "0": {
+            "t": "turn.append"
+          },
+          "content": {
+            "content": "\u4e2d\u6587\ud83d\ude00",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/metaverse/hyperposition/1"
+        }
+      },
+      "texts": {
+        "engine_turn_not_registered": "The turn handlers were called before they were registered."
+      }
+    },
+    "test_engine_verbose": {
+      "history_all": 100,
+      "lines": {
+        "put_ai": {
+          "0": {
+            "t": "verbose.put"
+          },
+          "lines": [
+            {
+              "at": 30,
+              "text": "c"
+            }
+          ],
+          "thread": "ai"
+        },
+        "put_invalid": {
+          "at_bool": {
+            "0": {
+              "t": "verbose.put"
+            },
+            "lines": [
+              {
+                "at": 10,
+                "text": "a"
+              },
+              {
+                "at": 20,
+                "text": "b"
+              },
+              {
+                "at": true,
+                "text": "x"
+              }
+            ],
+            "thread": "ui"
+          },
+          "at_float": {
+            "0": {
+              "t": "verbose.put"
+            },
+            "lines": [
+              {
+                "at": 10,
+                "text": "a"
+              },
+              {
+                "at": 20,
+                "text": "b"
+              },
+              {
+                "at": 1.5,
+                "text": "x"
+              }
+            ],
+            "thread": "ui"
+          },
+          "at_text": {
+            "0": {
+              "t": "verbose.put"
+            },
+            "lines": [
+              {
+                "at": 10,
+                "text": "a"
+              },
+              {
+                "at": 20,
+                "text": "b"
+              },
+              {
+                "at": "1",
+                "text": "x"
+              }
+            ],
+            "thread": "ui"
+          },
+          "field_extra": {
+            "0": {
+              "t": "verbose.put"
+            },
+            "lines": [
+              {
+                "at": 10,
+                "text": "a"
+              },
+              {
+                "at": 20,
+                "text": "b"
+              },
+              {
+                "at": 1,
+                "n": 2,
+                "text": "x"
+              }
+            ],
+            "thread": "ui"
+          },
+          "level_extra": {
+            "0": {
+              "t": "verbose.put"
+            },
+            "lines": [
+              {
+                "at": 10,
+                "text": "a"
+              },
+              {
+                "at": 20,
+                "text": "b"
+              },
+              {
+                "at": 1,
+                "level": 1,
+                "text": "x"
+              }
+            ],
+            "thread": "ui"
+          },
+          "text_missing": {
+            "0": {
+              "t": "verbose.put"
+            },
+            "lines": [
+              {
+                "at": 10,
+                "text": "a"
+              },
+              {
+                "at": 20,
+                "text": "b"
+              },
+              {
+                "at": 1
+              }
+            ],
+            "thread": "ui"
+          },
+          "text_number": {
+            "0": {
+              "t": "verbose.put"
+            },
+            "lines": [
+              {
+                "at": 10,
+                "text": "a"
+              },
+              {
+                "at": 20,
+                "text": "b"
+              },
+              {
+                "at": 1,
+                "text": 5
+              }
+            ],
+            "thread": "ui"
+          }
+        },
+        "put_ui": {
+          "0": {
+            "t": "verbose.put"
+          },
+          "lines": [
+            {
+              "at": 10,
+              "text": "a"
+            },
+            {
+              "at": 20,
+              "text": "b"
+            }
+          ],
+          "thread": "ui"
+        },
+        "tail_ai": {
+          "0": {
+            "i": 2,
+            "t": "verbose.tail"
+          },
+          "count": 1,
+          "thread": "ai"
+        },
+        "tail_ai_reply": {
+          "0": {
+            "r": 2,
+            "t": "verbose.tail"
+          },
+          "lines": [
+            {
+              "at": 30,
+              "text": "c"
+            }
+          ]
+        },
+        "tail_server": {
+          "0": {
+            "i": 7,
+            "t": "verbose.tail"
+          },
+          "count": 2,
+          "thread": "server"
+        },
+        "tail_server_reply": {
+          "0": {
+            "r": 7,
+            "t": "verbose.tail"
+          },
+          "lines": [
+            {
+              "at": 20,
+              "text": "b"
+            },
+            {
+              "at": 30,
+              "text": "c"
+            }
+          ]
+        },
+        "tail_ui": {
+          "0": {
+            "i": 1,
+            "t": "verbose.tail"
+          },
+          "count": 1,
+          "thread": "ui"
+        },
+        "tail_ui_reply": {
+          "0": {
+            "r": 1,
+            "t": "verbose.tail"
+          },
+          "lines": [
+            {
+              "at": 20,
+              "text": "b"
+            }
+          ]
+        }
+      },
+      "texts": {
+        "engine_verbose_debug_off": "verbose.put needs debug mode, and the setting debug is false.",
+        "engine_verbose_line_invalid_at_bool": "The verbose line {'at': True, 'text': 'x'} does not have exactly the fields at and text, a whole number and text.",
+        "engine_verbose_line_invalid_at_float": "The verbose line {'at': 1.5, 'text': 'x'} does not have exactly the fields at and text, a whole number and text.",
+        "engine_verbose_line_invalid_at_text": "The verbose line {'at': '1', 'text': 'x'} does not have exactly the fields at and text, a whole number and text.",
+        "engine_verbose_line_invalid_field_extra": "The verbose line {'at': 1, 'n': 2, 'text': 'x'} does not have exactly the fields at and text, a whole number and text.",
+        "engine_verbose_line_invalid_level_extra": "The verbose line {'at': 1, 'level': 1, 'text': 'x'} does not have exactly the fields at and text, a whole number and text.",
+        "engine_verbose_line_invalid_text_missing": "The verbose line {'at': 1} does not have exactly the fields at and text, a whole number and text.",
+        "engine_verbose_line_invalid_text_number": "The verbose line {'at': 1, 'text': 5} does not have exactly the fields at and text, a whole number and text.",
+        "engine_verbose_not_registered": "The verbose handlers were used before they were registered."
+      }
+    },
+    "test_jslb": {
+      "blob_max": 65536,
+      "deep_nesting": 1000000,
+      "line_max": 4096,
+      "long_digits": 5000,
+      "overflow_bytes": 1024,
+      "texts": {
+        "jslb_attribute_missing": "The object has no key d.",
+        "jslb_bad_size": "The size of blob header 1 is not a non negative integer.",
+        "jslb_blob_data_field": "Blob header 1 carries its data as a field, which is never sent.",
+        "jslb_blob_data_missing": "Blob header 1 has neither bytes nor a file path in d.",
+        "jslb_blob_field_reserved_d": "The blob header field d is set from the data and the key.",
+        "jslb_blob_field_reserved_k": "The blob header field k is set from the data and the key.",
+        "jslb_blob_field_reserved_s": "The blob header field s is set from the data and the key.",
+        "jslb_blob_field_reserved_size": "The blob header field size is set from the data and the key.",
+        "jslb_blob_gap_first": "The line has blob header 2 but no blob header 1.",
+        "jslb_blob_gap_middle": "The line has blob header 3 but no blob header 2.",
+        "jslb_blob_size_differs": "Blob header 1 has size 4 but its data is 3 bytes.",
+        "jslb_blobs_mismatch_fraction": "The line header counts 1.5 blobs but the line has 1 blob headers.",
+        "jslb_blobs_mismatch_negative": "The line header counts -1 blobs but the line has 0 blob headers.",
+        "jslb_blobs_mismatch_true": "The line header counts True blobs but the line has 1 blob headers.",
+        "jslb_blobs_mismatch_two": "The line header counts 2 blobs but the line has 1 blob headers.",
+        "jslb_blobs_mismatch_zero": "The line header counts 0 blobs but the line has 1 blob headers.",
+        "jslb_blobs_over": "The blobs of the message come to 65537 bytes, over blob_max of 65536 bytes.",
+        "jslb_blobs_over_vector": "The blobs of the message come to {0} bytes, over blob_max of {1} bytes.",
+        "jslb_blobs_preset": "The header already counts its blobs, which line_make sets.",
+        "jslb_both_name_forms": "The line mixes short and full header names.",
+        "jslb_decoder_failed": "The decoder failed before and reads nothing more.",
+        "jslb_field_missing_s": "The header has no s, which is required.",
+        "jslb_field_missing_type": "The header has no type, which is required.",
+        "jslb_field_unknown": "sha256 is not a header field name.",
+        "jslb_header_not_object_blob": "Header 1 of the line is not a JSON object.",
+        "jslb_header_not_object_line": "Header 0 of the line is not a JSON object.",
+        "jslb_integer_refused_above": "The integer 9007199254740993 is beyond plus or minus 2^53.",
+        "jslb_integer_refused_below": "The integer -9007199254740993 is beyond plus or minus 2^53.",
+        "jslb_integer_refused_long": "The integer {0} is beyond plus or minus 2^53.",
+        "jslb_integer_refused_power": "The integer 1152921504606846976 is beyond plus or minus 2^53.",
+        "jslb_key_refused_bool": "The key True cannot be written as a JSON object key.",
+        "jslb_key_refused_digits": "The key '5' cannot be written as a JSON object key.",
+        "jslb_key_refused_float": "The key 1.5 cannot be written as a JSON object key.",
+        "jslb_key_refused_negative": "The key -1 cannot be written as a JSON object key.",
+        "jslb_line_not_json": "The line is not JSON: {0}.",
+        "jslb_line_not_json_infinity": "The line is not JSON: Infinity.",
+        "jslb_line_not_json_infinity_negative": "The line is not JSON: -Infinity.",
+        "jslb_line_not_json_nan": "The line is not JSON: NaN.",
+        "jslb_line_not_object": "The line is not a JSON object.",
+        "jslb_line_not_utf8": "The line is not UTF-8: {0}.",
+        "jslb_line_over_max": "The line is longer than line_max of 4096 bytes.",
+        "jslb_line_over_max_vector": "The line is longer than line_max of {0} bytes.",
+        "jslb_no_header_zero": "The line has no header 0.",
+        "jslb_no_type": "The line header has no type string.",
+        "jslb_number_overflow_fraction": "The number 1.5e400 overflows a double.",
+        "jslb_number_overflow_negative": "The number -1e400 overflows a double.",
+        "jslb_number_overflow_positive": "The number 1e400 overflows a double.",
+        "jslb_number_refused_infinity": "The number inf is not one JSON allows.",
+        "jslb_number_refused_infinity_negative": "The number -inf is not one JSON allows.",
+        "jslb_number_refused_nan": "The number nan is not one JSON allows.",
+        "jslb_payload_digit_key_00": "The payload key 00 is decimal digits.",
+        "jslb_payload_digit_key_01": "The payload key 01 is decimal digits.",
+        "jslb_payload_digit_key_5": "The payload key 5 is decimal digits.",
+        "jslb_text_not_json": "The text is not JSON: {0}.",
+        "jslb_text_not_json_infinity": "The text is not JSON: Infinity.",
+        "jslb_text_not_json_infinity_negative": "The text is not JSON: -Infinity.",
+        "jslb_text_not_json_nan": "The text is not JSON: NaN.",
+        "jslb_unknown_line_field_s": "The line header has the unknown field s.",
+        "jslb_unknown_line_field_x": "The line header has the unknown field x."
+      }
+    },
+    "test_main_loop": {
+      "chunk_bytes": 1000,
+      "lines": {
+        "browser_error": {
+          "0": {
+            "t": "error"
+          },
+          "cause": {
+            "message": "first",
+            "stack": "Error: first"
+          },
+          "message": "boom",
+          "stack": "Error: boom\n    at a"
+        },
+        "call_debug_off": {
+          "0": {
+            "i": 1,
+            "t": "mcp"
+          },
+          "id": 3,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "name": "a.py",
+              "text": "x"
+            },
+            "name": "source_put"
+          }
+        },
+        "call_name_invalid": {
+          "0": {
+            "i": 1,
+            "t": "mcp"
+          },
+          "id": 3,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "name": "../a.py",
+              "text": "x"
+            },
+            "name": "source_put"
+          }
+        },
+        "call_reply": {
+          "0": {
+            "r": 1,
+            "t": "mcp"
+          }
+        },
+        "create_castle": {
+          "0": {
+            "t": "db.create"
+          },
+          "db": "castle"
+        },
+        "create_dropped": {
+          "0": {
+            "t": "db.create"
+          },
+          "db": "dropped"
+        },
+        "delete_gone": {
+          "0": {
+            "k": "/castle/gone",
+            "t": "kv.delete"
+          }
+        },
+        "doc_note": {
+          "0": {
+            "t": "doc.put"
+          },
+          "body": {
+            "0": {
+              "t": "note"
+            },
+            "text": "A note."
+          },
+          "db": "castle",
+          "id": "note"
+        },
+        "drop_dropped": {
+          "0": {
+            "t": "db.drop"
+          },
+          "db": "dropped"
+        },
+        "error": {
+          "0": {
+            "t": "error"
+          }
+        },
+        "error_full": {
+          "0": {
+            "type": "error"
+          }
+        },
+        "error_reply": {
+          "0": {
+            "r": 1,
+            "t": "error"
+          }
+        },
+        "initialize": {
+          "0": {
+            "i": 1,
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "method": "initialize",
+          "params": {
+            "capabilities": {},
+            "clientInfo": {
+              "name": "hyperposition-engine",
+              "version": "0"
+            },
+            "protocolVersion": "2025-06-18"
+          }
+        },
+        "initialize_reply": {
+          "0": {
+            "r": 1,
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "result": {
+            "capabilities": {
+              "tools": {}
+            },
+            "protocolVersion": "2025-06-18",
+            "serverInfo": {
+              "name": "xsjs-server",
+              "version": "0"
+            }
+          }
+        },
+        "initialized": {
+          "0": {
+            "t": "mcp"
+          },
+          "jsonrpc": "2.0",
+          "method": "notifications/initialized"
+        },
+        "put_cut": {
+          "0": {
+            "b": 1,
+            "k": "/_files/test/cut",
+            "t": "kv.put"
+          },
+          "1": {}
+        },
+        "put_gate": {
+          "0": {
+            "b": 1,
+            "k": "/castle/gate",
+            "t": "kv.put"
+          },
+          "1": {}
+        },
+        "put_gone": {
+          "0": {
+            "b": 1,
+            "k": "/castle/gone",
+            "t": "kv.put"
+          },
+          "1": {}
+        },
+        "put_kept": {
+          "0": {
+            "b": 1,
+            "k": "/castle/kept",
+            "t": "kv.put"
+          },
+          "1": {}
+        },
+        "put_later": {
+          "0": {
+            "b": 1,
+            "k": "/metaverse/later",
+            "t": "kv.put"
+          },
+          "1": {}
+        },
+        "put_streamed": {
+          "0": {
+            "b": 1,
+            "k": "/_files/test/streamed",
+            "t": "kv.put"
+          },
+          "1": {}
+        },
+        "put_title": {
+          "0": {
+            "b": 1,
+            "k": "/castle/title",
+            "t": "kv.put"
+          },
+          "1": {}
+        },
+        "put_value": {
+          "0": {
+            "b": 1,
+            "k": "/_files/test/value",
+            "t": "kv.put"
+          },
+          "1": {}
+        },
+        "source_put": {
+          "0": {
+            "b": 1,
+            "i": 1,
+            "t": "source.put"
+          },
+          "1": {},
+          "name": "loop_test.py"
+        },
+        "sql_castle": {
+          "0": {
+            "t": "sql.run"
+          },
+          "db": "castle",
+          "statements": [
+            {
+              "params": [],
+              "sql": "CREATE TABLE t (x INTEGER) STRICT"
+            },
+            {
+              "params": [7],
+              "sql": "INSERT INTO t VALUES (?)"
+            }
+          ]
+        },
+        "stray_101": {
+          "0": {
+            "r": 101,
+            "t": "tap.start"
+          }
+        },
+        "stray_102": {
+          "0": {
+            "r": 102,
+            "t": "mcp"
+          }
+        },
+        "stray_2": {
+          "0": {
+            "r": 2,
+            "t": "tap.start"
+          }
+        },
+        "tail_server": {
+          "0": {
+            "i": 1,
+            "t": "verbose.tail"
+          },
+          "count": 10,
+          "thread": "server"
+        },
+        "tail_server_reply": {
+          "0": {
+            "r": 1,
+            "t": "verbose.tail"
+          }
+        },
+        "tail_ui": {
+          "0": {
+            "i": 2,
+            "t": "verbose.tail"
+          },
+          "count": 10,
+          "thread": "ui"
+        },
+        "tail_ui_reply": {
+          "0": {
+            "r": 2,
+            "t": "verbose.tail"
+          },
+          "lines": [
+            {
+              "at": 1,
+              "text": "first"
+            },
+            {
+              "at": 2,
+              "text": "second"
+            }
+          ]
+        },
+        "tools_list": {
+          "0": {
+            "i": 2,
+            "t": "mcp"
+          },
+          "id": 2,
+          "jsonrpc": "2.0",
+          "method": "tools/list"
+        },
+        "tools_list_reply": {
+          "0": {
+            "r": 2,
+            "t": "mcp"
+          },
+          "id": 2,
+          "jsonrpc": "2.0"
+        },
+        "turn_note": {
+          "0": {
+            "t": "turn.append"
+          },
+          "content": {
+            "content": "A turn.",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/castle/note/1"
+        },
+        "unknown_request": {
+          "0": {
+            "i": 1,
+            "t": "no.such"
+          }
+        },
+        "verbose_put": {
+          "0": {
+            "t": "verbose.put"
+          },
+          "lines": [
+            {
+              "at": 1,
+              "text": "first"
+            },
+            {
+              "at": 2,
+              "text": "second"
+            }
+          ],
+          "thread": "ui"
+        }
+      },
+      "overflow_bytes": 4096,
+      "read_bytes": 65536,
+      "texts": {
+        "dispatch_handler_unknown": "No handler is registered for type no.such version 0.",
+        "engine_system_debug_off_line": "source.put needs debug mode, and the setting debug is false.",
+        "engine_system_debug_off_tool": "source_put needs debug mode, and the setting debug is false.",
+        "engine_system_name_invalid": "The name ../a.py is not a plain file name that ends in .py and does not start with a dot.",
+        "engine_tap_browser_cause": "caused by: first",
+        "engine_tap_browser_failed": "The browser failed: boom",
+        "jslb_no_type": "The line header has no type string.",
+        "main_loop_input_partial": "The engine input ended inside a message.",
+        "main_loop_line_dispatch_mcp": "server dispatches from ai: {\"i\":1,\"t\":\"mcp\"}",
+        "main_loop_line_dispatch_tail": "server dispatches from ai: {\"i\":1,\"t\":\"verbose.tail\"}",
+        "main_loop_line_dispatch_unknown": "server dispatches from ai: {\"i\":1,\"t\":\"no.such\"}",
+        "main_loop_line_reply_mcp": "server replies to ai: {\"t\":\"mcp\",\"r\":1}",
+        "main_loop_not_prepared": "loop_run ran before loop_prepare prepared the root.",
+        "main_loop_reply_unknown_101": "The line {\"0\":{\"r\":101,\"t\":\"tap.start\"}} replies to no request the server sent.",
+        "main_loop_reply_unknown_102": "The line {\"0\":{\"r\":102,\"t\":\"mcp\"}} replies to no request the server sent.",
+        "main_loop_reply_unknown_2": "The line {\"0\":{\"r\":2,\"t\":\"tap.start\"}} replies to no request the server sent.",
+        "main_loop_serve_failed_debug": "The server failed while serving the engine tty: source_put needs debug mode, and the setting debug is false.",
+        "main_loop_serve_failed_type": "The server failed while serving the engine tty: The line header has no type string.",
+        "main_loop_serve_failed_unknown": "The server failed while serving the engine tty: No handler is registered for type no.such version 0."
+      }
+    },
+    "test_mcp": {
+      "texts": {
+        "mcp_call_params": "The params of tools/call need a name and an object of arguments.",
+        "mcp_message_unexpected_notification": "The client was sent notifications/tools/list_changed, which is not a reply.",
+        "mcp_message_unexpected_ping": "The client was sent ping, which is not a reply.",
+        "mcp_method_unknown": "The method foo/bar is not served.",
+        "mcp_reply_id_refused_bool": "The reply id True is not an integer.",
+        "mcp_reply_id_refused_float": "The reply id 1.0 is not an integer.",
+        "mcp_reply_id_refused_null": "The reply id None is not an integer.",
+        "mcp_reply_id_refused_text": "The reply id '1' is not an integer.",
+        "mcp_reply_unknown_again": "The reply to request 1 is not one the client awaits.",
+        "mcp_reply_unknown_unasked": "The reply to request 99 is not one the client awaits.",
+        "mcp_request_invalid": "The message is not a valid JSON-RPC 2.0 request.",
+        "mcp_tool_twice": "A tool named {0} is already registered.",
+        "mcp_tool_unknown": "There is no tool named nothing."
+      }
+    },
+    "test_mcp_stdio": {
+      "child_seconds": 30,
+      "read_bytes": 65536,
+      "texts": {
+        "jslb_number_overflow": "The number 1e400 overflows a double.",
+        "jslb_text_not_json_blank": "The text is not JSON: Expecting value.",
+        "jslb_text_not_json_delimiter": "The text is not JSON: Expecting ':' delimiter.",
+        "mcp_stdio_line_malformed_blank": "Line 1 of the input is not JSON: The text is not JSON: Expecting value.",
+        "mcp_stdio_line_malformed_delimiter": "Line 2 of the input is not JSON: The text is not JSON: Expecting ':' delimiter.",
+        "mcp_stdio_line_malformed_overflow": "Line 1 of the input is not JSON: The number 1e400 overflows a double.",
+        "mcp_stdio_line_malformed_process": "Line 1 of the input is not JSON: The text is not JSON: Expecting ':' delimiter.",
+        "mcp_stdio_line_object": "Line 1 of the input is not a JSON object."
+      }
+    },
+    "test_settings": {
+      "texts": {
+        "jslb_number_overflow": "The number 1e400 overflows a double.",
+        "jslb_text_not_json": "The text is not JSON: {0}.",
+        "settings_key_extra": "The settings have the unexpected key {0}.",
+        "settings_key_extra_extra": "The settings have the unexpected key extra.",
+        "settings_key_missing": "The settings lack the key {0}.",
+        "settings_key_missing_timeout": "The settings lack the key provider.timeout_seconds.",
+        "settings_not_object": "The settings file {0} does not hold a JSON object.",
+        "settings_type_wrong": "The setting {0} must be of type {1} but is of type {2}.",
+        "settings_type_wrong_debug": "The setting debug must be of type bool but is of type int."
+      }
+    },
+    "test_stall_loop": {
+      "running_seconds": 0.2,
+      "texts": {
+        "stall_loop_run_reached": "loop_run ran in {0}, though loop_prepare never returns."
+      }
+    },
+    "test_substrate": {
+      "lines": {
+        "doc_put": {
+          "0": {
+            "t": "doc.put"
+          },
+          "body": {
+            "0": {
+              "t": "nest"
+            },
+            "1": "/_files/fog.png",
+            "count": -3,
+            "inner": {
+              "1": {
+                "$ref": 1
+              },
+              "2": "\u4e2d\u6587\ud83d\ude00",
+              "a": [
+                {
+                  "0": 0.5,
+                  "z": null
+                }
+              ],
+              "b": 1
+            }
+          },
+          "db": "alpha",
+          "id": "nest"
+        }
+      },
+      "texts": {
+        "agent_content_ambiguous": "The write would make two rows of the universe table name one world, so the current universe would be ambiguous; nothing was written.",
+        "substrate_db_busy": "The database alpha is inside a transaction.",
+        "substrate_db_closed_close": "The database gamma is not open.",
+        "substrate_db_closed_put": "The database beta is not open.",
+        "substrate_db_open": "The database alpha is already open.",
+        "substrate_document_ref_head": "The ref '/castle_gatehouse/scene/arrival' is not a Document-Ref.",
+        "substrate_document_ref_value": "The ref '/alpha/world' is not a Document-Ref.",
+        "substrate_file_lost_removed": "The value /alpha/big names the cache file {1}, which this store does not hold.",
+        "substrate_file_lost_restored": "The value {0} names the cache file {1}, which this store does not hold.",
+        "substrate_file_small": "The file {0} holds {1} bytes, not over overflow_bytes {2}.",
+        "substrate_header_bad_field": "The document header 0 is not a type with an optional version other than 0: {'t': 'scene', 'x': 1}",
+        "substrate_header_bad_text": "The document header 0 is not a type with an optional version other than 0: scene",
+        "substrate_header_bad_typeless": "The document header 0 is not a type with an optional version other than 0: {'v': 2}",
+        "substrate_header_bad_version": "The document header 0 is not a type with an optional version other than 0: {'t': 'scene', 'v': 0}",
+        "substrate_header_gap": "The document header 2 follows a gap.",
+        "substrate_header_missing": "The document has no header 0.",
+        "substrate_header_normal": "A document in its normal form has a header 1 besides 0.",
+        "substrate_header_ref": "The document header 1 is not a reference string.",
+        "substrate_id_empty": "A document id is empty.",
+        "substrate_id_missing_absent": "The database castle_gatehouse has no document 'scene/absent'.",
+        "substrate_id_missing_note": "The database alpha has no document 'note'.",
+        "substrate_key_digits_decode": "The document key '07' is decimal digits, which read as a header.",
+        "substrate_key_digits_encode": "The document key '12' is decimal digits, which read as a header.",
+        "substrate_key_missing_deleted": "The database alpha has no key 'greeting/\u4e2d\u6587\ud83d\ude00'.",
+        "substrate_key_missing_killed": "The database alpha has no key 'big'.",
+        "substrate_key_missing_restored": "The database alpha has no key 'b'.",
+        "substrate_key_missing_rolled": "The database alpha has no key 'd'.",
+        "substrate_key_missing_split": "The database alpha has no key 'a'.",
+        "substrate_key_missing_version": "The database castle_gatehouse has no key 'scene/arrival/3'.",
+        "substrate_key_refused": "The key '12' cannot be written as a JSON object key.",
+        "substrate_name_bad_accent": "The database name 'caf\u00e9' is not a C identifier.",
+        "substrate_name_bad_dash": "The database name 'a-b' is not a C identifier.",
+        "substrate_name_bad_digit": "The database name '1abc' is not a C identifier.",
+        "substrate_name_bad_dot": "The database name 'a.b' is not a C identifier.",
+        "substrate_name_bad_empty": "The database name '' is not a C identifier.",
+        "substrate_name_bad_slash": "The database name 'a/b' is not a C identifier.",
+        "substrate_name_bad_space": "The database name 'a b' is not a C identifier.",
+        "substrate_ref_bad_accent": "The ref '/caf\u00e9/key' is not a Key-Value-Ref.",
+        "substrate_ref_bad_dash": "The ref '/d-b/key' is not a Key-Value-Ref.",
+        "substrate_ref_bad_database_empty": "The ref '//key' is not a Key-Value-Ref.",
+        "substrate_ref_bad_digit": "The ref '/1db/key' is not a Key-Value-Ref.",
+        "substrate_ref_bad_empty": "The ref '' is not a Key-Value-Ref.",
+        "substrate_ref_bad_key_empty": "The ref '/metaverse/' is not a Key-Value-Ref.",
+        "substrate_ref_bad_key_missing": "The ref '/metaverse' is not a Key-Value-Ref.",
+        "substrate_ref_bad_slash": "The ref '/' is not a Key-Value-Ref.",
+        "substrate_ref_both": "The external ref '/alpha/world' names its database, and alpha was given too.",
+        "substrate_ref_index_true": "The header reference True names no header of the document.",
+        "substrate_ref_index_two": "The header reference 2 names no header of the document.",
+        "substrate_ref_internal": "The internal ref 'world' needs a database.",
+        "substrate_ref_shape": "The document body holds {'$ref': 1}, which has the shape of a header reference.",
+        "substrate_scene_bad_internal": "The scene 'hyperposition/1' is not an external Document-Ref.",
+        "substrate_scene_bad_value": "The scene '/metaverse/world' is not an external Document-Ref.",
+        "substrate_schema_partial_meta": "The database has only the substrate tables ['_meta'].",
+        "substrate_schema_partial_none": "The database has only the substrate tables [].",
+        "substrate_schema_version": "The substrate schema row is ('2',), not 1.",
+        "substrate_version_exists": "The document version 'note/1' already exists in alpha.",
+        "substrate_wal_left": "The database alpha still has a write ahead log after closing."
+      }
+    },
+    "test_third_party_fetch": {
+      "archives_read": ["sqlite-wasm-3460100.zip", "xterm-5.5.0.tgz"]
+    },
+    "test_verbose": {
+      "history_all": 100,
+      "ring_lines": 10,
+      "texts": {
+        "verbose_count_invalid": "The history count -1 is not a whole number from 0 up.",
+        "verbose_exec_exit_0": "`{0}` exited with code 0.",
+        "verbose_exec_exit_3": "`{0}` exited with code 3.",
+        "verbose_exec_run": "Running `{0}`.",
+        "verbose_level_invalid_above": "The shell's verbose level 3 is not a whole number from 0 to 2.",
+        "verbose_level_invalid_below": "The shell's verbose level -1 is not a whole number from 0 to 2.",
+        "verbose_not_open": "The verbose log was used before it was opened.",
+        "verbose_open_twice": "The verbose log is already open.",
+        "verbose_thread_unknown_console": "The verbose thread console is not ui or ai.",
+        "verbose_thread_unknown_empty": "The verbose thread  is not ui or ai.",
+        "verbose_thread_unknown_server": "The verbose thread server is not ui or ai."
+      }
+    },
+    "test_wire": {
+      "poll_seconds": 0.05,
+      "read_bytes": 1048576,
+      "root_level": 1,
+      "rung_seconds": 120,
+      "rungs": {
+        "commits": [
+          {
+            "payload": {
+              "db": "wire_commits"
+            },
+            "type": "db.create"
+          },
+          {
+            "key": "/wire_commits/kept",
+            "text": "kept value",
+            "type": "kv.put"
+          },
+          {
+            "key": "/wire_commits/gone",
+            "text": "gone value",
+            "type": "kv.put"
+          },
+          {
+            "key": "/wire_commits/gone",
+            "type": "kv.delete"
+          },
+          {
+            "payload": {
+              "body": {
+                "0": {
+                  "t": "note"
+                },
+                "text": "a note"
+              },
+              "db": "wire_commits",
+              "id": "note"
+            },
+            "type": "doc.put"
+          },
+          {
+            "payload": {
+              "content": {
+                "content": "a turn",
+                "role": "user"
+              },
+              "role": "user",
+              "scene": "/wire_commits/note/1"
+            },
+            "type": "turn.append"
+          },
+          {
+            "payload": {
+              "db": "wire_commits",
+              "statements": [
+                {
+                  "params": [],
+                  "sql": "CREATE TABLE t (x INTEGER) STRICT"
+                },
+                {
+                  "params": [7],
+                  "sql": "INSERT INTO t VALUES (?)"
+                }
+              ]
+            },
+            "type": "sql.run"
+          },
+          {
+            "payload": {
+              "db": "wire_dropped"
+            },
+            "type": "db.create"
+          },
+          {
+            "payload": {
+              "db": "wire_dropped"
+            },
+            "type": "db.drop"
+          }
+        ],
+        "console_last": "exit\r\n",
+        "console_prompt": "$ ",
+        "console_size": {
+          "columns": 80,
+          "rows": 24
+        },
+        "console_typed": "exit\n",
+        "control_bytes": 1048576,
+        "echo_payload": {
+          "count": -3,
+          "nested": {
+            "list": [1, "two", null, true]
+          },
+          "text": "na\u00efve \u65e5\u672c \ud83d\ude00"
+        },
+        "large_bytes": 134217728,
+        "lines_command": "( i=1; while [ \"$i\" -le 100000 ]; do echo \"$i\"; i=$((i + 1)); done )",
+        "lines_count": 100000,
+        "mcp_call": {
+          "arguments": {
+            "name": "wire_tool.py",
+            "text": "pass\n"
+          },
+          "name": "source_put"
+        },
+        "restart_name": "echo_loop.py",
+        "unknown_type": "wire.unknown",
+        "verbose_count": 10
+      },
+      "stop_seconds": 5,
+      "texts": {
+        "bootstrap_reply_unexpected": "The reply to tap.start 101 is not an empty tap.start reply: {0}",
+        "dispatch_handler_unknown": "No handler is registered for type wire.unknown version 0.",
+        "wire_start_twice": "The server sent tap.start a second time, as a restart does; only a reload of the page takes a new first line."
+      },
+      "window_height": 720,
+      "window_width": 1280
+    }
+  },
+  "smoke_seconds": 120,
+  "typescript": {
+    "run": "unit",
+    "test_agent": {
+      "document_lore": {
+        "0": {
+          "t": "prompt"
+        },
+        "1": "/castle/lore",
+        "text": {
+          "$ref": 1
+        }
+      },
+      "lines": {
+        "click": {
+          "0": {
+            "i": 1,
+            "t": "ai.click"
+          },
+          "x": 10,
+          "y": 20
+        },
+        "error_unauthorized": {
+          "0": {
+            "type": "error"
+          },
+          "message": "Unauthorized"
+        },
+        "reply_castle": {
+          "0": {
+            "r": 1,
+            "t": "ai.say"
+          },
+          "scene": "/castle_gatehouse/scene/arrival/1",
+          "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.",
+          "turn": 10
+        },
+        "reply_chat": {
+          "0": {
+            "t": "http.request"
+          },
+          "headers": {
+            "content-type": "application/json"
+          },
+          "status": 200
+        },
+        "reply_click": {
+          "0": {
+            "r": 1,
+            "t": "ai.click"
+          },
+          "scene": "/metaverse/hyperposition/1",
+          "subtitle": "The lights flicker.",
+          "turn": 2
+        },
+        "reply_full": {
+          "0": {
+            "reply": 7,
+            "type": "ai.say"
+          },
+          "scene": "/metaverse/hyperposition/1",
+          "subtitle": "Nothing happens.",
+          "turn": 2
+        },
+        "reply_mcp": {
+          "0": {
+            "t": "mcp"
+          },
+          "jsonrpc": "2.0"
+        },
+        "reply_next": {
+          "0": {
+            "r": 2,
+            "t": "ai.say"
+          },
+          "scene": "/castle_gatehouse/scene/arrival/1",
+          "subtitle": "Still the moat.",
+          "turn": 2
+        },
+        "request_chat": {
+          "0": {
+            "type": "http.request"
+          },
+          "headers": {
+            "Authorization": "Bearer xai-SYNTHETIC-KEY",
+            "Content-Type": "application/json"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "request_scripted": {
+          "0": {
+            "type": "http.request"
+          },
+          "headers": {
+            "Authorization": "Bearer xai-SYNTHETIC-KEY",
+            "Content-Type": "application/json"
+          },
+          "method": "POST",
+          "url": "/chat/completions"
+        },
+        "say_again": {
+          "0": {
+            "i": 2,
+            "t": "ai.say"
+          },
+          "text": "2"
+        },
+        "say_castle": {
+          "0": {
+            "i": 1,
+            "t": "ai.say"
+          },
+          "text": "1"
+        },
+        "say_full": {
+          "0": {
+            "id": 7,
+            "type": "ai.say"
+          },
+          "text": "2"
+        },
+        "say_next": {
+          "0": {
+            "i": 2,
+            "t": "ai.say"
+          },
+          "text": "0"
+        },
+        "say_nothing": {
+          "0": {
+            "i": 1,
+            "t": "ai.say"
+          },
+          "text": "2"
+        },
+        "wake_model": {
+          "0": {
+            "type": "ai.model_reply"
+          }
+        },
+        "wake_tool": {
+          "0": {
+            "type": "ai.tool_reply"
+          }
+        }
+      },
+      "texts": {
+        "agent_arguments_invalid_array": "The arguments of tool call call_1 to browser.render are not a JSON object: []",
+        "agent_arguments_invalid_null": "The arguments of tool call call_1 to browser.render are not a JSON object: null",
+        "agent_arguments_invalid_number": "The arguments of tool call call_1 to browser.render are not a JSON object: 5",
+        "agent_arguments_invalid_overflow": "The arguments of tool call call_1 to browser.render are not a JSON object: {\"subtitle\":1e400}",
+        "agent_arguments_invalid_string": "The arguments of tool call call_1 to browser.render are not a JSON object: \"Fog.\"",
+        "agent_arguments_invalid_unparsed": "The arguments of tool call call_1 to browser.render are not a JSON object: {",
+        "agent_click_text": "The player clicked at x 10, y 20.",
+        "agent_content_unsupported_first": "The result of tool call call_1 holds content of type image, and a tool message carries only text.",
+        "agent_content_unsupported_second": "The result of tool call call_2 holds content of type image, and a tool message carries only text.",
+        "agent_prompt_invalid_analyst": "The document /metaverse/prompt/2 is not a prompt: it needs its text as a string in the member text.",
+        "agent_prompt_invalid_universe": "The document /castle/prompt/1 is not a prompt: it needs its text as a string in the member text.",
+        "agent_reply_empty": "The model's reply chatcmpl-answer has neither tool calls nor content to end the turn with.",
+        "jslb_number_overflow": "The number 1e400 overflows a double.",
+        "jslb_text_not_json": "The text is not JSON: {0}.",
+        "provider_reply_type": "The provider reply is a line of type error instead of http.request.",
+        "substrate_id_missing": "The database metaverse has no document 'prompt'.",
+        "substrate_turns_compacted": "Turns 1 to 2 of this conversation were compacted when it held 2 turns. Their text is no longer in the conversation; the databases hold the state."
+      }
+    },
+    "test_all": {
+      "failfast": false
+    },
+    "test_console_view": {
+      "first_messages": {
+        "empty": "{\"AuthToken\":\"\",\"columns\":120,\"rows\":40}",
+        "fitted": "{\"AuthToken\":\"dXNlcjpwYXNz\",\"columns\":120,\"rows\":20}",
+        "sized": "{\"AuthToken\":\"\",\"columns\":100,\"rows\":30}",
+        "token": "{\"AuthToken\":\"dXNlcjpwYXNz\",\"columns\":120,\"rows\":40}"
+      },
+      "lines": {
+        "close_request": {
+          "0": {
+            "type": "console.close"
+          }
+        },
+        "close_sleep": {
+          "state": null,
+          "then_type": "ui.console_closed"
+        },
+        "close_wake": {
+          "0": {
+            "type": "ui.console_closed"
+          },
+          "replies": [
+            {
+              "0": {
+                "type": "console.close"
+              }
+            }
+          ],
+          "state": null
+        },
+        "close_wake_open_reply": {
+          "0": {
+            "type": "ui.console_closed"
+          },
+          "replies": [
+            {
+              "0": {
+                "type": "console.open"
+              },
+              "token": "dXNlcjpwYXNz"
+            }
+          ],
+          "state": null
+        },
+        "input": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          }
+        },
+        "open_request": {
+          "0": {
+            "type": "console.open"
+          }
+        },
+        "open_sleep": {
+          "state": null,
+          "then_type": "ui.console_reply"
+        },
+        "open_wake": {
+          "0": {
+            "type": "ui.console_reply"
+          },
+          "replies": [
+            {
+              "0": {
+                "type": "console.open"
+              },
+              "token": "dXNlcjpwYXNz"
+            }
+          ],
+          "state": null
+        },
+        "open_wake_bare": {
+          "0": {
+            "type": "ui.console_reply"
+          },
+          "replies": [
+            {
+              "0": {
+                "type": "console.open"
+              }
+            }
+          ],
+          "state": null
+        },
+        "open_wake_close_reply": {
+          "0": {
+            "type": "ui.console_reply"
+          },
+          "replies": [
+            {
+              "0": {
+                "type": "console.close"
+              }
+            }
+          ],
+          "state": null
+        },
+        "open_wake_empty": {
+          "0": {
+            "type": "ui.console_reply"
+          },
+          "replies": [
+            {
+              "0": {
+                "type": "console.open"
+              },
+              "token": ""
+            }
+          ],
+          "state": null
+        }
+      },
+      "texts": {
+        "console_view_close_phase_closing": "The console was asked to close while it was closing, not open.",
+        "console_view_close_phase_idle": "The console was asked to close while it was idle, not open.",
+        "console_view_close_phase_opening": "The console was asked to close while it was opening, not open.",
+        "console_view_closed_phase": "The console got the reply to console.close while it was open, not closing.",
+        "console_view_exit_phase_idle": "The console ended while it was idle, not open or closing.",
+        "console_view_exit_phase_opening": "The console ended while it was opening, not open or closing.",
+        "console_view_input_phase_closing": "Console input came while the console was closing, not open.",
+        "console_view_input_phase_idle": "Console input came while the console was idle, not open.",
+        "console_view_input_phase_opening": "Console input came while the console was opening, not open.",
+        "console_view_kind_unknown_0": "The console got a ttyd message of kind 0, which is not output, a title or preferences.",
+        "console_view_kind_unknown_123": "The console got a ttyd message of kind 123, which is not output, a title or preferences.",
+        "console_view_kind_unknown_255": "The console got a ttyd message of kind 255, which is not output, a title or preferences.",
+        "console_view_kind_unknown_47": "The console got a ttyd message of kind 47, which is not output, a title or preferences.",
+        "console_view_kind_unknown_51": "The console got a ttyd message of kind 51, which is not output, a title or preferences.",
+        "console_view_message_empty": "The console got a ttyd message with no bytes.",
+        "console_view_open_phase_closing": "The console was asked to open while it was closing, not idle.",
+        "console_view_open_phase_open": "The console was asked to open while it was open, not idle.",
+        "console_view_open_phase_opening": "The console was asked to open while it was opening, not idle.",
+        "console_view_reply_id": "The console got the reply to request {0} while it waits for request {1}.",
+        "console_view_reply_phase_idle": "The console got the reply to console.open while it was idle, not opening.",
+        "console_view_reply_phase_open": "The console got the reply to console.open while it was open, not opening.",
+        "console_view_reply_type_close": "The console got a reply of type console.close instead of console.open.",
+        "console_view_reply_type_open": "The console got a reply of type console.open instead of console.close.",
+        "console_view_rows_unfit": "The console has 0 px above the band for rows of 17 px, which is not room for one row.",
+        "console_view_token_invalid": "The reply to console.open carries a token of type undefined instead of text."
+      }
+    },
+    "test_dispatch": {
+      "lines": {
+        "blob_line": {
+          "0": {
+            "b": 1
+          },
+          "1": {
+            "s": 3
+          },
+          "n": 1
+        },
+        "blob_three": {
+          "s": 3
+        },
+        "blob_two": {
+          "s": 2
+        },
+        "error_request_5": {
+          "0": {
+            "r": 5,
+            "t": "error"
+          }
+        },
+        "error_value": {
+          "0": {
+            "type": "error"
+          },
+          "message": "boom",
+          "stack": ""
+        },
+        "notification": {
+          "0": {}
+        },
+        "notification_n": {
+          "0": {},
+          "n": 1
+        },
+        "notification_text": {
+          "0": {},
+          "text": "x"
+        },
+        "reply_found": {
+          "0": {
+            "r": 7
+          },
+          "found": true,
+          "size": 3
+        },
+        "reply_found_full": {
+          "0": {
+            "reply": 7
+          },
+          "found": true,
+          "size": 3
+        },
+        "request_3": {
+          "0": {
+            "i": 3
+          }
+        },
+        "request_5": {
+          "0": {
+            "i": 5
+          }
+        },
+        "request_7": {
+          "0": {
+            "i": 7
+          }
+        },
+        "request_8": {
+          "0": {
+            "i": 8
+          }
+        },
+        "request_full_5": {
+          "0": {
+            "id": 5
+          }
+        },
+        "request_full_9": {
+          "0": {
+            "id": 9
+          }
+        },
+        "request_keyed": {
+          "0": {
+            "i": 7,
+            "k": "/a/b",
+            "v": 1
+          },
+          "n": 1
+        },
+        "request_keyed_full": {
+          "0": {
+            "id": 7,
+            "key": "/a/b",
+            "version": 1
+          },
+          "n": 1
+        },
+        "versioned": {
+          "0": {
+            "v": 1
+          }
+        },
+        "versioned_text": {
+          "0": {
+            "v": 1
+          },
+          "text": "x"
+        },
+        "wake": {
+          "0": {},
+          "replies": []
+        }
+      },
+      "texts": {
+        "dispatch_handler_twice": "A handler is already registered for type {0} version 0.",
+        "dispatch_handler_unknown_type": "No handler is registered for type {0} version 0.",
+        "dispatch_handler_unknown_version": "No handler is registered for type {0} version 1.",
+        "dispatch_id_invalid": "The line of type {0} has the id 7, which is not a number.",
+        "dispatch_notification_replied": "The handler for type {0} version 0 returned a reply to a line with no id.",
+        "dispatch_reply_headerless": "The handler for type {0} version 0 returned a reply with no header.",
+        "dispatch_request_unanswered": "The handler for type {0} version 0 returned no reply to the request with id 7.",
+        "dispatch_stack_missing_line": "The error with the message boom has no stack.",
+        "dispatch_stack_missing_nested": "The error with the message inner has no stack.",
+        "dispatch_type_invalid": "A line has the type 5, which is not text."
+      }
+    },
+    "test_http": {
+      "lines": {
+        "answer_empty": {
+          "0": {
+            "r": 7,
+            "t": "http.request"
+          },
+          "headers": {},
+          "status": 204,
+          "text": ""
+        },
+        "answer_json": {
+          "0": {
+            "r": 7,
+            "t": "http.request"
+          },
+          "headers": {
+            "content-type": "application/json"
+          },
+          "json": {
+            "id": "c1",
+            "n": [1, 2]
+          },
+          "status": 200
+        },
+        "header_error": {
+          "r": 7,
+          "t": "error"
+        },
+        "header_error_full": {
+          "reply": 7,
+          "type": "error"
+        },
+        "header_full": {
+          "reply": 7,
+          "type": "http.request"
+        },
+        "request": {
+          "0": {
+            "i": 7,
+            "t": "http.request"
+          },
+          "headers": {
+            "authorization": "Bearer test-key",
+            "content-type": "application/json"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "request_blob": {
+          "0": {
+            "b": 1,
+            "i": 7,
+            "t": "http.request"
+          },
+          "1": {
+            "s": 1
+          },
+          "headers": {
+            "authorization": "Bearer test-key",
+            "content-type": "application/json"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "request_full": {
+          "0": {
+            "id": 7,
+            "type": "http.request"
+          },
+          "headers": {
+            "authorization": "Bearer test-key",
+            "content-type": "application/json"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "request_id_1": {
+          "0": {
+            "i": 1,
+            "t": "http.request"
+          },
+          "headers": {
+            "authorization": "Bearer test-key",
+            "content-type": "application/json"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "request_id_2": {
+          "0": {
+            "i": 2,
+            "t": "http.request"
+          },
+          "headers": {
+            "authorization": "Bearer test-key",
+            "content-type": "application/json"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "request_id_41": {
+          "0": {
+            "i": 41,
+            "t": "http.request"
+          },
+          "headers": {
+            "authorization": "Bearer test-key",
+            "content-type": "application/json"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "request_kv_get": {
+          "0": {
+            "i": 7,
+            "t": "kv.get"
+          },
+          "headers": {
+            "authorization": "Bearer test-key",
+            "content-type": "application/json"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "request_unnumbered": {
+          "0": {
+            "t": "http.request"
+          },
+          "headers": {
+            "authorization": "Bearer test-key",
+            "content-type": "application/json"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        }
+      },
+      "texts": {
+        "http_blobs_refused": "The http.request line carries blobs, which the HTTP port does not send.",
+        "http_fetch_failed_error": "The request to https://api.x.ai/v1/chat/completions failed: TypeError: Failed to fetch",
+        "http_fetch_failed_null": "The request to https://api.x.ai/v1/chat/completions failed: null",
+        "http_fetch_failed_number": "The request to https://api.x.ai/v1/chat/completions failed: 5",
+        "http_fetch_failed_text": "The request to https://api.x.ai/v1/chat/completions failed: boom",
+        "http_fetch_failed_undefined": "The request to https://api.x.ai/v1/chat/completions failed: undefined",
+        "http_field_invalid_body": "The request field body is missing or is not valid.",
+        "http_field_invalid_headers": "The request field headers is missing or is not valid.",
+        "http_field_invalid_method": "The request field method is missing or is not valid.",
+        "http_field_invalid_url": "The request field url is missing or is not valid.",
+        "http_id_missing": "The http.request line has no id, so nothing could answer it.",
+        "http_json_invalid_malformed": "The response from https://api.x.ai/v1/chat/completions has a JSON content type but its body is not JSON: WireError: The text is not JSON: {0}.",
+        "http_json_invalid_overflow": "The response from https://api.x.ai/v1/chat/completions has a JSON content type but its body is not JSON: WireError: The number 1e400 overflows a double.",
+        "http_receiver_missing": "The HTTP port got a request before a receiver was set.",
+        "http_receiver_twice": "The HTTP port already has a receiver.",
+        "http_status_failed": "The request to https://api.x.ai/v1/chat/completions answered with status 404: no such model",
+        "http_timeout_expired_fraction": "The request to https://api.x.ai/v1/chat/completions did not finish within 0.5 seconds.",
+        "http_timeout_expired_whole": "The request to https://api.x.ai/v1/chat/completions did not finish within 5 seconds.",
+        "http_timeout_invalid_long": "The HTTP timeout 2147484 is not a number of seconds above 0 that a timer can hold.",
+        "http_timeout_invalid_negative": "The HTTP timeout -1 is not a number of seconds above 0 that a timer can hold.",
+        "http_timeout_invalid_zero": "The HTTP timeout 0 is not a number of seconds above 0 that a timer can hold.",
+        "http_type_invalid": "The HTTP port got a line of type kv.get instead of http.request.",
+        "utility_value_refused": "JSON has no text for the value."
+      }
+    },
+    "test_i18n": {
+      "texts": {
+        "utility_bytes_refused": "The bytes are not valid UTF-8."
+      }
+    },
+    "test_jslb": {
+      "blob_max": 65536,
+      "line_max": 4096,
+      "overflow_bytes": 1024,
+      "texts": {
+        "jslb_bad_size": "The size of blob header 1 is not a non negative integer.",
+        "jslb_blob_data_field": "Blob header 1 carries its data as a field, which is never sent.",
+        "jslb_blob_data_missing": "Blob header 1 has neither bytes nor a file path in d.",
+        "jslb_blob_field_reserved_d": "The blob header field d is set from the data and the key.",
+        "jslb_blob_field_reserved_data": "The blob header field data is set from the data and the key.",
+        "jslb_blob_field_reserved_k": "The blob header field k is set from the data and the key.",
+        "jslb_blob_field_reserved_key": "The blob header field key is set from the data and the key.",
+        "jslb_blob_field_reserved_s": "The blob header field s is set from the data and the key.",
+        "jslb_blob_field_reserved_size": "The blob header field size is set from the data and the key.",
+        "jslb_blob_gap_first": "The line has blob header 2 but no blob header 1.",
+        "jslb_blob_gap_huge": "The line has blob header 4294967296 but no blob header 1.",
+        "jslb_blob_gap_middle": "The line has blob header 3 but no blob header 2.",
+        "jslb_blob_size_differs": "Blob header 1 has size 4 but its data is 3 bytes.",
+        "jslb_blobs_mismatch_boolean": "The line header counts true blobs but the line has 1 blob headers.",
+        "jslb_blobs_mismatch_extra": "The line header counts 0 blobs but the line has 1 blob headers.",
+        "jslb_blobs_mismatch_fraction": "The line header counts 0.5 blobs but the line has 0 blob headers.",
+        "jslb_blobs_mismatch_negative": "The line header counts -1 blobs but the line has 0 blob headers.",
+        "jslb_blobs_mismatch_over": "The line header counts 2 blobs but the line has 1 blob headers.",
+        "jslb_blobs_over": "The blobs of the message come to {0} bytes, over blob_max of {1} bytes.",
+        "jslb_blobs_preset": "The header already counts its blobs, which line_make sets.",
+        "jslb_both_name_forms": "The line mixes short and full header names.",
+        "jslb_decoder_failed": "The decoder failed before and reads nothing more.",
+        "jslb_field_missing_s": "The header has no s, which is required.",
+        "jslb_field_missing_type": "The header has no type, which is required.",
+        "jslb_field_unknown": "sha256 is not a header field name.",
+        "jslb_header_not_object_blob": "Header 1 of the line is not a JSON object.",
+        "jslb_header_not_object_line": "Header 0 of the line is not a JSON object.",
+        "jslb_integer_refused": "The integer {0} is beyond plus or minus 2^53.",
+        "jslb_integer_refused_above": "The integer 9007199254740993 is beyond plus or minus 2^53.",
+        "jslb_integer_refused_below": "The integer -9007199254740993 is beyond plus or minus 2^53.",
+        "jslb_integer_refused_encoded": "The integer 9007199254740994 is beyond plus or minus 2^53.",
+        "jslb_line_not_json": "The line is not JSON: {0}.",
+        "jslb_line_not_object": "The line is not a JSON object.",
+        "jslb_line_not_utf8": "The line is not UTF-8: Error: The bytes are not valid UTF-8..",
+        "jslb_line_over_max": "The line is longer than line_max of {0} bytes.",
+        "jslb_no_header_zero": "The line has no header 0.",
+        "jslb_no_type": "The line header has no type string.",
+        "jslb_number_overflow_fraction": "The number 1.5e400 overflows a double.",
+        "jslb_number_overflow_negative": "The number -1e400 overflows a double.",
+        "jslb_number_overflow_positive": "The number 1e400 overflows a double.",
+        "jslb_number_refused_infinity": "The number Infinity is not one JSON allows.",
+        "jslb_number_refused_nan": "The number NaN is not one JSON allows.",
+        "jslb_number_refused_negative": "The number -Infinity is not one JSON allows.",
+        "jslb_payload_digit_key_0": "The payload key 0 is decimal digits.",
+        "jslb_payload_digit_key_00": "The payload key 00 is decimal digits.",
+        "jslb_payload_digit_key_01": "The payload key 01 is decimal digits.",
+        "jslb_payload_digit_key_5": "The payload key 5 is decimal digits.",
+        "jslb_text_not_json": "The text is not JSON: {0}.",
+        "jslb_text_refused": "A text holds a lone surrogate, which UTF-8 cannot carry.",
+        "jslb_unknown_line_field_s": "The line header has the unknown field s.",
+        "jslb_unknown_line_field_x": "The line header has the unknown field x.",
+        "jslb_value_refused_bigint": "The value [object BigInt] has no JSON text.",
+        "jslb_value_refused_date": "The value [object Date] has no JSON text.",
+        "jslb_value_refused_function": "The value [object Function] has no JSON text.",
+        "jslb_value_refused_map": "The value [object Map] has no JSON text.",
+        "jslb_value_refused_symbol": "The value [object Symbol] has no JSON text.",
+        "jslb_value_refused_uint8array": "The value [object Uint8Array] has no JSON text.",
+        "jslb_value_refused_undefined": "The value [object Undefined] has no JSON text."
+      }
+    },
+    "test_mcp": {
+      "lines": {
+        "asked": {
+          "0": {
+            "t": "mcp_test.asked"
+          }
+        },
+        "call_console_full": {
+          "0": {
+            "id": 1,
+            "type": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "text": "echo hi",
+              "timeout_seconds": 5
+            },
+            "name": "console_run"
+          }
+        },
+        "call_image_make": {
+          "0": {
+            "i": 3,
+            "t": "mcp"
+          },
+          "id": 3,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {},
+            "name": "image_make"
+          }
+        },
+        "call_kv_get": {
+          "0": {
+            "i": 10,
+            "t": "mcp"
+          },
+          "id": 10,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {},
+            "name": "kv_get"
+          }
+        },
+        "call_kv_put": {
+          "0": {
+            "i": 1,
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "ref": "/_files/script/step_tide.js"
+            },
+            "name": "kv_put"
+          }
+        },
+        "call_render": {
+          "0": {
+            "i": 4,
+            "t": "mcp"
+          },
+          "id": 4,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {},
+            "name": "render"
+          }
+        },
+        "mcp_request": {
+          "0": {
+            "i": 1,
+            "t": "mcp"
+          }
+        },
+        "render_reply": {
+          "0": {
+            "r": 7,
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": []
+          }
+        },
+        "reply_nine": {
+          "0": {
+            "r": 9,
+            "t": "mcp"
+          }
+        },
+        "reply_seven": {
+          "0": {
+            "r": 7,
+            "t": "mcp"
+          }
+        },
+        "response_empty": {
+          "0": {
+            "r": 9,
+            "t": "mcp"
+          },
+          "id": 3,
+          "jsonrpc": "2.0"
+        },
+        "response_id": {
+          "0": {
+            "r": 8,
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "result": {}
+        },
+        "response_list": {
+          "0": {
+            "r": 10,
+            "t": "mcp"
+          },
+          "id": 4,
+          "jsonrpc": "2.0",
+          "result": []
+        },
+        "response_null": {
+          "0": {
+            "r": 11,
+            "t": "mcp"
+          },
+          "error": {
+            "code": -32600,
+            "message": "The message is not a valid JSON-RPC 2.0 request."
+          },
+          "id": null,
+          "jsonrpc": "2.0"
+        },
+        "response_version": {
+          "0": {
+            "r": 7,
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "1.0",
+          "result": {}
+        },
+        "restart_refused": {
+          "0": {
+            "r": 8,
+            "t": "mcp"
+          },
+          "error": {
+            "code": -32602,
+            "message": "There is no tool named system_restart."
+          },
+          "id": 1,
+          "jsonrpc": "2.0"
+        },
+        "result_content_text": {
+          "0": {
+            "r": 7,
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": "{}"
+          }
+        },
+        "result_flag_text": {
+          "0": {
+            "r": 8,
+            "t": "mcp"
+          },
+          "id": 2,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [],
+            "isError": "no"
+          }
+        },
+        "result_flagged": {
+          "0": {
+            "r": 7,
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "{}",
+                "type": "text"
+              }
+            ],
+            "isError": false
+          }
+        },
+        "result_plain": {
+          "0": {
+            "r": 8,
+            "t": "mcp"
+          },
+          "id": 2,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "{}",
+                "type": "text"
+              }
+            ]
+          }
+        },
+        "sleep_call": {
+          "state": {
+            "call": 1
+          },
+          "wait_ids": [7]
+        },
+        "sleep_empty": {
+          "state": null,
+          "wait_ids": []
+        },
+        "sleep_first": {
+          "state": {
+            "step": 1
+          },
+          "wait_ids": [7]
+        },
+        "sleep_one": {
+          "state": {
+            "n": 1
+          },
+          "wait_ids": []
+        },
+        "sleep_second": {
+          "state": {
+            "step": 2
+          },
+          "wait_ids": [8]
+        },
+        "sleep_waiting": {
+          "state": null,
+          "wait_ids": [7]
+        },
+        "tools_empty": {
+          "0": {
+            "r": 7,
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "result": {
+            "tools": []
+          }
+        },
+        "tools_invalid_entry": {
+          "0": {
+            "r": 8,
+            "t": "mcp"
+          },
+          "id": 2,
+          "jsonrpc": "2.0",
+          "result": {
+            "tools": [
+              {
+                "inputSchema": {
+                  "type": "object"
+                },
+                "name": "kv_get"
+              }
+            ]
+          }
+        },
+        "tools_invalid_object": {
+          "0": {
+            "r": 7,
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "result": {
+            "tools": {}
+          }
+        },
+        "version_reply": {
+          "0": {
+            "r": 7,
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "result": {
+            "capabilities": {
+              "tools": {}
+            },
+            "protocolVersion": "2024-11-05",
+            "serverInfo": {
+              "name": "xsjs-server",
+              "version": "0"
+            }
+          }
+        },
+        "wake_eight": {
+          "0": {},
+          "replies": [
+            {
+              "0": {
+                "r": 8,
+                "t": "mcp_test.asked"
+              }
+            }
+          ]
+        },
+        "wake_seven": {
+          "0": {},
+          "replies": [
+            {
+              "0": {
+                "r": 7,
+                "t": "mcp_test.asked"
+              }
+            }
+          ]
+        }
+      },
+      "texts": {
+        "arguments_absent_answer": "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"content\":[]}}",
+        "boot_answer_full": "{\"0\":{\"type\":\"mcp\",\"reply\":1},\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"xsjs-browser\",\"version\":\"0\"}}}",
+        "boot_initialize_full": "{\"0\":{\"type\":\"mcp\",\"id\":1},\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"hyperposition-engine\",\"version\":\"0\"}}}",
+        "boot_initialized_full": "{\"0\":{\"type\":\"mcp\"},\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}",
+        "boot_list_full": "{\"0\":{\"type\":\"mcp\",\"id\":2},\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}",
+        "console_call_full": "{\"0\":{\"type\":\"mcp\",\"id\":1},\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"console_run\",\"arguments\":{\"text\":\"echo hi\",\"timeout_seconds\":5}}}",
+        "mcp_call_params": "The params of tools/call need a name and an object of arguments.",
+        "mcp_method_unknown": "The method resources/list is not served.",
+        "mcp_prefix_refused_dotted": "The client prefix browser.tools is refused: a prefix is new, not empty, and holds no dot.",
+        "mcp_prefix_refused_empty": "The client prefix  is refused: a prefix is new, not empty, and holds no dot.",
+        "mcp_prefix_refused_taken": "The client prefix server is refused: a prefix is new, not empty, and holds no dot.",
+        "mcp_prefix_unknown_bare": "The tool name kv_get does not start with the prefix of a client and a dot.",
+        "mcp_prefix_unknown_browser": "The tool name browser.kv_get does not start with the prefix of a client and a dot.",
+        "mcp_reply_error": "The reply to request 8 is the error {\"code\":-32602,\"message\":\"There is no tool named system_restart.\"}.",
+        "mcp_reply_method": "The reply to request 7 answers tools/list, not tools/call.",
+        "mcp_reply_unknown_again": "The reply to request 7 is not one the client awaits.",
+        "mcp_reply_unknown_stray": "The reply to request 9 is not one the client awaits.",
+        "mcp_response_invalid_empty": "The reply to request 9 is not a JSON-RPC 2.0 response to id 3: {\"id\":3,\"jsonrpc\":\"2.0\"}",
+        "mcp_response_invalid_id": "The reply to request 8 is not a JSON-RPC 2.0 response to id 2: {\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{}}",
+        "mcp_response_invalid_list": "The reply to request 10 is not a JSON-RPC 2.0 response to id 4: {\"id\":4,\"jsonrpc\":\"2.0\",\"result\":[]}",
+        "mcp_response_invalid_null": "The reply to request 11 is not a JSON-RPC 2.0 response to id 5: {\"error\":{\"code\":-32600,\"message\":\"The message is not a valid JSON-RPC 2.0 request.\"},\"id\":null,\"jsonrpc\":\"2.0\"}",
+        "mcp_response_invalid_version": "The reply to request 7 is not a JSON-RPC 2.0 response to id 1: {\"id\":1,\"jsonrpc\":\"1.0\",\"result\":{}}",
+        "mcp_result_invalid_content": "The tools/call result of the reply to request 7 is not valid: {\"content\":\"{}\"}",
+        "mcp_result_invalid_entry": "The tools/list result of the reply to request 8 is not valid: {\"tools\":[{\"inputSchema\":{\"type\":\"object\"},\"name\":\"kv_get\"}]}",
+        "mcp_result_invalid_flag": "The tools/call result of the reply to request 8 is not valid: {\"content\":[],\"isError\":\"no\"}",
+        "mcp_result_invalid_object": "The tools/list result of the reply to request 7 is not valid: {\"tools\":{}}",
+        "mcp_tool_twice": "A tool named kv_get is already registered.",
+        "mcp_tool_unknown": "There is no tool named kv_get.",
+        "mcp_tools_unread": "The tools of the server of server have not been read.",
+        "mcp_version_refused": "The server answered initialize with protocol version 2024-11-05, and this client speaks 2025-06-18.",
+        "mcp_wake_unknown": "A tool slept with the wake type {0}, which was not registered with the MCP server.",
+        "request_invalid_five": "{\"jsonrpc\":\"2.0\",\"id\":5,\"error\":{\"code\":-32600,\"message\":\"The message is not a valid JSON-RPC 2.0 request.\"}}",
+        "request_invalid_null": "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32600,\"message\":\"The message is not a valid JSON-RPC 2.0 request.\"}}"
+      }
+    },
+    "test_media": {
+      "lines": {
+        "fetch": {
+          "0": {
+            "i": 7,
+            "t": "media.fetch"
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "url": "https://images.example.test/arrival.png"
+        },
+        "fetch_blob": {
+          "0": {
+            "b": 1,
+            "i": 7,
+            "t": "media.fetch"
+          },
+          "1": {
+            "s": 3
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "url": "https://images.example.test/arrival.png"
+        },
+        "fetch_full": {
+          "0": {
+            "id": 7,
+            "type": "media.fetch"
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "url": "https://images.example.test/arrival.png"
+        },
+        "fetch_id_1": {
+          "0": {
+            "i": 1,
+            "t": "media.fetch"
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "url": "https://images.example.test/arrival.png"
+        },
+        "fetch_id_2": {
+          "0": {
+            "i": 2,
+            "t": "media.fetch"
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "url": "https://images.example.test/arrival.png"
+        },
+        "fetch_id_41": {
+          "0": {
+            "i": 41,
+            "t": "media.fetch"
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "url": "https://images.example.test/arrival.png"
+        },
+        "fetch_keyless": {
+          "0": {
+            "i": 7,
+            "t": "media.fetch"
+          },
+          "url": "https://images.example.test/arrival.png"
+        },
+        "fetch_unnumbered": {
+          "0": {
+            "t": "media.fetch"
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "url": "https://images.example.test/arrival.png"
+        },
+        "fetch_urlless": {
+          "0": {
+            "i": 7,
+            "t": "media.fetch"
+          },
+          "k": "/_files/gatehouse/arrival.png"
+        },
+        "header_error": {
+          "r": 7,
+          "t": "error"
+        },
+        "header_error_full": {
+          "reply": 7,
+          "type": "error"
+        },
+        "header_fetch_full": {
+          "blobs": 1,
+          "reply": 7,
+          "type": "media.fetch"
+        },
+        "header_store_full": {
+          "reply": 7,
+          "type": "media.store"
+        },
+        "kv_get": {
+          "0": {
+            "i": 7,
+            "t": "kv.get"
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "url": "https://images.example.test/arrival.png"
+        },
+        "kv_get_key": {
+          "0": {
+            "i": 7,
+            "t": "kv.get"
+          },
+          "k": "/_files/gatehouse/arrival.png"
+        },
+        "reply_fetch": {
+          "0": {
+            "b": 1,
+            "r": 7,
+            "t": "media.fetch"
+          },
+          "1": {
+            "s": 3
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "size": 3
+        },
+        "reply_store": {
+          "0": {
+            "r": 7,
+            "t": "media.store"
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "size": 3
+        },
+        "store": {
+          "0": {
+            "b": 1,
+            "i": 7,
+            "t": "media.store"
+          },
+          "1": {
+            "s": 3
+          },
+          "k": "/_files/gatehouse/arrival.png"
+        },
+        "store_full": {
+          "0": {
+            "blobs": 1,
+            "id": 7,
+            "type": "media.store"
+          },
+          "1": {
+            "size": 3
+          },
+          "k": "/_files/gatehouse/arrival.png"
+        },
+        "store_id_1": {
+          "0": {
+            "b": 1,
+            "i": 1,
+            "t": "media.store"
+          },
+          "1": {
+            "s": 3
+          },
+          "k": "/_files/gatehouse/arrival.png"
+        },
+        "store_id_2": {
+          "0": {
+            "b": 1,
+            "i": 2,
+            "t": "media.store"
+          },
+          "1": {
+            "s": 3
+          },
+          "k": "/_files/gatehouse/arrival.png"
+        },
+        "store_id_41": {
+          "0": {
+            "b": 1,
+            "i": 41,
+            "t": "media.store"
+          },
+          "1": {
+            "s": 3
+          },
+          "k": "/_files/gatehouse/arrival.png"
+        },
+        "store_keyless": {
+          "0": {
+            "b": 1,
+            "i": 7,
+            "t": "media.store"
+          },
+          "1": {
+            "s": 3
+          }
+        },
+        "store_two": {
+          "0": {
+            "b": 2,
+            "i": 7,
+            "t": "media.store"
+          },
+          "1": {
+            "s": 3
+          },
+          "2": {
+            "s": 3
+          },
+          "k": "/_files/gatehouse/arrival.png"
+        },
+        "store_unblobbed": {
+          "0": {
+            "i": 7,
+            "t": "media.store"
+          },
+          "k": "/_files/gatehouse/arrival.png"
+        },
+        "store_unnumbered": {
+          "0": {
+            "b": 1,
+            "t": "media.store"
+          },
+          "1": {
+            "s": 3
+          },
+          "k": "/_files/gatehouse/arrival.png"
+        }
+      },
+      "texts": {
+        "media_blob_bytes": "The media.store line has a blob that is not in memory, so it cannot be decoded.",
+        "media_blobs_invalid_fetch": "The media.fetch line carries 1 blobs but must carry 0.",
+        "media_blobs_invalid_none": "The media.store line carries 0 blobs but must carry 1.",
+        "media_blobs_invalid_two": "The media.store line carries 2 blobs but must carry 1.",
+        "media_budget_invalid_negative": "The media budget -1 is not a number of bytes above 0.",
+        "media_budget_invalid_zero": "The media budget 0 is not a number of bytes above 0.",
+        "media_decode_failed_error": "The image for /_files/gatehouse/arrival.png could not be decoded: Error: bad bytes",
+        "media_decode_failed_null": "The image for /_files/gatehouse/arrival.png could not be decoded: null",
+        "media_decode_failed_number": "The image for /_files/gatehouse/arrival.png could not be decoded: 5",
+        "media_decode_failed_text": "The image for /_files/gatehouse/arrival.png could not be decoded: boom",
+        "media_decode_failed_undefined": "The image for /_files/gatehouse/arrival.png could not be decoded: undefined",
+        "media_download_expired_fraction": "The download of https://images.example.test/arrival.png for /_files/gatehouse/arrival.png did not finish within 0.5 seconds.",
+        "media_download_expired_whole": "The download of https://images.example.test/arrival.png for /_files/gatehouse/arrival.png did not finish within 5 seconds.",
+        "media_download_failed": "The download of https://images.example.test/arrival.png for /_files/gatehouse/arrival.png failed: TypeError: Failed to fetch",
+        "media_field_invalid_k": "The media field k is missing or is not valid.",
+        "media_field_invalid_url": "The media field url is missing or is not valid.",
+        "media_id_missing_fetch": "The media.fetch line has no id, so nothing could answer it.",
+        "media_id_missing_store": "The media.store line has no id, so nothing could answer it.",
+        "media_receiver_missing": "The media port got a request before a receiver was set.",
+        "media_receiver_twice": "The media port already has a receiver.",
+        "media_timeout_invalid_long": "The media timeout 2147484 is not a number of seconds above 0 that a timer can hold.",
+        "media_timeout_invalid_negative": "The media timeout -1 is not a number of seconds above 0 that a timer can hold.",
+        "media_timeout_invalid_zero": "The media timeout 0 is not a number of seconds above 0 that a timer can hold.",
+        "media_type_invalid": "The media port got a line of type kv.get instead of media.store or media.fetch."
+      }
+    },
+    "test_overlay": {
+      "container_height": 100,
+      "container_width": 400,
+      "tall_count": 50,
+      "texts": {
+        "overlay_ring_invalid_fraction": "The overlay ring 1.5 is not a whole number from 1 up.",
+        "overlay_ring_invalid_infinity": "The overlay ring Infinity is not a whole number from 1 up.",
+        "overlay_ring_invalid_nan": "The overlay ring NaN is not a whole number from 1 up.",
+        "overlay_ring_invalid_negative": "The overlay ring -1 is not a whole number from 1 up.",
+        "overlay_ring_invalid_zero": "The overlay ring 0 is not a whole number from 1 up."
+      }
+    },
+    "test_page": {
+      "lines": {
+        "ai_click": {
+          "0": {
+            "type": "ai.click"
+          },
+          "x": 3,
+          "y": 4
+        },
+        "ai_say": {
+          "0": {
+            "type": "ai.say"
+          },
+          "text": "1"
+        },
+        "ai_say_end": {
+          "0": {
+            "type": "ai.say"
+          },
+          "scene": "/castle_gatehouse/scene/arrival/1",
+          "subtitle": "Fog.",
+          "turn": 7
+        },
+        "console_exit": {
+          "0": {
+            "t": "console.exit"
+          },
+          "code": 0
+        },
+        "console_open": {
+          "0": {
+            "t": "console.open"
+          }
+        },
+        "console_open_answer": {
+          "0": {
+            "t": "console.open"
+          },
+          "token": "dXNlcjpwYXNz"
+        },
+        "console_output": {
+          "0": {
+            "b": 1,
+            "t": "console.output"
+          },
+          "1": {
+            "s": 2
+          }
+        },
+        "console_show_6": {
+          "0": {
+            "i": 6,
+            "t": "console.show"
+          }
+        },
+        "console_show_7": {
+          "0": {
+            "i": 7,
+            "t": "console.show"
+          }
+        },
+        "console_show_8": {
+          "0": {
+            "i": 8,
+            "t": "console.show"
+          }
+        },
+        "console_show_reply": {
+          "0": {
+            "r": 6,
+            "t": "console.show"
+          }
+        },
+        "control_key_0": {
+          "0": {
+            "t": "ui.control_key"
+          },
+          "digit": 0
+        },
+        "control_key_1": {
+          "0": {
+            "t": "ui.control_key"
+          },
+          "digit": 1
+        },
+        "control_key_2": {
+          "0": {
+            "t": "ui.control_key"
+          },
+          "digit": 2
+        },
+        "dom_choice": {
+          "0": {
+            "i": 4,
+            "t": "dom.choice"
+          },
+          "choices": ["accept", "deny", "always"],
+          "permit": 1
+        },
+        "dom_choice_always": {
+          "0": {
+            "type": "dom.choice"
+          },
+          "choice": "always"
+        },
+        "dom_choice_answer": {
+          "0": {
+            "r": 4,
+            "t": "dom.choice"
+          },
+          "choice": "deny"
+        },
+        "dom_choice_permit": {
+          "0": {
+            "type": "dom.choice"
+          },
+          "choices": ["accept", "deny", "always"],
+          "permit": 1
+        },
+        "dom_choice_unasked": {
+          "0": {
+            "t": "dom.choice"
+          },
+          "choices": [],
+          "permit": 1
+        },
+        "dom_choice_unknown": {
+          "0": {
+            "i": 2,
+            "t": "dom.choice"
+          },
+          "choices": ["maybe"],
+          "permit": 1
+        },
+        "dom_other": {
+          "0": {
+            "i": 1,
+            "t": "dom.other"
+          }
+        },
+        "fault": {
+          "0": {
+            "t": "fault"
+          },
+          "message": "Broken.",
+          "stack": "at x",
+          "thread": "ai"
+        },
+        "media_fetch": {
+          "0": {
+            "i": 5,
+            "t": "media.fetch"
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "url": "https://example.invalid/a.png"
+        },
+        "media_fetch_answer": {
+          "0": {
+            "blobs": 1,
+            "type": "media.fetch"
+          },
+          "1": {
+            "size": 2
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "sha256": "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0",
+          "size": 2
+        },
+        "media_fetch_copy": {
+          "0": {
+            "type": "media.fetch"
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "url": "https://example.invalid/a.png"
+        },
+        "media_fetch_reply": {
+          "0": {
+            "b": 1,
+            "r": 5,
+            "t": "media.fetch"
+          },
+          "1": {
+            "s": 2
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "sha256": "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0",
+          "size": 2
+        },
+        "media_store": {
+          "0": {
+            "b": 1,
+            "i": 1,
+            "t": "media.store"
+          },
+          "1": {
+            "s": 3
+          },
+          "k": "/_files/gatehouse/arrival.png"
+        },
+        "media_store_answer": {
+          "0": {
+            "type": "media.store"
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "sha256": "",
+          "size": 3
+        },
+        "media_store_copy": {
+          "0": {
+            "blobs": 1,
+            "type": "media.store"
+          },
+          "1": {
+            "size": 3
+          },
+          "k": "/_files/gatehouse/arrival.png"
+        },
+        "media_store_reply": {
+          "0": {
+            "r": 1,
+            "t": "media.store"
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "sha256": "",
+          "size": 3
+        },
+        "overlay_line": {
+          "0": {
+            "t": "overlay.line"
+          },
+          "text": "> x",
+          "tty": 1
+        },
+        "permit_ask": {
+          "0": {
+            "i": 3,
+            "t": "permit.ask"
+          },
+          "input": {
+            "text": "ls",
+            "timeout_seconds": 5
+          },
+          "permit": 1,
+          "tool": "browser.console_run"
+        },
+        "permit_reply": {
+          "0": {
+            "r": 3,
+            "t": "permit.ask"
+          },
+          "choice": "always",
+          "permit": 1
+        },
+        "render_bare": {
+          "0": {
+            "t": "render"
+          }
+        },
+        "render_black": {
+          "0": {
+            "i": 1,
+            "t": "render"
+          },
+          "scene": "/metaverse/hyperposition/1",
+          "subtitle": "How can I help you?"
+        },
+        "render_image": {
+          "0": {
+            "i": 2,
+            "t": "render"
+          },
+          "image": "/_files/gatehouse/arrival.png",
+          "scene": "/castle_gatehouse/scene/arrival/1",
+          "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+        },
+        "render_reply": {
+          "0": {
+            "r": 2,
+            "t": "render"
+          }
+        },
+        "settings_set": {
+          "0": {
+            "t": "settings.set"
+          }
+        },
+        "settings_set_gold": {
+          "0": {
+            "t": "settings.set"
+          },
+          "test_settings": {
+            "typescript": {
+              "run": "unit"
+            }
+          }
+        },
+        "sleep_console": {
+          "state": null,
+          "then_type": "ui.console_reply"
+        },
+        "sleep_media": {
+          "then_type": "ui.media_reply"
+        },
+        "sleep_permit": {
+          "then_type": "ui.permit_reply"
+        },
+        "sleep_shown": {
+          "then_type": "ui.console_shown"
+        },
+        "sleep_turn": {
+          "state": {
+            "input": "enabled"
+          },
+          "then_type": "ui.turn_end"
+        },
+        "ui_control_key_3": {
+          "0": {
+            "type": "ui.control_key"
+          },
+          "digit": 3
+        },
+        "ui_input_click": {
+          "0": {
+            "type": "ui.input"
+          },
+          "x": 1,
+          "y": 0
+        },
+        "ui_input_clicked": {
+          "0": {
+            "t": "ui.input"
+          },
+          "x": 3,
+          "y": 4
+        },
+        "ui_input_said": {
+          "0": {
+            "t": "ui.input"
+          },
+          "text": "1"
+        },
+        "ui_input_text": {
+          "0": {
+            "type": "ui.input"
+          },
+          "text": "1"
+        },
+        "ui_tests": {
+          "0": {
+            "t": "ui.tests"
+          }
+        },
+        "wake_console_closed": {
+          "0": {
+            "t": "ui.console_closed"
+          },
+          "replies": [],
+          "state": null
+        },
+        "wake_console_reply": {
+          "0": {
+            "t": "ui.console_reply"
+          },
+          "replies": [],
+          "state": null
+        },
+        "wake_console_shown": {
+          "0": {
+            "type": "ui.console_shown"
+          }
+        },
+        "wake_media": {
+          "0": {
+            "type": "ui.media_reply"
+          }
+        },
+        "wake_permit": {
+          "0": {
+            "type": "ui.permit_reply"
+          }
+        },
+        "wake_turn": {
+          "0": {
+            "type": "ui.turn_end"
+          }
+        }
+      },
+      "texts": {
+        "page_choice_accept": "Accept",
+        "page_choice_always": "Always Allow",
+        "page_choice_deny": "Deny",
+        "page_choice_unknown": "The DOM port has no button for the choice maybe.",
+        "page_console_busy": "console.show found the console view opening or closing, so it can neither answer at once nor ask for tty 0.",
+        "page_dom_type": "The DOM port answers dom.choice lines, not dom.other.",
+        "page_element_missing": "The page has no element with the id image.",
+        "page_id_missing": "The DOM port cannot answer dom.choice without an id.",
+        "page_image_missing": "The render of /castle_gatehouse/scene/arrival/1 names the image /_files/gatehouse/arrival.png, which the media cache does not hold.",
+        "page_message_unknown": "The AI worker posted a render line, which is not a fault.",
+        "page_permit_text": "browser.console_run asks to run with {\"text\":\"ls\",\"timeout_seconds\":5}.",
+        "page_receiver_twice": "The DOM port already has a receiver.",
+        "page_settings_missing": "The first line of the AI worker is ui.tests, not settings.set."
+      }
+    },
+    "test_provider": {
+      "lines": {
+        "chat_request": {
+          "0": {
+            "type": "http.request"
+          },
+          "headers": {
+            "authorization": "Bearer xai-SYNTHETIC-KEY",
+            "content-type": "application/json"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "image_request": {
+          "0": {
+            "type": "http.request"
+          },
+          "headers": {
+            "authorization": "Bearer xai-SYNTHETIC-KEY",
+            "content-type": "application/json"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/images/generations"
+        },
+        "refused_error": {
+          "0": {
+            "r": 1,
+            "t": "error"
+          },
+          "message": "It failed.",
+          "stack": "Error: It failed."
+        },
+        "refused_kv_get": {
+          "0": {
+            "r": 1,
+            "t": "kv.get"
+          },
+          "message": "It failed.",
+          "stack": "Error: It failed."
+        },
+        "reply": {
+          "0": {
+            "r": 1,
+            "t": "http.request"
+          },
+          "headers": {
+            "content-type": "application/json"
+          },
+          "status": 200
+        },
+        "reply_full": {
+          "0": {
+            "reply": 4,
+            "type": "http.request"
+          }
+        }
+      },
+      "texts": {
+        "provider_field_invalid_call": "The provider reply field json.choices[0].message.tool_calls[0] is missing or is not valid.",
+        "provider_field_invalid_call_arguments": "The provider reply field json.choices[0].message.tool_calls[0].function.arguments is missing or is not valid.",
+        "provider_field_invalid_call_function": "The provider reply field json.choices[0].message.tool_calls[0].function is missing or is not valid.",
+        "provider_field_invalid_call_id": "The provider reply field json.choices[0].message.tool_calls[0].id is missing or is not valid.",
+        "provider_field_invalid_call_name": "The provider reply field json.choices[0].message.tool_calls[0].function.name is missing or is not valid.",
+        "provider_field_invalid_call_type": "The provider reply field json.choices[0].message.tool_calls[0].type is missing or is not valid.",
+        "provider_field_invalid_calls": "The provider reply field json.choices[0].message.tool_calls is missing or is not valid.",
+        "provider_field_invalid_choice": "The provider reply field json.choices[0] is missing or is not valid.",
+        "provider_field_invalid_choice_index": "The provider reply field json.choices[0].index is missing or is not valid.",
+        "provider_field_invalid_choices": "The provider reply field json.choices is missing or is not valid.",
+        "provider_field_invalid_data": "The provider reply field json.data is missing or is not valid.",
+        "provider_field_invalid_finish_reason": "The provider reply field json.choices[0].finish_reason is missing or is not valid.",
+        "provider_field_invalid_id": "The provider reply field json.id is missing or is not valid.",
+        "provider_field_invalid_image": "The provider reply field json.data[0] is missing or is not valid.",
+        "provider_field_invalid_image_base64": "The provider reply field json.data[0].b64_json is missing or is not valid.",
+        "provider_field_invalid_image_prompt": "The provider reply field json.data[0].revised_prompt is missing or is not valid.",
+        "provider_field_invalid_json": "The provider reply field json is missing or is not valid.",
+        "provider_field_invalid_message": "The provider reply field json.choices[0].message is missing or is not valid.",
+        "provider_field_invalid_message_call_id": "The provider reply field json.choices[0].message.tool_call_id is missing or is not valid.",
+        "provider_field_invalid_message_content": "The provider reply field json.choices[0].message.content is missing or is not valid.",
+        "provider_field_invalid_message_role": "The provider reply field json.choices[0].message.role is missing or is not valid.",
+        "provider_field_invalid_model": "The provider reply field json.model is missing or is not valid.",
+        "provider_field_invalid_second_url": "The provider reply field json.data[1].url is missing or is not valid.",
+        "provider_key_missing": "No provider key has been set.",
+        "provider_reply_type_error": "The provider reply is a line of type error instead of http.request.",
+        "provider_reply_type_kv_get": "The provider reply is a line of type kv.get instead of http.request."
+      }
+    },
+    "test_provider_script": {
+      "lines": {
+        "chat_full": {
+          "0": {
+            "id": 7,
+            "type": "http.request"
+          },
+          "headers": {
+            "Authorization": "Bearer xai-SYNTHETIC-KEY",
+            "Content-Type": "application/json"
+          },
+          "json": {
+            "messages": [
+              {
+                "content": "2",
+                "role": "user"
+              }
+            ],
+            "model": "grok-4",
+            "tool_choice": "auto"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "chat_other": {
+          "0": {
+            "i": 2,
+            "t": "http.request"
+          },
+          "headers": {
+            "Authorization": "Bearer xai-SYNTHETIC-KEY",
+            "Content-Type": "application/json"
+          },
+          "json": {
+            "messages": [
+              {
+                "content": "2",
+                "role": "user"
+              }
+            ],
+            "model": "grok-x"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "chat_request": {
+          "0": {
+            "t": "http.request"
+          },
+          "headers": {
+            "Authorization": "Bearer xai-SYNTHETIC-KEY",
+            "Content-Type": "application/json"
+          },
+          "json": {
+            "model": "grok-4",
+            "tool_choice": "auto"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "image_post": {
+          "0": {
+            "i": 1,
+            "t": "http.request"
+          },
+          "headers": {},
+          "method": "POST",
+          "url": "https://api.x.ai/v1/images/generations"
+        },
+        "image_request": {
+          "0": {
+            "i": 3,
+            "t": "http.request"
+          },
+          "headers": {
+            "Authorization": "Bearer xai-SYNTHETIC-KEY",
+            "Content-Type": "application/json"
+          },
+          "json": {
+            "model": "grok-2-image",
+            "n": 1,
+            "prompt": "A rain dark castle gatehouse at dusk",
+            "response_format": "b64_json"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/images/generations"
+        },
+        "refused_blobs": {
+          "0": {
+            "b": 1,
+            "i": 1,
+            "t": "http.request"
+          },
+          "1": {
+            "s": 1
+          },
+          "headers": {},
+          "json": {
+            "messages": [
+              {
+                "content": "2",
+                "role": "user"
+              }
+            ],
+            "model": "grok-4"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "refused_id": {
+          "0": {
+            "t": "http.request"
+          },
+          "headers": {},
+          "json": {
+            "messages": [
+              {
+                "content": "2",
+                "role": "user"
+              }
+            ],
+            "model": "grok-4"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "refused_json": {
+          "0": {
+            "i": 1,
+            "t": "http.request"
+          },
+          "headers": {},
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "refused_message": {
+          "0": {
+            "i": 1,
+            "t": "http.request"
+          },
+          "headers": {},
+          "json": {
+            "messages": [5],
+            "model": "m"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "refused_messages": {
+          "0": {
+            "i": 1,
+            "t": "http.request"
+          },
+          "headers": {},
+          "json": {
+            "model": "m"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "refused_method": {
+          "0": {
+            "i": 1,
+            "t": "http.request"
+          },
+          "headers": {},
+          "json": {
+            "messages": [
+              {
+                "content": "2",
+                "role": "user"
+              }
+            ],
+            "model": "grok-4"
+          },
+          "method": "GET",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "refused_model": {
+          "0": {
+            "i": 1,
+            "t": "http.request"
+          },
+          "headers": {},
+          "json": {
+            "messages": []
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "refused_type": {
+          "0": {
+            "i": 1,
+            "t": "kv.get"
+          },
+          "headers": {},
+          "json": {
+            "messages": [
+              {
+                "content": "2",
+                "role": "user"
+              }
+            ],
+            "model": "grok-4"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/chat/completions"
+        },
+        "refused_unknown": {
+          "0": {
+            "i": 1,
+            "t": "http.request"
+          },
+          "headers": {},
+          "json": {
+            "messages": [
+              {
+                "content": "2",
+                "role": "user"
+              }
+            ],
+            "model": "grok-4"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/models"
+        },
+        "refused_url": {
+          "0": {
+            "i": 1,
+            "t": "http.request"
+          },
+          "headers": {},
+          "json": {
+            "messages": [
+              {
+                "content": "2",
+                "role": "user"
+              }
+            ],
+            "model": "grok-4"
+          },
+          "method": "POST",
+          "url": 5
+        },
+        "reply_full": {
+          "0": {
+            "reply": 7,
+            "type": "http.request"
+          }
+        },
+        "reply_image": {
+          "0": {
+            "r": 3,
+            "t": "http.request"
+          },
+          "headers": {
+            "content-type": "application/json"
+          },
+          "status": 200
+        },
+        "reply_nothing": {
+          "0": {
+            "r": 7,
+            "t": "http.request"
+          },
+          "headers": {
+            "content-type": "application/json"
+          },
+          "json": {
+            "choices": [
+              {
+                "finish_reason": "stop",
+                "index": 0,
+                "message": {
+                  "content": "Nothing happens.",
+                  "role": "assistant"
+                }
+              }
+            ],
+            "model": "grok-4"
+          },
+          "status": 200
+        }
+      },
+      "texts": {
+        "provider_script_after_missing": "The script node bare has no reply after tool results.",
+        "provider_script_blobs_refused": "The http.request line carries blobs, which the scripted provider refuses.",
+        "provider_script_field_invalid_json": "The request field json is missing or is not valid for the scripted provider.",
+        "provider_script_field_invalid_message": "The request field json.messages[0] is missing or is not valid for the scripted provider.",
+        "provider_script_field_invalid_messages": "The request field json.messages is missing or is not valid for the scripted provider.",
+        "provider_script_field_invalid_method": "The request field method is missing or is not valid for the scripted provider.",
+        "provider_script_field_invalid_model": "The request field json.model is missing or is not valid for the scripted provider.",
+        "provider_script_field_invalid_n": "The request field json.n is missing or is not valid for the scripted provider.",
+        "provider_script_field_invalid_url": "The request field url is missing or is not valid for the scripted provider.",
+        "provider_script_format_unsupported_undefined": "The scripted provider answers images only as b64_json, not undefined.",
+        "provider_script_format_unsupported_url": "The scripted provider answers images only as b64_json, not url.",
+        "provider_script_id_missing": "The http.request line has no id, so the scripted provider could not answer it.",
+        "provider_script_input_invalid_empty": "The scripted provider takes the decimal text of one integer as the user message, not .",
+        "provider_script_input_invalid_fraction": "The scripted provider takes the decimal text of one integer as the user message, not 1.0.",
+        "provider_script_input_invalid_minus_zero": "The scripted provider takes the decimal text of one integer as the user message, not -0.",
+        "provider_script_input_invalid_null": "The scripted provider takes the decimal text of one integer as the user message, not null.",
+        "provider_script_input_invalid_plus": "The scripted provider takes the decimal text of one integer as the user message, not +1.",
+        "provider_script_input_invalid_space_after": "The scripted provider takes the decimal text of one integer as the user message, not 1 .",
+        "provider_script_input_invalid_space_before": "The scripted provider takes the decimal text of one integer as the user message, not  1.",
+        "provider_script_input_invalid_word": "The scripted provider takes the decimal text of one integer as the user message, not one.",
+        "provider_script_input_invalid_zero_led": "The scripted provider takes the decimal text of one integer as the user message, not 01.",
+        "provider_script_input_unknown_minus_five": "The script node hyperposition has no reply for the input -5.",
+        "provider_script_input_unknown_nine": "The script node hyperposition has no reply for the input 9.",
+        "provider_script_input_unknown_zero": "The script node hyperposition has no reply for the input 0.",
+        "provider_script_node_unknown": "The script has no node nowhere.",
+        "provider_script_receiver_missing": "The scripted provider got a request before a receiver was set.",
+        "provider_script_receiver_twice": "The scripted provider already has a receiver.",
+        "provider_script_results_pending": "The scripted provider got a user message in node hyperposition while the tool results that lead to node castle were pending.",
+        "provider_script_results_unasked": "The scripted provider got tool results in node hyperposition, but its last reply called no tools.",
+        "provider_script_results_unmatched_other": "In node hyperposition the scripted provider got tool results for the calls [\"call_9\"], not for the calls [\"call_1\"] its last reply made.",
+        "provider_script_results_unmatched_twice": "In node hyperposition the scripted provider got tool results for the calls [\"call_1\",\"call_1\"], not for the calls [\"call_1\"] its last reply made.",
+        "provider_script_role_unexpected_assistant": "The scripted provider answers a user message or tool results, not a last message of role assistant.",
+        "provider_script_role_unexpected_system": "The scripted provider answers a user message or tool results, not a last message of role system.",
+        "provider_script_type_invalid": "The scripted provider got a line of type kv.get instead of http.request.",
+        "provider_script_url_unknown": "The scripted provider has no answer for the url https://api.x.ai/v1/models."
+      }
+    },
+    "test_queue": {
+      "lines": {
+        "bare": {
+          "0": {}
+        },
+        "blob_ab": {
+          "0": {
+            "b": 1
+          },
+          "1": {
+            "s": 4
+          },
+          "text": "ab"
+        },
+        "blob_cd": {
+          "0": {
+            "b": 1
+          },
+          "1": {
+            "s": 4
+          },
+          "text": "cd"
+        },
+        "blob_efg": {
+          "0": {
+            "b": 1
+          },
+          "1": {
+            "s": 5
+          },
+          "text": "efg"
+        },
+        "blob_held": {
+          "0": {
+            "b": 1
+          },
+          "1": {
+            "s": 3
+          },
+          "text": "held back"
+        },
+        "blob_hi": {
+          "0": {
+            "b": 1
+          },
+          "1": {
+            "s": 4
+          },
+          "text": "hi"
+        },
+        "cached_two": {
+          "0": {
+            "b": 2
+          },
+          "1": {
+            "d": "cache/0001",
+            "s": 100
+          },
+          "2": {
+            "s": 2
+          }
+        },
+        "error_bare": {
+          "0": {
+            "type": "error"
+          }
+        },
+        "forward_kept": {
+          "0": {
+            "b": 1
+          },
+          "1": {
+            "s": 3
+          },
+          "text": "kept"
+        },
+        "handle_x": {
+          "0": {
+            "b": 1
+          },
+          "1": {
+            "d": "cache/0001",
+            "s": 100
+          },
+          "text": "x"
+        },
+        "held_two": {
+          "0": {
+            "b": 2
+          },
+          "1": {
+            "s": 2
+          },
+          "2": {
+            "s": 3
+          }
+        },
+        "measured_two": {
+          "0": {
+            "b": 2
+          },
+          "1": {
+            "s": 2
+          },
+          "2": {
+            "s": 4
+          }
+        },
+        "n_1": {
+          "0": {},
+          "n": 1
+        },
+        "n_2": {
+          "0": {},
+          "n": 2
+        },
+        "n_3": {
+          "0": {},
+          "n": 3
+        },
+        "note_true": {
+          "0": {},
+          "note": true
+        },
+        "put_empty_ai": {
+          "0": {
+            "type": "verbose.put"
+          },
+          "lines": [],
+          "thread": "ai"
+        },
+        "put_empty_ui": {
+          "0": {
+            "type": "verbose.put"
+          },
+          "lines": [],
+          "thread": "ui"
+        },
+        "reply_done": {
+          "0": {},
+          "done": true
+        },
+        "reply_failed": {
+          "0": {},
+          "failed": true
+        },
+        "reply_held": {
+          "0": {
+            "b": 1
+          },
+          "1": {
+            "s": 4
+          }
+        },
+        "reply_seven": {
+          "0": {},
+          "n": 7
+        },
+        "request_1": {
+          "0": {
+            "i": 1
+          }
+        },
+        "request_2": {
+          "0": {
+            "i": 2
+          }
+        },
+        "request_3": {
+          "0": {
+            "i": 3
+          }
+        },
+        "request_4": {
+          "0": {
+            "i": 4
+          }
+        },
+        "request_5": {
+          "0": {
+            "i": 5
+          }
+        },
+        "request_6": {
+          "0": {
+            "i": 6
+          }
+        },
+        "request_8": {
+          "0": {
+            "i": 8
+          }
+        },
+        "request_9": {
+          "0": {
+            "i": 9
+          }
+        },
+        "request_99": {
+          "0": {
+            "i": 99
+          }
+        },
+        "say_1": {
+          "0": {
+            "i": 1
+          },
+          "text": "1"
+        },
+        "shared_halves": {
+          "0": {
+            "b": 2
+          },
+          "1": {
+            "s": 2
+          },
+          "2": {
+            "s": 2
+          }
+        },
+        "sleep_empty": {
+          "state": null,
+          "wait_ids": []
+        },
+        "sleep_kept": {
+          "state": {
+            "tag": "kept"
+          }
+        },
+        "sleep_null": {
+          "state": null
+        },
+        "sleep_request": {
+          "state": {}
+        },
+        "sleep_unknown": {
+          "state": null,
+          "wait_ids": [5]
+        },
+        "submit_six": {
+          "0": {
+            "b": 1
+          },
+          "1": {
+            "s": 6
+          }
+        },
+        "text_long": {
+          "0": {},
+          "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      },
+      "texts": {
+        "queue_dispatch": "ai dispatches from ui: {2}",
+        "queue_entry_over_ai": "A verbose line of thread ai makes a verbose.put of {1} bytes on its own, which is not below line_max {2}.",
+        "queue_entry_over_ui": "A verbose line of thread ui makes a verbose.put of {1} bytes on its own, which is not below line_max {2}.",
+        "queue_error_line": "Thread ai received an error line from server: It failed.\n{3}",
+        "queue_field_invalid": "The header {0} has a id that is not a number.",
+        "queue_forward_back": "Thread ai received {1} from ui, and its owner table names ui as the owner, so the two would pass it back and forth.",
+        "queue_forward_local": "Thread ai cannot forward {1}, which it handles itself.",
+        "queue_forward_marked": "Thread ai cannot forward {1}: a line with an id or a reply is answered on the port it came on.",
+        "queue_notify_marked": "The notification {0} has an id or a reply.",
+        "queue_owner_missing": "No prefix in the owner table of thread ai matches the type queue_unrouted.type.",
+        "queue_port_missing_http": "Thread ai has no port to http.",
+        "queue_port_missing_media": "Thread ai has no port to media.",
+        "queue_port_twice_own": "Thread ai already has a port to ai.",
+        "queue_port_twice_ui": "Thread ai already has a port to ui.",
+        "queue_queue_over_exact": "Thread ai cannot hold {1} with 5 blob bytes: 0 blob bytes are held and blob_max is 4.",
+        "queue_queue_over_measured": "Thread ai cannot hold {1} with 6 blob bytes: 0 blob bytes are held and blob_max is 5.",
+        "queue_queue_over_replies": "Thread ai cannot hold {1} with 3 blob bytes: 4 blob bytes are held and blob_max is 6.",
+        "queue_receiver_missing": "The local port has no receiver.",
+        "queue_receiver_twice": "The port already has a receiver.",
+        "queue_reply": "ai replies to ui: {2}",
+        "queue_reply_missing": "The wake {0} on thread ai returned nothing, so the request 3 from ui has no reply.",
+        "queue_reply_unknown_server": "Thread ai received the reply {1} from server, which answers no request it sent there.",
+        "queue_reply_unknown_ui": "Thread ai received the reply {1} from ui, which answers no request it sent there.",
+        "queue_reply_unowed": "The handler of {0} on thread ai returned the reply {2}, which answers no request this task owes.",
+        "queue_sink_owner": "Thread ai owns the type verbose.put, so its batches would come back to it.",
+        "queue_sink_thread": "Only the ui and ai threads forward verbose lines, not server.",
+        "queue_sink_twice": "Thread ui already sends its verbose lines.",
+        "queue_stopped": "The queue of thread ai stopped at its first fault: {1}\n{2}",
+        "queue_submit_marked": "The line {0} already has an id or a reply and cannot be submitted.",
+        "queue_submit_outside": "Thread ai cannot submit {1} outside a handler, as no task could wait for its reply.",
+        "queue_type_invalid": "The header {\"t\":5} has a type that is not text.",
+        "queue_wait_missing_first": "The handler of {0} on thread ai submitted the request 1 and does not sleep on it.",
+        "queue_wait_missing_second": "The handler of {0} on thread ai submitted the request 2 and does not sleep on it.",
+        "queue_wait_twice": "The handler of {0} on thread ai sleeps on the id 1 twice.",
+        "queue_wait_unknown": "The handler of {0} on thread ai sleeps on the id 5, which it did not submit."
+      }
+    },
+    "test_script": {
+      "texts": {
+        "script_trace_call_db_list": "substrate db_list []",
+        "script_trace_call_kv_put": "substrate kv_put [\"/_files/note\",{\"bytes\":3}]",
+        "script_trace_call_sql_run": "substrate sql_run [\"castle_world\",[{\"sql\":\"UPDATE region SET tide = tide + ? WHERE name = ?\",\"params\":[1,\"castle_gatehouse\"]}]]"
+      }
+    },
+    "test_settings": {
+      "texts": {
+        "settings_already_set": "The settings were already set on this thread.",
+        "settings_no_sender": "No sender is registered to submit settings.put.",
+        "settings_not_set": "The settings were used before they were set.",
+        "settings_put_denied": "Settings can only be changed in debug mode.",
+        "settings_sender_twice": "A sender is already registered for settings.put.",
+        "settings_unknown_id_base_url": "The settings have no value with id provider.base_url.",
+        "settings_unknown_id_chat_model": "The settings have no value with id provider.chat_model.",
+        "settings_unknown_id_debug": "The settings have no value with id debug.no_such_id.",
+        "settings_unknown_id_empty": "The settings have no value with id .",
+        "settings_unknown_id_image_model": "The settings have no value with id provider.image_model.",
+        "settings_unknown_id_leading": "The settings have no value with id .provider.",
+        "settings_unknown_id_message_max": "The settings have no value with id message_max.",
+        "settings_unknown_id_provider": "The settings have no value with id provider.no_such_id.",
+        "settings_unknown_id_queue_max": "The settings have no value with id queue_max.",
+        "settings_unknown_id_test": "The settings have no value with id test.no_such_id.",
+        "settings_unknown_id_trailing": "The settings have no value with id provider.."
+      }
+    },
+    "test_substrate": {
+      "lines": {
+        "file_alpha": {
+          "0": {
+            "b": 1,
+            "t": "db.file"
+          },
+          "db": "alpha"
+        },
+        "file_beta": {
+          "0": {
+            "b": 1,
+            "t": "db.file"
+          },
+          "db": "beta"
+        },
+        "push_db_create": {
+          "0": {
+            "type": "db.create"
+          },
+          "db": "alpha"
+        },
+        "push_db_drop": {
+          "0": {
+            "type": "db.drop"
+          },
+          "db": "alpha"
+        },
+        "push_doc_put": {
+          "0": {
+            "type": "doc.put"
+          },
+          "body": {
+            "0": {
+              "t": "note"
+            }
+          },
+          "db": "alpha",
+          "id": "note"
+        },
+        "push_kv_delete_a": {
+          "0": {
+            "key": "/alpha/a",
+            "type": "kv.delete"
+          }
+        },
+        "push_kv_put_a": {
+          "0": {
+            "blobs": 1,
+            "key": "/alpha/a",
+            "type": "kv.put"
+          }
+        },
+        "push_kv_put_big": {
+          "0": {
+            "blobs": 1,
+            "key": "/alpha/big",
+            "type": "kv.put"
+          }
+        },
+        "push_kv_put_streamed": {
+          "0": {
+            "blobs": 1,
+            "key": "/alpha/streamed",
+            "type": "kv.put"
+          }
+        },
+        "push_sql_run_create": {
+          "0": {
+            "type": "sql.run"
+          },
+          "db": "alpha",
+          "statements": [
+            {
+              "params": [],
+              "sql": "CREATE TABLE t (x TEXT)"
+            }
+          ]
+        },
+        "push_sql_run_insert": {
+          "0": {
+            "type": "sql.run"
+          },
+          "db": "alpha",
+          "statements": [
+            {
+              "params": ["a"],
+              "sql": "INSERT INTO t VALUES (?)"
+            }
+          ]
+        },
+        "push_turn_append_four": {
+          "0": {
+            "type": "turn.append"
+          },
+          "content": {
+            "content": "4",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/alpha/scene/1"
+        },
+        "push_turn_append_hi": {
+          "0": {
+            "type": "turn.append"
+          },
+          "content": {
+            "content": "hi",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/alpha/scene/1"
+        },
+        "request_db_create": {
+          "0": {
+            "i": 17,
+            "t": "db.create"
+          },
+          "db": "alpha"
+        },
+        "request_db_drop": {
+          "0": {
+            "i": 21,
+            "t": "db.drop"
+          },
+          "db": "alpha"
+        },
+        "request_doc_head": {
+          "0": {
+            "i": 14,
+            "t": "doc.head"
+          },
+          "db": "castle_gatehouse",
+          "id": "scene/arrival"
+        },
+        "request_doc_put": {
+          "0": {
+            "i": 13,
+            "t": "doc.put"
+          },
+          "body": {
+            "0": {
+              "t": "scene"
+            },
+            "1": "/_files/gatehouse/arrival.png",
+            "image": {
+              "$ref": 1
+            },
+            "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+          },
+          "db": "castle_gatehouse",
+          "id": "scene/arrival"
+        },
+        "request_kv_delete": {
+          "0": {
+            "i": 6,
+            "k": "/castle/world",
+            "t": "kv.delete"
+          }
+        },
+        "request_kv_get_big": {
+          "0": {
+            "i": 10,
+            "k": "/metaverse/big",
+            "t": "kv.get"
+          }
+        },
+        "request_kv_get_world": {
+          "0": {
+            "i": 8,
+            "k": "/metaverse/world",
+            "t": "kv.get"
+          }
+        },
+        "request_kv_list": {
+          "0": {
+            "i": 5,
+            "t": "kv.list"
+          },
+          "db": "castle",
+          "prefix": "wor"
+        },
+        "request_kv_put_big": {
+          "0": {
+            "b": 1,
+            "i": 9,
+            "k": "/metaverse/big",
+            "t": "kv.put"
+          }
+        },
+        "request_kv_put_world": {
+          "0": {
+            "b": 1,
+            "i": 7,
+            "k": "/metaverse/world",
+            "t": "kv.put"
+          }
+        },
+        "request_sql_run": {
+          "0": {
+            "i": 4,
+            "t": "sql.run"
+          },
+          "db": "castle",
+          "statements": [
+            {
+              "params": [],
+              "sql": "CREATE TABLE world (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT"
+            },
+            {
+              "params": ["castle_world", "The castle"],
+              "sql": "INSERT INTO world VALUES (?, ?)"
+            }
+          ]
+        },
+        "request_turn_append": {
+          "0": {
+            "i": 15,
+            "t": "turn.append"
+          },
+          "content": {
+            "content": "1",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "restore_alpha": {
+          "0": {
+            "b": 1,
+            "t": "db.restore"
+          },
+          "db": "alpha",
+          "files": 2
+        },
+        "restore_beta_none": {
+          "0": {
+            "b": 1,
+            "t": "db.restore"
+          },
+          "db": "beta",
+          "files": 0
+        },
+        "restore_beta_one": {
+          "0": {
+            "b": 1,
+            "t": "db.restore"
+          },
+          "db": "beta",
+          "files": 1
+        }
+      },
+      "piece_bytes": 4096,
+      "slot_count": 8,
+      "texts": {
+        "agent_content_ambiguous": "The write would make two rows of the universe table name one world, so the current universe would be ambiguous; nothing was written.",
+        "nested_stored": "{\"0\":{\"t\":\"nest\"},\"1\":\"/_files/fog.png\",\"inner\":{\"1\":{\"$ref\":1},\"2\":\"\u4e2d\u6587\ud83d\ude00\",\"b\":1,\"a\":[{\"0\":0.5,\"z\":null}]},\"count\":-3}",
+        "reply_db_create": "{\"0\":{\"t\":\"db.create\",\"r\":17}}",
+        "reply_db_drop": "{\"0\":{\"t\":\"db.drop\",\"r\":21}}",
+        "reply_doc_head": "{\"0\":{\"t\":\"doc.head\",\"r\":14},\"ref\":\"/castle_gatehouse/scene/arrival/1\"}",
+        "reply_doc_put": "{\"0\":{\"t\":\"doc.put\",\"r\":13},\"ref\":\"/castle_gatehouse/scene/arrival/1\"}",
+        "reply_kv_delete": "{\"0\":{\"t\":\"kv.delete\",\"r\":6}}",
+        "reply_kv_get": "{\"0\":{\"t\":\"kv.get\",\"r\":8,\"b\":1},\"1\":{\"s\":12},\"size\":12,\"sha256\":\"{0}\"}",
+        "reply_kv_list": "{\"0\":{\"t\":\"kv.list\",\"r\":5},\"keys\":[{\"k\":\"world\",\"size\":12,\"sha256\":\"{0}\"}]}",
+        "reply_kv_put": "{\"0\":{\"t\":\"kv.put\",\"r\":7},\"sha256\":\"{0}\"}",
+        "reply_sql_run": "{\"0\":{\"t\":\"sql.run\",\"r\":4},\"results\":[{\"columns\":[],\"rows\":[],\"changes\":0},{\"columns\":[],\"rows\":[],\"changes\":1}]}",
+        "reply_turn_append": "{\"0\":{\"t\":\"turn.append\",\"r\":15},\"n\":1}",
+        "substrate_cache_full_none": "The cache has no free file among its 0 files.",
+        "substrate_cache_full_one": "The cache has no free file among its 1 files.",
+        "substrate_cache_header": "The cache file 0 begins with zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz, which names no SHA-256.",
+        "substrate_cache_twice": "Two cache files are named {0}.",
+        "substrate_cache_unknown": "The cache has no file {0}.",
+        "substrate_db_absent": "The database gamma has no file under the root.",
+        "substrate_db_busy": "The database alpha is inside a transaction.",
+        "substrate_db_closed_beta": "The database beta is not open.",
+        "substrate_db_closed_gamma": "The database gamma is not open.",
+        "substrate_db_exists": "The database alpha already exists.",
+        "substrate_db_open": "The database alpha is already open.",
+        "substrate_document_ref_key": "The ref '/alpha/world' is not a Document-Ref.",
+        "substrate_document_ref_scene": "The ref '/castle_gatehouse/scene/arrival' is not a Document-Ref.",
+        "substrate_file_lost": "The value {0} names the cache file {1}, which this store does not hold.",
+        "substrate_file_lost_big": "The value /alpha/big names the cache file {1}, which this store does not hold.",
+        "substrate_file_small": "The file {0} holds {1} bytes, not over overflow_bytes {2}.",
+        "substrate_file_unexpected_alpha": "A db.file of alpha came with no restore of it waiting.",
+        "substrate_file_unexpected_beta": "A db.file of beta came with no restore of it waiting.",
+        "substrate_header_bad_field": "The document header 0 is not a type with an optional version other than 0: {\"t\":\"scene\",\"x\":1}",
+        "substrate_header_bad_text": "The document header 0 is not a type with an optional version other than 0: scene",
+        "substrate_header_bad_type": "The document header 0 is not a type with an optional version other than 0: {\"v\":2}",
+        "substrate_header_bad_version": "The document header 0 is not a type with an optional version other than 0: {\"t\":\"scene\",\"v\":0}",
+        "substrate_header_gap": "The document header 2 follows a gap.",
+        "substrate_header_missing": "The document has no header 0.",
+        "substrate_header_normal": "A document in its normal form has a header 1 besides 0.",
+        "substrate_header_ref": "The document header 1 is not a reference string.",
+        "substrate_id_empty": "A document id is empty.",
+        "substrate_id_missing_absent": "The database castle_gatehouse has no document 'scene/absent'.",
+        "substrate_id_missing_note": "The database alpha has no document 'note'.",
+        "substrate_key_digits": "The document key '07' is decimal digits, which read as a header.",
+        "substrate_key_missing_a": "The database alpha has no key 'a'.",
+        "substrate_key_missing_b": "The database alpha has no key 'b'.",
+        "substrate_key_missing_d": "The database alpha has no key 'd'.",
+        "substrate_key_missing_version": "The database castle_gatehouse has no key 'scene/arrival/3'.",
+        "substrate_key_missing_wide": "The database alpha has no key 'greeting/\u4e2d\u6587\ud83d\ude00'.",
+        "substrate_name_bad_dash": "The database name 'a-b' is not a C identifier.",
+        "substrate_name_bad_digit": "The database name '1abc' is not a C identifier.",
+        "substrate_name_bad_dot": "The database name 'a.b' is not a C identifier.",
+        "substrate_name_bad_empty": "The database name '' is not a C identifier.",
+        "substrate_name_bad_slash": "The database name 'a/b' is not a C identifier.",
+        "substrate_name_bad_space": "The database name 'a b' is not a C identifier.",
+        "substrate_name_bad_wide": "The database name 'caf\u00e9' is not a C identifier.",
+        "substrate_params_count_extra": "The statement takes 0 parameters and 1 were given: SELECT 1",
+        "substrate_params_count_missing": "The statement takes 1 parameters and 0 were given: SELECT ?",
+        "substrate_read_short": "The cache file 0 gave 9 of 10 bytes.",
+        "substrate_ref_bad_db_dash": "The ref '/d-b/key' is not a Key-Value-Ref.",
+        "substrate_ref_bad_db_digit": "The ref '/1db/key' is not a Key-Value-Ref.",
+        "substrate_ref_bad_db_empty": "The ref '//key' is not a Key-Value-Ref.",
+        "substrate_ref_bad_db_wide": "The ref '/caf\u00e9/key' is not a Key-Value-Ref.",
+        "substrate_ref_bad_empty": "The ref '' is not a Key-Value-Ref.",
+        "substrate_ref_bad_key_empty": "The ref '/metaverse/' is not a Key-Value-Ref.",
+        "substrate_ref_bad_key_none": "The ref '/metaverse' is not a Key-Value-Ref.",
+        "substrate_ref_bad_slash": "The ref '/' is not a Key-Value-Ref.",
+        "substrate_ref_both": "The external ref '/alpha/world' names its database, and alpha was given too.",
+        "substrate_ref_index_true": "The header reference true names no header of the document.",
+        "substrate_ref_index_two": "The header reference 2 names no header of the document.",
+        "substrate_ref_internal": "The internal ref 'world' needs a database.",
+        "substrate_ref_shape": "The document body holds {\"$ref\":1}, which has the shape of a header reference.",
+        "substrate_restore_left": "The restore file {0} is left from an earlier restore.",
+        "substrate_restore_pending": "A db.restore of beta came while the restore of alpha waits for 2 more cache files.",
+        "substrate_scene_bad_internal": "The scene 'hyperposition/1' is not an external Document-Ref.",
+        "substrate_scene_bad_key": "The scene '/metaverse/world' is not an external Document-Ref.",
+        "substrate_schema_partial_meta": "The database has only the substrate tables [\"_meta\"].",
+        "substrate_schema_partial_none": "The database has only the substrate tables [].",
+        "substrate_schema_version": "The substrate schema row is 2, not 1.",
+        "substrate_statement_many": "The SQL holds 2 statements, where one is allowed: SELECT 1; SELECT 2",
+        "substrate_text_refused": "The text holds a lone surrogate, which UTF-8 cannot encode.",
+        "substrate_through_bad": "Compaction through turn 0 is below 1.",
+        "substrate_turns_compacted_four": "Turns 1 to 4 of this conversation were compacted when it held 4 turns. Their text is no longer in the conversation; the databases hold the state.",
+        "substrate_turns_compacted_three": "Turns 1 to 3 of this conversation were compacted when it held 3 turns. Their text is no longer in the conversation; the databases hold the state.",
+        "substrate_turns_none": "The scene '/metaverse/elsewhere/1' has no turns 1 to 2.",
+        "substrate_value_refused_bytes": "The value [object Uint8Array] cannot be written as JSON.",
+        "substrate_value_refused_undefined": "The value [object Undefined] cannot be written as JSON.",
+        "substrate_version_exists": "The document version 'note/1' already exists in alpha.",
+        "substrate_write_short": "The cache file 0 took 63 of 64 bytes."
+      }
+    },
+    "test_tools_browser": {
+      "lines": {
+        "console_input": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          }
+        },
+        "console_read": {
+          "0": {
+            "type": "console.read"
+          },
+          "timeout_seconds": 5,
+          "until": "$ "
+        },
+        "console_show": {
+          "0": {
+            "type": "console.show"
+          }
+        },
+        "image_answer": {
+          "0": {
+            "t": "http.request"
+          },
+          "headers": {
+            "content-type": "application/json"
+          },
+          "json": {
+            "data": [
+              {}
+            ]
+          },
+          "status": 200
+        },
+        "image_answer_url": {
+          "0": {
+            "t": "http.request"
+          },
+          "headers": {
+            "content-type": "application/json"
+          },
+          "json": {
+            "data": [
+              {
+                "url": "https://images.invalid/gatehouse/arrival.png"
+              }
+            ]
+          },
+          "status": 200
+        },
+        "image_request": {
+          "0": {
+            "type": "http.request"
+          },
+          "headers": {
+            "Authorization": "Bearer xai-SYNTHETIC-KEY",
+            "Content-Type": "application/json"
+          },
+          "json": {
+            "model": "grok-2-image",
+            "n": 1,
+            "prompt": "A rain dark castle gatehouse at dusk seen from the far side of a moat, one lantern lit, painted, wide still frame, no people",
+            "response_format": "b64_json"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/images/generations"
+        },
+        "media_fetch": {
+          "0": {
+            "type": "media.fetch"
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "url": "https://images.invalid/gatehouse/arrival.png"
+        },
+        "media_fetch_reply": {
+          "0": {
+            "b": 1,
+            "t": "media.fetch"
+          },
+          "k": "/_files/gatehouse/arrival.png"
+        },
+        "media_store": {
+          "0": {
+            "blobs": 1,
+            "type": "media.store"
+          },
+          "k": "/_files/gatehouse/arrival.png"
+        },
+        "media_store_reply": {
+          "0": {
+            "t": "media.store"
+          },
+          "k": "/_files/gatehouse/arrival.png"
+        },
+        "permit_accept": {
+          "0": {
+            "t": "permit.ask"
+          },
+          "choice": "accept"
+        },
+        "permit_always": {
+          "0": {
+            "t": "permit.ask"
+          },
+          "choice": "always"
+        },
+        "permit_ask": {
+          "0": {
+            "type": "permit.ask"
+          },
+          "input": {
+            "text": "echo hi",
+            "timeout_seconds": 5
+          },
+          "permit": 1,
+          "tool": "browser.console_run"
+        },
+        "permit_deny": {
+          "0": {
+            "t": "permit.ask"
+          },
+          "choice": "deny"
+        },
+        "read_reply": {
+          "0": {
+            "t": "console.read"
+          },
+          "text": "echo hi\r\nhi\r\n$ ",
+          "timed_out": false
+        },
+        "read_reply_expired": {
+          "0": {
+            "t": "console.read"
+          },
+          "text": "sleep 600\r\n",
+          "timed_out": true
+        },
+        "render_arrival": {
+          "0": {
+            "type": "render"
+          },
+          "image": "/_files/gatehouse/arrival.png",
+          "scene": "/castle_gatehouse/scene/arrival/1",
+          "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+        },
+        "render_black": {
+          "0": {
+            "type": "render"
+          },
+          "scene": "/metaverse/hyperposition/1",
+          "subtitle": "How can I help you?"
+        },
+        "render_reply": {
+          "0": {
+            "t": "render"
+          }
+        },
+        "show_reply": {
+          "0": {
+            "t": "console.show"
+          }
+        },
+        "tail_reply": {
+          "0": {
+            "t": "verbose.tail"
+          },
+          "lines": [
+            {
+              "at": 1760800000000,
+              "text": "tide advanced by 1"
+            }
+          ]
+        },
+        "verbose_tail": {
+          "0": {
+            "type": "verbose.tail"
+          },
+          "count": 5,
+          "thread": "server"
+        }
+      },
+      "result_expired": "{\"output\":\"\",\"timed_out\":true}",
+      "texts": {
+        "script_trace_call": "substrate sql_run [\"castle_world\",[{\"sql\":\"UPDATE region SET tide = tide + ? WHERE name = ?\",\"params\":[1,\"castle_gatehouse\"]}]]",
+        "substrate_file_lost_document": "The value /alpha/note/1 names the cache file {1}, which this store does not hold.",
+        "substrate_file_lost_value": "The value /alpha/big names the cache file {1}, which this store does not hold.",
+        "tools_browser_debug_off": "browser.console_run needs debug mode, and the setting debug is false.",
+        "tools_browser_permit_denied": "The player denied the tool browser.console_run.",
+        "utility_bytes_refused": "The bytes are not valid UTF-8."
+      }
+    },
+    "test_utility": {
+      "texts": {
+        "utility_base64_refused": "The text is not strict base64: it must use the standard alphabet, full padding, no white space and zero unused bits.",
+        "utility_bytes_refused": "The bytes are not valid UTF-8.",
+        "utility_text_refused": "The text holds a lone surrogate, which UTF-8 cannot encode.",
+        "utility_value_refused": "JSON has no text for the value."
+      }
+    },
+    "test_verbose": {
+      "ring_narrow": 3,
+      "ring_pair": 2,
+      "ring_wide": 10,
+      "texts": {
+        "verbose_count_invalid_fraction": "The history count 1.5 is not a whole number from 0 up.",
+        "verbose_count_invalid_infinity": "The history count Infinity is not a whole number from 0 up.",
+        "verbose_count_invalid_nan": "The history count NaN is not a whole number from 0 up.",
+        "verbose_count_invalid_negative": "The history count -1 is not a whole number from 0 up.",
+        "verbose_ring_invalid_fraction": "The setting verbose_ring is 1.5, which is not a whole number of lines from 0 up.",
+        "verbose_ring_invalid_infinity": "The setting verbose_ring is Infinity, which is not a whole number of lines from 0 up.",
+        "verbose_ring_invalid_nan": "The setting verbose_ring is NaN, which is not a whole number of lines from 0 up.",
+        "verbose_ring_invalid_negative": "The setting verbose_ring is -1, which is not a whole number of lines from 0 up.",
+        "verbose_ring_invalid_null": "The setting verbose_ring is null, which is not a whole number of lines from 0 up.",
+        "verbose_ring_invalid_text": "The setting verbose_ring is 3, which is not a whole number of lines from 0 up.",
+        "verbose_ring_invalid_undefined": "The setting verbose_ring is undefined, which is not a whole number of lines from 0 up.",
+        "verbose_sink_twice": "A sink is already set for the verbose lines of this thread."
+      }
+    },
+    "test_wire": {
+      "lines": {
+        "error_reply": {
+          "0": {
+            "r": 1,
+            "t": "error"
+          },
+          "message": "kv_get: /metaverse/nothing: no such key",
+          "stack": "Traceback (most recent call last):"
+        },
+        "first": {
+          "0": {
+            "i": 101,
+            "t": "tap.start"
+          },
+          "settings": {
+            "root": "/home/t/.cache/xsjs"
+          }
+        },
+        "first_blob": {
+          "0": {
+            "b": 1,
+            "i": 101,
+            "t": "tap.start"
+          }
+        },
+        "first_reply": {
+          "0": {
+            "r": 101,
+            "t": "tap.start"
+          }
+        },
+        "input": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          }
+        },
+        "notice_a": {
+          "0": {
+            "t": "a"
+          }
+        },
+        "notice_b": {
+          "0": {
+            "t": "b"
+          }
+        },
+        "notice_console_output": {
+          "0": {
+            "t": "console.output"
+          }
+        },
+        "notice_mcp": {
+          "0": {
+            "t": "mcp"
+          }
+        },
+        "notice_tap_line": {
+          "0": {
+            "t": "tap.line"
+          }
+        },
+        "notice_verbose_put": {
+          "0": {
+            "t": "verbose.put"
+          }
+        },
+        "open_unnumbered": {
+          "0": {
+            "type": "console.open"
+          }
+        },
+        "output": {
+          "0": {
+            "blobs": 1,
+            "type": "console.output"
+          }
+        },
+        "put": {
+          "0": {
+            "b": 1,
+            "i": 1,
+            "k": "/m/big",
+            "t": "kv.put"
+          }
+        },
+        "read_reply_expired": {
+          "0": {
+            "reply": 1,
+            "type": "console.read"
+          },
+          "text": "",
+          "timed_out": true
+        },
+        "read_reply_found": {
+          "0": {
+            "reply": 1,
+            "type": "console.read"
+          },
+          "text": "hi\r\n$ ",
+          "timed_out": false
+        },
+        "read_reply_partial": {
+          "0": {
+            "reply": 1,
+            "type": "console.read"
+          },
+          "text": "partial",
+          "timed_out": true
+        },
+        "read_reply_second": {
+          "0": {
+            "reply": 2,
+            "type": "console.read"
+          },
+          "text": "$ ",
+          "timed_out": false
+        },
+        "read_request_1": {
+          "0": {
+            "id": 1,
+            "type": "console.read"
+          },
+          "timeout_seconds": 60,
+          "until": "$ "
+        },
+        "read_request_2": {
+          "0": {
+            "id": 2,
+            "type": "console.read"
+          },
+          "timeout_seconds": 60,
+          "until": "$ "
+        },
+        "read_seconds_long": {
+          "0": {
+            "id": 1,
+            "type": "console.read"
+          },
+          "timeout_seconds": 2147484,
+          "until": "$ "
+        },
+        "read_seconds_negative": {
+          "0": {
+            "id": 1,
+            "type": "console.read"
+          },
+          "timeout_seconds": -1,
+          "until": "$ "
+        },
+        "read_seconds_text": {
+          "0": {
+            "id": 1,
+            "type": "console.read"
+          },
+          "timeout_seconds": "5",
+          "until": "$ "
+        },
+        "read_unnumbered": {
+          "0": {
+            "type": "console.read"
+          },
+          "timeout_seconds": 5,
+          "until": "$ "
+        },
+        "read_until_number": {
+          "0": {
+            "id": 1,
+            "type": "console.read"
+          },
+          "timeout_seconds": 5,
+          "until": 5
+        },
+        "refusal": {
+          "0": {
+            "t": "error"
+          },
+          "message": "The engine lock /home/t/.cache/xsjs/engine.lock is held.",
+          "stack": "Traceback (most recent call last):"
+        },
+        "report": {
+          "0": {
+            "type": "error"
+          },
+          "message": "The server sent tap.start a second time.",
+          "stack": "Error: The server sent tap.start a second time."
+        }
+      },
+      "texts": {
+        "jslb_blobs_over": "The blobs of the message come to 1 bytes, over blob_max of 0 bytes.",
+        "jslb_line_over_max": "The line is longer than line_max of 64 bytes.",
+        "jslb_no_header_zero": "The line has no header 0.",
+        "jslb_number_overflow": "The number 1e400 overflows a double.",
+        "wire_blobs_over_frames": "The blobs of the kv.put line come to 100 bytes, over the blob_max of 99.",
+        "wire_blobs_over_posted": "The blobs of the kv.put line come to 100 bytes, over the blob_max of 64.",
+        "wire_chunk_invalid_fraction": "The chunk size 1.5 is not a whole number of bytes from 2 up.",
+        "wire_chunk_invalid_infinity": "The chunk size Infinity is not a whole number of bytes from 2 up.",
+        "wire_chunk_invalid_nan": "The chunk size NaN is not a whole number of bytes from 2 up.",
+        "wire_chunk_invalid_negative": "The chunk size -4 is not a whole number of bytes from 2 up.",
+        "wire_chunk_invalid_one": "The chunk size 1 is not a whole number of bytes from 2 up.",
+        "wire_chunk_invalid_zero": "The chunk size 0 is not a whole number of bytes from 2 up.",
+        "wire_close_partial": "connection closed with code 1006 in the middle of a message and no error line",
+        "wire_close_silent_abnormal": "connection closed with code 1006 and no error line",
+        "wire_close_silent_normal": "connection closed with code 1000 and no error line",
+        "wire_console_type": "The console port takes no line of type console.output.",
+        "wire_error_first": "The server sent an error before tap.start: The engine lock /home/t/.cache/xsjs/engine.lock is held.\nTraceback (most recent call last):",
+        "wire_frames_none": "No input frame is waiting to be sent.",
+        "wire_handle_unsent": "The wire port sends blob bytes held in memory, never the cache handle cache/0001.",
+        "wire_id_missing_open": "A console.open line posted to the console port needs an id.",
+        "wire_id_missing_read": "A console.read line posted to the console port needs an id.",
+        "wire_kind_unknown_brace": "ttyd sent a message of unknown kind 123.",
+        "wire_kind_unknown_digit": "ttyd sent a message of unknown kind 51.",
+        "wire_line_over_frames": "The mcp line of {1} bytes is over the line_max of {2}.",
+        "wire_line_over_posted": "The mcp line of {1} bytes is over the line_max of 64.",
+        "wire_message_empty": "ttyd sent an empty message.",
+        "wire_open_twice": "The socket ws://127.0.0.1:7681/ws is open or opening already.",
+        "wire_output_invalid_prompt": "The console output read until $  is not valid UTF-8.",
+        "wire_output_invalid_slash": "The console output read until / is not valid UTF-8.",
+        "wire_post_early": "Cannot post verbose.put before tap.start has arrived.",
+        "wire_queue_over": "The 6 blob bytes of the kv.put line on top of the 10 blob bytes held would pass the blob_max of 15 in the wire frame queue.",
+        "wire_read_none": "No console read is waiting.",
+        "wire_read_seconds_long": "The timeout_seconds of console.read is 2147484, not a number of seconds from 0 that a timer can hold.",
+        "wire_read_seconds_negative": "The timeout_seconds of console.read is -1, not a number of seconds from 0 that a timer can hold.",
+        "wire_read_seconds_text": "The timeout_seconds of console.read is 5, not a number of seconds from 0 that a timer can hold.",
+        "wire_read_twice": "A console read waits for $  already.",
+        "wire_read_until": "The until of console.read must be text.",
+        "wire_receiver_missing_close": "A close line arrived with no receiver set.",
+        "wire_receiver_missing_start": "A tap.start line arrived with no receiver set.",
+        "wire_receiver_twice_close": "close_receive was called twice.",
+        "wire_receiver_twice_first": "first_receive was called twice.",
+        "wire_receiver_twice_line": "line_receive was called twice.",
+        "wire_scheme_unknown_file": "The page address file:///tmp/ is neither http nor https.",
+        "wire_scheme_unknown_ftp": "The page address ftp://127.0.0.1/ is neither http nor https.",
+        "wire_socket_missing_console": "No socket ws://127.0.0.1:7681/ws?arg=console exists: it was never opened, or it has closed.",
+        "wire_socket_missing_wire": "No socket ws://127.0.0.1:7681/ws exists: it was never opened, or it has closed.",
+        "wire_start_missing": "The server sent mcp before tap.start.",
+        "wire_start_trailing": "The server sent more output after tap.start before its reply.",
+        "wire_start_twice": "The server sent tap.start a second time, as a restart does; only a reload of the page takes a new first line."
+      }
+    },
+    "test_worker_ai": {
+      "lines": {
+        "console_close_answer": {
+          "0": {
+            "reply": 8,
+            "type": "console.close"
+          }
+        },
+        "console_close_request": {
+          "0": {
+            "id": 8,
+            "type": "console.close"
+          }
+        },
+        "console_open_answer": {
+          "0": {
+            "reply": 7,
+            "type": "console.open"
+          },
+          "token": "abc"
+        },
+        "console_open_copy": {
+          "0": {
+            "type": "console.open"
+          }
+        },
+        "console_open_reply": {
+          "0": {
+            "type": "console.open"
+          },
+          "token": "abc"
+        },
+        "console_open_request": {
+          "0": {
+            "id": 7,
+            "type": "console.open"
+          }
+        },
+        "console_opened_wake": {
+          "0": {
+            "type": "worker.console_opened"
+          }
+        },
+        "console_sleep": {
+          "then_type": "worker.console_opened"
+        },
+        "error_full": {
+          "0": {
+            "type": "error"
+          }
+        },
+        "fault_ui": {
+          "0": {
+            "t": "fault"
+          },
+          "thread": "ui"
+        },
+        "kv_list_first": {
+          "0": {
+            "i": 1,
+            "t": "kv.list"
+          },
+          "db": "castle",
+          "prefix": ""
+        },
+        "kv_list_reply": {
+          "0": {
+            "r": 1,
+            "t": "kv.list"
+          },
+          "keys": []
+        },
+        "kv_list_second": {
+          "0": {
+            "i": 2,
+            "t": "kv.list"
+          },
+          "db": "castle",
+          "prefix": ""
+        },
+        "kv_put_sized": {
+          "0": {
+            "b": 1,
+            "k": "/a/b",
+            "t": "kv.put"
+          },
+          "1": {
+            "s": 3
+          }
+        },
+        "overlay_line": {
+          "0": {
+            "type": "overlay.line"
+          },
+          "tty": 1
+        },
+        "settings_put_copy": {
+          "0": {
+            "type": "settings.put"
+          }
+        },
+        "settings_put_notice": {
+          "0": {
+            "t": "settings.put"
+          }
+        },
+        "settings_put_reply": {
+          "0": {
+            "type": "settings.put"
+          }
+        },
+        "settings_put_wake": {
+          "0": {
+            "type": "worker.settings_put"
+          },
+          "state": null
+        },
+        "settings_sleep": {
+          "state": null,
+          "then_type": "worker.settings_put"
+        },
+        "verbose_put": {
+          "0": {
+            "t": "verbose.put"
+          },
+          "lines": [],
+          "thread": "ui"
+        },
+        "verbose_put_full": {
+          "0": {
+            "type": "verbose.put"
+          },
+          "lines": [],
+          "thread": "ui"
+        }
+      },
+      "texts": {
+        "worker_ai_overlay_received": "< {\"0\":{\"r\":1,\"t\":\"kv.list\"},\"keys\":[]}",
+        "worker_ai_overlay_received_sized": "< {\"b\":1,\"k\":\"/a/b\",\"t\":\"kv.put\"} with a payload of {1} bytes and blobs of [3] bytes",
+        "worker_ai_overlay_sent_empty": "> {}",
+        "worker_ai_overlay_sent_first": "> {\"0\":{\"i\":1,\"t\":\"kv.list\"},\"db\":\"castle\",\"prefix\":\"\"}",
+        "worker_ai_overlay_sent_second": "> {\"0\":{\"i\":2,\"t\":\"kv.list\"},\"db\":\"castle\",\"prefix\":\"\"}",
+        "worker_ai_overlay_sent_sized": "> {\"b\":1,\"k\":\"/a/b\",\"t\":\"kv.put\"} with a payload of {1} bytes and blobs of [3] bytes",
+        "worker_ai_synchronous_release": "The setting queue_synchronous is true while debug is false; synchronous mode is debug only."
+      }
+    }
+  }
+}

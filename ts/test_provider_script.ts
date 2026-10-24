@@ -4,20 +4,17 @@
 //
 // Tests of the scripted provider: a script walked through the castle turn,
 // which builds the gatehouse scene, the reply lines, every refusal, the image
-// answer, the PNG test pattern held against a reference PNG of the same
-// checkerboard in 88 bytes with other compressed data, and the port behind a
-// task queue in synchronous mode.
+// answer, and the PNG test pattern held against a reference PNG of the same
+// checkerboard in 88 bytes with other compressed data. The port is driven
+// directly by `line_post` and `line_receive`. The request lines it posts, the
+// reply lines it expects and the texts of the refusals are its gold in
+// `test_settings.json`, read through the harness.
 
 namespace test_provider_script {
-  // A provider's address, key and models, the castle turn's values, the PNG's.
+  // A model, the castle turn's values, the PNG's.
   const constants = Object.freeze({
-    base_url: "https://api.x.ai/v1",
-    key: "xai-SYNTHETIC-KEY",
-    chat_model: "grok-4",
     image_model: "grok-2-image",
-    request_type: "http.request",
     id_prefix: "chatcmpl-synthetic-",
-    type_prefix: "provider_script_test.",
     subtitle:
       "Mind the moat. The gatehouse keeper has been expecting someone, " +
       "though not necessarily you.",
@@ -63,9 +60,6 @@ namespace test_provider_script {
     whole: Uint8Array;
   }
 
-  // How many types the tests have made, so that each one is new.
-  let types_made = 0;
-
   // The error the function throws, and an error of its own when it doesn't.
   function thrown_get(fn: () => unknown): Error {
     try {
@@ -79,12 +73,28 @@ namespace test_provider_script {
     throw new Error("Nothing was thrown.");
   }
 
-  // Registers a handler for a new type of these tests and returns the type.
-  function handler_fresh(fn: dispatch.Handler): string {
-    types_made += 1;
-    const type = `${constants.type_prefix}${types_made}`;
-    dispatch.handler_register(type, 0, fn);
-    return type;
+  // A copy of a value of this module's gold, which the harness keeps frozen.
+  function gold_value(name: string): unknown {
+    return structuredClone(
+      harness.gold_get(`typescript.test_provider_script.${name}`),
+    );
+  }
+
+  // A text of this module's gold, a run time `{n}` left for the test to fill.
+  function gold_text(name: string): string {
+    return harness.gold_get(
+      `typescript.test_provider_script.texts.${name}`,
+    ) as string;
+  }
+
+  // A copy of a line of this module's gold, a run time part set on the copy.
+  function gold_line(name: string): lines.Line {
+    return gold_value(`lines.${name}`) as lines.Line;
+  }
+
+  // The bytes of a base64 text, as the platform's `atob` reads it.
+  function base64_read(text: string): Uint8Array {
+    return Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
   }
 
   // A call of the named tool with the arguments as JSON text.
@@ -96,7 +106,7 @@ namespace test_provider_script {
     return {
       id,
       type: "function",
-      function: { name, arguments: utility.json_text(args) },
+      function: { name, arguments: JSON.stringify(args) },
     };
   }
 
@@ -177,28 +187,15 @@ namespace test_provider_script {
     return { role: "user", content: text };
   }
 
-  // The line with the id the queue would give it, in the name form asked.
-  function line_numbered(
-    line: lines.Line,
-    id: number,
-    full: boolean,
-  ): lines.Line {
-    const header = jslb.header_make(constants.request_type, { id, full });
-    return jslb.line_make(header, [], jslb.payload_of(line));
-  }
-
   // A chat request line of the provider door, numbered, for the messages.
   function chat_line(
     messages: provider.ChatMessage[],
     id: number,
-    full: boolean,
   ): lines.Line {
-    const line = provider.chat_request(constants.base_url, constants.key, {
-      model: constants.chat_model,
-      messages: [...messages],
-      tool_choice: "auto",
-    });
-    return line_numbered(line, id, full);
+    const line = gold_line("chat_request");
+    line[0].i = id;
+    (line.json as FieldTable).messages = [...messages];
+    return line;
   }
 
   // Posts a chat request and reads the choice of the reply that came at once.
@@ -208,11 +205,11 @@ namespace test_provider_script {
     id: number,
   ): provider.ChatChoice {
     const count = bench.received.length;
-    bench.port.line_post(chat_line(messages, id, false), []);
+    bench.port.line_post(chat_line(messages, id), []);
     if (bench.received.length !== count + 1) {
       throw new Error("The scripted provider did not reply within the post.");
     }
-    return provider.chat_response(bench.received[count]).choices[0];
+    return (bench.received[count].json as provider.ChatResponse).choices[0];
   }
 
   // Adds the assistant message and one tool result for each call it made.
@@ -231,40 +228,16 @@ namespace test_provider_script {
     return (choice.message.tool_calls ?? []).map((call) => call.function.name);
   }
 
-  // The payload of a chat request every check accepts, with fields replaced.
-  function payload_with(fields: FieldTable): FieldTable {
-    return {
-      method: "POST",
-      url: `${constants.base_url}/chat/completions`,
-      headers: {},
-      json: { model: constants.chat_model, messages: [user_say("2")] },
-      ...fields,
-    };
-  }
-
-  // A line of the type with the header options, blobs and payload given.
-  function line_build(
-    type: string,
-    options: { id?: number },
-    blobs: lines.BlobHeader[],
-    payload: FieldTable,
-  ): lines.Line {
-    return jslb.line_make(jslb.header_make(type, options), blobs, payload);
-  }
-
   // An image request line numbered 1 whose body is the one given.
   function image_line(json: FieldTable): lines.Line {
-    return line_build(constants.request_type, { id: 1 }, [], {
-      method: "POST",
-      url: `${constants.base_url}/images/generations`,
-      headers: {},
-      json,
-    });
+    const line = gold_line("image_post");
+    line.json = json;
+    return line;
   }
 
   // The bytes of the reference PNG of the checkerboard.
   function recorded_get(): Uint8Array {
-    return utility.base64_decode(constants.recorded_png);
+    return base64_read(constants.recorded_png);
   }
 
   // The chunks of a PNG after its signature, in order.
@@ -278,7 +251,9 @@ namespace test_provider_script {
       const end = offset + 3 * word + length;
       const typed = png.subarray(offset + word, end - word);
       chunks.push({
-        kind: utility.utf8_decode(typed.subarray(0, word)),
+        kind: new TextDecoder("utf-8", { fatal: true }).decode(
+          typed.subarray(0, word),
+        ),
         typed,
         body: typed.subarray(word),
         crc: view.getUint32(end - word),
@@ -381,55 +356,42 @@ namespace test_provider_script {
     // The reply comes inside the post, shaped as a chat completion reply.
     test_reply_line(): void {
       const bench = bench_make();
-      bench.port.line_post(chat_line([user_say("2")], 7, false), []);
+      bench.port.line_post(chat_line([user_say("2")], 7), []);
       this.assertEqual(bench.received.length, 1);
       const reply = bench.received[0];
-      this.assertEqual(reply[0], { t: constants.request_type, r: 7 });
       this.assertEqual(Object.keys(reply).join(","), "0,status,headers,json");
-      this.assertEqual(reply.status, 200);
-      this.assertEqual(reply.headers, { "content-type": "application/json" });
       const json = reply.json as provider.ChatResponse;
       this.assertEqual(Object.keys(json).join(","), "id,model,choices");
       this.assertTrue(json.id.startsWith(constants.id_prefix));
-      this.assertEqual(json.model, constants.chat_model);
-      this.assertEqual(json.choices, [
-        {
-          index: 0,
-          message: { role: "assistant", content: "Nothing happens." },
-          finish_reason: "stop",
-        },
-      ]);
+      const expected = gold_line("reply_nothing");
+      (expected.json as FieldTable).id = json.id;
+      this.assertEqual(reply, expected);
     }
 
     // A request in full names is answered in full names.
     test_full_names(): void {
       const bench = bench_make();
-      bench.port.line_post(chat_line([user_say("2")], 7, true), []);
-      this.assertEqual(bench.received[0][0], {
-        type: constants.request_type,
-        reply: 7,
-      });
+      bench.port.line_post(gold_line("chat_full"), []);
+      this.assertEqual(bench.received[0][0], gold_line("reply_full")[0]);
     }
 
     // Each chat reply has an id of its own and the model the request named.
     test_ids_distinct(): void {
       const bench = bench_make();
-      bench.port.line_post(chat_line([user_say("2")], 1, false), []);
-      const other = provider.chat_request(constants.base_url, constants.key, {
-        model: "grok-x",
-        messages: [user_say("2")],
-      });
-      bench.port.line_post(line_numbered(other, 2, false), []);
-      const responses = bench.received.map((reply) =>
-        provider.chat_response(reply),
+      const first = chat_line([user_say("2")], 1);
+      const other = gold_line("chat_other");
+      bench.port.line_post(first, []);
+      bench.port.line_post(other, []);
+      const responses = bench.received.map(
+        (reply) => reply.json as provider.ChatResponse,
       );
       this.assertEqual(responses.length, 2);
       this.assertTrue(responses[0].id !== responses[1].id);
       for (const response of responses) {
         this.assertTrue(response.id.startsWith(constants.id_prefix));
       }
-      this.assertEqual(responses[0].model, constants.chat_model);
-      this.assertEqual(responses[1].model, "grok-x");
+      this.assertEqual(responses[0].model, (first.json as FieldTable).model);
+      this.assertEqual(responses[1].model, (other.json as FieldTable).model);
     }
 
     // The calls in a reply are copies, not the script's own objects.
@@ -440,7 +402,7 @@ namespace test_provider_script {
       port.line_receive((line: lines.Line) => {
         received.push(line);
       });
-      port.line_post(chat_line([user_say("1")], 1, false), []);
+      port.line_post(chat_line([user_say("1")], 1), []);
       const sent = received[0].json as provider.ChatResponse;
       const calls = sent.choices[0].message.tool_calls ?? [];
       const kept = script.nodes.hyperposition.replies["1"].tool_calls ?? [];
@@ -475,7 +437,7 @@ namespace test_provider_script {
       );
       this.assertEqual(
         error.message,
-        i18n("provider_script.node_unknown", "nowhere"),
+        gold_text("provider_script_node_unknown"),
       );
     }
 
@@ -489,19 +451,29 @@ namespace test_provider_script {
       const error = thrown_get(() => chat_post(bench, messages, 2));
       this.assertEqual(
         error.message,
-        i18n("provider_script.node_unknown", "nowhere"),
+        gold_text("provider_script_node_unknown"),
       );
     }
 
     // A user message that is not the decimal text of one integer is refused.
     test_input_invalid(): void {
       const bench = bench_make();
-      const texts = ["one", "01", "1.0", " 1", "1 ", "+1", "-0", "", null];
-      for (const text of texts) {
+      const cases: [string | null, string][] = [
+        ["one", "word"],
+        ["01", "zero_led"],
+        ["1.0", "fraction"],
+        [" 1", "space_before"],
+        ["1 ", "space_after"],
+        ["+1", "plus"],
+        ["-0", "minus_zero"],
+        ["", "empty"],
+        [null, "null"],
+      ];
+      for (const [text, suffix] of cases) {
         const error = thrown_get(() => chat_post(bench, [user_say(text)], 1));
         this.assertEqual(
           error.message,
-          i18n("provider_script.input_invalid", String(text)),
+          gold_text(`provider_script_input_invalid_${suffix}`),
         );
       }
       this.assertEqual(bench.received.length, 0);
@@ -511,11 +483,16 @@ namespace test_provider_script {
     // An integer the node has no reply for is refused.
     test_input_unknown(): void {
       const bench = bench_make();
-      for (const text of ["0", "9", "-5"]) {
+      const cases: [string, string][] = [
+        ["0", "zero"],
+        ["9", "nine"],
+        ["-5", "minus_five"],
+      ];
+      for (const [text, suffix] of cases) {
         const error = thrown_get(() => chat_post(bench, [user_say(text)], 1));
         this.assertEqual(
           error.message,
-          i18n("provider_script.input_unknown", "hyperposition", text),
+          gold_text(`provider_script_input_unknown_${suffix}`),
         );
       }
     }
@@ -530,7 +507,7 @@ namespace test_provider_script {
       const error = thrown_get(() => chat_post(bench, messages, 1));
       this.assertEqual(
         error.message,
-        i18n("provider_script.results_unasked", "hyperposition"),
+        gold_text("provider_script_results_unasked"),
       );
     }
 
@@ -542,7 +519,7 @@ namespace test_provider_script {
       const error = thrown_get(() => chat_post(bench, messages, 2));
       this.assertEqual(
         error.message,
-        i18n("provider_script.results_pending", "hyperposition", "castle"),
+        gold_text("provider_script_results_pending"),
       );
     }
 
@@ -550,7 +527,11 @@ namespace test_provider_script {
     test_results_unmatched(): void {
       const bench = bench_make();
       const asked = chat_post(bench, [user_say("1")], 1).message;
-      for (const ids of [["call_9"], ["call_1", "call_1"]]) {
+      const cases: [string[], string][] = [
+        [["call_9"], "other"],
+        [["call_1", "call_1"], "twice"],
+      ];
+      for (const [ids, suffix] of cases) {
         const messages: provider.ChatMessage[] = [user_say("1"), asked];
         for (const id of ids) {
           messages.push({ role: "tool", tool_call_id: id, content: "{}" });
@@ -558,12 +539,7 @@ namespace test_provider_script {
         const error = thrown_get(() => chat_post(bench, messages, 2));
         this.assertEqual(
           error.message,
-          i18n(
-            "provider_script.results_unmatched",
-            "hyperposition",
-            utility.json_text(ids),
-            utility.json_text(["call_1"]),
-          ),
+          gold_text(`provider_script_results_unmatched_${suffix}`),
         );
       }
       this.assertEqual(bench.received.length, 1);
@@ -578,7 +554,7 @@ namespace test_provider_script {
       const error = thrown_get(() => chat_post(bench, messages, 2));
       this.assertEqual(
         error.message,
-        i18n("provider_script.after_missing", "bare"),
+        gold_text("provider_script_after_missing"),
       );
     }
 
@@ -590,7 +566,7 @@ namespace test_provider_script {
         const error = thrown_get(() => chat_post(bench, messages, 1));
         this.assertEqual(
           error.message,
-          i18n("provider_script.role_unexpected", role),
+          gold_text(`provider_script_role_unexpected_${role}`),
         );
       }
     }
@@ -598,73 +574,46 @@ namespace test_provider_script {
     // A port with no receiver, or given a second one, refuses it.
     test_receiver_rules(): void {
       const port = new provider_script.ScriptPort(script_make());
-      const request = chat_line([user_say("2")], 1, false);
+      const request = chat_line([user_say("2")], 1);
       const missing = thrown_get(() => port.line_post(request, []));
       this.assertEqual(
         missing.message,
-        i18n("provider_script.receiver_missing"),
+        gold_text("provider_script_receiver_missing"),
       );
       port.line_receive(() => {});
       const twice = thrown_get(() => port.line_receive(() => {}));
-      this.assertEqual(twice.message, i18n("provider_script.receiver_twice"));
+      this.assertEqual(
+        twice.message,
+        gold_text("provider_script_receiver_twice"),
+      );
     }
 
     // A line that is not a chat or image request it can read is refused.
     test_line_refused(): void {
       const bench = bench_make();
-      const type = constants.request_type;
-      const blob = jslb.blob_make(new Uint8Array(1));
-      const unknown = `${constants.base_url}/models`;
-      const no_model = payload_with({ json: { messages: [] } });
-      const no_messages = payload_with({ json: { model: "m" } });
-      const bad_message = payload_with({
-        json: { model: "m", messages: [5] },
-      });
+      const blobs = gold_line("refused_blobs");
+      (blobs[1] as lines.BlobHeader).d = new Uint8Array(1);
       const cases: [lines.Line, string][] = [
+        [gold_line("refused_type"), "provider_script_type_invalid"],
+        [gold_line("refused_id"), "provider_script_id_missing"],
+        [blobs, "provider_script_blobs_refused"],
+        [gold_line("refused_method"), "provider_script_field_invalid_method"],
+        [gold_line("refused_url"), "provider_script_field_invalid_url"],
+        [gold_line("refused_unknown"), "provider_script_url_unknown"],
+        [gold_line("refused_json"), "provider_script_field_invalid_json"],
+        [gold_line("refused_model"), "provider_script_field_invalid_model"],
         [
-          line_build("kv.get", { id: 1 }, [], payload_with({})),
-          i18n("provider_script.type_invalid", "kv.get", type),
+          gold_line("refused_messages"),
+          "provider_script_field_invalid_messages",
         ],
         [
-          line_build(type, {}, [], payload_with({})),
-          i18n("provider_script.id_missing", type),
-        ],
-        [
-          line_build(type, { id: 1 }, [blob], payload_with({})),
-          i18n("provider_script.blobs_refused", type),
-        ],
-        [
-          line_build(type, { id: 1 }, [], payload_with({ method: "GET" })),
-          i18n("provider_script.field_invalid", "method"),
-        ],
-        [
-          line_build(type, { id: 1 }, [], payload_with({ url: 5 })),
-          i18n("provider_script.field_invalid", "url"),
-        ],
-        [
-          line_build(type, { id: 1 }, [], payload_with({ url: unknown })),
-          i18n("provider_script.url_unknown", unknown),
-        ],
-        [
-          line_build(type, { id: 1 }, [], payload_with({ json: undefined })),
-          i18n("provider_script.field_invalid", "json"),
-        ],
-        [
-          line_build(type, { id: 1 }, [], no_model),
-          i18n("provider_script.field_invalid", "json.model"),
-        ],
-        [
-          line_build(type, { id: 1 }, [], no_messages),
-          i18n("provider_script.field_invalid", "json.messages"),
-        ],
-        [
-          line_build(type, { id: 1 }, [], bad_message),
-          i18n("provider_script.field_invalid", "json.messages[0]"),
+          gold_line("refused_message"),
+          "provider_script_field_invalid_message",
         ],
       ];
-      for (const [line, expected] of cases) {
+      for (const [line, name] of cases) {
         const error = thrown_get(() => bench.port.line_post(line, []));
-        this.assertEqual(error.message, expected);
+        this.assertEqual(error.message, gold_text(name));
       }
       this.assertEqual(bench.received.length, 0);
       this.assertEqual(bench.port.node(), "hyperposition");
@@ -676,32 +625,20 @@ namespace test_provider_script {
     // An image request is answered with the pattern as base64, and no move.
     test_image_answer(): void {
       const bench = bench_make();
-      const request: provider.ImageRequest = {
-        model: constants.image_model,
-        prompt: "A rain dark castle gatehouse at dusk",
-        n: 1,
-        response_format: "b64_json",
-      };
-      const line = provider.image_request(
-        constants.base_url,
-        constants.key,
-        request,
-      );
-      bench.port.line_post(line_numbered(line, 3, false), []);
+      bench.port.line_post(gold_line("image_request"), []);
       this.assertEqual(bench.received.length, 1);
       const reply = bench.received[0];
-      this.assertEqual(reply[0], { t: constants.request_type, r: 3 });
-      this.assertEqual(reply.status, 200);
-      this.assertEqual(reply.headers, { "content-type": "application/json" });
       const data = (reply.json as provider.ImageResponse).data;
       this.assertEqual(data.length, 1);
       this.assertEqual(Object.keys(data[0]).join(","), "b64_json");
       this.assertEqual(typeof data[0].b64_json, "string");
       this.assertEqual(
-        utility.base64_decode(data[0].b64_json as string),
+        base64_read(data[0].b64_json as string),
         provider_script.image_pattern(),
       );
-      this.assertEqual(provider.image_response(reply).data, data);
+      const expected = gold_line("reply_image");
+      expected.json = reply.json;
+      this.assertEqual(reply, expected);
       this.assertEqual(bench.port.node(), "hyperposition");
     }
 
@@ -725,7 +662,11 @@ namespace test_provider_script {
     // An image request it cannot answer is refused by its field.
     test_image_refused(): void {
       const bench = bench_make();
-      for (const format of ["url", undefined]) {
+      const formats: [string | undefined, string][] = [
+        ["url", "url"],
+        [undefined, "undefined"],
+      ];
+      for (const [format, suffix] of formats) {
         const line = image_line({
           model: constants.image_model,
           prompt: "A gatehouse.",
@@ -735,7 +676,7 @@ namespace test_provider_script {
         const error = thrown_get(() => bench.port.line_post(line, []));
         this.assertEqual(
           error.message,
-          i18n("provider_script.format_unsupported", String(format)),
+          gold_text(`provider_script_format_unsupported_${suffix}`),
         );
       }
       for (const count of [0, -1, 1.5, "1", undefined]) {
@@ -748,7 +689,7 @@ namespace test_provider_script {
         const error = thrown_get(() => bench.port.line_post(line, []));
         this.assertEqual(
           error.message,
-          i18n("provider_script.field_invalid", "json.n"),
+          gold_text("provider_script_field_invalid_n"),
         );
       }
       this.assertEqual(bench.received.length, 0);
@@ -849,41 +790,6 @@ namespace test_provider_script {
       const second = provider_script.image_pattern();
       this.assertEqual(first, second);
       this.assertFalse(first === second);
-    }
-  }
-
-  // The port behind a task queue in synchronous mode.
-  export class TestQueueReply extends unittest.TestCase {
-    // A reply made inside the post wakes the task that slept on its request.
-    test_queue_synchronous(): void {
-      const owners: queue.OwnerTable = {
-        [constants.type_prefix]: "ai",
-        "http.": "http",
-      };
-      const tasks = new queue.TaskQueue("ai", owners, true);
-      tasks.port_add("http", new provider_script.ScriptPort(script_make()));
-      const submitted: number[] = [];
-      const woken: lines.Line[] = [];
-      const wake = handler_fresh((line: lines.Line) => {
-        woken.push(...(line.replies as lines.Line[]));
-        return undefined;
-      });
-      const say = handler_fresh(() => {
-        const request = provider.chat_request(
-          constants.base_url,
-          constants.key,
-          { model: constants.chat_model, messages: [user_say("2")] },
-        );
-        submitted.push(tasks.task_submit(request));
-        return dispatch.task_sleep(null, submitted, wake);
-      });
-      tasks.line_notify(jslb.line_make(jslb.header_make(say), [], {}), "ai");
-      this.assertEqual(submitted.length, 1);
-      this.assertEqual(woken.length, 1);
-      this.assertEqual(jslb.field_get(woken[0][0], "reply"), submitted[0]);
-      const choice = provider.chat_response(woken[0]).choices[0];
-      this.assertEqual(choice.message.content, "Nothing happens.");
-      this.assertEqual(tasks.depth(), 0);
     }
   }
 }

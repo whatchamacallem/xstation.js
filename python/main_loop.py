@@ -4,20 +4,27 @@
 #
 # The server's main loop, which `bootstrap.py` loads and a main loop file can
 # replace in debug mode. `bootstrap.py` has opened the log before either
-# function runs. `loop_prepare` runs before `hello`: it loads the settings into
-# `_settings`, opens every database under the root, creating the fixed ones
-# that are missing, seeds the scripted provider's script when `_files` lacks
-# it and the metaverse while its `seq` is 0, and returns the `seq` of each
-# database. `loop_run` registers the stock handlers and runs the select loop
-# on the engine tty: it decodes each line, refuses any reply, dispatches every
-# other line and writes each reply, and in debug mode the log traces each line
-# dispatched and each reply. A failure always logs its message, then writes
-# one `error` line and exits 1.
+# function runs. `loop_prepare` runs before the first line, `tap.start`: it
+# loads the settings into `_settings`, opens every database under the root,
+# creating the fixed ones that are missing, seeds the scripted provider's
+# script when `_files` lacks it, and seeds the metaverse when it lacks the
+# `universe` table, with the DDL and the triggers of API/sql/metaverse.sql.
+# `loop_run` registers the stock handlers and runs the select loop on the
+# engine tty: it decodes each line, refuses any reply, since the server
+# awaits none, and serves the rest, writing each reply, and in debug mode
+# the log traces each line dispatched and each reply. An `error` line of the
+# browser goes to `engine_tap.error_take`, after which the loop exits 1 and
+# writes nothing: its exit ends the connection, the close the page waits
+# for, since the page never closes on a failure. A `dispatch.Failure`
+# writes its reply, then fails with its error, whose `error` line has no
+# `r`, as its request is answered. A failure always logs its message, then
+# writes one `error` line with its cascade, in the name form of the line it
+# answers, else of the setting `debug`, and exits 1.
 
 import dispatch, engine_db, engine_doc, engine_kv, engine_mcp, engine_sql
 import engine_system, engine_tap, engine_turn, engine_verbose, functools, jslb
 import json, mcp, os, re, select, settings, substrate, uuid, verbose
-from i18n import i18n
+from internationalization import i18n
 from typing import Any, NamedTuple, NoReturn, cast
 
 # The settings file in the root.
@@ -88,16 +95,37 @@ _WORLD_KEY = "world"
 # The key in the current world of the current scene's `Document-Ref`.
 _SCENE_KEY = "scene"
 
-# The DDL of the metaverse's `universe` table, as the API's SQL file holds it.
-_UNIVERSE_DDL = """CREATE TABLE universe (
+# The `universe` table and its two triggers, as API/sql/metaverse.sql has them.
+_METAVERSE_DDL = (
+    """CREATE TABLE universe (
     name   TEXT PRIMARY KEY,
     title  TEXT NOT NULL,
     player TEXT NOT NULL,
     world  TEXT NOT NULL
-) WITHOUT ROWID, STRICT"""
+) WITHOUT ROWID, STRICT""",
+    """CREATE TRIGGER universe_world_insert BEFORE INSERT ON universe
+WHEN EXISTS (
+    SELECT 1 FROM universe WHERE world = NEW.world AND name <> NEW.name
+)
+BEGIN
+    SELECT RAISE(ABORT, 'agent.content_ambiguous');
+END""",
+    """CREATE TRIGGER universe_world_update BEFORE UPDATE OF world ON universe
+WHEN EXISTS (
+    SELECT 1 FROM universe WHERE world = NEW.world AND name <> NEW.name
+)
+BEGIN
+    SELECT RAISE(ABORT, 'agent.content_ambiguous');
+END""",
+)
 
-# A top level key of a seed document that names a header: canonical digits.
-_HEADER_KEY = re.compile(r"0|[1-9][0-9]*")
+# The query that finds the `universe` table, a row when the seed has run.
+_UNIVERSE_FIND = (
+    "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'universe'"
+)
+
+# The line type of the browser's failure.
+_ERROR_TYPE = "error"
 
 # The name the server's MCP server gives in its `serverInfo`.
 _SERVER_NAME = "xsjs-server"
@@ -155,23 +183,17 @@ def _databases_found(root: str) -> list[str]:
 
 # The JSON text of a value as the wire and the substrate write it.
 def _json_text(value: object) -> str:
-    return json.dumps(
-        value, ensure_ascii=False, separators=(",", ":"), allow_nan=False
-    )
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
-# Reads a seed document, its top level digit keys made integer header keys.
+# Reads a seed document by the decoders, its digit keys integer header keys.
 def _document_read(name: str) -> dict[int | str, Any]:
     path = os.path.join(_SEED_DIRECTORY, name)
     with open(path, encoding="utf-8") as file:
-        data: object = json.load(file)
-    fields = cast(dict[str, Any], data)
+        data: object = jslb.json_decode(file.read())
     if not isinstance(data, dict):
         raise ValueError(i18n("main_loop.seed_invalid", path))
-    return {
-        (int(key) if _HEADER_KEY.fullmatch(key) else key): value
-        for key, value in fields.items()
-    }
+    return cast(dict[int | str, Any], data)
 
 
 # Reads the seed of a new metaverse, raising when a file of it is absent.
@@ -191,12 +213,11 @@ def _settings_write(store: substrate.Store, values: dict[str, Any]) -> None:
         store.kv_put(key, _json_text(value).encode("utf-8"), _SETTINGS_DB)
 
 
-# Creates the `universe` table and writes the two documents and three rows.
+# Creates `universe` and its triggers, writes two documents and three rows.
 def _metaverse_write(store: substrate.Store, seed: _SeedFiles) -> None:
-    store.sql_run(_METAVERSE_DB, [substrate.SqlStatement(_UNIVERSE_DDL, [])])
-    scene, _ = store.doc_put(
-        _METAVERSE_DB, _HYPERPOSITION_ID, seed.hyperposition
-    )
+    statements = [substrate.SqlStatement(sql, []) for sql in _METAVERSE_DDL]
+    store.sql_run(_METAVERSE_DB, statements)
+    scene = store.doc_put(_METAVERSE_DB, _HYPERPOSITION_ID, seed.hyperposition)
     store.doc_put(_METAVERSE_DB, _PROMPT_ID, seed.prompt)
     rows = (
         (_PLAYER_KEY, _PLAYER_NAME),
@@ -236,17 +257,16 @@ def _prepare_run(root: str) -> _PreparedRoot:
         store.db_open(name)
     _settings_write(store, values)
     _provider_seed(store)
-    if store.seq_get(_METAVERSE_DB) == 0:
+    find = [substrate.SqlStatement(_UNIVERSE_FIND, [])]
+    (found,) = store.sql_run(_METAVERSE_DB, find)
+    if not found.rows:
         _metaverse_seed(store, _seed_read())
     return _PreparedRoot(values, store)
 
 
-# Prepares the root once, before `hello`, and returns each database's `seq`.
-def loop_prepare(root: str) -> dict[str, int]:
-    prepared = _prepare_run(root)
-    _STATE.prepared = prepared
-    store = prepared.store
-    return {name: store.seq_get(name) for name in store.db_list()}
+# Prepares the root once, before the first line.
+def loop_prepare(root: str) -> None:
+    _STATE.prepared = _prepare_run(root)
 
 
 # Registers every stock handler, and the server's MCP server with its tools.
@@ -293,12 +313,26 @@ def _line_write(line: jslb.Object, write_fd: int, chunk: int) -> None:
             _file_copy(piece, write_fd, chunk)
 
 
+# Writes a reply, traced in debug mode.
+def _reply_write(
+    reply: jslb.Object, write_fd: int, chunk: int, debug: bool
+) -> None:
+    if debug:
+        replied = _json_text(reply[0])
+        verbose.log(i18n("main_loop.line_reply", replied))
+    _line_write(reply, write_fd, chunk)
+
+
 # Logs the message of a failure, then writes its one `error` line and exits 1.
 def _failure_exit(
-    line: jslb.Object | None, error: Exception, write_fd: int, chunk: int
+    line: jslb.Object | None,
+    error: BaseException,
+    write_fd: int,
+    chunk: int,
+    debug: bool,
 ) -> NoReturn:
     verbose.log(i18n("main_loop.serve_failed", str(error)))
-    _line_write(dispatch.error_make(line, error), write_fd, chunk)
+    _line_write(dispatch.error_make(line, error, debug), write_fd, chunk)
     raise SystemExit(_EXIT_FAILED) from error
 
 
@@ -306,20 +340,27 @@ def _failure_exit(
 def _line_serve(
     line: jslb.Object, write_fd: int, chunk: int, debug: bool
 ) -> None:
-    # The server awaits no reply, as the one to `hello` was bootstrap's.
+    # The server awaits no reply, as the one to `tap.start` was bootstrap's.
     if jslb.field_get(line[0], "reply") is not None:
         raise LookupError(
             i18n("main_loop.reply_unknown", jslb.line_render(line))
         )
+    if jslb.field_get(line[0], "type") == _ERROR_TYPE:
+        # The browser's failure: logged, its stream bailed out, no answer.
+        payload = jslb.payload_of(line)
+        cause = payload["cause"] if "cause" in payload else None
+        engine_tap.error_take(payload["message"], payload["stack"], cause)
+        raise SystemExit(_EXIT_FAILED)
     if debug:
         dispatched = _json_text(line[0])
         verbose.log(i18n("main_loop.line_dispatch", dispatched))
-    reply = dispatch.line_dispatch(line)
-    if reply is not None:
-        if debug:
-            replied = _json_text(reply[0])
-            verbose.log(i18n("main_loop.line_reply", replied))
-        _line_write(reply, write_fd, chunk)
+    result = dispatch.line_dispatch(line)
+    if isinstance(result, dispatch.Failure):
+        _reply_write(result.reply, write_fd, chunk, debug)
+        # The request is answered, so the failure is the server's own.
+        _failure_exit(None, result.error, write_fd, chunk, debug)
+    if result is not None:
+        _reply_write(result, write_fd, chunk, debug)
 
 
 # Serves the lines one read finished, then feeds no bytes to raise a fault.
@@ -339,7 +380,7 @@ def _bytes_serve(
                 _line_serve(line, write_fd, chunk, debug)
             line = None
     except Exception as error:
-        _failure_exit(line, error, write_fd, chunk)
+        _failure_exit(line, error, write_fd, chunk, debug)
 
 
 # The select loop: reads the pty, decodes, dispatches, writes each reply.

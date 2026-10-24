@@ -4,21 +4,34 @@
 //
 // Tests of the debug overlays, run on containers that are not in the page,
 // and of the scrolling that keeps a shown overlay's newest line in view, run
-// on a container of a fixed size put in the page and taken out after.
+// on a container of a fixed size put in the page and taken out after. A
+// refused ring's text is the gold record's, and the count of a tall overlay
+// and the size of the scrolling container are read from the gold.
 namespace test_overlay {
-  // The counts and sizes the tests set.
+  // The rings the tests set, which the expected texts are written for.
   const constants = Object.freeze({
-    // Lines added to overflow the scrolling container, its writer's choice.
-    tall_count: 50,
     // The lines kept for each tty, its writer's choice.
     ring_lines: 3,
     // A ring of two lines, its writer's choice.
     ring_pair: 2,
-    // The scrolling container's width in pixels, its writer's choice.
-    container_width: 400,
-    // The scrolling container's height in pixels, its writer's choice.
-    container_height: 100,
   });
+
+  // A copy of a value of this module's gold, which the harness keeps frozen.
+  function gold_value(name: string): unknown {
+    return structuredClone(
+      harness.gold_get(`typescript.test_overlay.${name}`),
+    );
+  }
+
+  // A text of this module's gold, a run time `{n}` left for the test to fill.
+  function gold_text(name: string): string {
+    return harness.gold_get(`typescript.test_overlay.texts.${name}`) as string;
+  }
+
+  // The lines added to overflow the scrolling container, from the gold.
+  function tall_count(): number {
+    return gold_value("tall_count") as number;
+  }
 
   // A container that is not in the page, so the live page is not touched.
   function container_make(): HTMLElement {
@@ -49,7 +62,8 @@ namespace test_overlay {
 
   // Adds the lines of a tall overlay to a tty.
   function lines_add(instance: overlay.Overlay, tty: number): void {
-    for (let index = 0; index < constants.tall_count; index += 1) {
+    const count = tall_count();
+    for (let index = 0; index < count; index += 1) {
       instance.line_add(tty, `tty ${tty} line ${index}`);
     }
   }
@@ -59,11 +73,17 @@ namespace test_overlay {
     // A ring that is not a whole number of at least one is refused.
     test_ring_invalid(): void {
       const container = container_make();
-      const rings = [0, -1, 1.5, NaN, Infinity];
-      for (const ring of rings) {
+      const rings: [number, string][] = [
+        [0, "zero"],
+        [-1, "negative"],
+        [1.5, "fraction"],
+        [NaN, "nan"],
+        [Infinity, "infinity"],
+      ];
+      for (const [ring, name] of rings) {
         this.assertEqual(
           message_thrown(this, () => new overlay.Overlay(container, ring)),
-          i18n("overlay.ring_invalid", ring),
+          gold_text(`overlay_ring_invalid_${name}`),
         );
       }
     }
@@ -308,8 +328,8 @@ namespace test_overlay {
         position: "fixed",
         top: "0px",
         left: "0px",
-        width: `${constants.container_width}px`,
-        height: `${constants.container_height}px`,
+        width: `${gold_value("container_width") as number}px`,
+        height: `${gold_value("container_height") as number}px`,
         overflow: "auto",
       });
       document.body.append(container);
@@ -335,7 +355,7 @@ namespace test_overlay {
     // Lines added while hidden scroll nothing, the toggle shows the newest.
     test_toggle_scrolls(): void {
       const container = this.container_get();
-      const instance = new overlay.Overlay(container, constants.tall_count);
+      const instance = new overlay.Overlay(container, tall_count());
       lines_add(instance, 1);
       this.assertEqual(container.scrollTop, 0);
       instance.overlay_toggle(1);
@@ -346,7 +366,7 @@ namespace test_overlay {
     // Each line added to a shown overlay brings its newest line into view.
     test_line_scrolls(): void {
       const container = this.container_get();
-      const instance = new overlay.Overlay(container, constants.tall_count);
+      const instance = new overlay.Overlay(container, tall_count());
       instance.overlay_toggle(1);
       lines_add(instance, 1);
       const pre = pre_list(container)[0];
@@ -359,7 +379,7 @@ namespace test_overlay {
     // A line added to a hidden overlay leaves the view where it is.
     test_hidden_still(): void {
       const container = this.container_get();
-      const instance = new overlay.Overlay(container, constants.tall_count);
+      const instance = new overlay.Overlay(container, tall_count());
       lines_add(instance, 1);
       instance.overlay_toggle(1);
       container.scrollTop = 0;
@@ -370,7 +390,7 @@ namespace test_overlay {
     // A line added to the upper of two shown overlays brings it into view.
     test_upper_overlay(): void {
       const container = this.container_get();
-      const instance = new overlay.Overlay(container, constants.tall_count);
+      const instance = new overlay.Overlay(container, tall_count());
       instance.overlay_toggle(1);
       instance.overlay_toggle(2);
       lines_add(instance, 1);

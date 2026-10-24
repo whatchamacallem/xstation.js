@@ -5,13 +5,17 @@
 # Tests the MCP server on messages handed to it, the client against a server
 # through direct function calls and through a transport that answers later,
 # with the tools of API/mcp/tools.json. No transport and no process is used.
+# The texts expected are the gold's; the cascade a tool's exception or an
+# error response carries is built here from the exception the server kept.
 
-import functools, json, mcp, os, unittest
-from i18n import i18n
+import functools, harness, json, mcp, os, traceback, unittest
 from typing import Any
 
 # The root of the checkout.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# The id of this module's gold in `test_settings.json`.
+_GOLD_ID = "python.test_mcp"
 
 # The API file that holds the tools as `tools/list` returns them.
 _TOOLS_PATH = os.path.join(_ROOT_PATH, "API", "mcp", "tools.json")
@@ -84,6 +88,23 @@ def _text_make(value: Any) -> str:
     return json.dumps(value, separators=(",", ":"))
 
 
+# A text of this module's gold.
+def _text_get(name: str) -> str:
+    text: str = harness.gold_get(f"{_GOLD_ID}.texts.{name}")
+    return text
+
+
+# The `stack` of one entry of a cascade: the traceback without its chain.
+def _stack_of(error: BaseException) -> str:
+    lines = traceback.format_exception(error, chain=False)
+    return "".join(lines).removesuffix("\n")
+
+
+# The text of an `isError` result: the cascade as compact JSON, as sent.
+def _cascade_text(cascade: dict[str, Any]) -> str:
+    return json.dumps(cascade, ensure_ascii=False, separators=(",", ":"))
+
+
 # Hands a message to a server and returns the response it must give.
 def _response_get(server: mcp.Server, message: mcp.Message) -> mcp.Message:
     response = server.message_handle(message)
@@ -149,6 +170,44 @@ class TestServer(unittest.TestCase):
             functools.partial(self.tool_raise, error),
         )
 
+    # Calls the failing tool and returns the `isError` result it answers.
+    def failing_call(self, request_id: int) -> dict[str, Any]:
+        params = {"name": "fail", "arguments": {}}
+        response = _response_get(
+            self.server, _request_make(request_id, "tools/call", params)
+        )
+        self.assertNotIn("error", response)
+        self.assertEqual(response["id"], request_id)
+        result: dict[str, Any] = response["result"]
+        self.assertEqual(result["isError"], True)
+        self.assertEqual(len(result["content"]), 1)
+        self.assertEqual(result["content"][0]["type"], "text")
+        return result
+
+    # Takes the failure the last request kept, then checks none is left.
+    def failure_get(self) -> BaseException:
+        failure = self.server.failure_take()
+        if failure is None:
+            raise AssertionError("no failure kept")
+        self.assertIsNone(self.server.failure_take())
+        return failure
+
+    # Returns the kept failure, checked to be an `RpcError` of the code.
+    def rpc_check(self, code: int) -> BaseException:
+        failure = self.failure_get()
+        if not isinstance(failure, mcp.RpcError):
+            raise AssertionError(f"{failure!r} is no RpcError")
+        self.assertEqual(failure.code, code)
+        return failure
+
+    # Checks the `data` of an error response is the cascade of the failure.
+    def data_check(
+        self, response: mcp.Message, failure: BaseException
+    ) -> None:
+        cascade = {"message": str(failure), "stack": _stack_of(failure)}
+        self.assertEqual(response["error"]["data"], cascade)
+        self.assertEqual(response["error"]["message"], str(failure))
+
     # The initialize reply holds the revision, tools only and the identity.
     def test_initialize_reply(self) -> None:
         params = {
@@ -165,6 +224,7 @@ class TestServer(unittest.TestCase):
         for method in ("notifications/initialized", "notifications/unknown"):
             message = {"jsonrpc": "2.0", "method": method}
             self.assertIsNone(self.server.message_handle(message))
+            self.assertIsNone(self.server.failure_take())
 
     # Ping answers an empty result and echoes a number or a string id.
     def test_ping_reply(self) -> None:
@@ -248,43 +308,40 @@ class TestServer(unittest.TestCase):
         self.assertIn("result", response)
         self.assertEqual(self.calls, [("kv_get", {})])
 
-    # An exception of a tool function becomes an error response with a stack.
+    # A tool's exception answers an `isError` result holding its cascade.
     def test_call_raises(self) -> None:
-        self.failing_register(ValueError("boom"))
-        params = {"name": "fail", "arguments": {}}
-        response = _response_get(
-            self.server, _request_make(7, "tools/call", params)
-        )
-        self.assertNotIn("result", response)
-        self.assertEqual(response["id"], 7)
-        self.assertEqual(response["error"]["code"], -32603)
-        self.assertEqual(response["error"]["message"], "boom")
-        self.assertIn("ValueError: boom", response["error"]["data"]["stack"])
+        error = ValueError("boom")
+        self.failing_register(error)
+        result = self.failing_call(7)
+        cascade = {"message": "boom", "stack": _stack_of(error)}
+        self.assertEqual(result["content"][0]["text"], _cascade_text(cascade))
+        self.assertIs(self.failure_get(), error)
 
-    # An `RpcError` of a tool function keeps its code and data.
-    def test_error_kept(self) -> None:
-        self.failing_register(mcp.RpcError(-32000, "no", {"why": 1}))
-        params = {"name": "fail", "arguments": {}}
-        response = _response_get(
-            self.server, _request_make(8, "tools/call", params)
-        )
-        self.assertEqual(
-            _text_make(response),
-            '{"jsonrpc":"2.0","id":8,"error":'
-            '{"code":-32000,"message":"no","data":{"why":1}}}',
-        )
+    # A tool's `RpcError` is a tool's exception too: an `isError` result.
+    def test_rpc_tool(self) -> None:
+        error = mcp.RpcError(-32000, "no", {"why": 1})
+        self.failing_register(error)
+        result = self.failing_call(8)
+        cascade = {"message": "no", "stack": _stack_of(error)}
+        self.assertEqual(result["content"][0]["text"], _cascade_text(cascade))
+        self.assertIs(self.failure_get(), error)
 
-    # An `RpcError` with no data answers an error with no `data` member.
-    def test_data_absent(self) -> None:
-        self.failing_register(mcp.RpcError(-32000, "no"))
-        params = {"name": "fail", "arguments": {}}
-        response = _response_get(
-            self.server, _request_make(8, "tools/call", params)
-        )
-        self.assertEqual(
-            _text_make(response),
-            '{"jsonrpc":"2.0","id":8,"error":{"code":-32000,"message":"no"}}',
-        )
+    # The exception a tool raised from another holds it under `cause`.
+    def test_cause_kept(self) -> None:
+        inner = RuntimeError("inner")
+        try:
+            raise ValueError("outer") from inner
+        except ValueError as raised:
+            error = raised
+        self.failing_register(error)
+        result = self.failing_call(9)
+        cascade = {
+            "message": "outer",
+            "stack": _stack_of(error),
+            "cause": {"message": "inner", "stack": _stack_of(inner)},
+        }
+        self.assertEqual(result["content"][0]["text"], _cascade_text(cascade))
+        self.assertIs(self.failure_get(), error)
 
     # A tool nobody registered is invalid params, named in the message.
     def test_call_unknown(self) -> None:
@@ -294,8 +351,9 @@ class TestServer(unittest.TestCase):
         )
         self.assertEqual(response["error"]["code"], -32602)
         self.assertEqual(
-            response["error"]["message"], i18n("mcp.tool_unknown", "nothing")
+            response["error"]["message"], _text_get("mcp_tool_unknown")
         )
+        self.data_check(response, self.rpc_check(-32602))
         self.assertEqual(self.calls, [])
 
     # Params without a name or with arguments that are no object are invalid.
@@ -316,8 +374,9 @@ class TestServer(unittest.TestCase):
                 self.assertEqual(response["id"], 10)
                 self.assertEqual(response["error"]["code"], -32602)
                 self.assertEqual(
-                    response["error"]["message"], i18n("mcp.call_params")
+                    response["error"]["message"], _text_get("mcp_call_params")
                 )
+                self.data_check(response, self.rpc_check(-32602))
         self.assertEqual(self.calls, [])
 
     # An unknown method is not found, named in the message, with the same id.
@@ -329,9 +388,9 @@ class TestServer(unittest.TestCase):
             self.assertEqual(response["id"], request_id)
             self.assertEqual(response["error"]["code"], -32601)
             self.assertEqual(
-                response["error"]["message"],
-                i18n("mcp.method_unknown", "foo/bar"),
+                response["error"]["message"], _text_get("mcp_method_unknown")
             )
+            self.data_check(response, self.rpc_check(-32601))
 
     # A message that is no request is invalid, with the id only if it is valid.
     def test_request_invalid(self) -> None:
@@ -350,17 +409,19 @@ class TestServer(unittest.TestCase):
                 self.assertEqual(response["id"], reply_id)
                 self.assertEqual(response["error"]["code"], -32600)
                 self.assertEqual(
-                    response["error"]["message"], i18n("mcp.request_invalid")
+                    response["error"]["message"],
+                    _text_get("mcp_request_invalid"),
                 )
+                self.assertNotIn("data", response["error"])
+                self.assertIsNone(self.server.failure_take())
 
     # Registering a name twice raises.
     def test_tool_twice(self) -> None:
         tool = _tool_make(self.entries[0])
         with self.assertRaises(ValueError) as caught:
             self.server.tool_register(tool, lambda arguments: _result_make(""))
-        self.assertEqual(
-            str(caught.exception), i18n("mcp.tool_twice", tool.name)
-        )
+        message = _text_get("mcp_tool_twice").replace("{0}", tool.name)
+        self.assertEqual(str(caught.exception), message)
 
 
 # Tests the client against a server and against a transport that is slow.
@@ -442,10 +503,10 @@ class TestClient(unittest.TestCase):
         with self.assertRaises(mcp.RpcError) as caught:
             self.rig.client.tool_call("nothing", {}, self.rig.result_keep)
         self.assertEqual(caught.exception.code, -32602)
+        self.assertEqual(str(caught.exception), _text_get("mcp_tool_unknown"))
         self.assertEqual(
-            str(caught.exception), i18n("mcp.tool_unknown", "nothing")
+            caught.exception.data["message"], str(caught.exception)
         )
-        self.assertIsNone(caught.exception.data)
         self.assertEqual(self.rig.results, [])
 
     # An error response carries its data to the exception.
@@ -475,7 +536,8 @@ class TestClient(unittest.TestCase):
         self.assertEqual(results, [_result_make("kv_get")])
         with self.assertRaises(ValueError) as caught:
             client.message_handle(reply)
-        self.assertEqual(str(caught.exception), i18n("mcp.reply_unknown", 1))
+        message = _text_get("mcp_reply_unknown_again")
+        self.assertEqual(str(caught.exception), message)
 
     # A result with no `isError` member is not an error.
     def test_error_absent(self) -> None:
@@ -494,7 +556,8 @@ class TestClient(unittest.TestCase):
             self.rig.client.message_handle(
                 {"jsonrpc": "2.0", "id": 99, "result": {}}
             )
-        self.assertEqual(str(caught.exception), i18n("mcp.reply_unknown", 99))
+        message = _text_get("mcp_reply_unknown_unasked")
+        self.assertEqual(str(caught.exception), message)
 
     # An error response ends the wait for its id, so a second one is unknown.
     def test_error_pops(self) -> None:
@@ -511,27 +574,26 @@ class TestClient(unittest.TestCase):
         self.assertEqual(str(refused.exception), "no")
         with self.assertRaises(ValueError) as caught:
             client.message_handle(reply)
-        self.assertEqual(str(caught.exception), i18n("mcp.reply_unknown", 1))
+        message = _text_get("mcp_reply_unknown_again")
+        self.assertEqual(str(caught.exception), message)
 
     # A reply whose id is not an integer raises and leaves the wait in place.
     def test_id_refused(self) -> None:
         results: list[list[mcp.Tool]] = []
         client = mcp.Client("c", "0", lambda message: None)
         client.tools_list(results.append)
-        replies: list[mcp.Message] = [
-            {"jsonrpc": "2.0", "id": True, "result": {"tools": []}},
-            {"jsonrpc": "2.0", "id": 1.0, "result": {"tools": []}},
-            {"jsonrpc": "2.0", "id": "1", "result": {"tools": []}},
-            {"jsonrpc": "2.0", "id": None, "error": _INVALID_ERROR},
+        replies: list[tuple[mcp.Message, str]] = [
+            ({"jsonrpc": "2.0", "id": True, "result": {"tools": []}}, "bool"),
+            ({"jsonrpc": "2.0", "id": 1.0, "result": {"tools": []}}, "float"),
+            ({"jsonrpc": "2.0", "id": "1", "result": {"tools": []}}, "text"),
+            ({"jsonrpc": "2.0", "id": None, "error": _INVALID_ERROR}, "null"),
         ]
-        for reply in replies:
+        for reply, case in replies:
             with self.subTest(reply=reply):
                 with self.assertRaises(ValueError) as caught:
                     client.message_handle(reply)
-                self.assertEqual(
-                    str(caught.exception),
-                    i18n("mcp.reply_id_refused", repr(reply["id"])),
-                )
+                message = _text_get(f"mcp_reply_id_refused_{case}")
+                self.assertEqual(str(caught.exception), message)
         self.assertEqual(results, [])
         client.message_handle(
             {"jsonrpc": "2.0", "id": 1, "result": {"tools": []}}
@@ -540,13 +602,15 @@ class TestClient(unittest.TestCase):
 
     # A request or a notification sent to the client raises.
     def test_request_received(self) -> None:
-        for method in ("ping", "notifications/tools/list_changed"):
+        methods = (
+            ("ping", "ping"),
+            ("notifications/tools/list_changed", "notification"),
+        )
+        for method, case in methods:
             with self.subTest(method=method):
                 with self.assertRaises(ValueError) as caught:
                     self.rig.client.message_handle(
                         {"jsonrpc": "2.0", "id": 1, "method": method}
                     )
-                self.assertEqual(
-                    str(caught.exception),
-                    i18n("mcp.message_unexpected", method),
-                )
+                message = _text_get(f"mcp_message_unexpected_{case}")
+                self.assertEqual(str(caught.exception), message)

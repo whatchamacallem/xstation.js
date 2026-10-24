@@ -2,8 +2,12 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// The settings the server sent in hello, set once per thread, read by id
-// and, in debug mode, changed by id.
+// The settings the server sent in `tap.start`, set once per thread, read by
+// id and, in debug mode, changed by id. The file also holds the constants of
+// the PowerShell scripts, under `powershell`, which the browser receives and
+// does not read. `names_full()` is the one choice of the name form of the
+// lines a thread builds: full names until the settings are set, then full
+// names when `debug` is true and short names otherwise.
 
 namespace settings {
   // The constants of this module.
@@ -11,7 +15,7 @@ namespace settings {
     id_separator: ".",
   });
 
-  // The shape of settings.json, sent in `hello` unmodified.
+  // The shape of settings.json, sent in `tap.start` unmodified.
   export interface Settings {
     debug: boolean;
     queue_synchronous: boolean;
@@ -23,14 +27,40 @@ namespace settings {
     chunk_bytes: number;
     srv_buf_size: number;
     media_db_bytes: number;
-    files_browser_bytes: number;
-    db_soft_bytes: number;
     // The compaction threshold, 64, a default chosen by its writer.
     turn_compact_turns: number;
-    long_task_ms: number;
     provider: {
       scripted: boolean;
       timeout_seconds: number;
+      variable: string;
+    };
+    powershell: {
+      windows_port: number;
+      linux_port: number;
+      bind_address: string;
+      bootstrap_script: string;
+      engine_page: string;
+      ttyd_build: string;
+      ttyd_archive: string;
+      ttyd_patches: string;
+      terminal_type: string;
+      linux_folder: string;
+      distribution: string;
+      task_name: string;
+      firewall_rule: string;
+      state_folder: string;
+      certificate_file: string;
+      key_file: string;
+      certificate_days: number;
+      runner_file: string;
+      ttyd_log_file: string;
+      poll_tries: number;
+      poll_milliseconds: number;
+      output_width: number;
+      root_files: string[];
+      runtime_modules: string[];
+      build_tools: { [tool: string]: string };
+      build_headers: { [header: string]: string };
     };
   }
 
@@ -126,6 +156,14 @@ namespace settings {
       this.sender = sender;
     }
 
+    // Full names while the value is unset, then whether `debug` is true.
+    names_full(): boolean {
+      if (this.value === undefined) {
+        return true;
+      }
+      return this.value.debug === true;
+    }
+
     // The settings, throwing when they were not yet set.
     private value_live(): Settings {
       if (this.value === undefined) {
@@ -138,7 +176,7 @@ namespace settings {
   // The settings of this thread, behind the functions below.
   const store = new ValueStore();
 
-  // Stores the settings the hello carried, once per thread.
+  // Stores the settings `tap.start` carried, once per thread.
   export function settings_set(value: Settings): void {
     store.value_set(value);
   }
@@ -156,6 +194,11 @@ namespace settings {
   // Registers the function that sends `settings.put` for this thread.
   export function sender_register(sender: Sender): void {
     store.sender_register(sender);
+  }
+
+  // Whether this thread builds its lines in full names, as described above.
+  export function names_full(): boolean {
+    return store.names_full();
   }
 }
 

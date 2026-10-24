@@ -2,11 +2,12 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests of reformat's table and of its matching of whitelist lines, the
-# matching on a scratch tree under build/, each refusal compared with its
-# message.
+# Tests of reformat's table, of the commands its check and its formatting
+# start, with subprocess.run replaced so that none starts, and of its
+# matching of whitelist lines, the matching on a scratch tree under build/,
+# each refusal compared with its message.
 
-import os, reformat, tempfile, unittest
+import os, reformat, tempfile, unittest.mock
 
 # The checkout's build directory, where each test makes its scratch directory.
 _BUILD_PATH = os.path.join(
@@ -24,6 +25,31 @@ _TABLE_PATH = os.path.join(
 # The files of each matching test's scratch tree, from its root.
 _TREE_NAMES = ["x/a.py", "x/b.py", "x/.c.py", "x/d.txt", "top.sh"]
 
+# The options of each ruff command of the table, its configuration and cache.
+_RUFF_OPTIONS = [
+    "--config",
+    "python/pyproject.toml",
+    "--cache-dir",
+    "build/ruff_cache",
+]
+
+# A file of each extension the command tests give, PowerShell's run by none.
+_COMMAND_PATHS = ["/a/b.py", "/a/b.sh", "/a/b.ts", "/a/b.ps1"]
+
+# The commands a check starts on them, in the table's order, rewriting none.
+_CHECK_COMMANDS = [
+    ["ruff", "format", "--check", *_RUFF_OPTIONS, "/a/b.py"],
+    ["shfmt", "--diff", "/a/b.sh"],
+    ["prettier", "--check", "--no-config", "--print-width", "79", "/a/b.ts"],
+]
+
+# The commands a formatting starts on them, in the table's order.
+_FORMAT_COMMANDS = [
+    ["ruff", "format", *_RUFF_OPTIONS, "/a/b.py"],
+    ["shfmt", "--list", "--write", "/a/b.sh"],
+    ["prettier", "--write", "--no-config", "--print-width", "79", "/a/b.ts"],
+]
+
 
 # Writes an empty file at each path from the root, making its directories.
 def tree_make(root: str, names: list[str]) -> None:
@@ -36,7 +62,7 @@ def tree_make(root: str, names: list[str]) -> None:
 
 # The table's rows, and the row that a path's extension finds.
 class TestTable(unittest.TestCase):
-    # The table holds a row of the five fields for each whitelisted extension.
+    # The table holds a row of the six fields for each whitelisted extension.
     def test_rows_read(self) -> None:
         table = reformat.table_read()
         self.assertEqual(
@@ -60,17 +86,18 @@ class TestTable(unittest.TestCase):
     def test_windows_rows(self) -> None:
         table = reformat.table_read()
         expected = reformat.FileType(
-            "powershell", "utf-8-sig", [], [], "windows"
+            [], "powershell", "utf-8-sig", [], [], "windows"
         )
         for extension in (".ps1", ".psd1"):
             self.assertEqual(table[extension], expected, extension)
 
-    # Every other row is read as `utf-8` and formatted on Linux.
+    # Every other row is read as `utf-8` and checked and formatted on Linux.
     def test_linux_rows(self) -> None:
         for extension, row in reformat.table_read().items():
             if extension not in (".ps1", ".psd1"):
                 self.assertEqual(row.system, "linux", extension)
                 self.assertEqual(row.encoding, "utf-8", extension)
+                self.assertTrue(row.checker, extension)
                 self.assertTrue(row.formatter, extension)
 
     # A path finds the row of its last extension.
@@ -88,6 +115,29 @@ class TestTable(unittest.TestCase):
             with self.assertRaises(RuntimeError) as caught:
                 reformat.type_find(table, path)
             self.assertEqual(caught.exception.args, (expected,), path)
+
+
+# The commands each run starts, `subprocess.run` replaced so that none starts.
+class TestCommands(unittest.TestCase):
+    # A check starts each Linux row's checker on its files, rewriting none.
+    def test_check_commands(self) -> None:
+        with unittest.mock.patch("subprocess.run") as run:
+            reformat.format_check(_COMMAND_PATHS)
+        self.assertEqual(
+            [call.args[0] for call in run.call_args_list], _CHECK_COMMANDS
+        )
+        for call in run.call_args_list:
+            self.assertEqual(call.kwargs, {"check": True, "cwd": _ROOT_PATH})
+
+    # A formatting starts each Linux row's formatter on its files.
+    def test_format_commands(self) -> None:
+        with unittest.mock.patch("subprocess.run") as run:
+            reformat.reformat(_COMMAND_PATHS)
+        self.assertEqual(
+            [call.args[0] for call in run.call_args_list], _FORMAT_COMMANDS
+        )
+        for call in run.call_args_list:
+            self.assertEqual(call.kwargs, {"check": True, "cwd": _ROOT_PATH})
 
 
 # The matching of whitelist lines on a scratch tree, and each refusal.

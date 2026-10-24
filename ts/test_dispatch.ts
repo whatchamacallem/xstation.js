@@ -3,7 +3,10 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // Tests of the dispatcher: registration, dispatch by type and version, the
-// rules for replies and sleeps, and the reply, error and id lines it builds.
+// rules for replies, sleeps and failures, the reply and error lines it
+// builds, the cascades it writes and the ids it counts from 102. The lines
+// the tests send and expect and the texts of the throws are those of the
+// gold record, test_settings.json, each fresh type set on the copy.
 
 namespace test_dispatch {
   // The prefixes of the types and ports the tests make, which are their own.
@@ -36,18 +39,42 @@ namespace test_dispatch {
     return `${constants.port_prefix}${ports_made}`;
   }
 
-  // Builds a line with no blobs from its type, header options and payload.
-  function line_build(
-    type: string,
-    options: { version?: number; id?: number; key?: string; full?: boolean },
-    payload: { [key: string]: unknown } = {},
-  ): lines.Line {
-    return jslb.line_make(jslb.header_make(type, options), [], payload);
+  // A copy of a value of this module's gold, which the harness keeps frozen.
+  function gold_value(name: string): unknown {
+    return structuredClone(
+      harness.gold_get(`typescript.test_dispatch.${name}`),
+    );
+  }
+
+  // A text of this module's gold, a run time `{n}` left for the test to fill.
+  function gold_text(name: string): string {
+    return harness.gold_get(
+      `typescript.test_dispatch.texts.${name}`,
+    ) as string;
+  }
+
+  // A copy of a line of this module's gold, a run time part set on the copy.
+  function gold_line(name: string): lines.Line {
+    return gold_value(`lines.${name}`) as lines.Line;
+  }
+
+  // A copy of a gold line in short names, the fresh type set as `t`.
+  function line_short(name: string, type: string): lines.Line {
+    const line = gold_line(name);
+    Object.assign(line[0], { t: type });
+    return line;
+  }
+
+  // A copy of a gold line in full names, the fresh type set as `type`.
+  function line_full(name: string, type: string): lines.Line {
+    const line = gold_line(name);
+    Object.assign(line[0], { type });
+    return line;
   }
 
   // Makes a handler that records its lines and always returns the result.
   function record_make(
-    result: dispatch.Reply | dispatch.Sleep,
+    result: dispatch.Reply | dispatch.Sleep | dispatch.Failure,
   ): HandlerRecord {
     const seen: lines.Line[] = [];
     return {
@@ -83,8 +110,11 @@ namespace test_dispatch {
       const error = thrown_get(() =>
         dispatch.handler_register(type, 0, second.fn),
       );
-      this.assertEqual(error.message, i18n("dispatch.handler_twice", type, 0));
-      dispatch.line_dispatch(line_build(type, {}));
+      this.assertEqual(
+        error.message,
+        gold_text("dispatch_handler_twice").replaceAll("{0}", type),
+      );
+      dispatch.line_dispatch(line_short("notification", type));
       this.assertEqual(first.seen.length, 1);
       this.assertEqual(second.seen.length, 0);
     }
@@ -101,9 +131,9 @@ namespace test_dispatch {
       dispatch.handler_register(type, 0, records[0].fn);
       dispatch.handler_register(type, 1, records[1].fn);
       dispatch.handler_register(other, 0, records[2].fn);
-      dispatch.line_dispatch(line_build(type, {}));
-      dispatch.line_dispatch(line_build(type, { version: 1 }));
-      dispatch.line_dispatch(line_build(other, {}));
+      dispatch.line_dispatch(line_short("notification", type));
+      dispatch.line_dispatch(line_short("versioned", type));
+      dispatch.line_dispatch(line_short("notification", other));
       for (const record of records) {
         this.assertEqual(record.seen.length, 1);
       }
@@ -122,7 +152,7 @@ namespace test_dispatch {
       dispatch.handler_register(type, 0, first.fn);
       dispatch.handler_register(type, 1, versioned.fn);
       dispatch.handler_register(other, 0, elsewhere.fn);
-      const line = line_build(type, { version: 1 }, { text: "x" });
+      const line = line_short("versioned_text", type);
       this.assertEqual(dispatch.line_dispatch(line), undefined);
       this.assertEqual(versioned.seen.length, 1);
       this.assertTrue(versioned.seen[0] === line);
@@ -135,8 +165,8 @@ namespace test_dispatch {
       const type = type_fresh();
       const zero = record_make(undefined);
       dispatch.handler_register(type, 0, zero.fn);
-      dispatch.line_dispatch(line_build(type, {}));
-      dispatch.line_dispatch(line_build(type, { version: 0 }));
+      dispatch.line_dispatch(line_short("notification", type));
+      dispatch.line_dispatch(line_short("notification", type));
       this.assertEqual(zero.seen.length, 2);
     }
 
@@ -145,9 +175,11 @@ namespace test_dispatch {
       const type = type_fresh();
       const record = record_make(undefined);
       dispatch.handler_register(type, 0, record.fn);
-      const blob = jslb.blob_make(new Uint8Array([1, 2, 3]));
-      const header = jslb.header_make(type);
-      const line = jslb.line_make(header, [blob], { n: 1 });
+      const data = new Uint8Array([1, 2, 3]);
+      const line = line_short("blob_line", type);
+      Object.assign(line[1] as lines.BlobHeader, { d: data });
+      const blob = gold_line("blob_line")[1] as lines.BlobHeader;
+      blob.d = data;
       dispatch.line_dispatch(line);
       this.assertTrue(record.seen[0] === line);
       this.assertEqual(line.n, 1);
@@ -160,18 +192,18 @@ namespace test_dispatch {
       const other = type_fresh();
       dispatch.handler_register(type, 0, record_make(undefined).fn);
       const type_error = thrown_get(() =>
-        dispatch.line_dispatch(line_build(other, {})),
+        dispatch.line_dispatch(line_short("notification", other)),
       );
       this.assertEqual(
         type_error.message,
-        i18n("dispatch.handler_unknown", other, 0),
+        gold_text("dispatch_handler_unknown_type").replaceAll("{0}", other),
       );
       const version_error = thrown_get(() =>
-        dispatch.line_dispatch(line_build(type, { version: 1 })),
+        dispatch.line_dispatch(line_short("versioned", type)),
       );
       this.assertEqual(
         version_error.message,
-        i18n("dispatch.handler_unknown", type, 1),
+        gold_text("dispatch_handler_unknown_version").replaceAll("{0}", type),
       );
     }
 
@@ -182,7 +214,7 @@ namespace test_dispatch {
       dispatch.handler_register(type, 0, () => {
         throw failure;
       });
-      const line = line_build(type, { id: 7 });
+      const line = line_short("request_7", type);
       const error = thrown_get(() => dispatch.line_dispatch(line));
       this.assertTrue(error === failure);
     }
@@ -190,7 +222,7 @@ namespace test_dispatch {
     // A request gets the reply its handler returned, with `r` set to its `i`.
     test_request_reply(): void {
       const type = type_fresh();
-      const request = line_build(type, { id: 7 });
+      const request = line_short("request_7", type);
       const reply = dispatch.reply_make(request, { n: 1 });
       dispatch.handler_register(type, 0, record_make(reply).fn);
       this.assertTrue(dispatch.line_dispatch(request) === reply);
@@ -200,7 +232,7 @@ namespace test_dispatch {
     // A full name request is answered in full names.
     test_full_request(): void {
       const type = type_fresh();
-      const request = line_build(type, { id: 9, full: true });
+      const request = line_full("request_full_9", type);
       const reply = dispatch.reply_make(request, { n: 1 });
       dispatch.handler_register(type, 0, record_make(reply).fn);
       this.assertTrue(dispatch.line_dispatch(request) === reply);
@@ -211,12 +243,12 @@ namespace test_dispatch {
     test_reply_unset(): void {
       const short_type = type_fresh();
       const full_type = type_fresh();
-      const short_reply = line_build(short_type, {});
-      const full_reply = line_build(full_type, { full: true });
+      const short_reply = line_short("notification", short_type);
+      const full_reply = line_full("notification", full_type);
       dispatch.handler_register(short_type, 0, record_make(short_reply).fn);
       dispatch.handler_register(full_type, 0, record_make(full_reply).fn);
-      dispatch.line_dispatch(line_build(short_type, { id: 7 }));
-      dispatch.line_dispatch(line_build(full_type, { id: 8 }));
+      dispatch.line_dispatch(line_short("request_7", short_type));
+      dispatch.line_dispatch(line_short("request_8", full_type));
       this.assertEqual(short_reply[0], { t: short_type, r: 7 });
       this.assertEqual(full_reply[0], { type: full_type, reply: 8 });
     }
@@ -224,9 +256,9 @@ namespace test_dispatch {
     // A reply that names another request is changed to name this one.
     test_reply_overwritten(): void {
       const type = type_fresh();
-      const reply = dispatch.reply_make(line_build(type, { id: 3 }), {});
+      const reply = dispatch.reply_make(line_short("request_3", type), {});
       dispatch.handler_register(type, 0, record_make(reply).fn);
-      dispatch.line_dispatch(line_build(type, { id: 7 }));
+      dispatch.line_dispatch(line_short("request_7", type));
       this.assertEqual(reply[0], { t: type, r: 7 });
     }
 
@@ -235,11 +267,11 @@ namespace test_dispatch {
       const type = type_fresh();
       dispatch.handler_register(type, 0, record_make(undefined).fn);
       const error = thrown_get(() =>
-        dispatch.line_dispatch(line_build(type, { id: 7 })),
+        dispatch.line_dispatch(line_short("request_7", type)),
       );
       this.assertEqual(
         error.message,
-        i18n("dispatch.request_unanswered", type, 0, 7),
+        gold_text("dispatch_request_unanswered").replaceAll("{0}", type),
       );
     }
 
@@ -247,20 +279,20 @@ namespace test_dispatch {
     test_notification_none(): void {
       const type = type_fresh();
       dispatch.handler_register(type, 0, record_make(undefined).fn);
-      const line = line_build(type, {}, { text: "x" });
+      const line = line_short("notification_text", type);
       this.assertEqual(dispatch.line_dispatch(line), undefined);
     }
 
     // A notification whose handler returns a reply to no request throws.
     test_notification_reply(): void {
       const type = type_fresh();
-      const notification = line_build(type, {});
+      const notification = line_short("notification", type);
       const reply = dispatch.reply_make(notification, {});
       dispatch.handler_register(type, 0, record_make(reply).fn);
       const error = thrown_get(() => dispatch.line_dispatch(notification));
       this.assertEqual(
         error.message,
-        i18n("dispatch.notification_replied", type, 0),
+        gold_text("dispatch_notification_replied").replaceAll("{0}", type),
       );
     }
 
@@ -268,11 +300,11 @@ namespace test_dispatch {
     test_wake_reply(): void {
       const wake_type = type_fresh();
       const request_type = type_fresh();
-      const request = line_build(request_type, { id: 5 });
+      const request = line_short("request_5", request_type);
       const reply = dispatch.reply_make(request, { turn: 7 });
       dispatch.handler_register(wake_type, 0, record_make(reply).fn);
-      const wake: lines.Wake = { state: request, replies: [] };
-      const line = line_build(wake_type, {}, { ...wake });
+      const line = line_short("wake", wake_type);
+      line.state = request;
       this.assertTrue(dispatch.line_dispatch(line) === reply);
       this.assertEqual(reply[0], { t: request_type, r: 5 });
     }
@@ -280,14 +312,15 @@ namespace test_dispatch {
     // A reply with no header throws, for a request and for a notification.
     test_reply_headerless(): void {
       const type = type_fresh();
-      dispatch.handler_register(type, 0, record_make({ n: 1 }).fn);
-      for (const options of [{ id: 7 }, {}]) {
+      const headerless = { n: 1 } as unknown as lines.Line;
+      dispatch.handler_register(type, 0, record_make(headerless).fn);
+      for (const name of ["request_7", "notification"]) {
         const error = thrown_get(() =>
-          dispatch.line_dispatch(line_build(type, options)),
+          dispatch.line_dispatch(line_short(name, type)),
         );
         this.assertEqual(
           error.message,
-          i18n("dispatch.reply_headerless", type, 0),
+          gold_text("dispatch_reply_headerless").replaceAll("{0}", type),
         );
       }
     }
@@ -311,9 +344,11 @@ namespace test_dispatch {
       const sleep = dispatch.task_sleep({ step: 1 }, [1, 2], then_type);
       dispatch.handler_register(type, 0, record_make(sleep).fn);
       this.assertTrue(
-        dispatch.line_dispatch(line_build(type, { id: 7 })) === sleep,
+        dispatch.line_dispatch(line_short("request_7", type)) === sleep,
       );
-      this.assertTrue(dispatch.line_dispatch(line_build(type, {})) === sleep);
+      this.assertTrue(
+        dispatch.line_dispatch(line_short("notification", type)) === sleep,
+      );
       this.assertEqual(sleep, {
         state: { step: 1 },
         wait_ids: [1, 2],
@@ -322,48 +357,103 @@ namespace test_dispatch {
     }
   }
 
+  // The failure a handler returns: a reply, then the queue fails.
+  export class TestFailure extends unittest.TestCase {
+    // The failure holds the reply and the error it was given.
+    test_failure_fields(): void {
+      const reply = line_short("notification", type_fresh());
+      const error = new Error("boom");
+      const failure = dispatch.failure_make(reply, error);
+      this.assertTrue(failure.reply === reply);
+      this.assertTrue(failure.error === error);
+      this.assertEqual(Object.keys(failure).sort(), ["error", "reply"]);
+    }
+
+    // The reply of a request's failure gets `r`, the failure comes back.
+    test_request_failure(): void {
+      const type = type_fresh();
+      const reply = line_short("notification_n", type);
+      const failure = dispatch.failure_make(reply, new Error("boom"));
+      dispatch.handler_register(type, 0, record_make(failure).fn);
+      const result = dispatch.line_dispatch(line_short("request_7", type));
+      this.assertTrue(result === failure);
+      this.assertEqual(reply[0], { t: type, r: 7 });
+    }
+
+    // The failure of a wake whose reply answers a request comes back as is.
+    test_wake_failure(): void {
+      const wake_type = type_fresh();
+      const request_type = type_fresh();
+      const request = line_short("request_5", request_type);
+      const reply = dispatch.reply_make(request, { turn: 7 });
+      const failure = dispatch.failure_make(reply, new Error("boom"));
+      dispatch.handler_register(wake_type, 0, record_make(failure).fn);
+      const line = line_short("wake", wake_type);
+      line.state = request;
+      this.assertTrue(dispatch.line_dispatch(line) === failure);
+      this.assertEqual(reply[0], { t: request_type, r: 5 });
+    }
+
+    // A failure whose reply answers no request, of a line with no id, throws.
+    test_notification_failure(): void {
+      const type = type_fresh();
+      const reply = line_short("notification", type);
+      const failure = dispatch.failure_make(reply, new Error("boom"));
+      dispatch.handler_register(type, 0, record_make(failure).fn);
+      const error = thrown_get(() =>
+        dispatch.line_dispatch(line_short("notification", type)),
+      );
+      this.assertEqual(
+        error.message,
+        gold_text("dispatch_notification_replied").replaceAll("{0}", type),
+      );
+    }
+  }
+
   // The reply line a handler builds.
   export class TestReplyMake extends unittest.TestCase {
     // A short name reply has `t` and `r` and nothing else of the request.
     test_short_names(): void {
       const type = type_fresh();
-      const options = { version: 1, id: 7, key: "/a/b" };
-      const request = line_build(type, options, { n: 1 });
+      const request = line_short("request_keyed", type);
       const reply = dispatch.reply_make(request, { found: true, size: 3 });
       this.assertEqual(reply[0], { t: type, r: 7 });
       this.assertFalse("1" in reply);
-      this.assertEqual(jslb.payload_of(reply), { found: true, size: 3 });
+      this.assertEqual(reply, line_short("reply_found", type));
     }
 
     // A full name reply has `type` and `reply` and nothing else.
     test_full_names(): void {
       const type = type_fresh();
-      const options = { version: 1, id: 7, key: "/a/b", full: true };
-      const request = line_build(type, options, { n: 1 });
+      const request = line_full("request_keyed_full", type);
       const reply = dispatch.reply_make(request, { found: true, size: 3 });
       this.assertEqual(reply[0], { type, reply: 7 });
       this.assertFalse("1" in reply);
-      this.assertEqual(jslb.payload_of(reply), { found: true, size: 3 });
+      this.assertEqual(reply, line_full("reply_found_full", type));
     }
 
     // A reply to a notification has no `r`.
     test_id_absent(): void {
       const type = type_fresh();
-      const reply = dispatch.reply_make(line_build(type, {}), { n: 1 });
+      const notification = line_short("notification", type);
+      const reply = dispatch.reply_make(notification, { n: 1 });
       this.assertEqual(reply[0], { t: type });
     }
 
     // Blobs are numbered from 1 and counted, apart from the payload.
     test_blobs_numbered(): void {
-      const request = line_build(type_fresh(), { id: 3 });
-      const first = jslb.blob_make(new Uint8Array([1, 2, 3]));
-      const second = jslb.blob_make(new Uint8Array([4, 5]));
+      const request = line_short("request_3", type_fresh());
+      const first = gold_value("lines.blob_three") as lines.BlobHeader;
+      first.d = new Uint8Array([1, 2, 3]);
+      const second = gold_value("lines.blob_two") as lines.BlobHeader;
+      second.d = new Uint8Array([4, 5]);
       const reply = dispatch.reply_make(request, { seq: 4 }, [first, second]);
-      this.assertEqual(jslb.field_get(reply[0], "blobs"), 2);
+      this.assertEqual(reply[0].b, 2);
       this.assertEqual(reply[1], first);
       this.assertEqual(reply[2], second);
       this.assertFalse("3" in reply);
-      this.assertEqual(jslb.payload_of(reply), { seq: 4 });
+      this.assertEqual(Object.keys(reply), ["0", "1", "2", "seq"]);
+      this.assertEqual(reply.seq, 4);
     }
   }
 
@@ -372,34 +462,37 @@ namespace test_dispatch {
     // The error line of a request has `r`, the message and the stack.
     test_request_error(): void {
       const error = new Error("boom");
-      const request = line_build(type_fresh(), { id: 5 });
+      const request = line_short("request_5", type_fresh());
       const line = dispatch.error_make(request, error);
       this.assertEqual(line[0], { t: "error", r: 5 });
-      const payload = jslb.payload_of(line);
-      this.assertEqual(Object.keys(payload), ["message", "stack"]);
-      this.assertEqual(payload.message, "boom");
-      this.assertEqual(payload.stack, error.stack);
+      this.assertEqual(Object.keys(line), ["0", "message", "stack"]);
+      this.assertEqual(line.message, "boom");
+      this.assertEqual(line.stack, error.stack);
     }
 
     // The error line of a full name request uses full names.
     test_full_error(): void {
-      const request = line_build(type_fresh(), { id: 5, full: true });
+      const request = line_full("request_full_5", type_fresh());
       const line = dispatch.error_make(request, new Error("boom"));
       this.assertEqual(line[0], { type: "error", reply: 5 });
     }
 
     // The error line of a notification has no `r`.
     test_notification_error(): void {
-      const notification = line_build(type_fresh(), {});
+      const notification = line_short("notification", type_fresh());
       const line = dispatch.error_make(notification, new Error("boom"));
       this.assertEqual(line[0], { t: "error" });
-      this.assertEqual(jslb.payload_of(line).message, "boom");
+      this.assertEqual(line.message, "boom");
     }
 
-    // The error line of no line has no `r`, in short names.
+    // The error line of no line has no `r`, in the form the settings pick.
     test_no_line(): void {
       const line = dispatch.error_make(undefined, new Error("boom"));
-      this.assertEqual(line[0], { t: "error" });
+      if (harness.setting_get("debug") === true) {
+        this.assertEqual(line[0], { type: "error" });
+      } else {
+        this.assertEqual(line[0], { t: "error" });
+      }
     }
 
     // An error with no stack cannot be sent, so it throws.
@@ -407,7 +500,76 @@ namespace test_dispatch {
       const error = new Error("boom");
       Object.defineProperty(error, "stack", { value: undefined });
       const thrown = thrown_get(() => dispatch.error_make(undefined, error));
-      this.assertEqual(thrown.message, i18n("dispatch.stack_missing", "boom"));
+      const message = gold_text("dispatch_stack_missing_line");
+      this.assertEqual(thrown.message, message);
+    }
+
+    // The error line carries the cascade under `cause`, the first innermost.
+    test_cascade(): void {
+      const first = new Error("first");
+      const error = new Error("second", { cause: first });
+      const request = line_short("request_5", type_fresh());
+      const line = dispatch.error_make(request, error);
+      this.assertEqual(Object.keys(line), ["0", "message", "stack", "cause"]);
+      this.assertEqual(line, {
+        ...gold_line("error_request_5"),
+        message: "second",
+        stack: error.stack,
+        cause: { message: "first", stack: first.stack },
+      });
+    }
+
+    // A thrown value that is no `Error` is written as its text, no stack.
+    test_value_thrown(): void {
+      const line = dispatch.error_make(undefined, "boom");
+      this.assertEqual(line, gold_line("error_value"));
+    }
+  }
+
+  // The cascade of an error as nested `cause` entries.
+  export class TestCauseMake extends unittest.TestCase {
+    // An `Error` with two nested causes gives three entries, nested in order.
+    test_nested_errors(): void {
+      const first = new Error("first");
+      const second = new Error("second", { cause: first });
+      const third = new Error("third", { cause: second });
+      this.assertEqual(dispatch.cause_make(third), {
+        message: "third",
+        stack: third.stack,
+        cause: {
+          message: "second",
+          stack: second.stack,
+          cause: { message: "first", stack: first.stack },
+        },
+      });
+    }
+
+    // A `cause` that is no `Error` is written as its text with no stack.
+    test_cause_value(): void {
+      const error = new Error("outer", { cause: 7 });
+      this.assertEqual(dispatch.cause_make(error), {
+        message: "outer",
+        stack: error.stack,
+        cause: { message: "7", stack: "" },
+      });
+    }
+
+    // A thrown value that is no `Error` is written as its text with no stack.
+    test_value_thrown(): void {
+      this.assertEqual(dispatch.cause_make(undefined), {
+        message: "undefined",
+        stack: "",
+      });
+    }
+
+    // A nested `Error` with no stack cannot be sent, so it throws.
+    test_stack_missing(): void {
+      const inner = new Error("inner");
+      Object.defineProperty(inner, "stack", { value: undefined });
+      const error = new Error("outer", { cause: inner });
+      const thrown = thrown_get(() => dispatch.cause_make(error));
+      const message = gold_text("dispatch_stack_missing_nested");
+      this.assertEqual(thrown.message, message);
     }
   }
 
@@ -416,7 +578,7 @@ namespace test_dispatch {
     // A type that is not text throws in each call that reads it.
     test_type_invalid(): void {
       const line = { 0: { t: 5 } } as unknown as lines.Line;
-      const message = i18n("dispatch.type_invalid", 5);
+      const message = gold_text("dispatch_type_invalid");
       const dispatched = thrown_get(() => dispatch.line_dispatch(line));
       const replied = thrown_get(() => dispatch.reply_make(line, {}));
       this.assertEqual(dispatched.message, message);
@@ -429,7 +591,7 @@ namespace test_dispatch {
       const record = record_make(undefined);
       dispatch.handler_register(type, 0, record.fn);
       const line = { 0: { t: type, i: "7" } } as unknown as lines.Line;
-      const message = i18n("dispatch.id_invalid", type, "7");
+      const message = gold_text("dispatch_id_invalid").replaceAll("{0}", type);
       const dispatched = thrown_get(() => dispatch.line_dispatch(line));
       const replied = thrown_get(() => dispatch.reply_make(line, {}));
       const failed = thrown_get(() =>
@@ -444,7 +606,7 @@ namespace test_dispatch {
 
   // The ids of the ports.
   export class TestIdNext extends unittest.TestCase {
-    // The ids of a port count up from 1.
+    // The ids of a port count up from 102, as 101 is the first line's.
     test_ids_count(): void {
       const port = port_fresh();
       const counted = [
@@ -452,17 +614,17 @@ namespace test_dispatch {
         dispatch.id_next(port),
         dispatch.id_next(port),
       ];
-      this.assertEqual(counted, [1, 2, 3]);
+      this.assertEqual(counted, [102, 103, 104]);
     }
 
-    // Each port counts on its own.
+    // Each port counts on its own, each from 102.
     test_ports_separate(): void {
       const wire = port_fresh();
       const page = port_fresh();
-      this.assertEqual(dispatch.id_next(wire), 1);
-      this.assertEqual(dispatch.id_next(page), 1);
-      this.assertEqual(dispatch.id_next(wire), 2);
-      this.assertEqual(dispatch.id_next(page), 2);
+      this.assertEqual(dispatch.id_next(wire), 102);
+      this.assertEqual(dispatch.id_next(page), 102);
+      this.assertEqual(dispatch.id_next(wire), 103);
+      this.assertEqual(dispatch.id_next(page), 103);
     }
   }
 }

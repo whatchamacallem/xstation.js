@@ -6,13 +6,16 @@
 # that holds each line the moment it is logged, the lines of the page threads
 # written and read back, and the three levels of the shell's runner. The only
 # program a test starts is the interpreter that runs it. The scratch
-# directories go under `build/`.
+# directories go under `build/`. The texts expected, the ring the tests open
+# and the count of a whole history are the gold's.
 
-import contextlib, os, shlex, sqlite3, sys, tempfile, time, unittest
-import unittest.mock, verbose
+import contextlib, harness, os, shlex, sqlite3, sys, tempfile, time
+import unittest, unittest.mock, verbose
 from collections.abc import Callable
-from i18n import i18n
 from typing import Any, cast
+
+# The id of this module's gold in `test_settings.json`.
+_GOLD_ID = "python.test_verbose"
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -29,11 +32,14 @@ _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
 # The file in the root that holds the lines.
 _FILE_NAME = "_verbose.sqlite"
 
-# The highest level of the runner, which the message of a level refused names.
-_LEVEL_HIGHEST = 2
+# The ring of the log the tests open, more lines than any test logs.
+_RING_LINES: int = harness.gold_get(f"{_GOLD_ID}.ring_lines")
 
 # A count of lines greater than any ring a test makes.
-_HISTORY_ALL = 100
+_HISTORY_ALL: int = harness.gold_get(f"{_GOLD_ID}.history_all")
+
+# The threads other than ui and ai the tests give, by the case of their text.
+_THREADS_UNKNOWN = {"server": "server", "console": "console", "empty": ""}
 
 # Reads every row of the table, in the order they were written.
 _SELECT_ROWS = "SELECT seq, at, thread, text FROM line ORDER BY seq"
@@ -77,6 +83,12 @@ _HARD_PROGRAM = (
     "verbose.log('second')\n"
     "os._exit(7)\n"
 )
+
+
+# A text of this module's gold.
+def _text_get(name: str) -> str:
+    text: str = harness.gold_get(f"{_GOLD_ID}.texts.{name}")
+    return text
 
 
 # Makes a scratch directory in `build/` that goes when the test ends.
@@ -138,8 +150,8 @@ def _ring_texts() -> list[str]:
 def _progress_texts(argv: list[str], code: int) -> tuple[str, str]:
     command = shlex.join(argv)
     return (
-        i18n("verbose.exec_run", command),
-        i18n("verbose.exec_exit", command, code),
+        _text_get("verbose_exec_run").replace("{0}", command),
+        _text_get(f"verbose_exec_exit_{code}").replace("{0}", command),
     )
 
 
@@ -202,7 +214,7 @@ def _buffered_run(level: int, argv: list[str]) -> int:
 class TestLogAll(unittest.TestCase):
     # Every line given is in the ring and the database, with no level.
     def test_every_line(self) -> None:
-        path = _log_ready(self, 10)
+        path = _log_ready(self, _RING_LINES)
         for text in ["zero", "one", "two"]:
             verbose.log(text)
         self.assertEqual(_ring_texts(), ["zero", "one", "two"])
@@ -211,14 +223,14 @@ class TestLogAll(unittest.TestCase):
 
     # A runner level outside 0 to 2 raises, runs nothing and logs nothing.
     def test_level_unknown(self) -> None:
-        path = _log_ready(self, 10)
+        path = _log_ready(self, _RING_LINES)
         program = [sys.executable, "-c", _MARKER_PROGRAM]
         argv = [*program, os.path.join(path, "ran")]
-        for level in (3, -1):
+        for level, case in ((3, "above"), (-1, "below")):
             _raise_check(
                 self,
                 ValueError,
-                i18n("verbose.level_invalid", level, _LEVEL_HIGHEST),
+                _text_get(f"verbose_level_invalid_{case}"),
                 lambda: verbose.exec(level, argv, argv),
             )
         self.assertFalse(os.path.exists(argv[-1]))
@@ -227,7 +239,7 @@ class TestLogAll(unittest.TestCase):
 
     # Every use of the log before it is opened raises, a close too.
     def test_log_unopened(self) -> None:
-        message = i18n("verbose.not_open")
+        message = _text_get("verbose_not_open")
         uses: list[Callable[[], object]] = [
             lambda: verbose.log("early"),
             lambda: verbose.history_get(1),
@@ -240,10 +252,10 @@ class TestLogAll(unittest.TestCase):
 
     # A closed log refuses every use, a second close too, until it reopens.
     def test_log_closed(self) -> None:
-        path = _log_ready(self, 10)
+        path = _log_ready(self, _RING_LINES)
         verbose.log_close()
-        self.addCleanup(verbose.log_open, path, 10)
-        message = i18n("verbose.not_open")
+        self.addCleanup(verbose.log_open, path, _RING_LINES)
+        message = _text_get("verbose_not_open")
         uses: list[Callable[[], object]] = [
             lambda: verbose.log("closed"),
             lambda: verbose.history_get(1),
@@ -254,10 +266,10 @@ class TestLogAll(unittest.TestCase):
 
     # Closing the log forgets the ring, and the reopened log writes at once.
     def test_close_resets(self) -> None:
-        path = _log_ready(self, 10)
+        path = _log_ready(self, _RING_LINES)
         verbose.log("before")
         verbose.log_close()
-        verbose.log_open(path, 10)
+        verbose.log_open(path, _RING_LINES)
         self.assertEqual(_ring_texts(), [])
         verbose.log("after")
         self.assertEqual(_ring_texts(), ["after"])
@@ -282,7 +294,7 @@ class TestRing(unittest.TestCase):
 
     # The history is the last count lines, oldest first, or all if fewer.
     def test_history_counts(self) -> None:
-        _log_ready(self, 10)
+        _log_ready(self, _RING_LINES)
         self.assertEqual(verbose.history_get(5), [])
         for text in ["a", "b", "c"]:
             verbose.log(text)
@@ -298,17 +310,17 @@ class TestRing(unittest.TestCase):
 
     # A negative count raises.
     def test_history_negative(self) -> None:
-        _log_ready(self, 10)
+        _log_ready(self, _RING_LINES)
         _raise_check(
             self,
             ValueError,
-            i18n("verbose.count_invalid", -1),
+            _text_get("verbose_count_invalid"),
             lambda: verbose.history_get(-1),
         )
 
     # A line holds the time in milliseconds and its text, nothing else.
     def test_line_fields(self) -> None:
-        _log_ready(self, 10)
+        _log_ready(self, _RING_LINES)
         before = time.time_ns() // 1_000_000
         verbose.log("text")
         after = time.time_ns() // 1_000_000
@@ -322,7 +334,7 @@ class TestRing(unittest.TestCase):
 class TestDatabase(unittest.TestCase):
     # A second connection sees each line as soon as it is logged.
     def test_row_stored(self) -> None:
-        path = _log_ready(self, 10)
+        path = _log_ready(self, _RING_LINES)
         for number, text in enumerate(["a", "b", "c"], 1):
             verbose.log(text)
             rows = _rows_read(path)
@@ -333,7 +345,7 @@ class TestDatabase(unittest.TestCase):
 
     # The table has the columns of the DDL and is strict.
     def test_table_schema(self) -> None:
-        path = _log_ready(self, 10)
+        path = _log_ready(self, _RING_LINES)
         self.assertEqual(
             _query_read(path, "PRAGMA table_info(line)"), _COLUMNS
         )
@@ -344,27 +356,27 @@ class TestDatabase(unittest.TestCase):
 
     # The file is in the write ahead log mode.
     def test_journal_mode(self) -> None:
-        path = _log_ready(self, 10)
+        path = _log_ready(self, _RING_LINES)
         self.assertEqual(_query_read(path, "PRAGMA journal_mode"), [("wal",)])
 
     # A second open of the log raises and the first stays in use.
     def test_open_twice(self) -> None:
-        path = _log_ready(self, 10)
+        path = _log_ready(self, _RING_LINES)
         _raise_check(
             self,
             RuntimeError,
-            i18n("verbose.open_twice"),
-            lambda: verbose.log_open(path, 10),
+            _text_get("verbose_open_twice"),
+            lambda: verbose.log_open(path, _RING_LINES),
         )
         verbose.log("still open")
         self.assertEqual(_ring_texts(), ["still open"])
 
     # A reopened file keeps its rows, adds to them and starts an empty ring.
     def test_log_reopen(self) -> None:
-        path = _log_ready(self, 10)
+        path = _log_ready(self, _RING_LINES)
         verbose.log("first")
         verbose.log_close()
-        verbose.log_open(path, 10)
+        verbose.log_open(path, _RING_LINES)
         self.assertEqual(_ring_texts(), [])
         verbose.log("second")
         rows = _rows_read(path)
@@ -395,7 +407,7 @@ class TestDatabase(unittest.TestCase):
 class TestPage(unittest.TestCase):
     # Page lines are stored under their thread, in order.
     def test_page_lines(self) -> None:
-        path = _log_ready(self, 10)
+        path = _log_ready(self, _RING_LINES)
         verbose.lines_put(
             "ui", [verbose.LogLine(10, "a"), verbose.LogLine(20, "b")]
         )
@@ -410,25 +422,25 @@ class TestPage(unittest.TestCase):
 
     # Page lines are not in the ring.
     def test_page_ring(self) -> None:
-        _log_ready(self, 10)
+        _log_ready(self, _RING_LINES)
         verbose.lines_put("ui", [verbose.LogLine(10, "a")])
         self.assertEqual(_ring_texts(), [])
 
     # A thread other than ui or ai raises and nothing is written.
     def test_page_thread(self) -> None:
-        path = _log_ready(self, 10)
-        for thread in ["server", "console", ""]:
+        path = _log_ready(self, _RING_LINES)
+        for case, thread in _THREADS_UNKNOWN.items():
             _raise_check(
                 self,
                 ValueError,
-                i18n("verbose.thread_unknown", thread),
+                _text_get(f"verbose_thread_unknown_{case}"),
                 lambda: verbose.lines_put(thread, [verbose.LogLine(1, "x")]),
             )
         self.assertEqual(_rows_read(path), [])
 
     # A batch with a row the strict table refuses writes none of its rows.
     def test_page_batch(self) -> None:
-        path = _log_ready(self, 10)
+        path = _log_ready(self, _RING_LINES)
         with self.assertRaisesRegex(sqlite3.IntegrityError, "line[.]at"):
             verbose.lines_put(
                 "ui",
@@ -441,7 +453,7 @@ class TestPage(unittest.TestCase):
 
     # The tail of a page thread is its newest lines, oldest first, its own.
     def test_page_tail(self) -> None:
-        _log_ready(self, 10)
+        _log_ready(self, _RING_LINES)
         a = verbose.LogLine(10, "a")
         b = verbose.LogLine(20, "b")
         c = verbose.LogLine(30, "c")
@@ -462,27 +474,27 @@ class TestPage(unittest.TestCase):
 
     # The tail reads the file, so it holds the lines of an earlier opening.
     def test_tail_reopen(self) -> None:
-        path = _log_ready(self, 10)
+        path = _log_ready(self, _RING_LINES)
         line = verbose.LogLine(10, "a")
         verbose.lines_put("ui", [line])
         verbose.log_close()
-        verbose.log_open(path, 10)
+        verbose.log_open(path, _RING_LINES)
         self.assertEqual(verbose.tail_get("ui", 1), [line])
 
     # A thread other than ui or ai and a negative count raise.
     def test_tail_refused(self) -> None:
-        _log_ready(self, 10)
-        for thread in ["server", "console", ""]:
+        _log_ready(self, _RING_LINES)
+        for case, thread in _THREADS_UNKNOWN.items():
             _raise_check(
                 self,
                 ValueError,
-                i18n("verbose.thread_unknown", thread),
+                _text_get(f"verbose_thread_unknown_{case}"),
                 lambda: verbose.tail_get(thread, 1),
             )
         _raise_check(
             self,
             ValueError,
-            i18n("verbose.count_invalid", -1),
+            _text_get("verbose_count_invalid"),
             lambda: verbose.tail_get("ui", -1),
         )
 
@@ -497,7 +509,7 @@ class TestCommand(unittest.TestCase):
 
     # Level 0 passes the output through and logs nothing.
     def test_command_pass(self) -> None:
-        path = _log_ready(self, 10)
+        path = _log_ready(self, _RING_LINES)
         argv = [sys.executable, "-c", _OUTPUT_PROGRAM]
         code, out, err = _output_captured(
             path, lambda: verbose.exec(0, argv, argv)
@@ -508,7 +520,7 @@ class TestCommand(unittest.TestCase):
 
     # Every level writes what Python holds for both streams before it runs.
     def test_command_flushed(self) -> None:
-        path = _log_ready(self, 10)
+        path = _log_ready(self, _RING_LINES)
         argv = [sys.executable, "-c", _OUTPUT_PROGRAM]
         for level in range(3):
             code, out, err = _output_captured(
@@ -520,7 +532,7 @@ class TestCommand(unittest.TestCase):
 
     # Level 1 passes the output through and logs its start and its exit.
     def test_command_progress(self) -> None:
-        path = _log_ready(self, 10)
+        path = _log_ready(self, _RING_LINES)
         argv = [sys.executable, "-c", _OUTPUT_PROGRAM]
         code, out, err = _output_captured(
             path, lambda: verbose.exec(1, argv, argv)
@@ -532,7 +544,7 @@ class TestCommand(unittest.TestCase):
 
     # Level 2 passes the output through raw and logs its start and exit.
     def test_command_raw(self) -> None:
-        path = _log_ready(self, 10)
+        path = _log_ready(self, _RING_LINES)
         argv = [sys.executable, "-c", _OUTPUT_PROGRAM]
         code, out, err = _output_captured(
             path, lambda: verbose.exec(2, argv, argv)
@@ -544,7 +556,7 @@ class TestCommand(unittest.TestCase):
 
     # Level 2 runs the verbose command line, levels 0 and 1 the plain one.
     def test_command_chosen(self) -> None:
-        path = _log_ready(self, 10)
+        path = _log_ready(self, _RING_LINES)
         program = [sys.executable, "-c", _ARGS_PROGRAM]
         argv = [*program, "plain"]
         argv_verbose = [*program, "--verbose", "x y"]
@@ -564,7 +576,7 @@ class TestCommand(unittest.TestCase):
 
     # Every level passes the input through, so a console reads its terminal.
     def test_command_input(self) -> None:
-        path = _log_ready(self, 10)
+        path = _log_ready(self, _RING_LINES)
         argv = [sys.executable, "-c", _INPUT_PROGRAM]
         for level in range(3):
             code, out, _ = _output_captured(
@@ -577,13 +589,15 @@ class TestCommand(unittest.TestCase):
 
     # A program that cannot start raises at every level, logged at 1 and 2.
     def test_command_start(self) -> None:
-        path = _log_ready(self, 10)
+        path = _log_ready(self, _RING_LINES)
         absent = [os.path.join(path, "absent")]
         for level in range(3):
             with self.assertRaises(FileNotFoundError) as caught:
                 verbose.exec(level, absent, absent)
             self.assertEqual(caught.exception.filename, absent[0])
-        started = i18n("verbose.exec_run", shlex.join(absent))
+        started = _text_get("verbose_exec_run").replace(
+            "{0}", shlex.join(absent)
+        )
         self.assertEqual(_ring_texts(), [started, started])
 
     # Level 0 needs no log and levels 1 and 2 refuse before they run.
@@ -598,7 +612,7 @@ class TestCommand(unittest.TestCase):
             _raise_check(
                 self,
                 RuntimeError,
-                i18n("verbose.not_open"),
+                _text_get("verbose_not_open"),
                 lambda: verbose.exec(level, second, second),
             )
         self.assertFalse(os.path.exists(second[-1]))

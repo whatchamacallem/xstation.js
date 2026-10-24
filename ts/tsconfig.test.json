@@ -6,6 +6,7 @@
   "files": [
     "../API/ts/lines.d.ts",
     "error_overlay.ts",
+    "harness.ts",
     "utility.ts",
     "ui_strings.ts",
     "settings.ts",
@@ -31,8 +32,8 @@
     "page.ts",
     "worker_ai.ts",
     "boot.ts",
-    "test_hook.ts",
     "test_error_overlay.ts",
+    "test_harness.ts",
     "test_utility.ts",
     "test_ui_strings.ts",
     "test_settings.ts",
@@ -58,6 +59,7 @@
     "test_page.ts",
     "test_worker_ai.ts",
     "test_boot.ts",
+    "test_wire_rungs.ts",
     "test_all.ts"
   ]
 }

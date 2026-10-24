@@ -1,3 +1,18 @@
+# JSON Lines with Blobs. The decoders of both languages are the single door
+# for bad numbers: no other layer checks a number. At read, a decoder refuses
+# an integer token, digits without a fraction or an exponent, beyond 2**53
+# either way, with `jslb.integer_refused`, a token of more than 16 digits
+# refused before `int` reads it, and a number token whose float overflows to
+# an infinity, such as `1e400`, with `jslb.number_overflow`. Both raise
+# `WireError`. A token with a fraction or an exponent within the doubles is
+# read as the float it names. `json_decode` applies the same rules to a JSON
+# text read from anywhere but a line. The encoder keeps its own refusals of
+# NaN, the infinities and integers beyond 2**53, inside the same layer.
+#
+# A fault met while a fault is being handled, as the file of a streamed blob
+# that fails to close after a fault, is raised with the first fault as its
+# `__context__`, so one cascade holds both.
+
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -5,7 +20,7 @@ from typing import Any
 class Object(dict[int | str, Any]):
     def __getattr__(self, name: str) -> Any: ...
 
-# A framing or header fault. The port that fed the decoder closes on it.
+# A framing, header or number fault. The port that fed the decoder closes.
 class WireError(Exception): ...
 
 # Builds the header `0`. `full` selects full names. Defaults are left out.
@@ -44,6 +59,9 @@ def line_encode(line: Object) -> Iterator[bytes | str]: ...
 # The JSON text of a line followed by one `<blob "n"=K>` tag per blob.
 def line_render(line: Object) -> str: ...
 
+# Parses a JSON text by the decoder's rules into `Object`s. Raises WireError.
+def json_decode(text: str) -> Any: ...
+
 # WireError: a line over `line_max`, or blobs over `blob_max` in all.
 class LineDecoder:
     # `sink_make(header)` returns the path a blob over `overflow_bytes` takes.
@@ -56,3 +74,5 @@ class LineDecoder:
     ) -> None: ...
     # Returns the complete lines the bytes finish. Raises WireError on a fault.
     def bytes_feed(self, data: bytes) -> list[Object]: ...
+    # Whether no line or blob is partly read.
+    def idle(self) -> bool: ...

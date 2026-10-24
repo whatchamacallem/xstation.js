@@ -4,12 +4,15 @@
 #
 # Tests the parts of page_build.py that start no program: the strings table
 # substitution, the archive member lookup by path suffix, the vectors written
-# anew, the base64 of the vectors and the wasm, the template markers and the
-# check of each piece, the template read before anything is compiled, the
-# hash of the page written and the bound on tsc's run. No test starts tsc.
+# anew, the base64 of the vectors and the wasm, the markers of the one
+# template, html/test.html, and the check of each piece, the template read
+# before anything is compiled, the bundle of ts/tsconfig.test.json, the
+# command line of the page's name alone, the hash of the page written, the
+# bound on tsc's run, and the two archives the page reads, the names the gold
+# lists for the pins of third_party_fetch. No test starts tsc.
 
-import base64, hashlib, io, json, os, page_build, subprocess, tarfile
-import tempfile, unittest.mock, zipfile
+import base64, contextlib, harness, hashlib, io, json, os, page_build
+import subprocess, sys, tarfile, tempfile, unittest.mock, zipfile
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -25,7 +28,7 @@ _ABC_SHA256 = (
     "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
 )
 
-# The markers every template holds.
+# The markers of the page's pieces beside the vectors.
 _PAGE_MARKERS = [
     "XSJS_BUILD_BUNDLE",
     "XSJS_BUILD_ENGINE_CSS",
@@ -35,11 +38,24 @@ _PAGE_MARKERS = [
     "XSJS_BUILD_XTERM_JS",
 ]
 
-# The marker only the templates of the test bundle hold.
+# The marker of the vectors, which the one template holds too.
 _VECTORS_MARKER = "XSJS_BUILD_TEST_VECTORS"
 
-# The entry script of the test engine template.
-_HOOK_SCRIPT = "<script data-worker>test_hook.engine_run();</script>"
+# The configuration whose bundle the page carries, the test bundle.
+_TEST_CONFIG = os.path.join(_ROOT_PATH, "ts", "tsconfig.test.json")
+
+# The dotted names of the template folder and the compile the tests patch.
+_HTML_TARGET = "page_build._HTML_PATH"
+_COMPILE_TARGET = "page_build.bundle_compile"
+_BUILD_TARGET = "page_build.page_build"
+
+# The id of the gold's list of the archives the page reads, the pins' names.
+_ARCHIVES_ID = "python.test_third_party_fetch.archives_read"
+
+
+# Stands for the end of a build that a test stops at the compile.
+class CompileReached(Exception):
+    pass
 
 
 # Writes a gzipped tar of each member, a name ending in a slash being a folder.
@@ -331,13 +347,6 @@ class TestMarkers(unittest.TestCase):
             "XSJS_BUILD_XTERM_JS: holds </script, which ends the element",
         )
 
-    # The engine template holds each page marker once.
-    def test_template_engine(self) -> None:
-        path = os.path.join(_HTML_PATH, "engine.html")
-        pieces = {marker: "" for marker in _PAGE_MARKERS}
-        page = page_build.markers_fill(page_build.text_read(path), pieces)
-        self.assertNotIn("XSJS_BUILD_", page)
-
     # The test template holds each page marker and the vectors marker once.
     def test_template_tests(self) -> None:
         path = os.path.join(_HTML_PATH, "test.html")
@@ -345,23 +354,67 @@ class TestMarkers(unittest.TestCase):
         page = page_build.markers_fill(page_build.text_read(path), pieces)
         self.assertNotIn("XSJS_BUILD_", page)
 
-    # The test engine template holds the markers of the test bundle once.
-    def test_template_hooked(self) -> None:
-        path = os.path.join(_HTML_PATH, "test_engine.html")
-        pieces = {marker: "" for marker in [*_PAGE_MARKERS, _VECTORS_MARKER]}
-        page = page_build.markers_fill(page_build.text_read(path), pieces)
-        self.assertNotIn("XSJS_BUILD_", page)
-        self.assertEqual(page.count(_HOOK_SCRIPT), 1)
 
-
-# The template the caller names, read before anything is compiled.
+# The one template, read before anything is compiled, and the test bundle.
 class TestTemplate(unittest.TestCase):
-    # A template that `html/` lacks is refused before `tsc` starts.
+    # A folder that lacks `test.html` is refused before `tsc` starts.
     def test_template_absent(self) -> None:
-        path = os.path.join(_HTML_PATH, "absent.html")
-        with self.assertRaises(FileNotFoundError) as caught:
-            page_build.page_build("absent", False, "absent.html")
-        self.assertEqual(caught.exception.filename, path)
+        with tempfile.TemporaryDirectory() as folder:
+            with (
+                unittest.mock.patch(_HTML_TARGET, folder),
+                unittest.mock.patch(_COMPILE_TARGET) as compiled,
+                self.assertRaises(FileNotFoundError) as caught,
+            ):
+                page_build.page_build("absent")
+            path = os.path.join(folder, "test.html")
+            self.assertEqual(caught.exception.filename, path)
+            compiled.assert_not_called()
+
+    # The bundle compiled is always the one of `ts/tsconfig.test.json`.
+    def test_bundle_test(self) -> None:
+        reached = CompileReached()
+        with (
+            unittest.mock.patch(_COMPILE_TARGET, side_effect=reached) as run,
+            self.assertRaises(CompileReached),
+        ):
+            page_build.page_build("absent")
+        run.assert_called_once_with(_TEST_CONFIG)
+
+
+# The command line, which names the page and nothing else.
+class TestCommand(unittest.TestCase):
+    # The name alone builds that page.
+    def test_command_name(self) -> None:
+        argv = ["page_build.py", "hyperposition-engine"]
+        with (
+            unittest.mock.patch.object(sys, "argv", argv),
+            unittest.mock.patch(_BUILD_TARGET) as built,
+        ):
+            page_build.main()
+        built.assert_called_once_with("hyperposition-engine")
+
+    # The old `--test` option is refused with the usage code 2.
+    def test_option_refused(self) -> None:
+        argv = ["page_build.py", "hyperposition-engine", "--test"]
+        with (
+            unittest.mock.patch.object(sys, "argv", argv),
+            unittest.mock.patch(_BUILD_TARGET) as built,
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit) as caught,
+        ):
+            page_build.main()
+        self.assertEqual(caught.exception.code, 2)
+        built.assert_not_called()
+
+
+# The archives the page reads, as the gold lists them for the pins.
+class TestArchives(unittest.TestCase):
+    # The two archive constants are the gold's names, in order.
+    def test_archives_named(self) -> None:
+        names: list[str] = harness.gold_get(_ARCHIVES_ID)
+        constants = ("_SQLITE_ARCHIVE", "_XTERM_ARCHIVE")
+        archives = [getattr(page_build, constant) for constant in constants]
+        self.assertEqual(archives, names)
 
 
 # The run of tsc, bounded by its timer, with no compiler started.

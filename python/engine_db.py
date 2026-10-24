@@ -2,16 +2,16 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# The handlers of the `db.create`, `db.drop` and `db.snapshot` lines, over
-# the substrate's databases. A create and a drop are forwarded operations
-# that carry `since` and go through `operation_apply`: a create's `since` is
-# 0, the `seq` a database has before it exists and keeps when created, a
-# drop's is the database's `seq`. A snapshot replies with the SHA-256 and
-# `seq` of the database file and the file itself as blob 1, one blob within
-# blob_max however large the database.
+# The handlers of `db.create` and `db.drop`, the browser's commits, which the
+# server applies to its own store as plain messages and never answers. And
+# the lines of a whole database: `restore_lines` yields `db.restore` with the
+# database file as blob 1 and `files` set, then one `db.file` per cache file
+# the server holds for it, each with that file as blob 1, for the main loop
+# to write in order. A cache file the server lost is not among them.
 
-import dispatch, hashlib, jslb, substrate
-from i18n import i18n
+import dispatch, jslb, substrate
+from collections.abc import Iterator
+from internationalization import i18n
 
 
 # The store the registration sets, which is empty until then.
@@ -32,32 +32,35 @@ def _store_get() -> substrate.Store:
     return _STATE.store
 
 
-# Creates a database as a forwarded operation. The reply is empty.
-def db_create(line: jslb.Object, *, db: str, since: int) -> jslb.Object:
-    _store_get().operation_apply("db.create", since, db=db)
-    return dispatch.reply_make(line)
+# `db.create`: creates and opens the database.
+def db_create(line: jslb.Object, *, db: str) -> None:
+    _store_get().db_create(db)
 
 
-# Drops a database as a forwarded operation. The reply is empty.
-def db_drop(line: jslb.Object, *, db: str, since: int) -> jslb.Object:
-    _store_get().operation_apply("db.drop", since, db=db)
-    return dispatch.reply_make(line)
+# `db.drop`: closes and deletes the database and its cache files.
+def db_drop(line: jslb.Object, *, db: str) -> None:
+    _store_get().db_drop(db)
 
 
-# Replies with `sha256` and `seq`, and the serialized database as blob 1.
-def db_snapshot(line: jslb.Object, *, db: str) -> jslb.Object:
-    data, seq = _store_get().db_snapshot(db)
-    return dispatch.reply_make(
-        line,
-        [jslb.blob_make(data)],
-        sha256=hashlib.sha256(data).hexdigest(),
-        seq=seq,
+# The `db.restore` line of a database, then its `db.file` lines.
+def restore_lines(db: str, full: bool) -> Iterator[jslb.Object]:
+    image = _store_get().db_snapshot(db)
+    yield jslb.line_make(
+        jslb.header_make("db.restore", full=full),
+        [jslb.blob_make(image.data)],
+        db=db,
+        files=len(image.files),
     )
+    for path in image.files:
+        yield jslb.line_make(
+            jslb.header_make("db.file", full=full),
+            [jslb.blob_make(path)],
+            db=db,
+        )
 
 
-# Registers the handlers, with the store whose databases they serve.
+# Registers the handlers on the store given.
 def handlers_register(store: substrate.Store) -> None:
     _STATE.store = store
     dispatch.handler_register("db.create", 0, db_create)
     dispatch.handler_register("db.drop", 0, db_drop)
-    dispatch.handler_register("db.snapshot", 0, db_snapshot)

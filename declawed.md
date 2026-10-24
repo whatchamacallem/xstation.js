@@ -5,9 +5,10 @@
 The Project Rules section and subsections are set by the project maintainer
 and must not be modified without request. The maintainer is the final
 authority and decides correctness and requirements, however discrepancies are
-worth fixing. Authorship is a legal issue and ascribing authorship to a
-non-person is a violation of project rules. Human attribution is required for
-all contributions. Do not add contributors to a commit without request.
+worth fixing. No code was written by the maintainer. Authorship is a legal
+issue and ascribing authorship to a non-person is a violation of project
+rules. Human attribution is required for all contributions. Do not add
+contributors to a commit without request.
 
 Do not use the AskUserQuestion tool and use numbered number sub-lists per ISO
 2145. Maintain an engineering log for each session in `tmp/` following this
@@ -39,6 +40,16 @@ already know. No line numbers are allowed as they are fragile.
   fails loud with a call stack or exit with the right Unix error code.
 - Any error is a hard error, reported immediately, first failure only - no
   script collects failures, tallies of failures.
+- A cascading failure is described by chaining nested `cause` entries, so
+  that one JSLB object holds every error. The key is always the full name
+  `cause`, never `c`: only the headers have single letter names.
+- An error with no reasonable expectation of being thrown may be represented
+  with the "internal error" string in place of a detailed UI string, since
+  debugging will be required anyway.
+- Sanitization is exclusive: each kind of bad data is identified by one layer
+  only, as it passes through. The JSLB decoders are the single door for bad
+  numbers, such as a number token that overflows a double, which they refuse
+  at read; no other layer checks numbers.
 - There must be no data loss in the logs from a hard exit because there is no
   buffering beyond a single external command.
 - No fake data - every value is a measurement or plain arithmetic on one. If a
@@ -53,6 +64,15 @@ already know. No line numbers are allowed as they are fragile.
   and the databases; when the maintainer lifts it, it is removed, not argued
   for. Trashed databases are part of developing the AI API; recovery is
   added later.
+- The databases are filesystem accelerators that an AI talks to easily, not
+  replicas. No explicit incremental database synchronization and no database
+  replication specific technique is used: entire databases may be synced by
+  passing them as blobs, and otherwise the sync is lossy. The server may have
+  more history than the browser, and may not have received everything in an
+  orderly manner due to a connection loss. The TypeScript code is not
+  responsible for database integrity across a wire. It must be possible to
+  replace the database with a different kind of backing store without
+  changing the protocol.
 - Any urge to add decorative comments, "helpful" extra logging, or stylistic
   polish not asked for anywhere above is banned. Adding borders, tooltips,
   using alpha, adjusting shade, using gradients, adding requested style or
@@ -77,10 +97,14 @@ already know. No line numbers are allowed as they are fragile.
   file to be modified in git and run the tool. Then check the diff and if
   you believe there was an error the change can be reverted and applied
   manually.
+- An explicit formatting escape, such as a `<!-- prettier-ignore -->` line, is
+  legal when there is no normal solution.
 - Do not iterate on formatting `.md` documents. If there is a setting forcing
   you to reformat this document then it has to be disabled, inform the user.
 - Never add un-requested documentation because you saw some was missing. Only
-  document new code and prefer 1 line comments.
+  document new code and prefer 1 line comments. Comments are not required:
+  the one line limit is an allowance for sentences that improve
+  comprehension and optimize code lookup times.
 - Provide links to screenshots showing changes in all postmortems.
 - Always ask to have required apt packages installed and do not use any package
 manager without request.
@@ -89,10 +113,13 @@ manager without request.
 - Python follows PEP 8. Constants go at the top of each `.py` file, after the
   imports, named like `_VALUE_NAME`. Code ordering requirements come before
   code style rules.
+- PowerShell constants go in `settings.json`.
 - Each `.py` file imports its modules as `import a, b, c` in alphabetical
   order on one line, or on the fewest lines that stay within 79 columns.
   `from` is banned, except that `collections.abc` and `typing` always use
-  `from`, each on one line with its names in alphabetical order.
+  `from`, each on one line with its names in alphabetical order, and
+  `from internationalization import i18n` is the expected form of the import
+  of `i18n()`, expected in most modules.
 - New source files are added to the reformat whitelist without asking, when
   they are created: top-level files by name, files in subdirectories by
   glob. `.md` files are never added. A source file the whitelist misses is a

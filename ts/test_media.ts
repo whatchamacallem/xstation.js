@@ -4,26 +4,33 @@
 //
 // Tests of the media cache and port that need no image decoder and no
 // network. No test here posts a request that passes the checks, so no test
-// starts a decode or a `fetch`.
+// starts a decode or a `fetch`. The request lines, the expected replies and
+// every thrown or carried text are entries of the gold record,
+// test_settings.json; the image's bytes and their SHA-256 are one entry of
+// the digest vector test_digests.json.
 
 namespace test_media {
+  // The vector files of the test page, each base64.
+  declare const test_vectors: { readonly [name: string]: string };
+
   // The values the tests share.
   const constants = Object.freeze({
     key: "/_files/gatehouse/arrival.png",
     url: "https://images.example.test/arrival.png",
-    id: 7,
     // The cache budget in bytes, a size its writer chose.
     budget: 1000,
     pixel_bytes: 4,
-    abc_hash:
-      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    digests_name: "test_digests.json",
   });
 
-  // A payload of fields by name.
-  type PayloadFields = { [key: string]: unknown };
+  // One entry of the digest vector: an input and its `SHA-256`, both in hex.
+  type DigestRecord = { data: string; sha256: string };
 
-  // The header options of a line: its id and whether it has full names.
-  type HeaderOptions = { id?: number; full?: boolean };
+  // The digest vector: test module to entry name to its record.
+  type DigestVector = { [module: string]: { [name: string]: DigestRecord } };
+
+  // The digest vector of every test module, read once.
+  let digests: DigestVector | null = null;
 
   // An image that counts its closes and, once closed, reports no size.
   class ImageDouble {
@@ -45,6 +52,58 @@ namespace test_media {
     }
   }
 
+  // A copy of a value of this module's gold, which the harness keeps frozen.
+  function gold_value(name: string): unknown {
+    return structuredClone(harness.gold_get(`typescript.test_media.${name}`));
+  }
+
+  // A text of this module's gold, a run time `{n}` left for the test to fill.
+  function gold_text(name: string): string {
+    return harness.gold_get(`typescript.test_media.texts.${name}`) as string;
+  }
+
+  // A copy of a line of this module's gold, a run time part set on the copy.
+  function gold_line(name: string): lines.Line {
+    return gold_value(`lines.${name}`) as lines.Line;
+  }
+
+  // The digest vector of every test module, parsed at the first call.
+  function digests_get(): DigestVector {
+    if (digests === null) {
+      if (!Object.hasOwn(test_vectors, constants.digests_name)) {
+        throw new Error(`test_vectors has no file ${constants.digests_name}`);
+      }
+      const file = Uint8Array.from(
+        atob(test_vectors[constants.digests_name]),
+        (c) => c.charCodeAt(0),
+      );
+      const text = new TextDecoder("utf-8", { fatal: true }).decode(file);
+      digests = JSON.parse(text) as DigestVector;
+    }
+    return digests;
+  }
+
+  // The input and digest of an entry of this module's digest vector.
+  function digest_entry(name: string): { data: Uint8Array; sha256: string } {
+    const vectors = digests_get();
+    if (!Object.hasOwn(vectors, "test_media")) {
+      throw new Error("the digest vector has no module test_media");
+    }
+    if (!Object.hasOwn(vectors.test_media, name)) {
+      throw new Error(`the digest vector of test_media has no entry ${name}`);
+    }
+    const entry = vectors.test_media[name];
+    if (!/^(?:[0-9a-f]{2})*$/.test(entry.data)) {
+      throw new Error(`the digest input ${name} is not lowercase hex`);
+    }
+    const data = new Uint8Array(entry.data.length / 2);
+    for (let index = 0; index < data.length; index += 1) {
+      const pair = entry.data.slice(2 * index, 2 * index + 2);
+      data[index] = Number.parseInt(pair, 16);
+    }
+    return { data, sha256: entry.sha256 };
+  }
+
   // An image one pixel high that counts as the given number of bytes.
   function image_make(bytes: number): ImageDouble {
     return new ImageDouble(bytes / constants.pixel_bytes, 1);
@@ -55,45 +114,31 @@ namespace test_media {
     return new media.ImageCache(constants.budget);
   }
 
-  // The bytes of the image the tests send: the text abc.
+  // The bytes of the image the tests send, the input of the gold's digest.
   function bytes_make(): Uint8Array {
-    return new Uint8Array([0x61, 0x62, 0x63]);
+    return digest_entry("abc").data;
   }
 
-  // A line of the type with the payload, header options and blobs given.
-  function line_build(
-    type: string,
-    payload: PayloadFields,
-    options: HeaderOptions,
-    blobs: lines.BlobHeader[] = [],
+  // A copy of the gold line named, each blob header given the image's bytes.
+  function line_bytes(name: string): lines.Line {
+    const line = gold_line(name);
+    for (let number = 1; Object.hasOwn(line, String(number)); number += 1) {
+      (line[String(number)] as lines.BlobHeader).d = bytes_make();
+    }
+    return line;
+  }
+
+  // A copy of the gold line named, its blobs given bytes, the fields set.
+  function line_fields(
+    name: string,
+    fields: { [key: string]: unknown },
   ): lines.Line {
-    return jslb.line_make(jslb.header_make(type, options), blobs, payload);
+    return Object.assign(line_bytes(name), fields);
   }
 
-  // A `media.store` line of the key with one blob holding the bytes.
-  function store_line(options: HeaderOptions): lines.Line {
-    const blob = jslb.blob_make(bytes_make());
-    return line_build("media.store", { k: constants.key }, options, [blob]);
-  }
-
-  // A `media.fetch` line of the url and key.
-  function fetch_line(options: HeaderOptions): lines.Line {
-    const payload = { url: constants.url, k: constants.key };
-    return line_build("media.fetch", payload, options);
-  }
-
-  // The exchange of a `media.store` line, by default numbered 7, short names.
-  function store_exchange(
-    options: HeaderOptions = { id: constants.id },
-  ): media.MediaExchange {
-    return new media.MediaExchange(store_line(options));
-  }
-
-  // The exchange of a `media.fetch` line, by default numbered 7, short names.
-  function fetch_exchange(
-    options: HeaderOptions = { id: constants.id },
-  ): media.MediaExchange {
-    return new media.MediaExchange(fetch_line(options));
+  // The exchange of a copy of the gold request line named.
+  function exchange_make(name: string): media.MediaExchange {
+    return new media.MediaExchange(line_bytes(name));
   }
 
   // The message of the error the function throws, failing the test if none.
@@ -284,14 +329,18 @@ namespace test_media {
       }
     }
 
-    // Budgets that are 0, negative or not finite throw.
+    // Budgets that are 0 or negative throw.
     test_budget_invalid(): void {
-      for (const budget of [0, -1, NaN, Infinity, -Infinity]) {
+      const budgets: [number, string][] = [
+        [0, "media_budget_invalid_zero"],
+        [-1, "media_budget_invalid_negative"],
+      ];
+      for (const [budget, name] of budgets) {
         const message = message_thrown(
           this,
           () => new media.ImageCache(budget),
         );
-        this.assertEqual(message, i18n("media.budget_invalid", budget));
+        this.assertEqual(message, gold_text(name));
       }
     }
   }
@@ -300,58 +349,39 @@ namespace test_media {
   export class TestRequestChecks extends unittest.TestCase {
     // The smallest store request is accepted and keeps its bytes.
     test_store_least(): void {
-      const exchange = store_exchange();
+      const exchange = exchange_make("store");
       this.assertEqual(exchange.key, constants.key);
       this.assertEqual(exchange.source, bytes_make());
     }
 
     // The smallest fetch request is accepted and keeps its url.
     test_fetch_least(): void {
-      const exchange = fetch_exchange();
+      const exchange = exchange_make("fetch");
       this.assertEqual(exchange.key, constants.key);
       this.assertEqual(exchange.source, constants.url);
     }
 
     // A line of another type is refused.
     test_type_other(): void {
-      const payload = { url: constants.url, k: constants.key };
-      const line = line_build("kv.get", payload, { id: constants.id });
-      const expected = i18n(
-        "media.type_invalid",
-        "kv.get",
-        "media.store",
-        "media.fetch",
-      );
+      const line = gold_line("kv_get");
+      const expected = gold_text("media_type_invalid");
       this.assertEqual(refusal_text(this, line), expected);
     }
 
     // A request with no id is refused, as nothing could answer it.
     test_id_missing(): void {
-      const store = refusal_text(this, store_line({}));
-      const fetched = refusal_text(this, fetch_line({}));
-      this.assertEqual(store, i18n("media.id_missing", "media.store"));
-      this.assertEqual(fetched, i18n("media.id_missing", "media.fetch"));
+      const store = refusal_text(this, line_bytes("store_unnumbered"));
+      const fetched = refusal_text(this, gold_line("fetch_unnumbered"));
+      this.assertEqual(store, gold_text("media_id_missing_store"));
+      this.assertEqual(fetched, gold_text("media_id_missing_fetch"));
     }
 
     // A store needs exactly one blob and a fetch needs none.
     test_blobs_count(): void {
-      const options = { id: constants.id };
-      const blob = jslb.blob_make(bytes_make());
-      const store_payload = { k: constants.key };
-      const fetch_payload = { url: constants.url, k: constants.key };
       const cases: [lines.Line, string][] = [
-        [
-          line_build("media.store", store_payload, options),
-          i18n("media.blobs_invalid", "media.store", 0, 1),
-        ],
-        [
-          line_build("media.store", store_payload, options, [blob, blob]),
-          i18n("media.blobs_invalid", "media.store", 2, 1),
-        ],
-        [
-          line_build("media.fetch", fetch_payload, options, [blob]),
-          i18n("media.blobs_invalid", "media.fetch", 1, 0),
-        ],
+        [gold_line("store_unblobbed"), gold_text("media_blobs_invalid_none")],
+        [line_bytes("store_two"), gold_text("media_blobs_invalid_two")],
+        [line_bytes("fetch_blob"), gold_text("media_blobs_invalid_fetch")],
       ];
       for (const [line, expected] of cases) {
         this.assertEqual(refusal_text(this, line), expected);
@@ -360,32 +390,23 @@ namespace test_media {
 
     // A store whose blob is a cache handle and not bytes is refused.
     test_blob_handle(): void {
-      const blob: lines.BlobHeader = { s: 3, d: "cache/handle" };
-      const line = line_build(
-        "media.store",
-        { k: constants.key },
-        { id: constants.id },
-        [blob],
-      );
-      const expected = i18n("media.blob_bytes", "media.store");
+      const line = gold_line("store");
+      (line[1] as lines.BlobHeader).d = "cache/handle";
+      const expected = gold_text("media_blob_bytes");
       this.assertEqual(refusal_text(this, line), expected);
     }
 
     // A key that is missing, empty or not text is refused in both types.
     test_key_invalid(): void {
-      const blob = jslb.blob_make(bytes_make());
-      const options = { id: constants.id };
       const refused: lines.Line[] = [
-        line_build("media.store", {}, options, [blob]),
-        line_build("media.fetch", { url: constants.url }, options),
+        line_bytes("store_keyless"),
+        gold_line("fetch_keyless"),
       ];
       for (const k of [undefined, null, "", 5, ["a"]]) {
-        refused.push(line_build("media.store", { k }, options, [blob]));
-        refused.push(
-          line_build("media.fetch", { url: constants.url, k }, options),
-        );
+        refused.push(line_fields("store_keyless", { k }));
+        refused.push(line_fields("fetch_keyless", { k }));
       }
-      const expected = i18n("media.field_invalid", "k");
+      const expected = gold_text("media_field_invalid_k");
       for (const line of refused) {
         this.assertEqual(refusal_text(this, line), expected);
       }
@@ -393,15 +414,11 @@ namespace test_media {
 
     // A url that is missing, empty or not text is refused.
     test_url_invalid(): void {
-      const options = { id: constants.id };
-      const refused: lines.Line[] = [
-        line_build("media.fetch", { k: constants.key }, options),
-      ];
+      const refused: lines.Line[] = [gold_line("fetch_urlless")];
       for (const url of [undefined, null, "", 5, {}]) {
-        const payload = { url, k: constants.key };
-        refused.push(line_build("media.fetch", payload, options));
+        refused.push(line_fields("fetch_urlless", { url }));
       }
-      const expected = i18n("media.field_invalid", "url");
+      const expected = gold_text("media_field_invalid_url");
       for (const line of refused) {
         this.assertEqual(refusal_text(this, line), expected);
       }
@@ -412,37 +429,37 @@ namespace test_media {
   export class TestReplyLines extends unittest.TestCase {
     // A store is answered with its key, size and hash and no blob.
     test_store_reply(): void {
-      const reply = store_exchange().image_reply(bytes_make());
-      this.assertEqual(reply[0], { t: "media.store", r: constants.id });
+      const entry = digest_entry("abc");
+      const reply = exchange_make("store").image_reply(entry.data);
+      const expected = gold_line("reply_store");
+      expected.sha256 = entry.sha256;
+      this.assertEqual(reply, expected);
       this.assertEqual(Object.keys(reply).join(","), "0,k,size,sha256");
-      this.assertEqual(reply.k, constants.key);
-      this.assertEqual(reply.size, 3);
-      this.assertEqual(reply.sha256, constants.abc_hash);
-      this.assertEqual(jslb.headers_of(reply).length, 1);
     }
 
     // A fetch is answered with the same payload and the bytes as blob 1.
     test_fetch_reply(): void {
-      const reply = fetch_exchange().image_reply(bytes_make());
-      this.assertEqual(jslb.field_get(reply[0], "type"), "media.fetch");
-      this.assertEqual(jslb.field_get(reply[0], "reply"), constants.id);
-      this.assertEqual(jslb.field_get(reply[0], "blobs"), 1);
+      const entry = digest_entry("abc");
+      const reply = exchange_make("fetch").image_reply(entry.data);
+      const expected = gold_line("reply_fetch");
+      (expected[1] as lines.BlobHeader).d = entry.data;
+      expected.sha256 = entry.sha256;
+      this.assertEqual(reply, expected);
       this.assertEqual(Object.keys(reply).join(","), "0,1,k,size,sha256");
-      this.assertEqual(reply.k, constants.key);
-      this.assertEqual(reply.size, 3);
-      this.assertEqual(reply.sha256, constants.abc_hash);
-      const blob = reply[1] as lines.BlobHeader;
-      this.assertEqual(jslb.field_get(blob, "size"), 3);
-      this.assertEqual(jslb.field_get(blob, "data"), bytes_make());
     }
 
     // The reply carries the id of its own request and no id of its own.
     test_reply_number(): void {
-      for (const id of [1, 2, 41]) {
-        const store = store_exchange({ id }).image_reply(bytes_make());
-        const fetched = fetch_exchange({ id }).image_reply(bytes_make());
+      const requests: [number, string, string][] = [
+        [1, "store_id_1", "fetch_id_1"],
+        [2, "store_id_2", "fetch_id_2"],
+        [41, "store_id_41", "fetch_id_41"],
+      ];
+      for (const [id, store_name, fetch_name] of requests) {
+        const store = exchange_make(store_name).image_reply(bytes_make());
+        const fetched = exchange_make(fetch_name).image_reply(bytes_make());
         for (const reply of [store, fetched]) {
-          this.assertEqual(jslb.field_get(reply[0], "reply"), id);
+          this.assertEqual(reply[0].r, id);
           this.assertFalse(Object.hasOwn(reply[0], "i"));
         }
       }
@@ -450,22 +467,21 @@ namespace test_media {
 
     // A request in full names is answered in full names.
     test_full_names(): void {
-      const options = { id: constants.id, full: true };
-      const store = store_exchange(options).image_reply(bytes_make());
-      this.assertEqual(store[0], { type: "media.store", reply: constants.id });
-      const fetched = fetch_exchange(options).image_reply(bytes_make());
-      this.assertEqual(jslb.field_get(fetched[0], "type"), "media.fetch");
-      this.assertTrue(Object.hasOwn(fetched[0], "type"));
-      this.assertFalse(Object.hasOwn(fetched[0], "t"));
-      this.assertEqual(jslb.field_get(fetched[0], "reply"), constants.id);
+      const store = exchange_make("store_full").image_reply(bytes_make());
+      this.assertEqual(store[0], gold_value("lines.header_store_full"));
+      const fetched = exchange_make("fetch_full").image_reply(bytes_make());
+      this.assertEqual(fetched[0], gold_value("lines.header_fetch_full"));
     }
 
     // The size and hash are those of the bytes in a view, not of its buffer.
     test_view_bytes(): void {
-      const buffer = new Uint8Array([0, 0x61, 0x62, 0x63, 0]);
-      const reply = store_exchange().image_reply(buffer.subarray(1, 4));
-      this.assertEqual(reply.size, 3);
-      this.assertEqual(reply.sha256, constants.abc_hash);
+      const entry = digest_entry("abc");
+      const buffer = new Uint8Array(entry.data.length + 2);
+      buffer.set(entry.data, 1);
+      const view = buffer.subarray(1, 1 + entry.data.length);
+      const reply = exchange_make("store").image_reply(view);
+      this.assertEqual(reply.size, entry.data.length);
+      this.assertEqual(reply.sha256, entry.sha256);
     }
   }
 
@@ -474,10 +490,9 @@ namespace test_media {
     // Bytes that do not decode give an error line naming the key and cause.
     test_decode_text(): void {
       const cause = new Error("bad bytes");
-      const reply = store_exchange().decode_reply(cause);
-      const text = String(cause);
-      const expected = i18n("media.decode_failed", constants.key, text);
-      this.assertEqual(reply[0], { t: "error", r: constants.id });
+      const reply = exchange_make("store").decode_reply(cause);
+      const expected = gold_text("media_decode_failed_error");
+      this.assertEqual(reply[0], gold_value("lines.header_error"));
       this.assertEqual(Object.keys(reply).join(","), "0,message,stack");
       this.assertEqual(reply.message, expected);
       this.assertEqual(typeof reply.stack, "string");
@@ -485,27 +500,26 @@ namespace test_media {
 
     // A cause that is no error is named by its text.
     test_decode_other(): void {
-      const exchange = store_exchange();
-      for (const cause of ["boom", 5, undefined, null]) {
+      const exchange = exchange_make("store");
+      const causes: [unknown, string][] = [
+        ["boom", "media_decode_failed_text"],
+        [5, "media_decode_failed_number"],
+        [undefined, "media_decode_failed_undefined"],
+        [null, "media_decode_failed_null"],
+      ];
+      for (const [cause, name] of causes) {
         const reply = exchange.decode_reply(cause);
-        const text = String(cause);
-        const expected = i18n("media.decode_failed", constants.key, text);
-        this.assertEqual(reply.message, expected);
+        this.assertEqual(reply.message, gold_text(name));
       }
     }
 
     // A failed download gives an error line naming the url, key and cause.
     test_download_text(): void {
-      const exchange = fetch_exchange();
+      const exchange = exchange_make("fetch");
       const cause = new TypeError("Failed to fetch");
       const reply = exchange.download_reply(constants.url, cause);
-      const expected = i18n(
-        "media.download_failed",
-        constants.url,
-        constants.key,
-        String(cause),
-      );
-      this.assertEqual(reply[0], { t: "error", r: constants.id });
+      const expected = gold_text("media_download_failed");
+      this.assertEqual(reply[0], gold_value("lines.header_error"));
       this.assertEqual(Object.keys(reply).join(","), "0,message,stack");
       this.assertEqual(reply.message, expected);
       this.assertEqual(typeof reply.stack, "string");
@@ -513,14 +527,9 @@ namespace test_media {
 
     // The timeout gives an error line naming the url, key and seconds.
     test_timeout_text(): void {
-      const reply = fetch_exchange().timeout_reply(constants.url, 5);
-      const expected = i18n(
-        "media.download_expired",
-        constants.url,
-        constants.key,
-        5,
-      );
-      this.assertEqual(reply[0], { t: "error", r: constants.id });
+      const reply = exchange_make("fetch").timeout_reply(constants.url, 5);
+      const expected = gold_text("media_download_expired_whole");
+      this.assertEqual(reply[0], gold_value("lines.header_error"));
       this.assertEqual(Object.keys(reply).join(","), "0,message,stack");
       this.assertEqual(reply.message, expected);
       this.assertEqual(typeof reply.stack, "string");
@@ -528,19 +537,14 @@ namespace test_media {
 
     // Fractions of a second are named as they are.
     test_timeout_fraction(): void {
-      const reply = fetch_exchange().timeout_reply(constants.url, 0.5);
-      const expected = i18n(
-        "media.download_expired",
-        constants.url,
-        constants.key,
-        0.5,
-      );
+      const reply = exchange_make("fetch").timeout_reply(constants.url, 0.5);
+      const expected = gold_text("media_download_expired_fraction");
       this.assertEqual(reply.message, expected);
     }
 
     // The three failures have three different messages.
     test_messages_distinct(): void {
-      const exchange = fetch_exchange();
+      const exchange = exchange_make("fetch");
       const cause = new Error("x");
       const messages = [
         exchange.decode_reply(cause).message,
@@ -552,8 +556,8 @@ namespace test_media {
 
     // The error lines follow the name form of the request.
     test_error_full(): void {
-      const exchange = fetch_exchange({ id: constants.id, full: true });
-      const expected = { type: "error", reply: constants.id };
+      const exchange = exchange_make("fetch_full");
+      const expected = gold_value("lines.header_error_full");
       const cause = new Error("x");
       const download = exchange.download_reply(constants.url, cause);
       this.assertEqual(exchange.decode_reply(cause)[0], expected);
@@ -572,25 +576,34 @@ namespace test_media {
       }
     }
 
-    // Timeouts that are 0, negative, not finite or too long for a timer throw.
+    // Timeouts that are 0, negative or too long for a timer throw.
     test_timeout_invalid(): void {
-      for (const seconds of [0, -1, NaN, Infinity, 2147484]) {
+      const timeouts: [number, string][] = [
+        [0, "media_timeout_invalid_zero"],
+        [-1, "media_timeout_invalid_negative"],
+        [2147484, "media_timeout_invalid_long"],
+      ];
+      for (const [seconds, name] of timeouts) {
         const message = message_thrown(
           this,
           () => new media.MediaPort(constants.budget, seconds),
         );
-        this.assertEqual(message, i18n("media.timeout_invalid", seconds));
+        this.assertEqual(message, gold_text(name));
       }
     }
 
-    // A budget that is 0, negative or not finite throws from the port too.
+    // A budget that is 0 or negative throws from the port too.
     test_budget_invalid(): void {
-      for (const budget of [0, -1, NaN, Infinity]) {
+      const budgets: [number, string][] = [
+        [0, "media_budget_invalid_zero"],
+        [-1, "media_budget_invalid_negative"],
+      ];
+      for (const [budget, name] of budgets) {
         const message = message_thrown(
           this,
           () => new media.MediaPort(budget, 1),
         );
-        this.assertEqual(message, i18n("media.budget_invalid", budget));
+        this.assertEqual(message, gold_text(name));
       }
     }
 
@@ -599,15 +612,15 @@ namespace test_media {
       const port = new media.MediaPort(constants.budget, 1);
       port.line_receive(() => {});
       const message = message_thrown(this, () => port.line_receive(() => {}));
-      this.assertEqual(message, i18n("media.receiver_twice"));
+      this.assertEqual(message, gold_text("media_receiver_twice"));
     }
 
     // A request posted before a receiver is set throws.
     test_post_unreceived(): void {
       const port = new media.MediaPort(constants.budget, 1);
-      const line = store_line({ id: constants.id });
+      const line = line_bytes("store");
       const message = message_thrown(this, () => port.line_post(line, []));
-      this.assertEqual(message, i18n("media.receiver_missing"));
+      this.assertEqual(message, gold_text("media_receiver_missing"));
     }
 
     // A line that fails a check throws from the post and nothing is received.
@@ -617,23 +630,14 @@ namespace test_media {
       port.line_receive(() => {
         received += 1;
       });
-      const options = { id: constants.id };
-      const store_payload = { k: constants.key };
-      const fetch_payload = { url: 5, k: constants.key };
       const cases: [lines.Line, string][] = [
+        [gold_line("kv_get_key"), gold_text("media_type_invalid")],
+        [line_bytes("store_unnumbered"), gold_text("media_id_missing_store")],
+        [gold_line("fetch_unnumbered"), gold_text("media_id_missing_fetch")],
+        [gold_line("store_unblobbed"), gold_text("media_blobs_invalid_none")],
         [
-          line_build("kv.get", store_payload, options),
-          i18n("media.type_invalid", "kv.get", "media.store", "media.fetch"),
-        ],
-        [store_line({}), i18n("media.id_missing", "media.store")],
-        [fetch_line({}), i18n("media.id_missing", "media.fetch")],
-        [
-          line_build("media.store", store_payload, options),
-          i18n("media.blobs_invalid", "media.store", 0, 1),
-        ],
-        [
-          line_build("media.fetch", fetch_payload, options),
-          i18n("media.field_invalid", "url"),
+          line_fields("fetch_urlless", { url: 5 }),
+          gold_text("media_field_invalid_url"),
         ],
       ];
       for (const [line, expected] of cases) {

@@ -8,7 +8,7 @@
 # and those of a page thread from the database.
 
 import dispatch, jslb, verbose
-from i18n import i18n
+from internationalization import i18n
 
 # The thread whose lines the server's own ring holds.
 _SERVER_THREAD = "server"

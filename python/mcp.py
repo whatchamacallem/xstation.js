@@ -6,11 +6,26 @@
 # 2.0` messages go in and out as dicts. The server answers `initialize`,
 # `ping`, `tools/list` and `tools/call` and takes `notifications/initialized`,
 # for the revision in `_PROTOCOL_VERSION`, with the capability `tools` only.
+# MCP is a testing protocol for now: no AI is a requirement of the tests yet.
+#
+# Fail loud: an exception while a request is handled answers that request,
+# then the server stops. A tool's exception, an `RpcError` it raises
+# included, answers with a `tools/call` result whose `isError` is true and
+# whose one text content is the JSON text of the cascade, `message`, `stack`
+# and nested `cause`, as `dispatch.cause_make` writes it. An `RpcError` or
+# any other exception of a method answers with a `JSON-RPC` error whose
+# `data` is that cascade. `failure_take` then returns the exception once:
+# `engine_mcp` returns it as a `dispatch.Failure`, and `mcp_stdio` writes the
+# answer, then raises it. A test driver reads `isError`, or the error, to
+# tell an exception from the expected response. A message that is not a
+# `JSON-RPC 2.0` request is answered with -32600 and is no exception, as in
+# TypeScript. Continuing after an exception is deferred, its design in
+# TAP_PLAN.md section 5.4.
 
-import traceback
+import dispatch, json
 from collections.abc import Callable
 from typing import Any, NamedTuple, TypeAlias, TypeGuard
-from i18n import i18n
+from internationalization import i18n
 
 # The only `JSON-RPC` version this module speaks.
 _JSONRPC_VERSION = "2.0"
@@ -145,6 +160,7 @@ class Server:
         self._version = version
         self._tools: dict[str, Tool] = {}
         self._calls: dict[str, Callable[[dict[str, Any]], ToolResult]] = {}
+        self._failure: BaseException | None = None
         self._methods: dict[str, Callable[[Any], dict[str, Any]]] = {
             _METHOD_INITIALIZE: self._initialize_run,
             _METHOD_PING: self._ping_run,
@@ -176,15 +192,25 @@ class Server:
         try:
             result = self._method_run(method, message.get("params"))
         except RpcError as error:
-            return _error_make(reply_id, error.code, str(error), error.data)
+            self._failure = error
+            return _error_make(
+                reply_id, error.code, str(error), dispatch.cause_make(error)
+            )
         except Exception as error:
+            self._failure = error
             return _error_make(
                 reply_id,
                 _CODE_INTERNAL_ERROR,
                 str(error),
-                {"stack": traceback.format_exc()},
+                dispatch.cause_make(error),
             )
         return _result_make(reply_id, result)
+
+    # The exception of the last request answered with one, then None.
+    def failure_take(self) -> BaseException | None:
+        failure = self._failure
+        self._failure = None
+        return failure
 
     # Runs the method a request names, raising `RpcError` for an unknown one.
     def _method_run(self, method: str, params: Any) -> dict[str, Any]:
@@ -222,7 +248,19 @@ class Server:
             raise RpcError(
                 _CODE_PARAMS_INVALID, i18n("mcp.tool_unknown", name)
             )
-        result = self._calls[name](arguments)
+        try:
+            result = self._calls[name](arguments)
+        except Exception as error:
+            self._failure = error
+            text = json.dumps(
+                dispatch.cause_make(error),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            return {
+                "content": [{"type": "text", "text": text}],
+                "isError": True,
+            }
         return {"content": result.content, "isError": result.is_error}
 
 

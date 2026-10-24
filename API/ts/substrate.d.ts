@@ -1,3 +1,42 @@
+// The store on the AI thread: sqlite3.wasm on the OPFS SAH pool VFS under a
+// root, and the OPFS cache files beside it, which hold the values over
+// `overflow_bytes` by their digest. Every method is synchronous and runs
+// inside the task that called it. Names and parameters follow
+// API/python/substrate.pyi, the server's store, except where each store does
+// its own maintenance: only this one compacts turns, inside `turn_append` at
+// the threshold and by `turn_compact`, which the AI's scripts call through
+// `engine.store`. Nothing of a compaction goes to the server.
+//
+// Each modifying operation goes to the server as one push line of the same
+// type, built in the form `settings.names_full()` picks and given to
+// `tasks.line_notify(line, "server")`: `db.create` and `db.drop` once done,
+// the others once the outermost transaction that ran them commits, in order.
+// A `kv.put` carries its value's bytes as blob 1, read out of the cache file
+// when the value is one, never a cache handle. An operation that changes
+// nothing sends nothing, and a rolled back transaction sends nothing. Nothing
+// waits for, numbers or checks what the server does with it: the sync is
+// lossy by design.
+//
+// A value whose row names a cache file this side does not hold is lost: its
+// row stays, `kv_list` lists it, `kv_put` replaces it, `kv_check` counts
+// nothing for it, and `kv_get` throws `substrate.file_lost`. `db_snapshot`
+// names only the cache files this side holds, and `db_restore` tolerates
+// such rows, so a database restored without some of its cache files works
+// but for those values. A cache handle is a name this store's cache holds or
+// a blob its sink finished: `db_snapshot` gives names, and `db_restore` takes
+// either, or the bytes, keeping each file under the digest of its bytes.
+//
+// The handlers of the store's lines: the ui-ai requests of `lines.d.ts`,
+// answered with their replies, and the server's pushes `db.restore` and
+// `db.file`. A `db.restore` waits for its `files` lines of `db.file`, then
+// `db_restore` runs, at once when `files` is 0. A second `db.restore` while
+// one waits throws `substrate.restore_pending`, and a `db.file` with no
+// restore of its database waiting throws `substrate.file_unexpected`.
+//
+// The schema's triggers raise the name of a string of the strings table, as
+// `agent.content_ambiguous`: a statement that fails with such a message
+// throws that string, the SQLite error as its `cause`.
+
 declare namespace substrate {
   // The bytes of a value, or the cache handle when over `overflow_bytes`.
   interface KvValue {
@@ -19,28 +58,48 @@ declare namespace substrate {
     version?: number;
   }
 
-  // Splits a Key-Value-Ref or Document-Ref. A bad ref throws.
+  // A database as one blob: its file and the cache files its rows name.
+  interface DbImage {
+    data: Uint8Array;
+    files: string[];
+  }
+
+  // What the store gives each committed operation to: the thread's queue.
+  interface Notifier {
+    line_notify(line: lines.Line, owner?: queue.ThreadName): void;
+  }
+
+  // Splits a `Key-Value-Ref` or `Document-Ref`. A bad ref throws.
   function ref_split(ref: string): RefParts;
 
-  // Moves a document's reference strings into its headers 1 on,
-  // sharing equal strings, and leaves `{"$ref": n}` behind.
+  // Moves a document's reference strings into its headers 1 on.
   function doc_encode(normal: { [key: string]: unknown }): lines.Document;
 
   // Puts the reference strings back. `doc_decode(doc_encode(x))` is `x`.
   function doc_decode(encoded: lines.Document): { [key: string]: unknown };
 
-  // The store on the AI thread: sqlite3.wasm on the OPFS SAH pool VFS
-  // under `root`, the OPFS cache directory beside it. Names and
-  // parameters are those of API/python/substrate.pyi; every method is
-  // synchronous and runs inside the task that called it.
+  // The cache files, opened by the boot, and the decoder's streaming sink.
+  class CacheFiles implements jslb.BlobSink {
+    constructor(slots: unknown[]);
+    slot_add(slot: unknown): void;
+    slots_free(): number;
+    sink_open(header: lines.BlobHeader): string;
+    sink_append(handle: string, data: Uint8Array): void;
+    sink_close(handle: string): lines.Sha256;
+    cache_read(handle: string, offset: number, length: number): Uint8Array;
+  }
+
   class Store {
     constructor(
       sqlite3: unknown,
+      pool: unknown,
+      cache: CacheFiles,
       root: string,
       overflow_bytes: number,
       compact_turns: number,
+      tasks: Notifier,
     );
-    db_open(name: string): number;
+    db_open(name: string): void;
     db_close(name: string): void;
     db_list(): string[];
     db_create(name: string): void;
@@ -50,48 +109,38 @@ declare namespace substrate {
       ref: lines.KvRef,
       data: Uint8Array | string,
       db?: string,
-    ): { row: lines.KvRow; seq: number };
-    kv_delete(ref: lines.KvRef, db?: string): number;
+    ): lines.KvRow;
+    kv_delete(ref: lines.KvRef, db?: string): void;
     kv_list(db: string, prefix: string): lines.KvRow[];
+    // Removes the cache files no row names. Returns their count.
     kv_check(db: string): number;
     doc_get(ref: lines.DocRef, db?: string): lines.Document;
     doc_put(db: string, id: string, body: lines.Document): lines.DocPutReply;
     doc_head(db: string, id: string): lines.DocRef;
-    // A `user` turn on a scene of `compact_turns` turns first compacts them.
+    // A `user` turn on a scene of `compact_turns` turns compacts them first.
     turn_append(
       scene: lines.DocRef,
       role: provider.Role,
       content: provider.ChatMessage,
     ): lines.TurnAppendReply;
     turn_list(scene: lines.DocRef): TurnRow[];
-    turn_compact(
-      scene: lines.DocRef,
-      through: number,
-      summary: string,
-    ): number;
+    // Replaces turns 1 to `through` by one summary turn at 1, this side only.
+    turn_compact(scene: lines.DocRef, through: number, summary: string): void;
     sql_run(db: string, statements: lines.SqlStatement[]): lines.SqlResult[];
-    db_snapshot(db: string): { data: Uint8Array; seq: number };
-    db_restore(db: string, data: Uint8Array | string): number;
-    // Whether this side holds a value's bytes, in its row or a file.
-    kv_held(ref: lines.KvRef, db?: string): boolean;
-    // Puts back a value's cache file from bytes with the row's digest.
-    cache_fill(ref: lines.KvRef, data: Uint8Array | string, db?: string): void;
-    // Frees a database's unkept cache files to the budget; their count.
-    cache_evict(db: string, keep: readonly string[], budget: number): number;
-    operation_apply(
-      type: string,
-      since: number,
-      payload: { [key: string]: unknown },
-    ): number;
+    // The file and the handles of the cache files its rows name and it holds.
+    db_snapshot(db: string): DbImage;
+    // Replaces the database by the file and keeps the cache files given.
+    db_restore(
+      db: string,
+      data: Uint8Array | string,
+      files: (Uint8Array | string)[],
+    ): void;
     transaction_run<T>(fn: () => T): T;
-    // The emitting side of replication: after every committed modifying
-    // operation, `fn` gets the same operation as a wire line with
-    // `since` set, to submit to the server, one in flight per database.
-    forward_set(fn: (line: lines.Line) => void): void;
-    // The streaming sink of the decoder: a cache file by handle.
+    // The streaming sink of the decoder: the cache this store was given.
     sink(): jslb.BlobSink;
-    // Registers every `db.*`, `kv.*`, `doc.*`, `turn.*` and `sql.*`
-    // handler on this thread's dispatcher.
-    handlers_register(): void;
+    // Registers the handlers of the store's lines on this thread.
+    handlers_register(
+      register: (type: string, version: number, fn: dispatch.Handler) => void,
+    ): void;
   }
 }

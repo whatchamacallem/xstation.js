@@ -1,25 +1,34 @@
+// The bring-up of the one page, the test page, on both of its threads. The
+// page's last script, `test_all.suites_run()`, reads `self.name`: "ai" in the
+// AI worker, "" on the main thread, never undefined. No program but the test
+// suites runs: there is no hello, no start chain and no first render.
+//
+// The worker: the error overlay first, then the page's first message, the
+// wire to the server, whose first line is `tap.start` with `i` 101, then
+// sqlite3.wasm and the test pool, cleared at start, set as the globals
+// `test_sqlite3` and `test_pool`, and the test cache, its files cleared at
+// start, as the wire's sink, so that a reply's blob over `overflow_bytes`
+// streams to a file, then `worker_ai.tap_start`, which answers `tap.start`
+// and runs the worker's suites, whose stream sends `ui.tests` at its end.
+// `run` gets the queue and, for the wire rungs, the first line and the
+// page's address.
+//
+// The page: the error overlay first, the AI worker made from the texts of the
+// worker scripts, then at `settings.set` the UI thread's queue, whose
+// `ui.tests` handler runs the UI thread's suites.
+
 declare namespace boot {
-  // The one bundle runs on two threads. `boot_run` reads `self.name`:
-  // undefined on the main thread, "ai" in the worker.
-  function boot_run(): void;
-
-  // UI: error_overlay installed first; builds the DOM, creates the AI
-  // worker from the bundle's Blob URL, owns the UI queue with its media
-  // port and its DOM port, routes input, paints renders, hosts the
-  // console view and the overlays, shows permission requests.
-  function page_main(): void;
-
-  // The DOM port of the UI thread: its listeners post `ui.input` as
-  // notifications, and it answers `dom.choice` when a button of the
-  // permission request is clicked. Listeners are events, not promises.
-  class DomPort implements queue.Port {
-    constructor(container: HTMLElement);
-    line_post(line: lines.Line, transfer: ArrayBuffer[]): void;
-    line_receive(fn: (line: lines.Line) => void): void;
+  // What the worker's `run` gets beside its queue.
+  interface TestStart {
+    first: lines.Line;
+    base_url: string;
   }
 
-  // AI: the owner table, the store, the wire and console ports, the
-  // HTTP or scripted port, the MCP servers and clients, the agent, the
-  // forwarding of replication.
-  function worker_ai_main(): void;
+  // The AI worker's bring up, `run` getting its queue once the wire is up.
+  function test_worker(
+    run: (tasks: queue.TaskQueue, start: TestStart) => void,
+  ): void;
+
+  // The page's bring up, `run` getting the UI thread's queue at `ui.tests`.
+  function test_page(run: (tasks: queue.TaskQueue) => void): void;
 }

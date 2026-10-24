@@ -1,8 +1,8 @@
 -- The substrate's tables, created on first use in every database it
 -- opens. The prefix keeps them apart from the scripts' tables.
 
--- _meta holds seq, incremented in the same transaction as every
--- modifying operation, and schema.
+-- _meta holds schema, the version of these tables. Nothing counts the
+-- changes of a database: the stores sync by plain messages and whole blobs.
 CREATE TABLE _meta (
     name  TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -24,8 +24,9 @@ CREATE TABLE _head (
 ) WITHOUT ROWID, STRICT;
 
 -- The conversation of each scene, by the scene's Document-Ref. n counts
--- within the scene; content is one provider message as JSON. Compaction
--- deletes turns 1 to N and inserts one summary row at n 1.
+-- within the scene; content is one provider message as JSON. The browser's
+-- compaction deletes turns 1 to N and inserts one summary row at n 1; the
+-- server never compacts.
 CREATE TABLE _turn (
     scene   TEXT    NOT NULL,
     n       INTEGER NOT NULL,

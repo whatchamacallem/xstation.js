@@ -2,16 +2,21 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests of the infrastructure for testing, category: the options --smoke-test
-# and --normal-test on a parser, which suites a run of each category runs,
-# the seconds a run may take, the alarm of a suite, its own seconds or the
-# deadline of a smoke-test run, whichever comes first, own seconds winning a
-# tie, or a refusal once the deadline has passed, and the checks LabelBook
-# makes of the labels of the roots and rungs a runner reaches, each refusal
-# compared with its message. No real alarm is armed, since the runner's alarm
-# of this module is running.
+# Tests of the infrastructure for testing. The harness: a value of either
+# file by a top or nested id, the refusal of an unknown id, each file read
+# once, and the deep copies of both whole files, on files of the test's own
+# in place of the checkout's. Category: the options --smoke-test and
+# --normal-test on a parser, which suites a run of each category runs, the
+# seconds a run may take, the gold's smoke_seconds, the alarm of a suite,
+# its own seconds or the deadline of a smoke-test run, whichever comes
+# first, own seconds winning a tie, or a refusal once the deadline has
+# passed, and the checks LabelBook makes of the labels of the roots and
+# rungs a runner reaches, each refusal compared with its message. No real
+# alarm is armed, since the runner's alarm of this module is running.
 
-import argparse, category, contextlib, io, unittest
+import argparse, category, contextlib, harness, io, json, os, tempfile
+import unittest, unittest.mock
+from typing import Any
 
 # The label and category of the important suites that fit in 2 minutes.
 _SMOKE_TEST = "smoke-test"
@@ -19,11 +24,22 @@ _SMOKE_TEST = "smoke-test"
 # The label and category of every other suite.
 _NORMAL_TEST = "normal-test"
 
-# The maintainer's 2 minutes, the seconds a `smoke-test` run may take.
-_SMOKE_SECONDS = 120.0
-
 # The refusal of the category `all`, which is neither of the two.
 _ALL_REFUSED = "the category 'all' is neither smoke-test nor normal-test"
+
+# The dotted names of the harness's paths and state that the tests patch.
+_SETTINGS_TARGET = "harness._SETTINGS_PATH"
+_TESTS_TARGET = "harness._TESTS_PATH"
+_STATE_TARGET = "harness._STATE"
+
+# The settings file of the harness tests, a nested object among its values.
+_SETTINGS: dict[str, Any] = {"debug": True, "provider": {"scripted": True}}
+
+# The gold file of the harness tests, `smoke_seconds` read by `category`.
+_GOLD: dict[str, Any] = {
+    "smoke_seconds": 7,
+    "python": {"test_test": {"limits": [1, 2]}},
+}
 
 
 # Returns a parser with the two options and no abbreviations, as runners make.
@@ -31,6 +47,85 @@ def parser_make() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     category.options_add(parser)
     return parser
+
+
+# Writes `value` as the JSON text of the file at `path`.
+def json_write(path: str, value: object) -> None:
+    with open(path, "w", encoding="utf-8") as file:
+        json.dump(value, file)
+
+
+# Gives each test its own two files and a harness that has read neither.
+class HarnessCase(unittest.TestCase):
+    # Writes the two files and points the harness at them until the test ends.
+    def setUp(self) -> None:
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.settings_path = os.path.join(folder.name, "settings.json")
+        self.tests_path = os.path.join(folder.name, "test_settings.json")
+        json_write(self.settings_path, _SETTINGS)
+        json_write(self.tests_path, _GOLD)
+        patchers = (
+            unittest.mock.patch(_SETTINGS_TARGET, self.settings_path),
+            unittest.mock.patch(_TESTS_TARGET, self.tests_path),
+            unittest.mock.patch.dict(_STATE_TARGET, {}, clear=True),
+        )
+        for patcher in patchers:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+
+# The values of both files by id, the refusals, the one read and the copies.
+class TestHarness(HarnessCase):
+    # A top level id names its value in either file.
+    def test_top_id(self) -> None:
+        self.assertIs(harness.setting_get("debug"), True)
+        self.assertEqual(harness.gold_get("smoke_seconds"), 7)
+
+    # A nested id names the value of its keys joined by `.`.
+    def test_nested_id(self) -> None:
+        self.assertIs(harness.setting_get("provider.scripted"), True)
+        self.assertEqual(harness.gold_get("python.test_test.limits"), [1, 2])
+
+    # An id one of whose keys is missing raises, naming the file and the id.
+    def test_id_unknown(self) -> None:
+        with self.assertRaises(KeyError) as caught:
+            harness.setting_get("provider.variable")
+        expected = "settings.json has no value with id 'provider.variable'"
+        self.assertEqual(caught.exception.args, (expected,))
+        with self.assertRaises(KeyError) as caught:
+            harness.gold_get("python.test_jslb")
+        expected = "test_settings.json has no value with id 'python.test_jslb'"
+        self.assertEqual(caught.exception.args, (expected,))
+
+    # An id that goes on past a value that is not an object raises.
+    def test_id_past_value(self) -> None:
+        with self.assertRaises(KeyError) as caught:
+            harness.setting_get("debug.on")
+        expected = "settings.json has no value with id 'debug.on'"
+        self.assertEqual(caught.exception.args, (expected,))
+
+    # Each file is read once: a change after the first call is not seen.
+    def test_read_once(self) -> None:
+        self.assertIs(harness.setting_get("debug"), True)
+        self.assertEqual(harness.gold_get("smoke_seconds"), 7)
+        json_write(self.settings_path, {"debug": False})
+        json_write(self.tests_path, {"smoke_seconds": 8})
+        self.assertIs(harness.setting_get("debug"), True)
+        self.assertEqual(harness.gold_get("smoke_seconds"), 7)
+
+    # A copy holds the whole file, and changing it changes no later read.
+    def test_copies_whole(self) -> None:
+        settings = harness.settings_copy()
+        gold = harness.gold_copy()
+        self.assertEqual(settings, _SETTINGS)
+        self.assertEqual(gold, _GOLD)
+        settings["provider"]["scripted"] = False
+        gold["python"]["test_test"]["limits"].append(3)
+        self.assertIs(harness.setting_get("provider.scripted"), True)
+        self.assertEqual(harness.gold_get("python.test_test.limits"), [1, 2])
+        self.assertEqual(harness.settings_copy(), _SETTINGS)
+        self.assertEqual(harness.gold_copy(), _GOLD)
 
 
 # The two options, at most one, and `smoke-test` when neither is given.
@@ -93,10 +188,12 @@ class TestSelection(unittest.TestCase):
 
 
 # The seconds a run of each category may take.
-class TestLimit(unittest.TestCase):
-    # A `smoke-test` run has the maintainer's 2 minutes.
+class TestLimit(HarnessCase):
+    # A `smoke-test` run has the gold's `smoke_seconds`, as a float.
     def test_smoke_limit(self) -> None:
-        self.assertEqual(category.limit_seconds(_SMOKE_TEST), _SMOKE_SECONDS)
+        limit = category.limit_seconds(_SMOKE_TEST)
+        self.assertEqual(limit, 7.0)
+        self.assertIs(type(limit), float)
 
     # A `normal-test` run has no limit of its own.
     def test_normal_unlimited(self) -> None:

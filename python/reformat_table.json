@@ -1,5 +1,6 @@
 {
   ".html": {
+    "checker": ["prettier", "--check", "--no-config", "--print-width", "79"],
     "comments": "html",
     "encoding": "utf-8",
     "formatter": ["prettier", "--write", "--no-config", "--print-width", "79"],
@@ -7,6 +8,7 @@
     "system": "linux"
   },
   ".js": {
+    "checker": ["prettier", "--check", "--no-config", "--print-width", "79"],
     "comments": "javascript",
     "encoding": "utf-8",
     "formatter": ["prettier", "--write", "--no-config", "--print-width", "79"],
@@ -14,6 +16,7 @@
     "system": "linux"
   },
   ".md": {
+    "checker": ["mdformat", "--check"],
     "comments": "none",
     "encoding": "utf-8",
     "formatter": ["mdformat", "--check"],
@@ -21,6 +24,7 @@
     "system": "linux"
   },
   ".ps1": {
+    "checker": [],
     "comments": "powershell",
     "encoding": "utf-8-sig",
     "formatter": [],
@@ -28,6 +32,7 @@
     "system": "windows"
   },
   ".psd1": {
+    "checker": [],
     "comments": "powershell",
     "encoding": "utf-8-sig",
     "formatter": [],
@@ -35,6 +40,7 @@
     "system": "windows"
   },
   ".py": {
+    "checker": ["ruff", "format", "--check", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
     "comments": "python",
     "encoding": "utf-8",
     "formatter": ["ruff", "format", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
@@ -42,6 +48,7 @@
     "system": "linux"
   },
   ".pyi": {
+    "checker": ["ruff", "format", "--check", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
     "comments": "python",
     "encoding": "utf-8",
     "formatter": ["ruff", "format", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
@@ -49,6 +56,7 @@
     "system": "linux"
   },
   ".sh": {
+    "checker": ["shfmt", "--diff"],
     "comments": "shell",
     "encoding": "utf-8",
     "formatter": ["shfmt", "--list", "--write"],
@@ -56,6 +64,7 @@
     "system": "linux"
   },
   ".ts": {
+    "checker": ["prettier", "--check", "--no-config", "--print-width", "79"],
     "comments": "javascript",
     "encoding": "utf-8",
     "formatter": ["prettier", "--write", "--no-config", "--print-width", "79"],

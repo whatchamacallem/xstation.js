@@ -5,8 +5,11 @@
 // The door to the chat completion protocol: the `http.request` lines that ask
 // a provider for a chat completion or an image, the reading of the reply
 // lines that answer them, and the conversion of MCP tools to function tools.
-// It starts no request. The request builders take the key as an argument, and
-// the one copy it holds is the key that `hello` brings, in memory only.
+// It starts no request. Each request line is built in the form
+// `settings.names_full()` picks. The request builders take the key as an
+// argument, and the one copy it holds is the key `key_set` keeps, which
+// nothing sets at bring up: `provider.set` is deferred, `TAP_PLAN.md` 1.3.
+// The copy is in memory only.
 
 namespace provider {
   // The line type, the request parts, the header names and the tool type.
@@ -244,7 +247,10 @@ namespace provider {
       [constants.authorization_name]: `${scheme} ${key}`,
       [constants.content_name]: constants.json_media,
     };
-    return jslb.line_make(jslb.header_make(constants.request_type), [], {
+    const header = jslb.header_make(constants.request_type, {
+      full: settings.names_full(),
+    });
+    return jslb.line_make(header, [], {
       method: constants.method,
       url: base_url + path,
       headers,
@@ -325,6 +331,11 @@ namespace provider {
       return utility.fail_now(i18n("provider.key_missing"));
     }
     return key_stored;
+  }
+
+  // Forgets the key, for the tests only, so `key_get` can be tested unset.
+  export function key_clear(): void {
+    key_stored = undefined;
   }
 }
 

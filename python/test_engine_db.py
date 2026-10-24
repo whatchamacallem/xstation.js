@@ -2,175 +2,166 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests `db.create`, `db.drop` and `db.snapshot` through the dispatcher on a
-# real store under `build/`: databases made and dropped by forwarded lines, a
-# new database at `seq` 0, a stale `since`, a snapshot as one blob in memory
-# and streamed to the cache, a database past 10 MiB as one blob, a snapshot
-# restored into a second store, and a recorded sequence of creates and drops
-# replayed to a second store.
+# Tests the handlers of `db.create` and `db.drop`, and `restore_lines`, on a
+# store double: the type, version and handler each registration records,
+# each handler called as the dispatcher calls it on lines of the gold and
+# the store call it makes, lines in full names, a line with `i` the handler
+# leaves unanswered, and the `db.restore` and `db.file` lines of the image
+# the double's `db_snapshot` gives, in both name forms, against the gold,
+# one past the old 10 MiB window among them. Making, dropping, snapshotting
+# and restoring a database are the store's own, `test_substrate.py`'s.
 
-import dispatch, engine_db, hashlib, jslb, os, sqlite3, substrate, tempfile
-import unittest, unittest.mock, uuid
+import engine_db, harness, os, re, tempfile, unittest, unittest.mock
 from collections.abc import Callable
-from i18n import i18n
-from typing import Any
+from typing import Any, NamedTuple
 
 # The checkout's build directory, where each test makes its scratch roots.
 _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
 )
 
-# The dotted name of the handler table that the tests patch.
-_HANDLERS_TARGET = "dispatch._HANDLERS"
-
 # The dotted name of the store that the tests patch.
 _STORE_TARGET = "engine_db._STATE.store"
 
-# The `overflow_bytes` of the settings, 128 KiB.
-_OVERFLOW_BYTES = 131072
+# The id of this module's gold in `test_settings.json`.
+_GOLD_ID = "python.test_engine_db"
 
-# The `line_max` of the settings, 1 MiB.
-_LINE_MAX = 1048576
+# A key of the decimal digits of a non negative integer, as JSLB reads it.
+_NUMBER_KEY = re.compile(r"0|[1-9][0-9]*")
 
-# The `blob_max` of the settings, the largest database.
-_BLOB_MAX = 2147483391
-
-# The 10 MiB a snapshot once had to fit in each of its pieces.
-_OLD_WINDOW = 10485760
-
-# Each row of the database past that size, 1 MiB, a size its writer chose.
-_ROW_BYTES = 1048576
-
-# The rows of that database, 11 MiB together, a count its writer chose.
-_ROW_COUNT = 11
-
-# The database the tests create, snapshot and drop.
+# The database the tests snapshot.
 _DATABASE = "castle"
 
-# Text beyond ASCII, built from its code points.
-_WIDE_TEXT = chr(0x4E2D) + chr(0x6587) + chr(0x1F600)
+# The bytes the store double gives as the database file, a pattern.
+_DATA_BYTES = bytes(range(256))
 
-# A text row putting the file over `overflow_bytes`, a size its writer chose.
-_BIG_TEXT = "x" * 200000
-
-# A value over `overflow_bytes`, kept in the cache, a size its writer chose.
-_VALUE_OVER = bytes(range(256)) * 800
-
-# The magic bytes that start every SQLite database file.
-_FILE_MAGIC = b"SQLite format 3\x00"
-
-# Creates of the metaverse, a universe, its world and region, then a drop.
-_RECORDED: list[tuple[str, str]] = [
-    ("db.create", "metaverse"),
-    ("db.create", "castle"),
-    ("db.create", "castle_world"),
-    ("db.create", "castle_gatehouse"),
-    ("db.drop", "castle_gatehouse"),
-]
+# A value over `overflow_bytes`, as the store keeps in a cache file.
+_VALUE_OVER = bytes(range(256)) * (
+    harness.setting_get("overflow_bytes") // 256 + 1
+)
 
 
-# Builds a request line: the type, the id and the payload.
-def _line_make(name: str, request_id: int, **payload: Any) -> jslb.Object:
-    header = jslb.header_make(name, id=request_id)
-    return jslb.line_make(header, [], **payload)
+# The `DbImage` shape `Store.db_snapshot` returns: the file and cache files.
+class DatabaseImage(NamedTuple):
+    data: bytes
+    files: list[str]
 
 
-# Dispatches a line that must be answered and returns the reply.
-def _reply_get(line: jslb.Object) -> jslb.Object:
-    reply = dispatch.line_dispatch(line)
-    if reply is None:
-        raise AssertionError("the line was not answered")
-    return reply
+# A copy of a value of this module's gold, its number keys made `int`.
+def _gold_value(name: str) -> Any:
+    return _keys_number(harness.gold_get(f"{_GOLD_ID}.{name}"))
 
 
-# Reads a file with a handle of its own.
-def _file_read(path: str) -> bytes:
-    with open(path, "rb") as file:
-        return file.read()
+# A copy of a JSON value with each number key an `int`, at every depth.
+def _keys_number(value: Any) -> Any:
+    if isinstance(value, dict):
+        made: dict[int | str, Any] = {}
+        for key, item in value.items():
+            number = _NUMBER_KEY.fullmatch(key) is not None
+            made[int(key) if number else key] = _keys_number(item)
+        return made
+    if isinstance(value, list):
+        return [_keys_number(item) for item in value]
+    return value
 
 
-# The bytes of a line on the wire: the encoder's pieces, files read in.
-def _wire_bytes(line: jslb.Object) -> bytes:
-    wire = b""
-    for piece in jslb.line_encode(line):
-        if isinstance(piece, bytes):
-            wire += piece
-        else:
-            wire += _file_read(piece)
-    return wire
+# A text of this module's gold.
+def _text_get(name: str) -> str:
+    text: str = harness.gold_get(f"{_GOLD_ID}.texts.{name}")
+    return text
 
 
-# Makes a decoder whose streamed blobs go to new files in the root's cache.
-def _decoder_make(root: str) -> jslb.LineDecoder:
-    cache = os.path.join(root, "cache")
-
-    # Returns a new path in the cache for a streamed blob.
-    def sink_make(header: jslb.Object) -> str:
-        return os.path.join(cache, "sink" + uuid.uuid4().hex)
-
-    return jslb.LineDecoder(_LINE_MAX, _BLOB_MAX, _OVERFLOW_BYTES, sink_make)
-
-
-# Decodes the one line the bytes hold, streaming a big blob to the cache.
-def _line_decode(root: str, wire: bytes) -> jslb.Object:
-    (line,) = _decoder_make(root).bytes_feed(wire)
+# A line of the gold with blob 1's size and `d` set, as the decoder gives it.
+def _blob_line(name: str, data: bytes | str) -> dict[int | str, Any]:
+    line: dict[int | str, Any] = _gold_value(f"lines.{name}")
+    size = len(data) if isinstance(data, bytes) else os.path.getsize(data)
+    line[1]["size" if "type" in line[0] else "s"] = size
+    line[1]["d"] = data
     return line
 
 
-# The bytes of a blob, read from its file when it was streamed.
-def _blob_read(line: jslb.Object, number: int) -> bytes:
-    data: bytes | str = line[number]["d"]
-    return _file_read(data) if isinstance(data, str) else data
+# Calls a handler as `dispatch.line_dispatch` does, the payload as keywords.
+def _handler_call(fn: Callable[..., Any], line: dict[int | str, Any]) -> Any:
+    payload = {
+        key: value for key, value in line.items() if isinstance(key, str)
+    }
+    return fn(line, **payload)
 
 
-# The names of the database files in a root, in order.
-def _files_find(root: str) -> list[str]:
-    names = os.listdir(root)
-    return sorted(name for name in names if name.endswith(".sqlite"))
+# A store double: records each call, answers what the test queued for it.
+class StoreDouble:
+    # Starts with no call recorded and no answer queued.
+    def __init__(self) -> None:
+        self.calls: list[tuple[Any, ...]] = []
+        self.answers: dict[str, list[Any]] = {}
+
+    # Records a call and returns its next queued answer, which must exist.
+    def call_answer(self, name: str, *args: Any) -> Any:
+        self.calls.append((name, *args))
+        if not self.answers.get(name):
+            raise AssertionError(f"the store double has no answer: {name}")
+        return self.answers[name].pop(0)
+
+    # `Store.db_create`, as `engine_db` calls it.
+    def db_create(self, name: str) -> Any:
+        return self.call_answer("db_create", name)
+
+    # `Store.db_drop`, as `engine_db` calls it.
+    def db_drop(self, name: str) -> Any:
+        return self.call_answer("db_drop", name)
+
+    # `Store.db_snapshot`, as `engine_db` calls it.
+    def db_snapshot(self, db: str) -> Any:
+        return self.call_answer("db_snapshot", db)
 
 
-# One SQL statement with its parameters.
-def _statement_make(sql: str, *params: Any) -> substrate.SqlStatement:
-    return substrate.SqlStatement(sql, list(params))
-
-
-# Closes every database a store has open.
-def _store_close(store: substrate.Store) -> None:
-    for name in store.db_list():
-        store.db_close(name)
-
-
-# Every statement of the dump of a database file: its schema and its rows.
-def _database_dump(path: str) -> list[str]:
-    connection = sqlite3.connect(path)
-    try:
-        return list(connection.iterdump())
-    finally:
-        connection.close()
-
-
-# Gives each test an empty handler table, no registration and a real store.
+# Gives each test an empty state, a registration recorder, a store double.
 class IsolatedCase(unittest.TestCase):
-    # Patches the table and the state, makes a store with no database.
+    # Patches the state and `dispatch.handler_register` through `engine_db`.
     def setUp(self) -> None:
-        table = unittest.mock.patch.dict(_HANDLERS_TARGET, {}, clear=True)
+        self.handlers: list[tuple[str, int, Callable[..., Any]]] = []
         state = unittest.mock.patch(_STORE_TARGET, None)
-        for patcher in (table, state):
+        register = unittest.mock.patch.object(
+            engine_db.dispatch, "handler_register", self.handler_record
+        )
+        for patcher in (state, register):
             patcher.start()
             self.addCleanup(patcher.stop)
-        self.root = self.root_make()
-        self.store = self.store_make(self.root)
+        self.store = StoreDouble()
 
-    # Makes a scratch root under `build/`, removed when the test ends.
-    def root_make(self) -> str:
+    # Records one registration in place of the dispatcher's table.
+    def handler_record(
+        self, name: str, version: int, fn: Callable[..., Any]
+    ) -> None:
+        self.handlers.append((name, version, fn))
+
+    # Registers the handlers on the store double.
+    def double_register(self) -> None:
+        store: Any = self.store
+        engine_db.handlers_register(store)
+
+    # Registers the handlers on the store double, returns the one of `name`.
+    def handler_get(self, name: str) -> Callable[..., Any]:
+        self.double_register()
+        (fn,) = [fn for kind, _, fn in self.handlers if kind == name]
+        return fn
+
+    # Calls the handler of `kind` on a gold line, checks its one store call.
+    def push_check(self, kind: str, method: str, name: str) -> None:
+        fn = self.handler_get(kind)
+        line = _gold_value(f"lines.{name}")
+        self.store.answers[method] = [None]
+        self.assertIsNone(_handler_call(fn, line))
+        self.assertEqual(self.store.calls, [(method, line["db"])])
+
+    # Writes bytes to a new file in a scratch root under `build/`.
+    def file_write(self, data: bytes) -> str:
         os.makedirs(_BUILD_PATH, exist_ok=True)
-        return self.enterContext(tempfile.TemporaryDirectory(dir=_BUILD_PATH))
-
-    # Makes a store on a root, closing its databases when the test ends.
-    def store_make(self, root: str) -> substrate.Store:
-        store = substrate.Store(root, _OVERFLOW_BYTES)
-        self.addCleanup(_store_close, store)
-        return store
+        root = self.enterContext(tempfile.TemporaryDirectory(dir=_BUILD_PATH))
+        path = os.path.join(root, "blob")
+        with open(path, "xb") as file:
+            file.write(data)
+        return path
 
     # Calls `fn` and checks the type and the text of what it raises.
     def raise_check(
@@ -180,247 +171,104 @@ class IsolatedCase(unittest.TestCase):
             fn()
         self.assertEqual(str(caught.exception), message)
 
-    # Dispatches a line and checks the type and the text of what it raises.
-    def dispatch_check(
-        self, kind: type[Exception], message: str, line: jslb.Object
-    ) -> None:
-        self.raise_check(kind, message, lambda: dispatch.line_dispatch(line))
-
 
 # Tests the handler of `db.create`.
 class TestCreate(IsolatedCase):
-    # A create makes the database file at `seq` 0 and replies with nothing.
+    # A create asks the store to create the line's database.
     def test_database_created(self) -> None:
-        engine_db.handlers_register(self.store)
-        line = _line_make("db.create", 3, db=_DATABASE, since=0)
-        reply = _reply_get(line)
-        self.assertEqual(reply[0], {"t": "db.create", "r": 3})
-        self.assertEqual(jslb.payload_of(reply), {})
-        self.assertEqual(self.store.db_list(), [_DATABASE])
-        self.assertEqual(self.store.seq_get(_DATABASE), 0)
-        path = os.path.join(self.root, "castle.sqlite")
-        self.assertTrue(os.path.isfile(path))
+        self.push_check("db.create", "db_create", "create")
 
-    # A stale `since` raises the desync and nothing is created.
-    def test_since_stale(self) -> None:
-        engine_db.handlers_register(self.store)
-        line = _line_make("db.create", 1, db=_DATABASE, since=1)
-        message = i18n("substrate.since_stale", "db.create", 1, 0, _DATABASE)
-        self.dispatch_check(RuntimeError, message, line)
-        self.assertEqual(self.store.db_list(), [])
-        self.assertEqual(os.listdir(self.root), ["cache"])
+    # A line in full names is applied as one in short names.
+    def test_full_names(self) -> None:
+        self.push_check("db.create", "db_create", "create_full")
 
-    # A database that exists raises, and so does a name that is not valid.
-    def test_create_refused(self) -> None:
-        engine_db.handlers_register(self.store)
-        self.store.db_create(_DATABASE)
-        line = _line_make("db.create", 1, db=_DATABASE, since=0)
-        with self.assertRaises(FileExistsError) as caught:
-            dispatch.line_dispatch(line)
-        path = os.path.join(self.root, "castle.sqlite")
-        self.assertEqual(caught.exception.filename, path)
-        self.assertEqual(self.store.seq_get(_DATABASE), 0)
-        for name in ("", "a-b", "9a", "a/b"):
-            with self.subTest(name=name):
-                line = _line_make("db.create", 1, db=name, since=0)
-                message = i18n("substrate.name_bad", name)
-                self.dispatch_check(ValueError, message, line)
-        self.assertEqual(self.store.db_list(), [_DATABASE])
-        self.assertEqual(_files_find(self.root), ["castle.sqlite"])
+    # A create with `i` is applied and answered with nothing, as a push is.
+    def test_request_none(self) -> None:
+        self.push_check("db.create", "db_create", "create_request")
 
 
 # Tests the handler of `db.drop`.
 class TestDrop(IsolatedCase):
-    # A drop closes and deletes the database and its cache files.
+    # A drop asks the store to drop the line's database.
     def test_database_dropped(self) -> None:
-        engine_db.handlers_register(self.store)
-        self.store.db_create(_DATABASE)
-        self.store.kv_put("/castle/maps/castle.bin", _VALUE_OVER)
-        cache = os.path.join(self.root, "cache")
-        self.assertEqual(len(os.listdir(cache)), 1)
-        line = _line_make("db.drop", 4, db=_DATABASE, since=1)
-        reply = _reply_get(line)
-        self.assertEqual(reply[0], {"t": "db.drop", "r": 4})
-        self.assertEqual(jslb.payload_of(reply), {})
-        self.assertEqual(self.store.db_list(), [])
-        self.assertEqual(_files_find(self.root), [])
-        self.assertEqual(os.listdir(cache), [])
+        self.push_check("db.drop", "db_drop", "drop")
 
-    # A stale `since` raises the desync and the database stays.
-    def test_since_stale(self) -> None:
-        engine_db.handlers_register(self.store)
-        self.store.db_create(_DATABASE)
-        self.store.kv_put("/castle/a", b"one")
-        line = _line_make("db.drop", 1, db=_DATABASE, since=0)
-        message = i18n("substrate.since_stale", "db.drop", 0, 1, _DATABASE)
-        self.dispatch_check(RuntimeError, message, line)
-        self.assertEqual(self.store.db_list(), [_DATABASE])
-        self.assertEqual(_files_find(self.root), ["castle.sqlite"])
+    # A line in full names is applied as one in short names.
+    def test_full_names(self) -> None:
+        self.push_check("db.drop", "db_drop", "drop_full")
 
-    # A database that is not open raises.
-    def test_drop_unknown(self) -> None:
-        engine_db.handlers_register(self.store)
-        line = _line_make("db.drop", 1, db=_DATABASE, since=0)
-        message = i18n("substrate.db_closed", _DATABASE)
-        self.dispatch_check(LookupError, message, line)
+    # A drop with `i` is applied and answered with nothing, as a push is.
+    def test_request_none(self) -> None:
+        self.push_check("db.drop", "db_drop", "drop_request")
 
 
-# Tests the handler of `db.snapshot`.
-class TestSnapshot(IsolatedCase):
-    # Makes the database with a table and one row of the text: `seq` 1.
-    def database_fill(self, text: str) -> None:
-        self.store.db_create(_DATABASE)
-        statements = [
-            _statement_make("CREATE TABLE t (x TEXT) STRICT"),
-            _statement_make("INSERT INTO t VALUES (?)", text),
-        ]
-        self.store.sql_run(_DATABASE, statements)
+# Tests the lines of a whole database that `restore_lines` yields.
+class TestRestoreLines(IsolatedCase):
+    # Writes two values over `overflow_bytes`, the double's cache files.
+    def files_write(self) -> list[str]:
+        values = (_VALUE_OVER, bytes(reversed(_VALUE_OVER)))
+        return [self.file_write(value) for value in values]
 
-    # Makes the database with rows of zero bytes past 10 MiB: `seq` 1.
-    def database_over(self) -> None:
-        self.store.db_create(_DATABASE)
-        statements = [
-            _statement_make("CREATE TABLE b (x BLOB) STRICT"),
-            _statement_make(
-                "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL"
-                " SELECT i + 1 FROM n WHERE i < ?)"
-                " INSERT INTO b SELECT zeroblob(?) FROM n",
-                _ROW_COUNT,
-                _ROW_BYTES,
-            ),
-        ]
-        self.store.sql_run(_DATABASE, statements)
+    # Two cache files: the database file's line, then one line for each file.
+    def test_lines_made(self) -> None:
+        self.double_register()
+        files = self.files_write()
+        image = DatabaseImage(_DATA_BYTES, files)
+        self.store.answers["db_snapshot"] = [image, image]
+        for full, suffix in ((False, ""), (True, "_full")):
+            with self.subTest(full=full):
+                lines = list(engine_db.restore_lines(_DATABASE, full))
+                expected = [_blob_line(f"restore{suffix}", _DATA_BYTES)]
+                for path in files:
+                    expected.append(_blob_line(f"file{suffix}", path))
+                self.assertEqual(lines, expected)
+        snapshot = ("db_snapshot", _DATABASE)
+        self.assertEqual(self.store.calls, [snapshot, snapshot])
 
-    # Restores the snapshot into a second store and reads back the row.
-    def row_restored(self, data: bytes) -> list[list[Any]]:
-        second = self.store_make(self.root_make())
-        self.assertEqual(second.db_restore(_DATABASE, data), 1)
-        statement = _statement_make("SELECT x FROM t")
-        return second.sql_run(_DATABASE, [statement])[0].rows
+    # No cache file: the database file's line alone, `files` 0.
+    def test_lines_empty(self) -> None:
+        self.double_register()
+        self.store.answers["db_snapshot"] = [DatabaseImage(_DATA_BYTES, [])]
+        lines = list(engine_db.restore_lines(_DATABASE, False))
+        self.assertEqual(lines, [_blob_line("restore_empty", _DATA_BYTES)])
+        self.assertEqual(self.store.calls, [("db_snapshot", _DATABASE)])
 
-    # The reply holds the hash and `seq`, and the database file as blob 1.
-    def test_snapshot_replied(self) -> None:
-        engine_db.handlers_register(self.store)
-        self.database_fill(_WIDE_TEXT)
-        data, _ = self.store.db_snapshot(_DATABASE)
-        reply = _reply_get(_line_make("db.snapshot", 9, db=_DATABASE))
-        self.assertEqual(reply[0], {"t": "db.snapshot", "r": 9, "b": 1})
-        self.assertEqual(reply[1], {"s": len(data), "d": data})
-        payload = {"sha256": hashlib.sha256(data).hexdigest(), "seq": 1}
-        self.assertEqual(jslb.payload_of(reply), payload)
-        self.assertEqual(data[:16], _FILE_MAGIC)
-        self.assertEqual(self.row_restored(data), [[_WIDE_TEXT]])
-
-    # A blob over `overflow_bytes` streams to the reader's cache, hash kept.
-    def test_blob_streamed(self) -> None:
-        engine_db.handlers_register(self.store)
-        self.database_fill(_BIG_TEXT)
-        data, _ = self.store.db_snapshot(_DATABASE)
-        reply = _reply_get(_line_make("db.snapshot", 1, db=_DATABASE))
-        self.assertGreater(len(data), _OVERFLOW_BYTES)
-        decoded = _line_decode(self.root, _wire_bytes(reply))
-        self.assertIsInstance(decoded[1]["d"], str)
-        self.assertEqual(decoded[1]["sha256"], reply["sha256"])
-        self.assertEqual(_blob_read(decoded, 1), data)
-        self.assertEqual(self.row_restored(data), [[_BIG_TEXT]])
-
-    # A database past the old 10 MiB window comes whole, as one blob.
-    def test_past_window(self) -> None:
-        engine_db.handlers_register(self.store)
-        self.database_over()
-        reply = _reply_get(_line_make("db.snapshot", 1, db=_DATABASE))
-        self.assertEqual(jslb.field_get(reply[0], "blobs"), 1)
-        decoded = _line_decode(self.root, _wire_bytes(reply))
-        data = _blob_read(decoded, 1)
-        self.assertGreater(len(data), _OLD_WINDOW)
-        self.assertEqual(hashlib.sha256(data).hexdigest(), reply["sha256"])
-        second = self.store_make(self.root_make())
-        self.assertEqual(second.db_restore(_DATABASE, data), 1)
-        statement = _statement_make("SELECT count(*), sum(length(x)) FROM b")
-        rows = second.sql_run(_DATABASE, [statement])[0].rows
-        self.assertEqual(rows, [[_ROW_COUNT, _ROW_COUNT * _ROW_BYTES]])
-
-    # The `seq` of the reply is the `seq` of the database at that moment.
-    def test_seq_replied(self) -> None:
-        engine_db.handlers_register(self.store)
-        self.store.db_create(_DATABASE)
-        line = _line_make("db.snapshot", 1, db=_DATABASE)
-        self.assertEqual(_reply_get(line)["seq"], 0)
-        self.store.kv_put("/castle/a", b"one")
-        line = _line_make("db.snapshot", 2, db=_DATABASE)
-        self.assertEqual(_reply_get(line)["seq"], 1)
-
-    # A database that is not open raises.
-    def test_snapshot_unknown(self) -> None:
-        engine_db.handlers_register(self.store)
-        line = _line_make("db.snapshot", 1, db=_DATABASE)
-        message = i18n("substrate.db_closed", _DATABASE)
-        self.dispatch_check(LookupError, message, line)
-
-
-# Tests a recorded sequence of forwarded operations on a second store.
-class TestReplay(IsolatedCase):
-    # The server's store ends as the modifier's store did, file for file.
-    def test_recorded_replay(self) -> None:
-        second_root = self.root_make()
-        second = self.store_make(second_root)
-        engine_db.handlers_register(second)
-        for kind, name in _RECORDED:
-            if kind == "db.create":
-                since = 0
-                self.store.db_create(name)
-            else:
-                since = self.store.seq_get(name)
-                self.store.db_drop(name)
-            line = _line_make(kind, 1, db=name, since=since)
-            self.assertEqual(jslb.payload_of(_reply_get(line)), {}, name)
-        names = ["castle", "castle_world", "metaverse"]
-        self.assertEqual(self.store.db_list(), names)
-        self.assertEqual(second.db_list(), names)
-        for name in names:
-            self.assertEqual(second.seq_get(name), 0)
-        _store_close(self.store)
-        _store_close(second)
-        for name in names:
-            file_name = name + ".sqlite"
-            self.assertEqual(
-                _database_dump(os.path.join(self.root, file_name)),
-                _database_dump(os.path.join(second_root, file_name)),
-                name,
-            )
-        self.assertEqual(
-            sorted(os.listdir(self.root)), sorted(os.listdir(second_root))
-        )
+    # A database past the old 10 MiB window goes whole as blob 1.
+    def test_lines_large(self) -> None:
+        self.double_register()
+        window: int = harness.gold_get(f"{_GOLD_ID}.old_window")
+        data = bytes(window + 1)
+        files = self.files_write()
+        self.store.answers["db_snapshot"] = [DatabaseImage(data, files)]
+        lines = list(engine_db.restore_lines(_DATABASE, False))
+        expected = [_blob_line("restore", data)]
+        for path in files:
+            expected.append(_blob_line("file", path))
+        self.assertEqual(lines, expected)
+        self.assertGreater(lines[0][1]["s"], window)
 
 
 # Tests the registration.
 class TestRegister(IsolatedCase):
-    # A second registration raises, as the dispatcher refuses the pair.
-    def test_register_twice(self) -> None:
-        engine_db.handlers_register(self.store)
-        message = i18n("dispatch.handler_twice", "db.create", 0)
-        self.raise_check(
-            ValueError,
-            message,
-            lambda: engine_db.handlers_register(self.store),
-        )
+    # Each handler is registered once, under its type at version 0.
+    def test_handlers_registered(self) -> None:
+        self.double_register()
+        expected = [
+            ("db.create", 0, engine_db.db_create),
+            ("db.drop", 0, engine_db.db_drop),
+        ]
+        self.assertEqual(self.handlers, expected)
 
-    # No `db.chunk` handler is registered, as a snapshot comes whole.
-    def test_chunk_unknown(self) -> None:
-        engine_db.handlers_register(self.store)
-        self.store.db_create(_DATABASE)
-        line = _line_make("db.chunk", 1, snapshot=1, offset=0, size=1)
-        message = i18n("dispatch.handler_unknown", "db.chunk", 0)
-        self.dispatch_check(LookupError, message, line)
-
-    # Called before the registration each handler raises.
+    # Before the registration each handler and `restore_lines` raise.
     def test_called_early(self) -> None:
-        line = _line_make("db.create", 1)
-        message = i18n("engine_db.not_registered")
+        create = _gold_value("lines.create")
+        drop = _gold_value("lines.drop")
+        message = _text_get("engine_db_not_registered")
         calls: list[Callable[[], object]] = [
-            lambda: engine_db.db_create(line, db=_DATABASE, since=0),
-            lambda: engine_db.db_drop(line, db=_DATABASE, since=0),
-            lambda: engine_db.db_snapshot(line, db=_DATABASE),
+            lambda: _handler_call(engine_db.db_create, create),
+            lambda: _handler_call(engine_db.db_drop, drop),
+            lambda: next(engine_db.restore_lines(_DATABASE, False)),
         ]
         for call in calls:
             self.raise_check(RuntimeError, message, call)
+        self.assertEqual(self.store.calls, [])

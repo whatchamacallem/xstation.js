@@ -7,13 +7,14 @@
 # It holds the options --smoke-test and --normal-test that choose the category
 # of a run, smoke-test when neither is given; whether a suite of a label runs
 # in a run of a category, a smoke-test suite in both and a normal-test suite
-# in a normal-test run only; the seconds a run may take; the alarm of a suite,
-# its own seconds or the run's deadline, whichever comes first; and LabelBook,
-# which checks as a runner reaches them that a root labelled smoke-test holds
-# a rung labelled smoke-test and that a root labelled normal-test holds none.
-# A label or category other than the two strings raises.
+# in a normal-test run only; the seconds a run may take, the gold record's
+# smoke_seconds for a smoke-test run; the alarm of a suite, its own seconds
+# or the run's deadline, whichever comes first; and LabelBook, which checks
+# as a runner reaches them that a root labelled smoke-test holds a rung
+# labelled smoke-test and that a root labelled normal-test holds none. A
+# label or category other than the two strings raises.
 
-import argparse
+import argparse, harness
 
 # The label of the important suites that fit in 2 minutes, and its category.
 _SMOKE_TEST = "smoke-test"
@@ -23,9 +24,6 @@ _NORMAL_TEST = "normal-test"
 
 # The two labels, which are also the two categories.
 _LABELS = (_SMOKE_TEST, _NORMAL_TEST)
-
-# The maintainer's 2 minutes: the seconds a `smoke-test` run may take.
-_SMOKE_SECONDS = 120.0
 
 
 # Adds `--smoke-test` or `--normal-test` as `category`, `smoke-test` if none.
@@ -58,10 +56,12 @@ def suite_runs(label: str, category: str) -> bool:
     return label == _SMOKE_TEST or category == _NORMAL_TEST
 
 
-# The seconds a run may take, 120 for `smoke-test`, None for `normal-test`.
+# A run's seconds: the gold `smoke_seconds` for `smoke-test`, else None.
 def limit_seconds(category: str) -> float | None:
     _category_check(category)
-    return _SMOKE_SECONDS if category == _SMOKE_TEST else None
+    if category != _SMOKE_TEST:
+        return None
+    return float(harness.gold_get("smoke_seconds"))
 
 
 # The alarm of a suite, the sooner of its own seconds and the run's deadline.

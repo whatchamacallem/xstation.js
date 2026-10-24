@@ -1,9 +1,15 @@
-import jslb
+# The handler of `doc.put`, the browser's commit, which the server applies
+# to its own store as a plain message and never answers: the server writes
+# its own next version, whatever version the browser's was.
 
-# `doc.put`: a forwarded operation. Reply with `ref` and `seq`.
+from typing import Any
+
+import jslb, substrate
+
+# `doc.put`: writes the next version of the document and moves its head.
 def doc_put(
-    line: jslb.Object, *, db: str, id: str, body: dict[str, object], since: int
-) -> jslb.Object: ...
+    line: jslb.Object, *, db: str, id: str, body: dict[int | str, Any]
+) -> None: ...
 
-# `doc.head`: reply with `ref`.
-def doc_head(line: jslb.Object, *, db: str, id: str) -> jslb.Object: ...
+# Registers the handler on the store given.
+def handlers_register(store: substrate.Store) -> None: ...

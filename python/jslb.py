@@ -5,13 +5,28 @@
 # JSLB, the wire format: a line is one JSON object ending in CR, its headers
 # at the integer keys 0, 1, ... and its payload at the other keys, followed by
 # the bytes of each blob the line header counts. The builders, field access,
-# the encoder, the debug rendering, and the decoder, which streams a blob over
-# overflow_bytes into the file its sink names, hashing it on the way.
+# the encoder, the debug rendering, json_decode, and the decoder, which
+# streams a blob over overflow_bytes into the file its sink names, hashing it
+# on the way.
+#
+# The decoders are the single door for bad numbers: no other layer checks a
+# number. At read, an integer token, digits without a fraction or an
+# exponent, beyond 2**53 either way is refused with jslb.integer_refused, a
+# token of more than 16 digits before int reads it, and a number token whose
+# float overflows to an infinity, such as 1e400, with jslb.number_overflow,
+# both as WireError, raised by the hooks of json.loads as they read. A token
+# with a fraction or an exponent within the doubles reads as its float.
+# json_decode applies the same rules to a JSON text read from anywhere but a
+# line. The encoder keeps its own refusals of NaN, the infinities and
+# integers beyond 2**53, inside the same layer.
+#
+# A file of a streamed blob that fails to close after a fault raises its
+# error with the first fault as its __context__, so one cascade holds both.
 
 import hashlib, io, json, math, os, re
 from collections.abc import Callable, Iterable, Iterator
 from typing import Any, NoReturn, cast
-from i18n import i18n
+from internationalization import i18n
 
 # The short line header field names and their full forms.
 _LINE_NAMES = {
@@ -53,6 +68,9 @@ _FIELD_REQUIRED = frozenset(("t", "s"))
 # The largest magnitude of an `int` the encoder writes and the decoder reads.
 _INTEGER_LIMIT = 2**53
 
+# The most digits an integer token within `2**53` can have.
+_INTEGER_DIGITS = 16
+
 # A key of the decimal digits of a non negative integer, no leading zero.
 _NUMBER_KEY = re.compile(r"0|[1-9][0-9]*")
 
@@ -69,7 +87,7 @@ class Object(dict[int | str, Any]):
         return self[name]
 
 
-# A framing or header fault. The port that fed the decoder closes on it.
+# A framing, header or number fault. The port that fed the decoder closes.
 class WireError(Exception):
     pass
 
@@ -189,6 +207,16 @@ def line_render(line: Object) -> str:
     count = len(_line_check(line, False))
     tags = "".join(f'<blob "n"={number}>' for number in range(1, count + 1))
     return _line_text(line, count) + tags
+
+
+# Parses a JSON text by the decoder's rules into `Object`s, any JSON value.
+def json_decode(text: str) -> Any:
+    try:
+        return _json_load(text)
+    except json.JSONDecodeError as error:
+        raise WireError(i18n("jslb.text_not_json", error.msg)) from error
+    except (RecursionError, ValueError) as error:
+        raise WireError(i18n("jslb.text_not_json", str(error))) from error
 
 
 # Copies a blob header with its size and key named in the line's form.
@@ -322,17 +350,38 @@ def _object_make(pairs: list[tuple[str, Any]]) -> Object:
     return made
 
 
-# Refuses the `NaN` and `Infinity` constants, which are not JSON.
+# Refuses the `NaN` and `Infinity` constants, which are not JSON, by name.
 def _constant_refuse(name: str) -> NoReturn:
-    raise WireError(i18n("jslb.line_not_json", name))
+    raise ValueError(name)
 
 
-# Reads a JSON integer as an `int` within `2**53` either way, else a double.
-def _integer_parse(text: str) -> int | float:
+# Reads an integer token as an `int`, refusing one beyond `2**53` either way.
+def _integer_parse(text: str) -> int:
+    if len(text.removeprefix("-")) > _INTEGER_DIGITS:
+        raise WireError(i18n("jslb.integer_refused", text))
     number = int(text)
     if abs(number) > _INTEGER_LIMIT:
-        return float(text)
+        raise WireError(i18n("jslb.integer_refused", text))
     return number
+
+
+# Reads a token with a fraction or an exponent, refusing an infinity.
+def _float_parse(text: str) -> float:
+    number = float(text)
+    if math.isinf(number):
+        raise WireError(i18n("jslb.number_overflow", text))
+    return number
+
+
+# Parses a JSON text with the hooks of the decoder's rules.
+def _json_load(text: str) -> object:
+    return json.loads(
+        text,
+        object_pairs_hook=_object_make,
+        parse_constant=_constant_refuse,
+        parse_float=_float_parse,
+        parse_int=_integer_parse,
+    )
 
 
 # Parses line bytes as strict `UTF-8` JSON into an `Object`.
@@ -342,12 +391,7 @@ def _line_decode(text: bytes) -> Object:
     except UnicodeDecodeError as error:
         raise WireError(i18n("jslb.line_not_utf8", error.reason)) from error
     try:
-        value: object = json.loads(
-            string,
-            object_pairs_hook=_object_make,
-            parse_constant=_constant_refuse,
-            parse_int=_integer_parse,
-        )
+        value = _json_load(string)
     except json.JSONDecodeError as error:
         raise WireError(i18n("jslb.line_not_json", error.msg)) from error
     except (RecursionError, ValueError) as error:
@@ -397,9 +441,14 @@ class LineDecoder:
             self._bytes_read(data, lines)
             self._failed = False
         except Exception as error:
+            fault = error
+            try:
+                self._file_shut()
+            except Exception as second:
+                fault = second
             if not lines:
-                raise
-            self._fault = error
+                raise fault
+            self._fault = fault
         finally:
             if self._failed:
                 self._file_shut()

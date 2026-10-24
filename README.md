@@ -1,5 +1,7 @@
 # xstation.js (Cross-Station JS, xsjs)
 
+No code was written by the maintainer.
+
 These are the user facing scripts. The remaining scripts are for interested
 developers.
 
@@ -19,8 +21,11 @@ execution policy refuses the scripts from a `\\wsl.localhost` path.
 
 `.\xsjs_start.ps1 [username:password]` (admin)
 
-- Copies `python/bootstrap.py` and `python/bootstrap.html` to
-  `~/.cache/xsjs/` in WSL on each run, beside its `modules/` folder.
+- Copies the ttyd that `xsjs_install.ps1` built, the server's Python
+  modules and seeds, `i18n/en-US.json`, `settings.json`,
+  `test_settings.json`, `provider.json` and the page,
+  `build/hyperposition-engine.html`, to `~/.cache/xsjs/` in WSL on each
+  run.
 - Serves them with ttyd in WSL on 127.0.0.1:5769, which a Windows port
   proxy forwards from port 5768.
 - Serves localhost over HTTP, or the network over HTTPS with a password.

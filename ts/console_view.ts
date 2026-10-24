@@ -4,11 +4,14 @@
 //
 // The console view on the UI thread: one xterm.js terminal in a hidden child
 // of a container, speaking ttyd's client protocol to tty 0 as `console.input`
-// and `console.output` lines, asking for tty 0 and its close, and asking for
-// it again once it has ended. The terminal's rows are fitted to the height
-// the container has above the band, the element after it, at each show and
-// whenever the page or the band changes size while the view is shown, so
-// every row is seen without scrolling.
+// and `console.output` lines, built in the form `settings.names_full()`
+// picks, asking for tty 0 and its close, and asking for it again once it has
+// ended. The terminal's rows are fitted to the height the container has
+// above the band, the element after it, at each show and whenever the page
+// or the band changes size while the view is shown, so every row is seen
+// without scrolling. The fit changes only the terminal on the page: no
+// resize goes to tty 0, whose size is the one the first message gives at its
+// opening, which is debug only.
 
 // The xterm.js 5.5.0 members that the view uses, which no package declares.
 declare class Terminal {
@@ -26,22 +29,17 @@ declare class Terminal {
   write(data: Uint8Array): void;
   // Gives the terminal the keyboard focus.
   focus(): void;
-  // Changes the size in character cells, a change reported to `onResize`.
+  // Changes the size in character cells.
   resize(columns: number, rows: number): void;
   // Registers a listener for the text that keystrokes and pastes produce.
   readonly onData: (listener: (data: string) => void) => unknown;
-  // Registers a listener for a change of the size in character cells.
-  readonly onResize: (
-    listener: (size: { cols: number; rows: number }) => void,
-  ) => unknown;
 }
 
 namespace console_view {
-  // The ttyd message kinds, line types, owner, terminal size and name form.
+  // The ttyd message kinds, line types, owner and terminal size.
   const constants = Object.freeze({
     input_kind: 0x30,
     output_kind: 0x30,
-    resize_kind: 0x31,
     title_kind: 0x31,
     preferences_kind: 0x32,
     open_type: "console.open",
@@ -50,10 +48,9 @@ namespace console_view {
     wake_type: "ui.console_reply",
     closed_type: "ui.console_closed",
     owner: "ai" as const,
-    // The size when made, 120 by 40, its writer's; the rows fitted at a show.
+    // The size when made, 120 by 40, its writer's, the rows fitted at a show.
     columns: 120,
     rows: 40,
-    names_full: true,
     // The element of xterm.js that holds the rows, as tall as they are.
     screen_selector: ".xterm-screen",
   });
@@ -72,7 +69,7 @@ namespace console_view {
   // The `console.input` line that carries one message as its blob.
   function input_line(message: Uint8Array): lines.Line {
     const header = jslb.header_make(constants.input_type, {
-      full: constants.names_full,
+      full: settings.names_full(),
     });
     return jslb.line_make(header, [jslb.blob_make(message)], {});
   }
@@ -104,7 +101,6 @@ namespace console_view {
         disableStdin: true,
       });
       this.terminal.onData((data) => this.input_send(data));
-      this.terminal.onResize((size) => this.resize_send(size.cols, size.rows));
       this.observer = new ResizeObserver(() => this.space_change());
     }
 
@@ -137,13 +133,18 @@ namespace console_view {
       return !this.child.hidden && this.phase === "idle";
     }
 
+    // Whether tty 0 is open: its first message sent and input taken.
+    open_is(): boolean {
+      return this.phase === "open";
+    }
+
     // Asks the AI worker for tty 0 from a UI handler, which returns the sleep.
     open_request(): dispatch.Sleep {
       if (this.phase !== "idle") {
         throw new Error(i18n("console_view.open_phase", this.phase));
       }
       const header = jslb.header_make(constants.open_type, {
-        full: constants.names_full,
+        full: settings.names_full(),
       });
       const line = jslb.line_make(header, [], {});
       const id = this.tasks.task_submit(line, constants.owner);
@@ -179,7 +180,7 @@ namespace console_view {
         throw new Error(i18n("console_view.close_phase", this.phase));
       }
       const header = jslb.header_make(constants.close_type, {
-        full: constants.names_full,
+        full: settings.names_full(),
       });
       const line = jslb.line_make(header, [], {});
       const id = this.tasks.task_submit(line, constants.owner);
@@ -232,17 +233,6 @@ namespace console_view {
       }
       const body = utility.utf8_encode(data);
       const message = message_make(constants.input_kind, body);
-      this.tasks.line_notify(input_line(message), constants.owner);
-    }
-
-    // Sends the new size of an open terminal as one resize message.
-    private resize_send(columns: number, rows: number): void {
-      // Unless tty 0 is open, the first message of its next opening has it.
-      if (this.phase !== "open") {
-        return;
-      }
-      const body = utility.utf8_encode(utility.json_text({ columns, rows }));
-      const message = message_make(constants.resize_kind, body);
       this.tasks.line_notify(input_line(message), constants.owner);
     }
 

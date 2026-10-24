@@ -204,15 +204,26 @@ class WaitTimer:
         self.what = what
         self.seconds = seconds
         self.end = time.monotonic() + seconds
+        self.deadline_cut = False
+
+    # Ends the wait at the deadline instead, when the deadline comes first.
+    def deadline_apply(self, deadline: float) -> None:
+        if deadline < self.end:
+            self.end = deadline
+            self.deadline_cut = True
 
     # Returns the seconds left, or raises `TimeoutError` naming the wait.
     def seconds_left(self) -> float:
         left = self.end - time.monotonic()
-        if left <= 0:
+        if left > 0:
+            return left
+        if self.deadline_cut:
             raise TimeoutError(
-                f"gave up after {self.seconds:g} s waiting for {self.what}"
+                f"gave up at the deadline waiting for {self.what}"
             )
-        return left
+        raise TimeoutError(
+            f"gave up after {self.seconds:g} s waiting for {self.what}"
+        )
 
 
 # Keeps page loads, trace events, workers and pauses, and passes console on.
@@ -275,10 +286,15 @@ class ProtocolClient:
         self.wait_seconds = wait_seconds
         self.call_id = 0
         self.session_id = ""
+        self.deadline: float | None = None
+
+    # Ends every later wait at `end`, a `time.monotonic()` value, if sooner.
+    def deadline_set(self, end: float) -> None:
+        self.deadline = end
 
     # Passes events on until the condition holds, failing when the wait ends.
     def events_pump(self, what: str, done: Callable[[], bool]) -> None:
-        timer = WaitTimer(what, self.wait_seconds)
+        timer = self.timer_start(what)
         while not done():
             message = self.message_next(timer)
             if "id" in message:
@@ -296,7 +312,7 @@ class ProtocolClient:
     def handshake_open(self, host: str, path: str) -> None:
         key = base64.b64encode(os.urandom(16)).decode()
         self.writer(handshake_request(host, path, key))
-        timer = WaitTimer("the DevTools handshake answer", self.wait_seconds)
+        timer = self.timer_start("the DevTools handshake answer")
         head = head_read(functools.partial(self.reader, timer))
         handshake_check(key, head)
 
@@ -332,7 +348,7 @@ class ProtocolClient:
         if session_id:
             request["sessionId"] = session_id
         self.frame_send(_WEBSOCKET_OPCODE_TEXT, json.dumps(request).encode())
-        timer = WaitTimer(f"the reply to {method}", self.wait_seconds)
+        timer = self.timer_start(f"the reply to {method}")
         while True:
             message = self.message_next(timer)
             if "id" not in message:
@@ -347,6 +363,13 @@ class ProtocolClient:
                 raise RuntimeError(f"{method}: {message['error']['message']}")
             result: dict[str, Any] = message["result"]
             return result
+
+    # Returns the timer of a wait, ended at the deadline when that comes first.
+    def timer_start(self, what: str) -> WaitTimer:
+        timer = WaitTimer(what, self.wait_seconds)
+        if self.deadline is not None:
+            timer.deadline_apply(self.deadline)
+        return timer
 
 
 # Headless Chrome over DevTools, through the `powershell.exe` relay.

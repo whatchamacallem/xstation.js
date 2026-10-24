@@ -1,15 +1,14 @@
-import jslb
+# The handlers of `kv.put` and `kv.delete`, the browser's commits, which the
+# server applies to its own store as plain messages and never answers. The
+# ref is the line header's `k`.
 
-# Handlers of the `kv.*` lines. The ref is the line header's `k`.
+import jslb, substrate
 
-# `kv.get`: reply with `size` and `sha256`, and the value as one blob.
-def kv_get(line: jslb.Object) -> jslb.Object: ...
+# `kv.put`: one blob in, the value, bytes or the cache path it streamed to.
+def kv_put(line: jslb.Object) -> None: ...
 
-# `kv.put`: one blob in, a forwarded operation. Reply with `sha256`, `seq`.
-def kv_put(line: jslb.Object, *, since: int) -> jslb.Object: ...
+# `kv.delete`: deletes the row, a missing one included.
+def kv_delete(line: jslb.Object) -> None: ...
 
-# `kv.delete`: a forwarded operation. Reply with `seq`.
-def kv_delete(line: jslb.Object, *, since: int) -> jslb.Object: ...
-
-# `kv.list`: reply with `keys`, each `k`, `size`, `sha256`.
-def kv_list(line: jslb.Object, *, db: str, prefix: str) -> jslb.Object: ...
+# Registers the handlers on the store given.
+def handlers_register(store: substrate.Store) -> None: ...

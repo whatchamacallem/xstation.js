@@ -1,6 +1,16 @@
+// tappy's producer, with the names and parameters of the Python producer:
+// one TAP version 14 stream, a parent plan, and one indented block per test
+// module, each with its own plan. Each line goes to the stream's writer the
+// moment it is made; the bring up sends each as a `tap.line` at once.
+
 declare namespace tap_producer {
-  // tappy's `Tracker`, with the names and parameters of the Python producer.
+  // Writes the lines of one level of a stream the moment each is added.
   class Tracker {
+    // `write` takes each line, without its newline.
+    constructor(write: (text: string) => void);
+    // Writes the plan at once, before the points.
+    set_plan(total: number): void;
+    // `class_name` is tappy's and is not written.
     add_ok(
       class_name: string,
       description: string,
@@ -13,25 +23,48 @@ declare namespace tap_producer {
       directive?: string,
       diagnostics?: string,
     ): void;
+    // A passing point with a `SKIP` directive and the reason.
     add_skip(class_name: string, description: string, reason: string): void;
-    // Sets the number of points the plan line announces.
-    set_plan(total: number): void;
-    // Writes the points collected so far as TAP.
+    // Writes the plan of the points added, for a level whose plan comes last.
     generate_tap_reports(): void;
   }
 
-  // tappy's `TAPTestRunner`: runs a suite as Python's
-  // `unittest.TextTestRunner` does, its results written as TAP.
+  // Turns the harness's outcomes into one point per test.
+  class TAPTestResult implements unittest.TestResult {
+    testsRun: number;
+    failures: number;
+    errors: number;
+    skipped: number;
+    unexpectedSuccesses: number;
+    shouldStop: boolean;
+    // `tracker` writes the points, `failfast` stops at the first failure.
+    constructor(tracker: Tracker, failfast: boolean);
+    wasSuccessful(): boolean;
+    startTest(test: unittest.TestCase): void;
+    addSuccess(test: unittest.TestCase): void;
+    addSkip(test: unittest.TestCase, reason: string): void;
+    addFailure(test: unittest.TestCase, error: Error): void;
+    addError(test: unittest.TestCase, error: Error): void;
+    addExpectedFailure(test: unittest.TestCase, error: Error): void;
+    addUnexpectedSuccess(test: unittest.TestCase): void;
+    // Writes the point of the last test. Throws when it had no outcome.
+    point_flush(): void;
+  }
+
+  // Writes TAP for a unittest run: one plan, one indented block per module.
   class TAPTestRunner {
     // As `TextTestRunner(failfast=...)`.
     constructor(failfast: boolean);
-    // Streams each TAP line as it is produced; the test page submits each
-    // as `tap.line` at once.
-    set_stream(streaming: boolean): void;
-    run(test: unittest.TestSuite): unittest.TestResult;
+    // Sends each line to `write` as it is made, the version line first.
+    set_stream(write: (text: string) => void): void;
+    // Runs the suite as one block, its plan first, and returns its result.
+    run(test: unittest.TestSuite): TAPTestResult;
+    // Loads and runs one module as a block. True when it passed.
+    module_run(module: string, load: () => unittest.TestSuite): boolean;
+    // Writes the parent plan unless the stream bailed out. True if all passed.
+    run_end(): boolean;
   }
 
-  // Marks every `not ok` line and its diagnostic lines, whole line, and
-  // nothing else, for test.html.
+  // Marks every `not ok` line and its diagnostic lines, for the test page.
   function report_html(text: string): string;
 }

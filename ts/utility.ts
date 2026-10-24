@@ -4,7 +4,17 @@
 //
 // The routines the other modules share: error helpers, `SHA-256`, `UTF-8`,
 // base64 and JSON text. Every one is synchronous. Its messages come from
-// `i18n`, called only when a routine throws.
+// `i18n`, called only when a routine throws. `SHA-256` is implemented here
+// once, as `HashStream`, which `sha256_hex` and the store's cache use, not by
+// crypto.subtle. `json_text` checks no number: the JSLB decoders are the one
+// door for bad numbers, so NaN and the infinities reach it only from the
+// program's own arithmetic, and the JSLB encoder refuses them before any
+// line carries them.
+//
+// `cause_append` keeps both faults when a fault is met while one is handled:
+// the first goes under the innermost `cause` of the second. A thrown value
+// that is not an Error, at either place, becomes an Error whose message is
+// its text, so nothing of either fault is lost.
 namespace utility {
   // The sizes, limits, pattern and coders of the routines below.
   const constants = Object.freeze({
@@ -131,35 +141,90 @@ namespace utility {
     throw new Error(message);
   }
 
+  // Puts `first` under the innermost `cause` of `error` and returns it.
+  export function cause_append(error: unknown, first: unknown): Error {
+    const top = error instanceof Error ? error : new Error(String(error));
+    let node = top;
+    while (node.cause instanceof Error) {
+      node = node.cause;
+    }
+    if (node.cause === undefined) {
+      node.cause = first;
+    } else {
+      node.cause = new Error(String(node.cause), { cause: first });
+    }
+    return top;
+  }
+
+  // A `SHA-256` fed in pieces of any size, as a streamed blob arrives.
+  export class HashStream {
+    // The hash state after every whole block fed.
+    readonly #state = new Uint32Array(hash_start);
+    // The message schedule a block is mixed with.
+    readonly #schedule = new Uint32Array(constants.round_count);
+    // The bytes of the block not yet whole.
+    readonly #block = new Uint8Array(constants.block_bytes);
+    // A view of those bytes as words.
+    readonly #view = new DataView(this.#block.buffer);
+    // How many bytes of the block are filled.
+    #filled = 0;
+    // How many bytes were fed in all.
+    #length = 0;
+
+    // Feeds bytes, keeping none of the caller's view after the call.
+    bytes_add(data: Uint8Array): void {
+      const { block_bytes } = constants;
+      this.#length += data.length;
+      let offset = 0;
+      if (this.#filled > 0) {
+        offset = Math.min(block_bytes - this.#filled, data.length);
+        this.#block.set(data.subarray(0, offset), this.#filled);
+        this.#filled += offset;
+        if (this.#filled < block_bytes) {
+          return;
+        }
+        block_run(this.#state, this.#schedule, this.#view, 0);
+        this.#filled = 0;
+      }
+      const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+      for (; offset + block_bytes <= data.length; offset += block_bytes) {
+        block_run(this.#state, this.#schedule, view, offset);
+      }
+      this.#block.set(data.subarray(offset));
+      this.#filled = data.length - offset;
+    }
+
+    // The hash of the bytes fed so far as 64 lowercase hex characters.
+    digest_hex(): lines.Sha256 {
+      const { block_bytes, length_bytes, word_bytes, word_range } = constants;
+      const state = new Uint32Array(this.#state);
+      const filled = this.#filled;
+      const tail_length =
+        filled < block_bytes - length_bytes ? block_bytes : 2 * block_bytes;
+      const tail = new Uint8Array(tail_length);
+      tail.set(this.#block.subarray(0, filled));
+      tail[filled] = constants.padding_marker;
+      const bits = this.#length * constants.byte_bits;
+      const view = new DataView(tail.buffer);
+      const high = Math.floor(bits / word_range);
+      view.setUint32(tail_length - length_bytes, high);
+      view.setUint32(tail_length - word_bytes, bits % word_range);
+      for (let offset = 0; offset < tail_length; offset += block_bytes) {
+        block_run(state, this.#schedule, view, offset);
+      }
+      let hex = "";
+      for (const word of state) {
+        hex += word.toString(16).padStart(word_bytes * 2, "0");
+      }
+      return hex;
+    }
+  }
+
   // Hashes the bytes with `SHA-256` and returns 64 lowercase hex characters.
   export function sha256_hex(data: Uint8Array): lines.Sha256 {
-    const { block_bytes, length_bytes, word_bytes, word_range } = constants;
-    const state = new Uint32Array(hash_start);
-    const schedule = new Uint32Array(constants.round_count);
-    const remainder = data.length % block_bytes;
-    const body_length = data.length - remainder;
-    const body = new DataView(data.buffer, data.byteOffset, body_length);
-    for (let offset = 0; offset < body_length; offset += block_bytes) {
-      block_run(state, schedule, body, offset);
-    }
-    const tail_length =
-      remainder < block_bytes - length_bytes ? block_bytes : 2 * block_bytes;
-    const tail = new Uint8Array(tail_length);
-    tail.set(data.subarray(body_length));
-    tail[remainder] = constants.padding_marker;
-    const bits = data.length * constants.byte_bits;
-    const tail_view = new DataView(tail.buffer);
-    const high = Math.floor(bits / word_range);
-    tail_view.setUint32(tail_length - length_bytes, high);
-    tail_view.setUint32(tail_length - word_bytes, bits % word_range);
-    for (let offset = 0; offset < tail_length; offset += block_bytes) {
-      block_run(state, schedule, tail_view, offset);
-    }
-    let hex = "";
-    for (const word of state) {
-      hex += word.toString(16).padStart(word_bytes * 2, "0");
-    }
-    return hex;
+    const hash = new HashStream();
+    hash.bytes_add(data);
+    return hash.digest_hex();
   }
 
   // Encodes text as `UTF-8` and throws on a lone surrogate.
@@ -192,17 +257,9 @@ namespace utility {
     return bytes;
   }
 
-  // A JSON replacer that throws on `NaN` and the infinities, which JSON lacks.
-  function number_check(_key: string, value: unknown): unknown {
-    if (typeof value === "number" && !Number.isFinite(value)) {
-      fail_now(i18n("utility.number_refused", value));
-    }
-    return value;
-  }
-
   // Writes a value as JSON text with no whitespace outside strings.
   export function json_text(value: unknown): string {
-    const text: unknown = JSON.stringify(value, number_check);
+    const text: unknown = JSON.stringify(value);
     if (typeof text !== "string") {
       return fail_now(i18n("utility.value_refused"));
     }

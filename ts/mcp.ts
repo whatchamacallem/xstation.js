@@ -6,7 +6,23 @@
 // `2025-06-18`: the server that answers the `mcp` line and continues a tool
 // that sleeps in the wakes registered with it, the client that submits its
 // requests as `mcp` lines to the owner of its server, and the set of clients
-// that the agent sees as one list of prefixed tools.
+// that the agent sees as one list of prefixed tools. MCP is a testing
+// protocol for now: no AI is a requirement of the tests yet.
+//
+// Fail loud: an exception while a request is handled answers that request,
+// then the server stops. A tool's exception, thrown by the tool or by the
+// wake that continues it, answers with a `tools/call` result whose `isError`
+// is true and whose one text content is the JSON text of the cascade, its
+// `message`, `stack` and nested `cause`, as `dispatch.cause_make` writes it.
+// A protocol error, as an unknown method or tool or bad params, answers with
+// a JSON-RPC error whose `data` is that cascade. `failure_take` then returns
+// the exception once, and `line_handle` returns a `dispatch.Failure` that
+// holds the answer and the exception, so the queue posts the answer and then
+// fails. A test driver reads `isError`, or the error, to tell an exception
+// from the expected response. Continuing after an exception is deferred.
+// A message that is not a JSON-RPC 2.0 request is answered with -32600 and
+// is no exception, as in Python. Every `mcp` line the client builds takes
+// the form `settings.names_full()` picks.
 
 namespace mcp {
   // The revision pinned, the names and codes of the protocol, the line type.
@@ -59,7 +75,7 @@ namespace mcp {
   export interface ErrorResponse {
     jsonrpc: "2.0";
     id: Id | null;
-    error: { code: number; message: string; data?: unknown };
+    error: { code: number; message: string; data?: lines.ErrorCause };
   }
 
   // Any message of the protocol.
@@ -183,20 +199,22 @@ namespace mcp {
     return error_make(id, constants.code_invalid, i18n("mcp.request_invalid"));
   }
 
-  // The error response to a throw: a protocol error's code, else the stack.
-  function failure_make(id: Id, failure: Error): ErrorResponse {
-    if (failure instanceof ProtocolError) {
-      return error_make(id, failure.code, failure.message);
-    }
+  // The error response to a throw, a protocol error's code else -32603, its
+  // cascade in `data`.
+  function exception_make(id: Id, error: Error): ErrorResponse {
+    const code =
+      error instanceof ProtocolError ? error.code : constants.code_internal;
+    const data = dispatch.cause_make(error);
     return {
       jsonrpc: constants.jsonrpc_version,
       id,
-      error: {
-        code: constants.code_internal,
-        message: failure.message,
-        data: { stack: failure.stack as string },
-      },
+      error: { code, message: error.message, data },
     };
+  }
+
+  // The exception a throw leaves: the Error thrown, or an Error of its text.
+  function error_of(thrown: unknown): Error {
+    return thrown instanceof Error ? thrown : new Error(String(thrown));
   }
 
   // The outcome of a tool as a method's: its sleep, or a copy of its result.
@@ -214,6 +232,8 @@ namespace mcp {
     private readonly calls = new Map<string, ToolFn>();
     private readonly wakes = new Set<string>();
     private readonly methods: Map<string, MethodFn>;
+    // The exception of the last request answered with one, until taken.
+    private failure: Error | undefined = undefined;
 
     // Keeps the identity `initialize` reports and starts with no tools.
     constructor(name: string, version: string) {
@@ -267,28 +287,51 @@ namespace mcp {
       );
     }
 
-    // Handles one `mcp` line: its reply line, a sleep holding it, or nothing.
-    line_handle(line: lines.Line): dispatch.Reply | dispatch.Sleep {
+    // The exception of the last request answered with one, then undefined.
+    failure_take(): Error | undefined {
+      const failure = this.failure;
+      this.failure = undefined;
+      return failure;
+    }
+
+    // Handles one `mcp` line: the reply, a sleep, a failure, or nothing.
+    line_handle(
+      line: lines.Line,
+    ): dispatch.Reply | dispatch.Sleep | dispatch.Failure {
       const message = jslb.payload_of(line) as unknown as Message;
       const outcome = this.message_handle(message);
       if (outcome === undefined) {
         return undefined;
       }
-      return this.answer_make(line, outcome);
+      return this.answer_take(line, outcome);
     }
 
     // Continues a tool in its wake and answers the line its sleep holds.
     private wake_handle(
       line: lines.Line,
       fn: WakeFn,
-    ): dispatch.Reply | dispatch.Sleep {
+    ): dispatch.Reply | dispatch.Sleep | dispatch.Failure {
       const wait = line.state as WaitState;
       const replies = line.replies as lines.Line[];
       const id = jslb.payload_of(wait.request).id as Id;
       const outcome = this.outcome_take(id, () =>
-        outcome_fields(fn(wait.state, replies)),
+        this.tool_run(() => fn(wait.state, replies)),
       );
-      return this.answer_make(wait.request, outcome);
+      return this.answer_take(wait.request, outcome);
+    }
+
+    // The answer to the request, a failure holding it when an exception is
+    // kept, which comes with an answer and never with a sleep.
+    private answer_take(
+      request: lines.Line,
+      outcome: Message | dispatch.Sleep,
+    ): dispatch.Reply | dispatch.Sleep | dispatch.Failure {
+      const answer = this.answer_make(request, outcome);
+      const failure = this.failure_take();
+      if (failure === undefined) {
+        return answer;
+      }
+      return dispatch.failure_make(answer as lines.Line, failure);
     }
 
     // The reply line to the request, or the sleep that holds the request.
@@ -302,7 +345,8 @@ namespace mcp {
       return dispatch.reply_make(request, outcome as unknown as FieldTable);
     }
 
-    // Runs a method or a continuation, a throw becoming an error response.
+    // Runs a method or a continuation, a throw becoming an error response
+    // whose exception is kept.
     private outcome_take(
       id: Id,
       run: () => FieldTable | dispatch.Sleep,
@@ -310,9 +354,27 @@ namespace mcp {
       try {
         const outcome = run();
         return sleep_is(outcome) ? outcome : result_make(id, outcome);
-      } catch (error) {
-        return failure_make(id, error as Error);
+      } catch (thrown) {
+        const error = error_of(thrown);
+        this.failure = error;
+        return exception_make(id, error);
       }
+    }
+
+    // Runs a tool or its wake, a throw becoming the `isError` result of its
+    // cascade, the exception kept.
+    private tool_run(
+      run: () => ToolResult | dispatch.Sleep,
+    ): FieldTable | dispatch.Sleep {
+      let outcome: ToolResult | dispatch.Sleep;
+      try {
+        outcome = run();
+      } catch (thrown) {
+        const text = utility.json_text(dispatch.cause_make(thrown));
+        this.failure = error_of(thrown);
+        return { content: [{ type: "text", text }], isError: true };
+      }
+      return outcome_fields(outcome);
     }
 
     // The sleep of a tool holding the request, its wake type registered here.
@@ -381,7 +443,7 @@ namespace mcp {
           i18n("mcp.tool_unknown", name),
         );
       }
-      return outcome_fields(fn(args));
+      return this.tool_run(() => fn(args));
     }
   }
 
@@ -391,24 +453,21 @@ namespace mcp {
     private readonly version: string;
     private readonly tasks: queue.TaskQueue;
     private readonly owner: queue.ThreadName;
-    private readonly full: boolean | undefined;
     private readonly sent = new Map<number, SentRequest>();
     private rpc_last = 0;
     private tools: Tool[] | undefined;
 
-    // Keeps the identity, the queue, the owner of the server, the name form.
+    // Keeps the identity, the queue and the owner of the server.
     constructor(
       name: string,
       version: string,
       tasks: queue.TaskQueue,
       owner: queue.ThreadName,
-      full?: boolean,
     ) {
       this.name = name;
       this.version = version;
       this.tasks = tasks;
       this.owner = owner;
-      this.full = full;
     }
 
     // Submits `initialize` and returns the id to sleep on.
@@ -513,10 +572,10 @@ namespace mcp {
       return id;
     }
 
-    // Builds the `mcp` line of a message in the name form of the client.
+    // Builds the `mcp` line of a message in the form the settings pick.
     private line_build(message: FieldTable): lines.Line {
       const header = jslb.header_make(constants.line_type, {
-        full: this.full,
+        full: settings.names_full(),
       });
       return jslb.line_make(header, [], message);
     }

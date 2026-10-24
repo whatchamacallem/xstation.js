@@ -17,24 +17,20 @@ param()
 # The checkout, in which the ttyd source is unpacked, patched and built.
 $checkout_path_ = $PSScriptRoot
 # The pinned ttyd source release, which `third_party_fetch.py` fetches.
-$ttyd_archive_path_ = 'third_party/ttyd-1.7.7.tar.gz'
+$ttyd_archive_path_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.ttyd_archive')
 # The patches to the ttyd source, applied in name order.
-$patches_path_ = Join-Path $PSScriptRoot 'third_party\ttyd'
+$patches_folder_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.ttyd_patches')
+$patches_path_ = Join-Path $PSScriptRoot $patches_folder_
 # The tools the ttyd build runs in Linux, each with its apt package.
-$build_tools_ = [ordered]@{
-    cmake = 'cmake'
-    cc    = 'build-essential'
-    make  = 'build-essential'
-    patch = 'patch'
-}
+$build_tools_ = xsjs_util_get_setting $settings_json_ 'powershell.build_tools'
 # The headers the ttyd build includes, each with its apt package.
-$build_headers_ = [ordered]@{
-    'uv.h'            = 'libuv1-dev'
-    'json-c/json.h'   = 'libjson-c-dev'
-    'zlib.h'          = 'zlib1g-dev'
-    'libwebsockets.h' = 'libwebsockets-dev'
-    'openssl/ssl.h'   = 'libssl-dev'
-}
+$build_headers_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.build_headers')
+# The distribution installed when WSL runs no Linux.
+$distribution_name_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.distribution')
 
 # `figlet -f bigmono9 xsjs`
 $banner_ = @'
@@ -72,16 +68,18 @@ function _xsjs_install_step_check_wsl {
     if ($LASTEXITCODE -ne 0) { throw $i18n_.wsl_update_failed }
 }
 
-# Installs Ubuntu if WSL runs no Linux, and throws if it still doesn't.
+# Installs the distribution if WSL runs no Linux, throwing if it still doesn't.
 function _xsjs_install_step_check_linux {
     xsjs_util_write_log_section $i18n_.check_linux
     xsjs_util_invoke_native { wsl -e true }
     if ($LASTEXITCODE -ne 0) {
-        xsjs_util_write_notice $i18n_.linux_missing
-        wsl --install -d Ubuntu
+        xsjs_util_write_notice ($i18n_.linux_missing -f $distribution_name_)
+        wsl --install -d $distribution_name_
         xsjs_util_invoke_native { wsl -e true }
         if ($LASTEXITCODE -ne 0) {
-            throw ($i18n_.ubuntu_not_working -f $script_name_)
+            $not_ready_ = $i18n_.distribution_not_ready -f (
+                $distribution_name_, $script_name_)
+            throw $not_ready_
         }
     }
 }
@@ -125,13 +123,17 @@ function _xsjs_install_run_linux ([string[]]$arguments_, [string]$failure_) {
 # Throws, naming the apt package to request, unless ttyd can be built.
 function _xsjs_install_step_check_build {
     xsjs_util_write_log_section $i18n_.check_build
-    foreach ($tool_ in $build_tools_.Keys) {
+    foreach ($entry_ in $build_tools_.PSObject.Properties) {
+        $tool_ = $entry_.Name
+        $package_ = $entry_.Value
         xsjs_util_invoke_native { wsl -e which $tool_ }
         if ($LASTEXITCODE -ne 0) {
-            throw ($i18n_.build_tool_missing -f $tool_, $build_tools_[$tool_])
+            throw ($i18n_.build_tool_missing -f $tool_, $package_)
         }
     }
-    foreach ($header_ in $build_headers_.Keys) {
+    foreach ($entry_ in $build_headers_.PSObject.Properties) {
+        $header_ = $entry_.Name
+        $package_ = $entry_.Value
         # The compiler preprocesses an empty file that includes the header.
         $include_ = @(
             'cc', '-E', '-x', 'c', '-include', $header_
@@ -139,9 +141,7 @@ function _xsjs_install_step_check_build {
         )
         xsjs_util_invoke_native { wsl -e @include_ }
         if ($LASTEXITCODE -ne 0) {
-            $missing_ = $i18n_.build_header_missing -f (
-                $header_, $build_headers_[$header_])
-            throw $missing_
+            throw ($i18n_.build_header_missing -f $header_, $package_)
         }
     }
 }
@@ -168,7 +168,7 @@ function _xsjs_install_step_build_ttyd {
     foreach ($patch_ in $patches_) {
         $apply_ = @(
             'patch', '-p1', '-d', $source_path_
-            '-i', "$checkout_linux_/third_party/ttyd/$($patch_.Name)"
+            '-i', "$checkout_linux_/$patches_folder_/$($patch_.Name)"
         )
         $apply_failed_ = $i18n_.ttyd_patch_failed -f $patch_.Name
         _xsjs_install_run_linux $apply_ $apply_failed_

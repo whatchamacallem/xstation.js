@@ -3,9 +3,9 @@
 SPDX-FileCopyrightText: © 2026 Adrian Johnston.
 SPDX-License-Identifier: MIT
 This file is licensed under the terms of the LICENSE.md file.
-The shell of the test page: the engine page's pieces with the test bundle,
-test_vectors and a pre for the TAP stream. page_build.py replaces each build
-marker.
+The shell of the one page, the test page: engine.css, xterm.css, the test
+bundle with test_vectors, SQLite's wasm and glue, xterm.js and a pre for the
+TAP stream. page_build.py replaces each build marker.
 -->
 <html lang="en">
   <head>
@@ -26,7 +26,7 @@ marker.
   </head>
   <body>
     <pre id="tap_output"></pre>
-    <!-- The AI worker runs the text of each `data-worker` script, in order. -->
+    <!-- The AI worker runs the text of each `data-worker` script in order. -->
     <script data-worker>
       var test_vectors = XSJS_BUILD_TEST_VECTORS;
     </script>

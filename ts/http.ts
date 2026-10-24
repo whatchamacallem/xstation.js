@@ -161,9 +161,10 @@ namespace http {
       if (!media_json(headers)) {
         return this.reply_make({ status, headers, text: answer.text });
       }
+      // A JSON body passes the one door for bad numbers.
       let json: unknown;
       try {
-        json = JSON.parse(answer.text);
+        json = jslb.json_decode(answer.text);
       } catch (cause) {
         return this.error_reply(
           utility.error_wrap(
@@ -222,7 +223,6 @@ namespace http {
     // Takes the seconds a request may last, above 0 and within a timer.
     constructor(timeout_seconds: number) {
       if (
-        !Number.isFinite(timeout_seconds) ||
         timeout_seconds <= 0 ||
         timeout_seconds * constants.second_ms > constants.timer_max_ms
       ) {

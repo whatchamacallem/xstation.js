@@ -4,12 +4,26 @@
 #
 # The server substrate, the single door to SQLite: one connection for each
 # database file under a root, the substrate's tables in each, rows of values
-# with overflow to a cache directory, documents, turns, SQL, snapshots, and
-# the forwarded operations of replication, `seq` counting each.
+# with overflow to the cache directory `<root>/cache`, which holds the values
+# over `overflow_bytes` by their digest, documents, turns, SQL and snapshots.
+# It applies the browser's committed operations as plain messages, through
+# the same methods as any caller, and keeps more history than the browser:
+# it never compacts turns. Nothing here numbers, orders or checks a change
+# against another store.
+#
+# A value whose row names a cache file this side does not hold is lost: its
+# row stays, `kv_list` lists it, `kv_put` replaces it, and `kv_get` raises
+# `substrate.file_lost`. `db_restore` tolerates such rows, and `db_snapshot`
+# lists only the cache files it holds, so a database moves as one blob with
+# the cache files that exist and works but for the lost values.
+#
+# The schema's triggers raise the name of a string of the strings table, as
+# `agent.content_ambiguous`: a statement that fails with such a message
+# raises that string, the `sqlite3` error as its `__cause__`.
 
-import hashlib, json, math, os, re, sqlite3, tempfile, urllib.parse
+import hashlib, json, os, re, sqlite3, tempfile, urllib.parse
 from collections.abc import Callable, Iterable
-from i18n import i18n
+from internationalization import i18n
 from typing import Any, NamedTuple, cast
 
 # The substrate's tables, one statement each, created on first use.
@@ -61,12 +75,6 @@ _QUERY_READ = "mode=ro&immutable=1"
 # The directory under the root that holds the values over `overflow_bytes`.
 _CACHE_DIRECTORY = "cache"
 
-# The role of the summary turn that compaction writes.
-_SUMMARY_ROLE = "system"
-
-# The largest magnitude of an integer in stored JSON, as on the wire.
-_INTEGER_LIMIT = 2**53
-
 # A locked database's wait: 5000 ms, a default chosen by its writer.
 _BUSY_TIMEOUT_MS = 5000
 
@@ -84,6 +92,9 @@ _INTEGER_LITERAL = re.compile(r"0|[1-9][0-9]*")
 
 # Decimal digits, which no payload key of a document may be.
 _DIGITS = re.compile(r"[0-9]+")
+
+# The names of the strings the schema's triggers raise.
+_TRIGGER_NAMES = ("agent.content_ambiguous",)
 
 
 # A `_kv` row without its data.
@@ -128,6 +139,12 @@ class RefParts(NamedTuple):
     version: int | None
 
 
+# A database as one blob: its file's bytes and the paths of its cache files.
+class DbImage(NamedTuple):
+    data: bytes
+    files: list[str]
+
+
 # Raises unless the name is a C identifier, as a database name must be.
 def _name_check(name: str) -> None:
     if _C_IDENTIFIER.fullmatch(name) is None:
@@ -142,14 +159,6 @@ def _version_find(key: str) -> int | None:
     return None
 
 
-# The database an external ref names. An internal ref raises.
-def _ref_database(ref: str) -> str:
-    db = ref_split(ref).db
-    if db is None:
-        raise ValueError(i18n("substrate.ref_internal", ref))
-    return db
-
-
 # The database of a scene, whose ref must be an external `Document-Ref`.
 def _scene_database(scene: str) -> str:
     parts = ref_split(scene)
@@ -158,7 +167,7 @@ def _scene_database(scene: str) -> str:
     return parts.db
 
 
-# A JSON value ready to write: at every level integer keys first, all checked.
+# A JSON value ready to write: at every level integer keys first, keys checked.
 def _json_ordered(value: object) -> object:
     if isinstance(value, dict):
         source = cast(dict[object, object], value)
@@ -178,20 +187,13 @@ def _json_ordered(value: object) -> object:
     if isinstance(value, (list, tuple)):
         items = cast(Iterable[object], value)
         return [_json_ordered(item) for item in items]
-    if type(value) is int and abs(value) > _INTEGER_LIMIT:
-        raise ValueError(i18n("substrate.integer_range", value))
-    if type(value) is float and not math.isfinite(value):
-        raise ValueError(i18n("substrate.number_refused", value))
     return value
 
 
 # The canonical JSON text of a value, the text the wire's encoder writes.
 def _json_canonical(value: object) -> str:
     return json.dumps(
-        _json_ordered(value),
-        ensure_ascii=False,
-        separators=(",", ":"),
-        allow_nan=False,
+        _json_ordered(value), ensure_ascii=False, separators=(",", ":")
     )
 
 
@@ -296,28 +298,6 @@ def _pragmas_set(connection: sqlite3.Connection) -> None:
     connection.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
 
 
-# The `seq` of a database, the decimal text of its `_meta` row.
-def _seq_read(connection: sqlite3.Connection) -> int:
-    row = connection.execute(
-        "SELECT value FROM _meta WHERE name = 'seq'"
-    ).fetchone()
-    return int(row[0])
-
-
-# Adds one to the `seq` of a database and returns it.
-def _seq_bump(connection: sqlite3.Connection) -> int:
-    seq = _seq_read(connection) + 1
-    connection.execute(
-        "UPDATE _meta SET value = ? WHERE name = 'seq'", (str(seq),)
-    )
-    return seq
-
-
-# The `schema_version` pragma, which every change of the schema moves.
-def _schema_read(connection: sqlite3.Connection) -> int:
-    return connection.execute("PRAGMA schema_version").fetchone()[0]
-
-
 # The cache hashes the rows of a database name, none when it lacks `_kv`.
 def _hashes_read(connection: sqlite3.Connection) -> set[str]:
     found = connection.execute(
@@ -327,12 +307,6 @@ def _hashes_read(connection: sqlite3.Connection) -> set[str]:
         return set()
     rows = connection.execute("SELECT sha256 FROM _kv WHERE data IS NULL")
     return {row[0].hex() for row in rows}
-
-
-# Raises the desync of replication when `since` is not the database's `seq`.
-def _since_check(type: str, since: int, seq: int, db: str) -> None:
-    if since != seq:
-        raise RuntimeError(i18n("substrate.since_stale", type, since, seq, db))
 
 
 # The substrate's tables that a database holds.
@@ -378,8 +352,7 @@ def schema_apply(connection: sqlite3.Connection) -> None:
             for statement in _SCHEMA_STATEMENTS:
                 connection.execute(statement)
             connection.execute(
-                "INSERT INTO _meta (name, value)"
-                " VALUES ('seq', '0'), ('schema', ?)",
+                "INSERT INTO _meta (name, value) VALUES ('schema', ?)",
                 (_SCHEMA_VERSION,),
             )
         connection.execute("COMMIT")
@@ -452,8 +425,8 @@ class Store:
         self._unlinks: set[str] = set()
         os.makedirs(self._cache, exist_ok=True)
 
-    # Opens `<root>/<name>.sqlite`, applying the schema. Returns its `seq`.
-    def db_open(self, name: str) -> int:
+    # Opens `<root>/<name>.sqlite`, applying the schema.
+    def db_open(self, name: str) -> None:
         _name_check(name)
         if name in self._connections:
             raise RuntimeError(i18n("substrate.db_open", name))
@@ -465,12 +438,10 @@ class Store:
         try:
             _pragmas_set(connection)
             schema_apply(connection)
-            seq = _seq_read(connection)
         except BaseException:
             connection.close()
             raise
         self._connections[name] = connection
-        return seq
 
     # Closes an open database, which must not be inside a transaction.
     def db_close(self, name: str) -> None:
@@ -484,7 +455,7 @@ class Store:
     def db_list(self) -> list[str]:
         return sorted(self._connections)
 
-    # Creates and opens a new database, `seq` 0. Raises when the file exists.
+    # Creates and opens a new database. Raises when the file exists.
     def db_create(self, name: str) -> None:
         _name_check(name)
         path = self._path_find(name)
@@ -515,13 +486,18 @@ class Store:
             raise LookupError(i18n("substrate.key_missing", key, name))
         size, sha256, data = row
         if data is None:
-            return KvValue(self._cache_path(sha256), size, sha256)
+            path = self._cache_path(sha256)
+            if not os.path.isfile(path):
+                raise LookupError(
+                    i18n("substrate.file_lost", ref, sha256.hex())
+                )
+            return KvValue(path, size, sha256)
         return KvValue(data, size, sha256)
 
-    # Writes the value, over `overflow_bytes` to the cache. Returns row, `seq`.
+    # Writes the value, over `overflow_bytes` to the cache. Returns the row.
     def kv_put(
         self, ref: str, data: bytes | str, db: str | None = None
-    ) -> tuple[KvRow, int]:
+    ) -> KvRow:
         name, key = self._ref_resolve(ref, db)
         connection = self._connection_get(name)
         return self.transaction_run(
@@ -529,12 +505,10 @@ class Store:
         )
 
     # Deletes the row and its cache file when no other row shares the hash.
-    def kv_delete(self, ref: str, db: str | None = None) -> int:
+    def kv_delete(self, ref: str, db: str | None = None) -> None:
         name, key = self._ref_resolve(ref, db)
         connection = self._connection_get(name)
-        return self.transaction_run(
-            lambda: self._value_delete(connection, key)
-        )
+        self.transaction_run(lambda: self._value_delete(connection, key))
 
     # The rows of a database whose keys start with the prefix, by key.
     def kv_list(self, db: str, prefix: str) -> list[KvRow]:
@@ -563,10 +537,8 @@ class Store:
             raise ValueError(i18n("substrate.document_ref", ref))
         return _document_parse(_value_read(self.kv_get(ref, db).data))
 
-    # Writes version head plus one and moves the head. Returns ref and `seq`.
-    def doc_put(
-        self, db: str, id: str, body: dict[int | str, Any]
-    ) -> tuple[str, int]:
+    # Writes version head plus one and moves the head. Returns the ref.
+    def doc_put(self, db: str, id: str, body: dict[int | str, Any]) -> str:
         if not id:
             raise ValueError(i18n("substrate.id_empty"))
         doc_decode(body)
@@ -586,10 +558,8 @@ class Store:
             raise LookupError(i18n("substrate.id_missing", id, db))
         return f"/{db}/{id}/{row[0]}"
 
-    # Appends a turn to the scene's conversation. Returns its `n` and `seq`.
-    def turn_append(
-        self, scene: str, role: str, content: str
-    ) -> tuple[int, int]:
+    # Appends a turn to the scene's conversation. Returns its `n`.
+    def turn_append(self, scene: str, role: str, content: str) -> int:
         connection = self._connection_get(_scene_database(scene))
         return self.transaction_run(
             lambda: self._turn_add(connection, scene, role, content)
@@ -605,16 +575,7 @@ class Store:
         ).fetchall()
         return [TurnRow(*row) for row in rows]
 
-    # Replaces turns 1 to `through` with one summary turn at `n` 1.
-    def turn_compact(self, scene: str, through: int, summary: str) -> int:
-        if through < 1:
-            raise ValueError(i18n("substrate.through_bad", through))
-        connection = self._connection_get(_scene_database(scene))
-        return self.transaction_run(
-            lambda: self._turns_compact(connection, scene, through, summary)
-        )
-
-    # Runs the statements in order, in the running transaction.
+    # Runs the statements in order.
     def sql_run(
         self, db: str, statements: list[SqlStatement]
     ) -> list[SqlResult]:
@@ -623,13 +584,15 @@ class Store:
             lambda: self._statements_run(connection, statements)
         )
 
-    # `Connection.serialize` bytes, and the database's `seq`.
-    def db_snapshot(self, db: str) -> tuple[bytes, int]:
+    # The `Connection.serialize` bytes, and the held cache files its rows name.
+    def db_snapshot(self, db: str) -> DbImage:
         connection = self._connection_get(db)
         return self.transaction_run(lambda: self._snapshot_take(connection))
 
-    # Replaces the database file by a temp file and a rename. Returns `seq`.
-    def db_restore(self, db: str, data: bytes | str) -> int:
+    # Replaces the file by a temp file and a rename, caches files by digest.
+    def db_restore(
+        self, db: str, data: bytes | str, files: list[bytes | str]
+    ) -> None:
         _name_check(db)
         if isinstance(data, str):
             self._file_replace(db, data)
@@ -644,23 +607,13 @@ class Store:
             except BaseException:
                 os.remove(temporary)
                 raise
-        return self.db_open(db)
-
-    # Applies one forwarded operation when `since` is the database's `seq`.
-    def operation_apply(self, type: str, since: int, **payload: Any) -> int:
-        appliers: dict[str, Callable[..., int]] = {
-            "kv.put": self._put_apply,
-            "kv.delete": self._delete_apply,
-            "doc.put": self._doc_apply,
-            "db.create": self._create_apply,
-            "db.drop": self._drop_apply,
-            "turn.append": self._append_apply,
-            "turn.compact": self._compact_apply,
-            "sql.run": self._sql_apply,
-        }
-        if type not in appliers:
-            raise ValueError(i18n("substrate.operation_type", type))
-        return appliers[type](type, since, **payload)
+        for entry in files:
+            if isinstance(entry, str):
+                sha256 = _file_hash(entry)
+            else:
+                sha256 = hashlib.sha256(entry).digest()
+            self._cache_store(sha256, entry)
+        self.db_open(db)
 
     # Runs `fn` inside `BEGIN IMMEDIATE`: commit on return, rollback on raise.
     def transaction_run(self, fn: Callable[[], Any]) -> Any:
@@ -682,10 +635,6 @@ class Store:
             self._joined = None
         self._cache_prune(self._unlinks)
         return result
-
-    # The `seq` of an open database.
-    def seq_get(self, db: str) -> int:
-        return _seq_read(self._connection_get(db))
 
     # The file of a database under the root.
     def _path_find(self, name: str) -> str:
@@ -776,10 +725,10 @@ class Store:
             except FileNotFoundError:
                 pass
 
-    # Writes a row, its cache file first, and says whether the row changed.
+    # Writes a row, its cache file first; a row of the same digest stays.
     def _row_write(
         self, connection: sqlite3.Connection, key: str, data: bytes | str
-    ) -> tuple[KvRow, bool]:
+    ) -> KvRow:
         if isinstance(data, str):
             size = os.path.getsize(data)
             sha256 = _file_hash(data)
@@ -803,7 +752,7 @@ class Store:
             "SELECT sha256, data IS NULL FROM _kv WHERE key = ?", (key,)
         ).fetchone()
         if old is not None and old[0] == sha256:
-            return row, False
+            return row
         connection.execute(
             "INSERT INTO _kv (key, size, sha256, data) VALUES (?, ?, ?, ?)"
             " ON CONFLICT (key) DO UPDATE SET size = excluded.size,"
@@ -812,35 +761,31 @@ class Store:
         )
         if old is not None and old[1]:
             self._unlinks.add(old[0].hex())
-        return row, True
+        return row
 
-    # Writes a value inside the transaction, counting it when it changed.
+    # Writes a value inside the transaction.
     def _value_put(
         self, connection: sqlite3.Connection, key: str, data: bytes | str
-    ) -> tuple[KvRow, int]:
+    ) -> KvRow:
         self._transaction_join(connection)
-        row, changed = self._row_write(connection, key, data)
-        if changed:
-            return row, _seq_bump(connection)
-        return row, _seq_read(connection)
+        return self._row_write(connection, key, data)
 
-    # Deletes a row inside the transaction, counting it when the key existed.
-    def _value_delete(self, connection: sqlite3.Connection, key: str) -> int:
+    # Deletes a row inside the transaction, a missing row a no op.
+    def _value_delete(self, connection: sqlite3.Connection, key: str) -> None:
         self._transaction_join(connection)
         old = connection.execute(
             "SELECT sha256, data IS NULL FROM _kv WHERE key = ?", (key,)
         ).fetchone()
         if old is None:
-            return _seq_read(connection)
+            return
         connection.execute("DELETE FROM _kv WHERE key = ?", (key,))
         if old[1]:
             self._unlinks.add(old[0].hex())
-        return _seq_bump(connection)
 
     # Writes the next version of a document and moves its head.
     def _document_put(
         self, db: str, connection: sqlite3.Connection, id: str, data: bytes
-    ) -> tuple[str, int]:
+    ) -> str:
         self._transaction_join(connection)
         row = connection.execute(
             "SELECT version FROM _head WHERE id = ?", (id,)
@@ -858,7 +803,7 @@ class Store:
             " ON CONFLICT (id) DO UPDATE SET version = excluded.version",
             (id, version),
         )
-        return f"/{db}/{key}", _seq_bump(connection)
+        return f"/{db}/{key}"
 
     # Inserts a turn after the last of its scene inside the transaction.
     def _turn_add(
@@ -867,7 +812,7 @@ class Store:
         scene: str,
         role: str,
         content: str,
-    ) -> tuple[int, int]:
+    ) -> int:
         self._transaction_join(connection)
         n = connection.execute(
             "SELECT COALESCE(MAX(n), 0) + 1 FROM _turn WHERE scene = ?",
@@ -877,162 +822,37 @@ class Store:
             "INSERT INTO _turn (scene, n, role, content) VALUES (?, ?, ?, ?)",
             (scene, n, role, content),
         )
-        return n, _seq_bump(connection)
+        return n
 
-    # Deletes turns 1 to `through` and inserts the summary at `n` 1.
-    def _turns_compact(
-        self,
-        connection: sqlite3.Connection,
-        scene: str,
-        through: int,
-        summary: str,
-    ) -> int:
-        self._transaction_join(connection)
-        deleted = connection.execute(
-            "DELETE FROM _turn WHERE scene = ? AND n <= ?", (scene, through)
-        ).rowcount
-        if deleted == 0:
-            raise LookupError(i18n("substrate.turns_none", scene, through))
-        content = _json_canonical({"role": _SUMMARY_ROLE, "content": summary})
-        connection.execute(
-            "INSERT INTO _turn (scene, n, role, content) VALUES (?, 1, ?, ?)",
-            (scene, _SUMMARY_ROLE, content),
-        )
-        return _seq_bump(connection)
-
-    # Runs the statements and counts a change of any row or of the schema.
+    # Runs the statements, a trigger's refusal raised as the string it names.
     def _statements_run(
         self, connection: sqlite3.Connection, statements: list[SqlStatement]
     ) -> list[SqlResult]:
         self._transaction_join(connection)
-        changes = connection.total_changes
-        schema = _schema_read(connection)
         results: list[SqlResult] = []
         for statement in statements:
             before = connection.total_changes
-            cursor = connection.execute(statement.sql, statement.params)
+            try:
+                cursor = connection.execute(statement.sql, statement.params)
+            except sqlite3.DatabaseError as error:
+                for name in _TRIGGER_NAMES:
+                    if str(error).endswith(name):
+                        raise ValueError(i18n(name)) from error
+                raise
             rows = [list(row) for row in cursor.fetchall()]
             columns: list[str] = []
             if cursor.description is not None:
                 columns = [column[0] for column in cursor.description]
             changed = connection.total_changes - before
             results.append(SqlResult(columns, rows, changed))
-        if (
-            connection.total_changes != changes
-            or _schema_read(connection) != schema
-        ):
-            _seq_bump(connection)
         return results
 
-    # Serializes the database and reads its `seq` inside the transaction.
-    def _snapshot_take(
-        self, connection: sqlite3.Connection
-    ) -> tuple[bytes, int]:
+    # Serializes the database and lists its held cache files, in a transaction.
+    def _snapshot_take(self, connection: sqlite3.Connection) -> DbImage:
         self._transaction_join(connection)
-        return connection.serialize(), _seq_read(connection)
-
-    # Runs a forwarded operation in a transaction when `since` is the `seq`.
-    def _since_apply(
-        self, type: str, since: int, db: str, fn: Callable[[], object]
-    ) -> int:
-        connection = self._connection_get(db)
-        return self.transaction_run(
-            lambda: self._since_run(type, since, db, connection, fn)
-        )
-
-    # Checks `since` against `seq`, runs the operation, returns the new `seq`.
-    def _since_run(
-        self,
-        type: str,
-        since: int,
-        db: str,
-        connection: sqlite3.Connection,
-        fn: Callable[[], object],
-    ) -> int:
-        self._transaction_join(connection)
-        _since_check(type, since, _seq_read(connection), db)
-        fn()
-        return _seq_read(connection)
-
-    # Applies `kv.put`: `k` the external ref, `data` bytes or a streamed file.
-    def _put_apply(
-        self, type: str, since: int, *, k: str, data: bytes | str
-    ) -> int:
-        return self._since_apply(
-            type, since, _ref_database(k), lambda: self.kv_put(k, data)
-        )
-
-    # Applies `kv.delete`: `k` the external ref.
-    def _delete_apply(self, type: str, since: int, *, k: str) -> int:
-        return self._since_apply(
-            type, since, _ref_database(k), lambda: self.kv_delete(k)
-        )
-
-    # Applies `doc.put`: `db`, `id` and `body`, the document encoded.
-    def _doc_apply(
-        self,
-        type: str,
-        since: int,
-        *,
-        db: str,
-        id: str,
-        body: dict[int | str, Any],
-    ) -> int:
-        return self._since_apply(
-            type, since, db, lambda: self.doc_put(db, id, body)
-        )
-
-    # Applies `db.create`: `db`, which has `seq` 0 before it exists and after.
-    def _create_apply(self, type: str, since: int, *, db: str) -> int:
-        _since_check(type, since, 0, db)
-        self.db_create(db)
-        return self.seq_get(db)
-
-    # Applies `db.drop`: `db`. A database that no longer exists has `seq` 0.
-    def _drop_apply(self, type: str, since: int, *, db: str) -> int:
-        _since_check(type, since, self.seq_get(db), db)
-        self.db_drop(db)
-        return 0
-
-    # Applies `turn.append`: `scene`, `role` and `content`, the message object.
-    def _append_apply(
-        self,
-        type: str,
-        since: int,
-        *,
-        scene: str,
-        role: str,
-        content: dict[str, Any],
-    ) -> int:
-        text = _json_canonical(content)
-        return self._since_apply(
-            type,
-            since,
-            _scene_database(scene),
-            lambda: self.turn_append(scene, role, text),
-        )
-
-    # Applies `turn.compact`: `scene`, `through` and `summary`.
-    def _compact_apply(
-        self, type: str, since: int, *, scene: str, through: int, summary: str
-    ) -> int:
-        return self._since_apply(
-            type,
-            since,
-            _scene_database(scene),
-            lambda: self.turn_compact(scene, through, summary),
-        )
-
-    # Applies `sql.run`: `db` and `statements`, each `sql` and `params`.
-    def _sql_apply(
-        self,
-        type: str,
-        since: int,
-        *,
-        db: str,
-        statements: list[dict[str, Any]],
-    ) -> int:
-        parsed = [SqlStatement(**statement) for statement in statements]
-        return self._since_apply(
-            type, since, db, lambda: self.sql_run(db, parsed)
-        )
+        paths = [
+            os.path.join(self._cache, name)
+            for name in sorted(_hashes_read(connection))
+        ]
+        files = [path for path in paths if os.path.isfile(path)]
+        return DbImage(connection.serialize(), files)

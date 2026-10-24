@@ -1,3 +1,20 @@
+# The Model Context Protocol server and client, transport agnostic, revision
+# "2025-06-18" pinned: JSON-RPC 2.0 messages go in and out as dicts. MCP is a
+# testing protocol for now: no AI is a requirement of the tests yet.
+#
+# Fail loud: an exception while a request is handled answers that request,
+# then the server stops. A tool's exception answers with a `tools/call`
+# result whose `isError` is true and whose one text content is the JSON text
+# of the cascade, `message`, `stack` and nested `cause`, as
+# `dispatch.cause_make` writes it. An `RpcError` or any other exception of a
+# method answers with a JSON-RPC error whose `data` is that cascade.
+# `failure_take` then returns the exception once: `engine_mcp` returns it as
+# a `dispatch.Failure`, and `mcp_stdio` writes the answer, then raises it. A
+# test driver reads `isError`, or the error, to tell an exception from the
+# expected response. A message that is not a JSON-RPC 2.0 request is
+# answered with -32600 and is no exception, as in TypeScript. Continuing
+# after an exception is deferred, its design in TAP_PLAN.md section 5.4.
+
 from collections.abc import Callable
 from typing import Any, NamedTuple, TypeAlias
 
@@ -21,7 +38,7 @@ class RpcError(Exception):
     code: int
     data: Any
 
-# The MCP server, transport agnostic, revision `2025-06-18` pinned.
+# The MCP server.
 class Server:
     def __init__(self, name: str, version: str) -> None: ...
     # Registers a tool and the function that runs it on its arguments.
@@ -30,6 +47,8 @@ class Server:
     ) -> None: ...
     # Handles one message. Returns the response, or None for a notification.
     def message_handle(self, message: Message) -> Message | None: ...
+    # The exception of the last request answered with one, then None.
+    def failure_take(self) -> BaseException | None: ...
 
 # The MCP client: sends through `send`, receives through `message_handle`.
 class Client:
