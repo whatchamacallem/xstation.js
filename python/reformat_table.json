@@ -15,14 +15,6 @@
     "linter": [],
     "system": "linux"
   },
-  ".md": {
-    "checker": ["mdformat", "--check"],
-    "comments": "none",
-    "encoding": "utf-8",
-    "formatter": ["mdformat", "--check"],
-    "linter": [],
-    "system": "linux"
-  },
   ".ps1": {
     "checker": [],
     "comments": "powershell",

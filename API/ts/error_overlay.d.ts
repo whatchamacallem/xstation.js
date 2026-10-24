@@ -21,6 +21,20 @@
 // thrown value, each Error's `cause` nested, written by this module itself.
 
 declare namespace error_overlay {
+  // One fault screen per thread: it takes the first fault and ignores others.
+  class FaultScreen {
+    // Registers what stopping means on the main thread, once.
+    stop_register(fn: (thrown: unknown) => void): void;
+    // Registers what reporting means in the AI worker, once.
+    report_register(fn: (thrown: unknown, done: () => void) => void): void;
+    // Writes the first fault on the screen with a Reload, and only that.
+    overlay_show(message: string, stack: string): void;
+    // The thread's uncaught fault, `post` null on the main thread.
+    fault_take(thrown: unknown, post: ((line: object) => void) | null): void;
+    // A resource of the main thread that failed to load, taken as its fault.
+    resource_take(element: Element): void;
+  }
+
   function overlay_install(): void;
 
   // Registers what stopping means on the main thread, once.

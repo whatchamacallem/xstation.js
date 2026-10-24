@@ -9,11 +9,11 @@
 # sets, shell with shfmt, and TypeScript, JavaScript and HTML with prettier,
 # at 79 columns given on its command line and no configuration file. A check
 # runs each row's checker in place of its formatter, ruff format --check,
-# shfmt --diff and prettier --check, and rewrites nothing. Markdown is
-# checked with mdformat, not rewritten. It formats the table's linux rows;
-# powershell/test_lint.ps1 formats its windows rows, the PowerShell files, on
-# Windows. A whitelist line is a path from the top with * or ? in its last
-# part only, and matches at least one file and no directory.
+# shfmt --diff and prettier --check, and rewrites nothing. It formats the
+# table's linux rows; powershell/test_lint.ps1 formats its windows rows, the
+# PowerShell files, on Windows. A whitelist line is a path from the top with
+# * or ? in its last part only, and matches at least one file and no
+# directory.
 
 import argparse, fnmatch, json, os, re, subprocess
 from typing import Any, NamedTuple

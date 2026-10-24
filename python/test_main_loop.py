@@ -394,7 +394,7 @@ class TestPrepare(ScratchCase):
         universes = _rows_read(self.root, "metaverse", _UNIVERSE_QUERY)
         self.assertEqual(universes, [])
 
-    # The triggers refuse a second row naming a world, by insert or update.
+    # Insert and update refuse a second row naming a world, a rename passes.
     def test_world_ambiguous(self) -> None:
         self.settings_write()
         self.prepare_run()
@@ -414,8 +414,13 @@ class TestPrepare(ScratchCase):
                     with connection:
                         connection.execute(statement)
                 self.assertEqual(str(caught.exception), _AMBIGUOUS)
+            with connection:
+                connection.execute(
+                    "UPDATE universe SET name = 'd', world = 'w'"
+                    " WHERE name = 'a'"
+                )
         universes = _rows_read(self.root, "metaverse", _UNIVERSE_QUERY)
-        expected = [("a", "A", "player", "w"), ("c", "C", "player", "x")]
+        expected = [("c", "C", "player", "x"), ("d", "A", "player", "w")]
         self.assertEqual(sorted(universes), expected)
 
     # A new process on the prepared root changes no row and seeds nothing.

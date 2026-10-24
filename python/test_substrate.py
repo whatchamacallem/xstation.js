@@ -674,7 +674,7 @@ class TestValues(unittest.TestCase):
 
 # Documents: versions and heads, the encoded round trip, bad documents.
 class TestDocuments(unittest.TestCase):
-    # Each put writes the next version and moves the head, versions stay.
+    # Each put writes its id's next version and moves its head, versions stay.
     def test_document_heads(self) -> None:
         store = _store_make(self, _root_make(self))
         store.db_create("castle_gatehouse")
@@ -688,12 +688,17 @@ class TestDocuments(unittest.TestCase):
         self.assertEqual(
             store.kv_get(first).data, _ARRIVAL_TEXT.encode("utf-8")
         )
+        moat = store.doc_put("castle_gatehouse", "scene/moat", _ARRIVAL_BODY)
+        self.assertEqual(moat, "/castle_gatehouse/scene/moat/1")
         changed = dict(_ARRIVAL_BODY)
         changed["subtitle"] = "The keeper waves."
         second = store.doc_put("castle_gatehouse", "scene/arrival", changed)
         self.assertEqual(second, "/castle_gatehouse/scene/arrival/2")
         self.assertEqual(
             store.doc_head("castle_gatehouse", "scene/arrival"), second
+        )
+        self.assertEqual(
+            store.doc_head("castle_gatehouse", "scene/moat"), moat
         )
         self.assertEqual(store.doc_get(first), _ARRIVAL_BODY)
         self.assertEqual(
@@ -944,7 +949,13 @@ class TestTurns(unittest.TestCase):
                 substrate.TurnRow(_SCENE, 2, "assistant", answer),
             ],
         )
-        self.assertEqual(store.turn_list("/metaverse/elsewhere/1"), [])
+        elsewhere = "/metaverse/elsewhere/1"
+        self.assertEqual(store.turn_list(elsewhere), [])
+        self.assertEqual(store.turn_append(elsewhere, "user", user), 1)
+        self.assertEqual(
+            store.turn_list(elsewhere),
+            [substrate.TurnRow(elsewhere, 1, "user", user)],
+        )
         scenes = {"internal": "hyperposition/1", "value": "/metaverse/world"}
         for case, scene in scenes.items():
             message = _text_get(f"substrate_scene_bad_{case}")

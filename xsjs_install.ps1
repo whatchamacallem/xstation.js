@@ -75,6 +75,10 @@ function _xsjs_install_step_check_linux {
     if ($LASTEXITCODE -ne 0) {
         xsjs_util_write_notice ($i18n_.linux_missing -f $distribution_name_)
         wsl --install -d $distribution_name_
+        if ($LASTEXITCODE -ne 0) {
+            $install_ = "wsl --install -d $distribution_name_"
+            throw ($i18n_.exit_code -f $install_, $LASTEXITCODE)
+        }
         xsjs_util_invoke_native { wsl -e true }
         if ($LASTEXITCODE -ne 0) {
             $not_ready_ = $i18n_.distribution_not_ready -f (

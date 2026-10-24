@@ -190,7 +190,11 @@ namespace dispatch {
       return result;
     }
     if (failure_is(result)) {
-      reply_check(type, version, id, result.reply);
+      try {
+        reply_check(type, version, id, result.reply);
+      } catch (error) {
+        throw utility.cause_append(error, result.error);
+      }
       return result;
     }
     reply_check(type, version, id, result);

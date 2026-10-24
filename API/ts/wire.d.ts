@@ -32,6 +32,27 @@
 // whose expiry is a fault met while a fault is reported.
 
 declare namespace wire {
+  // Encoded lines waiting to go to ttyd as input frames, bounded in bytes.
+  class FrameQueue {
+    constructor(chunk_bytes: number, line_max: number, blob_max: number);
+    // Queues a line, refused over `line_max` or with blobs over `blob_max`.
+    line_add(line: lines.Line): void;
+    // Whether a frame waits to be sent.
+    frames_left(): boolean;
+    // The next frame: the input kind, then the next bytes of the first piece.
+    frame_next(): ArrayBuffer;
+  }
+
+  // The reads of the console output, each decoded from its own start.
+  class ConsoleReader {
+    // Takes a message of ttyd's, ignored unless a read waits that it may end.
+    message_take(message: Uint8Array): lines.ConsoleReadReply | undefined;
+    // Starts a read of the output from now on, until `until` shows in it.
+    read_start(until: string): void;
+    // Ends the waiting read when its timer expires or its socket closes.
+    read_expire(): lines.ConsoleReadReply;
+  }
+
   // The port to the server on tty 1.
   class WirePort implements queue.Port {
     constructor(
@@ -49,6 +70,12 @@ declare namespace wire {
     line_receive(fn: (line: lines.Line) => void): void;
     // Called once when the socket ends but by `wire_close` or `wire_end`.
     close_receive(fn: (code: number, had_error: boolean) => void): void;
+    // Sets the one receiver of the first line, which `wire_open` does.
+    first_receive(fn: (first: lines.Line) => void): void;
+    // Takes one message of ttyd's: keeps a title or preferences, or decodes.
+    message_take(message: Uint8Array): void;
+    // The close: what `wire_end` awaits, else a fault without an error line.
+    close_take(code: number): void;
     // ttyd's title and preferences.
     title: string;
     preferences: unknown;
@@ -63,5 +90,9 @@ declare namespace wire {
     line_receive(fn: (line: lines.Line) => void): void;
     // Called once with the close code. The AI worker pushes `console.exit`.
     close_receive(fn: (code: number) => void): void;
+    // Gives a message to the read, then relays it as `console.output`.
+    message_take(message: Uint8Array): void;
+    // Takes the close of the socket, after which `console.open` opens anew.
+    close_take(code: number): void;
   }
 }

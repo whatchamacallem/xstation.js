@@ -1,8 +1,9 @@
 # The reader of `settings.json`. Every key of the file is checked against a
 # table of its type: the top level keys, the keys of `provider` and the keys
 # of `powershell`, the constants of the PowerShell scripts. A type is a
-# bool, an int, a str, a list of str, or a dict of str to str. The file is
-# read by `jslb.json_decode`, the decoders' door for bad numbers.
+# bool, an int, a str, a list of str, a dict of str to str, or a nested
+# object checked by its own table. The file is read by `jslb.json_decode`,
+# the decoders' door for bad numbers.
 
 from typing import Any
 

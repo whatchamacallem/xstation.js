@@ -118,7 +118,7 @@ namespace jslb {
     // The byte that ends a line, CR.
     line_end: 0x0d,
     // A whole string or a number token of a JSON text.
-    number_token: /"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g,
+    number_token: /"[^"\\]*(?:\\.[^"\\]*)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g,
     // A number token without a fraction or an exponent.
     integer_token: /^-?\d+$/,
     // The largest magnitude an integer token may have, 2^53.

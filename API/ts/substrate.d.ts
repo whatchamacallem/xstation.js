@@ -38,6 +38,82 @@
 // throws that string, the SQLite error as its `cause`.
 
 declare namespace substrate {
+  // A file of the cache held open for synchronous access, as OPFS gives it.
+  interface SlotHandle {
+    // Reads into the buffer from the offset and returns the bytes read.
+    read(buffer: Uint8Array, options: { at: number }): number;
+    // Writes the buffer at the offset and returns the bytes written.
+    write(buffer: Uint8Array, options: { at: number }): number;
+    // Sets the size of the file.
+    truncate(size: number): void;
+    // The size of the file.
+    getSize(): number;
+  }
+
+  // What `exec` of a database takes: the SQL, its parameters, what to keep.
+  interface ExecOptions {
+    // The SQL text.
+    sql: string;
+    // The parameters of its first statement that has any.
+    bind?: unknown[];
+    // Rows as arrays.
+    rowMode?: "array";
+    // Where the rows go.
+    resultRows?: unknown[][];
+    // Where the column names go.
+    columnNames?: string[];
+    // Where the text of each statement run goes.
+    saveSql?: string[];
+  }
+
+  // A prepared statement of the pool's database class.
+  interface SqliteStatement {
+    // The number of parameters the statement takes.
+    readonly parameterCount: number;
+    // Frees the statement.
+    finalize(): unknown;
+  }
+
+  // A database of the pool's class `OpfsSAHPoolDb`, the parts used here.
+  interface SqliteDatabase {
+    // The `sqlite3` pointer of the connection.
+    readonly pointer: number;
+    // Runs SQL, keeping rows, column names and statements as asked.
+    exec(options: ExecOptions): unknown;
+    // The first column of the first row the SQL returns.
+    selectValue(sql: string, bind?: unknown[]): unknown;
+    // Prepares the first statement of the SQL.
+    prepare(sql: string): SqliteStatement;
+    // The rows the last statement changed, or all since opening when total.
+    changes(total: boolean): number;
+    // Closes the connection.
+    close(): void;
+  }
+
+  // The sqlite3.wasm module `sqlite3InitModule` resolves to, parts used.
+  interface SqliteModule {
+    // The C functions used here.
+    capi: {
+      sqlite3_js_db_export(pointer: number): Uint8Array;
+      sqlite3_get_autocommit(pointer: number): number;
+    };
+  }
+
+  // The OPFS SAH pool `installOpfsSAHPoolVfs` resolves to, parts used.
+  interface SqlitePool {
+    // The database class whose files are in the pool.
+    OpfsSAHPoolDb: new (options: {
+      filename: string;
+      flags: string;
+    }) => SqliteDatabase;
+    // The names of the files in the pool.
+    getFileNames(): string[];
+    // Writes database bytes as the named file, replacing any.
+    importDb(name: string, bytes: Uint8Array): unknown;
+    // Removes the named file and says whether it was there.
+    unlink(name: string): boolean;
+  }
+
   // The bytes of a value, or the cache handle when over `overflow_bytes`.
   interface KvValue {
     data: Uint8Array | string;
@@ -80,8 +156,8 @@ declare namespace substrate {
 
   // The cache files, opened by the boot, and the decoder's streaming sink.
   class CacheFiles implements jslb.BlobSink {
-    constructor(slots: unknown[]);
-    slot_add(slot: unknown): void;
+    constructor(slots: SlotHandle[]);
+    slot_add(slot: SlotHandle): void;
     slots_free(): number;
     sink_open(header: lines.BlobHeader): string;
     sink_append(handle: string, data: Uint8Array): void;
@@ -91,8 +167,8 @@ declare namespace substrate {
 
   class Store {
     constructor(
-      sqlite3: unknown,
-      pool: unknown,
+      sqlite3: SqliteModule,
+      pool: SqlitePool,
       cache: CacheFiles,
       root: string,
       overflow_bytes: number,

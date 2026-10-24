@@ -485,7 +485,7 @@
         }
       },
       "texts": {
-        "engine_doc_not_registered": "The doc handlers were called before they were registered."
+        "engine_doc_not_registered": "The doc handler was called before it was registered."
       }
     },
     "test_engine_kv": {
@@ -1043,7 +1043,7 @@
         }
       },
       "texts": {
-        "engine_turn_not_registered": "The turn handlers were called before they were registered."
+        "engine_turn_not_registered": "The turn handler was called before it was registered."
       }
     },
     "test_engine_verbose": {

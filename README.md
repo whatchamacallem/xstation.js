@@ -13,7 +13,9 @@ execution policy refuses the scripts from a `\\wsl.localhost` path.
 `.\xsjs_install.ps1` (admin)
 
 - Ensures WSL and Ubuntu are installed.
-- Ensures Python 3, OpenSSL and ttyd are installed in Linux with apt.
+- Ensures Python 3 and OpenSSL are installed in Linux with apt.
+- Builds ttyd in Linux from its pinned source release and patches, after
+  checking for the tools and headers the build needs.
 - Reports a ttyd for Windows from an earlier install, which is no longer
   used and stays installed.
 

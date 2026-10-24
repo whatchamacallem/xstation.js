@@ -228,8 +228,6 @@ def comments_check(path: str, encoding: str, lexer: str) -> None:
 def comments_find(path: str, text: str, lexer: str) -> list[Comment]:
     comments: list[Comment] = []
     match lexer:
-        case "none":
-            pass
         case "python":
             comments = python_comments(text)
         case "shell":

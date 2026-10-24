@@ -24,7 +24,7 @@ END;
 
 CREATE TRIGGER universe_world_update BEFORE UPDATE OF world ON universe
 WHEN EXISTS (
-    SELECT 1 FROM universe WHERE world = NEW.world AND name <> NEW.name
+    SELECT 1 FROM universe WHERE world = NEW.world AND name <> OLD.name
 )
 BEGIN
     SELECT RAISE(ABORT, 'agent.content_ambiguous');

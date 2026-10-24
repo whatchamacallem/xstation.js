@@ -5,7 +5,7 @@ def verbose_put(
     line: jslb.Object, *, thread: str, lines: list[dict[str, object]]
 ) -> None: ...
 
-# `verbose.tail`: reply with the last `count` lines of the server's ring.
+# `verbose.tail`: reply with the last `count` lines of a thread, oldest first.
 def verbose_tail(
     line: jslb.Object, *, thread: str, count: int
 ) -> jslb.Object: ...

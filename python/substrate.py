@@ -725,7 +725,7 @@ class Store:
             except FileNotFoundError:
                 pass
 
-    # Writes a row, its cache file first; a row of the same digest stays.
+    # Writes a row, its cache file first. A row of the same digest stays.
     def _row_write(
         self, connection: sqlite3.Connection, key: str, data: bytes | str
     ) -> KvRow:

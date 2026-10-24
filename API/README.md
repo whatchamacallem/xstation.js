@@ -34,6 +34,9 @@ console  AI worker  <->  ttyd's dash    ttyd's protocol over tty 0
 ui-ai    UI thread  <->  AI worker      structured clone, buffers moved
 mcp      agent      <->  MCP server     JSON-RPC 2.0, see ts/mcp.d.ts
 http     any        <->  HTTP port      one fetch per line, see ts/http.d.ts
+dom      UI thread  <->  DOM port       in the UI thread, see ts/page.d.ts
+ui       UI thread   ->  UI thread      its DOM listeners and its wakes
+ai       AI worker   ->  AI worker      its own pushes and wakes
 ```
 
 ## The first line

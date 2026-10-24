@@ -7,7 +7,9 @@
 // at its default is not written. Payload keys are always full English words:
 // only the header fields have single letter names. Each interface below is
 // the payload of one type; the table gives its lane, direction, blobs and
-// reply. "push" is a notification the receiver never answers.
+// reply. "push" is a notification the receiver never answers. An `mcp` line
+// is a request, with `i` and answered by an `mcp` reply, when its `JSON-RPC`
+// message is a request, and a push when that message is a notification.
 //
 // "commit" marks a modifying store operation that the browser's store sends
 // to the server as a push once its own transaction has committed. The server
@@ -39,7 +41,7 @@
 // verbose.put       wire     AI -> SERVER    0      push (debug)
 // verbose.tail      wire     AI -> SERVER    0      VerboseTailReply
 // tap.line          wire     AI -> SERVER    0      push
-// mcp               wire     either          0      push (JSON-RPC)
+// mcp               wire     either          0      request or push
 // settings.put      wire     AI -> SERVER    0      Empty (debug)
 // source.put        wire     AI -> SERVER    1      Sha256Reply (debug)
 // system.restart    wire     AI -> SERVER    0      push; a new tap.start
@@ -63,6 +65,7 @@
 // overlay.line      ui-ai    AI -> UI        0      push (debug)
 // verbose.put       ui-ai    UI -> AI        0      push, then forwarded
 // tap.line          ui-ai    UI -> AI        0      push, then forwarded
+// settings.put      ui-ai    UI -> AI        0      push, relayed to SERVER
 // kv.get            ui-ai    UI -> AI        0      KvGetReply + 1
 // kv.put            ui-ai    UI -> AI        1      KvPutReply
 // kv.delete         ui-ai    UI -> AI        0      Empty
@@ -85,6 +88,9 @@
 // worker.tests      ai       AI -> AI        0      push, runs the suites
 // rungs.next        ai       AI -> AI        0      push, the wire rungs
 // rungs.reply       ai       AI -> AI        0      wake, the wire rungs
+// settings.put      ai       AI -> AI        0      push, relayed to SERVER
+// worker.console_opened ai   AI -> AI        0      wake
+// worker.settings_put ai     AI -> AI        0      wake
 // ui.turn_end       ui       UI -> UI        0      wake
 // ui.permit_reply   ui       UI -> UI        0      wake
 // ui.media_reply    ui       UI -> UI        0      wake
@@ -92,7 +98,7 @@
 // ui.console_closed ui       UI -> UI        0      wake
 // ui.console_shown  ui       UI -> UI        0      wake
 // http.request      http     any -> HTTP     0      HttpResponse
-// mcp               mcp      AGENT <-> MCP   0      push (JSON-RPC)
+// mcp               mcp      AGENT <-> MCP   0      request or push
 
 declare namespace lines {
   // Header 0: `t` type, `v` version, `i` id, `r` reply, `k` key, `b` blobs.

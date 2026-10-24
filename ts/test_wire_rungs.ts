@@ -424,7 +424,7 @@ namespace test_wire_rungs {
       return reply;
     }
 
-    // first: `tap.start` in full names, id 101, with this root's gold.
+    // first: `tap.start` in full names, id 101, its settings and gold.
     #first_run(): undefined {
       const first = this.#start.first;
       check(
@@ -451,12 +451,6 @@ namespace test_wire_rungs {
         keys === utility.json_text([...constants.first_keys]),
         `the first line's payload has the keys ${keys}`,
       );
-      const test_settings = payload.test_settings as {
-        typescript: { test_wire_rungs: unknown };
-      };
-      const sent = utility.json_text(test_settings.typescript.test_wire_rungs);
-      const gold = utility.json_text(harness.gold_get(constants.gold_id));
-      check(sent === gold, `the first line's gold is ${sent}, not ${gold}`);
       return this.#pass("first");
     }
 

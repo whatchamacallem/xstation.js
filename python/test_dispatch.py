@@ -326,16 +326,19 @@ class TestDispatch(IsolatedCase):
         self.assertEqual(failure.reply, _gold_value("lines.mcp_reply"))
         self.assertIs(failure.error, error)
 
-    # A notification's `Failure` raises, as a reply to a notification does.
+    # A notification's `Failure` raises as a reply does, its error the cause.
     def test_failure_notification(self) -> None:
         reply = _gold_value("lines.mcp")
-        failure = dispatch.Failure(reply, _error_raise())
+        error = _error_raise()
+        failure = dispatch.Failure(reply, error)
         dispatch.handler_register("mcp", 0, _handler_make(failure))
-        self.dispatch_check(
-            ValueError,
+        with self.assertRaises(ValueError) as caught:
+            dispatch.line_dispatch(_gold_value("lines.mcp"))
+        self.assertEqual(
+            str(caught.exception),
             _text_get("dispatch_notification_replied_mcp"),
-            _gold_value("lines.mcp"),
         )
+        self.assertIs(caught.exception.__cause__, error)
         self.assertEqual(reply, _gold_value("lines.mcp"))
 
 

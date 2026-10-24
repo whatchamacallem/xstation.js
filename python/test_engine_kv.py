@@ -162,7 +162,7 @@ class IsolatedCase(unittest.TestCase):
 
 # Tests the handler of `kv.put`.
 class TestPut(IsolatedCase):
-    # The image goes to the store under the header's key; nothing answers.
+    # The image goes to the store under the header's key. Nothing answers.
     def test_value_stored(self) -> None:
         put = self.handler_get("kv.put")
         line = _blob_line("put_image", _IMAGE_BYTES)

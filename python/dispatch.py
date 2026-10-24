@@ -77,9 +77,10 @@ def line_dispatch(line: jslb.Object) -> jslb.Object | Failure | None:
     result = fn(line, **jslb.payload_of(line))
     if request_id is None:
         if result is not None:
+            first = result.error if isinstance(result, Failure) else None
             raise ValueError(
                 i18n("dispatch.notification_replied", name, version)
-            )
+            ) from first
         return None
     if result is None:
         raise ValueError(

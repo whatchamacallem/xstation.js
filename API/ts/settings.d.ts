@@ -76,6 +76,23 @@ declare namespace settings {
   // An id is a key, nested keys joined by `.`, as `provider.timeout_seconds`.
   type Id = string;
 
+  // Submits the payload of one `settings.put` line to the server.
+  type Sender = (payload: lines.SettingsPut) => void;
+
+  // The settings of one thread, set once, read and changed by id.
+  class ValueStore {
+    // Stores the settings once, deep frozen unless `debug` is true.
+    value_set(value: Settings): void;
+    // Returns the value of an id, throwing if unset or unknown.
+    value_get(id: Id): unknown;
+    // Debug mode only: changes the live value and sends `settings.put`.
+    value_put(id: Id, value: unknown): void;
+    // Registers the function that sends `settings.put`, once.
+    sender_register(sender: Sender): void;
+    // Full names while the value is unset, then whether `debug` is true.
+    names_full(): boolean;
+  }
+
   // Stores the settings `tap.start` carried, once per thread.
   function settings_set(value: Settings): void;
 
@@ -86,7 +103,7 @@ declare namespace settings {
   function settings_put(id: Id, value: unknown): void;
 
   // Registers the function that sends `settings.put` for this thread, once.
-  function sender_register(sender: (payload: lines.SettingsPut) => void): void;
+  function sender_register(sender: Sender): void;
 
   // Whether this thread builds its lines in full names, as described above.
   function names_full(): boolean;

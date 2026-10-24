@@ -23,12 +23,71 @@
 // channel by the stop function, its cascade under `cause`.
 
 declare namespace page {
+  // Registers the handler of one line type and version, as dispatch does.
+  type HandlerRegister = (
+    type: string,
+    version: number,
+    fn: dispatch.Handler,
+  ) => void;
+
+  // The decoded images the page paints, by key, as the media port keeps them.
+  interface ImageSource {
+    image_get(k: lines.KvRef): ImageBitmap | undefined;
+  }
+
+  // The console view as the handlers drive it.
+  interface ConsoleControl {
+    view_toggle(): void;
+    view_show(): void;
+    open_wanted(): boolean;
+    open_is(): boolean;
+    open_request(): dispatch.Sleep;
+    open_done(wake: lines.Line): void;
+    close_done(wake: lines.Line): void;
+    exit_done(): void;
+    output_feed(data: Uint8Array): void;
+  }
+
+  // The overlays as the handlers drive them.
+  interface OverlayControl {
+    line_add(tty: number, text: string): void;
+    overlay_toggle(tty: number): void;
+  }
+
+  // What the UI handlers work with: the queue, the elements and the parts.
+  interface PageParts {
+    tasks: queue.TaskQueue;
+    canvas: HTMLCanvasElement;
+    subtitle: HTMLElement;
+    input: HTMLInputElement;
+    permit: HTMLElement;
+    images: ImageSource;
+    view: ConsoleControl;
+    overlays: OverlayControl;
+    debug: boolean;
+  }
+
+  // The owner table of the UI thread.
+  function owners_make(): queue.OwnerTable;
+
+  // The first line of the worker, which is `settings.set`, taken whole.
+  function settings_take(data: unknown): lines.SettingsSet;
+
+  // The fault a message of the worker carries, which must be a `fault` line.
+  function fault_read(data: unknown): lines.Fault;
+
   // The DOM port: listeners post `ui.input` and `ui.control_key` lines.
   class DomPort implements queue.Port {
     constructor(container: HTMLElement);
     line_post(line: lines.Line, transfer: ArrayBuffer[]): void;
     line_receive(fn: (line: lines.Line) => void): void;
   }
+
+  // Registers the handlers of the UI thread with the register given.
+  function handlers_register(
+    parts: PageParts,
+    register: HandlerRegister,
+  ): void;
 
   // The bring up of the UI thread, `run` getting its queue at `ui.tests`.
   function test_page(run: (tasks: queue.TaskQueue) => void): void;

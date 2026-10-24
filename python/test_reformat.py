@@ -70,7 +70,6 @@ class TestTable(unittest.TestCase):
             [
                 ".html",
                 ".js",
-                ".md",
                 ".ps1",
                 ".psd1",
                 ".py",

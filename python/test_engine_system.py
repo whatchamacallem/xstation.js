@@ -27,9 +27,6 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
-# The settings file of the checkout, whose bytes the written file matches.
-_SETTINGS_PATH = os.path.join(_ROOT_PATH, "settings.json")
-
 # The API file that holds the tools as `tools/list` returns them.
 _TOOLS_PATH = os.path.join(_ROOT_PATH, "API", "mcp", "tools.json")
 
@@ -248,11 +245,14 @@ class TestSettings(IsolatedCase):
     # The file is the settings object written whole, and no file is left over.
     def test_settings_written(self) -> None:
         put = self.handler_get("settings.put", True)
-        line = _line_set("settings_put", "settings", harness.settings_copy())
+        value = harness.settings_copy()
+        line = _line_set("settings_put", "settings", value)
         reply = _handler_call(put, line)
         self.assertEqual(reply, _gold_value("lines.settings_reply"))
-        written = _file_read(self.settings_path)
-        self.assertEqual(written, _file_read(_SETTINGS_PATH))
+        with open(self.settings_path, encoding="utf-8") as file:
+            written: dict[str, Any] = json.load(file)
+        self.assertEqual(written, value)
+        self.assertEqual(list(written), list(value))
         self.assertEqual(os.listdir(self.root), ["settings.json"])
 
     # A changed value is in the file, and the file replaces the old one.

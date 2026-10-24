@@ -394,11 +394,12 @@ namespace test_dispatch {
       this.assertEqual(reply[0], { t: request_type, r: 5 });
     }
 
-    // A failure whose reply answers no request, of a line with no id, throws.
+    // A failure of a line with no id throws, the failure's error its cause.
     test_notification_failure(): void {
       const type = type_fresh();
       const reply = line_short("notification", type);
-      const failure = dispatch.failure_make(reply, new Error("boom"));
+      const first = new Error("boom");
+      const failure = dispatch.failure_make(reply, first);
       dispatch.handler_register(type, 0, record_make(failure).fn);
       const error = thrown_get(() =>
         dispatch.line_dispatch(line_short("notification", type)),
@@ -407,6 +408,7 @@ namespace test_dispatch {
         error.message,
         gold_text("dispatch_notification_replied").replaceAll("{0}", type),
       );
+      this.assertTrue(error.cause === first);
     }
   }
 
