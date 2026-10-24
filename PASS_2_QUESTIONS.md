@@ -1,135 +1,14 @@
 # Second pass questions
 
-These are the problems the first rework (`FIRST_REWORK.md`, items 1.1 to
-1.41) unearthed and left unresolved, as 37 multiple choice questions numbered
-2.1 to 2.37. They are grouped by class and ranked by importance within each
-class. The 32 entry limit binds classes B and C only: 2.1 to 2.32 are the
-first 32 questions, and 2.33 to 2.37 are the class A questions asked after
-them, exempt from the limit. These follow 2.11 in the class A section,
-ranked among themselves, so that the numbers the records cite stay.
+Do not read past commits. do not read past planning documents. Do not mention
+past commits, do not mention past planning documents. We are involved in
+a pre-flight fix up of a codebase before we start testing. The test plan has
+been written and is not part of this process. It is better for things to be
+resolved in a manner that leads to testing sooner than later at this point in
+development.
 
-- Class A: "this just needs to be done without your input, i'm happy to
-  assume choice A". Choice A of 2.1 to 2.11 is applied, as each one's text
-  says. Choice A of 2.33 to 2.37 is not applied: the rewrite that asked them
-  changed only this file.
-- Class B: "this would cause a lot of rework and input is required to be
-  sure." Nothing is applied.
-- Class C: "this doesn't have long term consequences or input seems unlikely
-  to change the outcome." Nothing is applied.
-
-Each choice has a box, `[ ]`. Answer a question by typing `x` over the space
-in the box of the choice you select, as `[x] A.`.
-
-Importance runs from 1 (low) to 5 (high): how much breaks, or how much gets
-built on the wrong thing, if the question stays open or is answered wrong.
-Nothing was run, built, tested or formatted in this pass, so every applied
-change is unverified until the testing phase.
-
-## Summary
-
-The first rework's 22 agents left their unresolved work in the records under
-the gitignored `tmp/handoff_23_0919/`: deferred designs, class B decisions,
-requests between packages, findings outside the items and points owed to
-testing. Seven agents read those records and the first rework's postmortem,
-checked each problem against the code as it stands, dropped the ones already
-resolved and made the class A changes. The 32 questions were chosen from
-their drafts. A rewrite then asked the class A problems left out, as 2.33 to
-2.37: the one class A draft dropped to reach 32 (2.37), the three class A
-problems among those found but not made questions (2.34 to 2.36), and one
-found while checking them (2.33). `TAP_PLAN.md`, whose section 12.2 listed
-107 class B points, is deleted from the working tree and was not read back
-from git (2.12).
-
-What the first rework left unresolved, by kind:
-
-- Deferred designs whose only record was gitignored or deleted:
-  - the MCP server continuing after a tool's exception, lost with the plan
-    (2.12);
-  - the program's assembly on the AI thread, `provider.set` and the resync,
-    which survive only in fragments (2.16);
-  - the dispatch order (2.19);
-  - the contract of `restore_lines` (2.21);
-  - the designs that would close 1.23 (2.28);
-  - `certificate_key` (2.32).
-
-  Each design that survives is now written in full in its question.
-- Failure policies that no rule settles:
-  - a push the server's store refuses (2.13);
-  - a push over `line_max` after its commit (2.14);
-  - a fault before the worker can report (2.17);
-  - the dispatcher's order (2.19);
-  - the MCP server's invalid messages (2.24);
-  - non-finite numbers from scripts (2.25).
-- What removing the program under 1.20 left behind: 2.16, 2.18, 2.20, 2.21,
-  2.27.
-- Items left partial: 1.23 (2.28) and 1.34 (2.23).
-- Rules and selected options that pull apart: 2.15, 2.22, 2.26, 2.29, 2.31.
-- Code, tests, stubs, the line catalogue and docs out of step with each
-  other: 2.1 to 2.11, fixed as class A, and 2.35 to 2.37, asked as class A
-  and not fixed.
-- Files the lint check refuses or never reads: 2.33 and 2.34, asked as
-  class A and not fixed.
-
-Found but not made questions, for the record, each class B or C, which the
-32 entry limit still binds:
-
-- Class C. The two JSLB decoders report different faults in two cases,
-  though both refuse both inputs:
-  - a digit key of more than 4300 digits: Python reports
-    `jslb.line_not_json`, while TypeScript reports `jslb.blob_gap` or keeps
-    the key as a string;
-  - a bad number before a syntax fault.
-- Class C. TypeScript `dispatch.error_make` has no caller outside its tests.
-  TypeScript `dispatch.id_next` (1.9) has no caller at all:
-  `TaskQueue.task_submit` numbers its requests from 1 with its own counter.
-  Nothing collides, since each side matches replies only to its own
-  requests.
-- Class C. `mcp_stdio.stdio_run` types `register` as `Callable[[Any], None]`,
-  where its stub has `Callable[[mcp.Server], None]`, because `mcp` is
-  imported only after `sys.pycache_prefix` is set.
-- Class C. `substrate._hashes_named` opens every unopened `<root>/*.sqlite`
-  read-write, `_verbose.sqlite` included, though `API/sql/verbose.sql` says
-  the store never opens it. It writes nothing there. The store does not know
-  the log's name, and a database name may begin with `_`, so a fix either
-  teaches the store that name or changes the text.
-- Class C. `Store.db_open` sets WAL mode before `schema_apply` checks the
-  tables, so a file it refuses is left in WAL mode.
-- Class C. Since the move to the gold record, no Python test restores a
-  database larger than the old 10 MiB window. The store has no code that
-  depends on the size.
-- Class B. `agent.prompt_build` finds a prompt by running `sql_run` on the
-  store's own `_head` table, since `store.doc_head` throws for a universe
-  with no prompt. Whether that is a routine query is a reading of 1.28, as
-  in 2.15.
-- Class C. Several headers state shipped values that go stale when a
-  setting changes: those of `xsjs_start.ps1`, `xsjs_status.ps1`,
-  `xsjs_stop.ps1` and `powershell/test_powershell.ps1`, and `README.md`.
-- Class B. `xsjs_start.ps1`'s header still says it serves the engine, which
-  follows the readings of 1.20 that 2.16, 2.18 and 2.20 ask about.
-- Class B. The PowerShell scripts write their `.md` logs beside themselves,
-  kept out of git by `.gitignore`, while a rule says to point tools at
-  `build/`. Whether a log is one of the rule's intermediates is the
-  maintainer's reading.
-- Class C. A database file made before `_meta` lost its `seq` row keeps that
-  row, since the schema version stayed 1, and nothing reads it.
-- Class C. `boot.test_worker` and `page.test_page` call
-  `error_overlay.overlay_install()`, which the module already ran when it
-  loaded, so the second call adds no listener.
-- Class C. An image count of 2^53 + 2 stays untested: the decoders refuse
-  such an integer at read, and only a line built in the worker could carry
-  it.
-- Class C. Seven decisions of the first rework's TypeScript core and JSLB
-  package stay unconfirmed, each of little consequence: `jslb.text_not_json`
-  for `json_decode`; `blob_make` taking bytes only; `error_make` with no
-  line using `settings.names_full()`; the Python twin of 1.14; a received
-  cascade rebuilt in `ts/queue.ts`; the vectors' `_LINE_MAX` of 8192 and
-  `number=5`; and the TypeScript encoder writing a number between 2^53 and
-  1e21 that both decoders refuse at read (1.18).
-- Withdrawn: the first postmortem said `ts/test_all.ts`'s header is stale.
-  That was wrong: `tap_start` does notify itself `worker.tests` in debug
-  mode.
-
-Owed to the testing phase, not questions:
+These are here as "Owed to the testing phase, not questions." responses will be
+between `[` and `]` as well.
 
 - the trigger message texts of sqlite3.wasm and of Python's `sqlite3`;
 - a 2 GiB echo, and a `kv.put` near `blob_max`, in the worker and OPFS;
@@ -142,35 +21,6 @@ Owed to the testing phase, not questions:
   of `rung_worker_hang`;
 - the test page growing about 1.9 MB with `test_digests.json`, and the
   182478 byte gold riding in every debug root's first line.
-
-Problems in how the first rework itself ran, which cannot be resolved now:
-
-- Its agents broke the hard limits six times by starting `python3` with no
-  input or with `--version`, and three times by reading files with
-  `git show HEAD:`.
-- Two agents deleted unused `i18n` keys before the coordinator's sweep.
-- None of these breaches ran or wrote anything of the project.
-
-No agent of this pass reported a breach.
-
-Files changed in this pass, unstaged:
-
-- Stubs and docs: `API/README.md`, `API/python/engine_verbose.pyi`,
-  `API/python/mcp.pyi`, `API/python/settings.pyi`, `API/sql/metaverse.sql`,
-  `API/ts/error_overlay.d.ts`, `API/ts/http.d.ts`, `API/ts/i18n.d.ts`,
-  `API/ts/lines.d.ts`, `API/ts/media.d.ts`, `API/ts/page.d.ts`,
-  `API/ts/settings.d.ts`, `API/ts/substrate.d.ts`, `API/ts/verbose.d.ts`,
-  `API/ts/wire.d.ts`, `README.md`.
-- Strings and gold: `i18n/en-US.json`, `test_settings.json`.
-- Python: `python/dispatch.py`, `python/main_loop.py`, `python/reformat.py`,
-  `python/reformat_table.json`, `python/substrate.py`,
-  `python/test_dispatch.py`, `python/test_engine_kv.py`,
-  `python/test_engine_system.py`, `python/test_main_loop.py`,
-  `python/test_posix.py`, `python/test_reformat.py`,
-  `python/test_substrate.py`.
-- TypeScript: `ts/dispatch.ts`, `ts/jslb.ts`, `ts/test_dispatch.ts`,
-  `ts/test_wire_rungs.ts`.
-- PowerShell: `xsjs_install.ps1`.
 
 ## Class A: choice A assumed
 
