@@ -1,17 +1,24 @@
 # Second pass questions
 
 These are the problems the first rework (`FIRST_REWORK.md`, items 1.1 to
-1.41) unearthed and left unresolved, as 32 multiple choice questions numbered
-2.1 to 2.32. They are grouped by class and ranked by importance within each
-class.
+1.41) unearthed and left unresolved, as 37 multiple choice questions numbered
+2.1 to 2.37. They are grouped by class and ranked by importance within each
+class. The 32 entry limit binds classes B and C only: 2.1 to 2.32 are the
+first 32 questions, and 2.33 to 2.37 are the class A questions asked after
+them, exempt from the limit. These follow 2.11 in the class A section,
+ranked among themselves, so that the numbers the records cite stay.
 
 - Class A: "this just needs to be done without your input, i'm happy to
-  assume choice A". Choice A is applied, marked `--` as the selected options
-  are in `FIRST_REWORK.md`.
+  assume choice A". Choice A of 2.1 to 2.11 is applied, as each one's text
+  says. Choice A of 2.33 to 2.37 is not applied: the rewrite that asked them
+  changed only this file.
 - Class B: "this would cause a lot of rework and input is required to be
   sure." Nothing is applied.
 - Class C: "this doesn't have long term consequences or input seems unlikely
   to change the outcome." Nothing is applied.
+
+Each choice has a box, `[ ]`. Answer a question by typing `x` over the space
+in the box of the choice you select, as `[x] A.`.
 
 Importance runs from 1 (low) to 5 (high): how much breaks, or how much gets
 built on the wrong thing, if the question stays open or is answered wrong.
@@ -26,8 +33,12 @@ requests between packages, findings outside the items and points owed to
 testing. Seven agents read those records and the first rework's postmortem,
 checked each problem against the code as it stands, dropped the ones already
 resolved and made the class A changes. The 32 questions were chosen from
-their drafts. `TAP_PLAN.md`, whose section 12.2 listed 107 class B points, is
-deleted from the working tree and was not read back from git (2.12).
+their drafts. A rewrite then asked the class A problems left out, as 2.33 to
+2.37: the one class A draft dropped to reach 32 (2.37), the three class A
+problems among those found but not made questions (2.34 to 2.36), and one
+found while checking them (2.33). `TAP_PLAN.md`, whose section 12.2 listed
+107 class B points, is deleted from the working tree and was not read back
+from git (2.12).
 
 What the first rework left unresolved, by kind:
 
@@ -54,50 +65,69 @@ What the first rework left unresolved, by kind:
 - Items left partial: 1.23 (2.28) and 1.34 (2.23).
 - Rules and selected options that pull apart: 2.15, 2.22, 2.26, 2.29, 2.31.
 - Code, tests, stubs, the line catalogue and docs out of step with each
-  other, fixed as class A: 2.1 to 2.11.
+  other: 2.1 to 2.11, fixed as class A, and 2.35 to 2.37, asked as class A
+  and not fixed.
+- Files the lint check refuses or never reads: 2.33 and 2.34, asked as
+  class A and not fixed.
 
-Found but not made questions, for the record:
+Found but not made questions, for the record, each class B or C, which the
+32 entry limit still binds:
 
-- The two JSLB decoders report different faults in two cases, though both
-  refuse both inputs:
+- Class C. The two JSLB decoders report different faults in two cases,
+  though both refuse both inputs:
   - a digit key of more than 4300 digits: Python reports
     `jslb.line_not_json`, while TypeScript reports `jslb.blob_gap` or keeps
     the key as a string;
   - a bad number before a syntax fault.
-- TypeScript `dispatch.error_make` has no caller outside its tests.
+- Class C. TypeScript `dispatch.error_make` has no caller outside its tests.
   TypeScript `dispatch.id_next` (1.9) has no caller at all:
   `TaskQueue.task_submit` numbers its requests from 1 with its own counter.
   Nothing collides, since each side matches replies only to its own
   requests.
-- `mcp_stdio.stdio_run` types `register` as `Callable[[Any], None]`, where
-  its stub has `Callable[[mcp.Server], None]`, because `mcp` is imported
-  only after `sys.pycache_prefix` is set.
-- `API/sql/*.sql` are missed by `python/reformat_whitelist.txt`, and
-  `python/reformat_table.json` has no `.sql` row, so no check reads them.
-- `substrate._hashes_named` opens every unopened `<root>/*.sqlite`
+- Class C. `mcp_stdio.stdio_run` types `register` as `Callable[[Any], None]`,
+  where its stub has `Callable[[mcp.Server], None]`, because `mcp` is
+  imported only after `sys.pycache_prefix` is set.
+- Class C. `substrate._hashes_named` opens every unopened `<root>/*.sqlite`
   read-write, `_verbose.sqlite` included, though `API/sql/verbose.sql` says
-  the store never opens it. It writes nothing there.
-- `Store.db_open` sets WAL mode before `schema_apply` checks the tables, so
-  a file it refuses is left in WAL mode.
-- Since the move to the gold record, no Python test restores a database
-  larger than the old 10 MiB window.
-- `python/seed/prompt.json` says `engine.store` "has the same operations as
-  the database tools", but it has four more.
-- `agent.prompt_build` finds a prompt by running `sql_run` on the store's
-  own `_head` table.
-- Several headers state shipped values that go stale when a setting
-  changes: those of `xsjs_start.ps1`, `xsjs_status.ps1`, `xsjs_stop.ps1` and
-  `powershell/test_powershell.ps1`, and `README.md`. `xsjs_start.ps1`'s
-  header still says it serves the engine.
-- `API/ts/worker_ai.d.ts` says `settings_register` relays the UI's
-  `settings.put`, but `tap_start` also notifies the worker's own.
-- The PowerShell scripts write their `.md` logs beside themselves, kept out
-  of git by `.gitignore`, while a rule says to point tools at `build/`.
-- `gold_value` in `ts/test_wire_rungs.ts` hands out the frozen gold without
-  copying it. Nothing writes to it, and a write would throw, so nothing was
-  changed.
-- The first postmortem said `ts/test_all.ts`'s header is stale. That was
-  wrong: `tap_start` does notify itself `worker.tests` in debug mode.
+  the store never opens it. It writes nothing there. The store does not know
+  the log's name, and a database name may begin with `_`, so a fix either
+  teaches the store that name or changes the text.
+- Class C. `Store.db_open` sets WAL mode before `schema_apply` checks the
+  tables, so a file it refuses is left in WAL mode.
+- Class C. Since the move to the gold record, no Python test restores a
+  database larger than the old 10 MiB window. The store has no code that
+  depends on the size.
+- Class B. `agent.prompt_build` finds a prompt by running `sql_run` on the
+  store's own `_head` table, since `store.doc_head` throws for a universe
+  with no prompt. Whether that is a routine query is a reading of 1.28, as
+  in 2.15.
+- Class C. Several headers state shipped values that go stale when a
+  setting changes: those of `xsjs_start.ps1`, `xsjs_status.ps1`,
+  `xsjs_stop.ps1` and `powershell/test_powershell.ps1`, and `README.md`.
+- Class B. `xsjs_start.ps1`'s header still says it serves the engine, which
+  follows the readings of 1.20 that 2.16, 2.18 and 2.20 ask about.
+- Class B. The PowerShell scripts write their `.md` logs beside themselves,
+  kept out of git by `.gitignore`, while a rule says to point tools at
+  `build/`. Whether a log is one of the rule's intermediates is the
+  maintainer's reading.
+- Class C. A database file made before `_meta` lost its `seq` row keeps that
+  row, since the schema version stayed 1, and nothing reads it.
+- Class C. `boot.test_worker` and `page.test_page` call
+  `error_overlay.overlay_install()`, which the module already ran when it
+  loaded, so the second call adds no listener.
+- Class C. An image count of 2^53 + 2 stays untested: the decoders refuse
+  such an integer at read, and only a line built in the worker could carry
+  it.
+- Class C. Seven decisions of the first rework's TypeScript core and JSLB
+  package stay unconfirmed, each of little consequence: `jslb.text_not_json`
+  for `json_decode`; `blob_make` taking bytes only; `error_make` with no
+  line using `settings.names_full()`; the Python twin of 1.14; a received
+  cascade rebuilt in `ts/queue.ts`; the vectors' `_LINE_MAX` of 8192 and
+  `number=5`; and the TypeScript encoder writing a number between 2^53 and
+  1e21 that both decoders refuse at read (1.18).
+- Withdrawn: the first postmortem said `ts/test_all.ts`'s header is stale.
+  That was wrong: `tap_start` does notify itself `worker.tests` in debug
+  mode.
 
 Owed to the testing phase, not questions:
 
@@ -142,7 +172,7 @@ Files changed in this pass, unstaged:
   `ts/test_wire_rungs.ts`.
 - PowerShell: `xsjs_install.ps1`.
 
-## Class A: done, choice A assumed
+## Class A: choice A assumed
 
 ### 2.1 `test_settings_written` compares bytes the writer cannot produce
 
@@ -163,14 +193,14 @@ into a scratch root, then compared the bytes with the checkout's
 Why the maintainer: only to confirm. The other fixes tie a hand-edited file
 to the layout of `json.dumps`, which no rule asks for.
 
--- A. Compare the parsed file and its top-level key order with
+[ ] A. Compare the parsed file and its top-level key order with
 `harness.settings_copy()`, as `test_settings_replaced` beside it does. The
 unused `_SETTINGS_PATH` goes. Applied in `python/test_engine_system.py`.
 
-B. Rewrite `settings.json` in `json.dumps(indent=2)` form and keep the byte
+[ ] B. Rewrite `settings.json` in `json.dumps(indent=2)` form and keep the byte
 compare.
 
-C. Compare the bytes with
+[ ] C. Compare the bytes with
 `json.dumps(harness.settings_copy(), ensure_ascii=False, indent=2) + "\n"`,
 which repeats the writer's code.
 
@@ -192,9 +222,9 @@ Both files are whitelisted. The first rework scanned only the stubs.
 Why the maintainer: only to confirm. The files break the check as it
 stands.
 
--- A. Each `;` becomes a full stop. Applied in both files.
+[ ] A. Each `;` becomes a full stop. Applied in both files.
 
-B. Leave them for the testing phase to find.
+[ ] B. Leave them for the testing phase to find.
 
 ### 2.3 The TypeScript number scan may overflow V8's backtrack stack on a long string
 
@@ -211,11 +241,11 @@ entry only per escape. The first rework deferred this to a measurement.
 Why the maintainer: only to confirm. The two patterns match the same tokens,
 so no measurement can make the new one wrong.
 
--- A. `constants.number_token` becomes
+[ ] A. `constants.number_token` becomes
 `/"[^"\\]*(?:\\.[^"\\]*)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g`, and nothing
 else changes. Applied in `ts/jslb.ts`.
 
-B. Keep the old pattern until a test with a long string has run.
+[ ] B. Keep the old pattern until a test with a long string has run.
 
 ### 2.4 The stubs leave out names their modules export
 
@@ -257,15 +287,15 @@ Why the maintainer: whether a name that only its own suite reaches belongs
 in the stub decides what every later stub holds. 1.32 accepted built
 additions of this kind to the `queue`, `unittest` and `tap_producer` stubs.
 
--- A. Each stub declares every name its module exports, as the code
+[ ] A. Each stub declares every name its module exports, as the code
 declares it, with a one line comment each, and the wrong sentences are
 corrected. Applied in all eleven stubs; no code changed.
 
-B. A stub declares only what other modules use, and `API/README.md` gains "A
-name only the module's own suite reaches is exported but not declared." Only
+[ ] B. A stub declares only what other modules use, and `API/README.md` gains
+"A name only the module's own suite reaches is exported but not declared." Only
 the wrong sentences are fixed.
 
-C. Nothing is exported for its own suite alone: those names become private,
+[ ] C. Nothing is exported for its own suite alone: those names become private,
 and the suites test through the declared surface.
 
 ### 2.5 A pushed line's failure drops the tool's exception
@@ -283,13 +313,13 @@ Why the maintainer: only to confirm. The rules settle it: never swallow an
 error, and describe a cascade as nested `cause` entries with the first
 failure innermost.
 
--- A. `notification_replied` is raised with the `Failure`'s error as its
+[ ] A. `notification_replied` is raised with the `Failure`'s error as its
 cause: `raise ... from` in Python, `utility.cause_append` in TypeScript.
 Applied in `python/dispatch.py` and `ts/dispatch.ts`. Their tests
 `test_failure_notification` and `test_notification_failure` now check the
 cause.
 
-B. The server writes such a failure as its own `error` line, and raises
+[ ] B. The server writes such a failure as its own `error` line, and raises
 `notification_replied` only for a plain reply.
 
 ### 2.6 The `universe` update trigger refuses a rename that keeps its world
@@ -307,12 +337,12 @@ use `NEW.name`.
 Why the maintainer: only to confirm. 1.12's selected option refuses only
 ambiguous content.
 
--- A. The update trigger excludes the row by `OLD.name`, in
+[ ] A. The update trigger excludes the row by `OLD.name`, in
 `API/sql/metaverse.sql` and in its copy `_METAVERSE_DDL` in
 `python/main_loop.py`. `test_world_ambiguous` in `python/test_main_loop.py`
 also renames `a` to `d`, keeping `w`, and expects it to pass. Applied.
 
-B. Leave it: a script writes the rename and the world in two statements.
+[ ] B. Leave it: a script writes the rename and the world in two statements.
 
 ### 2.7 The line catalogue is out of step with the code
 
@@ -333,17 +363,17 @@ refuse every MCP request.
 Why the maintainer: only to confirm. The other choices change code in both
 languages, or the table's scope, to fit a table.
 
--- A. The catalogue follows the code. Both `mcp` rows read "request or
+[ ] A. The catalogue follows the code. Both `mcp` rows read "request or
 push", and a header sentence says when each applies. Four rows are added:
 `settings.put` on `ui-ai` and on `ai`, and `worker.console_opened` and
 `worker.settings_put` as wakes. Applied in `API/ts/lines.d.ts`.
 
-B. The code follows the catalogue: every `mcp` line becomes a push, its
+[ ] B. The code follows the catalogue: every `mcp` line becomes a push, its
 JSON-RPC response a push of its own matched by the JSON-RPC id. This changes
 `ts/mcp.ts`, its use of `ts/queue.ts`, `python/engine_mcp.py` and their
 tests.
 
-C. As A for `mcp`, but the table lists only lines that cross a thread, so
+[ ] C. As A for `mcp`, but the table lists only lines that cross a thread, so
 the `ai` row and the two wakes are not added.
 
 ### 2.8 The `first` wire rung compared the gold with itself
@@ -360,15 +390,15 @@ blobs, and payload keys exactly `settings` and `test_settings`.
 Why the maintainer: the handoff asked for the comparison. A real comparison
 needs the Python driver to take part.
 
--- A. The comparison goes, and the other checks stay. Applied in
+[ ] A. The comparison goes, and the other checks stay. Applied in
 `ts/test_wire_rungs.ts`.
 
-B. Make it real: the rung writes the SHA-256 of the gold's JSON text as its
+[ ] B. Make it real: the rung writes the SHA-256 of the gold's JSON text as its
 diagnostic, and `python/test_wire.py` compares it with the digest of the
 text it wrote. This holds only while both languages write that JSON byte for
 byte alike.
 
-C. Keep it.
+[ ] C. Keep it.
 
 ### 2.9 Two store behaviours lost their tests in the move to the gold record
 
@@ -387,7 +417,7 @@ It did not cover them. `test_turns_append` appends to one scene only, and
 Why the maintainer: only to confirm. The record says the coverage moved, and
 it did not.
 
--- A. Applied in `python/test_substrate.py`:
+[ ] A. Applied in `python/test_substrate.py`:
 
 - `test_turns_append` appends one turn to `/metaverse/elsewhere/1` and gets
   `n` 1 there, with the first scene unchanged.
@@ -395,7 +425,7 @@ it did not.
   puts and gets version 1 for it. The arrival's second put still gets
   version 2.
 
-B. Leave the coverage to the testing phase.
+[ ] B. Leave the coverage to the testing phase.
 
 ### 2.10 `wsl --install -d` never reads its exit code
 
@@ -411,14 +441,14 @@ Why the maintainer: only to confirm. 1.11's selected option for the two
 `wsl --list` calls, "Any nonzero exit is a hard error now, revisited if a
 normal state turns out to exit nonzero", decides the same case here.
 
--- A. Right after the install, a nonzero `$LASTEXITCODE` throws `exit_code`
+[ ] A. Right after the install, a nonzero `$LASTEXITCODE` throws `exit_code`
 with the command and the code, as `xsjs_util_get_wsl` does. No new string.
 Applied in `xsjs_install.ps1`.
 
-B. As A, with a new string `distribution_install_failed`, "Installing {0}
+[ ] B. As A, with a new string `distribution_install_failed`, "Installing {0}
 failed (exit code {1}).".
 
-C. Leave it.
+[ ] C. Leave it.
 
 ### 2.11 Texts that misstate the project
 
@@ -442,7 +472,7 @@ Why the maintainer: only to confirm. The rule against unrequested
 documentation does not cover text that exists and is wrong, and the rules
 forbid keeping code because it exists.
 
--- A. All corrected and applied:
+[ ] A. All corrected and applied:
 
 - `README.md` gets "Ensures Python 3 and OpenSSL are installed in Linux with
   apt." and "Builds ttyd in Linux from its pinned source release and
@@ -453,10 +483,166 @@ forbid keeping code because it exists.
   and "The turn handler was called before it was registered.", in
   `i18n/en-US.json` and in the gold.
 
-B. As A, but the lane table of `API/README.md` goes, `lines.d.ts` being the
+[ ] B. As A, but the lane table of `API/README.md` goes, `lines.d.ts` being the
 catalogue.
 
-C. Leave them all.
+[ ] C. Leave them all.
+
+### 2.33 Five PowerShell files begin with two byte order marks
+
+Class A. Importance 3: the lint check refuses each of them at its first
+character, so every lint run, smoke included, would fail at the first of
+them it reads. What Windows PowerShell 5.1 does with the second mark is not
+measured.
+
+Found in this rewrite, while checking the header of `xsjs_start.ps1`. These
+files begin with the bytes `ef bb bf ef bb bf`, the UTF-8 byte order mark
+twice:
+
+- `powershell/en-US/i18n.psd1`;
+- `powershell/test_powershell.ps1`;
+- `powershell/xsjs_util.ps1`;
+- `xsjs_install.ps1`;
+- `xsjs_start.ps1`.
+
+`powershell/test_lint.ps1`, `xsjs_status.ps1` and `xsjs_stop.ps1` have one
+mark each. `non_ascii_check` in `python/test_posix.py` decodes a PowerShell
+file with `utf-8-sig`, which drops only the first mark, and the second is
+U+FEFF, which `_NON_ASCII_ALLOWED` does not hold. Where the second mark came
+from was not looked for, since that would mean reading git history.
+
+Why the maintainer: only to confirm. A mark is invisible, the rules call
+unintentional invisibility a bug, and the check refuses the files as they
+stand.
+
+[ ] A. The second mark goes from each of the five files, which keep one, as
+the other three PowerShell files do. Not applied.
+
+[ ] B. Leave them for the testing phase to find.
+
+### 2.34 The whitelist misses `API/sql/*.sql` and `html/engine.css`
+
+Class A. Importance 2: the comments of four source files meet no check, and
+the three SQL files are stubs of the API the maintainer reviews.
+
+`python/reformat_whitelist.txt` matches no `.sql` or `.css` file, and
+`python/reformat_table.json` has no row for either:
+
+- `API/sql/metaverse.sql`, `API/sql/substrate.sql` and `API/sql/verbose.sql`
+  hold 24 lines of `--` comments. Below a header, several comments run over
+  more than one line, and some hold `_` and `$` outside code spans, which
+  the comment check refuses.
+- `html/engine.css` holds `/* */` comments, which `css_scan` in
+  `python/test_posix.py` already reads inside an HTML file.
+
+`_commands_run` in `python/reformat.py` runs a row's command on the files of
+its system whatever the command holds, so a Linux row with no checker would
+run its first file as a command. No SQL formatter is on the path: `sqlfluff`,
+`sql-formatter`, `pg_format` and `sqlformat` were looked for.
+
+Why the maintainer: only to confirm. The rules settle the whitelist: a
+source file it misses is a discrepancy to fix. They leave the rows open,
+since a SQL formatter would need a package the maintainer installs.
+
+[ ] A. The whitelist gains `API/sql/*.sql` and `html/*.css`, and the table
+two rows. Not applied:
+
+- `.css`: the `prettier` checker and formatter of the `.html` row,
+  `utf-8`, `linux`, and comments `css`, a new `case "css"` in
+  `comments_find` that runs `css_scan` over the whole text;
+- `.sql`: no checker, formatter or linter, `utf-8`, `linux`, and comments
+  `sql`, a new `case "sql"` and `sql_scan` that find `--` comments outside
+  `'` and `"` literals;
+- `_commands_run` skips a row whose command is empty, with a test in
+  `python/test_reformat.py`;
+- `python/test_test_posix.py` gains a test of each new lexer;
+- the comments of the three `.sql` files are rewritten to the check's form:
+  one line each below the header, with names in code spans.
+
+[ ] B. As A, but the `.sql` row has a SQL formatter, named and installed by
+the maintainer, and `_commands_run` stays as it is.
+
+[ ] C. As built: no check reads the four files.
+
+### 2.35 `python/seed/prompt.json` misstates `engine.store`
+
+Class A. Importance 1: the AI is told its scripts have fewer operations than
+they do. The server seeds the prompt into `metaverse`, and outside the tests
+only the agent, part of the program 2.16 defers, reads it.
+
+The prompt says "`engine.store` has the same operations as the database
+tools, except that a KV value is bytes". `ScriptStore` also has `db_list`,
+`turn_append`, `turn_list` and `transaction_run`, which no tool of
+`API/mcp/tools.json` has.
+
+Why the maintainer: only to confirm. The sentence is wrong as the code
+stands. 2.15's choice B would rewrite it anyway, and 2.22's choice A drops
+the prompt's handle sentence.
+
+[ ] A. The sentence reads "`engine.store` has the operations of the database
+tools, and `db_list`, `turn_append`, `turn_list` and `transaction_run` too,
+except that a KV value is bytes", and the rest of the prompt stays. Not
+applied.
+
+[ ] B. Leave it until 2.15 is answered.
+
+### 2.36 Two TypeScript stubs still differ from their code after 2.4
+
+Class A. Importance 1: as in 2.4, the stubs are the API the maintainer
+reviews and nothing compiles them. Nothing runs differently.
+
+- `ts/substrate.ts` and `ts/worker_ai.ts` each export a type
+  `HandlerRegister`, "Registers the handler of one line type and version",
+  which `API/ts/substrate.d.ts` and `API/ts/worker_ai.d.ts` do not declare.
+  The stubs write the type out in each `register` parameter instead: that of
+  `Store.handlers_register`, and those of `settings_register`,
+  `console_register` and `fault_register`. No other module uses either
+  type. 2.4's choice A added `page.HandlerRegister` to `API/ts/page.d.ts`
+  only.
+- `API/ts/worker_ai.d.ts` says `settings_register` "Relays the UI's
+  `settings.put` to the server, `live` changed first". `tap_start` also
+  registers a sender with `settings.sender_register` that notifies the
+  worker's own `settings.put` to itself, and the same handler relays it.
+  The code's comment reads "Registers the relay of a `settings.put` notice
+  to the server as a request."
+
+A scan of every `export` of `ts/*.ts` against its stub found no other name
+missing.
+
+Why the maintainer: only to confirm. 2.4's answer decides the first part:
+under its choice B, a name no other module uses is not declared.
+
+[ ] A. Both stubs declare `HandlerRegister` as the code does, with its one
+line comment, and type their `register` parameters with it. The comment of
+`settings_register` reads "Relays a `settings.put` notice, the UI's or this
+thread's own, to the server, `live` changed first." Not applied.
+
+[ ] B. Only the comment of `settings_register` changes, as in A, since no
+other module uses `HandlerRegister`.
+
+### 2.37 `gold_value` in `ts/test_wire_rungs.ts` hands out the frozen gold
+
+Class A. Importance 1: nothing writes a gold value today, and a write would
+fail loudly.
+
+`gold_value` returns the value of `harness.gold_get`, which the harness
+froze deeply, without a `structuredClone`. The rungs pass parts of it, such
+as `echo_payload`, a commit's `payload` and `mcp_call.arguments`, to the
+line builders. The first rework's handoff asks for a copy "before a part is
+set or before it is passed to code that may change it". No rung sets a
+part: `jslb.line_make` copies a payload's entries into a new object, the
+queue sets ids on the new header only, and `Client.tool_call` wraps
+`arguments` in a new `params`. A write to a frozen value throws a
+`TypeError` in the bundle's strict code.
+
+Why the maintainer: the first postmortem left it open as a finding. It was
+drafted as class A and dropped to reach 32 questions.
+
+[ ] A. No change: the frozen gold is the loud failure the rules ask for, and
+the copy is owed only before a write. There is nothing to apply.
+
+[ ] B. `gold_value` returns `structuredClone(harness.gold_get(...))`, as the
+helper of every migrated test module does.
 
 ## Class B: input required
 
@@ -503,20 +689,20 @@ not recorded. The rules ask that a deferred design be written in full beside
 its deferral, and that nothing concrete exist ahead of the prose that
 describes it. Both now point at a file that only git holds.
 
-A. Keep it deleted. Once this test is answered, a new plan is written from
+[ ] A. Keep it deleted. Once this test is answered, a new plan is written from
 the answers, the code and the records, including the designs carried by this
 test, and the citations are repointed to it in the same change. Until then
 they stay. The design of 5.4 is redone when 1.8's "enabled later" comes.
 
-B. Restore it as committed, with `git checkout -- TAP_PLAN.md` (the
+[ ] B. Restore it as committed, with `git checkout -- TAP_PLAN.md` (the
 maintainer's command), and answer its 12.2 points beside this test.
 
-C. Keep it deleted and remove the citations now. Each design a citation
+[ ] C. Keep it deleted and remove the citations now. Each design a citation
 stands for is written into the header of its module's stub, and
 `API/README.md`'s rule reads "A file changes only by the maintainer's
 request."
 
-D. Keep it deleted and only remove the citations. The designs stay in git
+[ ] D. Keep it deleted and only remove the citations. The designs stay in git
 history and `tmp/`.
 
 ### 2.13 A push the server's store cannot apply ends the server
@@ -545,19 +731,19 @@ Why the maintainer: 1.7 calls the sync lossy, while the rules forbid
 swallowing an error or giving a default. Nothing says what the server does
 with a push its store refuses.
 
-A. As built: a refused push is a hard error, logged, and the server ends.
+[ ] A. As built: a refused push is a hard error, logged, and the server ends.
 The resync of 1.17, when built, runs at the start of each connection, before
 the server reads any push.
 
-B. A refused push counts as one more lost line, for push types only:
+[ ] B. A refused push counts as one more lost line, for push types only:
 `main_loop._line_serve` logs the failure and its cascade with `verbose.log`
 and reads on. The rules gain that exception on the maintainer's word.
 
-C. The server answers a refused push with an `error` line carrying the
+[ ] C. The server answers a refused push with an `error` line carrying the
 cascade and keeps serving, and the browser's AI repairs the damage over the
 MCP. This needs a new row in `API/ts/lines.d.ts`.
 
-D. The handlers apply what they can: `db.create` of an existing database
+[ ] D. The handlers apply what they can: `db.create` of an existing database
 opens it, and a push into a missing database creates it first. Every other
 refusal stays a hard error.
 
@@ -592,7 +778,7 @@ of 1.16's "The max message size is based on the max DB size", which no
 record settles. The fix changes either the wire catalogue and the server's
 handlers, or adds a refusal to the store.
 
-A. Each push carries its data as blob 1, as `kv.put` does:
+[ ] A. Each push carries its data as blob 1, as `kv.put` does:
 
 - `doc.put` carries the canonical text, with payload `{db, id}`;
 - `turn.append` carries the content's canonical text, with `{scene, role}`;
@@ -602,11 +788,11 @@ The server's handlers read blob 1, bounded by `blob_max`. The files are
 `ts/substrate.ts`, `python/engine_doc.py`, `python/engine_turn.py`,
 `python/engine_sql.py` and `API/ts/lines.d.ts`.
 
-B. Before its transaction starts, the store refuses an operation whose push
+[ ] B. Before its transaction starts, the store refuses an operation whose push
 line would pass `line_max`, as a new `substrate.push_over`. Nothing commits
 that cannot be sent.
 
-C. As built.
+[ ] C. As built.
 
 ### 2.15 The AI's scripts get 15 of the store's methods
 
@@ -630,16 +816,16 @@ databases unless the maintainer requires it" and 1.28's "Exposing the
 existence of the DB beyond routine SQL queries is an API violation" pull
 apart here. Only the maintainer can say whether 1.28 is that requirement.
 
-A. Keep the 15. 1.28 is the requirement the rule allows for, and what is
+[ ] A. Keep the 15. 1.28 is the requirement the rule allows for, and what is
 withheld is the store's machinery and the SQLite image, which 1.7 keeps out
 of the protocol.
 
-B. Scripts get the whole `substrate.Store` again. `ScriptStore`,
+[ ] B. Scripts get the whole `substrate.Store` again. `ScriptStore`,
 `store_methods` and `store_routine` go from `ts/script.ts` and
 `API/ts/script.d.ts`, the two tests of the restriction go, and the
 `engine.store` sentence of `python/seed/prompt.json` is rewritten.
 
-C. The 15 plus `db_snapshot` and `db_restore`, so whole databases move as
+[ ] C. The 15 plus `db_snapshot` and `db_restore`, so whole databases move as
 opaque blobs, as 1.7 allows. The other five stay withheld.
 
 ### 2.16 The deferred program on the AI thread has lost its plan
@@ -674,16 +860,16 @@ Why the maintainer: the rule that a deferred design is written in full
 beside its deferral pulls against the deletion of the plan that held it. The
 key's path is a design that a wrong guess could turn back into 1.20's leak.
 
-A. Record the assembly as the records give it, in the header of
+[ ] A. Record the assembly as the records give it, in the header of
 `API/ts/worker_ai.d.ts`, naming the key's line and the start of a resync as
 not yet designed. No code changes.
 
-B. As A, and design the key's part now. `provider.set` is a SERVER -> AI
+[ ] B. As A, and design the key's part now. `provider.set` is a SERVER -> AI
 push with payload `lines.ProviderInfo` and the key as blob 1.
 `jslb.line_render` shows a blob only as a tag, so neither `WireTap`'s note
 nor the overlay shows the key, and `provider.key_set` keeps it.
 
-C. Leave the design in the gitignored records only, and design the assembly
+[ ] C. Leave the design in the gitignored records only, and design the assembly
 afresh with the program's first suite, by 1.20's "one test suite at a time".
 
 ### 2.17 A fault before `worker_ai.tap_start` never reaches the server
@@ -712,19 +898,19 @@ Why the maintainer: the fix reorders a bring-up that two packages' stubs
 describe. The smaller fix changes when `tap.start` is answered, which the
 Python drivers see.
 
-A. `ts/boot.ts` reads `tap.start`'s settings, calls `settings.settings_set`
+[ ] A. `ts/boot.ts` reads `tap.start`'s settings, calls `settings.settings_set`
 and registers the report function as soon as the first line arrives.
 `worker_ai.tap_start` does neither any more. This changes `ts/worker_ai.ts`,
 `API/ts/worker_ai.d.ts` and `API/ts/boot.d.ts`. The reply still means ready,
 and a fault during the platform's start reaches the bootstrap waiting for
 that reply, which fails with `bootstrap.reply_unexpected`.
 
-B. Only `boot` changes: `tap_start` runs at `tap.start` and answers it
+[ ] B. Only `boot` changes: `tap_start` runs at `tap.start` and answers it
 before the test platform exists, and the platform opens inside the
 `worker.tests` task. A server line with a blob over `overflow_bytes`,
 arriving before the cache has its slots, would then fail.
 
-C. As built: such a fault shows on the page only, and the Python driver's
+[ ] C. As built: such a fault shows on the page only, and the Python driver's
 timer ends the run.
 
 ### 2.18 The provider key and file still reach every root, unread
@@ -749,20 +935,20 @@ Why the maintainer: what the deferred program keeps (2.16) is a design
 choice, and the reading of 1.20 that removed the provider from the bring-up
 is unconfirmed.
 
-A. Stop only the key and the file. The `WSLENV` forward goes from
+[ ] A. Stop only the key and the file. The `WSLENV` forward goes from
 `xsjs_start.ps1`, and `provider.json` leaves `powershell.root_files` in
 `settings.json`, `API/settings.json` and the samples of
 `python/test_settings.py` and `ts/test_settings.ts`. The `provider`
 settings, the seed and the TypeScript provider modules stay for the deferred
 program.
 
-B. Remove the whole residue: A, plus the `provider` settings object (in both
-settings files, `_PROVIDER_TYPES` in `python/settings.py`, and
-`ts/settings.ts`), `_provider_seed`, `python/seed/provider_script.json` and
-the `XSJS_PROVIDER_KEY` environments of `python/test_bootstrap.py`. The
-TypeScript provider modules follow 2.16.
+[ ] B. Remove the whole residue: A, plus the `provider` settings object (in
+both settings files, `_PROVIDER_TYPES` in `python/settings.py`, and
+`ts/settings.ts`), `_provider_seed`, `python/seed/provider_script.json` and the
+`XSJS_PROVIDER_KEY` environments of `python/test_bootstrap.py`. The TypeScript
+provider modules follow 2.16.
 
-C. Keep all of it until the deferred program returns.
+[ ] C. Keep all of it until the deferred program returns.
 
 ### 2.19 A malformed line runs its handler before the dispatcher refuses it
 
@@ -789,7 +975,7 @@ Why the maintainer: no item asks for this order, and the store is a lossy
 accelerator whose server exits on the fault anyway. The fix is a new
 registration shape across every engine of both languages.
 
-A. Refuse before the call:
+[ ] A. Refuse before the call:
 
 - `handler_register(type, version, fn, kind)` in both languages and their
   stubs, where `kind` is `"push"`, `"request"` or `"either"` (for `mcp`),
@@ -803,10 +989,10 @@ A. Refuse before the call:
 - Every `handlers_register` and `mcp.Server.wake_register` pass the kind.
 - TypeScript's wakes keep their own `r` check.
 
-B. As A, but the kinds are one table by type inside each dispatcher, copied
+[ ] B. As A, but the kinds are one table by type inside each dispatcher, copied
 from the catalogue, and `handler_register` keeps its signature.
 
-C. As built. The headers of both dispatch stubs say the form is checked
+[ ] C. As built. The headers of both dispatch stubs say the form is checked
 after the handler runs.
 
 ### 2.20 `python/bootstrap.html` and `python/xsjs_screenshot.py` drive a bootstrap that is gone
@@ -833,17 +1019,17 @@ Why the maintainer: 1.41's selected option says "`python/bootstrap.html`
 stays", and 1.20's says "no other programs". The first may mean the file
 stays, or only that its long lines stay unedited.
 
-A. Delete `python/bootstrap.html`, `python/xsjs_screenshot.py` and
+[ ] A. Delete `python/bootstrap.html`, `python/xsjs_screenshot.py` and
 `python/xsjs_screenshot_wsl.py` with `rm`, together with the whitelist line
 `python/*.html`, which would then match no file. Screenshots stay with
 `test_browser.py`.
 
-B. Keep all three, unchanged and unrun.
+[ ] B. Keep all three, unchanged and unrun.
 
-C. Keep all three, each header gaining one line saying it drives the retired
-line processor bootstrap and nothing runs it.
+[ ] C. Keep all three, each header gaining one line saying it drives the
+retired line processor bootstrap and nothing runs it.
 
-D. Rewrite `xsjs_screenshot.py` for the current bring-up (`html/test.html`
+[ ] D. Rewrite `xsjs_screenshot.py` for the current bring-up (`html/test.html`
 on a root made as `test_wire.py` makes one, ttyd from
 `powershell.ttyd_build`) and delete `bootstrap.html`.
 
@@ -868,20 +1054,20 @@ Why the maintainer: keeping, hardening or removing the function each builds
 the deferred resync a different way, and the plan that held the caller was
 deleted.
 
-A. Keep it and write its contract beside it, as one comment line in
+[ ] A. Keep it and write its contract beside it, as one comment line in
 `API/python/engine_db.pyi` and `python/engine_db.py`: "The caller writes
 every line before it reads the wire again, so no handler prunes a file a
 line names."
 
-B. Keep it and make it safe on its own. At its first `next` it hard links
+[ ] B. Keep it and make it safe on its own. At its first `next` it hard links
 each listed cache file to a name of its own under `<root>/cache`, and the
 `db.file` lines name the links. The caller removes each link once its line
 is written, and `kv_check` leaves those names alone.
 
-C. Remove `restore_lines`, its stub entry and `TestRestoreLines` until the
+[ ] C. Remove `restore_lines`, its stub entry and `TestRestoreLines` until the
 resync is designed again. `Store.db_snapshot` stays.
 
-D. Keep it as built, with its contract only in the record.
+[ ] D. Keep it as built, with its contract only in the record.
 
 ### 2.22 A script cannot read a value over `overflow_bytes`
 
@@ -902,18 +1088,18 @@ Why the maintainer: whether a handle may reach a script at all is a reading
 of 1.28's "Exposing the existence of the DB beyond routine SQL queries is an
 API violation". One choice changes the store's contract in both languages.
 
-A. `store_routine` binds a `kv_get` that reads a cached value whole, as
+[ ] A. `store_routine` binds a `kv_get` that reads a cached value whole, as
 `value_text` does, so `data` is always bytes. The prompt drops the handle
 sentence, and the store is unchanged.
 
-B. `substrate.Store.kv_get` always returns bytes, in both languages, and the
-handle form leaves `KvValue`. `text_read`, `value_text` and the `kv.get`
+[ ] B. `substrate.Store.kv_get` always returns bytes, in both languages, and
+the handle form leaves `KvValue`. `text_read`, `value_text` and the `kv.get`
 handler stop reading the cache.
 
-C. `ScriptStore` gains `cache_read(handle, offset, length)` on the store's
+[ ] C. `ScriptStore` gains `cache_read(handle, offset, length)` on the store's
 cache, and the prompt says how a script reads a handle.
 
-D. As built.
+[ ] D. As built.
 
 ### 2.23 1.34 left seven references to other modules in the TypeScript tests
 
@@ -947,7 +1133,7 @@ item named to `queue`, `mcp`, `tools_browser` and `agent`, and a class to
 `harness`. It would also do so before `provider.set`'s design (2.16) says
 where the key lives.
 
-A. Finish both:
+[ ] A. Finish both:
 
 - `TaskQueue`'s constructor takes `dispatch_run` and `sink_attach` takes
   `log`; `ts/page.ts` and `ts/worker_ai.ts` pass `dispatch.line_dispatch`
@@ -962,9 +1148,9 @@ A. Finish both:
   `gold_get`), and the module's three functions call one instance of it.
   `ts/test_harness.ts` tests the throw on an instance of its own.
 
-B. The changes of A without `ValueKeeper`, so the throw stays untested.
+[ ] B. The changes of A without `ValueKeeper`, so the throw stays untested.
 
-C. Neither:
+[ ] C. Neither:
 
 - The headers of `API/ts/unittest.d.ts` and `API/ts/harness.d.ts` gain "A
   test may also call the namespace that keeps state its module reaches with
@@ -991,15 +1177,15 @@ Why the maintainer: 1.8 has the server stop after an exception, and the
 first rework judged an invalid message not to be one. Which client mistakes
 stop the test protocol is the protocol owner's choice, in both servers.
 
-A. Both stop the server. The -32600 answer records a failure, so
+[ ] A. Both stop the server. The -32600 answer records a failure, so
 `line_handle` returns a `dispatch.Failure`. A notification other than
 `notifications/initialized` throws a new `mcp.notification_unknown` "The
 notification {0} is not served.", with no answer. Both stubs say so.
 
-B. Only the unknown notification stops the server, as in A. The -32600
+[ ] B. Only the unknown notification stops the server, as in A. The -32600
 answer stays as built.
 
-C. Both as built. The stub headers add that a notification of any method is
+[ ] C. Both as built. The stub headers add that a notification of any method is
 accepted without a check.
 
 ### 2.25 A non-finite number from a script is stored as `null` or fails unnamed
@@ -1024,16 +1210,16 @@ Why the maintainer: the rule that the JSLB decoders are the single door for
 bad numbers leaves a value that never passes a decoder unchecked. That
 conflicts with the rule that nothing gives a default.
 
-A. `ts/jslb.ts` exports the encoder's refusal as `jslb.number_check(value)`,
-which its `json_write` uses. `number_canonical` calls it first, so a stored
-document or turn refuses a non-finite number as `jslb.number_refused` inside
-the JSLB layer. `sql_run` stays as it is.
+[ ] A. `ts/jslb.ts` exports the encoder's refusal as
+`jslb.number_check(value)`, which its `json_write` uses. `number_canonical`
+calls it first, so a stored document or turn refuses a non-finite number as
+`jslb.number_refused` inside the JSLB layer. `sql_run` stays as it is.
 
-B. `number_canonical` refuses a non-finite number itself, as a new
+[ ] B. `number_canonical` refuses a non-finite number itself, as a new
 `substrate.number_refused`, and the rule names values from scripts as the
 one exception to the single door.
 
-C. As built.
+[ ] C. As built.
 
 ### 2.26 The PowerShell tests' five constants are read from `test_settings.json`
 
@@ -1060,7 +1246,7 @@ Why the maintainer: two of the maintainer's texts, 1.34 and 1.39 with its
 rule, name different files for the same keys, and only the maintainer words
 the project rules.
 
-A. The rule stands:
+[ ] A. The rule stands:
 
 - `lint_extensions` goes, and `test_lint.ps1` takes the name of every
   `windows` row from `python/reformat_table.json`.
@@ -1071,13 +1257,13 @@ A. The rule stands:
   `ts/settings.ts` and `API/ts/settings.d.ts`, and the samples of both
   settings tests.
 
-B. As A, but `lint_extensions` also moves into `settings.json` and keeps its
-copy of the table.
+[ ] B. As A, but `lint_extensions` also moves into `settings.json` and keeps
+its copy of the table.
 
-C. As built, and the rule gains "those of the PowerShell tests in
+[ ] C. As built, and the rule gains "those of the PowerShell tests in
 `test_settings.json`".
 
-D. As C, but `lint_extensions` goes as in A.
+[ ] D. As C, but `lint_extensions` goes as in A.
 
 ## Class C: little long term consequence
 
@@ -1103,18 +1289,18 @@ so a sweep between two reads of one blob would delete it.
 Why the maintainer: 1.28 gives each store its own maintenance but names no
 time for it, and when it runs decides what it may delete.
 
-A. Each store runs `kv_check` once at its start, before the first line is
+[ ] A. Each store runs `kv_check` once at its start, before the first line is
 read, when no stream file can be in use: in `main_loop._prepare_run` after
 the databases open, and in the browser's store when it opens. `db_restore`
 also prunes the names only the replaced copy held, the twin of `db_drop`.
 
-B. `db_restore` ends with `kv_check`'s sweep over every database, in both
+[ ] B. `db_restore` ends with `kv_check`'s sweep over every database, in both
 languages, and nothing else changes.
 
-C. Leave `kv_check` without a caller until a maintenance design exists. The
+[ ] C. Leave `kv_check` without a caller until a maintenance design exists. The
 deferred program's design gains a sweep at its start and after each resync.
 
-D. Remove `kv_check` from both stores, their stubs and their tests until
+[ ] D. Remove `kv_check` from both stores, their stubs and their tests until
 then.
 
 ### 2.28 1.23's two harness faults are closed only in part
@@ -1147,7 +1333,7 @@ Why the maintainer: the selected options named only blocking the signal and
 moving the `open`, which is what was built. Closing the gaps replaces the
 signal and the file, and both designs were only in gitignored records.
 
-A. Close both:
+[ ] A. Close both:
 
 - The stub sends no signal. `failure_send` keeps the first failure under
   its condition, and a new `StubServer.failure_check()` raises
@@ -1164,9 +1350,9 @@ A. Close both:
 - The parent drains that pipe and the output pipe together with `select`,
   and returns the report as the test's assertion text. `ending.txt` goes.
 
-B. Close only the `SIGUSR1` gap, as in A.
+[ ] B. Close only the `SIGUSR1` gap, as in A.
 
-C. Keep both as built, with the designs recorded here.
+[ ] C. Keep both as built, with the designs recorded here.
 
 ### 2.29 The failure texts of `python/devtools.py` and the drivers are plain English, outside `i18n`
 
@@ -1188,15 +1374,15 @@ are among "most modules". One guess leaves texts that cannot be translated.
 The other makes `devtools.py` depend on a project module, and on its copy in
 every root.
 
-A. Keep plain English in `devtools.py` and in the drivers' own failure
+[ ] A. Keep plain English in `devtools.py` and in the drivers' own failure
 texts. The rules gain, beside the `i18n` import rule: "the test drivers and
 `python/devtools.py` write their own failure texts in plain English".
 
-B. `devtools.py`'s 24 texts become `devtools.*` keys in `i18n/en-US.json`,
+[ ] B. `devtools.py`'s 24 texts become `devtools.*` keys in `i18n/en-US.json`,
 read through `from internationalization import i18n`, and its header loses
 "Standard library only". The drivers stay in plain English.
 
-C. As B, and every `CheckFailed` text of `test_browser.py` and
+[ ] C. As B, and every `CheckFailed` text of `test_browser.py` and
 `test_wire.py` also becomes a `test_browser.*` or `test_wire.*` key.
 
 ### 2.30 `bind_address` is both where ttyd binds in Linux and where the Windows port proxy connects
@@ -1220,14 +1406,14 @@ Why the maintainer: whether this is one address or two is a design choice
 that no item makes. A second setting that nobody asked for would be an
 Accidental-Requirement if the address never changes.
 
-A. As built: one loopback setting, with its comments explaining why.
+[ ] A. As built: one loopback setting, with its comments explaining why.
 
-B. A new `powershell.proxy_address`, "127.0.0.1", for `connectaddress` and
+[ ] B. A new `powershell.proxy_address`, "127.0.0.1", for `connectaddress` and
 the removal match. It goes through `_POWERSHELL_TYPES`, `ts/settings.ts`,
 `API/ts/settings.d.ts`, both settings files and the samples of the settings
 tests.
 
-C. The proxy connects to a literal `127.0.0.1`, a mode address like the
+[ ] C. The proxy connects to a literal `127.0.0.1`, a mode address like the
 listen addresses, and `bind_address` stays ttyd's alone.
 
 ### 2.31 `i18n` is renamed in Python only
@@ -1246,13 +1432,14 @@ import.
 
 Why the maintainer: "rename the module" does not say which language.
 
-A. Python only, as built.
+[ ] A. Python only, as built.
 
-B. TypeScript too: `ts/internationalization.ts` keeping its global `i18n()`,
-`API/ts/internationalization.d.ts`, `ts/test_internationalization.ts`, and
-every module list, page and whitelist line that names them.
+[ ] B. TypeScript too: `ts/internationalization.ts` keeping its global
+`i18n()`, `API/ts/internationalization.d.ts`,
+`ts/test_internationalization.ts`, and every module list, page and whitelist
+line that names them.
 
-C. As B, and the directory `i18n/` becomes `internationalization/`.
+[ ] C. As B, and the directory `i18n/` becomes `internationalization/`.
 
 ### 2.32 `rsa:2048` stays a literal in `xsjs_start.ps1` while `certificate_days` is a setting
 
@@ -1269,7 +1456,7 @@ Why the maintainer: 1.39's "move remaining PS constants there" does not say
 whether a flag's value is a constant. Either reading keeps the script
 working.
 
-A. A new setting `certificate_key`, "rsa:2048":
+[ ] A. A new setting `certificate_key`, "rsa:2048":
 
 - after `certificate_days` in `settings.json` and `API/settings.json`;
 - typed in `API/ts/settings.d.ts`, `ts/settings.ts` and
@@ -1277,4 +1464,4 @@ A. A new setting `certificate_key`, "rsa:2048":
 - read into `$certificate_key_` in `powershell/xsjs_util.ps1`, and passed as
   `'-newkey', $certificate_key_` in `xsjs_start.ps1`.
 
-B. As built.
+[ ] B. As built.
