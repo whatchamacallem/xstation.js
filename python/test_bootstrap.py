@@ -220,7 +220,7 @@ class VerboseDouble:
         return self.call_answer("exec", level, argv, argv_verbose)
 
 
-# A text of this module's gold, each `{n}` replaced by the n-th value.
+# A text of this module's gold, each `{n}` replaced by the value at `n`.
 def _text_get(name: str, *values: str) -> str:
     text: str = harness.gold_get(f"{_GOLD_ID}.texts.{name}")
     for number, value in enumerate(values):
@@ -601,7 +601,7 @@ class TestFirst(unittest.TestCase):
         )
 
     # Runs a debug root whose test settings are refused, after the prepare.
-    def tests_refused(
+    def refused_check(
         self, made: ScratchRoot, kind: str, expected: str
     ) -> None:
         _loop_write(made.root, _LOOP_TEXT)
@@ -673,7 +673,7 @@ class TestFirst(unittest.TestCase):
         path = os.path.join(made.root, _TESTS_NAME)
         os.remove(path)
         expected = str(FileNotFoundError(2, "No such file or directory", path))
-        self.tests_refused(made, "FileNotFoundError", expected)
+        self.refused_check(made, "FileNotFoundError", expected)
 
     # A test settings file that is not an object is refused, naming it.
     def test_tests_object(self) -> None:
@@ -682,14 +682,14 @@ class TestFirst(unittest.TestCase):
             _tests_write(made.root, text)
             path = os.path.join(made.root, _TESTS_NAME)
             expected = _text_get("bootstrap_tests_not_object", path)
-            self.tests_refused(made, "ValueError", expected)
+            self.refused_check(made, "ValueError", expected)
 
     # A test settings file that is not JSON is refused by the decoders.
     def test_tests_garbled(self) -> None:
         made = _root_make(self, True)
         _tests_write(made.root, _GARBLED_TEXT)
         expected = _text_get("jslb_text_not_json")
-        self.tests_refused(made, "jslb.WireError", expected)
+        self.refused_check(made, "jslb.WireError", expected)
 
 
 # Tests the reply to `tap.start`, which must be the empty reply in either form.

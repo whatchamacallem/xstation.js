@@ -121,7 +121,7 @@ namespace jslb {
     number_token: /"[^"\\]*(?:\\.[^"\\]*)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g,
     // A number token without a fraction or an exponent.
     integer_token: /^-?\d+$/,
-    // The largest magnitude an integer token may have, 2^53.
+    // The largest magnitude an integer token may have, `2 ** 53`.
     integer_limit: 2n ** 53n,
   });
 

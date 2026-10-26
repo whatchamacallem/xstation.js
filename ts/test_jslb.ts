@@ -1466,7 +1466,6 @@ namespace test_jslb {
         this.refused_assert(bytes_of(text + "\r"), parse_refusal(text));
       }
     }
-
   }
 
   // Tests the decoder's number rules, the one door for bad numbers.

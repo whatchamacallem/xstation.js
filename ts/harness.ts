@@ -15,8 +15,7 @@ namespace harness {
   // The object of `test_settings.json`.
   export type Gold = { [key: string]: unknown };
 
-  // The names of the two files, the mark that joins the keys of an id, and
-  // the texts of the throws.
+  // The names of the two files, the mark joining an id's keys, throw texts.
   const constants = Object.freeze({
     settings_name: "settings.json",
     gold_name: "test_settings.json",

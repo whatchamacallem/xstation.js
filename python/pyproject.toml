@@ -5,5 +5,7 @@ typeCheckingMode = "strict"
 line-length = 79
 
 [tool.ruff.lint]
+# The rules ruff selected by default before 0.16, which the sources follow.
+select = ["E4", "E7", "E9", "F"]
 # E401 and I001 reject the import a, b style.
 ignore = ["E401", "I001"]

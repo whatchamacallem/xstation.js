@@ -436,10 +436,7 @@ namespace test_wire_rungs {
         `the first line is ${String(type_of(first))}, not tap.start`,
       );
       const id = jslb.field_get(first[0], "id");
-      check(
-        id === constants.first_id,
-        `the first line's id is ${String(id)}`,
-      );
+      check(id === constants.first_id, `the first line's id is ${String(id)}`);
       check(
         !Object.hasOwn(first[0], "reply"),
         "the first line answers a line",

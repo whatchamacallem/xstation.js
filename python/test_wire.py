@@ -658,9 +658,7 @@ def commits_check(root: str) -> str:
             "SELECT key FROM _kv WHERE key = 'note/1'",
             [("note/1",)],
         )
-        rows_check(
-            connection, "SELECT id, version FROM _head", [("note", 1)]
-        )
+        rows_check(connection, "SELECT id, version FROM _head", [("note", 1)])
         sql = "SELECT scene, n, role, content FROM _turn"
         rows: list[tuple[str, int, str, str]] = connection.execute(
             sql

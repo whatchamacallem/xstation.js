@@ -164,9 +164,7 @@ class TestRefused(IsolatedCase):
         self.raise_match(TypeError, pattern, lambda: _handler_call(run, line))
         extra = _gold_value("lines.run_extra")
         pattern = "unexpected keyword argument 'extra'"
-        self.raise_match(
-            TypeError, pattern, lambda: _handler_call(run, extra)
-        )
+        self.raise_match(TypeError, pattern, lambda: _handler_call(run, extra))
         self.assertEqual(self.store.calls, [])
 
 

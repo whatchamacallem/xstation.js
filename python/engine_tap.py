@@ -5,11 +5,12 @@
 # The server's end of the TAP run: each `tap.line`, a line of the TypeScript
 # stream, the one that crosses the wire, is appended to
 # `<root>/tap/typescript.tap` the moment it arrives, unbuffered, so a hang
-# leaves every line before it on disk. Any other language is refused, as no
-# Python stream crosses the wire. When the browser fails, the main loop
-# gives its `error` line to `error_take`, which logs the cascade and ends
-# the TypeScript stream with a `Bail out!` line, so the TAP results are
-# written out whole, before the main loop exits 1 without an answer.
+# leaves every line before it on disk. Any other language is refused: the
+# Python stream, the one `tap.run` runs, crosses the other way. When the
+# browser fails, the main loop gives its `error` line to `error_take`, which
+# logs the cascade and ends the TypeScript stream with a `Bail out!` line,
+# so the TAP results are written out whole, before the main loop exits 1
+# without an answer.
 
 import dispatch, jslb, os, verbose
 from internationalization import i18n

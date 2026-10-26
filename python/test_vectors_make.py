@@ -95,9 +95,7 @@ class TestVectorsWrite(unittest.TestCase):
             vectors_make.vectors_write(scratch)
             path = os.path.join(scratch, _TEST_DIGESTS_NAME)
             with open(path, encoding="utf-8") as file:
-                digests: dict[str, dict[str, dict[str, str]]] = json.load(
-                    file
-                )
+                digests: dict[str, dict[str, dict[str, str]]] = json.load(file)
         table: dict[str, dict[str, tuple[bytes, int]]] = getattr(
             vectors_make, "_TEST_DIGESTS"
         )

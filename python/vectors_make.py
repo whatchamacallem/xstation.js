@@ -505,9 +505,7 @@ def _test_digests() -> dict[str, dict[str, dict[str, str]]]:
 
 
 # Writes a file of digest vectors into the directory, keys sorted.
-def _digests_write(
-    directory: str, name: str, vectors: dict[str, Any]
-) -> None:
+def _digests_write(directory: str, name: str, vectors: dict[str, Any]) -> None:
     path = os.path.join(directory, name)
     with open(path, "w", encoding="utf-8", newline="\n") as file:
         file.write(json.dumps(vectors, indent=2, sort_keys=True) + "\n")

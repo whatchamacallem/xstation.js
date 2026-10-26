@@ -199,8 +199,7 @@ namespace mcp {
     return error_make(id, constants.code_invalid, i18n("mcp.request_invalid"));
   }
 
-  // The error response to a throw, a protocol error's code else -32603, its
-  // cascade in `data`.
+  // A throw's error response: its protocol code or `-32603`, cascade `data`.
   function exception_make(id: Id, error: Error): ErrorResponse {
     const code =
       error instanceof ProtocolError ? error.code : constants.code_internal;
@@ -320,8 +319,7 @@ namespace mcp {
       return this.answer_take(wait.request, outcome);
     }
 
-    // The answer to the request, a failure holding it when an exception is
-    // kept, which comes with an answer and never with a sleep.
+    // The request's answer, in a failure when an exception is kept, no sleep.
     private answer_take(
       request: lines.Line,
       outcome: Message | dispatch.Sleep,
@@ -345,8 +343,7 @@ namespace mcp {
       return dispatch.reply_make(request, outcome as unknown as FieldTable);
     }
 
-    // Runs a method or a continuation, a throw becoming an error response
-    // whose exception is kept.
+    // Runs a method or continuation, a throw an error response, error kept.
     private outcome_take(
       id: Id,
       run: () => FieldTable | dispatch.Sleep,
@@ -361,8 +358,7 @@ namespace mcp {
       }
     }
 
-    // Runs a tool or its wake, a throw becoming the `isError` result of its
-    // cascade, the exception kept.
+    // Runs a tool or its wake, a throw its cascade's `isError` result, kept.
     private tool_run(
       run: () => ToolResult | dispatch.Sleep,
     ): FieldTable | dispatch.Sleep {

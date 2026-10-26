@@ -21,8 +21,7 @@
 // first line's.
 
 namespace dispatch {
-  // The error line type, the header names that tell the name forms apart and
-  // the fixed id of the first line, `tap.start`, after which each port counts.
+  // The error type, the headers that tell name forms apart, `tap.start`'s id.
   const constants = Object.freeze({
     error_type: "error",
     full_marker: "type",

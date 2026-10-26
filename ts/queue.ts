@@ -179,8 +179,7 @@ namespace queue {
     return jslb.line_make(header, [], { thread, lines: entries });
   }
 
-  // Whether an entry of `size` bytes in a `verbose.put` of `empty` bytes with
-  // no entries is below `line_max`: the one comparison of an entry alone.
+  // Whether an entry of `size` in an `empty` `verbose.put` is under `line_max`.
   function alone_fits(empty: number, size: number, line_max: number): boolean {
     return empty + size < line_max;
   }
@@ -710,8 +709,7 @@ namespace queue {
       this.result_take(line, run, result, owed);
     }
 
-    // Starts a sleep, posts a reply, fails after a failure's reply is posted,
-    // or checks that nothing was owed.
+    // Sleeps, posts a reply, fails after a failure's, or checks nothing owed.
     private result_take(
       line: lines.Line,
       run: HandlerRun,
@@ -743,8 +741,7 @@ namespace queue {
       this.reply_post(line, result as lines.Line, owed);
     }
 
-    // Posts a failure's reply, then throws its error, under the first request
-    // the handler submitted when it submitted any, as it sleeps on none.
+    // Posts a failure's reply, then throws under the handler's first request.
     private failure_raise(
       line: lines.Line,
       run: HandlerRun,

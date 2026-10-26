@@ -52,9 +52,8 @@ namespace error_overlay {
     #stop_function: ((thrown: unknown) => void) | null = null;
 
     // What reporting means in the AI worker, set once by the worker.
-    #report_function:
-      | ((thrown: unknown, done: () => void) => void)
-      | null = null;
+    #report_function: ((thrown: unknown, done: () => void) => void) | null =
+      null;
 
     // Whether a fault was shown, after which later ones are not.
     #fault_shown = false;

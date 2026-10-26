@@ -62,10 +62,10 @@ _PING_REPLY = '{"jsonrpc":"2.0","id":1,"result":{}}'
 # A ping whose id is a letter outside ASCII, as a client writes it.
 _WIDE_LINE = '{"jsonrpc":"2.0","id":"\xe9","method":"ping"}'
 
-# The response to it, in UTF-8 as MCP's stdio transport requires.
+# The response to it, in the `utf-8` codec MCP's stdio transport requires.
 _WIDE_REPLY = '{"jsonrpc":"2.0","id":"\xe9","result":{}}'
 
-# The encoding the child is told its streams have, which UTF-8 must override.
+# The encoding the child is told its streams have, which `utf-8` overrides.
 _ENCODING_NARROW = "ascii"
 
 # A client's `initialize` request, which opens a session.
@@ -271,7 +271,7 @@ class DoubleCase(unittest.TestCase):
 
 # Tests the loop on lines that are messages.
 class TestLoop(DoubleCase):
-    # A session goes to the server line by line; a None reply writes nothing.
+    # A session goes to the server line by line, a None reply writing nothing.
     def test_session_replay(self) -> None:
         steps = _session_steps()
         self.replies_queue([reply for _, reply in steps])
@@ -432,7 +432,7 @@ class TestProcess(unittest.TestCase):
         output, errors = process.communicate(timeout=_CHILD_SECONDS)
         self.assertEqual((process.returncode, output, errors), (0, b"", b""))
 
-    # Text outside ASCII comes in and goes out as UTF-8, whatever the locale.
+    # Text outside ASCII comes in and goes out as `utf-8`, whatever the locale.
     def test_process_wide(self) -> None:
         process = self.child_start()
         _line_write(process, _WIDE_LINE + "\n")

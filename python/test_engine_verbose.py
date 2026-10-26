@@ -196,9 +196,7 @@ class TestTail(IsolatedCase):
         reply = _gold_value("lines.tail_server_reply")
         self.verbose.answers["history_get"] = [_entries_of(reply)]
         self.assertEqual(_handler_call(tail, line), reply)
-        self.assertEqual(
-            self.verbose.calls, [("history_get", line["count"])]
-        )
+        self.assertEqual(self.verbose.calls, [("history_get", line["count"])])
 
     # The count goes to `history_get` as given, a large one included.
     def test_tail_counts(self) -> None:

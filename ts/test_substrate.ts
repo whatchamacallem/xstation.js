@@ -927,10 +927,7 @@ namespace test_substrate {
           gold_text("substrate_header_bad_version"),
         ],
         [{ 0: { v: 2 } }, gold_text("substrate_header_bad_type")],
-        [
-          { 0: { t: "scene", x: 1 } },
-          gold_text("substrate_header_bad_field"),
-        ],
+        [{ 0: { t: "scene", x: 1 } }, gold_text("substrate_header_bad_field")],
         [{ 0: "scene" }, gold_text("substrate_header_bad_text")],
         [
           { 0: { t: "scene" }, 1: "/a/b" },

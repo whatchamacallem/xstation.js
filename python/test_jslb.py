@@ -67,7 +67,7 @@ _DEEP_NESTING: int = harness.gold_get(f"{_GOLD_ID}.deep_nesting")
 _ECHO_LINE = b'{"0":{"t":"echo"}}\r'
 
 
-# A text of this module's gold, each `{n}` replaced by the n-th value given.
+# A text of this module's gold, each `{n}` replaced by the value at `n`.
 def _text_get(name: str, *values: object) -> str:
     text: str = harness.gold_get(f"{_GOLD_ID}.texts.{name}")
     for index, value in enumerate(values):

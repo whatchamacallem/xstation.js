@@ -4,7 +4,8 @@
 #
 # Tests of third_party_fetch: `file_fetch` against file URLs and a scratch
 # directory under build/, and the table of pinned files, which holds the
-# two archives the page reads as the gold names them.
+# two archives the page reads as the gold names them and the ttyd archive
+# the setting powershell.ttyd_archive names.
 
 import harness, hashlib, os, pathlib, re, tempfile, third_party_fetch
 import unittest.mock
@@ -18,16 +19,11 @@ _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
 )
 
-# The install script, which unpacks the pinned ttyd archive.
-_INSTALL_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "xsjs_install.ps1",
-)
+# The setting that names the ttyd archive the install script unpacks.
+_ARCHIVE_SETTING = "powershell.ttyd_archive"
 
-# The install script's line naming the ttyd archive in `third_party/`.
-_INSTALL_PATTERN = re.compile(
-    r"^\$ttyd_archive_path_ = 'third_party/([^']+)'$", re.MULTILINE
-)
+# The directory of the pinned files, which starts the archive's setting.
+_THIRD_PARTY_PREFIX = "third_party/"
 
 # A pinned name: words joined by hyphens, a hyphen, the version, the extension.
 _NAME_PATTERN = re.compile(
@@ -152,11 +148,10 @@ class TestPins(unittest.TestCase):
 
     # The ttyd archive that `xsjs_install.ps1` unpacks is a name of the table.
     def test_install_pinned(self) -> None:
-        with open(_INSTALL_PATH, encoding="utf-8-sig") as file:
-            found = _INSTALL_PATTERN.search(file.read())
-        self.assertIsNotNone(found, _INSTALL_PATH)
+        path: str = harness.setting_get(_ARCHIVE_SETTING)
+        self.assertTrue(path.startswith(_THIRD_PARTY_PREFIX), path)
         names = [name for name, _url, _sha256 in self.pins_get()]
-        self.assertIn(cast(re.Match[str], found).group(1), names)
+        self.assertIn(path.removeprefix(_THIRD_PARTY_PREFIX), names)
 
     # No two pins share a name, as each name is a file in `third_party/`.
     def test_pin_names(self) -> None:

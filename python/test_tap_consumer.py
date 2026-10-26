@@ -107,6 +107,11 @@ def line_insert(lines: Sequence[str], index: int, line: str) -> list[str]:
     return changed
 
 
+# The lines before `index`, then the browser's bail out, which nothing follows.
+def bail_cut(lines: Sequence[str], index: int) -> list[str]:
+    return [*lines[:index], _BROWSER_BAIL]
+
+
 # Tests the kind of each line the parser reads.
 class TestParser(unittest.TestCase):
     # The version line names its version.
@@ -257,22 +262,22 @@ class TestStats(unittest.TestCase):
 
     # A bail out between blocks ends the stream and counts one failure.
     def test_bail_between(self) -> None:
-        stats = stats_read(line_insert(_PASSING_LINES, 5, _BROWSER_BAIL))
+        stats = stats_read(bail_cut(_PASSING_LINES, 5))
         self.assertEqual(stats, tap_consumer.TapStats(2, 1, 1, 1, True))
 
     # A bail out after a passing point ends the stream with one failure.
     def test_bail_passed(self) -> None:
-        stats = stats_read(line_insert(_PASSING_LINES, 3, _BROWSER_BAIL))
+        stats = stats_read(bail_cut(_PASSING_LINES, 3))
         self.assertEqual(stats, tap_consumer.TapStats(2, 1, 1, 0, True))
 
     # A bail out before the first point of a block counts one failure.
     def test_bail_planned(self) -> None:
-        stats = stats_read(line_insert(_PASSING_LINES, 2, _BROWSER_BAIL))
+        stats = stats_read(bail_cut(_PASSING_LINES, 2))
         self.assertEqual(stats, tap_consumer.TapStats(2, 0, 1, 0, True))
 
     # A bail out after an expected failure counts one failure.
     def test_bail_todo(self) -> None:
-        stats = stats_read(line_insert(_TODO_LINES, 4, _BROWSER_BAIL))
+        stats = stats_read(bail_cut(_TODO_LINES, 4))
         self.assertEqual(stats, tap_consumer.TapStats(2, 1, 1, 0, True))
 
 

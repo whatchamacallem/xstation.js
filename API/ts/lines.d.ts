@@ -41,6 +41,8 @@
 // verbose.put       wire     AI -> SERVER    0      push (debug)
 // verbose.tail      wire     AI -> SERVER    0      VerboseTailReply
 // tap.line          wire     AI -> SERVER    0      push
+// tap.run           wire     AI -> SERVER    0      TapRunReply (debug)
+// tap.line          wire     SERVER -> AI    0      push, tap.run's stream
 // mcp               wire     either          0      request or push
 // settings.put      wire     AI -> SERVER    0      Empty (debug)
 // source.put        wire     AI -> SERVER    1      Sha256Reply (debug)
@@ -288,10 +290,23 @@ declare namespace lines {
     lines: VerboseLine[];
   }
 
-  // tap.line: one line of the TypeScript stream, the one that crosses a wire.
+  // tap.line: one line of the page's TAP stream, or of a `tap.run`'s.
   interface TapLine {
-    language: "typescript";
+    language: "typescript" | "python";
     text: string;
+  }
+
+  // tap.run: only `tap_loop.py` serves it, each line of the run a push.
+  interface TapRun {
+    category: "smoke-test" | "normal-test";
+    failfast: boolean;
+    modules: string[];
+  }
+
+  // The exit code of `test_all.py` and all it wrote to stderr.
+  interface TapRunReply {
+    code: number;
+    stderr: string;
   }
 
   // mcp: the payload is the `JSON-RPC` message itself, see `mcp.d.ts`.

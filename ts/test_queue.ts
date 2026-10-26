@@ -577,7 +577,7 @@ namespace test_queue {
         text_fill("queue_error_line", { 3: third.stack }),
       );
       const chain: Error[] = [];
-      for (let cause = thrown.cause; cause !== undefined; ) {
+      for (let cause = thrown.cause; cause !== undefined;) {
         if (!(cause instanceof Error)) {
           throw new TypeError("a cause is no Error", { cause });
         }
@@ -1422,9 +1422,12 @@ namespace test_queue {
       const ai = new PortDouble("ai", []);
       tasks.port_add("ai", ai);
       const ring = new RingDouble();
-      tasks.sink_attach((fn) => {
-        ring.sink_set(fn);
-      }, reader_make({ debug: true }));
+      tasks.sink_attach(
+        (fn) => {
+          ring.sink_set(fn);
+        },
+        reader_make({ debug: true }),
+      );
       ring.log("before");
       this.assertEqual(ai.posted.length, 0);
       const note = handler_fresh(() => {
@@ -1450,9 +1453,12 @@ namespace test_queue {
       const ai = new PortDouble("ai", []);
       tasks.port_add("ai", ai);
       const ring = new RingDouble();
-      tasks.sink_attach((fn) => {
-        ring.sink_set(fn);
-      }, reader_make({ debug: true }));
+      tasks.sink_attach(
+        (fn) => {
+          ring.sink_set(fn);
+        },
+        reader_make({ debug: true }),
+      );
       const failure = new Error("The handler failed.");
       const boom = handler_fresh(() => {
         ring.log("during");

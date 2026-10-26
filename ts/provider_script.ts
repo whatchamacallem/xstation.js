@@ -298,11 +298,7 @@ namespace provider_script {
       );
     }
     const count = body.n;
-    if (
-      typeof count !== "number" ||
-      !Number.isInteger(count) ||
-      count < 1
-    ) {
+    if (typeof count !== "number" || !Number.isInteger(count) || count < 1) {
       return field_invalid("json.n");
     }
     const text = base64_encode(image_pattern());

@@ -1206,11 +1206,7 @@ namespace substrate {
     }
 
     // Replaces turns 1 to `through` by one summary turn at 1, this side only.
-    turn_compact(
-      scene: lines.DocRef,
-      through: number,
-      summary: string,
-    ): void {
+    turn_compact(scene: lines.DocRef, through: number, summary: string): void {
       if (through < 1) {
         throw new Error(i18n("substrate.through_bad", through));
       }
@@ -1475,11 +1471,7 @@ namespace substrate {
     }
 
     // Deletes a row inside the transaction, pushing it when it existed.
-    #value_delete(
-      name: string,
-      database: SqliteDatabase,
-      key: string,
-    ): void {
+    #value_delete(name: string, database: SqliteDatabase, key: string): void {
       this.#transaction_join(database);
       const old = rows_select(
         database,

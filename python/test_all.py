@@ -30,11 +30,22 @@
 # limit of its own. Standard library only:
 #
 #     python3 python/test_all.py [--smoke-test | --normal-test] [--failfast]
+#         [--stream] [--module NAME]... [--tty]
 #
 # --smoke-test is the default. In a smoke-test run, or with --failfast, the
-# first failing test ends the stream.
+# first failing test ends the stream. --stream ends the run once the stream
+# is checked, before the checks after it, and writes nothing to stdout but
+# the stream. --module runs only the suites it names, once each, in the
+# order above, each one the category runs. --tty runs the stream on the
+# engine tty instead of in this process: through tap_tty.py, bootstrap.py
+# on a new pty serves the TAP suite server, tap_loop.py, on a debug root in
+# build/, which runs this file with --stream on the same suites and pushes
+# each line of its stream, and each line relayed is written to stdout as it
+# comes. The server's run writes its stderr, its timings among it, to this
+# stderr when it ends, and its exit code must be the stream's verdict.
 
-import argparse, functools, importlib, os, signal, sys, time, types, unittest
+import argparse, functools, importlib, os, signal, sys, tempfile, time, types
+import unittest
 
 # The python directory of the checkout, which holds this script.
 _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -74,6 +85,7 @@ _MODULES: list[tuple[str, str]] = [
     ("test_devtools", "smoke-test"),
     ("test_reformat", "smoke-test"),
     ("test_test_posix", "smoke-test"),
+    ("test_tap_tty", "smoke-test"),
 ]
 
 # The one test module that reads the vectors, which are written as it loads.
@@ -131,36 +143,40 @@ def timer_stop() -> None:
     signal.setitimer(signal.ITIMER_REAL, 0)
 
 
-# Runs the modules of the category, checks the stream, then runs the rest.
-def main(arguments: list[str]) -> int:
-    import category, harness, tap_consumer, tap_producer
+# The suites the run takes: the category's, only those named if any are.
+def modules_chosen(
+    parser: argparse.ArgumentParser, named: list[str], chosen: str
+) -> list[tuple[str, str]]:
+    import category
 
-    parser = argparse.ArgumentParser(
-        description="Run the suites of a category: the Python test modules"
-        " in the testing order, the tests of the TAP modules first, as one"
-        " TAP stream on stdout, check the stream, then run the checks of"
-        " test_posix.py, the wire test and the browser test.",
-        allow_abbrev=False,
-    )
-    parser.add_argument(
-        "--failfast",
-        action="store_true",
-        help="end the stream at the first failing test",
-    )
-    category.options_add(parser)
-    parsed = parser.parse_args(arguments)
-    failfast: bool = parsed.failfast
-    chosen: str = parsed.category
-    started = time.monotonic()
-    limit = category.limit_seconds(chosen)
+    labels = dict(_MODULES)
+    for name in named:
+        if named.count(name) > 1:
+            parser.error(f"--module {name} is given more than once")
+        if not category.suite_runs(labels[name], chosen):
+            parser.error(f"--module {name} is not a suite of a {chosen} run")
+    return [
+        (name, label)
+        for name, label in _MODULES
+        if category.suite_runs(label, chosen) and (not named or name in named)
+    ]
+
+
+# Runs the suites in this process, one block each, timing each one.
+def stream_run(
+    stream: StreamWriter,
+    modules: list[tuple[str, str]],
+    failfast: bool,
+    limit: float | None,
+    started: float,
+) -> None:
+    import category, harness, tap_producer
+
     module_seconds = float(harness.gold_get("module_seconds"))
-    stream = StreamWriter()
     runner = tap_producer.TAPTestRunner(failfast or limit is not None)
     runner.set_stream(stream.line_write)
     loader = unittest.TestLoader()
-    for name, label in _MODULES:
-        if not category.suite_runs(label, chosen):
-            continue
+    for name, label in modules:
         begun = time.monotonic()
         what = f"module {name}"
         timer_start(
@@ -175,11 +191,96 @@ def main(arguments: list[str]) -> int:
         if not passed:
             break
     runner.run_end()
+
+
+# Runs the suites on the TAP suite server over a pty, relaying its stream.
+def stream_relay(
+    stream: StreamWriter,
+    modules: list[tuple[str, str]],
+    chosen: str,
+    failfast: bool,
+    limit: float | None,
+    started: float,
+) -> int:
+    import category, tap_tty
+
+    what = "the stream over the tty"
+    elapsed = time.monotonic() - started
+    timer_start(category.alarm_plan(what, None, limit, elapsed))
+    names = [name for name, _ in modules]
+    os.makedirs(_BUILD_PATH, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix="test_all-", dir=_BUILD_PATH
+    ) as work:
+        root = os.path.join(work, "root")
+        code, errors = tap_tty.suites_relay(
+            root, chosen, failfast, names, stream.line_write
+        )
+    timer_stop()
+    sys.stderr.write(errors)
+    sys.stderr.flush()
+    return code
+
+
+# Runs the modules of the category, checks the stream, then runs the rest.
+def main(arguments: list[str]) -> int:
+    import category, tap_consumer
+
+    parser = argparse.ArgumentParser(
+        description="Run the suites of a category: the Python test modules"
+        " in the testing order, the tests of the TAP modules first, as one"
+        " TAP stream on stdout, check the stream, then run the checks of"
+        " test_posix.py, the wire test and the browser test.",
+        allow_abbrev=False,
+    )
+    parser.add_argument(
+        "--failfast",
+        action="store_true",
+        help="end the stream at the first failing test",
+    )
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="end the run once the stream is checked, writing nothing else"
+        " to stdout",
+    )
+    parser.add_argument(
+        "--module",
+        action="append",
+        default=[],
+        choices=[name for name, _ in _MODULES],
+        help="run only this suite; given once for each suite to run",
+    )
+    parser.add_argument(
+        "--tty",
+        action="store_true",
+        help="run the stream on a pty through bootstrap.py and the TAP suite"
+        " server, tap_loop.py, writing each line it relays",
+    )
+    category.options_add(parser)
+    parsed = parser.parse_args(arguments)
+    failfast: bool = parsed.failfast
+    chosen: str = parsed.category
+    modules = modules_chosen(parser, parsed.module, chosen)
+    started = time.monotonic()
+    limit = category.limit_seconds(chosen)
+    stream = StreamWriter()
+    code: int | None = None
+    if parsed.tty:
+        code = stream_relay(stream, modules, chosen, failfast, limit, started)
+    else:
+        stream_run(stream, modules, failfast, limit, started)
     stats = tap_consumer.document_stats(stream.document_get())
     if not stats.well_formed:
         raise RuntimeError("the TAP stream is not well formed")
-    if stats.failed:
-        return 1
+    verdict = 1 if stats.failed else 0
+    if code is not None and code != verdict:
+        raise RuntimeError(
+            f"test_all.py on the tty exited with {code}, though its stream"
+            f" holds {stats.failed} failures"
+        )
+    if verdict or parsed.stream:
+        return verdict
     posix_label = "smoke-test"
     if category.suite_runs(posix_label, chosen):
         import test_posix
