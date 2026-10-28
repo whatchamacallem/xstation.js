@@ -1872,7 +1872,26 @@
         "substrate_wal_left": "The database alpha still has a write ahead log after closing."
       }
     },
+    "test_tap_loop": {
+      "child_seconds": 30,
+      "overflow_bytes": 64,
+      "read_bytes": 65536,
+      "texts": {
+        "dispatch_handler_unknown": "No handler is registered for type no.such version 0.",
+        "tap_loop_blob_refused": "The TAP suite server takes no blob, but a line carries one of 129 bytes.",
+        "tap_loop_input_partial": "The engine input ended inside a message.",
+        "tap_loop_output_partial": "The output of the test suites ended inside a line: b'cut'",
+        "tap_loop_reply_unknown": "The line {\"0\":{\"t\":\"tap.run\",\"r\":1}} replies to no request the server sent."
+      }
+    },
     "test_tap_tty": {
+      "child_seconds": 30,
+      "failing": {
+        "failures": 4,
+        "stats": [7, 2, 4, 1, true],
+        "suite": "failing_suite"
+      },
+      "kept_value": "kept value",
       "lines": {
         "browser_error": {
           "0": {
@@ -1885,9 +1904,69 @@
           "message": "boom",
           "stack": "Error: boom\n    at a"
         },
+        "call_name_invalid": {
+          "0": {
+            "id": 102,
+            "type": "mcp"
+          },
+          "id": 3,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "name": "../a.py",
+              "text": "x"
+            },
+            "name": "source_put"
+          }
+        },
+        "call_reply": {
+          "0": {
+            "reply": 102,
+            "type": "mcp"
+          }
+        },
+        "create_castle": {
+          "0": {
+            "type": "db.create"
+          },
+          "db": "castle"
+        },
+        "delete_provider": {
+          "0": {
+            "key": "/_files/provider/script.json",
+            "type": "kv.delete"
+          }
+        },
+        "doc_note": {
+          "0": {
+            "type": "doc.put"
+          },
+          "body": {
+            "0": {
+              "t": "note"
+            },
+            "text": "A note."
+          },
+          "db": "castle",
+          "id": "note"
+        },
+        "drop_castle": {
+          "0": {
+            "type": "db.drop"
+          },
+          "db": "castle"
+        },
         "echo": {
           "0": {
             "id": 102,
+            "type": "echo"
+          },
+          "text": "the payload of the test"
+        },
+        "echo_reply": {
+          "0": {
+            "reply": 102,
             "type": "echo"
           },
           "text": "the payload of the test"
@@ -1915,6 +1994,49 @@
             "t": "tap.start"
           }
         },
+        "initialize": {
+          "0": {
+            "id": 103,
+            "type": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "method": "initialize",
+          "params": {
+            "capabilities": {},
+            "clientInfo": {
+              "name": "xsjs-test",
+              "version": "1"
+            },
+            "protocolVersion": "2025-06-18"
+          }
+        },
+        "initialize_reply": {
+          "0": {
+            "reply": 103,
+            "type": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "result": {
+            "capabilities": {
+              "tools": {}
+            },
+            "protocolVersion": "2025-06-18",
+            "serverInfo": {
+              "name": "xsjs-server",
+              "version": "0"
+            }
+          }
+        },
+        "put_kept": {
+          "0": {
+            "blobs": 1,
+            "key": "/castle/kept",
+            "type": "kv.put"
+          },
+          "1": {}
+        },
         "reply_full": {
           "0": {
             "reply": 101,
@@ -1933,6 +2055,12 @@
             "type": "hello"
           }
         },
+        "restart": {
+          "0": {
+            "type": "system.restart"
+          },
+          "main_loop": "echo_loop.py"
+        },
         "run_refused": {
           "0": {
             "id": 102,
@@ -1940,6 +2068,7 @@
           },
           "category": "smoke-test",
           "failfast": false,
+          "failures": 0,
           "modules": ["test_no_such"]
         },
         "run_reply": {
@@ -1947,6 +2076,90 @@
             "reply": 102,
             "type": "tap.run"
           }
+        },
+        "settings_reply": {
+          "0": {
+            "reply": 102,
+            "type": "settings.put"
+          }
+        },
+        "source_put": {
+          "0": {
+            "blobs": 1,
+            "id": 103,
+            "type": "source.put"
+          },
+          "1": {},
+          "name": "echo_loop.py"
+        },
+        "source_reply": {
+          "0": {
+            "reply": 103,
+            "type": "source.put"
+          }
+        },
+        "sql_castle": {
+          "0": {
+            "type": "sql.run"
+          },
+          "db": "castle",
+          "statements": [
+            {
+              "params": [],
+              "sql": "CREATE TABLE t (x INTEGER) STRICT"
+            },
+            {
+              "params": [7],
+              "sql": "INSERT INTO t VALUES (?)"
+            }
+          ]
+        },
+        "stdio_call": {
+          "id": 2,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "name": "stdio_put.py",
+              "text": "# written over stdio\n"
+            },
+            "name": "source_put"
+          }
+        },
+        "stdio_call_reply": {
+          "id": 2,
+          "jsonrpc": "2.0"
+        },
+        "stdio_initialize": {
+          "id": 1,
+          "jsonrpc": "2.0",
+          "method": "initialize",
+          "params": {
+            "capabilities": {},
+            "clientInfo": {
+              "name": "xsjs-test",
+              "version": "1"
+            },
+            "protocolVersion": "2025-06-18"
+          }
+        },
+        "stdio_initialize_reply": {
+          "id": 1,
+          "jsonrpc": "2.0",
+          "result": {
+            "capabilities": {
+              "tools": {}
+            },
+            "protocolVersion": "2025-06-18",
+            "serverInfo": {
+              "name": "xsjs-server",
+              "version": "0"
+            }
+          }
+        },
+        "stdio_initialized": {
+          "jsonrpc": "2.0",
+          "method": "notifications/initialized"
         },
         "tail_short": {
           "0": {
@@ -1990,6 +2203,17 @@
           "language": "typescript",
           "text": "ok 1 - test_page"
         },
+        "turn_note": {
+          "0": {
+            "type": "turn.append"
+          },
+          "content": {
+            "content": "A turn.",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/castle/note/1"
+        },
         "unknown_request": {
           "0": {
             "id": 102,
@@ -2009,14 +2233,19 @@
           "thread": "ui"
         }
       },
-      "overflow_bytes": 64,
+      "poll_seconds": 0.01,
+      "ring": 999,
       "suites": ["test_tap_producer"],
       "texts": {
+        "bail_failfast": "Bail out! failfast",
         "bail_out": "Bail out! boom",
-        "bootstrap_lock_held": "Another engine holds the lock {0}.",
         "bootstrap_reply_unexpected": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"reply\":101,\"type\":\"hello\"}}",
         "dispatch_handler_unknown": "No handler is registered for type no.such version 0.",
+        "engine_tap_browser_cause": "caused by: first",
+        "engine_tap_browser_failed": "The browser failed: boom",
+        "failed_prefix": "The server failed",
         "module_refused": "argument --module: invalid choice: 'test_no_such'",
+        "name_invalid": "The name ../a.py is not a plain file name that ends in .py and does not start with a dot.",
         "timing": "test_tap_producer: smoke-test, "
       }
     },

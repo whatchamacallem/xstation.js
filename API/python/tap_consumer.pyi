@@ -5,10 +5,12 @@
 # reads the TypeScript stream the server writes, stopping at its first
 # failure. A `Bail out!` line at depth 0 ends a stream wherever it stands: it
 # is well formed, and it counts as one failure unless it follows a failed
-# point, as the producer's own bail out does. The server writes one when the
-# browser fails, which can be before the version line. Each line kind is a
-# class named as tappy's category of it, and a line inside a stream carries
-# its depth: 0 for the stream, 1 for a block indented four spaces.
+# point, as the producer's own bail out does. Reading stops there: every line
+# after it is ignored, as TAP 14 asks a harness to stop at a bail out. The
+# server writes one when the browser fails, which can be before the version
+# line. Each line kind is a class named as tappy's category of it, and a
+# line inside a stream carries its depth: 0 for the stream, 1 for a block
+# indented four spaces.
 
 from collections.abc import Iterator
 from typing import NamedTuple, TypeAlias

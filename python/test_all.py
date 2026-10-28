@@ -13,12 +13,13 @@
 # category, then each next module the DAG allows. Each is one block of one
 # TAP stream that goes to stdout a line at a time; then it checks that
 # stream with the TAP consumer and exits 1 unless it is well formed and
-# holds no failing point, a bail out counting as one. When the stream is
-# clean it runs, in this process and given the category, the checks of
-# test_posix.py, the wire test and the browser test, and ends at the first
-# that fails, with its exit code. Every module has a timer, the gold
-# record's module_seconds. The JSLB vectors are written anew into
-# build/vectors as test_jslb loads, inside its block.
+# holds exactly the failing points --failures expects, none by default, a
+# bail out counting as one. When the stream passes so it runs, in this
+# process and given the category, the checks of test_posix.py, the wire
+# test and the browser test, and ends at the first that fails, with its
+# exit code. Every module has a timer, the gold record's module_seconds. The
+# JSLB vectors are written anew into build/vectors as test_jslb loads,
+# inside its block.
 #
 # After each module it writes "<module>: <label>, <s> s" to stderr, so that
 # stdout stays the TAP stream. After the checks of test_posix.py it prints
@@ -30,19 +31,22 @@
 # limit of its own. Standard library only:
 #
 #     python3 python/test_all.py [--smoke-test | --normal-test] [--failfast]
-#         [--stream] [--module NAME]... [--tty]
+#         [--stream] [--module NAME]... [--failures N] [--tty]
 #
 # --smoke-test is the default. In a smoke-test run, or with --failfast, the
 # first failing test ends the stream. --stream ends the run once the stream
 # is checked, before the checks after it, and writes nothing to stdout but
 # the stream. --module runs only the suites it names, once each, in the
-# order above, each one the category runs. --tty runs the stream on the
+# order above, each one the category runs; it alone runs a suite that fails
+# by design, listed apart, so that a run can check that failures are
+# counted, and counted right, by --failures. --tty runs the stream on the
 # engine tty instead of in this process: through tap_tty.py, bootstrap.py
 # on a new pty serves the TAP suite server, tap_loop.py, on a debug root in
-# build/, which runs this file with --stream on the same suites and pushes
-# each line of its stream, and each line relayed is written to stdout as it
-# comes. The server's run writes its stderr, its timings among it, to this
-# stderr when it ends, and its exit code must be the stream's verdict.
+# build/, which runs this file with --stream on the same suites and the
+# same --failures, and pushes each line of its stream, and each line
+# relayed is written to stdout as it comes. The server's run writes its
+# stderr, its timings among it, to this stderr when it ends, and its exit
+# code must be the stream's verdict.
 
 import argparse, functools, importlib, os, signal, sys, tempfile, time, types
 import unittest
@@ -67,6 +71,7 @@ _MODULES: list[tuple[str, str]] = [
     ("test_dispatch", "smoke-test"),
     ("test_mcp", "smoke-test"),
     ("test_stall_loop", "smoke-test"),
+    ("test_tap_loop", "smoke-test"),
     ("test_engine_tap", "smoke-test"),
     ("test_engine_verbose", "smoke-test"),
     ("test_engine_kv", "smoke-test"),
@@ -87,6 +92,9 @@ _MODULES: list[tuple[str, str]] = [
     ("test_test_posix", "smoke-test"),
     ("test_tap_tty", "smoke-test"),
 ]
+
+# The suites that fail by design, which only `--module` runs.
+_FAILING: list[tuple[str, str]] = [("failing_suite", "smoke-test")]
 
 # The one test module that reads the vectors, which are written as it loads.
 _VECTORS_READER = "test_jslb"
@@ -149,7 +157,8 @@ def modules_chosen(
 ) -> list[tuple[str, str]]:
     import category
 
-    labels = dict(_MODULES)
+    listed = _MODULES + _FAILING if named else _MODULES
+    labels = dict(listed)
     for name in named:
         if named.count(name) > 1:
             parser.error(f"--module {name} is given more than once")
@@ -157,7 +166,7 @@ def modules_chosen(
             parser.error(f"--module {name} is not a suite of a {chosen} run")
     return [
         (name, label)
-        for name, label in _MODULES
+        for name, label in listed
         if category.suite_runs(label, chosen) and (not named or name in named)
     ]
 
@@ -199,6 +208,7 @@ def stream_relay(
     modules: list[tuple[str, str]],
     chosen: str,
     failfast: bool,
+    failures: int,
     limit: float | None,
     started: float,
 ) -> int:
@@ -214,7 +224,7 @@ def stream_relay(
     ) as work:
         root = os.path.join(work, "root")
         code, errors = tap_tty.suites_relay(
-            root, chosen, failfast, names, stream.line_write
+            root, chosen, failfast, failures, names, stream.line_write
         )
     timer_stop()
     sys.stderr.write(errors)
@@ -248,8 +258,15 @@ def main(arguments: list[str]) -> int:
         "--module",
         action="append",
         default=[],
-        choices=[name for name, _ in _MODULES],
+        choices=[name for name, _ in _MODULES + _FAILING],
         help="run only this suite; given once for each suite to run",
+    )
+    parser.add_argument(
+        "--failures",
+        type=int,
+        default=0,
+        help="the failing tests the run expects: it passes only when"
+        " exactly this many fail",
     )
     parser.add_argument(
         "--tty",
@@ -261,23 +278,28 @@ def main(arguments: list[str]) -> int:
     parsed = parser.parse_args(arguments)
     failfast: bool = parsed.failfast
     chosen: str = parsed.category
+    failures: int = parsed.failures
+    if failures < 0:
+        parser.error(f"--failures {failures} is below 0")
     modules = modules_chosen(parser, parsed.module, chosen)
     started = time.monotonic()
     limit = category.limit_seconds(chosen)
     stream = StreamWriter()
     code: int | None = None
     if parsed.tty:
-        code = stream_relay(stream, modules, chosen, failfast, limit, started)
+        code = stream_relay(
+            stream, modules, chosen, failfast, failures, limit, started
+        )
     else:
         stream_run(stream, modules, failfast, limit, started)
     stats = tap_consumer.document_stats(stream.document_get())
     if not stats.well_formed:
         raise RuntimeError("the TAP stream is not well formed")
-    verdict = 1 if stats.failed else 0
+    verdict = 0 if stats.failed == failures else 1
     if code is not None and code != verdict:
         raise RuntimeError(
             f"test_all.py on the tty exited with {code}, though its stream"
-            f" holds {stats.failed} failures"
+            f" holds {stats.failed} failures of {failures} expected"
         )
     if verdict or parsed.stream:
         return verdict

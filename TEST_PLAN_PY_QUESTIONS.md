@@ -24,32 +24,17 @@ today.
 Question 3. What does a unit suite isolate its module from? `harness` and
 the TAP modules belong to the tests, not to the module, and stay real.
 
-[x] A. Every project module the module calls into is a double; only the
-standard library is real. Every suite changes but those of `category`,
-whose one callee is `harness`, and of the 7 modules that call into none:
-`tap_producer`, `tap_consumer`, `internationalization`, `harness`,
-`reformat`, `devtools` and `third_party_fetch`. (Recommended: the most
-traditional form, as asked.)
+Alternate maintainer selection:
 
-[ ] B. As A, except `internationalization` stays real, so each text is
-still checked against the gold's texts in the unit phase.
-
-[ ] C. Only callees with effects are doubles, as today (0.3): a store, a
-process, an exec, a program, the network. The others stay real, the unit
-phase keeps the layers of `TEST_PLAN_PY.md` section 6, and the integration
-phase tests only the boundaries the doubles cut.
+  "Using mock test objects is banned. Modules are tested in dependency order so
+  that each module has tested dependencies it can use while being tested. If it
+  is not possible to fully test a module without mocking environments that are
+  not available then split the test suites for that module and run the later
+  suites as it becomes possible to run them on real code."
 
 Question 4. How is a double made?
 
-[x] A. From the real module, with `unittest.mock.create_autospec`, so a call
-the real signature refuses fails in the unit phase. (Recommended: a double
-that drifts from its module is the usual failure of strict unit tests, and
-this catches the signature half of it before integration.)
-
-[ ] B. From the module's stub in `API/python/`, read with `ast`, so the
-stub, which changes first, is the contract the double holds to.
-
-[ ] C. By hand, as today's doubles are.
+It is forbidden,  declawed.md is already updated.
 
 Question 5. What is one increment of the integration phase?
 
@@ -136,18 +121,8 @@ Question 9, `TEST_PLAN_PY.md` Question 1. How is the restart loop fixed?
 re-run `mcp_stdio.py` with `--main-loop`, an option it does not define, and
 never answer; that is from reading only.
 
-[x] A. The restart handler and tool return a restart request instead of
-calling `os.execv`; `main_loop` returns it to `bootstrap`, which alone
-re-runs itself. bootstrap is the natural restart tool.
-
-[ ] B. As A, but `mcp_stdio` forwards the restart tool to the running
-server. That needs a channel from `mcp_stdio` to the server, which is not
-designed.
-
-[ ] C. Keep the exec in `engine_system`, since a restart never returns and
-so is not a call back; `mcp_stdio` does not register the restart tool.
-
-[ ] D. Keep everything as it is.
+[x] E. Restart actually requires the process to restart the interpreter. If
+  that means a HUP it is ok, reconnection doesn't have to be tested yet.
 
 Question 10 (class A), `TEST_PLAN_PY.md` Question 2. Are registered
 callbacks calls into the module that registered them? `dispatch` calls the
@@ -172,8 +147,9 @@ run, which fails at the first one never called. `echo_loop`, `stall_loop`,
 [x] B. Line coverage: every line of the module is run by its own unit
 suite, measured during the run, which fails at the first line never run. A
 line that raises "internal error", which no test is expected to reach,
-needs a mark that exempts it. (Recommended: the usual bar of the
-traditional process.)
+needs a mark that exempts it. immediate 100% line coverage is a non-goal, as
+some suites may not be able to run. it will become a goal once everything is
+running.
 
 [ ] C. Branch coverage: as B, for every branch, by `sys.monitoring`'s branch
 events.
@@ -228,3 +204,112 @@ and 3) fixed? Both are fixed before any new suite is written.
 `powershell.ttyd_archive` of `settings.json` instead of the install script.
 
 [ ] B. Otherwise, written in.
+
+Question 16. Question 1 A runs three phases in one stream: every unit
+suite, then the integration suites, then the stdio tests. The run has one
+phase today, and the consumer reads only a stream at depth 0 that holds
+blocks at depth 1. How does the stream show where a phase starts?
+
+[x] A. By order alone: the driver's list holds the unit suites, then the
+integration suites from the bottom layer up, then the stdio suites, and no
+line marks a phase. (Recommended: the producer, the consumer and the wire
+test stay as they are.)
+
+[ ] B. A diagnostic line at depth 0 before the first block of each phase,
+such as `# phase: integration`, which the consumer learns to accept.
+
+[ ] C. One block per phase at depth 1, each suite a block at depth 2 inside
+it, which the producer, the consumer and the wire test learn.
+
+Question 17. Which suites make up the stdio phase? Question 1 A names "the
+stdio tests of 0.4", but `TEST_PLAN_PY.md` has no section 0.4.
+
+[x] A. Every suite that starts `bootstrap.py` or `mcp_stdio.py` as a
+program and talks to it over its stdio: `test_tap_tty`, and the tests of
+`test_mcp_stdio` that start a child, which move to a suite of their own.
+`test_bootstrap`, which runs `bootstrap_run` in process over pipes, stays
+in the earlier phases. (Recommended: the phase is the program run whole.)
+
+[ ] B. `test_tap_tty` alone.
+
+[ ] C. Otherwise, written in.
+
+Question 18. Questions 3 A and 4 A make every project callee a double by
+`unittest.mock.create_autospec`....
+
+[x] This question is invalid now.
+
+Question 19. What does a suite `test_integrate_<module>.py` of Question 5 A
+test?
+
+[x] Follow previous instructions. Break tests into suites, first unit, then
+integration. Proceeded in module order testing only what is real, making
+accommodations as required, e.g. delaying or splitting off tests as needed.
+
+Question 22. Question 11 B fails the run at the first line of a module that
+its own unit suite never runs, except a line marked exempt. How is a line
+marked exempt?
+
+[ ] A. By what it raises: a line that raises with the text "internal
+error", the form the project rules give an error no test is expected to
+reach, is exempt, and no other line is. (Recommended: the rules already
+name the form, so no new mark is needed.)
+
+[x] B. By a trailing comment, `# pragma: no cover`, as coverage.py marks
+one.
+
+[ ] C. By a list in the module's gold of the functions whose lines are
+exempt, since line numbers are fragile and banned.
+
+Question 23. The last postmortem counts these answers as satisfied:
+Questions 6 A, 7, 8 A, 12 C, 13 A, 14 A and 15 A, and Question 10 A as
+shaping the plan only. Do you agree?
+
+[ ] A. Yes, all of them.
+
+[ ] B. No, these are not, written in.
+
+Question 24. Are these the sha256 digests to pin in the `_PINS` of
+`third_party_fetch.py`? They were measured with `hashlib` from the archives
+downloaded from the pinned URLs on 2026-10-25. Every pin's digest is empty
+today, so `third_party_fetch.py` fetches nothing, ttyd is not built, and
+`test_wire.py` and `test_browser.py` can't run.
+
+    ttyd-1.7.7.tar.gz
+    039dd995229377caee919898b7bd54484accec3bba49c118e2d5cd6ec51e3650
+    sqlite-wasm-3460100.zip
+    79b5fbfd1c5ca35f492624bb6b9323e6c74e483e2a55ff18ce5904a8cdb1b38c
+    xterm-5.5.0.tgz
+    bd954fa721872170188cc5d7e83e88db3c83c9a18a4e8d24c2783d26491f59d2
+
+[x] A. Yes: pin all three.
+
+[ ] B. Otherwise, written in.
+
+Question 25. `test_settings.json` holds one array, `"data": [ {} ]` in the
+gold of `test_third_party_fetch`, that prettier writes as `[{}]`. JSON has
+no row in `reformat_table.json`, so no check reads the file. What is done?
+
+[x] A. Run prettier on `test_settings.json` once, so the array takes its
+form.
+
+[ ] B. Leave it as it is.
+
+Question 26. `test_all.py --failures N` passes a run only when the consumer
+counts exactly N failing tests. Measured on `python/failing_suite.py`, a
+suite that fails by design, on 2026-10-25: a failed assertion, an error and
+an unexpected success count one each; a test with two failed subtests
+counts one; an expected failure counts as passed; a skip counts as
+skipped; with failfast the stream ends with a bail out after the first
+failure, which adds none. A failed `setUpClass` or `setUpModule` was not
+measured. This is also the unconfirmed assumption of `TEST_PLAN_PY.md` 4.4,
+the oracle of the pair test. What counts as one failure?
+
+[x] A. As measured: one per test, however many of its subtests fail, and
+one per failed fixture. (Recommended: it is what the producer and the
+consumer do today, and the count of `not ok` points a reader sees.)
+
+[ ] B. One per failed subtest, so a test with two failed subtests counts
+two, the producer writing a point per subtest.
+
+[ ] C. Otherwise, written in.

@@ -300,6 +300,8 @@ declare namespace lines {
   interface TapRun {
     category: "smoke-test" | "normal-test";
     failfast: boolean;
+    // The failing tests the run expects: it passes only with exactly these.
+    failures: number;
     modules: string[];
   }
 

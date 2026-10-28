@@ -149,6 +149,11 @@ manager without request.
   tests are built from, such as the test categories and their deadline.
   `python/test_test.py` tests the infrastructure for testing, not the test
   driver.
+- Using mock test objects is banned. Modules are tested in dependency order so
+  that each module has tested dependencies it can use while being tested. If it
+  is not possible to fully test a module without mocking environments that are
+  not available then split the test suites for that module and run the later
+  suites as it becomes possible to run them on real code.
 
 ### Accidental-Requirements, Requirements-Data-Loss, and Requirements-Refusal
 

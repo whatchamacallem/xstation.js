@@ -10,16 +10,16 @@
 # decoder's limits and the name form. loop_run decodes each line, refuses
 # any reply and serves the one type `tap.run`: its handler runs the driver,
 # test_all.py, as `python3 test_all.py --stream`, with the category, with
-# --failfast when asked, and with --module for each suite named, its input
-# empty. Each line of the driver's stdout, a line of its TAP stream, is
-# pushed the moment it ends as a `tap.line` of the language python, in the
-# name form of the setting `debug`; what it writes to stderr is kept, and
-# when it exits the reply carries its exit code and that text. Its stdout
-# ending inside a line is a fault. A line of no other type has a handler, a
-# blob is refused, and a failure writes one `error` line and exits 1, as the
-# stock main loop does. The hangup that ends the connection ends the loop,
-# and a driver still running with it, as both are in the tty's foreground
-# group.
+# --failfast when asked, with --failures for the failing tests the run
+# expects, and with --module for each suite named, its input empty. Each
+# line of the driver's stdout, a line of its TAP stream, is pushed the
+# moment it ends as a `tap.line` of the language python, in the name form of
+# the setting `debug`; what it writes to stderr is kept, and when it exits
+# the reply carries its exit code and that text. Its stdout ending inside a
+# line is a fault. A line of no other type has a handler, a blob is refused,
+# and a failure writes one `error` line and exits 1, as the stock main loop
+# does. The hangup that ends the connection ends the loop, and a driver
+# still running with it, as both are in the tty's foreground group.
 
 import dispatch, functools, jslb, os, select, settings, subprocess, sys
 import test_all
@@ -49,6 +49,9 @@ _FAILFAST_OPTION = "--failfast"
 
 # The driver's option that names one suite to run.
 _MODULE_OPTION = "--module"
+
+# The driver's option that gives the failing tests the run expects.
+_FAILURES_OPTION = "--failures"
 
 # The byte that ends each line of the driver's stdout.
 _NEWLINE = b"\n"
@@ -105,12 +108,13 @@ def _push_write(text: str, write_fd: int, full: bool) -> None:
 
 # The driver's command line: the stream alone, of the suites named.
 def _command_make(
-    category: str, failfast: bool, modules: list[str]
+    category: str, failfast: bool, failures: int, modules: list[str]
 ) -> list[str]:
     command = [sys.executable, test_all.__file__, _STREAM_OPTION]
     command.append("--" + category)
     if failfast:
         command.append(_FAILFAST_OPTION)
+    command += [_FAILURES_OPTION, str(failures)]
     for name in modules:
         command += [_MODULE_OPTION, name]
     return command
@@ -124,9 +128,10 @@ def suites_run(
     *,
     category: str,
     failfast: bool,
+    failures: int,
     modules: list[str],
 ) -> jslb.Object:
-    command = _command_make(category, failfast, modules)
+    command = _command_make(category, failfast, failures, modules)
     pending = b""
     errors = b""
     with subprocess.Popen(

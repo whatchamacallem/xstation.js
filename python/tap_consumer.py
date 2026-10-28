@@ -13,7 +13,9 @@
 # first fault: the counts are those of the lines before it. A `Bail out!`
 # line at depth 0 ends a stream wherever it stands, before the version line
 # too, since the server appends one when the browser fails: it counts as one
-# failure unless it follows a failed point, as the producer's own does.
+# failure unless it follows a failed point, as the producer's own does, and
+# reading stops there, every line after it ignored, as TAP 14 asks a harness
+# to stop at a bail out.
 
 import io, re
 from collections.abc import Iterator
@@ -152,7 +154,7 @@ class StreamReader:
 
     # Whether the stream ended, with its parent plan or a bail out line.
     def stream_ended(self) -> bool:
-        return self._state == "ended"
+        return self._state in ("ended", "bailed")
 
     # Takes the next line and returns whether it fits where it stands.
     def line_read(self, line: Line) -> bool:
@@ -171,6 +173,9 @@ class StreamReader:
                 return self._parent_read(parent)
             case "version" | "between" | "block", Bail(depth=0):
                 self._bail_read()
+            case "bailed", _:
+                # Reading stopped at the bail out, so the line is ignored.
+                pass
             case _:
                 return False
         return True
@@ -179,7 +184,7 @@ class StreamReader:
     def _bail_read(self) -> None:
         if not (self._state == "block" and self._last_failed):
             self.failed += 1
-        self._state = "ended"
+        self._state = "bailed"
 
     # Opens a block with the number of points its plan line names.
     def _block_open(self, total: int) -> None:

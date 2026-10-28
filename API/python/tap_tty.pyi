@@ -6,9 +6,10 @@
 # and hangs up by closing its side, which ends the engine with SIGHUP.
 # `suites_relay` runs Python test suites over the tty on the TAP suite
 # server, `tap_loop.py`, in a debug root it makes from the checkout's
-# settings and gold: it answers `tap.start`, sends one `tap.run`, and hands
-# the text of each `tap.line` of the language python to its writer as it
-# comes. Its texts are plain English.
+# settings and gold: it answers `tap.start`, sends one `tap.run` with the
+# failing tests the run expects, and hands the text of each `tap.line` of
+# the language python to its writer as it comes. Its texts are plain
+# English.
 
 import jslb, types
 from collections.abc import Callable
@@ -48,6 +49,7 @@ def suites_relay(
     root: str,
     category: str,
     failfast: bool,
+    failures: int,
     modules: list[str],
     write: Callable[[str], None],
 ) -> tuple[int, str]: ...

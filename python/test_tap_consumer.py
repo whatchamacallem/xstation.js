@@ -5,8 +5,8 @@
 # Tests the TAP consumer: the kind it reads from each line, the stats of
 # streams as the producers write them, passing, failing, bailed out and with
 # expected failures, a bail out wherever it stands counting one failure
-# unless it follows a failed point, the stream reader fed line by line, then
-# streams with one fault each.
+# unless it follows a failed point and the lines after it ignored, the stream
+# reader fed line by line, then streams with one fault each.
 
 import tap_consumer, unittest
 from collections.abc import Sequence
@@ -105,11 +105,6 @@ def line_insert(lines: Sequence[str], index: int, line: str) -> list[str]:
     changed = list(lines)
     changed.insert(index, line)
     return changed
-
-
-# The lines before `index`, then the browser's bail out, which nothing follows.
-def bail_cut(lines: Sequence[str], index: int) -> list[str]:
-    return [*lines[:index], _BROWSER_BAIL]
 
 
 # Tests the kind of each line the parser reads.
@@ -262,22 +257,22 @@ class TestStats(unittest.TestCase):
 
     # A bail out between blocks ends the stream and counts one failure.
     def test_bail_between(self) -> None:
-        stats = stats_read(bail_cut(_PASSING_LINES, 5))
+        stats = stats_read(line_insert(_PASSING_LINES, 5, _BROWSER_BAIL))
         self.assertEqual(stats, tap_consumer.TapStats(2, 1, 1, 1, True))
 
     # A bail out after a passing point ends the stream with one failure.
     def test_bail_passed(self) -> None:
-        stats = stats_read(bail_cut(_PASSING_LINES, 3))
+        stats = stats_read(line_insert(_PASSING_LINES, 3, _BROWSER_BAIL))
         self.assertEqual(stats, tap_consumer.TapStats(2, 1, 1, 0, True))
 
     # A bail out before the first point of a block counts one failure.
     def test_bail_planned(self) -> None:
-        stats = stats_read(bail_cut(_PASSING_LINES, 2))
+        stats = stats_read(line_insert(_PASSING_LINES, 2, _BROWSER_BAIL))
         self.assertEqual(stats, tap_consumer.TapStats(2, 0, 1, 0, True))
 
     # A bail out after an expected failure counts one failure.
     def test_bail_todo(self) -> None:
-        stats = stats_read(bail_cut(_TODO_LINES, 4))
+        stats = stats_read(line_insert(_TODO_LINES, 4, _BROWSER_BAIL))
         self.assertEqual(stats, tap_consumer.TapStats(2, 1, 1, 0, True))
 
 
@@ -296,7 +291,7 @@ class TestStreamReader(unittest.TestCase):
         self.assertEqual(reader.plan, 2)
         self.assertEqual(counts, _PASSING_COUNTS)
 
-    # A bail out ends the stream, and a line after it does not fit.
+    # A bail out ends the stream, and a line after it is ignored.
     def test_bail_ended(self) -> None:
         parser = tap_consumer.Parser()
         reader = tap_consumer.StreamReader()
@@ -306,7 +301,10 @@ class TestStreamReader(unittest.TestCase):
         counts = (reader.plan, reader.passed, reader.failed)
         self.assertEqual(counts, (2, 1, 1))
         later = parser.parse_line(_PASSING_LINES[3])
-        self.assertFalse(reader.line_read(later))
+        self.assertTrue(reader.line_read(later))
+        self.assertTrue(reader.stream_ended())
+        counts = (reader.plan, reader.passed, reader.failed)
+        self.assertEqual(counts, (2, 1, 1))
 
     # A line that does not fit where it stands is refused and counts nothing.
     def test_line_refused(self) -> None:
@@ -382,10 +380,10 @@ class TestFaults(unittest.TestCase):
         stats = stats_read(_PASSING_LINES + ("ok 3 - test_third",))
         self.assertEqual(stats, tap_consumer.TapStats(2, 1, 0, 1, False))
 
-    # A line after a bail out is a fault.
+    # A line after a bail out is ignored, one of no known kind too.
     def test_line_bailed(self) -> None:
-        stats = stats_read(_FAILFAST_LINES + ("1..1",))
-        self.assertEqual(stats, tap_consumer.TapStats(4, 1, 1, 0, False))
+        stats = stats_read(_FAILFAST_LINES + ("1..1", "hello"))
+        self.assertEqual(stats, tap_consumer.TapStats(4, 1, 1, 0, True))
 
     # A version other than 14 is a fault, and so is an empty text.
     def test_version_wrong(self) -> None:

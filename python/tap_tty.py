@@ -13,11 +13,11 @@
 # over the tty: it makes a debug root from the checkout's settings and gold
 # with the TAP suite server, tap_loop.py, in its main_loop directory, runs
 # the engine there with --main-loop tap_loop.py, answers tap.start, sends
-# one tap.run and hands the text of each tap.line of the language python
-# the server pushes to its writer as it comes. It returns the exit code and
-# the stderr text the reply carries, after hanging up. Anything else the
-# engine writes fails the relay, naming it. Its texts are plain English, as
-# the infrastructure for testing's are.
+# one tap.run, with the failing tests the run expects, and hands the text of
+# each tap.line of the language python the server pushes to its writer as it
+# comes. It returns the exit code and the stderr text the reply carries,
+# after hanging up. Anything else the engine writes fails the relay, naming
+# it. Its texts are plain English, as the infrastructure for testing's are.
 
 import errno, harness, jslb, json, os, pty, shutil, signal, sys, traceback
 import types
@@ -213,6 +213,7 @@ def suites_relay(
     root: str,
     category: str,
     failfast: bool,
+    failures: int,
     modules: list[str],
     write: Callable[[str], None],
 ) -> tuple[int, str]:
@@ -235,6 +236,7 @@ def suites_relay(
                 [],
                 category=category,
                 failfast=failfast,
+                failures=failures,
                 modules=modules,
             )
         )
