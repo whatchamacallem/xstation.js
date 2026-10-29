@@ -2,21 +2,27 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests the handler of `turn.append` on a store double: the type, version
-# and handler the registration records, the handler called as the
-# dispatcher calls it on lines of the gold, the store's `turn_append` it
-# makes with the scene, the role and the message as canonical JSON, a
-# message with null and a list whole, text beyond ASCII as raw characters, a
-# line in full names, and a line with `i` the handler leaves unanswered. The
-# numbering of turns and the scenes the store refuses are the store's own,
-# `test_substrate.py`'s.
+# Tests the handler of `turn.append` on a real store on a scratch root in
+# `build/`. Each test runs in a forked child that registers the handler in
+# the real dispatcher and kills itself when done, so that no registration
+# reaches another test, and the parent checks how the child said it ended.
+# The handler is called as the dispatcher calls it on lines of the gold, and
+# the scene's turns are read back from the store: the role and the message
+# as canonical JSON, a message with null and a list whole, text beyond ASCII
+# as raw characters, a line in full names, and a line with `i` the handler
+# leaves unanswered. The dispatcher refuses a second registration of the
+# type at version 0. The numbering of turns and the scenes the store refuses
+# are the store's own, `test_substrate.py`'s.
 
-import engine_turn, harness, json, re, unittest, unittest.mock
+import dispatch, engine_turn, harness, json, os, re, signal, substrate, sys
+import tempfile, traceback, unittest
 from collections.abc import Callable
 from typing import Any
 
-# The dotted name of the store that the tests patch.
-_STORE_TARGET = "engine_turn._STATE.store"
+# The checkout's build directory, where each test makes its scratch root.
+_BUILD_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
+)
 
 # The id of this module's gold in `test_settings.json`.
 _GOLD_ID = "python.test_engine_turn"
@@ -24,8 +30,17 @@ _GOLD_ID = "python.test_engine_turn"
 # A key of the decimal digits of a non negative integer, as JSLB reads it.
 _NUMBER_KEY = re.compile(r"0|[1-9][0-9]*")
 
+# The database of the scene of the gold's lines.
+_SCENE_DB = "metaverse"
+
+# The size over which the store keeps a value in a cache file.
+_OVERFLOW_BYTES: int = harness.setting_get("overflow_bytes")
+
 # Text beyond ASCII, built from its code points, as the gold's wide turn.
 _WIDE_TEXT = chr(0x4E2D) + chr(0x6587) + chr(0x1F600)
+
+# How a child ends when its work returned.
+_ENDING_PASSED = "passed"
 
 
 # A copy of a value of this module's gold, its number keys made `int`.
@@ -65,62 +80,53 @@ def _json_text(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
-# A store double: records each call, answers what the test queued for it.
-class StoreDouble:
-    # Starts with no call recorded and no answer queued.
-    def __init__(self) -> None:
-        self.calls: list[tuple[Any, ...]] = []
-        self.answers: dict[str, list[Any]] = {}
-
-    # Records a call and returns its next queued answer, which must exist.
-    def call_answer(self, name: str, *args: Any) -> Any:
-        self.calls.append((name, *args))
-        if not self.answers.get(name):
-            raise AssertionError(f"the store double has no answer: {name}")
-        return self.answers[name].pop(0)
-
-    # `Store.turn_append`, as `engine_turn` calls it.
-    def turn_append(self, scene: str, role: str, content: str) -> Any:
-        return self.call_answer("turn_append", scene, role, content)
+# In the forked child: runs the work, writes how it ended, kills itself.
+def _child_end(work: Callable[[], object], path: str) -> None:
+    try:
+        try:
+            work()
+            ending = _ENDING_PASSED
+        except BaseException:
+            ending = traceback.format_exc()
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(ending)
+    finally:
+        os.kill(os.getpid(), signal.SIGKILL)
 
 
-# Gives each test an empty state, a registration recorder, a store double.
-class IsolatedCase(unittest.TestCase):
-    # Patches the state and `dispatch.handler_register` through `engine_turn`.
+# Gives each test a scratch root in `build/` and a forked child to run in.
+class ScratchCase(unittest.TestCase):
+    # Makes the scratch directory and the root in it.
     def setUp(self) -> None:
-        self.handlers: list[tuple[str, int, Callable[..., Any]]] = []
-        state = unittest.mock.patch(_STORE_TARGET, None)
-        register = unittest.mock.patch.object(
-            engine_turn.dispatch, "handler_register", self.handler_record
-        )
-        for patcher in (state, register):
-            patcher.start()
-            self.addCleanup(patcher.stop)
-        self.store = StoreDouble()
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+        scratch = tempfile.TemporaryDirectory(dir=_BUILD_PATH)
+        self.addCleanup(scratch.cleanup)
+        self.scratch = scratch.name
+        self.root = os.path.join(scratch.name, "root")
+        os.mkdir(self.root)
 
-    # Records one registration in place of the dispatcher's table.
-    def handler_record(
-        self, name: str, version: int, fn: Callable[..., Any]
-    ) -> None:
-        self.handlers.append((name, version, fn))
+    # Runs the work in a forked child and fails with what the child raised.
+    def child_run(self, work: Callable[[], object]) -> None:
+        path = os.path.join(self.scratch, "ending.txt")
+        sys.stdout.flush()
+        sys.stderr.flush()
+        pid = os.fork()
+        if pid == 0:
+            _child_end(work, path)
+        status = os.waitpid(pid, 0)[1]
+        self.assertEqual(os.waitstatus_to_exitcode(status), -signal.SIGKILL)
+        with open(path, encoding="utf-8") as file:
+            ending = file.read()
+        os.remove(path)
+        if ending != _ENDING_PASSED:
+            self.fail(ending)
 
-    # Registers the handlers on the store double, returns the one of `name`.
-    def handler_get(self, name: str) -> Callable[..., Any]:
-        store: Any = self.store
+    # In the child: a store on the root with the scene's database, the handler.
+    def store_register(self) -> substrate.Store:
+        store = substrate.Store(self.root, _OVERFLOW_BYTES)
+        store.db_create(_SCENE_DB)
         engine_turn.handlers_register(store)
-        (fn,) = [fn for kind, _, fn in self.handlers if kind == name]
-        return fn
-
-    # Calls the handler on a gold line, checks its one `turn_append`.
-    def append_check(self, name: str) -> str:
-        append = self.handler_get("turn.append")
-        line = _gold_value(f"lines.{name}")
-        self.store.answers["turn_append"] = [1]
-        self.assertIsNone(_handler_call(append, line))
-        text = _json_text(line["content"])
-        expected = [("turn_append", line["scene"], line["role"], text)]
-        self.assertEqual(self.store.calls, expected)
-        return text
+        return store
 
     # Calls `fn` and checks the type and the text of what it raises.
     def raise_check(
@@ -132,55 +138,70 @@ class IsolatedCase(unittest.TestCase):
 
 
 # Tests the handler of `turn.append`.
-class TestAppend(IsolatedCase):
+class TestAppend(ScratchCase):
+    # In the child: the handler on gold lines in order, then the scene's turns.
+    def append_check(self, *names: str) -> list[substrate.TurnRow]:
+        store = self.store_register()
+        lines = [_gold_value(f"lines.{name}") for name in names]
+        for line in lines:
+            self.assertIsNone(_handler_call(engine_turn.turn_append, line))
+        expected = [
+            substrate.TurnRow(
+                line["scene"], n, line["role"], _json_text(line["content"])
+            )
+            for n, line in enumerate(lines, 1)
+        ]
+        turns = store.turn_list(lines[0]["scene"])
+        self.assertEqual(turns, expected)
+        return turns
+
     # The player's first message goes to the store as canonical JSON.
     def test_turn_appended(self) -> None:
-        self.append_check("append_user")
+        self.child_run(lambda: self.append_check("append_user"))
 
     # A message with null and a list goes whole, each turn in order.
     def test_messages_whole(self) -> None:
-        append = self.handler_get("turn.append")
         names = ("append_user", "append_call", "append_answer")
-        lines = [_gold_value(f"lines.{name}") for name in names]
-        self.store.answers["turn_append"] = [1, 2, 3]
-        for line in lines:
-            self.assertIsNone(_handler_call(append, line))
-        expected = [
-            (
-                "turn_append",
-                line["scene"],
-                line["role"],
-                _json_text(line["content"]),
-            )
-            for line in lines
-        ]
-        self.assertEqual(self.store.calls, expected)
+        self.child_run(lambda: self.append_check(*names))
+
+    # In the child: the wide text is in the stored message as it is.
+    def wide_check(self) -> None:
+        (turn,) = self.append_check("append_wide")
+        self.assertIn(_WIDE_TEXT, turn.content)
 
     # Text beyond ASCII is passed as raw characters, not as escapes.
     def test_text_wide(self) -> None:
-        text = self.append_check("append_wide")
-        self.assertIn(_WIDE_TEXT, text)
+        self.child_run(self.wide_check)
 
     # A line in full names is applied as one in short names.
     def test_full_names(self) -> None:
-        self.append_check("append_full")
+        self.child_run(lambda: self.append_check("append_full"))
 
     # An append with `i` is applied and answered with nothing, as a push is.
     def test_request_none(self) -> None:
-        self.append_check("append_request")
+        self.child_run(lambda: self.append_check("append_request"))
 
 
 # Tests the registration.
-class TestRegister(IsolatedCase):
+class TestRegister(ScratchCase):
+    # In the child: the dispatcher refuses the type at version 0 again.
+    def registered_check(self) -> None:
+        self.store_register()
+        message = _text_get("dispatch_handler_twice_append")
+        self.raise_check(
+            ValueError,
+            message,
+            lambda: dispatch.handler_register(
+                "turn.append", 0, engine_turn.turn_append
+            ),
+        )
+
     # The handler is registered once, under its type at version 0.
     def test_handlers_registered(self) -> None:
-        store: Any = self.store
-        engine_turn.handlers_register(store)
-        expected = [("turn.append", 0, engine_turn.turn_append)]
-        self.assertEqual(self.handlers, expected)
+        self.child_run(self.registered_check)
 
-    # Called before the registration the handler raises.
-    def test_called_early(self) -> None:
+    # In the child: before the registration the handler raises.
+    def early_check(self) -> None:
         line = _gold_value("lines.append_user")
         message = _text_get("engine_turn_not_registered")
         self.raise_check(
@@ -188,4 +209,7 @@ class TestRegister(IsolatedCase):
             message,
             lambda: _handler_call(engine_turn.turn_append, line),
         )
-        self.assertEqual(self.store.calls, [])
+
+    # Called before the registration the handler raises.
+    def test_called_early(self) -> None:
+        self.child_run(self.early_check)

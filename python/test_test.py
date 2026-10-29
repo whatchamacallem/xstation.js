@@ -2,21 +2,42 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests of the infrastructure for testing. The harness: a value of either
-# file by a top or nested id, the refusal of an unknown id, each file read
-# once, and the deep copies of both whole files, on files of the test's own
-# in place of the checkout's. Category: the options --smoke-test and
-# --normal-test on a parser, which suites a run of each category runs, the
-# seconds a run may take, the gold's smoke_seconds, the alarm of a suite,
-# its own seconds or the deadline of a smoke-test run, whichever comes
-# first, own seconds winning a tie, or a refusal once the deadline has
-# passed, and the checks LabelBook makes of the labels of the roots and
-# rungs a runner reaches, each refusal compared with its message. No real
-# alarm is armed, since the runner's alarm of this module is running.
+# Tests of the infrastructure for testing. The harness, on the checkout's
+# own settings.json and test_settings.json, each also read with `json` as
+# the oracle, and the gold under this suite's own id: a value of either file
+# by a top or nested id, the refusal of an unknown id, each file read once,
+# and the deep copies of both whole files. Category: the options
+# --smoke-test and --normal-test on a parser, which suites a run of each
+# category runs, the seconds a run may take, the gold's smoke_seconds, the
+# alarm of a suite, its own seconds or the deadline of a smoke-test run,
+# whichever comes first, own seconds winning a tie, or a refusal once the
+# deadline has passed, and the checks LabelBook makes of the labels of the
+# roots and rungs a runner reaches, each refusal compared with its message.
+# No real alarm is armed, since the runner's alarm of this module is
+# running. Line coverage: sample modules written to a scratch directory in
+# build/ and run with `runpy` while a count runs, their functions called in
+# this process or in a forked child ended by SIGKILL, the first line the
+# count finds never run compared with the line each refusal names.
 
-import argparse, category, contextlib, harness, io, json, os, tempfile
-import unittest, unittest.mock
-from typing import Any
+import argparse, category, contextlib, harness, io, json, line_coverage, os
+import runpy, signal, tempfile, unittest
+from typing import Any, cast
+
+# The checkout's top directory, above this file's `python/`.
+_ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Where the scratch directories go.
+_BUILD_PATH = os.path.join(_ROOT_PATH, "build")
+
+# The two files the harness reads, at the checkout's top.
+_SETTINGS_NAME = "settings.json"
+_TESTS_NAME = "test_settings.json"
+
+# The id of this module's gold in `test_settings.json`.
+_GOLD_ID = "python.test_test"
+
+# The list this module's gold holds under `limits`.
+_LIMITS = [1, 2]
 
 # The label and category of the important suites that fit in 2 minutes.
 _SMOKE_TEST = "smoke-test"
@@ -27,19 +48,63 @@ _NORMAL_TEST = "normal-test"
 # The refusal of the category `all`, which is neither of the two.
 _ALL_REFUSED = "the category 'all' is neither smoke-test nor normal-test"
 
-# The dotted names of the harness's paths and state that the tests patch.
-_SETTINGS_TARGET = "harness._SETTINGS_PATH"
-_TESTS_TARGET = "harness._TESTS_PATH"
-_STATE_TARGET = "harness._STATE"
+# The mark that exempts a statement and the block its first line opens.
+_MARK = "# pragma: no cover"
 
-# The settings file of the harness tests, a nested object among its values.
-_SETTINGS: dict[str, Any] = {"debug": True, "provider": {"scripted": True}}
+# A sample module: an import, a constant, a class with a method, and a
+# function of two branches.
+_SHAPES = """\
+import os
 
-# The gold file of the harness tests, `smoke_seconds` read by `category`.
-_GOLD: dict[str, Any] = {
-    "smoke_seconds": 7,
-    "python": {"test_test": {"limits": [1, 2]}},
-}
+_NAME = os.path.basename("shapes.py")
+
+
+class Square:
+    sides = 4
+
+    def area(self, side):
+        return side * side
+
+
+def parity(number):
+    if number % 2:
+        return "odd"
+    return "even"
+"""
+
+# The first function line of `_SHAPES`, the body of `Square.area`.
+_AREA_LINE = 10
+
+# The line of `_SHAPES` that only an even number runs.
+_EVEN_LINE = 16
+
+# A sample module whose lines are exempt in the block of the marked `if`,
+# which is never run, and in the marked `raise`, but not in the `else`.
+_EXEMPT = """\
+def sign(value):
+    if value < 0:  {mark}
+        raise RuntimeError("internal error")
+    else:
+        return 1
+
+
+def fail():
+    raise RuntimeError(  {mark}
+        "internal error"
+    )
+""".format(mark=_MARK)
+
+# The line of `_EXEMPT` in the `else` of the marked `if`.
+_ELSE_LINE = 5
+
+# A sample module with a signature over lines that hold only annotations.
+_ANNOTATED = """\
+def scale(
+    value: int,
+    factor: int,
+) -> int:
+    return value * factor
+"""
 
 
 # Returns a parser with the two options and no abbreviations, as runners make.
@@ -49,83 +114,105 @@ def parser_make() -> argparse.ArgumentParser:
     return parser
 
 
-# Writes `value` as the JSON text of the file at `path`.
-def json_write(path: str, value: object) -> None:
-    with open(path, "w", encoding="utf-8") as file:
-        json.dump(value, file)
+# The object of a file at the checkout's top, read with `json`.
+def file_load(name: str) -> dict[str, Any]:
+    with open(os.path.join(_ROOT_PATH, name), encoding="utf-8") as file:
+        data: dict[str, Any] = json.load(file)
+    return data
 
 
-# Gives each test its own two files and a harness that has read neither.
-class HarnessCase(unittest.TestCase):
-    # Writes the two files and points the harness at them until the test ends.
-    def setUp(self) -> None:
-        folder = tempfile.TemporaryDirectory()
-        self.addCleanup(folder.cleanup)
-        self.settings_path = os.path.join(folder.name, "settings.json")
-        self.tests_path = os.path.join(folder.name, "test_settings.json")
-        json_write(self.settings_path, _SETTINGS)
-        json_write(self.tests_path, _GOLD)
-        patchers = (
-            unittest.mock.patch(_SETTINGS_TARGET, self.settings_path),
-            unittest.mock.patch(_TESTS_TARGET, self.tests_path),
-            unittest.mock.patch.dict(_STATE_TARGET, {}, clear=True),
-        )
-        for patcher in patchers:
-            patcher.start()
-            self.addCleanup(patcher.stop)
+# The keys of the object whose values are objects in turn.
+def keys_nested(data: dict[str, Any]) -> list[str]:
+    return [key for key, value in data.items() if isinstance(value, dict)]
+
+
+# Calls each function of a run `_SHAPES`, both branches of `parity`.
+def shapes_call(shapes: dict[str, Any]) -> None:
+    shapes["Square"]().area(2)
+    shapes["parity"](1)
+    shapes["parity"](2)
 
 
 # The values of both files by id, the refusals, the one read and the copies.
-class TestHarness(HarnessCase):
+class TestHarness(unittest.TestCase):
+    # Reads both files with `json`, the oracle of the harness.
+    def setUp(self) -> None:
+        self.settings = file_load(_SETTINGS_NAME)
+        self.gold = file_load(_TESTS_NAME)
+
     # A top level id names its value in either file.
     def test_top_id(self) -> None:
-        self.assertIs(harness.setting_get("debug"), True)
-        self.assertEqual(harness.gold_get("smoke_seconds"), 7)
+        for key, value in self.settings.items():
+            self.assertEqual(harness.setting_get(key), value, key)
+        for key, value in self.gold.items():
+            self.assertEqual(harness.gold_get(key), value, key)
 
     # A nested id names the value of its keys joined by `.`.
     def test_nested_id(self) -> None:
-        self.assertIs(harness.setting_get("provider.scripted"), True)
-        self.assertEqual(harness.gold_get("python.test_test.limits"), [1, 2])
+        for key in keys_nested(self.settings):
+            inner = cast(dict[str, Any], self.settings[key])
+            for name, value in inner.items():
+                id = f"{key}.{name}"
+                self.assertEqual(harness.setting_get(id), value, id)
+        self.assertEqual(harness.gold_get(f"{_GOLD_ID}.limits"), _LIMITS)
 
     # An id one of whose keys is missing raises, naming the file and the id.
     def test_id_unknown(self) -> None:
+        id = f"{_GOLD_ID}.no_such"
         with self.assertRaises(KeyError) as caught:
-            harness.setting_get("provider.variable")
-        expected = "settings.json has no value with id 'provider.variable'"
+            harness.setting_get(id)
+        expected = (
+            "settings.json has no value with id 'python.test_test.no_such'"
+        )
         self.assertEqual(caught.exception.args, (expected,))
         with self.assertRaises(KeyError) as caught:
-            harness.gold_get("python.test_jslb")
-        expected = "test_settings.json has no value with id 'python.test_jslb'"
+            harness.gold_get(id)
+        expected = (
+            "test_settings.json has no value with id"
+            " 'python.test_test.no_such'"
+        )
         self.assertEqual(caught.exception.args, (expected,))
 
     # An id that goes on past a value that is not an object raises.
     def test_id_past_value(self) -> None:
+        nested = keys_nested(self.settings)
+        flat = [key for key in self.settings if key not in nested]
+        id = f"{flat[0]}.on"
         with self.assertRaises(KeyError) as caught:
-            harness.setting_get("debug.on")
-        expected = "settings.json has no value with id 'debug.on'"
+            harness.setting_get(id)
+        expected = f"settings.json has no value with id {id!r}"
+        self.assertEqual(caught.exception.args, (expected,))
+        with self.assertRaises(KeyError) as caught:
+            harness.gold_get(f"{_GOLD_ID}.limits.0")
+        expected = (
+            "test_settings.json has no value with id"
+            " 'python.test_test.limits.0'"
+        )
         self.assertEqual(caught.exception.args, (expected,))
 
-    # Each file is read once: a change after the first call is not seen.
+    # Each file is read once: two reads of an object's id give the one object
+    # that the first read of the file made.
     def test_read_once(self) -> None:
-        self.assertIs(harness.setting_get("debug"), True)
-        self.assertEqual(harness.gold_get("smoke_seconds"), 7)
-        json_write(self.settings_path, {"debug": False})
-        json_write(self.tests_path, {"smoke_seconds": 8})
-        self.assertIs(harness.setting_get("debug"), True)
-        self.assertEqual(harness.gold_get("smoke_seconds"), 7)
+        for key in keys_nested(self.settings):
+            self.assertIs(harness.setting_get(key), harness.setting_get(key))
+        self.assertIs(harness.gold_get(_GOLD_ID), harness.gold_get(_GOLD_ID))
 
     # A copy holds the whole file, and changing it changes no later read.
     def test_copies_whole(self) -> None:
         settings = harness.settings_copy()
         gold = harness.gold_copy()
-        self.assertEqual(settings, _SETTINGS)
-        self.assertEqual(gold, _GOLD)
-        settings["provider"]["scripted"] = False
+        self.assertEqual(settings, self.settings)
+        self.assertEqual(gold, self.gold)
+        nested = keys_nested(settings)
+        for key in nested:
+            settings[key].clear()
         gold["python"]["test_test"]["limits"].append(3)
-        self.assertIs(harness.setting_get("provider.scripted"), True)
-        self.assertEqual(harness.gold_get("python.test_test.limits"), [1, 2])
-        self.assertEqual(harness.settings_copy(), _SETTINGS)
-        self.assertEqual(harness.gold_copy(), _GOLD)
+        for key in nested:
+            expected = self.settings[key]
+            self.assertEqual(harness.setting_get(key), expected, key)
+        self.assertEqual(harness.gold_get(f"{_GOLD_ID}.limits"), _LIMITS)
+        self.assertEqual(harness.settings_copy(), self.settings)
+        self.assertEqual(harness.gold_copy(), self.gold)
 
 
 # The two options, at most one, and `smoke-test` when neither is given.
@@ -188,11 +275,12 @@ class TestSelection(unittest.TestCase):
 
 
 # The seconds a run of each category may take.
-class TestLimit(HarnessCase):
+class TestLimit(unittest.TestCase):
     # A `smoke-test` run has the gold's `smoke_seconds`, as a float.
     def test_smoke_limit(self) -> None:
         limit = category.limit_seconds(_SMOKE_TEST)
-        self.assertEqual(limit, 7.0)
+        expected = float(file_load(_TESTS_NAME)["smoke_seconds"])
+        self.assertEqual(limit, expected)
         self.assertIs(type(limit), float)
 
     # A `normal-test` run has no limit of its own.
@@ -323,3 +411,170 @@ class TestLabelBook(unittest.TestCase):
             book.root_leave()
         expected = "no root that runs is left to leave"
         self.assertEqual(caught.exception.args, (expected,))
+
+
+# The lines a count finds never run, in sample modules really run.
+class TestLineCount(unittest.TestCase):
+    # Makes the scratch directory of the samples in `build/`.
+    def setUp(self) -> None:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+        scratch = tempfile.TemporaryDirectory(dir=_BUILD_PATH)
+        self.addCleanup(scratch.cleanup)
+        self.scratch = scratch.name
+
+    # Writes a sample module in the scratch directory and returns its path.
+    def sample_write(self, name: str, text: str) -> str:
+        path = os.path.join(self.scratch, name)
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(text)
+        return path
+
+    # Starts a count that stops when the test ends.
+    def count_start(self) -> line_coverage.LineCount:
+        count = line_coverage.LineCount()
+        self.addCleanup(count.count_stop)
+        return count
+
+    # Checks that the count's check of the file raises naming the line.
+    def unrun_check(
+        self, count: line_coverage.LineCount, path: str, line: int
+    ) -> None:
+        with self.assertRaises(RuntimeError) as caught:
+            count.lines_check(path)
+        expected = f"line {line} of {path} was never counted as run"
+        self.assertEqual(caught.exception.args, (expected,))
+
+    # Calls each function of a run `_SHAPES` in a forked child, which ends by
+    # SIGKILL whatever the calls do.
+    def child_call(self, shapes: dict[str, Any]) -> None:
+        pid = os.fork()
+        if pid == 0:
+            try:
+                shapes_call(shapes)
+            finally:
+                os.kill(os.getpid(), signal.SIGKILL)
+        status = os.waitpid(pid, 0)[1]
+        self.assertEqual(os.waitstatus_to_exitcode(status), -signal.SIGKILL)
+
+    # Lines run at import count outside a suite, lines of functions in one.
+    def test_all_counted(self) -> None:
+        path = self.sample_write("shapes.py", _SHAPES)
+        count = self.count_start()
+        shapes = runpy.run_path(path)
+        count.suite_enter([path])
+        shapes_call(shapes)
+        count.suite_leave()
+        count.lines_check(path)
+
+    # A branch never taken holds the first line never run.
+    def test_branch_unrun(self) -> None:
+        path = self.sample_write("shapes.py", _SHAPES)
+        count = self.count_start()
+        shapes = runpy.run_path(path)
+        count.suite_enter([path])
+        shapes["Square"]().area(2)
+        shapes["parity"](1)
+        count.suite_leave()
+        self.unrun_check(count, path, _EVEN_LINE)
+
+    # Function lines run outside a suite do not count, and count once run in
+    # a suite, though the first run turned them off.
+    def test_suite_only(self) -> None:
+        path = self.sample_write("shapes.py", _SHAPES)
+        count = self.count_start()
+        shapes = runpy.run_path(path)
+        shapes_call(shapes)
+        self.unrun_check(count, path, _AREA_LINE)
+        count.suite_enter([path])
+        shapes_call(shapes)
+        count.suite_leave()
+        count.lines_check(path)
+
+    # A file never run has its first line never run.
+    def test_file_unrun(self) -> None:
+        path = self.sample_write("shapes.py", _SHAPES)
+        count = self.count_start()
+        self.unrun_check(count, path, 1)
+
+    # A suite counts the function lines of its own files only.
+    def test_other_file(self) -> None:
+        first = self.sample_write("first.py", _SHAPES)
+        second = self.sample_write("second.py", _SHAPES)
+        count = self.count_start()
+        samples = [runpy.run_path(first), runpy.run_path(second)]
+        count.suite_enter([first])
+        for shapes in samples:
+            shapes_call(shapes)
+        count.suite_leave()
+        count.lines_check(first)
+        self.unrun_check(count, second, _AREA_LINE)
+
+    # The marked `if` and `raise` are exempt with their blocks, the `else`
+    # of the `if` is not.
+    def test_exempt(self) -> None:
+        path = self.sample_write("exempt.py", _EXEMPT)
+        count = self.count_start()
+        exempt = runpy.run_path(path)
+        self.unrun_check(count, path, _ELSE_LINE)
+        count.suite_enter([path])
+        exempt["sign"](1)
+        count.suite_leave()
+        count.lines_check(path)
+
+    # The lines of a signature that hold only annotations do not count.
+    def test_annotations(self) -> None:
+        path = self.sample_write("annotated.py", _ANNOTATED)
+        count = self.count_start()
+        annotated = runpy.run_path(path)
+        count.suite_enter([path])
+        self.assertEqual(annotated["scale"](2, 3), 6)
+        count.suite_leave()
+        count.lines_check(path)
+
+    # A file run and named through a symbolic link counts as its real path.
+    def test_real_path(self) -> None:
+        path = self.sample_write("shapes.py", _SHAPES)
+        link = os.path.join(self.scratch, "link.py")
+        os.symlink(path, link)
+        count = self.count_start()
+        shapes = runpy.run_path(link)
+        count.suite_enter([link])
+        shapes_call(shapes)
+        count.suite_leave()
+        count.lines_check(path)
+
+    # A count stopped counts nothing more, and keeps what it counted.
+    def test_stopped(self) -> None:
+        first = self.sample_write("first.py", _SHAPES)
+        second = self.sample_write("second.py", _SHAPES)
+        count = line_coverage.LineCount()
+        runpy.run_path(first)
+        count.count_stop()
+        runpy.run_path(second)
+        self.unrun_check(count, first, _AREA_LINE)
+        self.unrun_check(count, second, 1)
+
+    # Two counts at once count apart, each only in its own suites.
+    def test_two_counts(self) -> None:
+        path = self.sample_write("shapes.py", _SHAPES)
+        first = self.count_start()
+        second = self.count_start()
+        shapes = runpy.run_path(path)
+        first.suite_enter([path])
+        shapes_call(shapes)
+        first.suite_leave()
+        first.lines_check(path)
+        self.unrun_check(second, path, _AREA_LINE)
+
+    # Function lines a forked child runs count in a suite, though the child
+    # ends by SIGKILL, and do not count outside one.
+    def test_forked_child(self) -> None:
+        path = self.sample_write("shapes.py", _SHAPES)
+        count = self.count_start()
+        shapes = runpy.run_path(path)
+        self.child_call(shapes)
+        self.unrun_check(count, path, _AREA_LINE)
+        count.suite_enter([path])
+        self.child_call(shapes)
+        count.suite_leave()
+        count.lines_check(path)

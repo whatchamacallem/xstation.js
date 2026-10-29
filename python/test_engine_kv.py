@@ -2,25 +2,26 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests the handlers of `kv.put` and `kv.delete` on a store double: the
-# type, version and handler each registration records, each handler called
-# as the dispatcher calls it on lines of the gold, the calls it makes on the
-# store, values byte for byte or as the path a streamed blob took, lines in
-# full names, a line with `i` the handler leaves unanswered, and lines that
-# lack a key or a blob. The store's own effects are `test_substrate.py`'s.
+# Tests the handlers of `kv.put` and `kv.delete` on a real store on a
+# scratch root in `build/`. Each test runs in a forked child that registers
+# the handlers in the real dispatcher and kills itself when done, so that no
+# registration reaches another test, and the parent checks how the child
+# said it ended. Each handler is called as the dispatcher calls it on lines
+# of the gold, and the store's rows are read back: values byte for byte or
+# as the path a streamed blob took, lines in full names, a line with `i` the
+# handler leaves unanswered, and lines that lack a key or a blob, which
+# change no row. The dispatcher refuses a second registration of each type
+# at version 0. The store's own effects are `test_substrate.py`'s.
 
-import base64, engine_kv, harness, hashlib, os, re, tempfile, unittest
-import unittest.mock
+import base64, dispatch, engine_kv, harness, os, re, signal, substrate, sys
+import tempfile, traceback, unittest
 from collections.abc import Callable
 from typing import Any
 
-# The checkout's build directory, where each test makes its scratch roots.
+# The checkout's build directory, where each test makes its scratch root.
 _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
 )
-
-# The dotted name of the store that the tests patch.
-_STORE_TARGET = "engine_kv._STATE.store"
 
 # The id of this module's gold in `test_settings.json`.
 _GOLD_ID = "python.test_engine_kv"
@@ -28,13 +29,17 @@ _GOLD_ID = "python.test_engine_kv"
 # A key of the decimal digits of a non negative integer, as JSLB reads it.
 _NUMBER_KEY = re.compile(r"0|[1-9][0-9]*")
 
+# The database of the refs of the gold's lines.
+_FILES_DB = "_files"
+
+# The size over which the store keeps a value in a cache file.
+_OVERFLOW_BYTES: int = harness.setting_get("overflow_bytes")
+
 # Every byte value once, the control bytes of a terminal included.
 _VALUE_BYTES = bytes(range(256))
 
 # A value over `overflow_bytes`, which the decoder streams to a file.
-_VALUE_OVER = bytes(range(256)) * (
-    harness.setting_get("overflow_bytes") // 256 + 1
-)
+_VALUE_OVER = bytes(range(256)) * (_OVERFLOW_BYTES // 256 + 1)
 
 # A small PNG image, as base64 text.
 _IMAGE_BASE64 = (
@@ -44,6 +49,9 @@ _IMAGE_BASE64 = (
 
 # The bytes of the image.
 _IMAGE_BYTES = base64.b64decode(_IMAGE_BASE64)
+
+# How a child ends when its work returned.
+_ENDING_PASSED = "passed"
 
 
 # A copy of a value of this module's gold, its number keys made `int`.
@@ -79,6 +87,12 @@ def _blob_line(name: str, data: bytes | str) -> dict[int | str, Any]:
     return line
 
 
+# The ref in the header of a line of the gold, in either name form.
+def _ref_of(line: dict[int | str, Any]) -> str:
+    ref: str = line[0]["key" if "type" in line[0] else "k"]
+    return ref
+
+
 # Calls a handler as `dispatch.line_dispatch` does, the payload as keywords.
 def _handler_call(fn: Callable[..., Any], line: dict[int | str, Any]) -> Any:
     payload = {
@@ -87,69 +101,61 @@ def _handler_call(fn: Callable[..., Any], line: dict[int | str, Any]) -> Any:
     return fn(line, **payload)
 
 
-# The `KvRow` shape `Store.kv_put` returns for a value, as a plain tuple.
-def _row_of(ref: str, value: bytes) -> tuple[str, int, bytes]:
-    return (ref, len(value), hashlib.sha256(value).digest())
+# The bytes of a value the store holds: as held, or read from its file.
+def _value_bytes(data: bytes | str) -> bytes:
+    if isinstance(data, bytes):
+        return data
+    with open(data, "rb") as file:
+        return file.read()
 
 
-# A store double: records each call, answers what the test queued for it.
-class StoreDouble:
-    # Starts with no call recorded and no answer queued.
-    def __init__(self) -> None:
-        self.calls: list[tuple[Any, ...]] = []
-        self.answers: dict[str, list[Any]] = {}
-
-    # Records a call and returns its next queued answer, which must exist.
-    def call_answer(self, name: str, *args: Any) -> Any:
-        self.calls.append((name, *args))
-        if not self.answers.get(name):
-            raise AssertionError(f"the store double has no answer: {name}")
-        return self.answers[name].pop(0)
-
-    # `Store.kv_put`, as `engine_kv` calls it.
-    def kv_put(self, ref: str, data: bytes | str) -> Any:
-        return self.call_answer("kv_put", ref, data)
-
-    # `Store.kv_delete`, as `engine_kv` calls it.
-    def kv_delete(self, ref: str) -> Any:
-        return self.call_answer("kv_delete", ref)
+# In the forked child: runs the work, writes how it ended, kills itself.
+def _child_end(work: Callable[[], object], path: str) -> None:
+    try:
+        try:
+            work()
+            ending = _ENDING_PASSED
+        except BaseException:
+            ending = traceback.format_exc()
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(ending)
+    finally:
+        os.kill(os.getpid(), signal.SIGKILL)
 
 
-# Gives each test an empty state, a registration recorder, a store double.
-class IsolatedCase(unittest.TestCase):
-    # Patches the state and `dispatch.handler_register` through `engine_kv`.
+# Gives each test a scratch root in `build/` and a forked child to run in.
+class ScratchCase(unittest.TestCase):
+    # Makes the scratch directory and the root in it.
     def setUp(self) -> None:
-        self.handlers: list[tuple[str, int, Callable[..., Any]]] = []
-        state = unittest.mock.patch(_STORE_TARGET, None)
-        register = unittest.mock.patch.object(
-            engine_kv.dispatch, "handler_register", self.handler_record
-        )
-        for patcher in (state, register):
-            patcher.start()
-            self.addCleanup(patcher.stop)
-        self.store = StoreDouble()
-
-    # Records one registration in place of the dispatcher's table.
-    def handler_record(
-        self, name: str, version: int, fn: Callable[..., Any]
-    ) -> None:
-        self.handlers.append((name, version, fn))
-
-    # Registers the handlers on the store double, returns the one of `name`.
-    def handler_get(self, name: str) -> Callable[..., Any]:
-        store: Any = self.store
-        engine_kv.handlers_register(store)
-        (fn,) = [fn for kind, _, fn in self.handlers if kind == name]
-        return fn
-
-    # Writes bytes to a new file in a scratch root under `build/`.
-    def file_write(self, data: bytes) -> str:
         os.makedirs(_BUILD_PATH, exist_ok=True)
-        root = self.enterContext(tempfile.TemporaryDirectory(dir=_BUILD_PATH))
-        path = os.path.join(root, "blob")
-        with open(path, "xb") as file:
-            file.write(data)
-        return path
+        scratch = tempfile.TemporaryDirectory(dir=_BUILD_PATH)
+        self.addCleanup(scratch.cleanup)
+        self.scratch = scratch.name
+        self.root = os.path.join(scratch.name, "root")
+        os.mkdir(self.root)
+
+    # Runs the work in a forked child and fails with what the child raised.
+    def child_run(self, work: Callable[[], object]) -> None:
+        path = os.path.join(self.scratch, "ending.txt")
+        sys.stdout.flush()
+        sys.stderr.flush()
+        pid = os.fork()
+        if pid == 0:
+            _child_end(work, path)
+        status = os.waitpid(pid, 0)[1]
+        self.assertEqual(os.waitstatus_to_exitcode(status), -signal.SIGKILL)
+        with open(path, encoding="utf-8") as file:
+            ending = file.read()
+        os.remove(path)
+        if ending != _ENDING_PASSED:
+            self.fail(ending)
+
+    # In the child: a store on the root with `_files`, the handlers on it.
+    def store_register(self) -> substrate.Store:
+        store = substrate.Store(self.root, _OVERFLOW_BYTES)
+        store.db_create(_FILES_DB)
+        engine_kv.handlers_register(store)
+        return store
 
     # Calls `fn` and checks the type and the text of what it raises.
     def raise_check(
@@ -161,120 +167,126 @@ class IsolatedCase(unittest.TestCase):
 
 
 # Tests the handler of `kv.put`.
-class TestPut(IsolatedCase):
+class TestPut(ScratchCase):
+    # In the child: the handler on a gold line, then the value under its ref.
+    def put_check(self, name: str, data: bytes | str, value: bytes) -> None:
+        store = self.store_register()
+        line = _blob_line(name, data)
+        self.assertIsNone(_handler_call(engine_kv.kv_put, line))
+        self.assertEqual(_value_bytes(store.kv_get(_ref_of(line)).data), value)
+
     # The image goes to the store under the header's key. Nothing answers.
     def test_value_stored(self) -> None:
-        put = self.handler_get("kv.put")
-        line = _blob_line("put_image", _IMAGE_BYTES)
-        key = line[0]["k"]
-        self.store.answers["kv_put"] = [_row_of(key, _IMAGE_BYTES)]
-        self.assertIsNone(_handler_call(put, line))
-        self.assertEqual(self.store.calls, [("kv_put", key, _IMAGE_BYTES)])
+        self.child_run(
+            lambda: self.put_check("put_image", _IMAGE_BYTES, _IMAGE_BYTES)
+        )
 
     # A line in full names is applied as one in short names.
     def test_full_names(self) -> None:
-        put = self.handler_get("kv.put")
-        line = _blob_line("put_full", b"one")
-        key = line[0]["key"]
-        self.store.answers["kv_put"] = [_row_of(key, b"one")]
-        self.assertIsNone(_handler_call(put, line))
-        self.assertEqual(self.store.calls, [("kv_put", key, b"one")])
+        self.child_run(lambda: self.put_check("put_full", b"one", b"one"))
 
     # Every byte value and an empty value go to the store as given.
     def test_bytes_identical(self) -> None:
-        put = self.handler_get("kv.put")
-        values = (_VALUE_BYTES, b"")
-        key = _gold_value("lines.put")[0]["k"]
-        self.store.answers["kv_put"] = [_row_of(key, v) for v in values]
-        for value in values:
-            self.assertIsNone(_handler_call(put, _blob_line("put", value)))
-        expected = [("kv_put", key, value) for value in values]
-        self.assertEqual(self.store.calls, expected)
+        for value in (_VALUE_BYTES, b""):
+            self.child_run(lambda: self.put_check("put", value, value))
 
     # A value the decoder streamed goes to the store as the path it took.
     def test_streamed_put(self) -> None:
-        put = self.handler_get("kv.put")
-        path = self.file_write(_VALUE_OVER)
-        line = _blob_line("put", path)
-        key = line[0]["k"]
-        self.store.answers["kv_put"] = [_row_of(key, _VALUE_OVER)]
-        self.assertIsNone(_handler_call(put, line))
-        self.assertEqual(self.store.calls, [("kv_put", key, path)])
+        path = os.path.join(self.scratch, "blob")
+        with open(path, "xb") as file:
+            file.write(_VALUE_OVER)
+        self.child_run(lambda: self.put_check("put", path, _VALUE_OVER))
 
     # A put with `i` is applied and answered with nothing, as a push is.
     def test_request_none(self) -> None:
-        put = self.handler_get("kv.put")
-        line = _blob_line("put_request", b"one")
-        key = line[0]["k"]
-        self.store.answers["kv_put"] = [_row_of(key, b"one")]
-        self.assertIsNone(_handler_call(put, line))
-        self.assertEqual(self.store.calls, [("kv_put", key, b"one")])
+        self.child_run(lambda: self.put_check("put_request", b"one", b"one"))
 
-    # A line with no blob raises, and so does a line with no key.
-    def test_line_incomplete(self) -> None:
-        put = self.handler_get("kv.put")
+    # In the child: a line with no blob or no key raises, and no row is made.
+    def incomplete_check(self) -> None:
+        store = self.store_register()
         line = _gold_value("lines.put_blobless")
         message = _text_get("engine_kv_blob_missing")
-        self.raise_check(ValueError, message, lambda: _handler_call(put, line))
+        self.raise_check(
+            ValueError, message, lambda: _handler_call(engine_kv.kv_put, line)
+        )
         keyless = _blob_line("put_keyless", b"one")
         message = _text_get("engine_kv_key_missing_put")
         self.raise_check(
-            ValueError, message, lambda: _handler_call(put, keyless)
+            ValueError,
+            message,
+            lambda: _handler_call(engine_kv.kv_put, keyless),
         )
-        self.assertEqual(self.store.calls, [])
+        self.assertEqual(store.kv_list(_FILES_DB, ""), [])
+
+    # A line with no blob raises, and so does a line with no key.
+    def test_line_incomplete(self) -> None:
+        self.child_run(self.incomplete_check)
 
 
 # Tests the handler of `kv.delete`.
-class TestDelete(IsolatedCase):
-    # A delete asks the store to delete the header's key.
+class TestDelete(ScratchCase):
+    # In the child: a row the store made, then the handler on a gold line.
+    def delete_check(self, name: str) -> None:
+        store = self.store_register()
+        line = _gold_value(f"lines.{name}")
+        store.kv_put(_ref_of(line), b"one")
+        self.assertIsNone(_handler_call(engine_kv.kv_delete, line))
+        self.assertEqual(store.kv_list(_FILES_DB, ""), [])
+
+    # A delete removes the row of the header's key.
     def test_key_deleted(self) -> None:
-        delete = self.handler_get("kv.delete")
-        line = _gold_value("lines.delete")
-        self.store.answers["kv_delete"] = [None]
-        self.assertIsNone(_handler_call(delete, line))
-        self.assertEqual(self.store.calls, [("kv_delete", line[0]["k"])])
+        self.child_run(lambda: self.delete_check("delete"))
 
     # A line in full names is applied as one in short names.
     def test_full_names(self) -> None:
-        delete = self.handler_get("kv.delete")
-        line = _gold_value("lines.delete_full")
-        self.store.answers["kv_delete"] = [None]
-        self.assertIsNone(_handler_call(delete, line))
-        self.assertEqual(self.store.calls, [("kv_delete", line[0]["key"])])
+        self.child_run(lambda: self.delete_check("delete_full"))
 
     # A delete with `i` is applied and answered with nothing, as a push is.
     def test_request_none(self) -> None:
-        delete = self.handler_get("kv.delete")
-        line = _gold_value("lines.delete_request")
-        self.store.answers["kv_delete"] = [None]
-        self.assertIsNone(_handler_call(delete, line))
-        self.assertEqual(self.store.calls, [("kv_delete", line[0]["k"])])
+        self.child_run(lambda: self.delete_check("delete_request"))
 
-    # A line with no key raises.
-    def test_key_missing(self) -> None:
-        delete = self.handler_get("kv.delete")
+    # In the child: a line with no key raises, and the row stays.
+    def missing_check(self) -> None:
+        store = self.store_register()
+        ref = _ref_of(_gold_value("lines.delete"))
+        store.kv_put(ref, b"one")
         line = _gold_value("lines.delete_keyless")
         message = _text_get("engine_kv_key_missing_delete")
         self.raise_check(
-            ValueError, message, lambda: _handler_call(delete, line)
+            ValueError,
+            message,
+            lambda: _handler_call(engine_kv.kv_delete, line),
         )
-        self.assertEqual(self.store.calls, [])
+        self.assertEqual(store.kv_get(ref).data, b"one")
+
+    # A line with no key raises.
+    def test_key_missing(self) -> None:
+        self.child_run(self.missing_check)
 
 
 # Tests the registration.
-class TestRegister(IsolatedCase):
+class TestRegister(ScratchCase):
+    # In the child: the dispatcher refuses each type at version 0 again.
+    def registered_check(self) -> None:
+        self.store_register()
+        handlers = [
+            ("kv.put", engine_kv.kv_put, "put"),
+            ("kv.delete", engine_kv.kv_delete, "delete"),
+        ]
+        for kind, fn, name in handlers:
+            message = _text_get(f"dispatch_handler_twice_{name}")
+            self.raise_check(
+                ValueError,
+                message,
+                lambda: dispatch.handler_register(kind, 0, fn),
+            )
+
     # Each handler is registered once, under its type at version 0.
     def test_handlers_registered(self) -> None:
-        store: Any = self.store
-        engine_kv.handlers_register(store)
-        expected = [
-            ("kv.put", 0, engine_kv.kv_put),
-            ("kv.delete", 0, engine_kv.kv_delete),
-        ]
-        self.assertEqual(self.handlers, expected)
+        self.child_run(self.registered_check)
 
-    # Called before the registration each handler raises.
-    def test_called_early(self) -> None:
+    # In the child: before the registration each handler raises.
+    def early_check(self) -> None:
         line = _gold_value("lines.put_blobless")
         message = _text_get("engine_kv_not_registered")
         calls: list[Callable[[], object]] = [
@@ -283,3 +295,7 @@ class TestRegister(IsolatedCase):
         ]
         for call in calls:
             self.raise_check(RuntimeError, message, call)
+
+    # Called before the registration each handler raises.
+    def test_called_early(self) -> None:
+        self.child_run(self.early_check)

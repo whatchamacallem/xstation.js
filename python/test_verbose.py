@@ -9,8 +9,8 @@
 # directories go under `build/`. The texts expected, the ring the tests open
 # and the count of a whole history are the gold's.
 
-import contextlib, harness, os, shlex, sqlite3, sys, tempfile, time
-import unittest, unittest.mock, verbose
+import contextlib, harness, os, shlex, sqlite3, subprocess, sys, tempfile, time
+import unittest, verbose
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -82,6 +82,21 @@ _HARD_PROGRAM = (
     "verbose.log('first')\n"
     "verbose.log('second')\n"
     "os._exit(7)\n"
+)
+
+# A program that holds a text in both of its streams, unflushed whatever its
+# environment, then runs the command line of its last arguments at a level.
+_HELD_PROGRAM = (
+    "import sys\n"
+    "sys.pycache_prefix = sys.argv[3]\n"
+    "sys.path.insert(0, sys.argv[1])\n"
+    "import verbose\n"
+    "verbose.log_open(sys.argv[2], 5)\n"
+    "for stream in (sys.stdout, sys.stderr):\n"
+    "    stream.reconfigure(line_buffering=False, write_through=False)\n"
+    "    stream.write('before ')\n"
+    "argv = sys.argv[5:]\n"
+    "sys.exit(verbose.exec(int(sys.argv[4]), argv, argv))\n"
 )
 
 
@@ -195,19 +210,6 @@ def _input_given(data: bytes, fn: Callable[[], int]) -> int:
         os.dup2(saved, 0)
         os.close(saved)
         os.close(read_fd)
-
-
-# Runs at the level with text held in the buffers of both Python streams.
-def _buffered_run(level: int, argv: list[str]) -> int:
-    with (
-        open(1, "w", encoding="utf-8", closefd=False) as out,
-        open(2, "w", encoding="utf-8", closefd=False) as err,
-        unittest.mock.patch("sys.stdout", out),
-        unittest.mock.patch("sys.stderr", err),
-    ):
-        out.write("before ")
-        err.write("before ")
-        return verbose.exec(level, argv, argv)
 
 
 # Tests that the log writes every line and what it refuses.
@@ -520,14 +522,25 @@ class TestCommand(unittest.TestCase):
 
     # Every level writes what Python holds for both streams before it runs.
     def test_command_flushed(self) -> None:
-        path = _log_ready(self, _RING_LINES)
+        path = _scratch_make(self)
         argv = [sys.executable, "-c", _OUTPUT_PROGRAM]
         for level in range(3):
-            code, out, err = _output_captured(
-                path, lambda: _buffered_run(level, argv)
+            child = [
+                sys.executable,
+                "-c",
+                _HELD_PROGRAM,
+                _PYTHON_PATH,
+                path,
+                _PYCACHE_PATH,
+                str(level),
+                *argv,
+            ]
+            ended = subprocess.run(
+                child, capture_output=True, encoding="utf-8"
             )
             self.assertEqual(
-                (code, out, err), (3, "before alpha\n", "before beta\n")
+                (ended.returncode, ended.stdout, ended.stderr),
+                (3, "before alpha\n", "before beta\n"),
             )
 
     # Level 1 passes the output through and logs its start and its exit.

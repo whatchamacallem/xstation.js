@@ -3,25 +3,27 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the handlers of `db.create` and `db.drop`, and `restore_lines`, on a
-# store double: the type, version and handler each registration records,
-# each handler called as the dispatcher calls it on lines of the gold and
-# the store call it makes, lines in full names, a line with `i` the handler
-# leaves unanswered, and the `db.restore` and `db.file` lines of the image
-# the double's `db_snapshot` gives, in both name forms, against the gold,
-# one past the old 10 MiB window among them. Making, dropping, snapshotting
-# and restoring a database are the store's own, `test_substrate.py`'s.
+# real store on a scratch root in `build/`. Each test runs in a forked child
+# that registers the handlers in the real dispatcher and kills itself when
+# done, so that no registration reaches another test, and the parent checks
+# how the child said it ended. Each handler is called as the dispatcher
+# calls it on lines of the gold, lines in full names and a line with `i` the
+# handler leaves unanswered among them, and its effect is read from the
+# store. The `db.restore` and `db.file` lines are checked in both name forms
+# against the gold and the store's own snapshot, one past the old 10 MiB
+# window among them. The dispatcher refuses a second registration of each
+# type at version 0. Making, dropping, snapshotting and restoring a database
+# are the store's own, `test_substrate.py`'s.
 
-import engine_db, harness, os, re, tempfile, unittest, unittest.mock
+import dispatch, engine_db, harness, os, re, signal, substrate, sys, tempfile
+import traceback, unittest
 from collections.abc import Callable
-from typing import Any, NamedTuple
+from typing import Any
 
-# The checkout's build directory, where each test makes its scratch roots.
+# The checkout's build directory, where each test makes its scratch root.
 _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
 )
-
-# The dotted name of the store that the tests patch.
-_STORE_TARGET = "engine_db._STATE.store"
 
 # The id of this module's gold in `test_settings.json`.
 _GOLD_ID = "python.test_engine_db"
@@ -29,22 +31,32 @@ _GOLD_ID = "python.test_engine_db"
 # A key of the decimal digits of a non negative integer, as JSLB reads it.
 _NUMBER_KEY = re.compile(r"0|[1-9][0-9]*")
 
-# The database the tests snapshot.
+# The database the tests make, drop and snapshot.
 _DATABASE = "castle"
 
-# The bytes the store double gives as the database file, a pattern.
-_DATA_BYTES = bytes(range(256))
+# The file extension of a database under the root.
+_DB_EXTENSION = ".sqlite"
+
+# The size over which the store keeps a value in a cache file.
+_OVERFLOW_BYTES: int = harness.setting_get("overflow_bytes")
 
 # A value over `overflow_bytes`, as the store keeps in a cache file.
-_VALUE_OVER = bytes(range(256)) * (
-    harness.setting_get("overflow_bytes") // 256 + 1
+_VALUE_OVER = bytes(range(256)) * (_OVERFLOW_BYTES // 256 + 1)
+
+# Two values over `overflow_bytes` by their refs, the database's cache files.
+_VALUES_OVER = {
+    "/castle/first": _VALUE_OVER,
+    "/castle/second": bytes(reversed(_VALUE_OVER)),
+}
+
+# The statements that pad a database: a table, then a row of zero bytes.
+_PADDING_SQL = (
+    "CREATE TABLE padding (data BLOB NOT NULL) STRICT",
+    "INSERT INTO padding VALUES (zeroblob(?))",
 )
 
-
-# The `DbImage` shape `Store.db_snapshot` returns: the file and cache files.
-class DatabaseImage(NamedTuple):
-    data: bytes
-    files: list[str]
+# How a child ends when its work returned.
+_ENDING_PASSED = "passed"
 
 
 # A copy of a value of this module's gold, its number keys made `int`.
@@ -88,80 +100,62 @@ def _handler_call(fn: Callable[..., Any], line: dict[int | str, Any]) -> Any:
     return fn(line, **payload)
 
 
-# A store double: records each call, answers what the test queued for it.
-class StoreDouble:
-    # Starts with no call recorded and no answer queued.
-    def __init__(self) -> None:
-        self.calls: list[tuple[Any, ...]] = []
-        self.answers: dict[str, list[Any]] = {}
-
-    # Records a call and returns its next queued answer, which must exist.
-    def call_answer(self, name: str, *args: Any) -> Any:
-        self.calls.append((name, *args))
-        if not self.answers.get(name):
-            raise AssertionError(f"the store double has no answer: {name}")
-        return self.answers[name].pop(0)
-
-    # `Store.db_create`, as `engine_db` calls it.
-    def db_create(self, name: str) -> Any:
-        return self.call_answer("db_create", name)
-
-    # `Store.db_drop`, as `engine_db` calls it.
-    def db_drop(self, name: str) -> Any:
-        return self.call_answer("db_drop", name)
-
-    # `Store.db_snapshot`, as `engine_db` calls it.
-    def db_snapshot(self, db: str) -> Any:
-        return self.call_answer("db_snapshot", db)
+# The bytes of a file.
+def _file_read(path: str) -> bytes:
+    with open(path, "rb") as file:
+        return file.read()
 
 
-# Gives each test an empty state, a registration recorder, a store double.
-class IsolatedCase(unittest.TestCase):
-    # Patches the state and `dispatch.handler_register` through `engine_db`.
+# In the forked child: runs the work, writes how it ended, kills itself.
+def _child_end(work: Callable[[], object], path: str) -> None:
+    try:
+        try:
+            work()
+            ending = _ENDING_PASSED
+        except BaseException:
+            ending = traceback.format_exc()
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(ending)
+    finally:
+        os.kill(os.getpid(), signal.SIGKILL)
+
+
+# Gives each test a scratch root in `build/` and a forked child to run in.
+class ScratchCase(unittest.TestCase):
+    # Makes the scratch directory and the root in it.
     def setUp(self) -> None:
-        self.handlers: list[tuple[str, int, Callable[..., Any]]] = []
-        state = unittest.mock.patch(_STORE_TARGET, None)
-        register = unittest.mock.patch.object(
-            engine_db.dispatch, "handler_register", self.handler_record
-        )
-        for patcher in (state, register):
-            patcher.start()
-            self.addCleanup(patcher.stop)
-        self.store = StoreDouble()
-
-    # Records one registration in place of the dispatcher's table.
-    def handler_record(
-        self, name: str, version: int, fn: Callable[..., Any]
-    ) -> None:
-        self.handlers.append((name, version, fn))
-
-    # Registers the handlers on the store double.
-    def double_register(self) -> None:
-        store: Any = self.store
-        engine_db.handlers_register(store)
-
-    # Registers the handlers on the store double, returns the one of `name`.
-    def handler_get(self, name: str) -> Callable[..., Any]:
-        self.double_register()
-        (fn,) = [fn for kind, _, fn in self.handlers if kind == name]
-        return fn
-
-    # Calls the handler of `kind` on a gold line, checks its one store call.
-    def push_check(self, kind: str, method: str, name: str) -> None:
-        fn = self.handler_get(kind)
-        line = _gold_value(f"lines.{name}")
-        self.store.answers[method] = [None]
-        self.assertIsNone(_handler_call(fn, line))
-        self.assertEqual(self.store.calls, [(method, line["db"])])
-
-    # Writes bytes to a new file in a scratch root under `build/`.
-    def file_write(self, data: bytes) -> str:
         os.makedirs(_BUILD_PATH, exist_ok=True)
-        root = self.enterContext(tempfile.TemporaryDirectory(dir=_BUILD_PATH))
-        path = os.path.join(root, "blob")
-        with open(path, "xb") as file:
-            file.write(data)
-        return path
+        scratch = tempfile.TemporaryDirectory(dir=_BUILD_PATH)
+        self.addCleanup(scratch.cleanup)
+        self.scratch = scratch.name
+        self.root = os.path.join(scratch.name, "root")
+        os.mkdir(self.root)
+
+    # Runs the work in a forked child and fails with what the child raised.
+    def child_run(self, work: Callable[[], object]) -> None:
+        path = os.path.join(self.scratch, "ending.txt")
+        sys.stdout.flush()
+        sys.stderr.flush()
+        pid = os.fork()
+        if pid == 0:
+            _child_end(work, path)
+        status = os.waitpid(pid, 0)[1]
+        self.assertEqual(os.waitstatus_to_exitcode(status), -signal.SIGKILL)
+        with open(path, encoding="utf-8") as file:
+            ending = file.read()
+        os.remove(path)
+        if ending != _ENDING_PASSED:
+            self.fail(ending)
+
+    # In the child: a store on the root, the handlers registered on it.
+    def store_register(self) -> substrate.Store:
+        store = substrate.Store(self.root, _OVERFLOW_BYTES)
+        engine_db.handlers_register(store)
+        return store
+
+    # The file of a database under the root.
+    def database_path(self, name: str) -> str:
+        return os.path.join(self.root, name + _DB_EXTENSION)
 
     # Calls `fn` and checks the type and the text of what it raises.
     def raise_check(
@@ -173,94 +167,142 @@ class IsolatedCase(unittest.TestCase):
 
 
 # Tests the handler of `db.create`.
-class TestCreate(IsolatedCase):
-    # A create asks the store to create the line's database.
+class TestCreate(ScratchCase):
+    # In the child: the handler on a gold line makes and opens its database.
+    def create_check(self, name: str) -> None:
+        line = _gold_value(f"lines.{name}")
+        store = self.store_register()
+        self.assertIsNone(_handler_call(engine_db.db_create, line))
+        self.assertEqual(store.db_list(), [line["db"]])
+        self.assertTrue(os.path.isfile(self.database_path(line["db"])))
+
+    # A create makes the line's database in the store and opens it.
     def test_database_created(self) -> None:
-        self.push_check("db.create", "db_create", "create")
+        self.child_run(lambda: self.create_check("create"))
 
     # A line in full names is applied as one in short names.
     def test_full_names(self) -> None:
-        self.push_check("db.create", "db_create", "create_full")
+        self.child_run(lambda: self.create_check("create_full"))
 
     # A create with `i` is applied and answered with nothing, as a push is.
     def test_request_none(self) -> None:
-        self.push_check("db.create", "db_create", "create_request")
+        self.child_run(lambda: self.create_check("create_request"))
 
 
 # Tests the handler of `db.drop`.
-class TestDrop(IsolatedCase):
-    # A drop asks the store to drop the line's database.
+class TestDrop(ScratchCase):
+    # In the child: the handler on a gold line drops a database the store made.
+    def drop_check(self, name: str) -> None:
+        line = _gold_value(f"lines.{name}")
+        store = self.store_register()
+        store.db_create(line["db"])
+        self.assertIsNone(_handler_call(engine_db.db_drop, line))
+        self.assertEqual(store.db_list(), [])
+        self.assertFalse(os.path.exists(self.database_path(line["db"])))
+
+    # A drop closes the line's database and deletes its file.
     def test_database_dropped(self) -> None:
-        self.push_check("db.drop", "db_drop", "drop")
+        self.child_run(lambda: self.drop_check("drop"))
 
     # A line in full names is applied as one in short names.
     def test_full_names(self) -> None:
-        self.push_check("db.drop", "db_drop", "drop_full")
+        self.child_run(lambda: self.drop_check("drop_full"))
 
     # A drop with `i` is applied and answered with nothing, as a push is.
     def test_request_none(self) -> None:
-        self.push_check("db.drop", "db_drop", "drop_request")
+        self.child_run(lambda: self.drop_check("drop_request"))
 
 
 # Tests the lines of a whole database that `restore_lines` yields.
-class TestRestoreLines(IsolatedCase):
-    # Writes two values over `overflow_bytes`, the double's cache files.
-    def files_write(self) -> list[str]:
-        values = (_VALUE_OVER, bytes(reversed(_VALUE_OVER)))
-        return [self.file_write(value) for value in values]
+class TestRestoreLines(ScratchCase):
+    # In the child: makes the database with the two values over the limit.
+    def values_write(self, store: substrate.Store) -> None:
+        store.db_create(_DATABASE)
+        for ref, value in _VALUES_OVER.items():
+            store.kv_put(ref, value)
+
+    # In the child: the lines of the store's own snapshot, as the gold's.
+    def lines_expected(
+        self, store: substrate.Store, restore_name: str, file_name: str
+    ) -> list[dict[int | str, Any]]:
+        image = store.db_snapshot(_DATABASE)
+        expected = [_blob_line(restore_name, image.data)]
+        expected += [_blob_line(file_name, path) for path in image.files]
+        return expected
+
+    # In the child: both name forms of the lines, the cache files the values.
+    def made_check(self) -> None:
+        store = self.store_register()
+        self.values_write(store)
+        for full, suffix in ((False, ""), (True, "_full")):
+            lines = list(engine_db.restore_lines(_DATABASE, full))
+            expected = self.lines_expected(
+                store, f"restore{suffix}", f"file{suffix}"
+            )
+            self.assertEqual(lines, expected)
+            files = sorted(_file_read(line[1]["d"]) for line in lines[1:])
+            self.assertEqual(files, sorted(_VALUES_OVER.values()))
 
     # Two cache files: the database file's line, then one line for each file.
     def test_lines_made(self) -> None:
-        self.double_register()
-        files = self.files_write()
-        image = DatabaseImage(_DATA_BYTES, files)
-        self.store.answers["db_snapshot"] = [image, image]
-        for full, suffix in ((False, ""), (True, "_full")):
-            with self.subTest(full=full):
-                lines = list(engine_db.restore_lines(_DATABASE, full))
-                expected = [_blob_line(f"restore{suffix}", _DATA_BYTES)]
-                for path in files:
-                    expected.append(_blob_line(f"file{suffix}", path))
-                self.assertEqual(lines, expected)
-        snapshot = ("db_snapshot", _DATABASE)
-        self.assertEqual(self.store.calls, [snapshot, snapshot])
+        self.child_run(self.made_check)
+
+    # In the child: a database with no cache file, its file's line alone.
+    def empty_check(self) -> None:
+        store = self.store_register()
+        store.db_create(_DATABASE)
+        lines = list(engine_db.restore_lines(_DATABASE, False))
+        image = store.db_snapshot(_DATABASE)
+        self.assertEqual(image.files, [])
+        self.assertEqual(lines, [_blob_line("restore_empty", image.data)])
 
     # No cache file: the database file's line alone, `files` 0.
     def test_lines_empty(self) -> None:
-        self.double_register()
-        self.store.answers["db_snapshot"] = [DatabaseImage(_DATA_BYTES, [])]
+        self.child_run(self.empty_check)
+
+    # In the child: the database padded past the old window, its files too.
+    def large_check(self) -> None:
+        window: int = harness.gold_get(f"{_GOLD_ID}.old_window")
+        store = self.store_register()
+        self.values_write(store)
+        create, insert = _PADDING_SQL
+        statements = [
+            substrate.SqlStatement(create, []),
+            substrate.SqlStatement(insert, [window + 1]),
+        ]
+        store.sql_run(_DATABASE, statements)
         lines = list(engine_db.restore_lines(_DATABASE, False))
-        self.assertEqual(lines, [_blob_line("restore_empty", _DATA_BYTES)])
-        self.assertEqual(self.store.calls, [("db_snapshot", _DATABASE)])
+        self.assertEqual(lines, self.lines_expected(store, "restore", "file"))
+        self.assertGreater(lines[0][1]["s"], window)
 
     # A database past the old 10 MiB window goes whole as blob 1.
     def test_lines_large(self) -> None:
-        self.double_register()
-        window: int = harness.gold_get(f"{_GOLD_ID}.old_window")
-        data = bytes(window + 1)
-        files = self.files_write()
-        self.store.answers["db_snapshot"] = [DatabaseImage(data, files)]
-        lines = list(engine_db.restore_lines(_DATABASE, False))
-        expected = [_blob_line("restore", data)]
-        for path in files:
-            expected.append(_blob_line("file", path))
-        self.assertEqual(lines, expected)
-        self.assertGreater(lines[0][1]["s"], window)
+        self.child_run(self.large_check)
 
 
 # Tests the registration.
-class TestRegister(IsolatedCase):
+class TestRegister(ScratchCase):
+    # In the child: the dispatcher refuses each type at version 0 again.
+    def registered_check(self) -> None:
+        self.store_register()
+        handlers = [
+            ("db.create", engine_db.db_create, "create"),
+            ("db.drop", engine_db.db_drop, "drop"),
+        ]
+        for kind, fn, name in handlers:
+            message = _text_get(f"dispatch_handler_twice_{name}")
+            self.raise_check(
+                ValueError,
+                message,
+                lambda: dispatch.handler_register(kind, 0, fn),
+            )
+
     # Each handler is registered once, under its type at version 0.
     def test_handlers_registered(self) -> None:
-        self.double_register()
-        expected = [
-            ("db.create", 0, engine_db.db_create),
-            ("db.drop", 0, engine_db.db_drop),
-        ]
-        self.assertEqual(self.handlers, expected)
+        self.child_run(self.registered_check)
 
-    # Before the registration each handler and `restore_lines` raise.
-    def test_called_early(self) -> None:
+    # In the child: before the registration each handler and the lines raise.
+    def early_check(self) -> None:
         create = _gold_value("lines.create")
         drop = _gold_value("lines.drop")
         message = _text_get("engine_db_not_registered")
@@ -271,4 +313,7 @@ class TestRegister(IsolatedCase):
         ]
         for call in calls:
             self.raise_check(RuntimeError, message, call)
-        self.assertEqual(self.store.calls, [])
+
+    # Before the registration each handler and `restore_lines` raise.
+    def test_called_early(self) -> None:
+        self.child_run(self.early_check)

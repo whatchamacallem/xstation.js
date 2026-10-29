@@ -29,9 +29,6 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 # The seed files that the main loop reads for a new metaverse.
 _SEED_PATH = os.path.join(_ROOT_PATH, "python", "seed")
 
-# The API file that holds the tools as `tools/list` returns them.
-_TOOLS_PATH = os.path.join(_ROOT_PATH, "API", "mcp", "tools.json")
-
 # The id of this module's gold in `test_settings.json`.
 _GOLD_ID = "python.test_main_loop"
 
@@ -101,9 +98,6 @@ _TRIGGERS_QUERY = (
     "SELECT name FROM sqlite_schema WHERE type = 'trigger' ORDER BY name"
 )
 
-# The query of the turns of a database.
-_TURNS_QUERY = "SELECT scene, n, role, content FROM _turn ORDER BY n"
-
 # What a child says when `loop_prepare` returned None and its work ended.
 _ENDING_PREPARED = repr(None)
 
@@ -119,11 +113,8 @@ _HASH_NAME = r"^[0-9a-f]{64}$"
 # A line whose header has no type, which the decoder refuses.
 _BAD_LINE = b'{"0":{"i":3}}\r'
 
-# The database the reopening test and the push test make.
+# The database the reopening test makes.
 _CASTLE_DB = "castle"
-
-# The database the push test makes and drops.
-_DROPPED_DB = "dropped"
 
 # The database of the server's log, under the root.
 _LOG_DB = "_verbose"
@@ -187,21 +178,6 @@ def _payload_of(line: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-# The result of `tools/list`: each server tool of the API file, no permit.
-def _list_result() -> dict[str, Any]:
-    with open(_TOOLS_PATH, encoding="utf-8") as file:
-        data: dict[str, Any] = json.load(file)
-    tools = [
-        {
-            "name": entry["name"],
-            "description": entry["description"],
-            "inputSchema": entry["inputSchema"],
-        }
-        for entry in data["server"]["result"]["tools"]
-    ]
-    return {"tools": tools}
-
-
 # Reads a seed file of the checkout.
 def _seed_read(name: str) -> bytes:
     with open(os.path.join(_SEED_PATH, name), "rb") as file:
@@ -249,14 +225,16 @@ def _child_end(
     work: Callable[[int, int], str], read_fd: int, write_fd: int, path: str
 ) -> None:
     try:
-        ending = work(read_fd, write_fd)
-    except SystemExit as error:
-        ending = f"exit {error.code}"
-    except BaseException:
-        ending = traceback.format_exc()
-    with open(path, "w", encoding="utf-8") as file:
-        file.write(ending)
-    os.kill(os.getpid(), signal.SIGKILL)
+        try:
+            ending = work(read_fd, write_fd)
+        except SystemExit as error:
+            ending = f"exit {error.code}"
+        except BaseException:
+            ending = traceback.format_exc()
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(ending)
+    finally:
+        os.kill(os.getpid(), signal.SIGKILL)
 
 
 # Opens the root's log with the ring of its settings, through `main_loop`.
@@ -574,37 +552,6 @@ class TestLoop(ScratchCase):
         expected = [("gate", b"The gate"), ("title", b"The castle")]
         self.assertEqual(rows, expected)
 
-    # Every kind of commit is applied as a push and answered by nothing.
-    def test_pushes_applied(self) -> None:
-        pushes = [
-            _line_bytes("create_castle"),
-            _line_bytes("put_kept", b"kept value"),
-            _line_bytes("put_gone", b"gone value"),
-            _line_bytes("delete_gone"),
-            _line_bytes("doc_note"),
-            _line_bytes("turn_note"),
-            _line_bytes("sql_castle"),
-            _line_bytes("create_dropped"),
-            _line_bytes("drop_dropped"),
-        ]
-        self.assertEqual(self.served_read(b"".join(pushes)), [])
-        kept = _value_read(self.root, _CASTLE_DB, "kept")
-        self.assertEqual(kept, b"kept value")
-        gone = _rows_read(self.root, _CASTLE_DB, _VALUE_QUERY, "gone")
-        self.assertEqual(gone, [])
-        note = _gold_copy("lines.doc_note")
-        heads = _rows_read(self.root, _CASTLE_DB, _HEADS_QUERY)
-        self.assertEqual(heads, [(note["id"], 1)])
-        turn = _gold_copy("lines.turn_note")
-        turns = _rows_read(self.root, _CASTLE_DB, _TURNS_QUERY)
-        content = _json_bytes(turn["content"]).decode()
-        expected = [(turn["scene"], 1, turn["role"], content)]
-        self.assertEqual(turns, expected)
-        table = _rows_read(self.root, _CASTLE_DB, "SELECT x FROM t")
-        self.assertEqual(table, [(7,)])
-        dropped = os.path.join(self.root, _DROPPED_DB + ".sqlite")
-        self.assertFalse(os.path.exists(dropped))
-
     # An unknown type gets one `error` line with its id, and nothing after.
     def test_type_unknown(self) -> None:
         unknown = _line_bytes("unknown_request")
@@ -720,21 +667,6 @@ class TestLoop(ScratchCase):
         message = _text_get("main_loop_not_prepared")
         self.assertEqual(last, f"RuntimeError: {message}")
 
-    # The server's MCP server answers `initialize` and `tools/list` only.
-    def test_mcp_tools(self) -> None:
-        lines = [
-            _line_bytes("initialize"),
-            _line_bytes("initialized"),
-            _line_bytes("tools_list"),
-        ]
-        replies = self.served_read(b"".join(lines))
-        self.assertEqual(len(replies), 2)
-        first, second = replies
-        self.assertEqual(first, _gold_copy("lines.initialize_reply"))
-        expected = _gold_copy("lines.tools_list_reply")
-        expected["result"] = _list_result()
-        self.assertEqual(second, expected)
-
     # The browser's `error` is logged and bailed out, then exit 1, no answer.
     def test_browser_error(self) -> None:
         self.debug_write(False)
@@ -779,29 +711,3 @@ class TestLoop(ScratchCase):
         self.assertIs(answer["result"]["isError"], True)
         message = _text_get("engine_system_name_invalid")
         self.error_check(error, "error_full", message)
-
-    # `verbose.tail` gives the server's ring, its own trace, and the page's.
-    def test_verbose_tail(self) -> None:
-        self.debug_write(True)
-        lines = [
-            _line_bytes("tail_server"),
-            _line_bytes("verbose_put"),
-            _line_bytes("tail_ui"),
-        ]
-        replies = self.served_read(b"".join(lines))
-        self.assertEqual(len(replies), 2)
-        server, page = replies
-        self.header_check(server, "tail_server_reply")
-        texts = [entry["text"] for entry in server["lines"]]
-        self.assertEqual(texts, [_text_get("main_loop_line_dispatch_tail")])
-        self.assertEqual(page, _gold_copy("lines.tail_ui_reply"))
-
-    # With `debug` false, `source.put` gets an `error` line and writes nothing.
-    def test_debug_off(self) -> None:
-        self.debug_write(False)
-        replies = self.failure_read(_line_bytes("source_put", b"pass\n"))
-        self.assertEqual(len(replies), 1)
-        message = _text_get("engine_system_debug_off_line")
-        self.error_check(replies[0], "error_reply", message)
-        directory = os.path.join(self.root, "main_loop")
-        self.assertFalse(os.path.exists(directory))

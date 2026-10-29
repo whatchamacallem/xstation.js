@@ -6,16 +6,18 @@
 # reply rules for requests and notifications, a `Failure`'s reply, the reply
 # and error lines it builds, each compared whole with a gold line in its name
 # form, the cascades against those built here from the raised exceptions by
-# the rule of `cause`, and the ids from 102.
+# the rule of `cause`, and the ids from 102. A handler is a function of the
+# test that keeps the line and the payload it is called with. Each test that
+# registers a handler or counts an id runs in a forked child, which writes
+# how it ended on a pipe and kills itself, so the handlers and the ids it
+# leaves never reach another test.
 
-import dispatch, harness, re, traceback, unittest, unittest.mock
-from typing import Any
+import dispatch, functools, harness, os, re, signal, sys, traceback, unittest
+from collections.abc import Callable
+from typing import Any, NoReturn, TypeAlias
 
-# The dotted name of the handler table that the tests patch.
-_HANDLERS_TARGET = "dispatch._HANDLERS"
-
-# The dotted name of the id counters that the tests patch.
-_IDS_TARGET = "dispatch._IDS"
+# How a child ends when its test passed: any other ending is a traceback.
+_ENDING_PASSED = "passed"
 
 # The id of this module's gold in `test_settings.json`.
 _GOLD_ID = "python.test_dispatch"
@@ -41,6 +43,9 @@ _VERSIONS_REFUSED = (
     ([1], "list"),
     (None, "null"),
 )
+
+# The calls a handler of the test keeps: each line and its payload.
+HandlerCalls: TypeAlias = list[tuple[Any, dict[str, Any]]]
 
 
 # A copy of a value of this module's gold, its number keys made `int`.
@@ -98,9 +103,24 @@ def _error_expected(name: str, cascade: dict[str, Any]) -> Any:
     return line
 
 
-# Makes a handler double that returns `reply`.
-def _handler_make(reply: Any = None) -> unittest.mock.Mock:
-    return unittest.mock.Mock(return_value=reply)
+# A handler of the test: keeps the line and the payload, returns `reply`.
+def _handler_keep(
+    calls: HandlerCalls, reply: Any, line: Any, /, **payload: Any
+) -> Any:
+    calls.append((line, payload))
+    return reply
+
+
+# Makes a handler that keeps each call in `calls` and returns `reply`.
+def _handler_make(calls: HandlerCalls, reply: Any = None) -> dispatch.Handler:
+    return functools.partial(_handler_keep, calls, reply)
+
+
+# A handler of the test that raises the error given.
+def _handler_raise(
+    error: BaseException, line: Any, /, **payload: Any
+) -> NoReturn:
+    raise error
 
 
 # Raises a `ValueError` and returns it, so that it carries a traceback.
@@ -155,14 +175,45 @@ def _chain_cascade(error: BaseException) -> dict[str, Any]:
     return _entry_of(error) | {"cause": inner}
 
 
-# Gives each test an empty handler table and empty id counters.
-class IsolatedCase(unittest.TestCase):
-    # Patches the handler table and the id counters until the test ends.
-    def setUp(self) -> None:
-        for target in (_HANDLERS_TARGET, _IDS_TARGET):
-            patcher = unittest.mock.patch.dict(target, {}, clear=True)
-            patcher.start()
-            self.addCleanup(patcher.stop)
+# In the forked child: runs the check, writes how it ended, kills itself.
+def _child_end(check: Callable[[], None], write_fd: int) -> None:
+    try:
+        try:
+            check()
+            ending = _ENDING_PASSED
+        except BaseException:
+            ending = traceback.format_exc()
+        try:
+            with open(write_fd, "w", encoding="utf-8") as file:
+                file.write(ending)
+        except BaseException:
+            # The parent reads no ending, so the failure and it go to stderr.
+            sys.stderr.write(
+                f"{traceback.format_exc()}the ending not written: {ending}\n"
+            )
+            sys.stderr.flush()
+    finally:
+        os.kill(os.getpid(), signal.SIGKILL)
+
+
+# Runs each check that registers a handler or counts an id in a forked child.
+class ChildCase(unittest.TestCase):
+    # Runs the check in a forked child, failing with its traceback, if any.
+    def child_check(self, check: Callable[[], None]) -> None:
+        read_fd, write_fd = os.pipe()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        pid = os.fork()
+        if pid == 0:
+            os.close(read_fd)
+            _child_end(check, write_fd)
+        os.close(write_fd)
+        with open(read_fd, encoding="utf-8") as file:
+            ending = file.read()
+        status = os.waitpid(pid, 0)[1]
+        self.assertEqual(os.waitstatus_to_exitcode(status), -signal.SIGKILL)
+        if ending != _ENDING_PASSED:
+            self.fail(ending)
 
     # Dispatches a line and checks the type and the text of what it raises.
     def dispatch_check(
@@ -173,58 +224,73 @@ class IsolatedCase(unittest.TestCase):
         self.assertEqual(str(caught.exception), message)
 
 
+# Makes a test of a `ChildCase` run whole in a forked child, by `child_check`.
+def _child_run(test: Callable[[Any], None]) -> Callable[[Any], None]:
+    # Runs the test on its case in a forked child.
+    @functools.wraps(test)
+    def forked_run(case: ChildCase) -> None:
+        case.child_check(functools.partial(test, case))
+
+    return forked_run
+
+
 # Tests the registration of handlers.
-class TestRegistration(IsolatedCase):
+class TestRegistration(ChildCase):
     # A second registration of a pair raises and the first one stays.
+    @_child_run
     def test_twice_raises(self) -> None:
-        first = _handler_make()
-        dispatch.handler_register("kv.get", 0, first)
+        first: HandlerCalls = []
+        dispatch.handler_register("kv.get", 0, _handler_make(first))
         with self.assertRaises(ValueError) as context:
-            dispatch.handler_register("kv.get", 0, _handler_make())
+            dispatch.handler_register("kv.get", 0, _handler_make([]))
         self.assertEqual(
             str(context.exception), _text_get("dispatch_handler_twice")
         )
-        dispatch.line_dispatch(_gold_value("lines.get"))
-        first.assert_called_once()
+        line = _gold_value("lines.get")
+        dispatch.line_dispatch(line)
+        self.assertEqual(first, [(line, {})])
 
     # The same type at another version, and another type, register.
+    @_child_run
     def test_pairs_differ(self) -> None:
-        dispatch.handler_register("kv.get", 0, _handler_make())
-        dispatch.handler_register("kv.get", 1, _handler_make())
-        dispatch.handler_register("kv.put", 0, _handler_make())
+        dispatch.handler_register("kv.get", 0, _handler_make([]))
+        dispatch.handler_register("kv.get", 1, _handler_make([]))
+        dispatch.handler_register("kv.put", 0, _handler_make([]))
 
 
 # Tests the call of the handler a line names and the reply rules.
-class TestDispatch(IsolatedCase):
+class TestDispatch(ChildCase):
     # Only the handler of the line's type and version is called.
+    @_child_run
     def test_handler_called(self) -> None:
-        first = _handler_make()
-        other_version = _handler_make()
-        other_type = _handler_make()
-        dispatch.handler_register("kv.put", 0, first)
-        dispatch.handler_register("kv.put", 1, other_version)
-        dispatch.handler_register("kv.get", 0, other_type)
+        first: HandlerCalls = []
+        other_version: HandlerCalls = []
+        other_type: HandlerCalls = []
+        dispatch.handler_register("kv.put", 0, _handler_make(first))
+        dispatch.handler_register("kv.put", 1, _handler_make(other_version))
+        dispatch.handler_register("kv.get", 0, _handler_make(other_type))
         line = _gold_value("lines.put_v1")
         self.assertIsNone(dispatch.line_dispatch(line))
-        other_version.assert_called_once_with(
-            line, n=line["n"], text=line["text"]
-        )
-        first.assert_not_called()
-        other_type.assert_not_called()
+        payload = {"n": line["n"], "text": line["text"]}
+        self.assertEqual(other_version, [(line, payload)])
+        self.assertEqual(first, [])
+        self.assertEqual(other_type, [])
 
     # The handler gets the line and the payload only, blobs stay in the line.
+    @_child_run
     def test_payload_only(self) -> None:
-        handler = _handler_make()
-        dispatch.handler_register("kv.put", 0, handler)
+        calls: HandlerCalls = []
+        dispatch.handler_register("kv.put", 0, _handler_make(calls))
         line = _gold_value("lines.put_blob")
         line[1].update(_blob_of(b"abc"))
         dispatch.line_dispatch(line)
-        handler.assert_called_once_with(line, n=line["n"])
+        self.assertEqual(calls, [(line, {"n": line["n"]})])
         self.assertEqual(line[1]["d"], b"abc")
 
     # A type or a version that nothing registered raises.
+    @_child_run
     def test_pair_unknown(self) -> None:
-        dispatch.handler_register("kv.get", 0, _handler_make())
+        dispatch.handler_register("kv.get", 0, _handler_make([]))
         self.dispatch_check(
             LookupError,
             _text_get("dispatch_handler_unknown_put"),
@@ -238,62 +304,76 @@ class TestDispatch(IsolatedCase):
 
     # An id that is not an integer of at least 1 raises before any call.
     def test_id_refused(self) -> None:
-        handler = _handler_make()
-        dispatch.handler_register("kv.get", 0, handler)
         for value, case in _IDS_REFUSED:
             with self.subTest(value=value):
-                line = _gold_value("lines.get")
-                line[0]["i"] = value
-                message = _text_get(f"dispatch_id_refused_{case}")
-                self.dispatch_check(ValueError, message, line)
-        handler.assert_not_called()
+                check = functools.partial(self.id_check, value, case)
+                self.child_check(check)
+
+    # Dispatches a line with the id to a registered handler, never called.
+    def id_check(self, value: Any, case: str) -> None:
+        calls: HandlerCalls = []
+        dispatch.handler_register("kv.get", 0, _handler_make(calls))
+        line = _gold_value("lines.get")
+        line[0]["i"] = value
+        message = _text_get(f"dispatch_id_refused_{case}")
+        self.dispatch_check(ValueError, message, line)
+        self.assertEqual(calls, [])
 
     # A version that is not an integer raises before any call.
     def test_version_refused(self) -> None:
-        first = _handler_make()
-        second = _handler_make()
-        dispatch.handler_register("kv.get", 0, first)
-        dispatch.handler_register("kv.get", 1, second)
         for value, case in _VERSIONS_REFUSED:
             with self.subTest(value=value):
-                line = _gold_value("lines.get")
-                line[0]["v"] = value
-                message = _text_get(f"dispatch_version_refused_{case}")
-                self.dispatch_check(ValueError, message, line)
-        first.assert_not_called()
-        second.assert_not_called()
+                check = functools.partial(self.version_check, value, case)
+                self.child_check(check)
+
+    # Dispatches a line with the version to two handlers, neither called.
+    def version_check(self, value: Any, case: str) -> None:
+        first: HandlerCalls = []
+        second: HandlerCalls = []
+        dispatch.handler_register("kv.get", 0, _handler_make(first))
+        dispatch.handler_register("kv.get", 1, _handler_make(second))
+        line = _gold_value("lines.get")
+        line[0]["v"] = value
+        message = _text_get(f"dispatch_version_refused_{case}")
+        self.dispatch_check(ValueError, message, line)
+        self.assertEqual(first, [])
+        self.assertEqual(second, [])
 
     # An exception from a handler propagates unchanged.
+    @_child_run
     def test_handler_raises(self) -> None:
         error = KeyError("missing")
-        handler = unittest.mock.Mock(side_effect=error)
+        handler = functools.partial(_handler_raise, error)
         dispatch.handler_register("kv.get", 0, handler)
         with self.assertRaises(KeyError) as context:
             dispatch.line_dispatch(_gold_value("lines.get_request"))
         self.assertIs(context.exception, error)
 
     # A request gets the reply its handler returned, with `r` set to its `i`.
+    @_child_run
     def test_request_reply(self) -> None:
         request = _gold_value("lines.get_request")
         reply = dispatch.reply_make(request, n=1)
-        dispatch.handler_register("kv.get", 0, _handler_make(reply))
+        dispatch.handler_register("kv.get", 0, _handler_make([], reply))
         self.assertIs(dispatch.line_dispatch(request), reply)
         self.assertEqual(reply, _gold_value("lines.get_reply"))
 
     # A reply without `r` gets it, spelled in the name form of its header.
+    @_child_run
     def test_reply_unset(self) -> None:
         short = _gold_value("lines.get")
         full = _gold_value("lines.put_full")
-        dispatch.handler_register("kv.get", 0, _handler_make(short))
-        dispatch.handler_register("kv.put", 0, _handler_make(full))
+        dispatch.handler_register("kv.get", 0, _handler_make([], short))
+        dispatch.handler_register("kv.put", 0, _handler_make([], full))
         dispatch.line_dispatch(_gold_value("lines.get_request"))
         dispatch.line_dispatch(_gold_value("lines.put_request"))
         self.assertEqual(short, _gold_value("lines.get_answered"))
         self.assertEqual(full, _gold_value("lines.put_full_answered"))
 
     # A request whose handler returns nothing raises.
+    @_child_run
     def test_request_none(self) -> None:
-        dispatch.handler_register("kv.get", 0, _handler_make())
+        dispatch.handler_register("kv.get", 0, _handler_make([]))
         self.dispatch_check(
             ValueError,
             _text_get("dispatch_request_unanswered"),
@@ -301,15 +381,17 @@ class TestDispatch(IsolatedCase):
         )
 
     # A notification whose handler returns nothing returns nothing.
+    @_child_run
     def test_notification_none(self) -> None:
-        dispatch.handler_register("verbose.put", 0, _handler_make())
+        dispatch.handler_register("verbose.put", 0, _handler_make([]))
         line = _gold_value("lines.verbose_put_text")
         self.assertIsNone(dispatch.line_dispatch(line))
 
     # A notification whose handler returns a reply raises.
+    @_child_run
     def test_notification_reply(self) -> None:
         reply = _gold_value("lines.verbose_put")
-        dispatch.handler_register("verbose.put", 0, _handler_make(reply))
+        dispatch.handler_register("verbose.put", 0, _handler_make([], reply))
         self.dispatch_check(
             ValueError,
             _text_get("dispatch_notification_replied_verbose"),
@@ -317,21 +399,23 @@ class TestDispatch(IsolatedCase):
         )
 
     # A request's `Failure` is returned, its reply given `r` as a reply is.
+    @_child_run
     def test_failure_request(self) -> None:
         request = _gold_value("lines.mcp_request")
         error = _error_raise()
         failure = dispatch.Failure(dispatch.reply_make(request), error)
-        dispatch.handler_register("mcp", 0, _handler_make(failure))
+        dispatch.handler_register("mcp", 0, _handler_make([], failure))
         self.assertIs(dispatch.line_dispatch(request), failure)
         self.assertEqual(failure.reply, _gold_value("lines.mcp_reply"))
         self.assertIs(failure.error, error)
 
     # A notification's `Failure` raises as a reply does, its error the cause.
+    @_child_run
     def test_failure_notification(self) -> None:
         reply = _gold_value("lines.mcp")
         error = _error_raise()
         failure = dispatch.Failure(reply, error)
-        dispatch.handler_register("mcp", 0, _handler_make(failure))
+        dispatch.handler_register("mcp", 0, _handler_make([], failure))
         with self.assertRaises(ValueError) as caught:
             dispatch.line_dispatch(_gold_value("lines.mcp"))
         self.assertEqual(
@@ -343,7 +427,7 @@ class TestDispatch(IsolatedCase):
 
 
 # Tests the reply line a handler builds.
-class TestReply(IsolatedCase):
+class TestReply(unittest.TestCase):
     # A short name reply has `t` and `r` and nothing else of the request.
     def test_short_names(self) -> None:
         request = _gold_value("lines.keyed")
@@ -368,7 +452,7 @@ class TestReply(IsolatedCase):
 
 
 # Tests the cascade of an exception.
-class TestCause(IsolatedCase):
+class TestCause(unittest.TestCase):
     # A chain by `from` and by context nests each cause, the first innermost.
     def test_chain(self) -> None:
         error = _chain_raise()
@@ -388,7 +472,7 @@ class TestCause(IsolatedCase):
 
 
 # Tests the error line.
-class TestError(IsolatedCase):
+class TestError(unittest.TestCase):
     # The error line of a request has `r` and the line's short names.
     def test_request_error(self) -> None:
         request = _gold_value("lines.get_request")
@@ -436,13 +520,15 @@ class TestError(IsolatedCase):
 
 
 # Tests the ids of the ports.
-class TestIdNext(IsolatedCase):
+class TestIdNext(ChildCase):
     # The ids of a port count up from 102, as 101 is the first line's.
+    @_child_run
     def test_ids_count(self) -> None:
         ids = [dispatch.id_next("wire") for _ in range(3)]
         self.assertEqual(ids, [102, 103, 104])
 
     # Each port counts on its own.
+    @_child_run
     def test_ports_separate(self) -> None:
         self.assertEqual(dispatch.id_next("wire"), 102)
         self.assertEqual(dispatch.id_next("ui"), 102)

@@ -11,12 +11,10 @@
 # compared with its message. An HTML comment that is the formatter escape
 # prettier-ignore passes the comment check, one with more words is refused.
 # A synchronization token outside the exempt modules is refused with its
-# message too. The formatter step of a smoke-test run prints its advisory and
-# only checks, and that of a normal-test run formats and prints nothing, on a
-# double of reformat, which test_posix imports inside the function.
+# message too. No test reaches the formatter step, which calls into category
+# and reformat.
 
-import contextlib, io, os, sys, tempfile, test_posix, unittest.mock
-from typing import Any
+import os, tempfile, test_posix, unittest
 
 # The checkout's build directory, where each test makes its scratch directory.
 _BUILD_PATH = os.path.join(
@@ -35,15 +33,6 @@ _BLOCK_REFUSED = chr(0x2594)
 # The name the lexer tests give their text.
 _TEXT_PATH = "a.ps1"
 
-# The category that only checks the formatting.
-_SMOKE_TEST = "smoke-test"
-
-# The category that does the reformatting.
-_NORMAL_TEST = "normal-test"
-
-# The files the formatter step tests give, which no command reaches.
-_STEP_PATHS = ["/a/b.py"]
-
 
 # Returns the comments the PowerShell lexer finds in the text.
 def comments_list(text: str) -> list[test_posix.Comment]:
@@ -56,29 +45,6 @@ def file_write(directory: str, name: str, data: bytes) -> str:
     with open(path, "wb") as file:
         file.write(data)
     return path
-
-
-# A double of `reformat`: records each call, answers what the test queued.
-class ReformatDouble:
-    # Starts with no call recorded and no answer queued.
-    def __init__(self) -> None:
-        self.calls: list[tuple[Any, ...]] = []
-        self.answers: dict[str, list[Any]] = {}
-
-    # Records a call and returns its next queued answer, which must exist.
-    def call_answer(self, name: str, *args: Any) -> Any:
-        self.calls.append((name, *args))
-        if not self.answers.get(name):
-            raise AssertionError(f"the reformat double has no answer: {name}")
-        return self.answers[name].pop(0)
-
-    # `reformat.format_check`, as `formatter_run` calls it.
-    def format_check(self, paths: list[str]) -> Any:
-        return self.call_answer("format_check", paths)
-
-    # `reformat.reformat`, as `formatter_run` calls it.
-    def reformat(self, paths: list[str]) -> Any:
-        return self.call_answer("reformat", paths)
 
 
 # The message of a character the check refuses at a line and a column.
@@ -289,33 +255,3 @@ class TestAuditMessage(unittest.TestCase):
                 test_posix.synchronization_check(path)
             expected = f"{path}:2: await outside _SYNCHRONIZATION_MODULES"
             self.assertEqual(caught.exception.args, (expected,))
-
-
-# The formatter step of each category, `reformat` a double in `sys.modules`.
-class TestFormatterStep(unittest.TestCase):
-    # Runs the step of the category, returns the double's calls and output.
-    def step_run(
-        self, chosen: str, answers: dict[str, list[Any]]
-    ) -> tuple[list[tuple[Any, ...]], str]:
-        double = ReformatDouble()
-        double.answers = answers
-        printed = io.StringIO()
-        with (
-            unittest.mock.patch.dict(sys.modules, {"reformat": double}),
-            contextlib.redirect_stdout(printed),
-        ):
-            test_posix.formatter_run(_STEP_PATHS, chosen)
-        return double.calls, printed.getvalue()
-
-    # A `smoke-test` run prints the advisory, then only checks the files.
-    def test_smoke_checked(self) -> None:
-        calls, printed = self.step_run(_SMOKE_TEST, {"format_check": [None]})
-        self.assertEqual(calls, [("format_check", _STEP_PATHS)])
-        advisory: str = getattr(test_posix, "_CHECK_ADVISORY")
-        self.assertEqual(printed, advisory + "\n")
-
-    # A `normal-test` run formats the files and prints nothing.
-    def test_normal_formatted(self) -> None:
-        calls, printed = self.step_run(_NORMAL_TEST, {"reformat": [None]})
-        self.assertEqual(calls, [("reformat", _STEP_PATHS)])
-        self.assertEqual(printed, "")

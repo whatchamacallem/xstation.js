@@ -10,8 +10,8 @@
 # turns, SQL, a trigger's refusal, and transactions over several databases.
 # Each text a refusal is checked against is the gold's.
 
-import harness, hashlib, json, os, signal, sqlite3, substrate, tempfile
-import unittest, unittest.mock
+import harness, hashlib, json, os, resource, signal, sqlite3, substrate
+import tempfile, traceback, unittest
 from collections.abc import Callable
 from typing import Any, NoReturn, cast
 
@@ -37,9 +37,6 @@ _VALUE_EXACT = bytes(index % 256 for index in range(_OVERFLOW_BYTES))
 
 # A value one byte over `overflow_bytes`, which goes to the cache.
 _VALUE_OVER = _VALUE_EXACT + bytes(1)
-
-# The real `os.replace`, which the patched one of the forked child calls.
-_OS_REPLACE = os.replace
 
 # The subtitle of the arrival scene.
 _ARRIVAL_SUBTITLE = (
@@ -240,21 +237,50 @@ def _database_dump(path: str) -> list[str]:
         connection.close()
 
 
-# Renames as `os.replace` does, then kills the process before the row.
-def _replace_kill(source: str, target: str) -> None:
-    _OS_REPLACE(source, target)
-    os.kill(os.getpid(), signal.SIGKILL)
-
-
-# In the forked child: puts a value and is killed as its cache file lands.
-def _child_put(root: str, value: bytes) -> NoReturn:
+# In the forked child: puts a value over `overflow_bytes`, whose cache file
+# lands whole, and is killed by the file size limit as its row is written.
+def _child_put(root: str) -> NoReturn:
     try:
         store = substrate.Store(root, _OVERFLOW_BYTES)
         store.db_open("alpha")
-        setattr(os, "replace", _replace_kill)
-        store.kv_put("/alpha/big", value)
+        # Its row ends the write ahead log past the size of that cache file.
+        store.kv_put("/alpha/fill", _VALUE_EXACT)
+        core = resource.getrlimit(resource.RLIMIT_CORE)[1]
+        resource.setrlimit(resource.RLIMIT_CORE, (0, core))
+        size = resource.getrlimit(resource.RLIMIT_FSIZE)[1]
+        resource.setrlimit(resource.RLIMIT_FSIZE, (len(_VALUE_OVER), size))
+        # The default action of SIGXFSZ, which Python ignores, kills.
+        signal.signal(signal.SIGXFSZ, signal.SIG_DFL)
+        store.kv_put("/alpha/big", _VALUE_OVER)
     finally:
         os._exit(1)
+
+
+# A create in a process with one descriptor free, which the open after it
+# lacks. Returns the text of the error and the databases left open.
+def _create_limited(root: str, write_fd: int) -> str:
+    store = substrate.Store(root, _OVERFLOW_BYTES)
+    free = os.dup(write_fd)
+    os.close(free)
+    files = resource.getrlimit(resource.RLIMIT_NOFILE)[1]
+    resource.setrlimit(resource.RLIMIT_NOFILE, (free + 1, files))
+    try:
+        store.db_create("alpha")
+    except sqlite3.OperationalError as error:
+        return f"{error} {store.db_list()}"
+    return f"created {store.db_list()}"
+
+
+# In the forked child: the limited create, how it ended written to the pipe.
+def _child_create(root: str, write_fd: int) -> NoReturn:
+    try:
+        try:
+            ending = _create_limited(root, write_fd)
+        except BaseException:
+            ending = traceback.format_exc()
+        os.write(write_fd, ending.encode("utf-8"))
+    finally:
+        os._exit(0)
 
 
 # Databases: the tables on first use, names, creating, opening, dropping.
@@ -345,16 +371,19 @@ class TestDatabases(unittest.TestCase):
     # A create whose open fails removes its file, so a later create succeeds.
     def test_create_failed(self) -> None:
         root = _root_make(self)
-        store = _store_make(self, root)
-        failure = RuntimeError("schema failure made by the test")
-        with unittest.mock.patch.object(
-            substrate, "schema_apply", side_effect=failure
-        ):
-            with self.assertRaises(RuntimeError) as caught:
-                store.db_create("alpha")
-        self.assertIs(caught.exception, failure)
+        read_fd, write_fd = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            os.close(read_fd)
+            _child_create(root, write_fd)
+        os.close(write_fd)
+        with os.fdopen(read_fd, "rb") as pipe:
+            ending = pipe.read().decode("utf-8")
+        status = os.waitpid(pid, 0)[1]
+        self.assertEqual(os.waitstatus_to_exitcode(status), 0)
+        self.assertEqual(ending, "unable to open database file []")
         self.assertEqual(os.listdir(root), ["cache"])
-        self.assertEqual(store.db_list(), [])
+        store = _store_make(self, root)
         store.db_create("alpha")
         self.assertEqual(store.db_list(), ["alpha"])
 
@@ -1279,9 +1308,9 @@ class TestCrash(unittest.TestCase):
         store.db_close("alpha")
         pid = os.fork()
         if pid == 0:
-            _child_put(root, _VALUE_OVER)
+            _child_put(root)
         status = os.waitpid(pid, 0)[1]
-        self.assertEqual(os.waitstatus_to_exitcode(status), -signal.SIGKILL)
+        self.assertEqual(os.waitstatus_to_exitcode(status), -signal.SIGXFSZ)
         path = _cache_file(root, _VALUE_OVER)
         self.assertTrue(os.path.isfile(path))
         store.db_open("alpha")

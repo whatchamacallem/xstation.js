@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests of reformat's table, of the commands its check and its formatting
-# start, with subprocess.run replaced so that none starts, and of its
-# matching of whitelist lines, the matching on a scratch tree under build/,
-# each refusal compared with its message.
+# Tests of reformat's table, of its check and its formatting of PowerShell
+# files, which start no command on Linux, and of its matching of whitelist
+# lines, the matching on a scratch tree under build/, each refusal compared
+# with its message. No formatter starts.
 
-import os, reformat, tempfile, unittest.mock
+import os, reformat, tempfile, unittest
 
 # The checkout's build directory, where each test makes its scratch directory.
 _BUILD_PATH = os.path.join(
@@ -25,30 +25,8 @@ _TABLE_PATH = os.path.join(
 # The files of each matching test's scratch tree, from its root.
 _TREE_NAMES = ["x/a.py", "x/b.py", "x/.c.py", "x/d.txt", "top.sh"]
 
-# The options of each ruff command of the table, its configuration and cache.
-_RUFF_OPTIONS = [
-    "--config",
-    "python/pyproject.toml",
-    "--cache-dir",
-    "build/ruff_cache",
-]
-
-# A file of each extension the command tests give, PowerShell's run by none.
-_COMMAND_PATHS = ["/a/b.py", "/a/b.sh", "/a/b.ts", "/a/b.ps1"]
-
-# The commands a check starts on them, in the table's order, rewriting none.
-_CHECK_COMMANDS = [
-    ["ruff", "format", "--check", *_RUFF_OPTIONS, "/a/b.py"],
-    ["shfmt", "--diff", "/a/b.sh"],
-    ["prettier", "--check", "--no-config", "--print-width", "79", "/a/b.ts"],
-]
-
-# The commands a formatting starts on them, in the table's order.
-_FORMAT_COMMANDS = [
-    ["ruff", "format", *_RUFF_OPTIONS, "/a/b.py"],
-    ["shfmt", "--list", "--write", "/a/b.sh"],
-    ["prettier", "--write", "--no-config", "--print-width", "79", "/a/b.ts"],
-]
+# The PowerShell files of the command test's scratch tree, from its root.
+_WINDOWS_NAMES = ["a.ps1", "a.psd1"]
 
 
 # Writes an empty file at each path from the root, making its directories.
@@ -116,27 +94,22 @@ class TestTable(unittest.TestCase):
             self.assertEqual(caught.exception.args, (expected,), path)
 
 
-# The commands each run starts, `subprocess.run` replaced so that none starts.
+# The commands of the PowerShell rows, which none starts on Linux.
 class TestCommands(unittest.TestCase):
-    # A check starts each Linux row's checker on its files, rewriting none.
-    def test_check_commands(self) -> None:
-        with unittest.mock.patch("subprocess.run") as run:
-            reformat.format_check(_COMMAND_PATHS)
-        self.assertEqual(
-            [call.args[0] for call in run.call_args_list], _CHECK_COMMANDS
-        )
-        for call in run.call_args_list:
-            self.assertEqual(call.kwargs, {"check": True, "cwd": _ROOT_PATH})
+    # Makes the checkout's `build/` for the scratch trees.
+    def setUp(self) -> None:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
 
-    # A formatting starts each Linux row's formatter on its files.
-    def test_format_commands(self) -> None:
-        with unittest.mock.patch("subprocess.run") as run:
-            reformat.reformat(_COMMAND_PATHS)
-        self.assertEqual(
-            [call.args[0] for call in run.call_args_list], _FORMAT_COMMANDS
-        )
-        for call in run.call_args_list:
-            self.assertEqual(call.kwargs, {"check": True, "cwd": _ROOT_PATH})
+    # A check and a formatting of PowerShell files start no command.
+    def test_windows_none(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as root:
+            tree_make(root, _WINDOWS_NAMES)
+            paths = [os.path.join(root, name) for name in _WINDOWS_NAMES]
+            # A command started on them would fail, as they are not programs.
+            reformat.format_check(paths)
+            reformat.reformat(paths)
+            sizes = [os.path.getsize(path) for path in paths]
+        self.assertEqual(sizes, [0, 0])
 
 
 # The matching of whitelist lines on a scratch tree, and each refusal.

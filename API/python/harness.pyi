@@ -4,7 +4,8 @@
 # only, so it sits below every module, and its texts are plain English. Each
 # file is read once, at the first call that needs it. An id is a key, nested
 # keys joined by `.`, as `python.test_jslb.limits`. A test module imports
-# only its own module, the standard library and this one.
+# the standard library, this one, the modules it tests, and other project
+# modules only once their own suites have passed earlier in the run.
 
 from typing import Any
 

@@ -6,9 +6,11 @@
 # fail. Each failure is an expected failure: the test states the stream the
 # suite must write, its diagnostics by the lines they must hold, and passes
 # only when the suite fails exactly that way. The fixtures are nested in the
-# test class so that no loader collects them.
+# test class so that no loader collects them. The failing `setUpModule` runs
+# in a forked child, which registers its module and then kills itself, so
+# that the module reaches no other test.
 
-import importlib, sys, tap_producer, types, unittest
+import importlib, os, signal, sys, tap_producer, traceback, types, unittest
 from collections.abc import Callable, Sequence
 from typing import cast
 
@@ -27,10 +29,13 @@ _BLOCK_NAME = "fixture"
 # What starts each diagnostic line of a block.
 _DIAGNOSTIC_PREFIX = "    # "
 
+# The ending a child writes when its work raised nothing.
+_ENDING_PASSED = "passed"
+
 # The diagnostic line of the error the fixtures raise.
 _ERROR_LINE = "    # RuntimeError: fixture error"
 
-# The module name the module fixture claims, registered only by its test.
+# The module name the module fixture claims, registered only in its child.
 _FIXTURE_MODULE = "tap_fixture_module"
 
 # The parent line of a fixture block that failed.
@@ -121,6 +126,44 @@ def stream_expect(
     ended = runner.run_end()
     case.assertEqual(stream_reduce(lines, expected), list(expected))
     case.assertEqual([passed, ended], [_PARENT_PASSED in expected] * 2)
+
+
+# In the forked child: runs the work, writes how it ended, kills itself.
+def child_end(work: Callable[[], None], write_fd: int) -> None:
+    try:
+        try:
+            work()
+            ending = _ENDING_PASSED
+        except BaseException:
+            ending = traceback.format_exc()
+        try:
+            with os.fdopen(write_fd, "w", encoding="utf-8") as file:
+                file.write(ending)
+        except BaseException:
+            # The parent finds no ending, so the failure and it go to stderr.
+            sys.stderr.write(
+                f"{traceback.format_exc()}the ending not written: {ending}\n"
+            )
+            sys.stderr.flush()
+    finally:
+        os.kill(os.getpid(), signal.SIGKILL)
+
+
+# Runs the work in a forked child, failing the case unless it raised nothing.
+def child_expect(case: unittest.TestCase, work: Callable[[], None]) -> None:
+    read_fd, write_fd = os.pipe()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    pid = os.fork()
+    if pid == 0:
+        os.close(read_fd)
+        child_end(work, write_fd)
+    os.close(write_fd)
+    with os.fdopen(read_fd, encoding="utf-8") as file:
+        ending = file.read()
+    status = os.waitpid(pid, 0)[1]
+    case.assertEqual(os.waitstatus_to_exitcode(status), -signal.SIGKILL)
+    case.assertEqual(ending, _ENDING_PASSED)
 
 
 # Tests the tracker: numbered points, directives, diagnostics and plans.
@@ -562,12 +605,11 @@ class TestFailures(unittest.TestCase):
         ]
         stream_expect(self, class_load(self.ClosingFixture), False, expected)
 
-    # An error in `setUpModule` is a point of its own and ends the stream.
-    def test_module_setup(self) -> None:
+    # In the child: registers the fixture's module, then expects its stream.
+    def module_expect(self) -> None:
         module = types.ModuleType(_FIXTURE_MODULE)
         setattr(module, "setUpModule", module_fail)
         sys.modules[_FIXTURE_MODULE] = module
-        self.addCleanup(sys.modules.pop, _FIXTURE_MODULE)
         expected = [
             _VERSION_LINE,
             "    1..1",
@@ -577,6 +619,10 @@ class TestFailures(unittest.TestCase):
             _BAIL_LINE,
         ]
         stream_expect(self, class_load(self.ModuleFixture), False, expected)
+
+    # An error in `setUpModule` is a point of its own and ends the stream.
+    def test_module_setup(self) -> None:
+        child_expect(self, self.module_expect)
 
     # An expected failure is a `TODO` point that does not fail the block.
     def test_failure_expected(self) -> None:

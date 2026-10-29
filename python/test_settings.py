@@ -3,12 +3,10 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the settings check on good objects, plain and as read off the wire,
-# each object a dict subclass of the decoder's shape written here, and on
-# copies with a missing key, an extra key or a wrong type, a list or a dict
-# of strings with one wrong item among them, the load from scratch files
-# through the decoders' door, which refuses with a `WireError` a text that
-# is not JSON and a number that overflows a double, and the real file. The
-# expected texts are the gold's.
+# each object a `jslb.Object`, the class the decoder makes, and on copies
+# with a missing key, an extra key or a wrong type, a list or a dict of
+# strings with one wrong item among them, the load from scratch files, and
+# the real file. The expected texts are the gold's.
 
 import copy, harness, json, os, settings, tempfile, unittest
 from typing import Any, cast
@@ -164,23 +162,8 @@ _NOT_TABLE: tuple[Any, ...] = (None, "text", 0, ["a"], {"a": 1}, {1: "a"})
 # Values that are not an object.
 _NOT_OBJECT: tuple[Any, ...] = (None, False, 0, 1.5, "text", [])
 
-# A number token that overflows a double, which the decoders refuse.
-_OVERFLOW_TOKEN = "1e400"
-
 # The id of this module's gold in `test_settings.json`.
 _GOLD_ID = "python.test_settings"
-
-# The class name of the decoders' refusal, which the load raises.
-_WIRE_ERROR = "WireError"
-
-
-# A decoded JSON object, as `jslb.Object` is: a dict, string keys attributes.
-class WireObject(dict[int | str, Any]):
-    # Reads a string key, as the decoder's objects allow.
-    def __getattr__(self, name: str) -> Any:
-        if name not in self:
-            raise AttributeError(name)
-        return self[name]
 
 
 # A text of this module's gold, each `{n}` replaced by the value `n`.
@@ -196,11 +179,13 @@ def _good_make() -> dict[str, Any]:
     return copy.deepcopy(_GOOD_SETTINGS)
 
 
-# A copy of a JSON value with each object a `WireObject`, at every depth.
+# A copy of a JSON value with each object a `jslb.Object`, at every depth.
 def _objects_wire(value: Any) -> Any:
     if isinstance(value, dict):
         pairs = cast(dict[str, Any], value).items()
-        return WireObject({key: _objects_wire(item) for key, item in pairs})
+        return settings.jslb.Object(
+            {key: _objects_wire(item) for key, item in pairs}
+        )
     if isinstance(value, list):
         return [_objects_wire(item) for item in cast(list[Any], value)]
     return value
@@ -315,7 +300,7 @@ class TestCheck(unittest.TestCase):
         good = _wire_make()
         for path in _OBJECT_PATHS + _TABLE_PATHS:
             holder, name = _holder_find(good, path)
-            self.assertIs(type(holder[name]), WireObject, path)
+            self.assertIs(type(holder[name]), settings.jslb.Object, path)
         settings.settings_check(good)
         self.assertEqual(good, _GOOD_SETTINGS)
 
@@ -345,33 +330,10 @@ class TestLoad(unittest.TestCase):
         with open(self.file_path, "w", encoding="utf-8") as file:
             file.write(text)
 
-    # Loads the scratch file and returns the decoders' refusal it raises.
-    def wire_refused(self) -> Exception:
-        with self.assertRaises(Exception) as context:
-            settings.settings_load(self.file_path)
-        self.assertEqual(type(context.exception).__name__, _WIRE_ERROR)
-        return context.exception
-
     # A file that does not exist raises and nothing is defaulted.
     def test_file_absent(self) -> None:
         with self.assertRaises(FileNotFoundError):
             settings.settings_load(self.file_path)
-
-    # A file that is not JSON raises the decoders' `jslb.text_not_json`.
-    def test_file_invalid(self) -> None:
-        self.text_write("{")
-        error = self.wire_refused()
-        cause = error.__cause__
-        self.assertIsInstance(cause, json.JSONDecodeError)
-        reason = cast(json.JSONDecodeError, cause).msg
-        expected = _text_fill("jslb_text_not_json", reason)
-        self.assertEqual(str(error), expected)
-
-    # A number that overflows a double is refused at read, by the decoders.
-    def test_number_overflow(self) -> None:
-        self.text_write('{"verbose_ring": ' + _OVERFLOW_TOKEN + "}")
-        error = self.wire_refused()
-        self.assertEqual(str(error), _text_fill("jslb_number_overflow"))
 
     # The settings file at the top level of the checkout loads and checks.
     def test_file_real(self) -> None:

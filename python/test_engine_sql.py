@@ -2,21 +2,27 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests the handler of `sql.run` on a store double: the type, version and
-# handler the registration records, the handler called as the dispatcher
-# calls it on lines of the gold, the store's `sql_run` it makes with the
-# line's database and statements, each a `SqlStatement` of its text and
-# parameters, a parameter with quotes and text beyond ASCII bound whole, a
-# line in full names, a line with `i` the handler leaves unanswered, and
-# malformed statements. Running, rolling back and the databases the store
-# refuses are the store's own, `test_substrate.py`'s.
+# Tests the handler of `sql.run` on a real store on a scratch root in
+# `build/`. Each test runs in a forked child that registers the handler in
+# the real dispatcher and kills itself when done, so that no registration
+# reaches another test, and the parent checks how the child said it ended.
+# The handler is called as the dispatcher calls it on lines of the gold, and
+# the rows the line's statements made are queried back from its database: a
+# parameter with quotes and text beyond ASCII bound whole, a line in full
+# names, a line with `i` the handler leaves unanswered, and malformed
+# statements. The dispatcher refuses a second registration of the type at
+# version 0. Running, rolling back and the databases the store refuses are
+# the store's own, `test_substrate.py`'s.
 
-import engine_sql, harness, re, unittest, unittest.mock
+import dispatch, engine_sql, harness, os, re, signal, substrate, sys, tempfile
+import traceback, unittest
 from collections.abc import Callable
 from typing import Any
 
-# The dotted name of the store that the tests patch.
-_STORE_TARGET = "engine_sql._STATE.store"
+# The checkout's build directory, where each test makes its scratch root.
+_BUILD_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
+)
 
 # The id of this module's gold in `test_settings.json`.
 _GOLD_ID = "python.test_engine_sql"
@@ -24,8 +30,20 @@ _GOLD_ID = "python.test_engine_sql"
 # A key of the decimal digits of a non negative integer, as JSLB reads it.
 _NUMBER_KEY = re.compile(r"0|[1-9][0-9]*")
 
+# The size over which the store keeps a value in a cache file.
+_OVERFLOW_BYTES: int = harness.setting_get("overflow_bytes")
+
 # Text with quotes, a statement separator and characters beyond ASCII.
 _QUOTED_TEXT = "it's 'quoted'; DROP TABLE t; --" + chr(0x4E2D) + chr(0x1F600)
+
+# The query of the rows the gold's universe statements insert.
+_WORLD_QUERY = "SELECT name, title FROM world"
+
+# The query of the row the gold's quoted statements insert.
+_QUOTED_QUERY = "SELECT x FROM t"
+
+# How a child ends when its work returned.
+_ENDING_PASSED = "passed"
 
 
 # A copy of a value of this module's gold, its number keys made `int`.
@@ -60,63 +78,59 @@ def _handler_call(fn: Callable[..., Any], line: dict[int | str, Any]) -> Any:
     return fn(line, **payload)
 
 
-# A store double: records each call, answers what the test queued for it.
-class StoreDouble:
-    # Starts with no call recorded and no answer queued.
-    def __init__(self) -> None:
-        self.calls: list[tuple[Any, ...]] = []
-        self.answers: dict[str, list[Any]] = {}
-
-    # Records a call and returns its next queued answer, which must exist.
-    def call_answer(self, name: str, *args: Any) -> Any:
-        self.calls.append((name, *args))
-        if not self.answers.get(name):
-            raise AssertionError(f"the store double has no answer: {name}")
-        return self.answers[name].pop(0)
-
-    # `Store.sql_run`, as `engine_sql` calls it.
-    def sql_run(self, db: str, statements: list[Any]) -> Any:
-        return self.call_answer("sql_run", db, statements)
+# In the forked child: runs the work, writes how it ended, kills itself.
+def _child_end(work: Callable[[], object], path: str) -> None:
+    try:
+        try:
+            work()
+            ending = _ENDING_PASSED
+        except BaseException:
+            ending = traceback.format_exc()
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(ending)
+    finally:
+        os.kill(os.getpid(), signal.SIGKILL)
 
 
-# Gives each test an empty state, a registration recorder, a store double.
-class IsolatedCase(unittest.TestCase):
-    # Patches the state and `dispatch.handler_register` through `engine_sql`.
+# Gives each test a scratch root in `build/` and a forked child to run in.
+class ScratchCase(unittest.TestCase):
+    # Makes the scratch directory and the root in it.
     def setUp(self) -> None:
-        self.handlers: list[tuple[str, int, Callable[..., Any]]] = []
-        state = unittest.mock.patch(_STORE_TARGET, None)
-        register = unittest.mock.patch.object(
-            engine_sql.dispatch, "handler_register", self.handler_record
-        )
-        for patcher in (state, register):
-            patcher.start()
-            self.addCleanup(patcher.stop)
-        self.store = StoreDouble()
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+        scratch = tempfile.TemporaryDirectory(dir=_BUILD_PATH)
+        self.addCleanup(scratch.cleanup)
+        self.scratch = scratch.name
+        self.root = os.path.join(scratch.name, "root")
+        os.mkdir(self.root)
 
-    # Records one registration in place of the dispatcher's table.
-    def handler_record(
-        self, name: str, version: int, fn: Callable[..., Any]
-    ) -> None:
-        self.handlers.append((name, version, fn))
+    # Runs the work in a forked child and fails with what the child raised.
+    def child_run(self, work: Callable[[], object]) -> None:
+        path = os.path.join(self.scratch, "ending.txt")
+        sys.stdout.flush()
+        sys.stderr.flush()
+        pid = os.fork()
+        if pid == 0:
+            _child_end(work, path)
+        status = os.waitpid(pid, 0)[1]
+        self.assertEqual(os.waitstatus_to_exitcode(status), -signal.SIGKILL)
+        with open(path, encoding="utf-8") as file:
+            ending = file.read()
+        os.remove(path)
+        if ending != _ENDING_PASSED:
+            self.fail(ending)
 
-    # Registers the handlers on the store double, returns the one of `name`.
-    def handler_get(self, name: str) -> Callable[..., Any]:
-        store: Any = self.store
+    # In the child: a store on the root, the handler registered on it.
+    def store_register(self) -> substrate.Store:
+        store = substrate.Store(self.root, _OVERFLOW_BYTES)
         engine_sql.handlers_register(store)
-        (fn,) = [fn for kind, _, fn in self.handlers if kind == name]
-        return fn
+        return store
 
-    # Calls the handler on a gold line, checks its one `sql_run`, returns it.
-    def run_check(self, name: str) -> list[Any]:
-        run = self.handler_get("sql.run")
-        line = _gold_value(f"lines.{name}")
-        statements = line["statements"]
-        self.store.answers["sql_run"] = [[([], [], 0)] * len(statements)]
-        self.assertIsNone(_handler_call(run, line))
-        parsed = [(item["sql"], item["params"]) for item in statements]
-        self.assertEqual(self.store.calls, [("sql_run", line["db"], parsed)])
-        made: list[Any] = self.store.calls[0][2]
-        return made
+    # Calls `fn` and checks it raises the type with text matching.
+    def raise_match(
+        self, kind: type[Exception], pattern: str, fn: Callable[[], object]
+    ) -> None:
+        with self.assertRaisesRegex(kind, pattern):
+            fn()
 
     # Calls `fn` and checks the type and the text of what it raises.
     def raise_check(
@@ -126,59 +140,88 @@ class IsolatedCase(unittest.TestCase):
             fn()
         self.assertEqual(str(caught.exception), message)
 
-    # Calls `fn` and checks it raises the type with text matching.
-    def raise_match(
-        self, kind: type[Exception], pattern: str, fn: Callable[[], object]
-    ) -> None:
-        with self.assertRaisesRegex(kind, pattern):
-            fn()
-
 
 # Tests the handler of `sql.run`.
-class TestRun(IsolatedCase):
-    # The universe database's statements go to the store in order.
+class TestRun(ScratchCase):
+    # In the child: the handler on a gold line, then the row it inserted.
+    def run_check(self, name: str, query: str) -> list[list[Any]]:
+        line = _gold_value(f"lines.{name}")
+        store = self.store_register()
+        store.db_create(line["db"])
+        self.assertIsNone(_handler_call(engine_sql.sql_run, line))
+        select = [substrate.SqlStatement(query, [])]
+        (result,) = store.sql_run(line["db"], select)
+        self.assertEqual(result.rows, [line["statements"][-1]["params"]])
+        return result.rows
+
+    # The universe database's statements run in order: its table, its row.
     def test_universe_statements(self) -> None:
-        self.run_check("run")
+        self.child_run(lambda: self.run_check("run", _WORLD_QUERY))
 
     # A line in full names is applied as one in short names.
     def test_full_names(self) -> None:
-        self.run_check("run_full")
+        self.child_run(lambda: self.run_check("run_full", _WORLD_QUERY))
 
     # A run with `i` is applied and answered with nothing, as a push is.
     def test_request_none(self) -> None:
-        self.run_check("run_request")
+        self.child_run(lambda: self.run_check("run_request", _WORLD_QUERY))
+
+    # In the child: the quoted text comes back from its table whole.
+    def quoted_check(self) -> None:
+        rows = self.run_check("run_quoted", _QUOTED_QUERY)
+        self.assertEqual(rows, [[_QUOTED_TEXT]])
 
     # Text with quotes and beyond ASCII stays a parameter, whole.
     def test_parameters_bound(self) -> None:
-        made = self.run_check("run_quoted")
-        self.assertEqual(made[1].params, [_QUOTED_TEXT])
+        self.child_run(self.quoted_check)
 
 
 # Tests what the handler of `sql.run` refuses.
-class TestRefused(IsolatedCase):
-    # A statement with a key missing or a key too many raises.
-    def test_statement_malformed(self) -> None:
-        run = self.handler_get("sql.run")
+class TestRefused(ScratchCase):
+    # In the child: a statement with a key missing or a key too many raises.
+    def malformed_check(self) -> None:
+        store = self.store_register()
         line = _gold_value("lines.run_paramless")
+        store.db_create(line["db"])
         pattern = "missing 1 required positional argument: 'params'"
-        self.raise_match(TypeError, pattern, lambda: _handler_call(run, line))
+        self.raise_match(
+            TypeError,
+            pattern,
+            lambda: _handler_call(engine_sql.sql_run, line),
+        )
         extra = _gold_value("lines.run_extra")
         pattern = "unexpected keyword argument 'extra'"
-        self.raise_match(TypeError, pattern, lambda: _handler_call(run, extra))
-        self.assertEqual(self.store.calls, [])
+        self.raise_match(
+            TypeError,
+            pattern,
+            lambda: _handler_call(engine_sql.sql_run, extra),
+        )
+
+    # A statement with a key missing or a key too many raises.
+    def test_statement_malformed(self) -> None:
+        self.child_run(self.malformed_check)
 
 
 # Tests the registration.
-class TestRegister(IsolatedCase):
+class TestRegister(ScratchCase):
+    # In the child: the dispatcher refuses the type at version 0 again.
+    def registered_check(self) -> None:
+        self.store_register()
+        message = _text_get("dispatch_handler_twice_run")
+        self.raise_check(
+            ValueError,
+            message,
+            lambda: dispatch.handler_register(
+                "sql.run", 0, engine_sql.sql_run
+            ),
+        )
+
     # The handler is registered once, under its type at version 0.
     def test_handlers_registered(self) -> None:
-        store: Any = self.store
-        engine_sql.handlers_register(store)
-        expected = [("sql.run", 0, engine_sql.sql_run)]
-        self.assertEqual(self.handlers, expected)
+        self.child_run(self.registered_check)
 
-    # Called before the registration the handler raises.
-    def test_called_early(self) -> None:
+    # In the child: before the registration the handler raises.
+    def early_check(self) -> None:
         line = _gold_value("lines.run")
         message = _text_get("engine_sql_not_registered")
         self.raise_check(
@@ -186,4 +229,7 @@ class TestRegister(IsolatedCase):
             message,
             lambda: _handler_call(engine_sql.sql_run, line),
         )
-        self.assertEqual(self.store.calls, [])
+
+    # Called before the registration the handler raises.
+    def test_called_early(self) -> None:
+        self.child_run(self.early_check)

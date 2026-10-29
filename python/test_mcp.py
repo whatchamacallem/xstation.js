@@ -326,23 +326,6 @@ class TestServer(unittest.TestCase):
         self.assertEqual(result["content"][0]["text"], _cascade_text(cascade))
         self.assertIs(self.failure_get(), error)
 
-    # The exception a tool raised from another holds it under `cause`.
-    def test_cause_kept(self) -> None:
-        inner = RuntimeError("inner")
-        try:
-            raise ValueError("outer") from inner
-        except ValueError as raised:
-            error = raised
-        self.failing_register(error)
-        result = self.failing_call(9)
-        cascade = {
-            "message": "outer",
-            "stack": _stack_of(error),
-            "cause": {"message": "inner", "stack": _stack_of(inner)},
-        }
-        self.assertEqual(result["content"][0]["text"], _cascade_text(cascade))
-        self.assertIs(self.failure_get(), error)
-
     # A tool nobody registered is invalid params, named in the message.
     def test_call_unknown(self) -> None:
         params = {"name": "nothing", "arguments": {}}

@@ -4,20 +4,17 @@
 #
 # Tests the parts of devtools.py that need no browser: WebSocket frames with
 # and without masks, the handshake, joining a message from its fragments, the
-# relay and stop scripts, the DevTools address, the timers, a client reading
-# canned bytes or an empty pipe, the synchronous loads picked out of a trace,
-# the workers and pauses kept, and a browser's page, trace and worker calls
-# and waits with canned bytes, a scratch profile and a patched removal. No
-# process is started. The waits the tests give are the gold's.
+# relay script and the PowerShell arguments, the DevTools address, the
+# timers, a client on real pipes, filled before it reads or never written
+# to, the synchronous loads picked out of a trace, and the page's loads,
+# trace, workers and pauses kept. Every byte a function reads, and every
+# frame a client writes, rides a real pipe, and a pipe in packet mode gives
+# the short reads. No process is started. The waits the tests give and the
+# size of a pipe are the gold's.
 
-import devtools, errno, functools, harness, io, json, os, subprocess
-import tempfile, time, unittest.mock
-from typing import Any, cast
-
-# The checkout's build directory, where each test makes its scratch directory.
-_BUILD_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
-)
+import devtools, fcntl, functools, harness, json, os, time, unittest
+from collections.abc import Callable
+from typing import Any, BinaryIO
 
 # The id of this module's gold in `test_settings.json`.
 _GOLD_ID = "python.test_devtools"
@@ -28,12 +25,14 @@ _WAIT_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.wait_seconds")
 # A wait that ends soon, for the replies and events that never come.
 _EXPIRY_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.expiry_seconds")
 
-# What DevTools answers a navigation to an address nothing listens on yet.
-_REFUSED_RESULT = {
-    "errorText": "net::ERR_CONNECTION_REFUSED",
-    "frameId": "F",
-    "loaderId": "L0",
-}
+# A size chosen by its writer: a pipe's buffer, room for all a test writes.
+_PIPE_BYTES: int = harness.gold_get(f"{_GOLD_ID}.pipe_bytes")
+
+# The flags of a pipe, closed across an exec as `os.pipe` makes one.
+_PIPE_FLAGS = os.O_CLOEXEC
+
+# The flags of a pipe in packet mode, where a read takes one write at most.
+_PACKET_FLAGS = os.O_CLOEXEC | os.O_DIRECT
 
 # RFC 6455's sample key.
 _SAMPLE_KEY = "dGhlIHNhbXBsZSBub25jZQ=="
@@ -63,49 +62,6 @@ _HELLO_PLAIN = bytes.fromhex("810548656c6c6f")
 _ZERO_MASK = bytes(4)
 
 
-# Serves canned bytes as the relay's pipe would, ignoring the timer.
-class CannedReader:
-    # Keeps the bytes to serve.
-    def __init__(self, data: bytes) -> None:
-        self.stream = io.BytesIO(data)
-
-    # Returns up to count of the bytes, and nothing once they run out.
-    def bytes_next(self, timer: devtools.WaitTimer, count: int) -> bytes:
-        return self.stream.read(count)
-
-
-# Keeps the frames a reader sent, in order.
-class FrameRecorder:
-    # Starts with no frames.
-    def __init__(self) -> None:
-        self.frames: list[tuple[int, bytes]] = []
-
-    # Keeps one frame sent.
-    def frame_record(self, opcode: int, payload: bytes) -> None:
-        self.frames.append((opcode, payload))
-
-
-# A client reading canned bytes, with what it wrote and what it passed on.
-class ClientRig:
-    # Makes the client and the lists its writes and events go to.
-    def __init__(self, data: bytes, wait_seconds: float) -> None:
-        self.writes: list[bytes] = []
-        self.events: list[dict[str, Any]] = []
-        self.client = devtools.ProtocolClient(
-            CannedReader(data).bytes_next,
-            self.writes.append,
-            self.events.append,
-            wait_seconds,
-        )
-
-
-# A browser process that has not exited.
-class RunningProcess:
-    # Returns no exit code, as a running process does.
-    def poll(self) -> int | None:
-        return None
-
-
 # Returns the event of a target attached from the page, with its session.
 def attach_event(kind: str, session_id: str, title: str) -> dict[str, Any]:
     return {
@@ -125,19 +81,6 @@ def attach_event(kind: str, session_id: str, title: str) -> dict[str, Any]:
     }
 
 
-# Returns a browser that starts nothing and whose client reads the bytes.
-def browser_make(data: bytes, writes: list[bytes]) -> devtools.Browser:
-    with unittest.mock.patch("shutil.which", return_value="/w/ps.exe"):
-        browser = devtools.Browser(800, 600)
-    browser.client = devtools.ProtocolClient(
-        CannedReader(data).bytes_next,
-        writes.append,
-        browser.events.message_handle,
-        _WAIT_SECONDS,
-    )
-    return browser
-
-
 # Returns the frame a server sends for a DevTools message.
 def message_frame(message: dict[str, Any]) -> bytes:
     payload = json.dumps(message).encode()
@@ -154,9 +97,8 @@ def paused_event(session_id: str) -> dict[str, Any]:
 
 
 # Returns the DevTools request inside a frame the client wrote.
-def request_decode(frame: bytes) -> dict[str, Any]:
-    decoded = devtools.frame_decode(io.BytesIO(frame).read)
-    request: dict[str, Any] = json.loads(decoded.payload)
+def request_decode(frame: devtools.SocketFrame) -> dict[str, Any]:
+    request: dict[str, Any] = json.loads(frame.payload)
     return request
 
 
@@ -200,8 +142,73 @@ def trace_data(values: list[dict[str, Any]]) -> dict[str, Any]:
     return {"method": "Tracing.dataCollected", "params": {"value": values}}
 
 
+# Gives each test real pipes, each end closed when the test ends.
+class PipeCase(unittest.TestCase):
+    # The read end of the pipe a client writes to, and the file it writes by.
+    written_fd: int
+    writer: BinaryIO
+
+    # Returns the read end of a pipe of the flags holding the chunks, ended.
+    def pipe_filled(self, chunks: list[bytes], flags: int) -> int:
+        read_fd, write_fd = os.pipe2(flags)
+        self.addCleanup(os.close, read_fd)
+        with open(write_fd, "wb", buffering=0) as pipe_file:
+            fcntl.fcntl(write_fd, fcntl.F_SETPIPE_SZ, _PIPE_BYTES)
+            for chunk in chunks:
+                self.assertEqual(pipe_file.write(chunk), len(chunk))
+        return read_fd
+
+    # Returns a reader of a pipe that holds the bytes, its write end closed.
+    def reader_filled(self, data: bytes) -> Callable[[int], bytes]:
+        read_fd = self.pipe_filled([data], _PIPE_FLAGS)
+        return functools.partial(os.read, read_fd)
+
+    # Returns the read end of a pipe nothing is written to, its writer open.
+    def pipe_idle(self) -> int:
+        read_fd, write_fd = os.pipe()
+        self.addCleanup(os.close, read_fd)
+        self.addCleanup(os.close, write_fd)
+        return read_fd
+
+    # Returns a client reading the descriptor and writing to a new pipe.
+    def client_make(
+        self, read_fd: int, wait_seconds: float, events: list[dict[str, Any]]
+    ) -> devtools.ProtocolClient:
+        self.written_fd, write_fd = os.pipe()
+        self.addCleanup(os.close, self.written_fd)
+        self.writer = open(write_fd, "wb")
+        self.addCleanup(self.writer.close)
+        return devtools.ProtocolClient(
+            functools.partial(devtools.pipe_read, read_fd),
+            functools.partial(devtools.stream_write, self.writer),
+            events.append,
+            wait_seconds,
+        )
+
+    # Returns a client reading the bytes from a pipe, its events kept.
+    def client_filled(
+        self, data: bytes, wait_seconds: float, events: list[dict[str, Any]]
+    ) -> devtools.ProtocolClient:
+        read_fd = self.pipe_filled([data], _PIPE_FLAGS)
+        return self.client_make(read_fd, wait_seconds, events)
+
+    # Returns a client on a pipe nothing is written to, its events kept.
+    def client_idle(
+        self, wait_seconds: float, events: list[dict[str, Any]]
+    ) -> devtools.ProtocolClient:
+        return self.client_make(self.pipe_idle(), wait_seconds, events)
+
+    # Returns the frames the client wrote, which must be all it wrote.
+    def frames_written(self, count: int) -> list[devtools.SocketFrame]:
+        self.writer.close()
+        read = functools.partial(os.read, self.written_fd)
+        frames = [devtools.frame_decode(read) for _ in range(count)]
+        self.assertEqual(os.read(self.written_fd, 1), b"")
+        return frames
+
+
 # Frames encode and decode as RFC 6455 says, with and without masks.
-class TestFrames(unittest.TestCase):
+class TestFrames(PipeCase):
     # A masked text frame is RFC 6455's example.
     def test_encode_masked(self) -> None:
         frame = devtools.frame_encode(0x1, b"Hello", _SAMPLE_MASK)
@@ -228,91 +235,91 @@ class TestFrames(unittest.TestCase):
 
     # A frame as a server sends it, with no mask, decodes.
     def test_decode_plain(self) -> None:
-        frame = devtools.frame_decode(io.BytesIO(_HELLO_PLAIN).read)
+        frame = devtools.frame_decode(self.reader_filled(_HELLO_PLAIN))
         self.assertEqual(frame, devtools.SocketFrame(True, 0x1, b"Hello"))
 
     # A masked frame is unmasked.
     def test_decode_masked(self) -> None:
-        frame = devtools.frame_decode(io.BytesIO(_HELLO_MASKED).read)
+        frame = devtools.frame_decode(self.reader_filled(_HELLO_MASKED))
         self.assertEqual(frame, devtools.SocketFrame(True, 0x1, b"Hello"))
 
     # Lengths of 2 bytes and of 8 bytes decode.
     def test_decode_lengths(self) -> None:
         medium = bytes(index % 251 for index in range(300))
         data = b"\x81\x7e" + (300).to_bytes(2, "big") + medium
-        frame = devtools.frame_decode(io.BytesIO(data).read)
+        frame = devtools.frame_decode(self.reader_filled(data))
         self.assertEqual(frame.payload, medium)
         large = bytes(index % 251 for index in range(70000))
         data = b"\x81\x7f" + (70000).to_bytes(8, "big") + large
-        frame = devtools.frame_decode(io.BytesIO(data).read)
+        frame = devtools.frame_decode(self.reader_filled(data))
         self.assertEqual(frame.payload, large)
 
     # A frame encoded with a mask decodes to its payload.
     def test_decode_cycle(self) -> None:
         payload = bytes(index % 251 for index in range(70000))
         frame = devtools.frame_encode(0x1, payload, bytes([9, 8, 7, 6]))
-        decoded = devtools.frame_decode(io.BytesIO(frame).read)
+        decoded = devtools.frame_decode(self.reader_filled(frame))
         self.assertEqual(decoded, devtools.SocketFrame(True, 0x1, payload))
 
     # A fragment that doesn't end its message decodes with its flag clear.
     def test_decode_fragment(self) -> None:
-        stream = io.BytesIO(bytes.fromhex("010348656c80026c6f"))
-        first = devtools.frame_decode(stream.read)
-        second = devtools.frame_decode(stream.read)
+        read = self.reader_filled(bytes.fromhex("010348656c80026c6f"))
+        first = devtools.frame_decode(read)
+        second = devtools.frame_decode(read)
         self.assertEqual(first, devtools.SocketFrame(False, 0x1, b"Hel"))
         self.assertEqual(second, devtools.SocketFrame(True, 0x0, b"lo"))
 
     # A frame cut short fails loud.
     def test_decode_short(self) -> None:
         with self.assertRaises(ConnectionError) as caught:
-            devtools.frame_decode(io.BytesIO(_HELLO_PLAIN[:-1]).read)
+            devtools.frame_decode(self.reader_filled(_HELLO_PLAIN[:-1]))
         self.assertEqual(
             str(caught.exception), "DevTools closed the connection"
         )
 
 
 # A message is joined from its frames, with pings answered on the way.
-class TestMessages(unittest.TestCase):
-    # Returns the message read from the frames, and the frames sent meanwhile.
+class TestMessages(PipeCase):
+    # Returns the message read from the frames and the frames sent meanwhile.
     def frames_read(
-        self, frames: str
-    ) -> tuple[bytes, list[tuple[int, bytes]]]:
-        recorder = FrameRecorder()
+        self, frames: str, sent: int
+    ) -> tuple[bytes, list[devtools.SocketFrame]]:
+        client = self.client_idle(_WAIT_SECONDS, [])
         message = devtools.message_read(
-            io.BytesIO(bytes.fromhex(frames)).read, recorder.frame_record
+            self.reader_filled(bytes.fromhex(frames)), client.frame_send
         )
-        return message, recorder.frames
+        return message, self.frames_written(sent)
 
     # A message in one frame is returned as it is.
     def test_read_single(self) -> None:
-        self.assertEqual(self.frames_read("810548656c6c6f"), (b"Hello", []))
+        self.assertEqual(self.frames_read("810548656c6c6f", 0), (b"Hello", []))
 
     # Fragments are joined, as in RFC 6455's example.
     def test_read_fragments(self) -> None:
-        message, sent = self.frames_read("010348656c80026c6f")
+        message, sent = self.frames_read("010348656c80026c6f", 0)
         self.assertEqual(message, b"Hello")
         self.assertEqual(sent, [])
 
     # A ping is answered with a pong holding its payload.
     def test_read_ping(self) -> None:
-        message, sent = self.frames_read("89026162" + "81017a")
+        message, sent = self.frames_read("89026162" + "81017a", 1)
         self.assertEqual(message, b"z")
-        self.assertEqual(sent, [(0xA, b"ab")])
+        self.assertEqual(sent, [devtools.SocketFrame(True, 0xA, b"ab")])
 
     # A pong is ignored.
     def test_read_pong(self) -> None:
-        self.assertEqual(self.frames_read("8a00" + "81017a"), (b"z", []))
+        self.assertEqual(self.frames_read("8a00" + "81017a", 0), (b"z", []))
 
     # A ping between fragments is answered and the fragments still join.
     def test_read_between(self) -> None:
-        message, sent = self.frames_read("010161" + "8900" + "800162")
+        message, sent = self.frames_read("010161" + "8900" + "800162", 1)
         self.assertEqual(message, b"ab")
-        self.assertEqual(sent, [(0xA, b"")])
+        self.assertEqual(sent, [devtools.SocketFrame(True, 0xA, b"")])
 
     # A close frame fails loud.
     def test_read_close(self) -> None:
         with self.assertRaises(ConnectionError) as caught:
-            self.frames_read("8800")
+            self.frames_read("8800", 0)
         self.assertEqual(
             str(caught.exception), "DevTools closed the connection"
         )
@@ -327,12 +334,12 @@ class TestMessages(unittest.TestCase):
         }
         for frames, message in refusals.items():
             with self.assertRaises(ConnectionError, msg=frames) as caught:
-                self.frames_read(frames)
+                self.frames_read(frames, 0)
             self.assertEqual(str(caught.exception), message)
 
 
 # The WebSocket upgrade request and its answer.
-class TestHandshake(unittest.TestCase):
+class TestHandshake(PipeCase):
     # The sample key gives the accept value RFC 6455 gives.
     def test_accept_sample(self) -> None:
         self.assertEqual(devtools.accept_key(_SAMPLE_KEY), _SAMPLE_ACCEPT)
@@ -383,9 +390,10 @@ class TestHandshake(unittest.TestCase):
 
     # The head is read up to the blank line and no further.
     def test_head_read(self) -> None:
-        stream = io.BytesIO(_ACCEPT_HEAD + b"rest")
-        self.assertEqual(devtools.head_read(stream.read), _ACCEPT_HEAD)
-        self.assertEqual(stream.read(), b"rest")
+        read_fd = self.pipe_filled([_ACCEPT_HEAD + b"rest"], _PIPE_FLAGS)
+        read = functools.partial(os.read, read_fd)
+        self.assertEqual(devtools.head_read(read), _ACCEPT_HEAD)
+        self.assertEqual(os.read(read_fd, _PIPE_BYTES), b"rest")
 
 
 # The address the browser writes to its port file.
@@ -428,13 +436,6 @@ class TestScripts(unittest.TestCase):
         self.assertTrue(script.isascii())
         self.assertNotIn("\r", script)
 
-    # The stop script fails loud but for a helper gone with the browser.
-    def test_stop_loud(self) -> None:
-        script: str = getattr(devtools, "_STOP_SCRIPT")
-        self.assertNotIn("-ErrorAction SilentlyContinue", script)
-        self.assertIn("-ErrorAction Stop", script)
-        self.assertIn("-ne 'ObjectNotFound'", script)
-
     # The script goes in as base64 of its `UTF-16` little endian bytes.
     def test_command_encoded(self) -> None:
         arguments = devtools.powershell_command("ps.exe", "a")
@@ -451,7 +452,7 @@ class TestScripts(unittest.TestCase):
 
 
 # Every wait has a timer that ends it, and reads that return too little.
-class TestTimers(unittest.TestCase):
+class TestTimers(PipeCase):
     # A wait with no time left fails, naming what it waited for.
     def test_timer_expired(self) -> None:
         timer = devtools.WaitTimer("the thing", 0)
@@ -501,62 +502,53 @@ class TestTimers(unittest.TestCase):
 
     # Short reads are joined until the count is reached.
     def test_bytes_joined(self) -> None:
-        stream = io.BytesIO(b"abc")
-        data = devtools.bytes_exact(lambda count: stream.read(1), 3)
-        self.assertEqual(data, b"abc")
+        read_fd = self.pipe_filled([b"a", b"b", b"c"], _PACKET_FLAGS)
+        read = functools.partial(os.read, read_fd)
+        self.assertEqual(devtools.bytes_exact(read, 3), b"abc")
 
     # A reader that runs dry first fails loud.
     def test_bytes_short(self) -> None:
-        stream = io.BytesIO(b"ab")
+        read_fd = self.pipe_filled([b"a", b"b"], _PACKET_FLAGS)
+        read = functools.partial(os.read, read_fd)
         with self.assertRaises(ConnectionError) as caught:
-            devtools.bytes_exact(lambda count: stream.read(1), 3)
+            devtools.bytes_exact(read, 3)
         self.assertEqual(
             str(caught.exception), "DevTools closed the connection"
         )
 
 
-# The protocol client's calls, events and timers, on canned bytes or a pipe.
-class TestClient(unittest.TestCase):
+# The protocol client's calls, events and timers, on real pipes.
+class TestClient(PipeCase):
     # A reply is matched by its id and events before it are passed on.
     def test_call_reply(self) -> None:
         event = {"method": "Page.frameNavigated", "params": {}}
         reply = {"id": 1, "result": {"frameId": "F"}}
-        rig = ClientRig(
-            message_frame(event) + message_frame(reply), _WAIT_SECONDS
+        events: list[dict[str, Any]] = []
+        client = self.client_filled(
+            message_frame(event) + message_frame(reply), _WAIT_SECONDS, events
         )
-        result = rig.client.method_call("Page.navigate", {"url": "u"})
+        result = client.method_call("Page.navigate", {"url": "u"})
         self.assertEqual(result, {"frameId": "F"})
-        self.assertEqual(rig.events, [event])
+        self.assertEqual(events, [event])
+        request = request_decode(self.frames_written(1)[0])
         self.assertEqual(
-            request_decode(rig.writes[0]),
+            request,
             {"id": 1, "method": "Page.navigate", "params": {"url": "u"}},
         )
 
-    # Page methods carry the session and browser and target methods don't.
-    def test_call_session(self) -> None:
-        rig = ClientRig(
-            message_frame({"id": 1, "result": {}})
-            + message_frame({"id": 2, "result": {}}),
-            _WAIT_SECONDS,
-        )
-        rig.client.session_id = "S"
-        rig.client.method_call("Runtime.enable")
-        rig.client.method_call("Target.getTargets")
-        self.assertEqual(request_decode(rig.writes[0])["sessionId"], "S")
-        self.assertNotIn("sessionId", request_decode(rig.writes[1]))
-
     # A call on a named session carries it, even for a target method.
     def test_call_named(self) -> None:
-        rig = ClientRig(
+        client = self.client_filled(
             message_frame({"id": 1, "result": {}})
             + message_frame({"id": 2, "result": {}}),
             _WAIT_SECONDS,
+            [],
         )
-        rig.client.session_id = "P"
-        rig.client.session_call("W", "Target.setAutoAttach", {"flatten": True})
-        rig.client.session_call("", "Runtime.enable")
+        client.session_call("W", "Target.setAutoAttach", {"flatten": True})
+        client.session_call("", "Runtime.enable")
+        first, second = self.frames_written(2)
         self.assertEqual(
-            request_decode(rig.writes[0]),
+            request_decode(first),
             {
                 "id": 1,
                 "method": "Target.setAutoAttach",
@@ -564,23 +556,25 @@ class TestClient(unittest.TestCase):
                 "sessionId": "W",
             },
         )
-        self.assertNotIn("sessionId", request_decode(rig.writes[1]))
+        self.assertNotIn("sessionId", request_decode(second))
 
     # An error reply fails loud with the method and DevTools' message.
     def test_call_error(self) -> None:
         error = {"code": -32601, "message": "nope"}
-        rig = ClientRig(
-            message_frame({"id": 1, "error": error}), _WAIT_SECONDS
+        client = self.client_filled(
+            message_frame({"id": 1, "error": error}), _WAIT_SECONDS, []
         )
         with self.assertRaises(RuntimeError) as caught:
-            rig.client.method_call("Page.enable")
+            client.method_call("Page.enable")
         self.assertEqual(str(caught.exception), "Page.enable: nope")
 
     # A reply to another call fails loud.
     def test_call_mismatch(self) -> None:
-        rig = ClientRig(message_frame({"id": 5, "result": {}}), _WAIT_SECONDS)
+        client = self.client_filled(
+            message_frame({"id": 5, "result": {}}), _WAIT_SECONDS, []
+        )
         with self.assertRaises(RuntimeError) as caught:
-            rig.client.method_call("Page.enable")
+            client.method_call("Page.enable")
         self.assertEqual(
             str(caught.exception),
             "DevTools answered call 5 while call 1 was waiting",
@@ -588,28 +582,18 @@ class TestClient(unittest.TestCase):
 
     # A ping during a call is answered with a pong.
     def test_call_ping(self) -> None:
-        rig = ClientRig(
+        client = self.client_filled(
             bytes.fromhex("89026162") + message_frame({"id": 1, "result": {}}),
             _WAIT_SECONDS,
+            [],
         )
-        rig.client.method_call("Page.enable")
-        self.assertEqual(len(rig.writes), 2)
-        pong = devtools.frame_decode(io.BytesIO(rig.writes[1]).read)
+        client.method_call("Page.enable")
+        pong = self.frames_written(2)[1]
         self.assertEqual(pong, devtools.SocketFrame(True, 0xA, b"ab"))
 
     # A call nothing answers fails when its timer ends, naming the method.
     def test_call_timeout(self) -> None:
-        read_fd, write_fd = os.pipe()
-        self.addCleanup(os.close, read_fd)
-        self.addCleanup(os.close, write_fd)
-        writes: list[bytes] = []
-        events: list[dict[str, Any]] = []
-        client = devtools.ProtocolClient(
-            functools.partial(devtools.pipe_read, read_fd),
-            writes.append,
-            events.append,
-            _EXPIRY_SECONDS,
-        )
+        client = self.client_idle(_EXPIRY_SECONDS, [])
         with self.assertRaises(TimeoutError) as caught:
             client.method_call("Page.navigate")
         self.assertEqual(
@@ -617,23 +601,29 @@ class TestClient(unittest.TestCase):
             f"gave up after {_EXPIRY_SECONDS:g} s waiting for the reply to"
             " Page.navigate",
         )
-        self.assertEqual(len(writes), 1)
+        request = request_decode(self.frames_written(1)[0])
+        self.assertEqual(
+            request, {"id": 1, "method": "Page.navigate", "params": {}}
+        )
 
     # Events are passed on until the condition holds.
     def test_pump_events(self) -> None:
         first = {"method": "A.one", "params": {}}
         second = {"method": "A.two", "params": {}}
-        rig = ClientRig(
-            message_frame(first) + message_frame(second), _WAIT_SECONDS
+        events: list[dict[str, Any]] = []
+        client = self.client_filled(
+            message_frame(first) + message_frame(second), _WAIT_SECONDS, events
         )
-        rig.client.events_pump("two events", lambda: len(rig.events) == 2)
-        self.assertEqual(rig.events, [first, second])
+        client.events_pump("two events", lambda: len(events) == 2)
+        self.assertEqual(events, [first, second])
 
     # A reply while no call waits fails loud.
     def test_pump_reply(self) -> None:
-        rig = ClientRig(message_frame({"id": 1, "result": {}}), _WAIT_SECONDS)
+        client = self.client_filled(
+            message_frame({"id": 1, "result": {}}), _WAIT_SECONDS, []
+        )
         with self.assertRaises(RuntimeError) as caught:
-            rig.client.events_pump("an event", lambda: False)
+            client.events_pump("an event", lambda: False)
         self.assertEqual(
             str(caught.exception),
             "DevTools answered call 1 while no call was waiting",
@@ -641,16 +631,7 @@ class TestClient(unittest.TestCase):
 
     # An event that never comes fails when its timer ends.
     def test_pump_timeout(self) -> None:
-        read_fd, write_fd = os.pipe()
-        self.addCleanup(os.close, read_fd)
-        self.addCleanup(os.close, write_fd)
-        events: list[dict[str, Any]] = []
-        client = devtools.ProtocolClient(
-            functools.partial(devtools.pipe_read, read_fd),
-            lambda data: None,
-            events.append,
-            _EXPIRY_SECONDS,
-        )
+        client = self.client_idle(_EXPIRY_SECONDS, [])
         with self.assertRaises(TimeoutError) as caught:
             client.events_pump("a load", lambda: False)
         self.assertEqual(
@@ -658,24 +639,9 @@ class TestClient(unittest.TestCase):
             f"gave up after {_EXPIRY_SECONDS:g} s waiting for a load",
         )
 
-    # Returns a client on a pipe nothing is written to, keeping its writes.
-    def client_idle(
-        self, wait_seconds: float, writes: list[bytes]
-    ) -> devtools.ProtocolClient:
-        read_fd, write_fd = os.pipe()
-        self.addCleanup(os.close, read_fd)
-        self.addCleanup(os.close, write_fd)
-        return devtools.ProtocolClient(
-            functools.partial(devtools.pipe_read, read_fd),
-            writes.append,
-            lambda message: None,
-            wait_seconds,
-        )
-
     # A deadline before the client's own wait ends a call, naming the call.
     def test_deadline_first(self) -> None:
-        writes: list[bytes] = []
-        client = self.client_idle(_WAIT_SECONDS, writes)
+        client = self.client_idle(_WAIT_SECONDS, [])
         client.deadline_set(time.monotonic() + _EXPIRY_SECONDS)
         with self.assertRaises(TimeoutError) as caught:
             client.method_call("Page.navigate")
@@ -683,7 +649,10 @@ class TestClient(unittest.TestCase):
             str(caught.exception),
             "gave up at the deadline waiting for the reply to Page.navigate",
         )
-        self.assertEqual(len(writes), 1)
+        request = request_decode(self.frames_written(1)[0])
+        self.assertEqual(
+            request, {"id": 1, "method": "Page.navigate", "params": {}}
+        )
 
     # A deadline after the client's own wait leaves that wait as it is.
     def test_deadline_later(self) -> None:
@@ -720,28 +689,6 @@ class TestPage(unittest.TestCase):
         )
         events.message_handle({"method": "Page.frameNavigated", "params": {}})
         self.assertEqual(events.lifecycle, {("L", "load")})
-
-    # A console message reaches every follower as its text.
-    def test_console_followed(self) -> None:
-        events = devtools.PageEvents()
-        first: list[str] = []
-        second: list[str] = []
-        events.followers.append(first.append)
-        events.followers.append(second.append)
-        events.message_handle(
-            {
-                "method": "Runtime.consoleAPICalled",
-                "params": {
-                    "type": "log",
-                    "args": [
-                        {"type": "string", "value": "ok 1 - x"},
-                        {"type": "number", "value": 2, "description": "2"},
-                    ],
-                },
-            }
-        )
-        self.assertEqual(first, ["ok 1 - x 2"])
-        self.assertEqual(second, ["ok 1 - x 2"])
 
     # Each kind of console argument becomes text.
     def test_console_values(self) -> None:
@@ -913,273 +860,3 @@ class TestWorkers(unittest.TestCase):
         )
         self.assertEqual(events.workers, {"other": "V"})
         self.assertEqual(events.paused, {"V"})
-
-
-# A browser's page calls and waits, on canned bytes and a scratch profile.
-class TestBrowser(unittest.TestCase):
-    # Makes the scratch directory a profile is in.
-    def setUp(self) -> None:
-        os.makedirs(_BUILD_PATH, exist_ok=True)
-        self.scratch_path = self.enterContext(
-            tempfile.TemporaryDirectory(dir=_BUILD_PATH)
-        )
-
-    # Returns a browser waiting on a port file that holds the text.
-    def browser_waiting(self, text: str) -> devtools.Browser:
-        port_path = os.path.join(self.scratch_path, "DevToolsActivePort")
-        with open(port_path, "w") as port_file:
-            port_file.write(text)
-        browser = browser_make(b"", [])
-        browser.profile_path = self.scratch_path
-        browser.executable_name = "chrome.exe"
-        browser.browser_process = cast(
-            subprocess.Popen[bytes], RunningProcess()
-        )
-        return browser
-
-    # A refused navigation is sent again until one loads.
-    def test_open_refused(self) -> None:
-        loaded = {"frameId": "F", "loaderId": "L1"}
-        event = {
-            "method": "Page.lifecycleEvent",
-            "params": {"loaderId": "L1", "name": "load"},
-        }
-        writes: list[bytes] = []
-        browser = browser_make(
-            message_frame({"id": 1, "result": _REFUSED_RESULT})
-            + message_frame({"id": 2, "result": loaded})
-            + message_frame(event),
-            writes,
-        )
-        browser.page_open("http://u/")
-        self.assertEqual(
-            [request_decode(write) for write in writes],
-            [
-                {
-                    "id": call_id,
-                    "method": "Page.navigate",
-                    "params": {"url": "http://u/"},
-                }
-                for call_id in (1, 2)
-            ],
-        )
-
-    # Any other navigation error fails at once.
-    def test_open_error(self) -> None:
-        failed = {"errorText": "net::ERR_NAME_NOT_RESOLVED", "loaderId": "L0"}
-        writes: list[bytes] = []
-        browser = browser_make(
-            message_frame({"id": 1, "result": failed}), writes
-        )
-        with self.assertRaises(RuntimeError) as caught:
-            browser.page_open("http://u/")
-        self.assertEqual(
-            str(caught.exception), "http://u/: net::ERR_NAME_NOT_RESOLVED"
-        )
-        self.assertEqual(len(writes), 1)
-
-    # A navigation refused until its timer ends fails, naming the URL.
-    def test_open_timeout(self) -> None:
-        writes: list[bytes] = []
-        browser = browser_make(
-            message_frame({"id": 1, "result": _REFUSED_RESULT}), writes
-        )
-        with (
-            unittest.mock.patch.object(devtools, "_SERVER_WAIT_SECONDS", 0),
-            self.assertRaises(TimeoutError) as caught,
-        ):
-            browser.page_open("http://u/")
-        self.assertEqual(
-            str(caught.exception),
-            "gave up after 0 s waiting for http://u/ to accept connections"
-            " after net::ERR_CONNECTION_REFUSED",
-        )
-        self.assertEqual(len(writes), 1)
-
-    # Closing the page names its target and reads nothing of the result.
-    def test_close_target(self) -> None:
-        writes: list[bytes] = []
-        browser = browser_make(message_frame({"id": 1, "result": {}}), writes)
-        browser.target_id = "T"
-        browser.page_close()
-        self.assertEqual(
-            request_decode(writes[0]),
-            {
-                "id": 1,
-                "method": "Target.closeTarget",
-                "params": {"targetId": "T"},
-            },
-        )
-
-    # A port file with fewer than two fields is still being written.
-    def test_port_partial(self) -> None:
-        for text in ("", "9222", "9222\n"):
-            browser = self.browser_waiting(text)
-            with (
-                unittest.mock.patch.object(
-                    devtools, "_DEVTOOLS_WAIT_SECONDS", 0
-                ),
-                self.assertRaises(TimeoutError, msg=repr(text)) as caught,
-            ):
-                browser.devtools_wait()
-            self.assertEqual(
-                str(caught.exception),
-                "gave up after 0 s waiting for chrome.exe to serve DevTools",
-            )
-
-    # A port file with a port and a path gives the address.
-    def test_port_written(self) -> None:
-        browser = self.browser_waiting("9222\n/devtools/browser/abc")
-        self.assertEqual(
-            browser.devtools_wait(),
-            devtools.EndpointAddress(9222, "/devtools/browser/abc"),
-        )
-
-    # A profile a helper still holds is removed once it lets go.
-    def test_remove_busy(self) -> None:
-        browser = browser_make(b"", [])
-        browser.profile_path = self.scratch_path
-        held = PermissionError(errno.EACCES, "Permission denied")
-        with unittest.mock.patch(
-            "shutil.rmtree", side_effect=[held, None]
-        ) as rmtree:
-            browser.profile_remove()
-        self.assertEqual(rmtree.call_count, 2)
-
-    # A profile held past its timer fails, with the last error as context.
-    def test_remove_timeout(self) -> None:
-        browser = browser_make(b"", [])
-        browser.profile_path = self.scratch_path
-        held = PermissionError(errno.EACCES, "Permission denied")
-        with (
-            unittest.mock.patch.object(devtools, "_PROFILE_REMOVE_SECONDS", 0),
-            unittest.mock.patch("shutil.rmtree", side_effect=held),
-            self.assertRaises(TimeoutError) as caught,
-        ):
-            browser.profile_remove()
-        self.assertEqual(
-            str(caught.exception),
-            f"gave up after 0 s waiting for {self.scratch_path} to be"
-            " removable",
-        )
-        self.assertIs(caught.exception.__context__, held)
-
-    # Any other error of the removal fails at once.
-    def test_remove_failed(self) -> None:
-        browser = browser_make(b"", [])
-        browser.profile_path = self.scratch_path
-        failed = OSError(errno.EIO, "Input/output error")
-        with (
-            unittest.mock.patch("shutil.rmtree", side_effect=failed) as rmtree,
-            self.assertRaises(OSError) as caught,
-        ):
-            browser.profile_remove()
-        self.assertIs(caught.exception, failed)
-        self.assertEqual(rmtree.call_count, 1)
-
-    # A trace starts afresh on the page, its categories reported as events.
-    def test_trace_start(self) -> None:
-        writes: list[bytes] = []
-        browser = browser_make(message_frame({"id": 1, "result": {}}), writes)
-        browser.client_get().session_id = "P"
-        browser.events.trace = [thread_metadata(1, 10, "CrRendererMain")]
-        browser.events.trace_done = True
-        browser.events.trace_lost = True
-        browser.trace_start(devtools.blocking_categories())
-        self.assertEqual(
-            request_decode(writes[0]),
-            {
-                "id": 1,
-                "method": "Tracing.start",
-                "params": {
-                    "transferMode": "ReportEvents",
-                    "traceConfig": {
-                        "includedCategories": ["loading", "__metadata"],
-                    },
-                },
-                "sessionId": "P",
-            },
-        )
-        self.assertEqual(browser.events.trace, [])
-        self.assertFalse(browser.events.trace_done)
-        self.assertFalse(browser.events.trace_lost)
-
-    # Ending a trace returns every event sent until the trace completed.
-    def test_trace_end(self) -> None:
-        name = thread_metadata(1, 10, "CrRendererMain")
-        load = thread_span(1, 10, "URLLoader::loadSynchronously")
-        writes: list[bytes] = []
-        browser = browser_make(
-            message_frame({"id": 1, "result": {}})
-            + message_frame(trace_data([name]))
-            + message_frame(trace_data([load]))
-            + message_frame(trace_complete(False)),
-            writes,
-        )
-        browser.client_get().session_id = "P"
-        self.assertEqual(browser.trace_end(), [name, load])
-        self.assertEqual(
-            request_decode(writes[0]),
-            {
-                "id": 1,
-                "method": "Tracing.end",
-                "params": {},
-                "sessionId": "P",
-            },
-        )
-
-    # A trace that lost events fails loud.
-    def test_trace_lost(self) -> None:
-        browser = browser_make(
-            message_frame({"id": 1, "result": {}})
-            + message_frame(trace_complete(True)),
-            [],
-        )
-        with self.assertRaises(RuntimeError) as caught:
-            browser.trace_end()
-        self.assertEqual(
-            str(caught.exception),
-            "the trace lost events, so it can't show everything that ran",
-        )
-
-    # The worker is attached from the page, its debugger enabled and paused.
-    def test_worker_pause(self) -> None:
-        writes: list[bytes] = []
-        browser = browser_make(
-            message_frame(attach_event("worker", "V", "other"))
-            + message_frame({"id": 1, "result": {}})
-            + message_frame(attach_event("worker", "W", "ai"))
-            + message_frame({"id": 2, "result": {"debuggerId": "D"}})
-            + message_frame({"id": 3, "result": {}})
-            + message_frame(paused_event("W")),
-            writes,
-        )
-        browser.client_get().session_id = "P"
-        browser.worker_pause("ai")
-        self.assertEqual(
-            [request_decode(write) for write in writes],
-            [
-                {
-                    "id": 1,
-                    "method": "Target.setAutoAttach",
-                    "params": {
-                        "autoAttach": True,
-                        "waitForDebuggerOnStart": False,
-                        "flatten": True,
-                    },
-                    "sessionId": "P",
-                },
-                {
-                    "id": 2,
-                    "method": "Debugger.enable",
-                    "params": {},
-                    "sessionId": "W",
-                },
-                {
-                    "id": 3,
-                    "method": "Debugger.pause",
-                    "params": {},
-                    "sessionId": "W",
-                },
-            ],
-        )

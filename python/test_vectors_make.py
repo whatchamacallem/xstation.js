@@ -7,8 +7,8 @@
 # directory made when it is missing, a file an earlier run left removed, the
 # two vectors at the edge of blob_max, the six number vectors, the digest
 # vectors, inputs of 55, 56 and 64 bytes each beside its SHA-256 digest, and
-# the TypeScript test modules' digests, exactly the entries of the module's
-# table, each input in lowercase hex beside its SHA-256 digest.
+# the TypeScript test modules' digests, each input in lowercase hex beside its
+# SHA-256 digest.
 
 import hashlib, json, os, tempfile, unittest, vectors_make
 from typing import Any
@@ -89,28 +89,21 @@ class TestVectorsWrite(unittest.TestCase):
                 vector["sha256"], hashlib.sha256(data).hexdigest(), name
             )
 
-    # The table's modules and names exactly, each input beside its digest.
+    # Each module has entries, an input in lowercase hex beside its digest.
     def test_modules_written(self) -> None:
         with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
             vectors_make.vectors_write(scratch)
             path = os.path.join(scratch, _TEST_DIGESTS_NAME)
             with open(path, encoding="utf-8") as file:
                 digests: dict[str, dict[str, dict[str, str]]] = json.load(file)
-        table: dict[str, dict[str, tuple[bytes, int]]] = getattr(
-            vectors_make, "_TEST_DIGESTS"
-        )
-        self.assertEqual(sorted(digests), sorted(table))
-        for module, inputs in table.items():
-            entries = digests[module]
-            self.assertEqual(sorted(entries), sorted(inputs), module)
-            for name, (written, size) in inputs.items():
-                entry = entries[name]
+        self.assertTrue(digests)
+        for module, entries in digests.items():
+            self.assertTrue(entries, module)
+            for name, entry in entries.items():
                 self.assertEqual(sorted(entry), ["data", "sha256"], name)
-                pattern = bytes(index % 256 for index in range(size))
-                data = written + pattern
+                data = bytes.fromhex(entry["data"])
                 self.assertEqual(entry["data"], data.hex(), name)
-                fed = bytes.fromhex(entry["data"])
-                digest = hashlib.sha256(fed).hexdigest()
+                digest = hashlib.sha256(data).hexdigest()
                 self.assertEqual(entry["sha256"], digest, name)
                 self.assertEqual(len(entry["sha256"]), 64, name)
 

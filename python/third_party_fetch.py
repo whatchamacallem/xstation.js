@@ -26,17 +26,17 @@ _PINS: tuple[tuple[str, str, str], ...] = (
     (
         "ttyd-1.7.7.tar.gz",
         "https://github.com/tsl0922/ttyd/archive/refs/tags/1.7.7.tar.gz",
-        "",
+        "039dd995229377caee919898b7bd54484accec3bba49c118e2d5cd6ec51e3650",
     ),
     (
         "sqlite-wasm-3460100.zip",
         "https://sqlite.org/2024/sqlite-wasm-3460100.zip",
-        "",
+        "79b5fbfd1c5ca35f492624bb6b9323e6c74e483e2a55ff18ce5904a8cdb1b38c",
     ),
     (
         "xterm-5.5.0.tgz",
         "https://registry.npmjs.org/@xterm/xterm/-/xterm-5.5.0.tgz",
-        "",
+        "bd954fa721872170188cc5d7e83e88db3c83c9a18a4e8d24c2783d26491f59d2",
     ),
 )
 

@@ -7,10 +7,13 @@
 # error texts against the gold. Each child writes how its work ended to a
 # file, or to stderr with the failure when that write fails, then kills
 # itself whatever happened, so the handlers it registers never reach another
-# test.
+# test. The browser's `error` line goes to the real `engine_tap`, which logs
+# its cascade in the root's log, opened first by the child, through
+# `echo_loop`, as `bootstrap.py` opens it, and ends the root's TAP file with
+# a bail out, both read from the root.
 
-import echo_loop, functools, harness, json, os, signal, sys, tempfile
-import traceback, unittest, unittest.mock
+import contextlib, echo_loop, functools, harness, json, os, signal, sqlite3
+import sys, tempfile, traceback, unittest
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
@@ -67,12 +70,17 @@ _BROWSER_ERROR = (
     b'"cause":{"message":"first fault","stack":"at first"}}\r'
 )
 
-# The arguments `engine_tap.error_take` is due for that line.
-_ERROR_TAKEN: list[Any] = [
-    "page fault",
-    "at page",
-    {"message": "first fault", "stack": "at first"},
-]
+# The line that ends the root's TAP file after that line.
+_BAIL_LINE = "Bail out! page fault\n"
+
+# The log of the server in a root, as `verbose` names it.
+_LOG_NAME = "_verbose.sqlite"
+
+# The query of the thread and text of each line of the log, in order.
+_LOG_QUERY = "SELECT thread, text FROM line ORDER BY seq"
+
+# The thread the server's own lines are stored under in the log.
+_SERVER_THREAD = "server"
 
 
 # A text of this module's gold.
@@ -159,19 +167,23 @@ def _echo_serve(root: str, read_fd: int, write_fd: int) -> str:
     return _ENDING_RETURNED
 
 
-# The work of a child whose `error_take` writes its arguments to a file.
-def _error_serve(root: str, path: str, read_fd: int, write_fd: int) -> str:
-    # Appends the arguments as one line of JSON, in place of the real work.
-    def taken_write(
-        message: str, stack: str, cause: dict[str, object] | None
-    ) -> None:
-        with open(path, "a", encoding="utf-8") as file:
-            file.write(json.dumps([message, stack, cause]) + "\n")
+# The work of a child that opens the root's log with the ring of its
+# settings, as `bootstrap.py` does, then echoes the pipes to the end.
+def _logged_serve(root: str, read_fd: int, write_fd: int) -> str:
+    path = os.path.join(root, "settings.json")
+    with open(path, encoding="utf-8") as file:
+        values: dict[str, Any] = json.load(file)
+    echo_loop.engine_tap.verbose.log_open(root, values["verbose_ring"])
+    return _echo_serve(root, read_fd, write_fd)
 
-    with unittest.mock.patch.object(
-        echo_loop.engine_tap, "error_take", taken_write
-    ):
-        return _echo_serve(root, read_fd, write_fd)
+
+# The thread and text of each line of the root's log, in order.
+def _log_read(root: str) -> list[tuple[str, str]]:
+    path = os.path.join(root, _LOG_NAME)
+    with contextlib.closing(sqlite3.connect(path)) as connection:
+        cursor = connection.execute(_LOG_QUERY)
+        rows: list[tuple[str, str]] = cursor.fetchall()
+    return rows
 
 
 # Gives each test a scratch root in `build/` whose settings stream small.
@@ -311,13 +323,20 @@ class TestEcho(ScratchCase):
         with open(path, encoding="utf-8") as file:
             self.assertEqual(file.read(), "ok 1 - x\n")
 
-    # The browser's `error` line goes to `error_take` once, then exit 1.
+    # The browser's `error` line is logged and bailed out, then exit 1.
     def test_browser_error(self) -> None:
-        path = os.path.join(self.scratch, "taken.json")
-        work = functools.partial(_error_serve, self.root, path)
+        work = functools.partial(_logged_serve, self.root)
         ending, output = self.child_run(work, _BROWSER_ERROR)
         self.assertEqual(ending, _ENDING_FAILED)
         self.assertEqual(output, b"")
+        path = os.path.join(self.root, _TAP_FILE)
         with open(path, encoding="utf-8") as file:
-            taken = [json.loads(text) for text in file.read().splitlines()]
-        self.assertEqual(taken, [_ERROR_TAKEN])
+            self.assertEqual(file.read(), _BAIL_LINE)
+        texts = [
+            _text_get("engine_tap_browser_failed"),
+            "at page",
+            _text_get("engine_tap_browser_cause"),
+            "at first",
+        ]
+        expected = [(_SERVER_THREAD, text) for text in texts]
+        self.assertEqual(_log_read(self.root), expected)

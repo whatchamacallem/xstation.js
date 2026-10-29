@@ -27,9 +27,24 @@
             "i": 101,
             "t": "tap.start"
           }
+        },
+        "tail_short": {
+          "0": {
+            "i": 102,
+            "t": "verbose.tail"
+          },
+          "count": 10,
+          "thread": "ui"
+        },
+        "tail_short_reply": {
+          "0": {
+            "r": 102,
+            "t": "verbose.tail"
+          },
+          "lines": []
         }
       },
-      "read_bytes": 64,
+      "read_bytes": 65536,
       "texts": {
         "bootstrap_lock_held": "Another engine holds the lock {0}.",
         "bootstrap_loop_missing": "The main loop file {0} does not define loop_run.",
@@ -42,7 +57,6 @@
         "bootstrap_option_repeated_loop": "The option --main-loop is given more than once.",
         "bootstrap_option_repeated_root": "The option --root is given more than once.",
         "bootstrap_reply_blob": "The reply to tap.start carries a blob of {0} bytes.",
-        "bootstrap_reply_closed": "The input ended before the reply to tap.start.",
         "bootstrap_reply_unexpected_blob_carried": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"tap.start\",\"r\":101,\"b\":1},\"1\":{\"s\":3}}<blob \"n\"=1>",
         "bootstrap_reply_unexpected_blobs_zero": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"tap.start\",\"r\":101,\"b\":0}}",
         "bootstrap_reply_unexpected_error_pushed": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"error\"},\"message\":\"m\",\"stack\":\"s\"}",
@@ -57,6 +71,13 @@
         "bootstrap_tests_not_object": "The test settings file {0} does not hold a JSON object.",
         "jslb_line_not_json": "The line is not JSON: Expecting value.",
         "jslb_text_not_json": "The text is not JSON: Expecting value."
+      }
+    },
+    "test_bootstrap_dash": {
+      "read_bytes": 65536,
+      "texts": {
+        "verbose_exec_exit": "`{0}` exited with code {1}.",
+        "verbose_exec_run": "Running `{0}`."
       }
     },
     "test_browser": {
@@ -131,6 +152,12 @@
     },
     "test_devtools": {
       "expiry_seconds": 0.05,
+      "pipe_bytes": 131072,
+      "wait_seconds": 60
+    },
+    "test_devtools_powershell": {
+      "listen_seconds": 2,
+      "poll_seconds": 0.1,
       "wait_seconds": 60
     },
     "test_dispatch": {
@@ -337,7 +364,9 @@
       "texts": {
         "dispatch_handler_unknown": "No handler is registered for type no.such version 0.",
         "echo_loop_input_partial": "The engine input ended inside a message.",
-        "echo_loop_reply_unknown": "The line {\"0\":{\"t\":\"echo\",\"r\":1}} replies to no request the server sent."
+        "echo_loop_reply_unknown": "The line {\"0\":{\"t\":\"echo\",\"r\":1}} replies to no request the server sent.",
+        "engine_tap_browser_cause": "caused by: first fault",
+        "engine_tap_browser_failed": "The browser failed: page fault"
       }
     },
     "test_engine_db": {
@@ -426,6 +455,8 @@
       },
       "old_window": 10485760,
       "texts": {
+        "dispatch_handler_twice_create": "A handler is already registered for type db.create version 0.",
+        "dispatch_handler_twice_drop": "A handler is already registered for type db.drop version 0.",
         "engine_db_not_registered": "The db handlers were called before they were registered."
       }
     },
@@ -485,6 +516,7 @@
         }
       },
       "texts": {
+        "dispatch_handler_twice_put": "A handler is already registered for type doc.put version 0.",
         "engine_doc_not_registered": "The doc handler was called before it was registered."
       }
     },
@@ -562,6 +594,8 @@
         }
       },
       "texts": {
+        "dispatch_handler_twice_delete": "A handler is already registered for type kv.delete version 0.",
+        "dispatch_handler_twice_put": "A handler is already registered for type kv.put version 0.",
         "engine_kv_blob_missing": "The kv.put line carries no blob 1, the value it puts.",
         "engine_kv_key_missing_delete": "The kv.delete line has no header key k, the ref it is about.",
         "engine_kv_key_missing_put": "The kv.put line has no header key k, the ref it is about.",
@@ -583,22 +617,46 @@
             "name": "fail"
           }
         },
+        "call_echo": {
+          "0": {
+            "i": 5,
+            "t": "mcp"
+          },
+          "id": 3,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "a": [2, "c"],
+              "b": 1
+            },
+            "name": "echo"
+          }
+        },
+        "call_echo_reply": {
+          "0": {
+            "r": 5,
+            "t": "mcp"
+          },
+          "id": 3,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "{\"a\":[2,\"c\"],\"b\":1}",
+                "type": "text"
+              }
+            ],
+            "isError": false
+          }
+        },
         "call_reply": {
           "0": {
             "r": 6,
             "t": "mcp"
           },
           "id": 2,
-          "jsonrpc": "2.0",
-          "result": {
-            "content": [
-              {
-                "text": "boom",
-                "type": "text"
-              }
-            ],
-            "isError": true
-          }
+          "jsonrpc": "2.0"
         },
         "initialize": {
           "0": {
@@ -667,6 +725,14 @@
                   "type": "object"
                 },
                 "name": "echo"
+              },
+              {
+                "description": "Fail.",
+                "inputSchema": {
+                  "properties": {},
+                  "type": "object"
+                },
+                "name": "fail"
               }
             ]
           }
@@ -709,6 +775,58 @@
             "jsonrpc": "2.0",
             "method": "notifications/initialized"
           }
+        ],
+        "passed_replies": [
+          {
+            "0": {
+              "t": "mcp"
+            },
+            "id": 1,
+            "jsonrpc": "2.0",
+            "result": {
+              "tools": [
+                {
+                  "description": "Echo.",
+                  "inputSchema": {
+                    "properties": {},
+                    "type": "object"
+                  },
+                  "name": "echo"
+                },
+                {
+                  "description": "Fail.",
+                  "inputSchema": {
+                    "properties": {},
+                    "type": "object"
+                  },
+                  "name": "fail"
+                }
+              ]
+            }
+          },
+          {
+            "0": {
+              "t": "mcp"
+            },
+            "error": {
+              "code": -32600,
+              "message": "The message is not a valid JSON-RPC 2.0 request."
+            },
+            "id": 2,
+            "jsonrpc": "2.0"
+          },
+          {
+            "0": {
+              "t": "mcp"
+            },
+            "error": {
+              "code": -32600,
+              "message": "The message is not a valid JSON-RPC 2.0 request."
+            },
+            "id": 3,
+            "jsonrpc": "2.0"
+          },
+          null
         ],
         "ping": {
           "0": {
@@ -760,14 +878,16 @@
           },
           "error": {
             "code": -32601,
-            "message": "m"
+            "message": "The method nothing/here is not served."
           },
           "id": 4,
           "jsonrpc": "2.0"
         }
       },
       "texts": {
-        "engine_mcp_not_registered": "The MCP handler was used before it was registered."
+        "dispatch_handler_twice": "A handler is already registered for type mcp version 0.",
+        "engine_mcp_not_registered": "The MCP handler was used before it was registered.",
+        "mcp_method_unknown": "The method nothing/here is not served."
       }
     },
     "test_engine_sql": {
@@ -863,6 +983,7 @@
         }
       },
       "texts": {
+        "dispatch_handler_twice_run": "A handler is already registered for type sql.run version 0.",
         "engine_sql_not_registered": "The sql handler was called before it was registered."
       }
     },
@@ -910,6 +1031,9 @@
         }
       },
       "texts": {
+        "dispatch_handler_twice_restart": "A handler is already registered for type system.restart version 0.",
+        "dispatch_handler_twice_settings": "A handler is already registered for type settings.put version 0.",
+        "dispatch_handler_twice_source": "A handler is already registered for type source.put version 0.",
         "engine_system_argument_invalid_main_loop": "The argument main_loop of the tool system_restart is missing or is not text.",
         "engine_system_argument_invalid_name": "The argument name of the tool source_put is missing or is not text.",
         "engine_system_argument_invalid_text": "The argument text of the tool source_put is missing or is not text.",
@@ -939,6 +1063,7 @@
       }
     },
     "test_engine_tap": {
+      "fill_bytes": 1048576,
       "lines": {
         "tap_line": {
           "0": {
@@ -948,6 +1073,7 @@
         }
       },
       "texts": {
+        "dispatch_handler_twice": "A handler is already registered for type tap.line version 0.",
         "engine_tap_browser_cause_first": "caused by: first",
         "engine_tap_browser_cause_inner": "caused by: inner",
         "engine_tap_browser_failed_boom": "The browser failed: boom",
@@ -1043,6 +1169,7 @@
         }
       },
       "texts": {
+        "dispatch_handler_twice_append": "A handler is already registered for type turn.append version 0.",
         "engine_turn_not_registered": "The turn handler was called before it was registered."
       }
     },
@@ -1252,17 +1379,7 @@
           "0": {
             "r": 7,
             "t": "verbose.tail"
-          },
-          "lines": [
-            {
-              "at": 20,
-              "text": "b"
-            },
-            {
-              "at": 30,
-              "text": "c"
-            }
-          ]
+          }
         },
         "tail_ui": {
           "0": {
@@ -1285,7 +1402,10 @@
           ]
         }
       },
+      "server_texts": ["a", "b", "c"],
       "texts": {
+        "dispatch_handler_twice_put": "A handler is already registered for type verbose.put version 0.",
+        "dispatch_handler_twice_tail": "A handler is already registered for type verbose.tail version 0.",
         "engine_verbose_debug_off": "verbose.put needs debug mode, and the setting debug is false.",
         "engine_verbose_line_invalid_at_bool": "The verbose line {'at': True, 'text': 'x'} does not have exactly the fields at and text, a whole number and text.",
         "engine_verbose_line_invalid_at_float": "The verbose line {'at': 1.5, 'text': 'x'} does not have exactly the fields at and text, a whole number and text.",
@@ -1296,6 +1416,1146 @@
         "engine_verbose_line_invalid_text_number": "The verbose line {'at': 1, 'text': 5} does not have exactly the fields at and text, a whole number and text.",
         "engine_verbose_not_registered": "The verbose handlers were used before they were registered."
       }
+    },
+    "test_integrate_bootstrap": {
+      "lines": {
+        "browser_error": {
+          "0": {
+            "t": "error"
+          },
+          "cause": {
+            "message": "first",
+            "stack": "Error: first"
+          },
+          "message": "boom",
+          "stack": "Error: boom\n    at a"
+        },
+        "error_reply": {
+          "0": {
+            "r": 1,
+            "t": "error"
+          }
+        },
+        "first_full": {
+          "0": {
+            "id": 101,
+            "type": "tap.start"
+          }
+        },
+        "tail_server": {
+          "0": {
+            "i": 1,
+            "t": "verbose.tail"
+          },
+          "count": 10,
+          "thread": "server"
+        },
+        "tail_server_reply": {
+          "0": {
+            "r": 1,
+            "t": "verbose.tail"
+          }
+        },
+        "unknown_request": {
+          "0": {
+            "i": 1,
+            "t": "no.such"
+          }
+        }
+      },
+      "read_bytes": 65536,
+      "texts": {
+        "bootstrap_start_submit": "server submits to ai: {\"type\":\"tap.start\",\"id\":101}",
+        "dispatch_handler_unknown": "No handler is registered for type no.such version 0.",
+        "engine_tap_browser_cause": "caused by: first",
+        "engine_tap_browser_failed": "The browser failed: boom",
+        "main_loop_line_dispatch_tail": "server dispatches from ai: {\"i\":1,\"t\":\"verbose.tail\"}",
+        "main_loop_line_dispatch_unknown": "server dispatches from ai: {\"i\":1,\"t\":\"no.such\"}",
+        "main_loop_serve_failed_unknown": "The server failed while serving the engine tty: No handler is registered for type no.such version 0."
+      }
+    },
+    "test_integrate_dispatch": {
+      "texts": {
+        "dispatch_id_refused_float": "The line of type kv.get has the id 7.0, which is not an integer of at least 1."
+      }
+    },
+    "test_integrate_echo_loop": {
+      "chunk_bytes": 1000,
+      "overflow_bytes": 4096,
+      "read_bytes": 65536,
+      "texts": {
+        "dispatch_handler_unknown": "No handler is registered for type no.such version 0.",
+        "engine_tap_browser_cause": "caused by: first fault",
+        "engine_tap_browser_failed": "The browser failed: page fault"
+      }
+    },
+    "test_integrate_engine_db": {
+      "lines": {
+        "create": {
+          "0": {
+            "t": "db.create"
+          },
+          "db": "castle"
+        },
+        "create_full": {
+          "0": {
+            "type": "db.create"
+          },
+          "db": "castle"
+        },
+        "create_request": {
+          "0": {
+            "i": 7,
+            "t": "db.create"
+          },
+          "db": "castle"
+        },
+        "drop": {
+          "0": {
+            "t": "db.drop"
+          },
+          "db": "castle"
+        },
+        "drop_full": {
+          "0": {
+            "type": "db.drop"
+          },
+          "db": "castle"
+        },
+        "error_request": {
+          "0": {
+            "r": 7,
+            "t": "error"
+          }
+        },
+        "file": {
+          "0": {
+            "b": 1,
+            "t": "db.file"
+          },
+          "1": {},
+          "db": "castle"
+        },
+        "file_full": {
+          "0": {
+            "blobs": 1,
+            "type": "db.file"
+          },
+          "1": {},
+          "db": "castle"
+        },
+        "restore": {
+          "0": {
+            "b": 1,
+            "t": "db.restore"
+          },
+          "1": {},
+          "db": "castle",
+          "files": 2
+        },
+        "restore_full": {
+          "0": {
+            "blobs": 1,
+            "type": "db.restore"
+          },
+          "1": {},
+          "db": "castle",
+          "files": 2
+        }
+      },
+      "texts": {
+        "dispatch_request_unanswered": "The handler for type db.create version 0 returned no reply to the request with id 7."
+      }
+    },
+    "test_integrate_engine_doc": {
+      "lines": {
+        "error_request": {
+          "0": {
+            "r": 7,
+            "t": "error"
+          }
+        },
+        "put": {
+          "0": {
+            "t": "doc.put"
+          },
+          "body": {
+            "0": {
+              "t": "scene"
+            },
+            "1": "/_files/gatehouse/arrival.png",
+            "image": {
+              "$ref": 1
+            },
+            "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+          },
+          "db": "castle_gatehouse",
+          "id": "scene/arrival"
+        },
+        "put_full": {
+          "0": {
+            "type": "doc.put"
+          },
+          "body": {
+            "0": {
+              "t": "scene"
+            },
+            "1": "/_files/gatehouse/arrival.png",
+            "image": {
+              "$ref": 1
+            },
+            "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+          },
+          "db": "castle_gatehouse",
+          "id": "scene/arrival"
+        },
+        "put_request": {
+          "0": {
+            "i": 7,
+            "t": "doc.put"
+          },
+          "body": {
+            "0": {
+              "t": "scene"
+            },
+            "1": "/_files/gatehouse/arrival.png",
+            "image": {
+              "$ref": 1
+            },
+            "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+          },
+          "db": "castle_gatehouse",
+          "id": "scene/arrival"
+        }
+      },
+      "texts": {
+        "dispatch_request_unanswered": "The handler for type doc.put version 0 returned no reply to the request with id 7."
+      }
+    },
+    "test_integrate_engine_kv": {
+      "lines": {
+        "delete": {
+          "0": {
+            "k": "/_files/a",
+            "t": "kv.delete"
+          }
+        },
+        "delete_full": {
+          "0": {
+            "key": "/_files/a",
+            "type": "kv.delete"
+          }
+        },
+        "error_request": {
+          "0": {
+            "r": 7,
+            "t": "error"
+          }
+        },
+        "put": {
+          "0": {
+            "b": 1,
+            "k": "/_files/a",
+            "t": "kv.put"
+          },
+          "1": {}
+        },
+        "put_full": {
+          "0": {
+            "blobs": 1,
+            "key": "/_files/a",
+            "type": "kv.put"
+          },
+          "1": {}
+        },
+        "put_image": {
+          "0": {
+            "b": 1,
+            "k": "/_files/gatehouse/arrival.png",
+            "t": "kv.put"
+          },
+          "1": {}
+        },
+        "put_request": {
+          "0": {
+            "b": 1,
+            "i": 7,
+            "k": "/_files/a",
+            "t": "kv.put"
+          },
+          "1": {}
+        }
+      },
+      "texts": {
+        "dispatch_request_unanswered": "The handler for type kv.put version 0 returned no reply to the request with id 7."
+      }
+    },
+    "test_integrate_engine_mcp": {
+      "lines": {
+        "call": {
+          "0": {
+            "i": 6,
+            "t": "mcp"
+          },
+          "id": 3,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "a": [2, "c"],
+              "b": 1
+            },
+            "name": "echo"
+          }
+        },
+        "call_fail": {
+          "0": {
+            "i": 9,
+            "t": "mcp"
+          },
+          "id": 4,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {},
+            "name": "fail"
+          }
+        },
+        "call_fail_reply": {
+          "0": {
+            "r": 9,
+            "t": "mcp"
+          },
+          "id": 4,
+          "jsonrpc": "2.0"
+        },
+        "call_reply": {
+          "0": {
+            "r": 6,
+            "t": "mcp"
+          },
+          "id": 3,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "{\"a\":[2,\"c\"],\"b\":1}",
+                "type": "text"
+              }
+            ],
+            "isError": false
+          }
+        },
+        "initialize": {
+          "0": {
+            "i": 7,
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "method": "initialize",
+          "params": {
+            "capabilities": {},
+            "clientInfo": {
+              "name": "hyperposition-engine",
+              "version": "0"
+            },
+            "protocolVersion": "2025-06-18"
+          }
+        },
+        "initialize_reply": {
+          "0": {
+            "r": 7,
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "result": {
+            "capabilities": {
+              "tools": {}
+            },
+            "protocolVersion": "2025-06-18",
+            "serverInfo": {
+              "name": "xsjs-server",
+              "version": "0"
+            }
+          }
+        },
+        "initialized": {
+          "0": {
+            "t": "mcp"
+          },
+          "jsonrpc": "2.0",
+          "method": "notifications/initialized"
+        },
+        "list": {
+          "0": {
+            "i": 8,
+            "t": "mcp"
+          },
+          "id": 2,
+          "jsonrpc": "2.0",
+          "method": "tools/list"
+        },
+        "list_reply": {
+          "0": {
+            "r": 8,
+            "t": "mcp"
+          },
+          "id": 2,
+          "jsonrpc": "2.0",
+          "result": {
+            "tools": [
+              {
+                "description": "Echo.",
+                "inputSchema": {
+                  "properties": {},
+                  "type": "object"
+                },
+                "name": "echo"
+              },
+              {
+                "description": "Fail.",
+                "inputSchema": {
+                  "properties": {},
+                  "type": "object"
+                },
+                "name": "fail"
+              }
+            ]
+          }
+        },
+        "ping_pushed": {
+          "0": {
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "method": "ping"
+        }
+      },
+      "texts": {
+        "dispatch_notification_replied": "The handler for type mcp version 0 returned a reply to a line with no id."
+      }
+    },
+    "test_integrate_engine_sql": {
+      "lines": {
+        "error_request": {
+          "0": {
+            "r": 7,
+            "t": "error"
+          }
+        },
+        "run": {
+          "0": {
+            "t": "sql.run"
+          },
+          "db": "castle",
+          "statements": [
+            {
+              "params": [],
+              "sql": "CREATE TABLE world (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT"
+            },
+            {
+              "params": ["castle_world", "The castle"],
+              "sql": "INSERT INTO world VALUES (?, ?)"
+            }
+          ]
+        },
+        "run_full": {
+          "0": {
+            "type": "sql.run"
+          },
+          "db": "castle",
+          "statements": [
+            {
+              "params": [],
+              "sql": "CREATE TABLE world (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT"
+            },
+            {
+              "params": ["castle_world", "The castle"],
+              "sql": "INSERT INTO world VALUES (?, ?)"
+            }
+          ]
+        },
+        "run_quoted": {
+          "0": {
+            "t": "sql.run"
+          },
+          "db": "castle",
+          "statements": [
+            {
+              "params": [],
+              "sql": "CREATE TABLE t (x TEXT) STRICT"
+            },
+            {
+              "params": ["it's 'quoted'; DROP TABLE t; --\u4e2d\ud83d\ude00"],
+              "sql": "INSERT INTO t VALUES (?)"
+            }
+          ]
+        },
+        "run_request": {
+          "0": {
+            "i": 7,
+            "t": "sql.run"
+          },
+          "db": "castle",
+          "statements": [
+            {
+              "params": [],
+              "sql": "CREATE TABLE world (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT"
+            },
+            {
+              "params": ["castle_world", "The castle"],
+              "sql": "INSERT INTO world VALUES (?, ?)"
+            }
+          ]
+        }
+      },
+      "texts": {
+        "dispatch_request_unanswered": "The handler for type sql.run version 0 returned no reply to the request with id 7."
+      }
+    },
+    "test_integrate_engine_system": {
+      "lines": {
+        "restart": {
+          "0": {
+            "t": "system.restart"
+          },
+          "main_loop": "b.py"
+        },
+        "settings_put": {
+          "0": {
+            "i": 3,
+            "t": "settings.put"
+          }
+        },
+        "settings_reply": {
+          "0": {
+            "r": 3,
+            "t": "settings.put"
+          }
+        },
+        "source_put": {
+          "0": {
+            "b": 1,
+            "i": 4,
+            "t": "source.put"
+          },
+          "1": {},
+          "name": "a.py"
+        },
+        "source_reply": {
+          "0": {
+            "r": 4,
+            "t": "source.put"
+          }
+        }
+      },
+      "overflow_bytes": 16,
+      "texts": {
+        "engine_system_debug_off_settings": "settings.put needs debug mode, and the setting debug is false.",
+        "engine_system_debug_off_source": "source.put needs debug mode, and the setting debug is false.",
+        "engine_system_main_loop_missing": "The main loop file {0} does not exist."
+      }
+    },
+    "test_integrate_engine_tap": {
+      "lines": {
+        "browser_error": {
+          "0": {
+            "t": "error"
+          },
+          "cause": {
+            "cause": {
+              "message": "second fault",
+              "stack": "at second"
+            },
+            "message": "first fault",
+            "stack": "at first"
+          },
+          "message": "page fault",
+          "stack": "at page"
+        },
+        "tap_line": {
+          "0": {
+            "t": "tap.line"
+          },
+          "language": "typescript"
+        },
+        "tap_python": {
+          "0": {
+            "t": "tap.line"
+          },
+          "language": "python",
+          "text": "ok 1 - x"
+        },
+        "tap_request": {
+          "0": {
+            "i": 5,
+            "t": "tap.line"
+          },
+          "language": "typescript",
+          "text": "ok 1 - x"
+        },
+        "tap_version": {
+          "0": {
+            "t": "tap.line",
+            "v": 1
+          },
+          "language": "typescript",
+          "text": "ok 1 - x"
+        }
+      },
+      "texts": {
+        "bail_out": "Bail out! page fault",
+        "dispatch_handler_unknown": "No handler is registered for type tap.line version 1.",
+        "dispatch_request_unanswered": "The handler for type tap.line version 0 returned no reply to the request with id 5.",
+        "engine_tap_browser_cause_first": "caused by: first fault",
+        "engine_tap_browser_cause_second": "caused by: second fault",
+        "engine_tap_browser_failed": "The browser failed: page fault",
+        "engine_tap_language_unknown": "The TAP language python is not typescript, the one stream that crosses the wire."
+      }
+    },
+    "test_integrate_engine_turn": {
+      "lines": {
+        "append_answer": {
+          "0": {
+            "t": "turn.append"
+          },
+          "content": {
+            "content": "Mind the moat.",
+            "role": "assistant"
+          },
+          "role": "assistant",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "append_call": {
+          "0": {
+            "t": "turn.append"
+          },
+          "content": {
+            "content": null,
+            "role": "assistant",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"name\":\"bootstrap\",\"args\":{\"universe\":\"castle\",\"title\":\"The castle\",\"world\":\"castle_world\",\"region\":\"castle_gatehouse\"}}",
+                  "name": "browser.script_run"
+                },
+                "id": "call_1",
+                "type": "function"
+              }
+            ]
+          },
+          "role": "assistant",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "append_full": {
+          "0": {
+            "type": "turn.append"
+          },
+          "content": {
+            "content": "1",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "append_request": {
+          "0": {
+            "i": 7,
+            "t": "turn.append"
+          },
+          "content": {
+            "content": "1",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "append_user": {
+          "0": {
+            "t": "turn.append"
+          },
+          "content": {
+            "content": "1",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "append_wide": {
+          "0": {
+            "t": "turn.append"
+          },
+          "content": {
+            "content": "\u4e2d\u6587\ud83d\ude00",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "error_request": {
+          "0": {
+            "r": 7,
+            "t": "error"
+          }
+        }
+      },
+      "texts": {
+        "dispatch_request_unanswered": "The handler for type turn.append version 0 returned no reply to the request with id 7."
+      }
+    },
+    "test_integrate_engine_verbose": {
+      "lines": {
+        "put_ai": {
+          "0": {
+            "t": "verbose.put"
+          },
+          "lines": [
+            {
+              "at": 30,
+              "text": "c"
+            }
+          ],
+          "thread": "ai"
+        },
+        "put_invalid": {
+          "at_bool": {
+            "0": {
+              "t": "verbose.put"
+            },
+            "lines": [
+              {
+                "at": 10,
+                "text": "a"
+              },
+              {
+                "at": true,
+                "text": "x"
+              }
+            ],
+            "thread": "ui"
+          },
+          "at_float": {
+            "0": {
+              "t": "verbose.put"
+            },
+            "lines": [
+              {
+                "at": 10,
+                "text": "a"
+              },
+              {
+                "at": 1.5,
+                "text": "x"
+              }
+            ],
+            "thread": "ui"
+          },
+          "at_whole": {
+            "0": {
+              "t": "verbose.put"
+            },
+            "lines": [
+              {
+                "at": 10,
+                "text": "a"
+              },
+              {
+                "at": 1.0,
+                "text": "x"
+              }
+            ],
+            "thread": "ui"
+          },
+          "text_number": {
+            "0": {
+              "t": "verbose.put"
+            },
+            "lines": [
+              {
+                "at": 10,
+                "text": "a"
+              },
+              {
+                "at": 1,
+                "text": 5
+              }
+            ],
+            "thread": "ui"
+          }
+        },
+        "put_request": {
+          "0": {
+            "i": 4,
+            "t": "verbose.put"
+          },
+          "lines": [
+            {
+              "at": 10,
+              "text": "a"
+            }
+          ],
+          "thread": "ui"
+        },
+        "put_ui": {
+          "0": {
+            "t": "verbose.put"
+          },
+          "lines": [
+            {
+              "at": 10,
+              "text": "a"
+            },
+            {
+              "at": 20,
+              "text": "b"
+            }
+          ],
+          "thread": "ui"
+        },
+        "tail_ai": {
+          "0": {
+            "i": 2,
+            "t": "verbose.tail"
+          },
+          "count": 1,
+          "thread": "ai"
+        },
+        "tail_ai_reply": {
+          "0": {
+            "r": 2,
+            "t": "verbose.tail"
+          },
+          "lines": [
+            {
+              "at": 30,
+              "text": "c"
+            }
+          ]
+        },
+        "tail_pushed": {
+          "0": {
+            "t": "verbose.tail"
+          },
+          "count": 1,
+          "thread": "ui"
+        },
+        "tail_server": {
+          "0": {
+            "i": 7,
+            "t": "verbose.tail"
+          },
+          "count": 2,
+          "thread": "server"
+        },
+        "tail_server_reply": {
+          "0": {
+            "r": 7,
+            "t": "verbose.tail"
+          }
+        },
+        "tail_ui": {
+          "0": {
+            "i": 1,
+            "t": "verbose.tail"
+          },
+          "count": 2,
+          "thread": "ui"
+        },
+        "tail_ui_reply": {
+          "0": {
+            "r": 1,
+            "t": "verbose.tail"
+          },
+          "lines": [
+            {
+              "at": 10,
+              "text": "a"
+            },
+            {
+              "at": 20,
+              "text": "b"
+            }
+          ]
+        }
+      },
+      "server_texts": ["a", "b", "c"],
+      "texts": {
+        "dispatch_notification_replied": "The handler for type verbose.tail version 0 returned a reply to a line with no id.",
+        "dispatch_request_unanswered": "The handler for type verbose.put version 0 returned no reply to the request with id 4.",
+        "engine_verbose_debug_off": "verbose.put needs debug mode, and the setting debug is false.",
+        "engine_verbose_line_invalid_at_bool": "The verbose line {'at': True, 'text': 'x'} does not have exactly the fields at and text, a whole number and text.",
+        "engine_verbose_line_invalid_at_float": "The verbose line {'at': 1.5, 'text': 'x'} does not have exactly the fields at and text, a whole number and text.",
+        "engine_verbose_line_invalid_at_whole": "The verbose line {'at': 1.0, 'text': 'x'} does not have exactly the fields at and text, a whole number and text.",
+        "engine_verbose_line_invalid_text_number": "The verbose line {'at': 1, 'text': 5} does not have exactly the fields at and text, a whole number and text."
+      }
+    },
+    "test_integrate_main_loop": {
+      "chunk_bytes": 1000,
+      "lines": {
+        "create_castle": {
+          "0": {
+            "t": "db.create"
+          },
+          "db": "castle"
+        },
+        "create_dropped": {
+          "0": {
+            "t": "db.create"
+          },
+          "db": "dropped"
+        },
+        "delete_gone": {
+          "0": {
+            "k": "/castle/gone",
+            "t": "kv.delete"
+          }
+        },
+        "doc_note": {
+          "0": {
+            "t": "doc.put"
+          },
+          "body": {
+            "0": {
+              "t": "note"
+            },
+            "text": "A note."
+          },
+          "db": "castle",
+          "id": "note"
+        },
+        "drop_dropped": {
+          "0": {
+            "t": "db.drop"
+          },
+          "db": "dropped"
+        },
+        "error_reply": {
+          "0": {
+            "r": 1,
+            "t": "error"
+          }
+        },
+        "initialize": {
+          "0": {
+            "i": 1,
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "method": "initialize",
+          "params": {
+            "capabilities": {},
+            "clientInfo": {
+              "name": "hyperposition-engine",
+              "version": "0"
+            },
+            "protocolVersion": "2025-06-18"
+          }
+        },
+        "initialize_reply": {
+          "0": {
+            "r": 1,
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "result": {
+            "capabilities": {
+              "tools": {}
+            },
+            "protocolVersion": "2025-06-18",
+            "serverInfo": {
+              "name": "xsjs-server",
+              "version": "0"
+            }
+          }
+        },
+        "initialized": {
+          "0": {
+            "t": "mcp"
+          },
+          "jsonrpc": "2.0",
+          "method": "notifications/initialized"
+        },
+        "put_gone": {
+          "0": {
+            "b": 1,
+            "k": "/castle/gone",
+            "t": "kv.put"
+          },
+          "1": {}
+        },
+        "put_kept": {
+          "0": {
+            "b": 1,
+            "k": "/castle/kept",
+            "t": "kv.put"
+          },
+          "1": {}
+        },
+        "settings_put": {
+          "0": {
+            "i": 2,
+            "t": "settings.put"
+          }
+        },
+        "settings_reply": {
+          "0": {
+            "r": 2,
+            "t": "settings.put"
+          }
+        },
+        "source_put": {
+          "0": {
+            "b": 1,
+            "i": 1,
+            "t": "source.put"
+          },
+          "1": {},
+          "name": "loop_test.py"
+        },
+        "source_reply": {
+          "0": {
+            "r": 1,
+            "t": "source.put"
+          }
+        },
+        "sql_castle": {
+          "0": {
+            "t": "sql.run"
+          },
+          "db": "castle",
+          "statements": [
+            {
+              "params": [],
+              "sql": "CREATE TABLE t (x INTEGER) STRICT"
+            },
+            {
+              "params": [7],
+              "sql": "INSERT INTO t VALUES (?)"
+            }
+          ]
+        },
+        "tail_server": {
+          "0": {
+            "i": 1,
+            "t": "verbose.tail"
+          },
+          "count": 10,
+          "thread": "server"
+        },
+        "tail_server_reply": {
+          "0": {
+            "r": 1,
+            "t": "verbose.tail"
+          }
+        },
+        "tail_ui": {
+          "0": {
+            "i": 2,
+            "t": "verbose.tail"
+          },
+          "count": 10,
+          "thread": "ui"
+        },
+        "tail_ui_reply": {
+          "0": {
+            "r": 2,
+            "t": "verbose.tail"
+          },
+          "lines": [
+            {
+              "at": 1,
+              "text": "first"
+            },
+            {
+              "at": 2,
+              "text": "second"
+            }
+          ]
+        },
+        "tap_line": {
+          "0": {
+            "t": "tap.line"
+          },
+          "language": "typescript",
+          "text": "ok 1 - test_page"
+        },
+        "tools_list": {
+          "0": {
+            "i": 2,
+            "t": "mcp"
+          },
+          "id": 2,
+          "jsonrpc": "2.0",
+          "method": "tools/list"
+        },
+        "tools_list_reply": {
+          "0": {
+            "r": 2,
+            "t": "mcp"
+          },
+          "id": 2,
+          "jsonrpc": "2.0"
+        },
+        "turn_note": {
+          "0": {
+            "t": "turn.append"
+          },
+          "content": {
+            "content": "A turn.",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/castle/note/1"
+        },
+        "verbose_put": {
+          "0": {
+            "t": "verbose.put"
+          },
+          "lines": [
+            {
+              "at": 1,
+              "text": "first"
+            },
+            {
+              "at": 2,
+              "text": "second"
+            }
+          ],
+          "thread": "ui"
+        }
+      },
+      "overflow_bytes": 4096,
+      "read_bytes": 65536,
+      "ring": 999,
+      "texts": {
+        "engine_system_debug_off_line": "source.put needs debug mode, and the setting debug is false.",
+        "main_loop_line_dispatch_tail": "server dispatches from ai: {\"i\":1,\"t\":\"verbose.tail\"}"
+      }
+    },
+    "test_integrate_mcp_stdio": {
+      "texts": {
+        "engine_system_debug_off_tool": "source_put needs debug mode, and the setting debug is false."
+      }
+    },
+    "test_integrate_settings": {
+      "texts": {
+        "jslb_number_overflow": "The number 1e400 overflows a double.",
+        "jslb_text_not_json": "The text is not JSON: {0}.",
+        "settings_type_wrong_debug": "The setting debug must be of type bool but is of type int.",
+        "settings_type_wrong_root_files": "The setting powershell.root_files must be of type list of str but is of type list."
+      }
+    },
+    "test_integrate_tap_loop": {
+      "failing_failures": 4,
+      "read_bytes": 65536
+    },
+    "test_integrate_test_posix": {
+      "check_advisory": "test_posix.py: this smoke-test run checks the formatting and rewrites nothing; wait for a normal-test run, which does the reformatting."
     },
     "test_jslb": {
       "blob_max": 65536,
@@ -1423,37 +2683,6 @@
           },
           "db": "castle"
         },
-        "create_dropped": {
-          "0": {
-            "t": "db.create"
-          },
-          "db": "dropped"
-        },
-        "delete_gone": {
-          "0": {
-            "k": "/castle/gone",
-            "t": "kv.delete"
-          }
-        },
-        "doc_note": {
-          "0": {
-            "t": "doc.put"
-          },
-          "body": {
-            "0": {
-              "t": "note"
-            },
-            "text": "A note."
-          },
-          "db": "castle",
-          "id": "note"
-        },
-        "drop_dropped": {
-          "0": {
-            "t": "db.drop"
-          },
-          "db": "dropped"
-        },
         "error": {
           "0": {
             "t": "error"
@@ -1505,13 +2734,6 @@
             }
           }
         },
-        "initialized": {
-          "0": {
-            "t": "mcp"
-          },
-          "jsonrpc": "2.0",
-          "method": "notifications/initialized"
-        },
         "put_cut": {
           "0": {
             "b": 1,
@@ -1524,22 +2746,6 @@
           "0": {
             "b": 1,
             "k": "/castle/gate",
-            "t": "kv.put"
-          },
-          "1": {}
-        },
-        "put_gone": {
-          "0": {
-            "b": 1,
-            "k": "/castle/gone",
-            "t": "kv.put"
-          },
-          "1": {}
-        },
-        "put_kept": {
-          "0": {
-            "b": 1,
-            "k": "/castle/kept",
             "t": "kv.put"
           },
           "1": {}
@@ -1576,31 +2782,6 @@
           },
           "1": {}
         },
-        "source_put": {
-          "0": {
-            "b": 1,
-            "i": 1,
-            "t": "source.put"
-          },
-          "1": {},
-          "name": "loop_test.py"
-        },
-        "sql_castle": {
-          "0": {
-            "t": "sql.run"
-          },
-          "db": "castle",
-          "statements": [
-            {
-              "params": [],
-              "sql": "CREATE TABLE t (x INTEGER) STRICT"
-            },
-            {
-              "params": [7],
-              "sql": "INSERT INTO t VALUES (?)"
-            }
-          ]
-        },
         "stray_101": {
           "0": {
             "r": 101,
@@ -1619,100 +2800,17 @@
             "t": "tap.start"
           }
         },
-        "tail_server": {
-          "0": {
-            "i": 1,
-            "t": "verbose.tail"
-          },
-          "count": 10,
-          "thread": "server"
-        },
-        "tail_server_reply": {
-          "0": {
-            "r": 1,
-            "t": "verbose.tail"
-          }
-        },
-        "tail_ui": {
-          "0": {
-            "i": 2,
-            "t": "verbose.tail"
-          },
-          "count": 10,
-          "thread": "ui"
-        },
-        "tail_ui_reply": {
-          "0": {
-            "r": 2,
-            "t": "verbose.tail"
-          },
-          "lines": [
-            {
-              "at": 1,
-              "text": "first"
-            },
-            {
-              "at": 2,
-              "text": "second"
-            }
-          ]
-        },
-        "tools_list": {
-          "0": {
-            "i": 2,
-            "t": "mcp"
-          },
-          "id": 2,
-          "jsonrpc": "2.0",
-          "method": "tools/list"
-        },
-        "tools_list_reply": {
-          "0": {
-            "r": 2,
-            "t": "mcp"
-          },
-          "id": 2,
-          "jsonrpc": "2.0"
-        },
-        "turn_note": {
-          "0": {
-            "t": "turn.append"
-          },
-          "content": {
-            "content": "A turn.",
-            "role": "user"
-          },
-          "role": "user",
-          "scene": "/castle/note/1"
-        },
         "unknown_request": {
           "0": {
             "i": 1,
             "t": "no.such"
           }
-        },
-        "verbose_put": {
-          "0": {
-            "t": "verbose.put"
-          },
-          "lines": [
-            {
-              "at": 1,
-              "text": "first"
-            },
-            {
-              "at": 2,
-              "text": "second"
-            }
-          ],
-          "thread": "ui"
         }
       },
       "overflow_bytes": 4096,
       "read_bytes": 65536,
       "texts": {
         "dispatch_handler_unknown": "No handler is registered for type no.such version 0.",
-        "engine_system_debug_off_line": "source.put needs debug mode, and the setting debug is false.",
         "engine_system_debug_off_tool": "source_put needs debug mode, and the setting debug is false.",
         "engine_system_name_invalid": "The name ../a.py is not a plain file name that ends in .py and does not start with a dot.",
         "engine_tap_browser_cause": "caused by: first",
@@ -1720,7 +2818,6 @@
         "jslb_no_type": "The line header has no type string.",
         "main_loop_input_partial": "The engine input ended inside a message.",
         "main_loop_line_dispatch_mcp": "server dispatches from ai: {\"i\":1,\"t\":\"mcp\"}",
-        "main_loop_line_dispatch_tail": "server dispatches from ai: {\"i\":1,\"t\":\"verbose.tail\"}",
         "main_loop_line_dispatch_unknown": "server dispatches from ai: {\"i\":1,\"t\":\"no.such\"}",
         "main_loop_line_reply_mcp": "server replies to ai: {\"t\":\"mcp\",\"r\":1}",
         "main_loop_not_prepared": "loop_run ran before loop_prepare prepared the root.",
@@ -1753,20 +2850,26 @@
       "child_seconds": 30,
       "read_bytes": 65536,
       "texts": {
+        "argparse_root_required": "error: the following arguments are required: --root",
         "jslb_number_overflow": "The number 1e400 overflows a double.",
         "jslb_text_not_json_blank": "The text is not JSON: Expecting value.",
         "jslb_text_not_json_delimiter": "The text is not JSON: Expecting ':' delimiter.",
         "mcp_stdio_line_malformed_blank": "Line 1 of the input is not JSON: The text is not JSON: Expecting value.",
         "mcp_stdio_line_malformed_delimiter": "Line 2 of the input is not JSON: The text is not JSON: Expecting ':' delimiter.",
         "mcp_stdio_line_malformed_overflow": "Line 1 of the input is not JSON: The number 1e400 overflows a double.",
-        "mcp_stdio_line_malformed_process": "Line 1 of the input is not JSON: The text is not JSON: Expecting ':' delimiter.",
         "mcp_stdio_line_object": "Line 1 of the input is not a JSON object."
+      }
+    },
+    "test_mcp_stdio_process": {
+      "child_seconds": 30,
+      "read_bytes": 65536,
+      "texts": {
+        "jslb_text_not_json_delimiter": "The text is not JSON: Expecting ':' delimiter.",
+        "mcp_stdio_line_malformed_process": "Line 1 of the input is not JSON: The text is not JSON: Expecting ':' delimiter."
       }
     },
     "test_settings": {
       "texts": {
-        "jslb_number_overflow": "The number 1e400 overflows a double.",
-        "jslb_text_not_json": "The text is not JSON: {0}.",
         "settings_key_extra": "The settings have the unexpected key {0}.",
         "settings_key_extra_extra": "The settings have the unexpected key extra.",
         "settings_key_missing": "The settings lack the key {0}.",
@@ -1880,7 +2983,6 @@
         "dispatch_handler_unknown": "No handler is registered for type no.such version 0.",
         "tap_loop_blob_refused": "The TAP suite server takes no blob, but a line carries one of 129 bytes.",
         "tap_loop_input_partial": "The engine input ended inside a message.",
-        "tap_loop_output_partial": "The output of the test suites ended inside a line: b'cut'",
         "tap_loop_reply_unknown": "The line {\"0\":{\"t\":\"tap.run\",\"r\":1}} replies to no request the server sent."
       }
     },
@@ -2248,6 +3350,9 @@
         "name_invalid": "The name ../a.py is not a plain file name that ends in .py and does not start with a dot.",
         "timing": "test_tap_producer: smoke-test, "
       }
+    },
+    "test_test": {
+      "limits": [1, 2]
     },
     "test_third_party_fetch": {
       "archives_read": ["sqlite-wasm-3460100.zip", "xterm-5.5.0.tgz"]

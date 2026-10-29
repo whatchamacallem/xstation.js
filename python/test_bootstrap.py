@@ -2,20 +2,24 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests the platform services without a pty: the arguments, the engine lock,
-# the first line, `tap.start` with the fixed id 101, its settings and, in
-# debug mode only, its test settings, and no provider field, the reply, the
-# choice and loading of the main loop file, the console role, the error
-# line in full names with its cascade, and the calls bootstrap makes on the
-# server's log. Each run has descriptors 0 and 1 set to files, raw mode
-# patched to record its calls, and `verbose`, which bootstrap imports inside
-# its functions, replaced through `sys.modules` by a double that records
-# each call; the test main loop files write their calls to files in the
-# root. The expected texts and headers are the gold's. The scratch
-# directories go under build/.
+# Tests the platform services in process: each run of `bootstrap_run` is a
+# forked child whose controlling tty, stdin, stdout and stderr are a new pty
+# of `pty.openpty`, as ttyd runs it, with its environment set in the child,
+# and the test plays the page on the other side of the pty. It tests the
+# arguments, the engine lock, the raw mode of the pty, the first line,
+# `tap.start` with the fixed id 101, its settings and, in debug mode only,
+# its test settings, and no provider field, the reply, the choice and
+# loading of the main loop file, the console role where it runs no shell,
+# the error line in full names with its cascade, and the lines bootstrap
+# writes to the root's log. The test main loop files, named by `--main-loop`
+# in debug mode, write their calls to files in the root; with no
+# `--main-loop` the stock main_loop.py answers a request. Each child writes
+# how its run ended to a file, then kills itself, so that the lock, the log
+# and the loaded main loop never reach another test. The expected texts and
+# lines are the gold's. The scratch directories go under build/.
 
-import bootstrap, fcntl, harness, json, os, signal, sys, tempfile, unittest
-import unittest.mock
+import bootstrap, contextlib, errno, fcntl, harness, json, os, pty, resource
+import signal, sqlite3, sys, tempfile, termios, traceback, unittest
 from typing import Any, NamedTuple
 
 # The checkout's top directory, above this file's `python/`.
@@ -24,20 +28,11 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
-# The module under test.
-_BOOTSTRAP_PATH = os.path.abspath(bootstrap.__file__)
-
-# The stock main loop file, beside the module under test.
-_STOCK_PATH = os.path.join(os.path.dirname(_BOOTSTRAP_PATH), "main_loop.py")
-
 # The id of this module's gold in `test_settings.json`.
 _GOLD_ID = "python.test_bootstrap"
 
-# The most bytes a probe or a test main loop reads at once.
+# The most bytes a read of the pty, a probe or a test main loop takes at once.
 _READ_BYTES: int = harness.gold_get(f"{_GOLD_ID}.read_bytes")
-
-# The fixed id of `tap.start`, the first request on the engine tty.
-_FIRST_ID = 101
 
 # The environment variable that once held the provider key, a setting.
 _PROVIDER_VARIABLE: str = harness.setting_get("provider.variable")
@@ -57,13 +52,6 @@ _CONSOLE_ENVIRONMENT = {
     "OTHER": "dropped",
 }
 
-# What the console keeps of that environment, which does not set `LANG`.
-_CONSOLE_KEPT = {
-    "HOME": "/home/test",
-    "PATH": "/usr/bin:/bin",
-    "TERM": "xterm-256color",
-}
-
 # The keys of `tap.start` outside debug mode, in written order.
 _FIRST_KEYS = ["0", "settings"]
 
@@ -72,6 +60,15 @@ _FIRST_KEYS_DEBUG = ["0", "settings", "test_settings"]
 
 # The file in the root that holds the test settings.
 _TESTS_NAME = "test_settings.json"
+
+# The file in the root that holds the log.
+_LOG_NAME = "_verbose.sqlite"
+
+# The query of the thread and text of each line of the log, in order.
+_LOG_QUERY = "SELECT thread, text FROM line ORDER BY seq"
+
+# The thread the server's own lines are stored under in the log.
+_SERVER_THREAD = "server"
 
 # The file name the test main loops are written under in the root.
 _LOOP_NAME = "test_loop.py"
@@ -82,7 +79,14 @@ _PREPARE_NAME = "prepare.json"
 # The file the test main loop's `loop_run` writes its arguments and input to.
 _RUN_NAME = "run.json"
 
-# A main loop that writes its calls to files in the root.
+# The file in its scratch directory a child writes how its run ended to.
+_ENDING_NAME = "ending.txt"
+
+# Bytes after the reply, which the main loop must find unread.
+_AFTER_REPLY = b"the bytes after the reply"
+
+# A main loop that writes its calls to files in the root, its `loop_run`
+# once it has read the bytes after the reply.
 _LOOP_TEXT = (
     "import json, os\n"
     "\n"
@@ -93,9 +97,12 @@ _LOOP_TEXT = (
     "\n"
     "\n"
     "def loop_run(read_fd, write_fd, root):\n"
-    f"    rest = os.read(read_fd, {_READ_BYTES}).decode('utf-8')\n"
+    "    rest = b''\n"
+    f"    while len(rest) < {len(_AFTER_REPLY)}:\n"
+    f"        rest += os.read(read_fd, {_READ_BYTES})\n"
+    "    text = rest.decode('utf-8')\n"
     f"    with open(os.path.join(root, {_RUN_NAME!r}), 'w') as file:\n"
-    "        json.dump([read_fd, write_fd, root, rest], file)\n"
+    "        json.dump([read_fd, write_fd, root, text], file)\n"
 )
 
 # A main loop file that defines `loop_prepare` and not `loop_run`.
@@ -133,9 +140,6 @@ _REPLY_REORDERED = b'{"0":{"r":101,"t":"tap.start"}}\r'
 # The reply to `tap.start` in full names.
 _REPLY_FULL = b'{"0":{"type":"tap.start","reply":101}}\r'
 
-# Bytes after the reply, which the main loop must find unread.
-_AFTER_REPLY = b"the bytes after the reply"
-
 # Replies that are not the empty reply to `tap.start`, with their cases.
 _REPLIES_WRONG = [
     (b'{"0":{"t":"tap.start","r":1}}\r', "reply_one"),
@@ -170,6 +174,21 @@ _GARBLED_TEXT = "not a line"
 # The keys an error line may hold, its cascade's `cause` among them.
 _ERROR_KEYS = {"0", "message", "stack", "cause"}
 
+# How a child ends when `bootstrap_run` returns 0.
+_ENDING_SERVED = repr(0)
+
+# How a child ends when `bootstrap_run` returns 1.
+_ENDING_FAILED = repr(1)
+
+# The exit code of a child that killed itself once its run ended.
+_KILLED = -signal.SIGKILL
+
+# The exit code of a child the hangup ended.
+_HUNG_UP = -signal.SIGHUP
+
+# The start of the message of a process that the system refused to start.
+_SPAWN_REFUSED = f"[Errno {errno.EAGAIN}] {os.strerror(errno.EAGAIN)}"
+
 
 # A scratch directory and its root, with the settings and the test settings.
 class ScratchRoot(NamedTuple):
@@ -177,47 +196,6 @@ class ScratchRoot(NamedTuple):
     root: str
     settings: dict[str, Any]
     tests: dict[str, Any]
-
-
-# What a run returned and wrote, and each raw mode call with the output size.
-class RunRecord(NamedTuple):
-    code: int
-    output: bytes
-    raw_calls: list[tuple[int, int]]
-
-
-# A double of `verbose`: records each call, answers what the test queued.
-class VerboseDouble:
-    # Starts with the answers queued for each function, by its name.
-    def __init__(self, **answers: list[Any]) -> None:
-        self.calls: list[tuple[Any, ...]] = []
-        self.places: list[tuple[dict[str, str], str]] = []
-        self.answers = answers
-
-    # Records a call, returns its next queued answer or raises a queued error.
-    def call_answer(self, name: str, *args: Any) -> Any:
-        self.calls.append((name, *args))
-        if not self.answers.get(name):
-            raise AssertionError(f"the verbose double has no answer: {name}")
-        answer = self.answers[name].pop(0)
-        if isinstance(answer, BaseException):
-            raise answer
-        return answer
-
-    # `verbose.log_open`, as bootstrap calls it.
-    def log_open(self, root: str, ring: int) -> Any:
-        return self.call_answer("log_open", root, ring)
-
-    # `verbose.log`, as bootstrap calls it.
-    def log(self, text: str) -> Any:
-        return self.call_answer("log", text)
-
-    # `verbose.exec`, keeping the environment and directory it was called in.
-    def exec(
-        self, level: int, argv: list[str], argv_verbose: list[str]
-    ) -> Any:
-        self.places.append((dict(os.environ), os.getcwd()))
-        return self.call_answer("exec", level, argv, argv_verbose)
 
 
 # A text of this module's gold, each `{n}` replaced by the value at `n`.
@@ -234,24 +212,37 @@ def _line_get(name: str) -> dict[str, Any]:
     return line
 
 
-# A verbose double for a run that opens the log and logs `count` lines.
-def _logged(count: int) -> VerboseDouble:
-    return VerboseDouble(log_open=[None], log=[None] * count)
+# The bytes of a gold line on the wire: its JSON text and a CR.
+def _line_bytes(name: str) -> bytes:
+    line = _line_get(name)
+    text = json.dumps(line, ensure_ascii=False, separators=(",", ":"))
+    return text.encode("utf-8") + b"\r"
 
 
-# The call that opens the root's log at the ring of its settings.
-def _open_call(made: ScratchRoot) -> tuple[Any, ...]:
-    return ("log_open", made.root, made.settings["verbose_ring"])
+# The log line of the trace of `tap.start`, in debug mode.
+def _trace_line() -> tuple[str, str]:
+    return (_SERVER_THREAD, _text_get("bootstrap_start_submit"))
 
 
-# The log call of the trace of `tap.start`, in debug mode.
-def _trace_call() -> tuple[Any, ...]:
-    return ("log", _text_get("bootstrap_start_submit"))
+# The log line of a failure with the message.
+def _failure_line(message: str) -> tuple[str, str]:
+    return (_SERVER_THREAD, _text_get("bootstrap_run_failed", message))
 
 
-# The log call of a failure with the message.
-def _failure_call(message: str) -> tuple[Any, ...]:
-    return ("log", _text_get("bootstrap_run_failed", message))
+# The thread and text of each line of the root's log, which must be open.
+def _log_read(root: str) -> list[tuple[str, str]]:
+    path = os.path.join(root, _LOG_NAME)
+    if not os.path.isfile(path):
+        raise AssertionError(f"the log was never opened: {path}")
+    with contextlib.closing(sqlite3.connect(path)) as connection:
+        cursor = connection.execute(_LOG_QUERY)
+        rows: list[tuple[str, str]] = cursor.fetchall()
+    return rows
+
+
+# Checks the run never opened the root's log.
+def _log_absent(case: unittest.TestCase, root: str) -> None:
+    case.assertFalse(os.path.exists(os.path.join(root, _LOG_NAME)))
 
 
 # Writes the text as the test settings file of the root.
@@ -301,91 +292,6 @@ def _engine_argv(root: str) -> list[str]:
     return ["--root", root, "--main-loop", _LOOP_NAME]
 
 
-# Writes the input of a run to a file, returns its path and the output's.
-def _files_make(made: ScratchRoot, given: bytes) -> tuple[str, str]:
-    in_path = os.path.join(made.scratch, "in.bin")
-    out_path = os.path.join(made.scratch, "out.bin")
-    with open(in_path, "wb") as file:
-        file.write(given)
-    return in_path, out_path
-
-
-# Runs `bootstrap_run`, descriptors 0 and 1 in files, `logged` as `verbose`.
-def _run_captured(
-    made: ScratchRoot,
-    argv: list[str],
-    given: bytes,
-    environment: dict[str, str],
-    logged: VerboseDouble,
-) -> RunRecord:
-    in_path, out_path = _files_make(made, given)
-    raw_calls: list[tuple[int, int]] = []
-
-    # Records the descriptor of a raw mode call and the output size before it.
-    def raw_record(descriptor: int, when: int) -> None:
-        raw_calls.append((descriptor, os.fstat(1).st_size))
-
-    scrubbed = unittest.mock.patch.dict(os.environ, environment, clear=True)
-    raw = unittest.mock.patch("tty.setraw", side_effect=raw_record)
-    modules = unittest.mock.patch.dict(sys.modules, {"verbose": logged})
-    sys.stdout.flush()
-    saved_in = os.dup(0)
-    saved_out = os.dup(1)
-    try:
-        with open(in_path, "rb") as source, open(out_path, "wb") as sink:
-            os.dup2(source.fileno(), 0)
-            os.dup2(sink.fileno(), 1)
-            try:
-                with scrubbed, raw, modules:
-                    code = bootstrap.bootstrap_run(argv)
-            finally:
-                os.dup2(saved_in, 0)
-                os.dup2(saved_out, 1)
-    finally:
-        os.close(saved_in)
-        os.close(saved_out)
-    with open(out_path, "rb") as file:
-        output = file.read()
-    return RunRecord(code, output, raw_calls)
-
-
-# Runs `bootstrap_run` in a child, which its main loop may replace by `exec`.
-def _child_run(
-    made: ScratchRoot,
-    argv: list[str],
-    given: bytes,
-    environment: dict[str, str],
-) -> tuple[int, bytes]:
-    in_path, out_path = _files_make(made, given)
-    sys.stdout.flush()
-    sys.stderr.flush()
-    pid = os.fork()
-    if pid == 0:
-        try:
-            source = os.open(in_path, os.O_RDONLY)
-            sink = os.open(out_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
-            os.dup2(source, 0)
-            os.dup2(sink, 1)
-            os.environ.clear()
-            os.environ.update(environment)
-            with unittest.mock.patch("tty.setraw"):
-                bootstrap.bootstrap_run(argv)
-        finally:
-            os.kill(os.getpid(), signal.SIGKILL)
-    _, status = os.waitpid(pid, 0)
-    with open(out_path, "rb") as file:
-        output = file.read()
-    return os.waitstatus_to_exitcode(status), output
-
-
-# Splits the output into its lines, each ending in CR, and parses each one.
-def _lines_parse(output: bytes) -> list[dict[str, Any]]:
-    texts = output.split(b"\r")
-    if texts.pop() != b"":
-        raise ValueError(f"the output does not end in CR: {output!r}")
-    return [json.loads(text) for text in texts]
-
-
 # Reads the JSON file a function of the test main loop wrote in the root.
 def _marker_read(root: str, name: str) -> Any:
     with open(os.path.join(root, name), encoding="utf-8") as file:
@@ -415,25 +321,11 @@ def _raised_check(
     return message
 
 
-# Checks raw mode was set once, on descriptor 0, before any output.
-def _raw_check(case: unittest.TestCase, record: RunRecord) -> None:
-    case.assertEqual(record.raw_calls, [(0, 0)])
-
-
-# Checks the run opened the root's log and logged one line, the failure.
-def _failure_logged(
-    case: unittest.TestCase,
-    made: ScratchRoot,
-    logged: VerboseDouble,
-    message: str,
-) -> None:
-    expected = [_open_call(made), _failure_call(message)]
-    case.assertEqual(logged.calls, expected)
-
-
 # Returns what a child process found when it tried the root's engine lock.
 def _lock_tried(root: str) -> bytes:
     found_read, found_write = os.pipe()
+    sys.stdout.flush()
+    sys.stderr.flush()
     pid = os.fork()
     if pid == 0:
         try:
@@ -458,6 +350,8 @@ def _lock_tried(root: str) -> bytes:
 def _lock_hold(root: str) -> tuple[int, int]:
     ready_read, ready_write = os.pipe()
     release_read, release_write = os.pipe()
+    sys.stdout.flush()
+    sys.stderr.flush()
     pid = os.fork()
     if pid == 0:
         try:
@@ -481,6 +375,141 @@ def _lock_hold(root: str) -> tuple[int, int]:
     return pid, release_write
 
 
+# In the forked child: the pty as its tty and its 0, 1 and 2, the
+# environment, the run, how it ended written to the file, then a kill.
+def _child_main(
+    slave: int,
+    argv: list[str],
+    environment: dict[str, str],
+    path: str,
+    spawn_refused: bool,
+) -> None:
+    try:
+        try:
+            os.login_tty(slave)
+            os.environ.clear()
+            os.environ.update(environment)
+            if spawn_refused:
+                # The user may own no more processes, so none can start.
+                resource.setrlimit(resource.RLIMIT_NPROC, (0, 0))
+            ending = repr(bootstrap.bootstrap_run(argv))
+        except BaseException:
+            ending = traceback.format_exc()
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(ending)
+    finally:
+        os.kill(os.getpid(), signal.SIGKILL)
+
+
+# `bootstrap_run` in a forked child on a new pty, and the page's end of it.
+class EngineChild:
+    # Forks the child that runs the arguments on the pty in the environment.
+    def __init__(
+        self,
+        case: unittest.TestCase,
+        made: ScratchRoot,
+        argv: list[str],
+        environment: dict[str, str],
+        spawn_refused: bool = False,
+    ) -> None:
+        self.ending_path = os.path.join(made.scratch, _ENDING_NAME)
+        master, slave = pty.openpty()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        pid = os.fork()
+        if pid == 0:
+            os.close(master)
+            _child_main(
+                slave, argv, environment, self.ending_path, spawn_refused
+            )
+        os.close(slave)
+        self.pid = pid
+        self.master: int | None = master
+        self.reaped = False
+        self.buffer = b""
+        case.addCleanup(self.cleanup)
+
+    # This side of the pty, which must still be open.
+    def master_get(self) -> int:
+        if self.master is None:
+            raise AssertionError(f"the pty of the child {self.pid} is closed")
+        return self.master
+
+    # Reads what the child wrote, empty once no process holds its side.
+    def bytes_read(self) -> bytes:
+        try:
+            return os.read(self.master_get(), _READ_BYTES)
+        except OSError as error:
+            # Linux reads EIO from a pty whose other side no process holds.
+            if error.errno != errno.EIO:
+                raise
+            return b""
+
+    # The next line the child wrote, its text up to the CR as `json` reads it.
+    def line_read(self) -> dict[str, Any]:
+        while (end := self.buffer.find(b"\r")) < 0:
+            data = self.bytes_read()
+            if not data:
+                raise AssertionError(f"the output ends in {self.buffer!r}")
+            self.buffer += data
+        line: dict[str, Any] = json.loads(self.buffer[:end])
+        self.buffer = self.buffer[end + 1 :]
+        return line
+
+    # Writes all the bytes to the child.
+    def bytes_write(self, data: bytes) -> None:
+        view = memoryview(data)
+        while view:
+            written = os.write(self.master_get(), view)
+            view = view[written:]
+
+    # Whether the pty is raw: no line editing, no echo, no output processing.
+    def raw_get(self) -> bool:
+        attributes = termios.tcgetattr(self.master_get())
+        oflag: int = attributes[1]
+        lflag: int = attributes[3]
+        edited = lflag & (termios.ICANON | termios.ECHO)
+        return not edited and not oflag & termios.OPOST
+
+    # Reads the output to its end, then reaps the child: its code, the rest.
+    def rest_read(self) -> tuple[int, bytes]:
+        rest = self.buffer
+        while data := self.bytes_read():
+            rest += data
+        self.buffer = b""
+        _, status = os.waitpid(self.pid, 0)
+        self.reaped = True
+        return os.waitstatus_to_exitcode(status), rest
+
+    # Reads the output to its end and returns how the run ended, and the rest.
+    def run_end(self) -> tuple[str, bytes]:
+        code, rest = self.rest_read()
+        if code != _KILLED:
+            raise AssertionError(f"the child {self.pid} exited with {code}")
+        with open(self.ending_path, encoding="utf-8") as file:
+            ending = file.read()
+        os.remove(self.ending_path)
+        return ending, rest
+
+    # Closes this side, the hangup, and returns the child's exit code.
+    def hangup(self) -> int:
+        os.close(self.master_get())
+        self.master = None
+        _, status = os.waitpid(self.pid, 0)
+        self.reaped = True
+        return os.waitstatus_to_exitcode(status)
+
+    # Kills and reaps a child a failed test left, and closes this side.
+    def cleanup(self) -> None:
+        if not self.reaped:
+            os.kill(self.pid, signal.SIGKILL)
+            os.waitpid(self.pid, 0)
+            self.reaped = True
+        if self.master is not None:
+            os.close(self.master)
+            self.master = None
+
+
 # Tests the arguments, which are refused with an error line after raw mode.
 class TestArguments(unittest.TestCase):
     # No root, an unknown role, option or extra word is refused by `argparse`.
@@ -494,15 +523,12 @@ class TestArguments(unittest.TestCase):
             ["--root", made.root, "console", "console"],
         ]
         for argv in cases:
-            logged = VerboseDouble()
-            record = _run_captured(
-                made, argv, b"", _ENGINE_ENVIRONMENT, logged
-            )
-            self.assertEqual(record.code, 1)
-            _raw_check(self, record)
-            (line,) = _lines_parse(record.output)
+            child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+            line = child.line_read()
+            self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
+            self.assertTrue(child.raw_get())
             _raised_check(self, line, "argparse.ArgumentError")
-            self.assertEqual(logged.calls, [])
+            _log_absent(self, made.root)
 
     # A repeated `--root` or `--main-loop` is refused after raw mode.
     def test_option_repeated(self) -> None:
@@ -513,12 +539,10 @@ class TestArguments(unittest.TestCase):
             (root + root, "root"),
             (root + loop + loop, "loop"),
         ):
-            record = _run_captured(
-                made, argv, b"", _ENGINE_ENVIRONMENT, VerboseDouble()
-            )
-            self.assertEqual(record.code, 1)
-            _raw_check(self, record)
-            (line,) = _lines_parse(record.output)
+            child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+            line = child.line_read()
+            self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
+            self.assertTrue(child.raw_get())
             self.assertEqual(
                 _error_check(self, line),
                 _text_get(f"bootstrap_option_repeated_{case}"),
@@ -527,34 +551,33 @@ class TestArguments(unittest.TestCase):
 
 # Tests the engine lock of the root.
 class TestLock(unittest.TestCase):
-    # After a run the lock is still held, so a child's attempt is refused.
+    # While the main loop runs the lock is held, and the run's end frees it.
     def test_lock_kept(self) -> None:
         made = _root_make(self, True)
         _loop_write(made.root, _LOOP_TEXT)
         argv = _engine_argv(made.root)
-        record = _run_captured(
-            made, argv, _REPLY_FULL, _ENGINE_ENVIRONMENT, _logged(1)
-        )
-        self.assertEqual(record.code, 0)
+        child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+        child.line_read()
         self.assertEqual(_lock_tried(made.root), b"refused")
+        child.bytes_write(_REPLY_FULL + _AFTER_REPLY)
+        self.assertEqual(child.run_end(), (_ENDING_SERVED, b""))
+        self.assertEqual(_lock_tried(made.root), b"taken")
 
     # A held lock is one error line after raw mode, its cause the refusal.
     def test_lock_refused(self) -> None:
         made = _root_make(self, False)
         _loop_write(made.root, _LOOP_TEXT)
         argv = ["--root", made.root]
-        logged = VerboseDouble()
         pid, release = _lock_hold(made.root)
         try:
-            record = _run_captured(
-                made, argv, _REPLY_FULL, _ENGINE_ENVIRONMENT, logged
-            )
+            child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+            line = child.line_read()
+            ending = child.run_end()
         finally:
             os.close(release)
             os.waitpid(pid, 0)
-        self.assertEqual(record.code, 1)
-        _raw_check(self, record)
-        (line,) = _lines_parse(record.output)
+        self.assertEqual(ending, (_ENDING_FAILED, b""))
+        self.assertTrue(child.raw_get())
         path = os.path.join(made.root, "engine.lock")
         self.assertEqual(
             _error_check(self, line), _text_get("bootstrap_lock_held", path)
@@ -566,7 +589,7 @@ class TestLock(unittest.TestCase):
         self.assertEqual(line["stack"].count("Traceback"), 1)
         prepared = os.path.join(made.root, _PREPARE_NAME)
         self.assertFalse(os.path.exists(prepared))
-        self.assertEqual(logged.calls, [])
+        _log_absent(self, made.root)
         self.assertEqual(_lock_tried(made.root), b"taken")
 
     # The lock closes at `exec`, so the probe the main loop becomes takes it.
@@ -574,12 +597,11 @@ class TestLock(unittest.TestCase):
         made = _root_make(self, True)
         _loop_write(made.root, _LOOP_EXEC)
         argv = _engine_argv(made.root)
-        code, output = _child_run(made, argv, _REPLY_FULL, _ENGINE_ENVIRONMENT)
-        self.assertEqual(code, 0)
-        first, taken = output.split(b"\r")
-        header = json.loads(first)["0"]
-        self.assertEqual(header, _line_get("first_full")["0"])
-        self.assertEqual(taken, b"taken")
+        child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+        first = child.line_read()
+        self.assertEqual(first["0"], _line_get("first_full")["0"])
+        child.bytes_write(_REPLY_FULL)
+        self.assertEqual(child.rest_read(), (0, b"taken"))
 
 
 # Tests the first line, its settings and test settings, and the loop calls.
@@ -606,47 +628,41 @@ class TestFirst(unittest.TestCase):
     ) -> None:
         _loop_write(made.root, _LOOP_TEXT)
         argv = _engine_argv(made.root)
-        logged = _logged(1)
-        record = _run_captured(
-            made, argv, _REPLY_FULL, _ENGINE_ENVIRONMENT, logged
-        )
-        self.assertEqual(record.code, 1)
-        (line,) = _lines_parse(record.output)
+        child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+        line = child.line_read()
+        self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
         self.assertEqual(_raised_check(self, line, kind), expected)
         self.assertEqual(_marker_read(made.root, _PREPARE_NAME), [made.root])
         self.assertFalse(os.path.exists(os.path.join(made.root, _RUN_NAME)))
-        _failure_logged(self, made, logged, expected)
+        self.assertEqual(_log_read(made.root), [_failure_line(expected)])
 
-    # Outside debug mode `tap.start` is short, its test settings left unread.
+    # Outside debug mode `tap.start` is short, its test settings left unread,
+    # and the stock main loop answers the request after the reply.
     def test_first_short(self) -> None:
         made = _root_make(self, False)
         os.remove(os.path.join(made.root, _TESTS_NAME))
-        path = _loop_write(made.root, _LOOP_TEXT)
-        given = _REPLY_SHORT + _AFTER_REPLY
         argv = ["--root", made.root]
-        stock = unittest.mock.patch.object(bootstrap, "_MAIN_LOOP_STOCK", path)
-        with stock:
-            record = _run_captured(
-                made, argv, given, _ENGINE_ENVIRONMENT, _logged(0)
-            )
-        self.assertEqual(record.code, 0)
-        _raw_check(self, record)
-        (first,) = _lines_parse(record.output)
+        child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+        first = child.line_read()
+        self.assertTrue(child.raw_get())
         self.assertEqual(first["0"], _line_get("first_short")["0"])
-        self.first_check(made, first, False)
+        self.assertEqual(list(first), _FIRST_KEYS)
+        self.assertEqual(first["settings"], made.settings)
+        self.assertEqual(list(first["settings"]), list(made.settings))
+        child.bytes_write(_REPLY_SHORT + _line_bytes("tail_short"))
+        self.assertEqual(child.line_read(), _line_get("tail_short_reply"))
+        self.assertEqual(child.hangup(), _HUNG_UP)
 
     # In debug mode `tap.start` has full names and the test settings.
     def test_first_full(self) -> None:
         made = _root_make(self, True)
         _loop_write(made.root, _LOOP_TEXT)
-        given = _REPLY_FULL + _AFTER_REPLY
         argv = _engine_argv(made.root)
-        record = _run_captured(
-            made, argv, given, _ENGINE_ENVIRONMENT, _logged(1)
-        )
-        self.assertEqual(record.code, 0)
-        _raw_check(self, record)
-        (first,) = _lines_parse(record.output)
+        child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+        first = child.line_read()
+        self.assertTrue(child.raw_get())
+        child.bytes_write(_REPLY_FULL + _AFTER_REPLY)
+        self.assertEqual(child.run_end(), (_ENDING_SERVED, b""))
         self.assertEqual(first["0"], _line_get("first_full")["0"])
         self.first_check(made, first, True)
 
@@ -660,11 +676,10 @@ class TestFirst(unittest.TestCase):
         with open(os.path.join(made.root, "provider.json"), "w") as file:
             file.write(_GARBLED_TEXT)
         _loop_write(made.root, _LOOP_TEXT)
-        given = _REPLY_FULL + _AFTER_REPLY
-        argv = _engine_argv(made.root)
-        record = _run_captured(made, argv, given, {}, _logged(1))
-        self.assertEqual(record.code, 0)
-        (first,) = _lines_parse(record.output)
+        child = EngineChild(self, made, _engine_argv(made.root), {})
+        first = child.line_read()
+        child.bytes_write(_REPLY_FULL + _AFTER_REPLY)
+        self.assertEqual(child.run_end(), (_ENDING_SERVED, b""))
         self.first_check(made, first, True)
 
     # In debug mode a missing test settings file raises as `open` does.
@@ -694,22 +709,22 @@ class TestFirst(unittest.TestCase):
 
 # Tests the reply to `tap.start`, which must be the empty reply in either form.
 class TestReply(unittest.TestCase):
-    # Runs with the input and checks `tap.start`, the error line, no loop run.
+    # Writes the reply, checks `tap.start`, the error line, no loop run.
     def refusal_check(
         self, made: ScratchRoot, given: bytes, expected: str
     ) -> None:
         _loop_write(made.root, _LOOP_TEXT)
         argv = _engine_argv(made.root)
-        logged = _logged(2)
-        record = _run_captured(made, argv, given, _ENGINE_ENVIRONMENT, logged)
-        self.assertEqual(record.code, 1)
-        first, line = _lines_parse(record.output)
+        child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+        first = child.line_read()
         self.assertEqual(first["0"], _line_get("first_full")["0"])
+        child.bytes_write(given)
+        line = child.line_read()
+        self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
         self.assertEqual(_error_check(self, line), expected)
         self.assertFalse(os.path.exists(os.path.join(made.root, _RUN_NAME)))
         self.assertEqual(
-            logged.calls,
-            [_open_call(made), _trace_call(), _failure_call(expected)],
+            _log_read(made.root), [_trace_line(), _failure_line(expected)]
         )
 
     # Each reply that is not the empty reply is refused, showing what came.
@@ -729,29 +744,22 @@ class TestReply(unittest.TestCase):
         for reply in (_REPLY_SHORT, _REPLY_REORDERED):
             made = _root_make(self, True)
             _loop_write(made.root, _LOOP_TEXT)
-            given = reply + _AFTER_REPLY
             argv = _engine_argv(made.root)
-            record = _run_captured(
-                made, argv, given, _ENGINE_ENVIRONMENT, _logged(1)
-            )
-            self.assertEqual(record.code, 0)
-            (first,) = _lines_parse(record.output)
+            child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+            first = child.line_read()
+            child.bytes_write(reply + _AFTER_REPLY)
+            self.assertEqual(child.run_end(), (_ENDING_SERVED, b""))
             self.assertEqual(first["0"], _line_get("first_full")["0"])
             self.assertEqual(
                 _marker_read(made.root, _RUN_NAME),
                 [0, 1, made.root, _AFTER_REPLY.decode("utf-8")],
             )
 
-    # Input that ends before the reply is refused.
-    def test_reply_closed(self) -> None:
-        expected = _text_get("bootstrap_reply_closed")
-        self.refusal_check(_root_make(self, True), b"", expected)
-
     # A reply with a blob over `overflow_bytes` is refused before its bytes.
     def test_reply_streamed(self) -> None:
         made = _root_make(self, True)
         size: int = made.settings["overflow_bytes"] + 1
-        header = {"t": "tap.start", "r": _FIRST_ID, "b": 1}
+        header = {"t": "tap.start", "r": 101, "b": 1}
         reply = {"0": header, "1": {"s": size}}
         given = json.dumps(reply, separators=(",", ":")).encode() + b"\r"
         expected = _text_get("bootstrap_reply_blob", str(size))
@@ -760,19 +768,21 @@ class TestReply(unittest.TestCase):
 
 # Tests the choice and the loading of the main loop file.
 class TestMainLoop(unittest.TestCase):
+    # Runs the arguments, checks one error line ends it, returns its message.
+    def refused_read(self, made: ScratchRoot, argv: list[str]) -> str:
+        child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+        line = child.line_read()
+        self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
+        return _error_check(self, line)
+
     # A name that is not a plain file name ending in `.py` is refused.
     def test_name_refused(self) -> None:
         for name, case in _NAMES_REFUSED:
             made = _root_make(self, True)
             _loop_write(made.root, _LOOP_TEXT)
             argv = ["--root", made.root, "--main-loop", name]
-            record = _run_captured(
-                made, argv, _REPLY_FULL, _ENGINE_ENVIRONMENT, _logged(1)
-            )
-            self.assertEqual(record.code, 1)
-            (line,) = _lines_parse(record.output)
             self.assertEqual(
-                _error_check(self, line),
+                self.refused_read(made, argv),
                 _text_get(f"bootstrap_main_loop_name_{case}"),
             )
             prepared = os.path.join(made.root, _PREPARE_NAME)
@@ -782,14 +792,8 @@ class TestMainLoop(unittest.TestCase):
     def test_function_missing(self) -> None:
         made = _root_make(self, True)
         path = _loop_write(made.root, _LOOP_PARTIAL)
-        argv = _engine_argv(made.root)
-        record = _run_captured(
-            made, argv, _REPLY_FULL, _ENGINE_ENVIRONMENT, _logged(1)
-        )
-        self.assertEqual(record.code, 1)
-        (line,) = _lines_parse(record.output)
         self.assertEqual(
-            _error_check(self, line),
+            self.refused_read(made, _engine_argv(made.root)),
             _text_get("bootstrap_loop_missing", path),
         )
 
@@ -798,11 +802,9 @@ class TestMainLoop(unittest.TestCase):
         made = _root_make(self, True)
         path = os.path.join(made.root, "main_loop", _LOOP_NAME)
         argv = _engine_argv(made.root)
-        record = _run_captured(
-            made, argv, _REPLY_FULL, _ENGINE_ENVIRONMENT, _logged(1)
-        )
-        self.assertEqual(record.code, 1)
-        (line,) = _lines_parse(record.output)
+        child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+        line = child.line_read()
+        self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
         message = _raised_check(self, line, "FileNotFoundError")
         self.assertIn(path, message)
 
@@ -810,123 +812,52 @@ class TestMainLoop(unittest.TestCase):
     def test_debug_gate(self) -> None:
         made = _root_make(self, False)
         _loop_write(made.root, _LOOP_TEXT)
-        argv = _engine_argv(made.root)
-        record = _run_captured(
-            made, argv, _REPLY_SHORT, _ENGINE_ENVIRONMENT, _logged(1)
-        )
-        self.assertEqual(record.code, 1)
-        (line,) = _lines_parse(record.output)
         self.assertEqual(
-            _error_check(self, line), _text_get("bootstrap_main_loop_refused")
+            self.refused_read(made, _engine_argv(made.root)),
+            _text_get("bootstrap_main_loop_refused"),
         )
         prepared = os.path.join(made.root, _PREPARE_NAME)
         self.assertFalse(os.path.exists(prepared))
 
-    # With no `--main-loop` the stock file runs until it imports `substrate`.
-    def test_stock_path(self) -> None:
-        made = _root_make(self, False)
-        argv = ["--root", made.root]
-        logged = _logged(1)
-        halted = unittest.mock.patch.dict(sys.modules, {"substrate": None})
-        with halted:
-            record = _run_captured(
-                made, argv, b"", _ENGINE_ENVIRONMENT, logged
-            )
-        self.assertEqual(record.code, 1)
-        (line,) = _lines_parse(record.output)
-        message = _raised_check(self, line, "ModuleNotFoundError")
-        self.assertIn("substrate", message)
-        self.assertIn(f'File "{_STOCK_PATH}"', line["stack"])
-        names = sorted(os.listdir(made.root))
-        self.assertEqual(names, ["engine.lock", "settings.json", _TESTS_NAME])
-        _failure_logged(self, made, logged, message)
 
-
-# Tests the console role, which runs dash in debug mode only.
+# Tests the console role where it runs no shell.
 class TestConsole(unittest.TestCase):
     # Outside debug mode nothing runs, nothing is written and the code is 1.
     def test_console_refused(self) -> None:
         made = _root_make(self, False)
-        before = os.getcwd()
-        self.addCleanup(os.chdir, before)
         argv = ["--root", made.root, "console"]
-        logged = VerboseDouble()
-        record = _run_captured(made, argv, b"", _CONSOLE_ENVIRONMENT, logged)
-        self.assertEqual(logged.calls, [])
-        self.assertEqual(record, RunRecord(1, b"", []))
-        self.assertEqual(os.getcwd(), before)
+        child = EngineChild(self, made, argv, _CONSOLE_ENVIRONMENT)
+        self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
+        self.assertFalse(child.raw_get())
+        _log_absent(self, made.root)
 
-    # In debug mode dash runs in the root with only the kept variables.
-    def test_console_scrubbed(self) -> None:
-        made = _root_make(self, True)
-        self.addCleanup(os.chdir, os.getcwd())
-        argv = ["--root", made.root, "console"]
-        logged = VerboseDouble(log_open=[None], exec=[3])
-        record = _run_captured(made, argv, b"", _CONSOLE_ENVIRONMENT, logged)
-        self.assertEqual(record, RunRecord(3, b"", []))
-        level: int = made.settings["verbose_level"]
-        called = ("exec", level, ["/bin/dash"], ["/bin/dash", "-v"])
-        self.assertEqual(logged.calls, [_open_call(made), called])
-        ((environment, directory),) = logged.places
-        self.assertEqual(environment, _CONSOLE_KEPT)
-        self.assertTrue(os.path.samefile(directory, made.root))
-
-    # Dash runs at the verbose level of the settings, and its verbose form.
-    def test_console_level(self) -> None:
-        before = os.getcwd()
-        self.addCleanup(os.chdir, before)
-        for level in range(3):
-            made = _level_write(_root_make(self, True), level)
-            argv = ["--root", made.root, "console"]
-            logged = VerboseDouble(log_open=[None], exec=[0])
-            record = _run_captured(
-                made, argv, b"", _CONSOLE_ENVIRONMENT, logged
-            )
-            os.chdir(before)
-            self.assertEqual(record, RunRecord(0, b"", []))
-            called = ("exec", level, ["/bin/dash"], ["/bin/dash", "-v"])
-            self.assertEqual(logged.calls, [_open_call(made), called])
-
-    # A dash that cannot start is logged, then is one error line and exit 1.
+    # A dash that cannot start, as the user may own no more processes, is
+    # logged, then is one error line and exit 1, the pty never raw.
     def test_console_failed(self) -> None:
-        made = _root_make(self, True)
-        self.addCleanup(os.chdir, os.getcwd())
+        made = _level_write(_root_make(self, True), 0)
         argv = ["--root", made.root, "console"]
-        missing = FileNotFoundError(2, "No such file or directory", "dash")
-        logged = VerboseDouble(log_open=[None], exec=[missing], log=[None])
-        record = _run_captured(made, argv, b"", _CONSOLE_ENVIRONMENT, logged)
-        self.assertEqual(record.code, 1)
-        self.assertEqual(record.raw_calls, [])
-        (line,) = _lines_parse(record.output)
-        message = _raised_check(self, line, "FileNotFoundError")
-        self.assertEqual(message, str(missing))
-        level: int = made.settings["verbose_level"]
-        called = ("exec", level, ["/bin/dash"], ["/bin/dash", "-v"])
-        expected = [_open_call(made), called, _failure_call(message)]
-        self.assertEqual(logged.calls, expected)
-
-    # A dash a signal ended gives the shell's code, 128 plus the signal.
-    def test_console_signal(self) -> None:
-        made = _root_make(self, True)
-        self.addCleanup(os.chdir, os.getcwd())
-        argv = ["--root", made.root, "console"]
-        logged = VerboseDouble(log_open=[None], exec=[-signal.SIGKILL])
-        record = _run_captured(made, argv, b"", _CONSOLE_ENVIRONMENT, logged)
-        self.assertEqual(record, RunRecord(128 + signal.SIGKILL, b"", []))
+        child = EngineChild(
+            self, made, argv, _CONSOLE_ENVIRONMENT, spawn_refused=True
+        )
+        line = child.line_read()
+        self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
+        self.assertFalse(child.raw_get())
+        message = _raised_check(self, line, "BlockingIOError")
+        self.assertTrue(message.startswith(_SPAWN_REFUSED), message)
+        self.assertEqual(_log_read(made.root), [_failure_line(message)])
 
     # The console role with `--main-loop` is refused, raw, before dash runs.
     def test_console_loop(self) -> None:
         made = _root_make(self, True)
         argv = ["--root", made.root, "console", "--main-loop", _LOOP_NAME]
-        logged = VerboseDouble()
-        record = _run_captured(made, argv, b"", _CONSOLE_ENVIRONMENT, logged)
-        self.assertEqual(logged.calls, [])
-        self.assertEqual(record.code, 1)
-        _raw_check(self, record)
-        (line,) = _lines_parse(record.output)
+        child = EngineChild(self, made, argv, _CONSOLE_ENVIRONMENT)
+        line = child.line_read()
+        self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
+        self.assertTrue(child.raw_get())
         self.assertEqual(
             _error_check(self, line), _text_get("bootstrap_main_loop_refused")
         )
+        _log_absent(self, made.root)
 
 
 # Tests the error line, which `jslb` encodes in full names.
@@ -937,61 +868,48 @@ class TestError(unittest.TestCase):
         path = os.path.join(made.root, "settings.json")
         os.remove(path)
         argv = _engine_argv(made.root)
-        logged = VerboseDouble()
-        record = _run_captured(
-            made, argv, _REPLY_FULL, _ENGINE_ENVIRONMENT, logged
-        )
-        self.assertEqual(record.code, 1)
-        _raw_check(self, record)
-        (line,) = _lines_parse(record.output)
+        child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+        line = child.line_read()
+        self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
+        self.assertTrue(child.raw_get())
         message = _raised_check(self, line, "FileNotFoundError")
         self.assertIn(path, message)
         self.assertEqual(list(line), ["0", "message", "stack"])
-        self.assertEqual(logged.calls, [])
+        _log_absent(self, made.root)
 
     # Outside debug mode the error line is still in full names.
     def test_error_full(self) -> None:
         made = _root_make(self, False)
         _loop_write(made.root, _LOOP_TEXT)
         argv = _engine_argv(made.root)
-        record = _run_captured(
-            made, argv, _REPLY_SHORT, _ENGINE_ENVIRONMENT, _logged(1)
-        )
-        self.assertEqual(record.code, 1)
-        (line,) = _lines_parse(record.output)
+        child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+        line = child.line_read()
+        self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
         self.assertEqual(line["0"], _line_get("error")["0"])
 
 
-# Tests the calls the engine role makes on the server's log.
+# Tests the lines the engine role writes to the root's log.
 class TestLog(unittest.TestCase):
     # In debug mode the log traces `tap.start`, whatever the shell's level.
     def test_first_traced(self) -> None:
         for level in range(3):
             made = _level_write(_root_make(self, True), level)
             _loop_write(made.root, _LOOP_TEXT)
-            given = _REPLY_FULL + _AFTER_REPLY
             argv = _engine_argv(made.root)
-            logged = _logged(1)
-            record = _run_captured(
-                made, argv, given, _ENGINE_ENVIRONMENT, logged
-            )
-            self.assertEqual(record.code, 0)
-            self.assertEqual(logged.calls, [_open_call(made), _trace_call()])
+            child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+            child.line_read()
+            child.bytes_write(_REPLY_FULL + _AFTER_REPLY)
+            self.assertEqual(child.run_end(), (_ENDING_SERVED, b""))
+            self.assertEqual(_log_read(made.root), [_trace_line()])
 
     # Outside debug mode a run that does not fail logs nothing, at any level.
     def test_first_quiet(self) -> None:
         for level in range(3):
             made = _level_write(_root_make(self, False), level)
-            path = _loop_write(made.root, _LOOP_TEXT)
-            given = _REPLY_SHORT + _AFTER_REPLY
             argv = ["--root", made.root]
-            logged = _logged(0)
-            stock = unittest.mock.patch.object(
-                bootstrap, "_MAIN_LOOP_STOCK", path
-            )
-            with stock:
-                record = _run_captured(
-                    made, argv, given, _ENGINE_ENVIRONMENT, logged
-                )
-            self.assertEqual(record.code, 0)
-            self.assertEqual(logged.calls, [_open_call(made)])
+            child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+            child.line_read()
+            child.bytes_write(_REPLY_SHORT + _line_bytes("tail_short"))
+            self.assertEqual(child.line_read(), _line_get("tail_short_reply"))
+            self.assertEqual(child.hangup(), _HUNG_UP)
+            self.assertEqual(_log_read(made.root), [])

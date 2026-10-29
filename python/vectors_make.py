@@ -4,7 +4,7 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Writes the JSLB vectors that the Python and the TypeScript decoders read
-# into build/vectors, an intermediate made anew by test_all.py and by the test
+# into build/vectors, an intermediate made anew by a Python suite and the test
 # page's build before their tests read it, the files an earlier run left
 # removed first. NAME.jslb holds a stream of messages that jslb.py
 # encodes or bytes made by hand, which the encoder would write otherwise or

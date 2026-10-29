@@ -2,20 +2,31 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests the handler of the `mcp` line on a server double: the registration's
-# type, version and handler, the handler called as the dispatcher calls it
-# on lines of the gold, the members of each message handed to the server as
-# they came, its response the payload of the reply and nothing replied when
-# it gives none, a reply without `r` to a request that came as a push, and
-# after an exception a result named `Failure` holding the reply and the
-# exception. What the MCP server answers is `test_mcp.py`'s.
+# Tests the handler of the `mcp` line in forked children, each registered
+# with the real dispatcher on a real MCP server, so the server and the
+# handler never reach another test. The server has two tools, plain
+# functions of this module: one answers the JSON text of its arguments and
+# one raises. The handler is called as the dispatcher calls it on lines of
+# the gold: the exchange that opens a session, nothing replied to a
+# notification, a reply without `r` to a request that came as a push, each
+# message the server takes answered, a tool's arguments passed on in their
+# order, and after an exception a result named `Failure` holding the reply
+# and the exception, the cascade the server writes read back. A failure the
+# server keeps when no response comes raises. The registration is read from
+# the dispatcher, which refuses a second one of the type. Each child writes
+# how its work ended to a file, or to stderr when that write fails, then
+# kills itself.
 
-import engine_mcp, harness, re, unittest, unittest.mock
+import engine_mcp, functools, harness, json, os, re, signal, sys, tempfile
+import traceback, unittest
 from collections.abc import Callable
-from typing import Any
+from typing import Any, NoReturn
 
-# The dotted name of the MCP server that the tests patch.
-_SERVER_TARGET = "engine_mcp._STATE.server"
+# The checkout's top directory, above this file's `python/`.
+_ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Where the scratch directories go.
+_BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
 # The id of this module's gold in `test_settings.json`.
 _GOLD_ID = "python.test_engine_mcp"
@@ -23,10 +34,21 @@ _GOLD_ID = "python.test_engine_mcp"
 # A key of the decimal digits of a non negative integer, as JSLB reads it.
 _NUMBER_KEY = re.compile(r"0|[1-9][0-9]*")
 
+# The text of the exception that the failing tool raises.
+_TOOL_FAILURE = "boom"
+
+# The file in the scratch directory that a child writes how it ended to.
+_ENDING_NAME = "ending.json"
+
 
 # A copy of a value of this module's gold, its number keys made `int`.
 def _gold_value(name: str) -> Any:
     return _keys_number(harness.gold_get(f"{_GOLD_ID}.{name}"))
+
+
+# A value of this module's gold as JSON holds it, which is not to be changed.
+def _gold_raw(name: str) -> Any:
+    return harness.gold_get(f"{_GOLD_ID}.{name}")
 
 
 # A copy of a JSON value with each number key an `int`, at every depth.
@@ -58,178 +80,230 @@ def _handler_call(fn: Callable[..., Any], line: dict[int | str, Any]) -> Any:
     return fn(line, **_payload_of(line))
 
 
-# A server double: records each call, answers what the test queued for it.
-class ServerDouble:
-    # Starts with no call recorded and no answer queued.
-    def __init__(self) -> None:
-        self.calls: list[tuple[Any, ...]] = []
-        self.answers: dict[str, list[Any]] = {}
-
-    # Records a call and returns its next queued answer, which must exist.
-    def call_answer(self, name: str, *args: Any) -> Any:
-        self.calls.append((name, *args))
-        if not self.answers.get(name):
-            raise AssertionError(f"the server double has no answer: {name}")
-        return self.answers[name].pop(0)
-
-    # `Server.message_handle`, as `engine_mcp` calls it.
-    def message_handle(self, message: dict[str, Any]) -> Any:
-        return self.call_answer("message_handle", message)
-
-    # `Server.failure_take`, as `engine_mcp` calls it.
-    def failure_take(self) -> Any:
-        return self.call_answer("failure_take")
+# The echo tool: answers the JSON text of its arguments, in their order.
+def _echo_run(arguments: dict[str, Any]) -> engine_mcp.mcp.ToolResult:
+    text = json.dumps(arguments, separators=(",", ":"))
+    return engine_mcp.mcp.ToolResult([{"type": "text", "text": text}], False)
 
 
-# Gives each test an empty state, a registration recorder, a server double.
-class IsolatedCase(unittest.TestCase):
-    # Patches the state and `dispatch.handler_register` through `engine_mcp`.
-    def setUp(self) -> None:
-        self.handlers: list[tuple[str, int, Callable[..., Any]]] = []
-        state = unittest.mock.patch(_SERVER_TARGET, None)
-        register = unittest.mock.patch.object(
-            engine_mcp.dispatch, "handler_register", self.handler_record
+# The failing tool: raises, as a tool that fails does.
+def _fail_run(arguments: dict[str, Any]) -> NoReturn:
+    raise ValueError(_TOOL_FAILURE)
+
+
+# A new server named as the gold's `initialize` reply, with the gold's tools:
+# the echo tool and the failing one, in the order `tools/list` gives them.
+def _server_make() -> engine_mcp.mcp.Server:
+    identity = _gold_value("lines.initialize_reply")["result"]["serverInfo"]
+    server = engine_mcp.mcp.Server(identity["name"], identity["version"])
+    echo, fail = _gold_value("lines.list_reply")["result"]["tools"]
+    for entry, run in ((echo, _echo_run), (fail, _fail_run)):
+        tool = engine_mcp.mcp.Tool(
+            entry["name"], entry["description"], entry["inputSchema"], False
         )
-        for patcher in (state, register):
-            patcher.start()
-            self.addCleanup(patcher.stop)
-        self.server = ServerDouble()
+        server.tool_register(tool, run)
+    return server
 
-    # Records one registration in place of the dispatcher's table.
-    def handler_record(
-        self, name: str, version: int, fn: Callable[..., Any]
+
+# What a handler returned, made JSON: a `Failure` as its reply and its error.
+def _result_read(result: object) -> object:
+    if isinstance(result, engine_mcp.dispatch.Failure):
+        error = result.error
+        return {"failure": [result.reply, type(error).__name__, str(error)]}
+    return result
+
+
+# The work of a child: registers on a new server, then handles each line.
+def _lines_handle(lines: list[Any]) -> list[object]:
+    engine_mcp.handlers_register(_server_make())
+    return [
+        _result_read(_handler_call(engine_mcp.mcp_message, line))
+        for line in lines
+    ]
+
+
+# The work of a child: registers on a new server, leaves it the failure of a
+# request it handles alone, then calls the handler on the line.
+def _failure_left(line: Any) -> object:
+    server = _server_make()
+    engine_mcp.handlers_register(server)
+    server.message_handle(_payload_of(_gold_value("lines.unknown")))
+    return _handler_call(engine_mcp.mcp_message, line)
+
+
+# The work of a child: registers, then registers the handler's type again.
+def _register_twice() -> None:
+    engine_mcp.handlers_register(_server_make())
+    engine_mcp.dispatch.handler_register("mcp", 0, engine_mcp.mcp_message)
+
+
+# In the forked child: runs the work, writes how it ended, kills itself.
+def _child_end(work: Callable[[], object], path: str) -> None:
+    try:
+        try:
+            ending: dict[str, object] = {"returned": work()}
+        except BaseException as error:
+            ending = {
+                "raised": [type(error).__name__, str(error)],
+                "trace": traceback.format_exc(),
+            }
+        text = json.dumps(ending)
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(text)
+    except BaseException:
+        # The parent finds no ending, so the failure goes to stderr.
+        sys.stderr.write(traceback.format_exc())
+        sys.stderr.flush()
+    finally:
+        os.kill(os.getpid(), signal.SIGKILL)
+
+
+# Gives each test a scratch directory in `build/` and runs its work in
+# children.
+class ScratchCase(unittest.TestCase):
+    # Makes the scratch directory.
+    def setUp(self) -> None:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+        scratch = tempfile.TemporaryDirectory(dir=_BUILD_PATH)
+        self.addCleanup(scratch.cleanup)
+        self.scratch = scratch.name
+
+    # Runs the work in a forked child and returns how it ended.
+    def child_run(self, work: Callable[[], object]) -> dict[str, Any]:
+        path = os.path.join(self.scratch, _ENDING_NAME)
+        sys.stdout.flush()
+        sys.stderr.flush()
+        pid = os.fork()
+        if pid == 0:
+            _child_end(work, path)
+        status = os.waitpid(pid, 0)[1]
+        self.assertEqual(os.waitstatus_to_exitcode(status), -signal.SIGKILL)
+        with open(path, encoding="utf-8") as file:
+            ending: dict[str, Any] = json.load(file)
+        os.remove(path)
+        return ending
+
+    # Runs the work in a child and returns what it returned.
+    def child_value(self, work: Callable[[], object]) -> Any:
+        ending = self.child_run(work)
+        if "raised" in ending:
+            self.fail(ending["trace"])
+        return ending["returned"]
+
+    # Runs the work in a child and checks the type and the text it raised.
+    def child_raise(
+        self,
+        work: Callable[[], object],
+        kind: type[BaseException],
+        message: str,
     ) -> None:
-        self.handlers.append((name, version, fn))
+        ending = self.child_run(work)
+        if "returned" in ending:
+            self.fail(f"nothing was raised: {ending['returned']!r}")
+        expected = [kind.__name__, message]
+        self.assertEqual(ending["raised"], expected, ending["trace"])
 
-    # Registers the handler on the server double and returns it.
-    def handler_get(self) -> Callable[..., Any]:
-        server: Any = self.server
-        engine_mcp.handlers_register(server)
-        (fn,) = [fn for kind, _, fn in self.handlers if kind == "mcp"]
-        return fn
-
-    # Queues the server's answers to one message: a response and a failure.
-    def answers_queue(self, response: Any, failure: Any) -> None:
-        self.server.answers.setdefault("message_handle", []).append(response)
-        self.server.answers.setdefault("failure_take", []).append(failure)
-
-    # Checks a result is a `Failure` of the reply and the error, by its name.
-    def failure_check(
-        self, result: Any, reply: dict[int | str, Any], error: BaseException
+    # Checks a cascade the server wrote of an exception of the type and text.
+    def cascade_check(
+        self, cascade: dict[str, Any], kind: str, message: str
     ) -> None:
-        self.assertEqual(type(result).__name__, "Failure")
-        self.assertEqual(result.reply, reply)
-        self.assertIs(result.error, error)
-
-    # Calls `fn` and checks the type and the text of what it raises.
-    def raise_check(
-        self, kind: type[Exception], message: str, fn: Callable[[], object]
-    ) -> None:
-        with self.assertRaises(kind) as caught:
-            fn()
-        self.assertEqual(str(caught.exception), message)
+        self.assertEqual(sorted(cascade), ["message", "stack"])
+        self.assertEqual(cascade["message"], message)
+        self.assertTrue(cascade["stack"].endswith(f"{kind}: {message}"))
 
 
-# Tests the exchange that opens a session, on the server double.
-class TestExchange(IsolatedCase):
+# Tests the exchange that opens a session, and the answers after a fault.
+class TestExchange(ScratchCase):
     # Opening a session replies to `initialize` and `tools/list` only.
     def test_session_opened(self) -> None:
-        handler = self.handler_get()
         names = ("initialize", "initialized", "list")
         lines = [_gold_value(f"lines.{name}") for name in names]
         expected = [
-            _gold_value("lines.initialize_reply"),
+            _gold_raw("lines.initialize_reply"),
             None,
-            _gold_value("lines.list_reply"),
+            _gold_raw("lines.list_reply"),
         ]
-        for reply in expected:
-            response = None if reply is None else _payload_of(reply)
-            self.answers_queue(response, None)
-        replies = [_handler_call(handler, line) for line in lines]
-        self.assertEqual(replies, expected)
-        messages = [call[1] for call in self.server.calls[::2]]
-        self.assertEqual(messages, [_payload_of(line) for line in lines])
+        work = functools.partial(_lines_handle, lines)
+        self.assertEqual(self.child_value(work), expected)
 
     # A request pushed with no wire id gets a reply without `r`.
     def test_request_pushed(self) -> None:
-        handler = self.handler_get()
-        reply = _gold_value("lines.ping_pushed_reply")
-        self.answers_queue(_payload_of(reply), None)
-        line = _gold_value("lines.ping_pushed")
-        self.assertEqual(_handler_call(handler, line), reply)
+        work = functools.partial(
+            _lines_handle, [_gold_value("lines.ping_pushed")]
+        )
+        expected = [_gold_raw("lines.ping_pushed_reply")]
+        self.assertEqual(self.child_value(work), expected)
 
     # An error response is the reply of a `Failure` holding the exception.
     def test_error_response(self) -> None:
-        handler = self.handler_get()
-        error = RuntimeError("kept")
-        reply = _gold_value("lines.unknown_reply")
-        self.answers_queue(_payload_of(reply), error)
-        result = _handler_call(handler, _gold_value("lines.unknown"))
-        self.failure_check(result, reply, error)
+        work = functools.partial(_lines_handle, [_gold_value("lines.unknown")])
+        (ended,) = self.child_value(work)
+        reply, kind, message = ended["failure"]
+        text = _text_get("mcp_method_unknown")
+        self.assertEqual([kind, message], ["RpcError", text])
+        cascade = reply["error"].pop("data")
+        self.assertEqual(reply, _gold_raw("lines.unknown_reply"))
+        self.cascade_check(cascade, kind, text)
 
     # A tool's exception is the `isError` reply of a `Failure` holding it.
     def test_tool_raises(self) -> None:
-        handler = self.handler_get()
-        error = ValueError("boom")
-        reply = _gold_value("lines.call_reply")
-        self.answers_queue(_payload_of(reply), error)
-        result = _handler_call(handler, _gold_value("lines.call"))
-        self.failure_check(result, reply, error)
+        work = functools.partial(_lines_handle, [_gold_value("lines.call")])
+        (ended,) = self.child_value(work)
+        reply, kind, message = ended["failure"]
+        self.assertEqual([kind, message], ["ValueError", _TOOL_FAILURE])
+        result = reply.pop("result")
+        self.assertEqual(reply, _gold_raw("lines.call_reply"))
+        self.assertIs(result["isError"], True)
+        (block,) = result["content"]
+        self.assertEqual(block["type"], "text")
+        self.cascade_check(json.loads(block["text"]), kind, message)
 
 
 # Tests how the message reaches the server and the response comes back.
-class TestPass(IsolatedCase):
-    # The server gets the members of the message as they came, in order.
-    def test_members_passed(self) -> None:
-        handler = self.handler_get()
-        for line in _gold_value("lines.passed"):
-            with self.subTest(line=line):
-                self.server.calls.clear()
-                self.answers_queue(None, None)
-                self.assertIsNone(_handler_call(handler, line))
-                message = _payload_of(line)
-                passed = self.server.calls[0][1]
-                self.assertEqual(
-                    self.server.calls,
-                    [("message_handle", message), ("failure_take",)],
-                )
-                self.assertEqual(list(passed), list(message))
+class TestPass(ScratchCase):
+    # Each message the server takes is answered, a notification by nothing.
+    def test_messages_answered(self) -> None:
+        work = functools.partial(_lines_handle, _gold_value("lines.passed"))
+        expected = _gold_raw("lines.passed_replies")
+        self.assertEqual(self.child_value(work), expected)
+
+    # A tool gets the arguments of the call as they came, in their order.
+    def test_arguments_passed(self) -> None:
+        line = _gold_value("lines.call_echo")
+        work = functools.partial(_lines_handle, [line])
+        expected = [_gold_raw("lines.call_echo_reply")]
+        self.assertEqual(self.child_value(work), expected)
 
     # The response is the payload of the reply, and the wire id is separate.
     def test_response_replied(self) -> None:
-        handler = self.handler_get()
-        reply = _gold_value("lines.ping_reply")
-        self.answers_queue(_payload_of(reply), None)
-        line = _gold_value("lines.ping")
-        self.assertEqual(_handler_call(handler, line), reply)
+        work = functools.partial(_lines_handle, [_gold_value("lines.ping")])
+        expected = [_gold_raw("lines.ping_reply")]
+        self.assertEqual(self.child_value(work), expected)
 
-    # No response means nothing to reply.
-    def test_response_none(self) -> None:
-        handler = self.handler_get()
-        self.answers_queue(None, None)
-        self.assertIsNone(_handler_call(handler, _gold_value("lines.ping")))
-
-    # A failure kept with no response raises: a `Failure` needs a reply.
+    # A failure the server keeps when no response comes raises: a `Failure`
+    # needs a reply.
     def test_failure_unanswered(self) -> None:
-        handler = self.handler_get()
-        error = RuntimeError("kept")
-        self.answers_queue(None, error)
         line = _gold_value("lines.initialized")
-        with self.assertRaises(RuntimeError) as caught:
-            _handler_call(handler, line)
-        self.assertIs(caught.exception, error)
+        self.child_raise(
+            functools.partial(_failure_left, line),
+            engine_mcp.mcp.RpcError,
+            _text_get("mcp_method_unknown"),
+        )
 
     # Called before the registration the handler raises.
     def test_called_early(self) -> None:
         line = _gold_value("lines.initialized")
-        self.raise_check(
+        self.child_raise(
+            functools.partial(_handler_call, engine_mcp.mcp_message, line),
             RuntimeError,
             _text_get("engine_mcp_not_registered"),
-            lambda: _handler_call(engine_mcp.mcp_message, line),
         )
 
-    # The handler is registered once, under `mcp` at version 0.
+    # The handler is registered under `mcp` at version 0, which the
+    # dispatcher then refuses to register again.
     def test_handlers_registered(self) -> None:
-        server: Any = self.server
-        engine_mcp.handlers_register(server)
-        self.assertEqual(self.handlers, [("mcp", 0, engine_mcp.mcp_message)])
+        self.child_raise(
+            _register_twice,
+            ValueError,
+            _text_get("dispatch_handler_twice"),
+        )
