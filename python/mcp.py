@@ -19,8 +19,7 @@
 # answer, then raises it. A test driver reads `isError`, or the error, to
 # tell an exception from the expected response. A message that is not a
 # `JSON-RPC 2.0` request is answered with -32600 and is no exception, as in
-# TypeScript. Continuing after an exception is deferred, its design in
-# TAP_PLAN.md section 5.4.
+# TypeScript. Continuing after an exception is deferred.
 
 import dispatch, json
 from collections.abc import Callable

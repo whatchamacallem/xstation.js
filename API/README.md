@@ -2,8 +2,8 @@
 
 No code was written by the maintainer.
 
-The external API of every module TAP_PLAN.md names, before any is written.
-Nothing here runs. A file changes only when TAP_PLAN.md changes with it.
+The external API of the modules, before any is written. Nothing here runs.
+A file here changes before the code it describes.
 
 - `python/*.pyi`: the public names of each Python module, as stub
   files. A handler module lists one function per
@@ -45,8 +45,7 @@ The server's first line is `tap.start`, a request with the fixed id 101,
 carrying the settings and, in debug mode, the test settings. The AI worker
 answers it with an Empty reply. Every later request of the server takes its
 id from `dispatch.id_next`, which starts at 102 in both languages. No
-program but the test suites runs: the bring up is a TAP run, see
-TAP_PLAN.md.
+program but the test suites runs: the bring up is a TAP run.
 
 ## Name forms
 

@@ -707,7 +707,7 @@ def kill_check(ttyd: TtydServer, pid: int) -> str:
     )
 
 
-# The gold of a root's wire rungs, by the schema of `TAP_PLAN.md` 4.3.
+# The gold of a root's wire rungs.
 def gold_make(name: str, rungs: list[str]) -> dict[str, Any]:
     fixed: dict[str, Any] = gold_value("rungs")
     restart_path = os.path.join(_PYTHON_PATH, fixed["restart_name"])

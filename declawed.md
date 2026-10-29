@@ -89,6 +89,10 @@ already know. No line numbers are allowed as they are fragile.
 - Do not look at past git commits unless asked or debugging. Deletion of code
   and documents by the maintainer may indicate a desire to remove the
   information from the conversation instead of waiting for AI to re-read it.
+- Asking about deleted prose in a single sentence without further
+  explanation is not allowed. A question the maintainer deleted may have
+  rested on the premise of a forbidden implementation, which made it
+  impossible to answer.
 - Do not reference `CLAUDE.md` or `declawed.md` outside this doc. Do not
   explicitly mention the tests being tested themselves in other source.
 - The source formatters may need to run twice to be stable. Alert the user
@@ -154,6 +158,12 @@ manager without request.
   is not possible to fully test a module without mocking environments that are
   not available then split the test suites for that module and run the later
   suites as it becomes possible to run them on real code.
+- Directly changing a module's internal state during testing to emulate a
+  test environment is forbidden. All tests go through the APIs being tested
+  and show normal operation. They do not use isolated operation of an
+  internal component in a way that violates separation of concerns.
+- `internationalization` does not count as a module when labelling another
+  module's test a unit test; otherwise there would be no unit tests.
 
 ### Accidental-Requirements, Requirements-Data-Loss, and Requirements-Refusal
 

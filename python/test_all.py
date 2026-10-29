@@ -8,9 +8,9 @@
 # normal-test run runs the suites of both labels. Each suite's label is
 # written beside it, and category.py holds the labels, the options and their
 # checks. It runs the Python test modules in the testing order of the module
-# DAG, TAP_PLAN.md section 3.3: the tests of the TAP producer and consumer
-# first, then those of the infrastructure for testing, the harness and
-# category, then each next module the DAG allows. Each is one block of one
+# DAG: the tests of the TAP producer and consumer first, then those of the
+# infrastructure for testing, the harness and category, then each next
+# module the DAG allows. Each is one block of one
 # TAP stream that goes to stdout a line at a time; then it checks that
 # stream with the TAP consumer and exits 1 unless it is well formed and
 # holds exactly the failing points --failures expects, none by default, a
@@ -57,7 +57,7 @@ _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
 # The build directory of the checkout, for bytecode and scratch files.
 _BUILD_PATH = os.path.join(os.path.dirname(_PYTHON_PATH), "build")
 
-# The test modules and their labels, in the order of `TAP_PLAN.md` 3.3.
+# The test modules and their labels, in the testing order of the module DAG.
 _MODULES: list[tuple[str, str]] = [
     ("test_tap_producer", "smoke-test"),
     ("test_tap_consumer", "smoke-test"),
