@@ -181,7 +181,8 @@ namespace test_node {
       jslb.field_get(header, "id") !== constants.first_id
     ) {
       throw new Error(
-        `the first line is not tap.start with i 101: ${jslb.line_render(first)}`,
+        "the first line is not tap.start with i 101: " +
+          jslb.line_render(first),
       );
     }
     const payload = jslb.payload_of(first) as unknown as lines.TapStart;

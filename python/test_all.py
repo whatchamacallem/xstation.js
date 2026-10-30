@@ -19,8 +19,11 @@
 # process and given the category, the checks of test_posix.py, the wire test
 # and the browser test, and ends at the first that fails, with its exit
 # code. Every suite and block has a timer, the gold record's module_seconds.
+# Before the first block, in this process and outside every timer, the run
+# has third_party_fetch.py fetch each pinned third party file that is not in
+# place with its pinned digest, and a failed fetch fails the run there.
 #
-# The suites run in strict dependency order, in five phases that only the
+# The suites run in strict dependency order, in seven phases that only the
 # order of the lists shows. Three are of Python: the unit suites,
 # test_<module>.py, by layer; then the pair test of the TAP producer and
 # consumer, test_tap_pair.py, and the integration suites,
@@ -30,7 +33,9 @@
 # in Node: the unit blocks, test_<module>.ts, by layer; then the pair test
 # of the TypeScript TAP producer and the Python consumer, test_tap_pair_ts.py,
 # and the integration blocks, test_integrate_<module>.ts, by the layer of
-# their block. A module calls into another when it imports it, at the top
+# their block. Two are of group B, the TypeScript blocks run in headless
+# Chrome: the unit blocks, then the integration blocks, each by layer as in
+# A. A module calls into another when it imports it, at the top
 # or in a function, loads its file, runs it as a program, or has it run
 # inside the block of its suite, as this file has the TAP producer and
 # consumer in every block; a call of a function it was handed is no call
@@ -62,6 +67,31 @@
 # far end of a block's fetches, starts from the gold's script before the
 # first block that needs it, and stops when the stream ends, before the
 # checks after it.
+#
+# A block of group B runs in a page load of its own in the one browser of the
+# run, chrome-headless-shell on its DevTools pipe. Before the first B block,
+# outside every block timer, the run builds the headless page,
+# build/headless.html, with page_build.page_build, starts the browser, and
+# adds the binding realm_line, which stands on every later load; a build or
+# a start that fails fails the run. The page comes from the local HTTP
+# server, from the server of the block's script if it has one, so that its
+# fetches are of the page's own origin, and from that of the gold's
+# typescript.test_headless.server if not. Under the block's timer the block
+# loads the page, then calls test_headless.realm_start(BLOCK, FAILFAST,
+# LINE) by Runtime.evaluate, LINE the base64 of tap.start; every DevTools
+# wait of the block ends at the timer's end alone, so that the gold's
+# seconds are the block's one limit. Each call of
+# realm_line carries the base64 of one of the realm's lines: the Empty reply
+# first, then each tap.line, whose text goes to the relay as in A. A worker
+# block also sends verbose.put pushes, whose entries go to the block's log
+# with the page's console messages, and the settings.set its worker sends
+# toward the UI thread, which no UI thread takes there. Any other line, as an
+# error or a fault, fails the block. The realm's stream ends at its last
+# line, its parent plan or a bail out, and the block then loads about:blank,
+# which ends the page and its worker, before the relay ends. Any failure of
+# a block fails the run, the block's log in its cause. The browser stops when
+# the stream ends, before the servers, so that it holds none of their
+# connections.
 #
 # After each module it writes "<module>: <label>, <s> s" to stderr, so that
 # stdout stays the TAP stream. After the checks of test_posix.py it prints
@@ -97,13 +127,14 @@
 # stdio suite, or a TypeScript block, for none. It counts in this process,
 # so it refuses --tty.
 
-import argparse, functools, importlib, os, signal, subprocess, sys, tempfile
-import time, types, unittest
+import argparse, base64, contextlib, functools, importlib, json, os, signal
+import subprocess, sys, tempfile, time, types, unittest
 from typing import Any, IO, NoReturn, TYPE_CHECKING, cast
 
 # Only type checks import these here, and `main` imports `line_coverage` first.
 if TYPE_CHECKING:
-    import jslb, line_coverage, local_http, tap_consumer, tap_producer
+    import devtools, jslb, line_coverage, local_http, tap_consumer
+    import tap_producer
 
 # The python directory of the checkout, which holds this script.
 _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -150,6 +181,7 @@ _MODULES: list[tuple[str, str]] = [
     ("test_mcp", "smoke-test"),
     ("test_page_build", "smoke-test"),
     ("test_page_build_node", "smoke-test"),
+    ("test_page_build_tsc", "smoke-test"),
     ("test_tap_loop", "smoke-test"),
     ("test_echo_loop", "smoke-test"),
     ("test_engine_mcp", "smoke-test"),
@@ -217,8 +249,38 @@ _A_INTEGRATION: list[tuple[str, str]] = [
     ("test_integrate_provider_script.ts", "smoke-test"),
 ]
 
+# Group B's unit phase, the TypeScript blocks of headless Chrome, by layer.
+_B_UNIT: list[tuple[str, str]] = [
+    ("test_error_overlay.ts", "smoke-test"),
+    ("test_error_overlay_worker.ts", "smoke-test"),
+    ("test_overlay.ts", "smoke-test"),
+    ("test_substrate_store.ts", "smoke-test"),
+    ("test_jslb_decode.ts", "smoke-test"),
+    ("test_console_view.ts", "smoke-test"),
+    ("test_media_cache.ts", "smoke-test"),
+    ("test_script.ts", "smoke-test"),
+    ("test_worker_ai.ts", "smoke-test"),
+    ("test_page.ts", "smoke-test"),
+    ("test_tools_browser.ts", "smoke-test"),
+    ("test_agent.ts", "smoke-test"),
+    ("test_boot.ts", "smoke-test"),
+]
+
+# Group B's integration phase, by the layer of each block.
+_B_INTEGRATION: list[tuple[str, str]] = [
+    ("test_integrate_substrate.ts", "smoke-test"),
+    ("test_integrate_media.ts", "smoke-test"),
+    ("test_integrate_worker_ai.ts", "smoke-test"),
+    ("test_integrate_console_view.ts", "smoke-test"),
+    ("test_substrate_crash.ts", "smoke-test"),
+    ("test_integrate_page.ts", "smoke-test"),
+    ("test_integrate_tools_browser.ts", "smoke-test"),
+    ("test_agent_faults.ts", "smoke-test"),
+    ("test_integrate_agent.ts", "smoke-test"),
+]
+
 # Every suite and block of a run, in the phases of the order above.
-_PHASES = _MODULES + _A_UNIT + _A_INTEGRATION
+_PHASES = _MODULES + _A_UNIT + _A_INTEGRATION + _B_UNIT + _B_INTEGRATION
 
 # The suites and blocks that fail by design, which only `--module` runs.
 _FAILING: list[tuple[str, str]] = [
@@ -236,10 +298,39 @@ _NODE_BLOCKS = frozenset(
     if name.endswith(_TS_SUFFIX)
 )
 
+# The TypeScript blocks that a page load runs, those of group B.
+_CHROME_BLOCKS = frozenset(name for name, _ in _B_UNIT + _B_INTEGRATION)
+
 # The gold id of the script of the local HTTP server, by each block it serves.
 _SERVED: dict[str, str] = {
     "test_integrate_http.ts": "typescript.test_integrate_http.server",
+    "test_integrate_media.ts": "typescript.test_integrate_media.server",
+    "test_integrate_page.ts": "typescript.test_integrate_page.server",
 }
+
+# The gold id of the headless realm's own: its window, its page's server.
+_HEADLESS_ID = "typescript.test_headless"
+
+# The template of the headless page, and its name in `build`.
+_PAGE_NAME = "headless"
+
+# The headless page's path on the local HTTP server, which serves `build`.
+_PAGE_PATH = f"/build/{_PAGE_NAME}.html"
+
+# The binding through which the headless realm sends each of its lines.
+_BINDING_NAME = "realm_line"
+
+# The page whose load ends a realm, its page and its worker.
+_BLANK_URL = "about:blank"
+
+# The push that carries a worker block's verbose entries.
+_VERBOSE_TYPE = "verbose.put"
+
+# The push a worker block sends toward the UI thread, which none takes there.
+_NOTICE_TYPE = "settings.set"
+
+# What the page's console messages are written after in a block's log.
+_CONSOLE_SOURCE = "console"
 
 # The program that runs a realm.
 _NODE_PROGRAM = "node"
@@ -269,7 +360,6 @@ _READ_BYTES = 65536
 _LATER: list[tuple[str, str]] = [
     ("test_bootstrap_dash", "dash"),
     ("test_devtools_powershell", "powershell.exe, and Chrome or Edge"),
-    ("test_page_build_tsc", "the archives of third_party_fetch.py"),
     ("test_reformat_formatters", "ruff, shfmt and prettier"),
     ("test_test_posix_formatters", "ruff"),
 ]
@@ -445,26 +535,69 @@ def reply_check(line: jslb.Object) -> None:
         )
 
 
+# Feeds the text of a `tap.line` to the relay, refusing any other line.
+def line_relay(runner: tap_producer.TAPTestRunner, line: jslb.Object) -> str:
+    import jslb
+
+    header: jslb.Object = line[0]
+    payload = jslb.payload_of(line)
+    if (
+        jslb.field_get(header, "type") != _LINE_TYPE
+        or jslb.field_get(header, "id") is not None
+        or jslb.field_get(header, "reply") is not None
+        or payload.get("language") != _LANGUAGE
+    ):
+        raise RuntimeError(
+            f"the realm wrote {jslb.line_render(line)}, not a"
+            f" {_LINE_TYPE} of {_LANGUAGE}"
+        )
+    text: str = payload["text"]
+    runner.relay_feed(text)
+    return text
+
+
+# The local HTTP servers of the run, by the gold id of each one's script.
+class ServerPool:
+    # Holds no server yet.
+    def __init__(self) -> None:
+        self._servers: dict[str, local_http.LocalServer] = {}
+
+    # Starts the server of the gold's script, unless it is serving already.
+    def server_need(self, script: str) -> None:
+        import harness, local_http
+
+        if script not in self._servers:
+            self._servers[script] = local_http.LocalServer(
+                harness.gold_get(script), _BUILD_PATH
+            )
+
+    # Stops each server started, once the stream has ended.
+    def servers_stop(self) -> None:
+        for server in self._servers.values():
+            server.server_stop()
+
+
 # Runs each TypeScript block of group A in a node realm of its own.
 class RealmRunner:
-    # Holds no bundle, `tap.start` or server yet: each is made at first need.
+    # Holds no bundle or `tap.start` yet: each is made at first need.
     def __init__(
         self,
         runner: tap_producer.TAPTestRunner,
         reader: tap_consumer.StreamReader,
+        servers: ServerPool,
     ) -> None:
         self._runner = runner
         self._reader = reader
+        self._servers = servers
         self._bundle: str | None = None
         self._start = b""
         self._settings: dict[str, Any] = {}
-        self._servers: dict[str, local_http.LocalServer] = {}
 
     # Builds the bundle and `tap.start` once, and starts the block's server.
     def block_prepare(
         self, name: str, limit: float | None, started: float
     ) -> None:
-        import category, harness, local_http, page_build
+        import category, page_build
 
         if self._bundle is None:
             what = "the Node bundle"
@@ -473,11 +606,8 @@ class RealmRunner:
             self._bundle = page_build.node_build(_BUILD_PATH)
             timer_stop()
             self._start, self._settings = start_encode()
-        script = _SERVED.get(name)
-        if script is not None and script not in self._servers:
-            self._servers[script] = local_http.LocalServer(
-                harness.gold_get(script), _BUILD_PATH
-            )
+        if name in _SERVED:
+            self._servers.server_need(_SERVED[name])
 
     # Runs the block in a realm, relaying its stream, the realm killed after.
     def block_run(self, name: str) -> None:
@@ -535,7 +665,7 @@ class RealmRunner:
             for piece in (data, b""):
                 for line in decoder.bytes_feed(piece):
                     if replied:
-                        self.line_relay(line)
+                        line_relay(self._runner, line)
                     else:
                         reply_check(line)
                         replied = True
@@ -546,28 +676,191 @@ class RealmRunner:
             raise RuntimeError(f"the realm exited with {code}")
         self._runner.relay_end()
 
-    # Feeds the text of a `tap.line` to the relay, refusing any other line.
-    def line_relay(self, line: jslb.Object) -> None:
-        import jslb
 
-        header: jslb.Object = line[0]
-        payload = jslb.payload_of(line)
-        if (
-            jslb.field_get(header, "type") != _LINE_TYPE
-            or jslb.field_get(header, "id") is not None
-            or jslb.field_get(header, "reply") is not None
-            or payload.get("language") != _LANGUAGE
-        ):
+# The lane of one block's realm in a page: its lines, its log, where it stands.
+class PageLane:
+    # Starts before the Empty reply, the realm's log written to `log` at once.
+    def __init__(
+        self,
+        runner: tap_producer.TAPTestRunner,
+        loaded: dict[str, Any],
+        log: IO[bytes],
+    ) -> None:
+        import jslb, tap_consumer
+
+        self._runner = runner
+        self._log = log
+        self._decoder = jslb.LineDecoder(
+            loaded["line_max"],
+            loaded["blob_max"],
+            loaded["overflow_bytes"],
+            sink_refuse,
+        )
+        self._parser = tap_consumer.Parser()
+        self._replied = False
+        self.ended = False
+        self.calls = 0
+
+    # Writes one text of the realm's log, after what it came from.
+    def log_write(self, source: str, text: str) -> None:
+        self._log.write(f"{source}: {text}\n".encode("utf-8"))
+
+    # Takes one call of the binding, the base64 of the realm's bytes.
+    def text_take(self, text: str) -> None:
+        data = base64.b64decode(text, validate=True)
+        # Feeding nothing raises at once a fault the decoder held back.
+        for piece in (data, b""):
+            for line in self._decoder.bytes_feed(piece):
+                self.line_take(line)
+        self.calls += 1
+
+    # Logs a verbose entry, relays a TAP line, and refuses any other line.
+    def line_take(self, line: jslb.Object) -> None:
+        import jslb, tap_consumer
+
+        kind = jslb.field_get(line[0], "type")
+        # The notice of the settings is the UI thread's, which no block runs.
+        if kind == _NOTICE_TYPE:
+            return
+        if kind == _VERBOSE_TYPE:
+            payload = jslb.payload_of(line)
+            for entry in payload["lines"]:
+                self.log_write(payload["thread"], entry["text"])
+        elif not self._replied:
+            reply_check(line)
+            self._replied = True
+        elif self.ended:
             raise RuntimeError(
-                f"the realm wrote {jslb.line_render(line)}, not a"
-                f" {_LINE_TYPE} of {_LANGUAGE}"
+                f"the realm wrote {jslb.line_render(line)} after its stream"
+                " ended"
             )
-        self._runner.relay_feed(payload["text"])
+        else:
+            parsed = self._parser.parse_line(line_relay(self._runner, line))
+            self.ended = (
+                isinstance(parsed, (tap_consumer.Plan, tap_consumer.Bail))
+                and parsed.depth == 0
+            )
 
-    # Stops each server started, once the stream has ended.
-    def servers_stop(self) -> None:
-        for server in self._servers.values():
-            server.server_stop()
+    # Raises unless the realm's lines ended between two lines.
+    def end_check(self) -> None:
+        if not self._decoder.idle():
+            raise EOFError("the realm's lines ended in a line")
+
+
+# Runs each TypeScript block of group B in a page load of its own.
+class PageRunner:
+    # Holds no page, browser or `tap.start` yet: each is made at first need.
+    def __init__(
+        self,
+        runner: tap_producer.TAPTestRunner,
+        reader: tap_consumer.StreamReader,
+        servers: ServerPool,
+    ) -> None:
+        self._runner = runner
+        self._reader = reader
+        self._servers = servers
+        self._stack = contextlib.ExitStack()
+        self._browser: devtools.Browser | None = None
+        self._line = ""
+        self._settings: dict[str, Any] = {}
+        self._lane: PageLane | None = None
+
+    # Builds the page and `tap.start`, starts the browser, once, then a server.
+    def block_prepare(
+        self, name: str, limit: float | None, started: float
+    ) -> None:
+        import category, devtools, harness, page_build
+
+        if self._browser is None:
+            what = "the headless page and the browser"
+            elapsed = time.monotonic() - started
+            timer_start(category.alarm_plan(what, None, limit, elapsed))
+            page_build.page_build(_PAGE_NAME, _PAGE_NAME)
+            start, self._settings = start_encode()
+            self._line = base64.b64encode(start).decode("ascii")
+            browser = self._stack.enter_context(
+                devtools.Browser(
+                    harness.gold_get(f"{_HEADLESS_ID}.window_width"),
+                    harness.gold_get(f"{_HEADLESS_ID}.window_height"),
+                    devtools.LinuxPipe(),
+                )
+            )
+            browser.console_follow(self.console_take)
+            browser.binding_add(_BINDING_NAME, self.binding_call)
+            self._browser = browser
+            timer_stop()
+        self._servers.server_need(page_script(name))
+
+    # Runs the block in a fresh page load, relaying its stream, then ends it.
+    def block_run(self, name: str, end: float) -> None:
+        import harness
+
+        block = name.removesuffix(_TS_SUFFIX)
+        browser = cast("devtools.Browser", self._browser)
+        script = harness.gold_get(page_script(name))
+        url = f"http://{script['host']}:{script['port']}{_PAGE_PATH}"
+        call = (
+            f"test_headless.realm_start({json.dumps(block)},"
+            f" {json.dumps(self._runner.failfast)}, {json.dumps(self._line)})"
+        )
+        self._runner.block_relay(block, self._reader)
+        with tempfile.TemporaryFile(dir=_BUILD_PATH, buffering=0) as log:
+            lane = PageLane(self._runner, self._settings, log)
+            self._lane = lane
+            try:
+                client = browser.client_get()
+                # The end of the block's timer ends each of its waits, alone.
+                client.limit_set(end)
+                browser.page_open(url)
+                browser.script_evaluate(call)
+                # A wait for each next line, the block's timer over them all.
+                while not lane.ended:
+                    calls = lane.calls
+                    client.events_pump(
+                        f"the next line of the realm of {name}",
+                        lambda: lane.calls > calls,
+                    )
+                browser.page_open(_BLANK_URL)
+                lane.end_check()
+            except Exception as error:
+                log.seek(0)
+                cause = RuntimeError(
+                    "the realm's log:\n" + log.read().decode("utf-8")
+                )
+                cause.__cause__ = error
+                raise RuntimeError(
+                    f"the realm of {name} failed: {error}"
+                ) from cause
+            finally:
+                self._lane = None
+        self._runner.relay_end()
+
+    # Gives the payload of a call of the binding to the running block's lane.
+    def binding_call(self, text: str) -> None:
+        self.lane_get().text_take(text)
+
+    # Writes a message of the page's console to the running block's log.
+    def console_take(self, text: str) -> None:
+        self.lane_get().log_write(_CONSOLE_SOURCE, text)
+
+    # The lane of the block running, raising when none is.
+    def lane_get(self) -> PageLane:
+        if self._lane is None:
+            raise RuntimeError(
+                "the page spoke while no block of B was running"
+            )
+        return self._lane
+
+    # Stops the browser, if started, once the stream has ended.
+    def browser_stop(self) -> None:
+        self._stack.close()
+
+
+# The gold id of the script of the server of a B block's page.
+def page_script(name: str) -> str:
+    if name in _SERVED:
+        return _SERVED[name]
+    return f"{_HEADLESS_ID}.server"
 
 
 # Runs the suites and blocks here, one timed block each, to the first failing.
@@ -585,24 +878,32 @@ def stream_run(
     runner = tap_producer.TAPTestRunner(failfast or limit is not None)
     runner.set_stream(stream.line_write)
     loader = unittest.TestLoader()
-    realms = RealmRunner(runner, stream.reader)
+    servers = ServerPool()
+    realms = RealmRunner(runner, stream.reader, servers)
+    pages = PageRunner(runner, stream.reader, servers)
     try:
         for index, (name, label) in enumerate(modules):
             failed = stream.reader.failed
             realm = name in _NODE_BLOCKS
+            page = name in _CHROME_BLOCKS
             if realm:
                 realms.block_prepare(name, limit, started)
+            elif page:
+                pages.block_prepare(name, limit, started)
             begun = time.monotonic()
-            what = f"block {name}" if realm else f"module {name}"
-            timer_start(
-                category.alarm_plan(
-                    what, module_seconds, limit, begun - started
-                )
+            what = f"block {name}" if realm or page else f"module {name}"
+            plan = category.alarm_plan(
+                what, module_seconds, limit, begun - started
             )
+            timer_start(plan)
             if count is not None:
                 count.suite_enter(paths_counted(name))
             if realm:
                 realms.block_run(name)
+            elif page:
+                # A block has seconds of its own, so its alarm has a plan.
+                seconds, _ = cast(tuple[float, str], plan)
+                pages.block_run(name, begun + seconds)
             else:
                 load = functools.partial(suite_load, loader, name)
                 runner.module_run(name, load)
@@ -619,7 +920,10 @@ def stream_run(
                 coverage_check(count, modules, index)
         runner.run_end()
     finally:
-        realms.servers_stop()
+        try:
+            pages.browser_stop()
+        finally:
+            servers.servers_stop()
 
 
 # Runs the suites on the TAP suite server over a pty, relaying its stream.
@@ -719,6 +1023,10 @@ def main(arguments: list[str]) -> int:
             " the stream in another"
         )
     modules = modules_chosen(parser, parsed.module, chosen)
+    import third_party_fetch
+
+    # Bring up: the pins are in place before the first block and its timer.
+    third_party_fetch.pins_fetch()
     started = time.monotonic()
     limit = category.limit_seconds(chosen)
     stream = StreamWriter([name for name, _ in modules])

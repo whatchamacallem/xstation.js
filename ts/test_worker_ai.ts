@@ -2,16 +2,25 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the AI worker with a queue double, a port double and a wire
-// double: the owner table, the synchronous mode, the wire's tap in its full
-// and sized forms, the note of tty 1, the relays of the console and of the
-// settings, called through the handlers they register, and the cascade of a
-// fault sent as an `error` line by the end function `tap_start` takes, the
-// worker's own and the UI's.
-// The lines the tests send and expect and the texts of the notes and throws
-// are those of the gold record, test_settings.json. `tap_start` runs once
-// per worker, at bring up, which is its integration test, so no test here
-// calls it.
+// Tests of the AI worker on the UI side, in a page load of its own, where no
+// bring up has registered the types its relays register: the owner table,
+// the synchronous mode, the wire's tap in its full and sized forms, the note
+// of tty 1, the relays of the console's close and of the settings, and the
+// cascade of a fault sent as an `error` line by the end function `tap_start`
+// takes, the worker's own and the UI's. A relay runs on a real queue of
+// thread `ai` in synchronous mode, its handlers registered through the real
+// dispatch, its lanes linked local ports whose far ends are the test's, so
+// the whole exchange runs within the test's call: the test posts the UI's
+// lines at the far end of `ui` and reads what comes back there, and the far
+// end of `server` keeps each line and answers a request with the gold's
+// reply, as the server does, since the AI side handles `settings.put` too.
+// The tap's inner port is one of a linked pair, and the end function is the
+// test's own. The lines the tests send and expect and the texts of the notes
+// and throws are those of the gold record, test_settings.json. `tap_start`
+// runs once per worker, at bring up, whose line cases are
+// `test_integrate_worker_ai`, so no test here calls it. The relay of the
+// console's opening, which needs the console on tty 0, is the module
+// `test_worker_ai_console`, of group C.
 
 namespace test_worker_ai {
   // The values the tests use.
@@ -20,38 +29,15 @@ namespace test_worker_ai {
     put_blob_max: 7,
     // The bytes of the payload of `{"text": ""}`, around the text.
     text_payload_bytes: 11,
-    // The id the queue double answers for a request, chosen by its writer.
-    submit_id: 41,
   });
 
   // An object of fields by name.
   type FieldTable = { [key: string]: unknown };
 
-  // A line and the owner it was given to the queue for.
-  type Owned = [lines.Line, queue.ThreadName | undefined];
-
-  // The handlers the code under test registered, by line type.
-  const routed = new Map<string, dispatch.Handler>();
-
-  // A register that keeps each handler in `routed`, checked at version 0.
-  function register_route(
-    type: string,
-    version: number,
-    fn: dispatch.Handler,
-  ): void {
-    if (version !== 0) {
-      throw new Error(`${type} was registered at version ${String(version)}.`);
-    }
-    routed.set(type, fn);
-  }
-
-  // The handler registered for a type, which must have been registered.
-  function routed_get(type: string): dispatch.Handler {
-    const fn = routed.get(type);
-    if (fn === undefined) {
-      throw new Error(`No handler was registered for ${type}.`);
-    }
-    return fn;
+  // The test's end of a lane: its linked local port and the lines that came.
+  interface LaneEnd {
+    port: queue.LocalPort;
+    came: lines.Line[];
   }
 
   // A copy of a value of this module's gold, which the harness keeps frozen.
@@ -86,81 +72,30 @@ namespace test_worker_ai {
     throw new Error("Nothing was thrown.");
   }
 
-  // A port double: it keeps what is posted and hands lines to its receiver.
-  class PortDouble implements queue.Port {
-    readonly posted: lines.Line[] = [];
-    private receiver: ((line: lines.Line) => void) | undefined;
-
-    // Keeps a posted line.
-    line_post(line: lines.Line, _transfer: ArrayBuffer[]): void {
-      this.posted.push(line);
-    }
-
-    // Takes the receiver.
-    line_receive(fn: (line: lines.Line) => void): void {
-      this.receiver = fn;
-    }
-
-    // Hands a line to the receiver as if it came on this port.
-    line_send(line: lines.Line): void {
-      const receiver = this.receiver;
-      if (receiver === undefined) {
-        throw new Error("The port double has no receiver.");
-      }
-      receiver(line);
-    }
+  // Links the test's end to a local port, the end keeping each line that came.
+  function end_link(near: queue.LocalPort): LaneEnd {
+    const port = new queue.LocalPort(near);
+    const came: lines.Line[] = [];
+    port.line_receive((line) => {
+      came.push(line);
+    });
+    return { port, came };
   }
 
-  // A queue double: it answers the ids the test picks and keeps each line.
-  class TasksDouble {
-    readonly submitted: Owned[] = [];
-    readonly notified: Owned[] = [];
-    private readonly ids: number[];
-
-    // Takes the ids `task_submit` answers, in order.
-    constructor(ids: number[]) {
-      this.ids = [...ids];
-    }
-
-    // Keeps the request and its owner, and answers the next id picked.
-    task_submit(line: lines.Line, owner?: queue.ThreadName): number {
-      const id = this.ids.shift();
-      if (id === undefined) {
-        throw new Error("The queue double has no id left to answer.");
-      }
-      this.submitted.push([line, owner]);
-      return id;
-    }
-
-    // Keeps the notification and its owner.
-    line_notify(line: lines.Line, owner?: queue.ThreadName): void {
-      this.notified.push([line, owner]);
-    }
+  // Joins the queue to the thread by linked local ports, one end the test's.
+  function lane_make(
+    tasks: queue.TaskQueue,
+    thread: queue.ThreadName,
+  ): LaneEnd {
+    const near = new queue.LocalPort();
+    const end = end_link(near);
+    tasks.port_add(thread, near);
+    return end;
   }
 
-  // A wire double: it keeps each line `wire_end` sends, then calls back.
-  class WireDouble {
-    readonly ended: lines.Line[] = [];
-    // The number of lines kept when each callback ran.
-    readonly called: number[] = [];
-
-    // Keeps the line, then calls back as the server's close of the wire does.
-    wire_end(line: lines.Line, fn: () => void): void {
-      this.ended.push(line);
-      this.called.push(this.ended.length);
-      fn();
-    }
-  }
-
-  // A queue double answering the ids given, with no handler routed.
-  function tasks_make(ids: number[]): TasksDouble {
-    routed.clear();
-    return new TasksDouble(ids);
-  }
-
-  // The queue double as the queue the code under test takes.
-  function queue_of(tasks: TasksDouble): queue.TaskQueue {
-    return tasks as unknown as queue.TaskQueue;
+  // The AI thread's real queue in synchronous mode, by the worker's owners.
+  function tasks_make(): queue.TaskQueue {
+    return new queue.TaskQueue("ai", worker_ai.owners_make(), true);
   }
 
   // Whether a line was built in full names, as `settings.names_full()` says.
@@ -237,20 +172,21 @@ namespace test_worker_ai {
   export class TestWireTap extends unittest.TestCase {
     // Each line is noted as sent or received and passes unchanged.
     test_both_ways(): void {
-      const inner = new PortDouble();
+      const inner = new queue.LocalPort();
+      const far = end_link(inner);
       const notes: string[] = [];
       const tap = new worker_ai.WireTap(inner, (text) => {
         notes.push(text);
       });
       const sent = gold_line("kv_list_first");
       tap.line_post(sent, []);
-      this.assertTrue(inner.posted[0] === sent);
+      this.assertTrue(far.came[0] === sent);
       const taken: lines.Line[] = [];
       tap.line_receive((line) => {
         taken.push(line);
       });
       const received = gold_line("kv_list_reply");
-      inner.line_send(received);
+      far.port.line_post(received, []);
       this.assertTrue(taken[0] === received);
       this.assertEqual(notes, [
         gold_text("worker_ai_overlay_sent_first"),
@@ -260,7 +196,8 @@ namespace test_worker_ai {
 
     // A line whose rendering would not fit a verbose entry is noted by sizes.
     test_sizes_noted(): void {
-      const inner = new PortDouble();
+      const inner = new queue.LocalPort();
+      const far = end_link(inner);
       const notes: string[] = [];
       const tap = new worker_ai.WireTap(inner, (text) => {
         notes.push(text);
@@ -275,13 +212,13 @@ namespace test_worker_ai {
       };
       const sent = sized();
       tap.line_post(sent, []);
-      this.assertTrue(inner.posted[0] === sent);
+      this.assertTrue(far.came[0] === sent);
       const taken: lines.Line[] = [];
       tap.line_receive((line) => {
         taken.push(line);
       });
       const received = sized();
-      inner.line_send(received);
+      far.port.line_post(received, []);
       this.assertTrue(taken[0] === received);
       const payload = String(line_max + constants.text_payload_bytes);
       this.assertEqual(notes, [
@@ -295,7 +232,8 @@ namespace test_worker_ai {
 
     // The page's view forwarded as `verbose.put` passes and is not noted.
     test_forward_unshown(): void {
-      const inner = new PortDouble();
+      const inner = new queue.LocalPort();
+      const far = end_link(inner);
       const notes: string[] = [];
       const tap = new worker_ai.WireTap(inner, (text) => {
         notes.push(text);
@@ -303,110 +241,81 @@ namespace test_worker_ai {
       for (const name of ["verbose_put_full", "verbose_put"]) {
         const put = gold_line(name);
         tap.line_post(put, []);
-        this.assertTrue(inner.posted[inner.posted.length - 1] === put);
+        this.assertTrue(far.came[far.came.length - 1] === put);
       }
       const sent = gold_line("kv_list_second");
       tap.line_post(sent, []);
-      this.assertEqual(inner.posted.length, 3);
+      this.assertEqual(far.came.length, 3);
       this.assertEqual(notes, [gold_text("worker_ai_overlay_sent_second")]);
     }
 
     // A note goes to the overlay of tty 1 on the UI and to the log.
     test_note_logged(): void {
-      const tasks = tasks_make([]);
+      const tasks = tasks_make();
+      const ui = lane_make(tasks, "ui");
       const logged: string[] = [];
-      const note = worker_ai.note_make(queue_of(tasks), (text) => {
+      const note = worker_ai.note_make(tasks, (text) => {
         logged.push(text);
       });
       const text = gold_text("worker_ai_overlay_sent_empty");
       note(text);
-      this.assertEqual(tasks.notified.length, 1);
-      const [shown, owner] = tasks.notified[0];
+      this.assertEqual(ui.came.length, 1);
+      const [shown] = ui.came;
       const expected = gold_line("overlay_line");
       expected.text = text;
       this.assertEqual(shown, expected);
-      this.assertEqual(owner, "ui");
       this.assertEqual(full_of(shown), harness.setting_get("debug"));
       this.assertEqual(logged, [text]);
     }
   }
 
-  // The relays of the UI's console opening and close, and of the settings.
+  // The relays of the UI's console close and of the settings.
   export class TestRelays extends unittest.TestCase {
-    // The UI's opening goes to the console port, and its token comes back.
-    test_console_opened(): void {
-      const id = constants.submit_id;
-      const tasks = tasks_make([id]);
-      let closes = 0;
-      worker_ai.console_register(queue_of(tasks), register_route, () => {
-        closes += 1;
-      });
-      const request = gold_line("console_open_request");
-      const sleep = routed_get("console.open")(request);
-      this.assertEqual(tasks.submitted.length, 1);
-      const [opening, owner] = tasks.submitted[0];
-      this.assertEqual(opening, gold_line("console_open_copy"));
-      this.assertEqual(owner, "console");
-      this.assertEqual(full_of(opening), harness.setting_get("debug"));
-      this.assertTrue(opening !== request);
-      const expected = gold_value("lines.console_sleep") as dispatch.Sleep;
-      expected.state = { request };
-      expected.wait_ids = [id];
-      this.assertEqual(sleep, expected);
-      const reply = gold_line("console_open_reply");
-      Object.assign(reply[0], { reply: id });
-      const wake = gold_line("console_opened_wake");
-      wake.state = (sleep as dispatch.Sleep).state;
-      wake.replies = [reply];
-      const answer = routed_get("worker.console_opened")(wake);
-      this.assertEqual(answer, gold_line("console_open_answer"));
-      this.assertEqual(tasks.notified.length, 0);
-      this.assertEqual(closes, 0);
-    }
-
     // The UI's close closes the console port once and is answered at once.
     test_console_closed(): void {
-      const tasks = tasks_make([]);
+      const tasks = tasks_make();
+      const ui = lane_make(tasks, "ui");
       let closes = 0;
-      worker_ai.console_register(queue_of(tasks), register_route, () => {
+      worker_ai.console_register(tasks, dispatch.handler_register, () => {
         closes += 1;
       });
-      const request = gold_line("console_close_request");
-      const answer = routed_get("console.close")(request);
+      ui.port.line_post(gold_line("console_close_request"), []);
       this.assertEqual(closes, 1);
-      this.assertEqual(tasks.submitted.length, 0);
-      this.assertEqual(tasks.notified.length, 0);
-      this.assertEqual(answer, gold_line("console_close_answer"));
+      this.assertEqual(ui.came, [gold_line("console_close_answer")]);
+      this.assertEqual(tasks.depth(), 0);
     }
 
     // A notice of new settings changes the live value, goes to the server.
     test_settings_sent(): void {
-      const id = constants.submit_id;
-      const tasks = tasks_make([id]);
+      const tasks = tasks_make();
+      const ui = lane_make(tasks, "ui");
+      const near = new queue.LocalPort();
+      const server = new queue.LocalPort(near);
+      const kept: lines.Line[] = [];
+      // The server's end: it keeps the request and answers it with the gold.
+      server.line_receive((line) => {
+        kept.push(line);
+        const reply = gold_line("settings_put_reply");
+        server.line_post(
+          dispatch.reply_make(line, jslb.payload_of(reply)),
+          [],
+        );
+      });
+      tasks.port_add("server", near);
       const live = settings_live();
-      worker_ai.settings_register(queue_of(tasks), register_route, live);
+      worker_ai.settings_register(tasks, dispatch.handler_register, live);
       const value = settings_live();
       value.blob_max = constants.put_blob_max;
       const notice = gold_line("settings_put_notice");
       notice.settings = value;
-      const sleep = routed_get("settings.put")(notice);
+      ui.port.line_post(notice, []);
       this.assertEqual(live, value);
-      this.assertEqual(tasks.submitted.length, 1);
-      const [put, owner] = tasks.submitted[0];
       const expected = gold_line("settings_put_copy");
       expected.settings = value;
-      this.assertEqual(put, expected);
-      this.assertEqual(owner, "server");
-      this.assertEqual(full_of(put), harness.setting_get("debug"));
-      const slept = gold_value("lines.settings_sleep") as dispatch.Sleep;
-      slept.wait_ids = [id];
-      this.assertEqual(sleep, slept);
-      const reply = gold_line("settings_put_reply");
-      Object.assign(reply[0], { reply: id });
-      const wake = gold_line("settings_put_wake");
-      wake.replies = [reply];
-      this.assertEqual(routed_get("worker.settings_put")(wake), undefined);
-      this.assertEqual(tasks.notified.length, 0);
+      this.assertEqual(kept, [expected]);
+      this.assertEqual(full_of(kept[0]), harness.setting_get("debug"));
+      this.assertEqual(ui.came, []);
+      this.assertEqual(tasks.depth(), 0);
     }
   }
 
@@ -414,15 +323,19 @@ namespace test_worker_ai {
   export class TestFaults extends unittest.TestCase {
     // The cascade goes as one `error` line, its `cause` only when present.
     test_error_sent(): void {
-      const wire = new WireDouble();
+      const ended: lines.Line[] = [];
       const done: number[] = [];
-      const end: worker_ai.ServerEnd = (line, fn) => wire.wire_end(line, fn);
+      // The test's own end: it keeps the line, then calls back at once.
+      const end: worker_ai.ServerEnd = (line, fn) => {
+        ended.push(line);
+        fn();
+      };
       const cascade = cascade_make();
       worker_ai.error_send(end, cascade, () => {
-        done.push(wire.ended.length);
+        done.push(ended.length);
       });
-      this.assertEqual(wire.ended.length, 1);
-      const [line] = wire.ended;
+      this.assertEqual(ended.length, 1);
+      const [line] = ended;
       this.assertEqual(full_of(line), harness.setting_get("debug"));
       for (const name of ["i", "id", "r", "reply"]) {
         this.assertFalse(Object.hasOwn(line[0], name), name);
@@ -431,35 +344,37 @@ namespace test_worker_ai {
       this.assertEqual(done, [1]);
       const alone = { message: "The read failed.", stack: "" };
       worker_ai.error_send(end, alone, () => {
-        done.push(wire.ended.length);
+        done.push(ended.length);
       });
-      this.assertEqual(wire.ended[1], {
-        ...gold_line("error_full"),
-        ...alone,
-      });
-      this.assertFalse(Object.hasOwn(wire.ended[1], "cause"));
+      this.assertEqual(ended[1], { ...gold_line("error_full"), ...alone });
+      this.assertFalse(Object.hasOwn(ended[1], "cause"));
       this.assertEqual(done, [1, 2]);
     }
 
     // The UI's `fault` is sent on as that `error` line, then closes once.
     test_fault_sent(): void {
-      routed.clear();
-      const wire = new WireDouble();
-      const end: worker_ai.ServerEnd = (line, fn) => wire.wire_end(line, fn);
+      const tasks = tasks_make();
+      const ui = lane_make(tasks, "ui");
+      const ended: lines.Line[] = [];
+      // The number of lines kept when each callback ran.
+      const called: number[] = [];
+      // The test's own end: it keeps the line, then calls back at once.
+      const end: worker_ai.ServerEnd = (line, fn) => {
+        ended.push(line);
+        called.push(ended.length);
+        fn();
+      };
       let closes = 0;
-      worker_ai.fault_register(register_route, end, () => {
+      worker_ai.fault_register(dispatch.handler_register, end, () => {
         closes += 1;
       });
       const cascade = cascade_make();
-      const line = Object.assign(gold_line("fault_ui"), cascade);
-      this.assertEqual(routed_get("fault")(line), undefined);
-      this.assertEqual(wire.ended.length, 1);
-      this.assertEqual(wire.ended[0], {
-        ...gold_line("error_full"),
-        ...cascade,
-      });
-      this.assertEqual(wire.called, [1]);
+      ui.port.line_post(Object.assign(gold_line("fault_ui"), cascade), []);
+      this.assertEqual(ended, [{ ...gold_line("error_full"), ...cascade }]);
+      this.assertEqual(called, [1]);
       this.assertEqual(closes, 1);
+      this.assertEqual(ui.came, []);
+      this.assertEqual(tasks.depth(), 0);
     }
   }
 

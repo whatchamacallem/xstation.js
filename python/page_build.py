@@ -70,8 +70,8 @@ _VECTORS_NAME = "vectors"
 # The vectors written for the page, which carries them as `test_vectors`.
 _VECTORS_PATH = os.path.join(_BUILD_PATH, _VECTORS_NAME)
 
-# The SQLite release archive.
-_SQLITE_ARCHIVE = "sqlite-wasm-3460100.zip"
+# The SQLite release archive, in its library's directory of `third_party`.
+_SQLITE_ARCHIVE = os.path.join("sqlite", "sqlite-wasm-3460100.zip")
 
 # SQLite's JavaScript glue, by the end of its path inside the archive.
 _SQLITE_JS = "jswasm/sqlite3.js"
@@ -79,8 +79,8 @@ _SQLITE_JS = "jswasm/sqlite3.js"
 # SQLite's WebAssembly, by the end of its path inside the archive.
 _SQLITE_WASM = "jswasm/sqlite3.wasm"
 
-# The `xterm.js` package archive.
-_XTERM_ARCHIVE = "xterm-5.5.0.tgz"
+# The `xterm.js` package archive, in its library's directory of `third_party`.
+_XTERM_ARCHIVE = os.path.join("xterm", "xterm-5.5.0.tgz")
 
 # The `xterm.js` script inside its package archive.
 _XTERM_JS = "package/lib/xterm.js"

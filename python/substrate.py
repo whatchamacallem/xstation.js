@@ -240,7 +240,7 @@ def _header_copy(document: dict[int | str, Any]) -> dict[str, Any]:
         type(fields["v"]) is int and fields["v"] != 0
     )
     if not (typed and versioned and fields.keys() <= {"t", "v"}):
-        raise ValueError(i18n("substrate.header_bad", header))
+        raise ValueError(i18n("substrate.header_bad", fields))
     return dict(fields)
 
 
@@ -319,7 +319,7 @@ def _tables_found(connection: sqlite3.Connection) -> set[str]:
 
 # Raises unless the tables found are all of the substrate's, at its version.
 def _schema_check(connection: sqlite3.Connection, found: set[str]) -> None:
-    if found != _SCHEMA_TABLES:
+    if found != set(_SCHEMA_TABLES):
         raise RuntimeError(i18n("substrate.schema_partial", sorted(found)))
     row = connection.execute(
         "SELECT value FROM _meta WHERE name = 'schema'"

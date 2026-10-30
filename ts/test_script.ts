@@ -2,14 +2,28 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of script.ts on a store double that records each call and answers
-// what the test chose: the step script that advances a region's tide, run
-// and traced, every line a run keeps, a script read from the cache, the
-// engine object and its store of routine methods, the exceptions a run
-// returns and the errors it throws. The trace texts are entries of the gold
+// Tests of script.ts, a block of group B in the AI worker, on a real store:
+// the sqlite3.wasm module and OPFS pool the bring up sets as globals, a cache
+// over the first of the open OPFS files it gives the block as `test_slots`,
+// cleared, and a real `queue.TaskQueue` whose server lane ends at the test's
+// own receiver, which keeps the store's pushes. Each test puts its scripts
+// in the store at the ref of the gold: the step script that advances a
+// region's tide, run and traced, every line a run keeps, a script read from
+// the cache, the engine object and its store of routine methods, the
+// exceptions a run returns and the errors it throws. The trace texts, the
+// store's refusals and the pushes the runs make are entries of the gold
 // record, test_settings.json.
 
 namespace test_script {
+  // The initialized sqlite3.wasm module, a global the bring up sets.
+  declare const test_sqlite3: substrate.SqliteModule;
+
+  // The installed OPFS SAH pool, a global the bring up sets.
+  declare const test_pool: substrate.SqlitePool;
+
+  // The open OPFS files of this block, cleared, a global the bring up sets.
+  declare const test_slots: readonly substrate.SlotHandle[];
+
   // The names, texts and calls the tests use.
   const constants = Object.freeze({
     // The step script, 319 bytes.
@@ -22,12 +36,15 @@ namespace test_script {
       "]);\n" +
       'engine.log("tide advanced by " + args.hours);\n' +
       "return {changes: results[0].changes};\n",
-    // The row of the step script.
-    step_ref: "/_files/script/step_tide.js",
     // The line the step script logs when it advances the tide by 1.
     step_line: "tide advanced by 1",
-    // The handle of a script the store holds in its cache.
-    cached_handle: "cache/0001",
+    // The world the step script writes, its region table and its one row.
+    world_db: "castle_world",
+    region_sql:
+      "CREATE TABLE region" +
+      " (name TEXT PRIMARY KEY, tide INTEGER NOT NULL) STRICT",
+    region_row: "INSERT INTO region VALUES ('castle_gatehouse', 0)",
+    tide_sql: "SELECT tide FROM region WHERE name = 'castle_gatehouse'",
     // The routine methods of `engine.store`, in the order of the stub.
     store_names: Object.freeze([
       "sql_run",
@@ -46,152 +63,60 @@ namespace test_script {
       "turn_compact",
       "transaction_run",
     ]),
+    // The start of the root of each store a test makes in the pool.
+    root_prefix: "/test_script/",
+    // The files of each store's cache: one holds a script cached whole.
+    cache_slots: 1,
+    // The thread of each store's queue and the owner its pushes go to.
+    thread: "ai" as const,
+    server: "server" as const,
+    // The settings of a store and of the mode of its queue.
+    synchronous_setting: "queue_synchronous",
+    overflow_setting: "overflow_bytes",
+    compact_setting: "turn_compact_turns",
   });
 
-  // What the store double answers to one call: a value or an error thrown.
-  type StoreAnswer = { value: unknown } | { thrown: Error };
-
-  // One call of a double: the method's name and its arguments.
-  type DoubleCall = [string, unknown[]];
+  // The number of the last root a test made, so that each store has its own.
+  let root_count = 0;
 
   // A text of this module's gold, a run time `{n}` left for the test to fill.
   function gold_text(name: string): string {
     return harness.gold_get(`typescript.test_script.texts.${name}`) as string;
   }
 
-  // A cache double: the bytes of each handle the test put, each read kept.
-  class CacheDouble {
-    // Every read, its handle, offset and length, in order.
-    readonly reads: [string, number, number][] = [];
-    // The bytes the test put under each handle.
-    readonly #files = new Map<string, Uint8Array>();
-
-    // Puts the bytes under the handle.
-    file_put(handle: string, data: Uint8Array): void {
-      this.#files.set(handle, data);
-    }
-
-    // Keeps the read and gives the bytes, which the test must have put.
-    cache_read(handle: string, offset: number, length: number): Uint8Array {
-      this.reads.push([handle, offset, length]);
-      const data = this.#files.get(handle);
-      if (data === undefined) {
-        throw new Error(`the cache double has no file ${handle}`);
-      }
-      return data.subarray(offset, offset + length);
-    }
+  // A copy of a line of this module's gold, a run time part set on the copy.
+  function gold_line(name: string): lines.Line {
+    return structuredClone(
+      harness.gold_get(`typescript.test_script.lines.${name}`),
+    ) as lines.Line;
   }
 
-  // A store double: each call kept, answered by the test's next answer.
-  class StoreDouble {
-    // Every call, in order.
-    readonly calls: DoubleCall[] = [];
-    // The cache double that `sink` gives.
-    readonly cache = new CacheDouble();
-    // The answers still to give, by method name, the first set given first.
-    readonly #answers = new Map<string, StoreAnswer[]>();
-
-    // Sets the answer of the next call of the method not yet answered.
-    answer_add(name: string, answer: StoreAnswer): void {
-      const answers = this.#answers.get(name);
-      if (answers === undefined) {
-        this.#answers.set(name, [answer]);
-      } else {
-        answers.push(answer);
-      }
-    }
-
-    // Sets a script's text, in memory, as the next answer of `kv_get`.
-    script_add(text: string): void {
-      const data = new TextEncoder().encode(text);
-      this.answer_add("kv_get", { value: { data, size: data.length } });
-    }
-
-    // Keeps the call and gives its answer, which the test must have set.
-    #call(name: string, values: unknown[]): unknown {
-      this.calls.push([name, values]);
-      const answer = this.#answers.get(name)?.shift();
-      if (answer === undefined) {
-        throw new Error(`the store double has no answer for ${name}`);
-      }
-      if ("thrown" in answer) {
-        throw answer.thrown;
-      }
-      return answer.value;
-    }
-
-    // Keeps the call and gives the cache double.
-    sink(): CacheDouble {
-      this.calls.push(["sink", []]);
-      return this.cache;
-    }
-
-    // The fifteen routine methods `script_run` binds, each kept and answered.
-    sql_run(...values: unknown[]): unknown {
-      return this.#call("sql_run", values);
-    }
-    db_list(...values: unknown[]): unknown {
-      return this.#call("db_list", values);
-    }
-    db_create(...values: unknown[]): unknown {
-      return this.#call("db_create", values);
-    }
-    db_drop(...values: unknown[]): unknown {
-      return this.#call("db_drop", values);
-    }
-    kv_get(...values: unknown[]): unknown {
-      return this.#call("kv_get", values);
-    }
-    kv_put(...values: unknown[]): unknown {
-      return this.#call("kv_put", values);
-    }
-    kv_delete(...values: unknown[]): unknown {
-      return this.#call("kv_delete", values);
-    }
-    kv_list(...values: unknown[]): unknown {
-      return this.#call("kv_list", values);
-    }
-    doc_get(...values: unknown[]): unknown {
-      return this.#call("doc_get", values);
-    }
-    doc_put(...values: unknown[]): unknown {
-      return this.#call("doc_put", values);
-    }
-    doc_head(...values: unknown[]): unknown {
-      return this.#call("doc_head", values);
-    }
-    turn_append(...values: unknown[]): unknown {
-      return this.#call("turn_append", values);
-    }
-    turn_list(...values: unknown[]): unknown {
-      return this.#call("turn_list", values);
-    }
-    turn_compact(...values: unknown[]): unknown {
-      return this.#call("turn_compact", values);
-    }
-    transaction_run(...values: unknown[]): unknown {
-      return this.#call("transaction_run", values);
-    }
+  // A push of the gold, its blob 1 the bytes and their size in full names.
+  function push_bytes(name: string, data: Uint8Array): lines.Line {
+    const line = gold_line(name);
+    line[1] = { size: data.length, d: data };
+    return line;
   }
 
-  // A store double holding one script, read in memory, for each run asked.
-  function store_make(text: string, runs = 1): StoreDouble {
-    const store = new StoreDouble();
-    for (let run = 0; run < runs; run += 1) {
-      store.script_add(text);
-    }
-    return store;
+  // The ref of the row of a script, by the gold's form of it.
+  function script_ref(name: string): string {
+    const form = harness.gold_get("typescript.test_script.script_ref");
+    return (form as string).replaceAll("{0}", name);
   }
 
-  // Runs the script of the name on the store double.
-  function run_double(
-    store: StoreDouble,
-    name: string,
-    args: unknown,
-    trace: boolean,
-  ): script.ScriptResult {
-    const door = store as unknown as substrate.Store;
-    return script.script_run(door, name, args, trace);
+  // The database the scripts' rows are in, the one their refs name.
+  function files_db(): string {
+    return substrate.ref_split(script_ref("")).db as string;
+  }
+
+  // The `overflow_bytes` of `settings.json`, which the test stores take.
+  function overflow_get(): number {
+    return harness.setting_get(constants.overflow_setting) as number;
+  }
+
+  // The `UTF-8` bytes of text.
+  function bytes_text(text: string): Uint8Array {
+    return new TextEncoder().encode(text);
   }
 
   // The text of each line, which leaves out the time.
@@ -209,8 +134,97 @@ namespace test_script {
     throw new Error("JSON wrote the value.");
   }
 
-  // A script test, with an assertion of a plain `Error`.
+  // A script test on stores of its own, each root's files then removed.
   class ScriptCase extends unittest.TestCase {
+    // The roots this test made.
+    readonly #roots: string[] = [];
+    // The stores this test made, each with the pushes its server lane took.
+    readonly #stores = new Map<substrate.Store, lines.Line[]>();
+
+    // Closes every database of the stores and removes the roots' files.
+    tearDown(): void {
+      for (const store of this.#stores.keys()) {
+        for (const name of store.db_list()) {
+          store.db_close(name);
+        }
+      }
+      for (const root of this.#roots) {
+        for (const file of test_pool.getFileNames()) {
+          if (file.startsWith(`${root}/`)) {
+            test_pool.unlink(file);
+          }
+        }
+      }
+    }
+
+    // A store on a new root, its scripts' database created, its pushes kept.
+    store_make(): substrate.Store {
+      root_count += 1;
+      const root = constants.root_prefix + String(root_count);
+      this.#roots.push(root);
+      if (test_slots.length < constants.cache_slots) {
+        throw new Error(
+          `test_slots holds ${test_slots.length} files,` +
+            ` fewer than ${constants.cache_slots}`,
+        );
+      }
+      const slots = test_slots.slice(0, constants.cache_slots);
+      for (const slot of slots) {
+        slot.truncate(0);
+      }
+      const pushed: lines.Line[] = [];
+      const far = new queue.LocalPort();
+      far.line_receive((line) => {
+        pushed.push(line);
+      });
+      const synchronous = harness.setting_get(
+        constants.synchronous_setting,
+      ) as boolean;
+      const tasks = new queue.TaskQueue(constants.thread, {}, synchronous);
+      tasks.port_add(constants.server, new queue.LocalPort(far));
+      const store = new substrate.Store(
+        test_sqlite3,
+        test_pool,
+        new substrate.CacheFiles(slots),
+        root,
+        overflow_get(),
+        harness.setting_get(constants.compact_setting) as number,
+        tasks,
+      );
+      this.#stores.set(store, pushed);
+      store.db_create(files_db());
+      return store;
+    }
+
+    // A new store holding the script of the name, its pushes so far let go.
+    store_script(name: string, text: string): substrate.Store {
+      const store = this.store_make();
+      store.kv_put(script_ref(name), bytes_text(text));
+      this.pushes_taken(store);
+      return store;
+    }
+
+    // The pushes a store's server lane took, which are then let go.
+    pushes_taken(store: substrate.Store): lines.Line[] {
+      return (this.#stores.get(store) as lines.Line[]).splice(0);
+    }
+
+    // Creates the world of the step script, its tide 0, its pushes let go.
+    world_make(store: substrate.Store): void {
+      store.db_create(constants.world_db);
+      store.sql_run(constants.world_db, [
+        { sql: constants.region_sql, params: [] },
+        { sql: constants.region_row, params: [] },
+      ]);
+      this.pushes_taken(store);
+    }
+
+    // The tide of the gatehouse in the world of the step script.
+    tide_get(store: substrate.Store): unknown {
+      const statement = { sql: constants.tide_sql, params: [] };
+      return store.sql_run(constants.world_db, [statement])[0].rows;
+    }
+
     // Asserts the call throws a plain `Error` with exactly the message.
     raised_assert(message: string, fn: () => unknown): void {
       try {
@@ -228,52 +242,51 @@ namespace test_script {
 
   // Runs of a script: the value, the kept lines, the trace and the engine.
   export class TestRun extends ScriptCase {
-    // The step script reads its row, calls the store, returns and logs.
+    // The step script reads its row, runs its statement, returns and logs.
     test_step_recorded(): void {
-      const store = store_make(constants.step_script);
-      const changed = { columns: [], rows: [], changes: 1 };
-      store.answer_add("sql_run", { value: [changed] });
-      const result = run_double(store, "step_tide", { hours: 1 }, false);
+      const store = this.store_script("step_tide", constants.step_script);
+      this.world_make(store);
+      const result = script.script_run(
+        store,
+        "step_tide",
+        { hours: 1 },
+        false,
+      );
       this.assertEqual(Object.keys(result), ["value", "lines"]);
       this.assertEqual(result.value, { changes: 1 });
       this.assertEqual(lines_shown(result.lines), [constants.step_line]);
       this.assertEqual(Object.keys(result.lines[0]), ["at", "text"]);
       this.assertEqual(typeof result.lines[0].at, "number");
-      const statement = {
-        sql: "UPDATE region SET tide = tide + ? WHERE name = ?",
-        params: [1, "castle_gatehouse"],
-      };
-      this.assertEqual(store.calls, [
-        ["kv_get", [constants.step_ref]],
-        ["sink", []],
-        ["sql_run", ["castle_world", [statement]]],
+      this.assertEqual(this.tide_get(store), [[1]]);
+      this.assertEqual(this.pushes_taken(store), [
+        gold_line("push_sql_run_tide"),
       ]);
     }
 
     // A traced run traces the call of the store before the script's line.
     test_step_traced(): void {
-      const store = store_make(constants.step_script);
-      const changed = { columns: [], rows: [], changes: 1 };
-      store.answer_add("sql_run", { value: [changed] });
-      const result = run_double(store, "step_tide", { hours: 1 }, true);
+      const store = this.store_script("step_tide", constants.step_script);
+      this.world_make(store);
+      const result = script.script_run(store, "step_tide", { hours: 1 }, true);
       this.assertEqual(result.value, { changes: 1 });
       this.assertEqual(lines_shown(result.lines), [
         gold_text("script_trace_call_sql_run"),
         constants.step_line,
       ]);
+      this.assertEqual(this.tide_get(store), [[1]]);
     }
 
     // A run keeps every line it logs, in order, traced or not.
     test_lines_kept(): void {
-      const store = store_make(
+      const store = this.store_script(
+        "lines",
         'engine.log("zero");\n' +
           'engine.log("one");\n' +
           'engine.log("two");\n' +
           "return null;\n",
-        2,
       );
       for (const trace of [false, true]) {
-        const result = run_double(store, "lines", {}, trace);
+        const result = script.script_run(store, "lines", {}, trace);
         this.assertEqual(result.value, null);
         this.assertEqual(lines_shown(result.lines), ["zero", "one", "two"]);
       }
@@ -281,59 +294,61 @@ namespace test_script {
 
     // A line the script logs to the thread is one of the run's lines.
     test_thread_logged(): void {
-      const store = store_make('engine.log("to the thread");\n');
-      const result = run_double(store, "thread", {}, false);
+      const store = this.store_script(
+        "thread",
+        'engine.log("to the thread");\n',
+      );
+      const result = script.script_run(store, "thread", {}, false);
       this.assertEqual(lines_shown(result.lines), ["to the thread"]);
     }
 
     // Only a traced run traces the calls of the store.
     test_trace_only(): void {
-      const store = store_make("return engine.store.db_list();\n", 2);
-      store.answer_add("db_list", { value: ["_files"] });
-      store.answer_add("db_list", { value: ["_files"] });
-      const plain = run_double(store, "list", {}, false);
-      this.assertEqual(plain, { value: ["_files"], lines: [] });
-      const traced = run_double(store, "list", {}, true);
-      this.assertEqual(traced.value, ["_files"]);
+      const store = this.store_script(
+        "list",
+        "return engine.store.db_list();\n",
+      );
+      const plain = script.script_run(store, "list", {}, false);
+      this.assertEqual(plain, { value: [files_db()], lines: [] });
+      const traced = script.script_run(store, "list", {}, true);
+      this.assertEqual(traced.value, [files_db()]);
       const trace = gold_text("script_trace_call_db_list");
       this.assertEqual(lines_shown(traced.lines), [trace]);
-      const listed = store.calls.filter(([name]) => name === "db_list");
-      this.assertEqual(listed, [
-        ["db_list", []],
-        ["db_list", []],
-      ]);
     }
 
     // A trace shows the bytes an argument holds by their count.
     test_bytes_counted(): void {
-      const store = store_make(
+      const store = this.store_script(
+        "note",
         'const data = new TextEncoder().encode("abc");\n' +
           'engine.store.kv_put("/_files/note", data);\n',
       );
-      store.answer_add("kv_put", { value: undefined });
-      const result = run_double(store, "note", {}, true);
+      const result = script.script_run(store, "note", {}, true);
       const trace = gold_text("script_trace_call_kv_put");
       this.assertEqual(lines_shown(result.lines), [trace]);
-      const put = store.calls.filter(([name]) => name === "kv_put");
-      const data = new TextEncoder().encode("abc");
-      this.assertEqual(put, [["kv_put", ["/_files/note", data]]]);
+      const data = bytes_text("abc");
+      this.assertEqual(store.kv_get("/_files/note").data, data);
+      this.assertEqual(this.pushes_taken(store), [
+        push_bytes("push_kv_put_note", data),
+      ]);
     }
 
     // The arguments reach the script as they were given.
     test_args_passed(): void {
-      const store = store_make("return args;\n");
+      const store = this.store_script("echo", "return args;\n");
       const args = { list: [1, "two"], flag: true };
-      const result = run_double(store, "echo", args, false);
+      const result = script.script_run(store, "echo", args, false);
       this.assertEqual(result.value, args);
     }
 
     // The engine is frozen and holds the store, the log and `i18n`.
     test_engine_frozen(): void {
-      const store = store_make(
+      const store = this.store_script(
+        "engine",
         "return [Object.isFrozen(engine), Object.keys(engine)," +
           " typeof engine.i18n];\n",
       );
-      this.assertEqual(run_double(store, "engine", {}, false).value, [
+      this.assertEqual(script.script_run(store, "engine", {}, false).value, [
         true,
         ["store", "log", "i18n"],
         "function",
@@ -342,13 +357,13 @@ namespace test_script {
 
     // The store is frozen and holds the routine methods only, traced or not.
     test_store_routine(): void {
-      const store = store_make(
+      const store = this.store_script(
+        "methods",
         "return [Object.isFrozen(engine.store)," +
           " Object.keys(engine.store)];\n",
-        2,
       );
       for (const trace of [false, true]) {
-        const result = run_double(store, "methods", {}, trace);
+        const result = script.script_run(store, "methods", {}, trace);
         this.assertEqual(result.value, [true, [...constants.store_names]]);
       }
     }
@@ -356,8 +371,11 @@ namespace test_script {
     // The store's machinery is not there: calling it is the engine's error.
     test_store_machinery(): void {
       for (const call of ['db_snapshot("_files")', "sink()"]) {
-        const store = store_make(`return engine.store.${call};\n`);
-        const result = run_double(store, "machinery", {}, false);
+        const store = this.store_script(
+          "machinery",
+          `return engine.store.${call};\n`,
+        );
+        const result = script.script_run(store, "machinery", {}, false);
         this.assertTrue(String(result.error).startsWith("TypeError: "));
         this.assertFalse("value" in result);
       }
@@ -365,17 +383,12 @@ namespace test_script {
 
     // A script the store holds in its cache is read from the cache.
     test_cached_script(): void {
-      const store = new StoreDouble();
-      const data = new TextEncoder().encode("// cached\nreturn 7;\n");
-      store.cache.file_put(constants.cached_handle, data);
-      const value = { data: constants.cached_handle, size: data.length };
-      store.answer_add("kv_get", { value });
-      this.assertEqual(run_double(store, "large", {}, false).value, 7);
-      const read = ["kv_get", ["/_files/script/large.js"]];
-      this.assertEqual(store.calls[0], read);
-      this.assertEqual(store.cache.reads, [
-        [constants.cached_handle, 0, data.length],
-      ]);
+      const text = "// " + "x".repeat(overflow_get()) + "\nreturn 7;\n";
+      const store = this.store_script("large", text);
+      const held = store.kv_get(script_ref("large"));
+      this.assertEqual(typeof held.data, "string");
+      this.assertEqual(held.size, bytes_text(text).length);
+      this.assertEqual(script.script_run(store, "large", {}, false).value, 7);
     }
   }
 
@@ -383,8 +396,8 @@ namespace test_script {
   export class TestErrors extends ScriptCase {
     // An `Error` the script throws comes back with its text and stack.
     test_error_returned(): void {
-      const store = store_make('throw new RangeError("far");\n');
-      const result = run_double(store, "far", {}, false);
+      const store = this.store_script("far", 'throw new RangeError("far");\n');
+      const result = script.script_run(store, "far", {}, false);
       this.assertEqual(Object.keys(result), ["error", "stack", "lines"]);
       this.assertEqual(result.error, "RangeError: far");
       this.assertIn("RangeError: far", result.stack);
@@ -393,8 +406,8 @@ namespace test_script {
 
     // A value that is no `Error` comes back as its text, with no stack.
     test_value_thrown(): void {
-      const store = store_make('throw "plain";\n');
-      this.assertEqual(run_double(store, "plain", {}, false), {
+      const store = this.store_script("plain", 'throw "plain";\n');
+      this.assertEqual(script.script_run(store, "plain", {}, false), {
         error: "plain",
         lines: [],
       });
@@ -402,26 +415,30 @@ namespace test_script {
 
     // A script that does not compile returns its `SyntaxError`.
     test_syntax_returned(): void {
-      const store = store_make("return (;\n");
-      const result = run_double(store, "broken", {}, false);
+      const store = this.store_script("broken", "return (;\n");
+      const result = script.script_run(store, "broken", {}, false);
       this.assertTrue(String(result.error).startsWith("SyntaxError: "));
       this.assertFalse("value" in result);
     }
 
     // The lines logged before the exception are kept.
     test_lines_before(): void {
-      const store = store_make(
+      const store = this.store_script(
+        "late",
         'engine.log("before");\nthrow new Error("after");\n',
       );
-      const result = run_double(store, "late", {}, false);
+      const result = script.script_run(store, "late", {}, false);
       this.assertEqual(result.error, "Error: after");
       this.assertEqual(lines_shown(result.lines), ["before"]);
     }
 
     // A value JSON cannot carry is the run's exception, not the tool's.
     test_value_uncarried(): void {
-      const store = store_make('engine.log("before");\nreturn BigInt(1);\n');
-      const result = run_double(store, "uncarried", {}, false);
+      const store = this.store_script(
+        "uncarried",
+        'engine.log("before");\nreturn BigInt(1);\n',
+      );
+      const result = script.script_run(store, "uncarried", {}, false);
       this.assertEqual(result.error, refusal_text(BigInt(1)));
       this.assertEqual(typeof result.stack, "string");
       this.assertFalse("value" in result);
@@ -431,8 +448,11 @@ namespace test_script {
     // NaN and the infinities are returned, as no decoder lets them in.
     test_value_unchecked(): void {
       for (const value of ["NaN", "Infinity"]) {
-        const store = store_make(`engine.log("before");\nreturn ${value};\n`);
-        const result = run_double(store, "unchecked", {}, false);
+        const store = this.store_script(
+          "unchecked",
+          `engine.log("before");\nreturn ${value};\n`,
+        );
+        const result = script.script_run(store, "unchecked", {}, false);
         this.assertEqual(Object.keys(result), ["value", "lines"]);
         this.assertEqual(String(result.value), value);
         this.assertEqual(lines_shown(result.lines), ["before"]);
@@ -441,27 +461,22 @@ namespace test_script {
 
     // A call of the store that fails is the script's exception.
     test_store_refused(): void {
-      const store = store_make(
+      const store = this.store_script(
+        "absent",
         'return engine.store.kv_get("/_files/absent");\n',
       );
-      const thrown = new Error("the store refused the read");
-      store.answer_add("kv_get", { thrown });
-      const result = run_double(store, "absent", {}, false);
-      this.assertEqual(result.error, "Error: the store refused the read");
-      this.assertEqual(store.calls[2], ["kv_get", ["/_files/absent"]]);
+      const result = script.script_run(store, "absent", {}, false);
+      const refused = gold_text("substrate_key_missing_absent");
+      this.assertEqual(result.error, `Error: ${refused}`);
+      this.assertFalse("value" in result);
     }
 
     // A name with no script throws the store's error.
     test_script_missing(): void {
-      const store = new StoreDouble();
-      const thrown = new Error("the store has no such row");
-      store.answer_add("kv_get", { thrown });
-      this.raised_assert("the store has no such row", () =>
-        run_double(store, "missing", {}, false),
+      const store = this.store_make();
+      this.raised_assert(gold_text("substrate_key_missing_script"), () =>
+        script.script_run(store, "missing", {}, false),
       );
-      this.assertEqual(store.calls, [
-        ["kv_get", ["/_files/script/missing.js"]],
-      ]);
     }
   }
 

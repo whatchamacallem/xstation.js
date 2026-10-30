@@ -192,7 +192,7 @@ namespace test_line_case {
     );
   }
 
-  // Runs the runs from `index` on, to the first failed with failfast, then ends.
+  // Runs the runs from `index` on, to the first failed if failfast, then ends.
   function runs_check(
     runner: tap_producer.TAPTestRunner,
     tracker: tap_producer.Tracker,

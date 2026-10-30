@@ -104,6 +104,10 @@
 // tap.start         realm    DRIVER -> REALM 0      Empty; `i` is 101
 // tap.line          realm    REALM -> DRIVER 0      push
 // tap.pair          realm    REALM -> DRIVER 0      push, a pair test run
+// verbose.put       realm    REALM -> DRIVER 0      push (debug), B's worker
+// settings.set      realm    REALM -> DRIVER 0      push, B's worker's UI lane
+// error             realm    REALM -> DRIVER 0      none; fails the block
+// fault             realm    REALM -> DRIVER 0      push; fails the block
 
 declare namespace lines {
   // Header 0: `t` type, `v` version, `i` id, `r` reply, `k` key, `b` blobs.

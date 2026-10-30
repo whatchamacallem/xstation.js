@@ -697,6 +697,19 @@ class TestClient(PipeCase):
             str(caught.exception), "gave up at the deadline waiting for a load"
         )
 
+    # A limit ends a wait at its end alone, past the client's own wait.
+    def test_limit_alone(self) -> None:
+        client = self.client_idle(_EXPIRY_SECONDS, [])
+        started = time.monotonic()
+        client.limit_set(started + 2 * _EXPIRY_SECONDS)
+        with self.assertRaises(TimeoutError) as caught:
+            client.events_pump("a load", lambda: False)
+        waited = time.monotonic() - started
+        self.assertGreaterEqual(waited, 2 * _EXPIRY_SECONDS)
+        self.assertEqual(
+            str(caught.exception), "gave up at the deadline waiting for a load"
+        )
+
 
 # What the page's events and exceptions are turned into.
 class TestPage(unittest.TestCase):

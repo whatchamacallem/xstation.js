@@ -21,8 +21,8 @@
 # Standard library only, and `powershell.exe`, `wslpath` and
 # chrome-headless-shell are the programs it starts.
 
-import base64, errno, fcntl, functools, hashlib, json, os, select, shutil
-import signal, subprocess, tempfile, time, types, uuid
+import base64, errno, fcntl, functools, hashlib, json, math, os, select
+import shutil, signal, subprocess, tempfile, time, types, uuid
 from collections.abc import Callable
 from typing import Any, IO, NamedTuple, NoReturn, Self, cast
 
@@ -434,6 +434,11 @@ class ProtocolClient:
 
     # Ends every later wait at `end`, a `time.monotonic()` value, if sooner.
     def deadline_set(self, end: float) -> None:
+        self.deadline = end
+
+    # Ends every later wait at `end` alone, in place of the wait's own limit.
+    def limit_set(self, end: float) -> None:
+        self.wait_seconds = math.inf
         self.deadline = end
 
     # Passes events on until the condition holds, failing when the wait ends.

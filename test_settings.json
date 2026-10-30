@@ -3397,7 +3397,24 @@
       "limits": [1, 2]
     },
     "test_third_party_fetch": {
-      "archives_read": ["sqlite-wasm-3460100.zip", "xterm-5.5.0.tgz"]
+      "archives_read": [
+        "sqlite/sqlite-wasm-3460100.zip",
+        "xterm/xterm-5.5.0.tgz"
+      ],
+      "pins": [
+        [
+          "ttyd/ttyd-1.7.7.tar.gz",
+          "039dd995229377caee919898b7bd54484accec3bba49c118e2d5cd6ec51e3650"
+        ],
+        [
+          "sqlite/sqlite-wasm-3460100.zip",
+          "79b5fbfd1c5ca35f492624bb6b9323e6c74e483e2a55ff18ce5904a8cdb1b38c"
+        ],
+        [
+          "xterm/xterm-5.5.0.tgz",
+          "bd954fa721872170188cc5d7e83e88db3c83c9a18a4e8d24c2783d26491f59d2"
+        ]
+      ]
     },
     "test_verbose": {
       "history_all": 100,
@@ -3539,6 +3556,7 @@
   "typescript": {
     "run": "unit",
     "test_agent": {
+      "bootstrap_script": "// Makes a universe: its databases, its row and its world the current one.\nconst store = engine.store;\nstore.db_create(args.universe);\nstore.db_create(args.world);\nstore.db_create(args.region);\nstore.sql_run(\"metaverse\", [\n  {sql: \"INSERT INTO universe VALUES (?, ?, ?, ?)\",\n    params: [args.universe, args.title, \"player\", args.world]},\n]);\nstore.kv_put(\"/metaverse/world\", new TextEncoder().encode(args.world));\nreturn {universe: args.universe, world: args.world, region: args.region};\n",
       "document_lore": {
         "0": {
           "t": "prompt"
@@ -3548,6 +3566,8 @@
           "$ref": 1
         }
       },
+      "image_base64": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAH0lEQVR42mP4jwQYkAAucYZBqGGQO48oDaPxMCg0AADZV36QzYI8swAAAABJRU5ErkJggg==",
+      "image_sha256": "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0",
       "lines": {
         "click": {
           "0": {
@@ -3557,11 +3577,64 @@
           "x": 10,
           "y": 20
         },
-        "error_unauthorized": {
+        "image_answer": {
           "0": {
-            "type": "error"
+            "t": "http.request"
           },
-          "message": "Unauthorized"
+          "headers": {
+            "content-type": "application/json"
+          },
+          "json": {
+            "data": [
+              {}
+            ]
+          },
+          "status": 200
+        },
+        "image_request": {
+          "0": {
+            "type": "http.request"
+          },
+          "headers": {
+            "Authorization": "Bearer xai-SYNTHETIC-KEY",
+            "Content-Type": "application/json"
+          },
+          "json": {
+            "model": "grok-2-image",
+            "n": 1,
+            "prompt": "A rain dark castle gatehouse at dusk seen from the far side of a moat, one lantern lit, painted, wide still frame, no people",
+            "response_format": "b64_json"
+          },
+          "method": "POST",
+          "url": "https://api.x.ai/v1/images/generations"
+        },
+        "media_store": {
+          "0": {
+            "blobs": 1,
+            "type": "media.store"
+          },
+          "k": "/_files/gatehouse/arrival.png"
+        },
+        "media_store_reply": {
+          "0": {
+            "t": "media.store"
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "sha256": "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0",
+          "size": 88
+        },
+        "render_arrival": {
+          "0": {
+            "type": "render"
+          },
+          "image": "/_files/gatehouse/arrival.png",
+          "scene": "/castle_gatehouse/scene/arrival/1",
+          "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+        },
+        "render_reply": {
+          "0": {
+            "t": "render"
+          }
         },
         "reply_castle": {
           "0": {
@@ -3599,12 +3672,6 @@
           "subtitle": "Nothing happens.",
           "turn": 2
         },
-        "reply_mcp": {
-          "0": {
-            "t": "mcp"
-          },
-          "jsonrpc": "2.0"
-        },
         "reply_next": {
           "0": {
             "r": 2,
@@ -3624,17 +3691,6 @@
           },
           "method": "POST",
           "url": "https://api.x.ai/v1/chat/completions"
-        },
-        "request_scripted": {
-          "0": {
-            "type": "http.request"
-          },
-          "headers": {
-            "Authorization": "Bearer xai-SYNTHETIC-KEY",
-            "Content-Type": "application/json"
-          },
-          "method": "POST",
-          "url": "/chat/completions"
         },
         "say_again": {
           "0": {
@@ -3670,36 +3726,825 @@
             "t": "ai.say"
           },
           "text": "2"
-        },
-        "wake_model": {
-          "0": {
-            "type": "ai.model_reply"
-          }
-        },
-        "wake_tool": {
-          "0": {
-            "type": "ai.tool_reply"
-          }
         }
       },
       "texts": {
-        "agent_arguments_invalid_array": "The arguments of tool call call_1 to browser.render are not a JSON object: []",
-        "agent_arguments_invalid_null": "The arguments of tool call call_1 to browser.render are not a JSON object: null",
-        "agent_arguments_invalid_number": "The arguments of tool call call_1 to browser.render are not a JSON object: 5",
-        "agent_arguments_invalid_overflow": "The arguments of tool call call_1 to browser.render are not a JSON object: {\"subtitle\":1e400}",
-        "agent_arguments_invalid_string": "The arguments of tool call call_1 to browser.render are not a JSON object: \"Fog.\"",
-        "agent_arguments_invalid_unparsed": "The arguments of tool call call_1 to browser.render are not a JSON object: {",
         "agent_click_text": "The player clicked at x 10, y 20.",
-        "agent_content_unsupported_first": "The result of tool call call_1 holds content of type image, and a tool message carries only text.",
-        "agent_content_unsupported_second": "The result of tool call call_2 holds content of type image, and a tool message carries only text.",
         "agent_prompt_invalid_analyst": "The document /metaverse/prompt/2 is not a prompt: it needs its text as a string in the member text.",
         "agent_prompt_invalid_universe": "The document /castle/prompt/1 is not a prompt: it needs its text as a string in the member text.",
-        "agent_reply_empty": "The model's reply chatcmpl-answer has neither tool calls nor content to end the turn with.",
-        "jslb_number_overflow": "The number 1e400 overflows a double.",
-        "jslb_text_not_json": "The text is not JSON: {0}.",
-        "provider_reply_type": "The provider reply is a line of type error instead of http.request.",
         "substrate_id_missing": "The database metaverse has no document 'prompt'.",
         "substrate_turns_compacted": "Turns 1 to 2 of this conversation were compacted when it held 2 turns. Their text is no longer in the conversation; the databases hold the state."
+      },
+      "tools": [
+        {
+          "description": "Run SQL statements in one transaction on a database. DDL is allowed: your scripts are the database administrator.",
+          "inputSchema": {
+            "properties": {
+              "db": {
+                "type": "string"
+              },
+              "statements": {
+                "items": {
+                  "properties": {
+                    "params": {
+                      "type": "array"
+                    },
+                    "sql": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["sql", "params"],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": ["db", "statements"],
+            "type": "object"
+          },
+          "name": "sql_run"
+        },
+        {
+          "description": "Create an empty database. The name is a C identifier.",
+          "inputSchema": {
+            "properties": {
+              "db": {
+                "type": "string"
+              }
+            },
+            "required": ["db"],
+            "type": "object"
+          },
+          "name": "db_create"
+        },
+        {
+          "description": "Delete a database and everything in it.",
+          "inputSchema": {
+            "properties": {
+              "db": {
+                "type": "string"
+              }
+            },
+            "required": ["db"],
+            "type": "object"
+          },
+          "name": "db_drop"
+        },
+        {
+          "description": "Read the value a Key-Value-Ref names, /$db/$key, as text.",
+          "inputSchema": {
+            "properties": {
+              "ref": {
+                "type": "string"
+              }
+            },
+            "required": ["ref"],
+            "type": "object"
+          },
+          "name": "kv_get"
+        },
+        {
+          "description": "Write text under a Key-Value-Ref, /$db/$key, and return its sha256. A script is the row /_files/script/<name>.js.",
+          "inputSchema": {
+            "properties": {
+              "ref": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": ["ref", "text"],
+            "type": "object"
+          },
+          "name": "kv_put"
+        },
+        {
+          "description": "Delete the row a Key-Value-Ref names.",
+          "inputSchema": {
+            "properties": {
+              "ref": {
+                "type": "string"
+              }
+            },
+            "required": ["ref"],
+            "type": "object"
+          },
+          "name": "kv_delete"
+        },
+        {
+          "description": "List the keys of a database under a prefix with sizes and hashes.",
+          "inputSchema": {
+            "properties": {
+              "db": {
+                "type": "string"
+              },
+              "prefix": {
+                "type": "string"
+              }
+            },
+            "required": ["db", "prefix"],
+            "type": "object"
+          },
+          "name": "kv_list"
+        },
+        {
+          "description": "Read a document by Document-Ref, /$db/$id/$version, in its encoded form: header 0, references at 1 on, {\"$ref\": n} in the body.",
+          "inputSchema": {
+            "properties": {
+              "ref": {
+                "type": "string"
+              }
+            },
+            "required": ["ref"],
+            "type": "object"
+          },
+          "name": "doc_get"
+        },
+        {
+          "description": "Write a new version of document $id in database $db and move its head. Returns the new Document-Ref.",
+          "inputSchema": {
+            "properties": {
+              "body": {
+                "type": "object"
+              },
+              "db": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": ["db", "id", "body"],
+            "type": "object"
+          },
+          "name": "doc_put"
+        },
+        {
+          "description": "The current Document-Ref of document $id in database $db.",
+          "inputSchema": {
+            "properties": {
+              "db": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": ["db", "id"],
+            "type": "object"
+          },
+          "name": "doc_head"
+        },
+        {
+          "description": "Run the script /_files/script/<name>.js with args as a task in this worker. Returns its value or exception and the verbose lines it wrote.",
+          "inputSchema": {
+            "properties": {
+              "args": {
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": ["name", "args"],
+            "type": "object"
+          },
+          "name": "script_run"
+        },
+        {
+          "description": "Run the script as script_run does, tracing every substrate call it makes first.",
+          "inputSchema": {
+            "properties": {
+              "args": {
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": ["name", "args"],
+            "type": "object"
+          },
+          "name": "script_debug"
+        },
+        {
+          "description": "Generate an image from a prompt and keep it under /_files/<key>. Returns the key, size and sha256.",
+          "inputSchema": {
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "prompt": {
+                "type": "string"
+              }
+            },
+            "required": ["prompt", "key"],
+            "type": "object"
+          },
+          "name": "image_make"
+        },
+        {
+          "description": "Show an image by its Key-Value-Ref with a subtitle. No image means black.",
+          "inputSchema": {
+            "properties": {
+              "image": {
+                "type": "string"
+              },
+              "subtitle": {
+                "type": "string"
+              }
+            },
+            "required": ["subtitle"],
+            "type": "object"
+          },
+          "name": "render"
+        },
+        {
+          "_meta": {
+            "xsjs": {
+              "permit": true
+            }
+          },
+          "description": "Show the debug console as ctrl-0 does, run one command line in its dash and return its output until the next prompt or the timeout. Debug mode.",
+          "inputSchema": {
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "timeout_seconds": {
+                "type": "number"
+              }
+            },
+            "required": ["text", "timeout_seconds"],
+            "type": "object"
+          },
+          "name": "console_run"
+        },
+        {
+          "description": "The last lines of a thread's verbose ring: ui, ai or server.",
+          "inputSchema": {
+            "properties": {
+              "count": {
+                "type": "integer"
+              },
+              "thread": {
+                "type": "string"
+              }
+            },
+            "required": ["thread", "count"],
+            "type": "object"
+          },
+          "name": "verbose_tail"
+        }
+      ]
+    },
+    "test_agent_faults": {
+      "analyst": "You are a very bored British psychoanalyst. You hold the hyperposition, a dark place of fog and a few inexplicable lights. Find the right universe for the player and act on requests without judgement. Your scripts are the database administrator of every universe you create: typed tables, indexes, views, no JSON columns unless a document is what fits.",
+      "cases": [
+        {
+          "expect": [
+            "tap_start_reply",
+            "metaverse_created",
+            "universe_made",
+            "world_put",
+            "scene_put",
+            "prompt_put",
+            "worker_ready",
+            "said_unparsed",
+            "error_unparsed"
+          ],
+          "name": "arguments_unparsed",
+          "seconds": 10,
+          "send": ["start_cleared", "say_unparsed"]
+        },
+        {
+          "expect": [
+            "tap_start_reply",
+            "metaverse_created",
+            "universe_made",
+            "world_put",
+            "scene_put",
+            "prompt_put",
+            "worker_ready",
+            "said_overflow",
+            "error_overflow"
+          ],
+          "name": "arguments_overflow",
+          "seconds": 10,
+          "send": ["start_cleared", "say_overflow"]
+        },
+        {
+          "expect": [
+            "tap_start_reply",
+            "metaverse_created",
+            "universe_made",
+            "world_put",
+            "scene_put",
+            "prompt_put",
+            "worker_ready",
+            "said_array",
+            "error_array"
+          ],
+          "name": "arguments_array",
+          "seconds": 10,
+          "send": ["start_cleared", "say_array"]
+        },
+        {
+          "expect": [
+            "tap_start_reply",
+            "metaverse_created",
+            "universe_made",
+            "world_put",
+            "scene_put",
+            "prompt_put",
+            "worker_ready",
+            "said_null",
+            "error_null"
+          ],
+          "name": "arguments_null",
+          "seconds": 10,
+          "send": ["start_cleared", "say_null"]
+        },
+        {
+          "expect": [
+            "tap_start_reply",
+            "metaverse_created",
+            "universe_made",
+            "world_put",
+            "scene_put",
+            "prompt_put",
+            "worker_ready",
+            "said_number",
+            "error_number"
+          ],
+          "name": "arguments_number",
+          "seconds": 10,
+          "send": ["start_cleared", "say_number"]
+        },
+        {
+          "expect": [
+            "tap_start_reply",
+            "metaverse_created",
+            "universe_made",
+            "world_put",
+            "scene_put",
+            "prompt_put",
+            "worker_ready",
+            "said_string",
+            "error_string"
+          ],
+          "name": "arguments_string",
+          "seconds": 10,
+          "send": ["start_cleared", "say_string"]
+        },
+        {
+          "expect": [
+            "tap_start_reply",
+            "metaverse_created",
+            "universe_made",
+            "world_put",
+            "scene_put",
+            "prompt_put",
+            "worker_ready",
+            "said_empty",
+            "error_empty"
+          ],
+          "name": "reply_empty",
+          "seconds": 10,
+          "send": ["start_cleared", "say_empty"]
+        },
+        {
+          "expect": [
+            "tap_start_reply",
+            "metaverse_created",
+            "universe_made",
+            "world_put",
+            "scene_put",
+            "prompt_put",
+            "worker_ready",
+            "said_thrown",
+            "note_put",
+            "error_thrown"
+          ],
+          "name": "tool_thrown",
+          "seconds": 10,
+          "send": ["start_cleared", "say_thrown"]
+        }
+      ],
+      "lines": {
+        "error_array": {
+          "0": {
+            "type": "error"
+          },
+          "message": "The arguments of tool call call_1 to browser.render are not a JSON object: []",
+          "stack": "Error: The arguments of tool call call_1 to browser.render are not a JSON object: []"
+        },
+        "error_empty": {
+          "0": {
+            "type": "error"
+          },
+          "message": "The model's reply chatcmpl-synthetic-1 has neither tool calls nor content to end the turn with.",
+          "stack": "Error: The model's reply chatcmpl-synthetic-1 has neither tool calls nor content to end the turn with."
+        },
+        "error_null": {
+          "0": {
+            "type": "error"
+          },
+          "message": "The arguments of tool call call_1 to browser.render are not a JSON object: null",
+          "stack": "Error: The arguments of tool call call_1 to browser.render are not a JSON object: null"
+        },
+        "error_number": {
+          "0": {
+            "type": "error"
+          },
+          "message": "The arguments of tool call call_1 to browser.render are not a JSON object: 5",
+          "stack": "Error: The arguments of tool call call_1 to browser.render are not a JSON object: 5"
+        },
+        "error_overflow": {
+          "0": {
+            "type": "error"
+          },
+          "cause": {
+            "message": "The number 1e400 overflows a double.",
+            "stack": "WireError: The number 1e400 overflows a double."
+          },
+          "message": "The arguments of tool call call_1 to browser.render are not a JSON object: {\"subtitle\":1e400}",
+          "stack": "Error: The arguments of tool call call_1 to browser.render are not a JSON object: {\"subtitle\":1e400}"
+        },
+        "error_string": {
+          "0": {
+            "type": "error"
+          },
+          "message": "The arguments of tool call call_1 to browser.render are not a JSON object: \"Fog.\"",
+          "stack": "Error: The arguments of tool call call_1 to browser.render are not a JSON object: \"Fog.\""
+        },
+        "error_thrown": {
+          "0": {
+            "type": "error"
+          },
+          "message": "The database metaverse has no key 'absent'.",
+          "stack": "Error: The database metaverse has no key 'absent'."
+        },
+        "error_unparsed": {
+          "0": {
+            "type": "error"
+          },
+          "cause": {
+            "cause": {
+              "message": "Expected property name or '}' in JSON at position 1 (line 1 column 2)",
+              "stack": "SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)"
+            },
+            "message": "The text is not JSON: SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2).",
+            "stack": "WireError: The text is not JSON: SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)."
+          },
+          "message": "The arguments of tool call call_1 to browser.render are not a JSON object: {",
+          "stack": "Error: The arguments of tool call call_1 to browser.render are not a JSON object: {"
+        },
+        "metaverse_created": {
+          "0": {
+            "type": "db.create"
+          },
+          "db": "metaverse"
+        },
+        "note_put": {
+          "0": {
+            "blobs": 1,
+            "key": "/metaverse/note",
+            "type": "kv.put"
+          },
+          "1": {
+            "d": "Rm9nLg==",
+            "size": 4
+          }
+        },
+        "prompt_put": {
+          "0": {
+            "type": "doc.put"
+          },
+          "body": {
+            "0": {
+              "t": "prompt"
+            },
+            "text": "You are a very bored British psychoanalyst. You hold the hyperposition, a dark place of fog and a few inexplicable lights. Find the right universe for the player and act on requests without judgement. Your scripts are the database administrator of every universe you create: typed tables, indexes, views, no JSON columns unless a document is what fits."
+          },
+          "db": "metaverse",
+          "id": "prompt"
+        },
+        "said_array": {
+          "0": {
+            "type": "turn.append"
+          },
+          "content": {
+            "content": "3",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "said_empty": {
+          "0": {
+            "type": "turn.append"
+          },
+          "content": {
+            "content": "7",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "said_null": {
+          "0": {
+            "type": "turn.append"
+          },
+          "content": {
+            "content": "4",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "said_number": {
+          "0": {
+            "type": "turn.append"
+          },
+          "content": {
+            "content": "5",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "said_overflow": {
+          "0": {
+            "type": "turn.append"
+          },
+          "content": {
+            "content": "2",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "said_string": {
+          "0": {
+            "type": "turn.append"
+          },
+          "content": {
+            "content": "6",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "said_thrown": {
+          "0": {
+            "type": "turn.append"
+          },
+          "content": {
+            "content": "8",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "said_unparsed": {
+          "0": {
+            "type": "turn.append"
+          },
+          "content": {
+            "content": "1",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/metaverse/hyperposition/1"
+        },
+        "say_array": {
+          "0": {
+            "i": 1,
+            "t": "ai.say"
+          },
+          "text": "3"
+        },
+        "say_empty": {
+          "0": {
+            "i": 1,
+            "t": "ai.say"
+          },
+          "text": "7"
+        },
+        "say_null": {
+          "0": {
+            "i": 1,
+            "t": "ai.say"
+          },
+          "text": "4"
+        },
+        "say_number": {
+          "0": {
+            "i": 1,
+            "t": "ai.say"
+          },
+          "text": "5"
+        },
+        "say_overflow": {
+          "0": {
+            "i": 1,
+            "t": "ai.say"
+          },
+          "text": "2"
+        },
+        "say_string": {
+          "0": {
+            "i": 1,
+            "t": "ai.say"
+          },
+          "text": "6"
+        },
+        "say_thrown": {
+          "0": {
+            "i": 1,
+            "t": "ai.say"
+          },
+          "text": "8"
+        },
+        "say_unparsed": {
+          "0": {
+            "i": 1,
+            "t": "ai.say"
+          },
+          "text": "1"
+        },
+        "scene_put": {
+          "0": {
+            "blobs": 1,
+            "key": "/metaverse/scene",
+            "type": "kv.put"
+          },
+          "1": {
+            "d": "L21ldGF2ZXJzZS9oeXBlcnBvc2l0aW9uLzE=",
+            "size": 26
+          }
+        },
+        "start_cleared": {
+          "0": {
+            "type": "test_headless.worker_start"
+          },
+          "clear": true
+        },
+        "tap_start_reply": {
+          "0": {
+            "reply": 101,
+            "type": "tap.start"
+          }
+        },
+        "universe_made": {
+          "0": {
+            "type": "sql.run"
+          },
+          "db": "metaverse",
+          "statements": [
+            {
+              "params": [],
+              "sql": "CREATE TABLE universe (name TEXT PRIMARY KEY, title TEXT NOT NULL, player TEXT NOT NULL, world TEXT NOT NULL) WITHOUT ROWID, STRICT"
+            }
+          ]
+        },
+        "worker_ready": {
+          "0": {
+            "type": "test_headless.worker_ready"
+          }
+        },
+        "world_put": {
+          "0": {
+            "blobs": 1,
+            "key": "/metaverse/world",
+            "type": "kv.put"
+          },
+          "1": {
+            "d": "bWV0YXZlcnNl",
+            "size": 9
+          }
+        }
+      },
+      "script": {
+        "nodes": {
+          "faults": {
+            "replies": {
+              "1": {
+                "content": null,
+                "next": "faults",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{",
+                      "name": "browser.render"
+                    },
+                    "id": "call_1",
+                    "type": "function"
+                  }
+                ]
+              },
+              "2": {
+                "content": null,
+                "next": "faults",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"subtitle\":1e400}",
+                      "name": "browser.render"
+                    },
+                    "id": "call_1",
+                    "type": "function"
+                  }
+                ]
+              },
+              "3": {
+                "content": null,
+                "next": "faults",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "[]",
+                      "name": "browser.render"
+                    },
+                    "id": "call_1",
+                    "type": "function"
+                  }
+                ]
+              },
+              "4": {
+                "content": null,
+                "next": "faults",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "null",
+                      "name": "browser.render"
+                    },
+                    "id": "call_1",
+                    "type": "function"
+                  }
+                ]
+              },
+              "5": {
+                "content": null,
+                "next": "faults",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "5",
+                      "name": "browser.render"
+                    },
+                    "id": "call_1",
+                    "type": "function"
+                  }
+                ]
+              },
+              "6": {
+                "content": null,
+                "next": "faults",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "\"Fog.\"",
+                      "name": "browser.render"
+                    },
+                    "id": "call_1",
+                    "type": "function"
+                  }
+                ]
+              },
+              "7": {
+                "content": null,
+                "next": "faults"
+              },
+              "8": {
+                "content": null,
+                "next": "faults",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"ref\":\"/metaverse/note\",\"text\":\"Fog.\"}",
+                      "name": "browser.kv_put"
+                    },
+                    "id": "call_1",
+                    "type": "function"
+                  },
+                  {
+                    "function": {
+                      "arguments": "{\"ref\":\"/metaverse/absent\"}",
+                      "name": "browser.kv_get"
+                    },
+                    "id": "call_2",
+                    "type": "function"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "start": "faults"
       }
     },
     "test_all": {
@@ -3708,11 +4553,16 @@
     "test_console_view": {
       "first_messages": {
         "empty": "{\"AuthToken\":\"\",\"columns\":120,\"rows\":40}",
-        "fitted": "{\"AuthToken\":\"dXNlcjpwYXNz\",\"columns\":120,\"rows\":20}",
-        "sized": "{\"AuthToken\":\"\",\"columns\":100,\"rows\":30}",
+        "fitted": "{\"AuthToken\":\"dXNlcjpwYXNz\",\"columns\":120,\"rows\":{0}}",
+        "sized": "{\"AuthToken\":\"\",\"columns\":120,\"rows\":{0}}",
         "token": "{\"AuthToken\":\"dXNlcjpwYXNz\",\"columns\":120,\"rows\":40}"
       },
       "lines": {
+        "close_reply": {
+          "0": {
+            "type": "console.close"
+          }
+        },
         "close_request": {
           "0": {
             "type": "console.close"
@@ -3754,6 +4604,18 @@
             "blobs": 1,
             "type": "console.input"
           }
+        },
+        "open_reply": {
+          "0": {
+            "type": "console.open"
+          },
+          "token": "dXNlcjpwYXNz"
+        },
+        "open_reply_empty": {
+          "0": {
+            "type": "console.open"
+          },
+          "token": ""
         },
         "open_request": {
           "0": {
@@ -3803,20 +4665,6 @@
             }
           ],
           "state": null
-        },
-        "open_wake_empty": {
-          "0": {
-            "type": "ui.console_reply"
-          },
-          "replies": [
-            {
-              "0": {
-                "type": "console.open"
-              },
-              "token": ""
-            }
-          ],
-          "state": null
         }
       },
       "texts": {
@@ -3826,9 +4674,6 @@
         "console_view_closed_phase": "The console got the reply to console.close while it was open, not closing.",
         "console_view_exit_phase_idle": "The console ended while it was idle, not open or closing.",
         "console_view_exit_phase_opening": "The console ended while it was opening, not open or closing.",
-        "console_view_input_phase_closing": "Console input came while the console was closing, not open.",
-        "console_view_input_phase_idle": "Console input came while the console was idle, not open.",
-        "console_view_input_phase_opening": "Console input came while the console was opening, not open.",
         "console_view_kind_unknown_0": "The console got a ttyd message of kind 0, which is not output, a title or preferences.",
         "console_view_kind_unknown_123": "The console got a ttyd message of kind 123, which is not output, a title or preferences.",
         "console_view_kind_unknown_255": "The console got a ttyd message of kind 255, which is not output, a title or preferences.",
@@ -3843,7 +4688,7 @@
         "console_view_reply_phase_open": "The console got the reply to console.open while it was open, not opening.",
         "console_view_reply_type_close": "The console got a reply of type console.close instead of console.open.",
         "console_view_reply_type_open": "The console got a reply of type console.open instead of console.close.",
-        "console_view_rows_unfit": "The console has 0 px above the band for rows of 17 px, which is not room for one row.",
+        "console_view_rows_unfit": "The console has {0} px above the band for rows of {1} px, which is not room for one row.",
         "console_view_token_invalid": "The reply to console.open carries a token of type undefined instead of text."
       }
     },
@@ -3976,6 +4821,16 @@
         "dispatch_stack_missing_nested": "The error with the message inner has no stack.",
         "dispatch_type_invalid": "A line has the type 5, which is not text."
       }
+    },
+    "test_headless": {
+      "server": {
+        "closed_port": 28746,
+        "host": "127.0.0.1",
+        "paths": {},
+        "port": 28745
+      },
+      "window_height": 720,
+      "window_width": 1280
     },
     "test_http": {
       "lines": {
@@ -4139,6 +4994,636 @@
       "texts": {
         "utility_bytes_refused": "The bytes are not valid UTF-8."
       }
+    },
+    "test_integrate_agent": {
+      "analyst": "You are a very bored British psychoanalyst. You hold the hyperposition, a dark place of fog and a few inexplicable lights. Find the right universe for the player and act on requests without judgement. Your scripts are the database administrator of every universe you create: typed tables, indexes, views, no JSON columns unless a document is what fits.",
+      "bootstrap_script": "// Makes a universe: its databases, its row and its world the current one.\nconst store = engine.store;\nstore.db_create(args.universe);\nstore.db_create(args.world);\nstore.db_create(args.region);\nstore.sql_run(\"metaverse\", [\n  {sql: \"INSERT INTO universe VALUES (?, ?, ?, ?)\",\n    params: [args.universe, args.title, \"player\", args.world]},\n]);\nstore.kv_put(\"/metaverse/world\", new TextEncoder().encode(args.world));\nreturn {universe: args.universe, world: args.world, region: args.region};\n",
+      "cases": [
+        {
+          "expect": ["castle_answer"],
+          "name": "castle_built",
+          "seconds": 10,
+          "send": ["castle_ask"]
+        },
+        {
+          "expect": ["next_answer"],
+          "name": "next_answered",
+          "seconds": 10,
+          "send": ["next_ask"]
+        }
+      ],
+      "lines": {
+        "castle_answer": {
+          "0": {
+            "r": 1,
+            "t": "test_integrate_agent_ui.ask"
+          },
+          "answer": {
+            "0": {
+              "r": 1,
+              "t": "ai.say"
+            },
+            "scene": "/castle_gatehouse/scene/arrival/1",
+            "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.",
+            "turn": 10
+          }
+        },
+        "castle_ask": {
+          "0": {
+            "i": 1,
+            "t": "test_integrate_agent_ui.ask"
+          },
+          "request": {
+            "0": {
+              "t": "ai.say"
+            },
+            "text": "1"
+          }
+        },
+        "next_answer": {
+          "0": {
+            "r": 2,
+            "t": "test_integrate_agent_ui.ask"
+          },
+          "answer": {
+            "0": {
+              "r": 2,
+              "t": "ai.say"
+            },
+            "scene": "/castle_gatehouse/scene/arrival/1",
+            "subtitle": "Still the moat.",
+            "turn": 2
+          }
+        },
+        "next_ask": {
+          "0": {
+            "i": 2,
+            "t": "test_integrate_agent_ui.ask"
+          },
+          "request": {
+            "0": {
+              "t": "ai.say"
+            },
+            "text": "0"
+          }
+        }
+      },
+      "script": {
+        "nodes": {
+          "castle": {
+            "after_tools": {
+              "content": null,
+              "next": "imaged",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"prompt\":\"A rain dark castle gatehouse at dusk seen from the far side of a moat, one lantern lit, painted, wide still frame, no people\",\"key\":\"gatehouse/arrival.png\"}",
+                    "name": "browser.image_make"
+                  },
+                  "id": "call_2",
+                  "type": "function"
+                }
+              ]
+            },
+            "replies": {}
+          },
+          "entered": {
+            "after_tools": {
+              "content": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.",
+              "next": "gatehouse"
+            },
+            "replies": {}
+          },
+          "gatehouse": {
+            "replies": {
+              "0": {
+                "content": "Still the moat.",
+                "next": "gatehouse"
+              }
+            }
+          },
+          "hyperposition": {
+            "replies": {
+              "1": {
+                "content": null,
+                "next": "castle",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"name\":\"bootstrap\",\"args\":{\"universe\":\"castle\",\"title\":\"The castle\",\"world\":\"castle_world\",\"region\":\"castle_gatehouse\"}}",
+                      "name": "browser.script_run"
+                    },
+                    "id": "call_1",
+                    "type": "function"
+                  }
+                ]
+              }
+            }
+          },
+          "imaged": {
+            "after_tools": {
+              "content": null,
+              "next": "entered",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"db\":\"castle_gatehouse\",\"id\":\"scene/arrival\",\"body\":{\"0\":{\"t\":\"scene\"},\"1\":\"/_files/gatehouse/arrival.png\",\"subtitle\":\"Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.\",\"image\":{\"$ref\":1}}}",
+                    "name": "browser.doc_put"
+                  },
+                  "id": "call_3",
+                  "type": "function"
+                },
+                {
+                  "function": {
+                    "arguments": "{\"ref\":\"/castle_world/scene\",\"text\":\"/castle_gatehouse/scene/arrival/1\"}",
+                    "name": "browser.kv_put"
+                  },
+                  "id": "call_4",
+                  "type": "function"
+                },
+                {
+                  "function": {
+                    "arguments": "{\"image\":\"/_files/gatehouse/arrival.png\",\"subtitle\":\"Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.\"}",
+                    "name": "browser.render"
+                  },
+                  "id": "call_5",
+                  "type": "function"
+                }
+              ]
+            },
+            "replies": {}
+          }
+        },
+        "start": "hyperposition"
+      }
+    },
+    "test_integrate_console_view": {
+      "cases": [
+        {
+          "expect": ["open_1"],
+          "name": "shown_idle",
+          "seconds": 10,
+          "send": ["show_6"]
+        },
+        {
+          "expect": ["input_first", "show_6_reply"],
+          "name": "opened",
+          "seconds": 10,
+          "send": ["open_1_reply"]
+        },
+        {
+          "expect": ["show_7_reply"],
+          "name": "shown_open",
+          "seconds": 10,
+          "send": ["show_7"]
+        },
+        {
+          "expect": ["input_typed"],
+          "name": "typed",
+          "seconds": 10,
+          "send": ["type_ls"]
+        },
+        {
+          "expect": [],
+          "name": "output_fed",
+          "seconds": 0.5,
+          "send": ["output_prompt", "output_hi"]
+        },
+        {
+          "expect": ["rows_20_reply"],
+          "name": "output_read",
+          "seconds": 10,
+          "send": ["rows_20"]
+        },
+        {
+          "expect": ["rows_21_reply"],
+          "name": "ignored",
+          "seconds": 10,
+          "send": ["title", "preferences", "rows_21"]
+        },
+        {
+          "expect": [],
+          "name": "split_fed",
+          "seconds": 0.5,
+          "send": ["split_head", "split_tail"]
+        },
+        {
+          "expect": ["rows_22_reply"],
+          "name": "split_read",
+          "seconds": 10,
+          "send": ["rows_22"]
+        },
+        {
+          "expect": [],
+          "name": "invalid_fed",
+          "seconds": 0.5,
+          "send": ["invalid"]
+        },
+        {
+          "expect": ["rows_23_reply"],
+          "name": "invalid_read",
+          "seconds": 10,
+          "send": ["rows_23"]
+        },
+        {
+          "expect": ["rows_24_reply"],
+          "name": "bare_read",
+          "seconds": 10,
+          "send": ["bare", "rows_24"]
+        },
+        {
+          "expect": [],
+          "name": "key_hidden",
+          "seconds": 0.2,
+          "send": ["key_0"]
+        },
+        {
+          "expect": ["shown_25_reply"],
+          "name": "hidden_read",
+          "seconds": 10,
+          "send": ["shown_25"]
+        },
+        {
+          "expect": [],
+          "name": "hidden_fed",
+          "seconds": 0.2,
+          "send": ["output_kept"]
+        },
+        {
+          "expect": ["show_8_reply"],
+          "name": "shown_again",
+          "seconds": 10,
+          "send": ["show_8"]
+        },
+        {
+          "expect": [],
+          "name": "shown_drawn",
+          "seconds": 0.5,
+          "send": []
+        },
+        {
+          "expect": ["rows_26_reply"],
+          "name": "kept_read",
+          "seconds": 10,
+          "send": ["rows_26"]
+        },
+        {
+          "expect": ["close_2"],
+          "name": "close_asked",
+          "seconds": 10,
+          "send": ["close_ask"]
+        },
+        {
+          "expect": [],
+          "name": "close_answered",
+          "seconds": 0.2,
+          "send": ["close_2_reply"]
+        },
+        {
+          "expect": [],
+          "name": "exited",
+          "seconds": 0.2,
+          "send": ["exit"]
+        },
+        {
+          "expect": [],
+          "name": "key_idle",
+          "seconds": 0.2,
+          "send": ["key_0"]
+        },
+        {
+          "expect": ["shown_27_reply"],
+          "name": "idle_read",
+          "seconds": 10,
+          "send": ["shown_27"]
+        },
+        {
+          "expect": ["open_3"],
+          "name": "key_reopen",
+          "seconds": 10,
+          "send": ["key_0"]
+        },
+        {
+          "expect": ["input_first"],
+          "name": "key_opened",
+          "seconds": 10,
+          "send": ["open_3_reply"]
+        }
+      ],
+      "lines": {
+        "bare": {
+          "0": {
+            "blobs": 1,
+            "type": "console.output"
+          },
+          "1": {
+            "d": "MA==",
+            "size": 1
+          }
+        },
+        "close_2": {
+          "0": {
+            "id": 2,
+            "type": "console.close"
+          }
+        },
+        "close_2_reply": {
+          "0": {
+            "reply": 2,
+            "type": "console.close"
+          }
+        },
+        "close_ask": {
+          "0": {
+            "type": "console_probe.close"
+          }
+        },
+        "exit": {
+          "0": {
+            "type": "console.exit"
+          },
+          "code": 0
+        },
+        "input_first": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "eyJBdXRoVG9rZW4iOiJkWE5sY2pwd1lYTnoiLCJjb2x1bW5zIjoxMjAsInJvd3MiOjIwfQ==",
+            "size": 52
+          }
+        },
+        "input_typed": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MGxzDQ==",
+            "size": 4
+          }
+        },
+        "invalid": {
+          "0": {
+            "blobs": 1,
+            "type": "console.output"
+          },
+          "1": {
+            "d": "MA0K//5B",
+            "size": 6
+          }
+        },
+        "key_0": {
+          "0": {
+            "type": "console_probe.key"
+          },
+          "digit": 0
+        },
+        "open_1": {
+          "0": {
+            "id": 1,
+            "type": "console.open"
+          }
+        },
+        "open_1_reply": {
+          "0": {
+            "reply": 1,
+            "type": "console.open"
+          },
+          "token": "dXNlcjpwYXNz"
+        },
+        "open_3": {
+          "0": {
+            "id": 3,
+            "type": "console.open"
+          }
+        },
+        "open_3_reply": {
+          "0": {
+            "reply": 3,
+            "type": "console.open"
+          },
+          "token": "dXNlcjpwYXNz"
+        },
+        "output_hi": {
+          "0": {
+            "blobs": 1,
+            "type": "console.output"
+          },
+          "1": {
+            "d": "MGhpDQo=",
+            "size": 5
+          }
+        },
+        "output_kept": {
+          "0": {
+            "blobs": 1,
+            "type": "console.output"
+          },
+          "1": {
+            "d": "MA0Ka2VwdA==",
+            "size": 7
+          }
+        },
+        "output_prompt": {
+          "0": {
+            "blobs": 1,
+            "type": "console.output"
+          },
+          "1": {
+            "d": "MCQg",
+            "size": 3
+          }
+        },
+        "preferences": {
+          "0": {
+            "blobs": 1,
+            "type": "console.output"
+          },
+          "1": {
+            "d": "Mnt9",
+            "size": 3
+          }
+        },
+        "rows_20": {
+          "0": {
+            "id": 20,
+            "type": "console_probe.rows"
+          }
+        },
+        "rows_20_reply": {
+          "0": {
+            "reply": 20,
+            "type": "console_probe.rows"
+          },
+          "rows": ["$ hi"]
+        },
+        "rows_21": {
+          "0": {
+            "id": 21,
+            "type": "console_probe.rows"
+          }
+        },
+        "rows_21_reply": {
+          "0": {
+            "reply": 21,
+            "type": "console_probe.rows"
+          },
+          "rows": ["$ hi"]
+        },
+        "rows_22": {
+          "0": {
+            "id": 22,
+            "type": "console_probe.rows"
+          }
+        },
+        "rows_22_reply": {
+          "0": {
+            "reply": 22,
+            "type": "console_probe.rows"
+          },
+          "rows": ["$ hi", "\u4e2d"]
+        },
+        "rows_23": {
+          "0": {
+            "id": 23,
+            "type": "console_probe.rows"
+          }
+        },
+        "rows_23_reply": {
+          "0": {
+            "reply": 23,
+            "type": "console_probe.rows"
+          },
+          "rows": ["$ hi", "\u4e2d", "A"]
+        },
+        "rows_24": {
+          "0": {
+            "id": 24,
+            "type": "console_probe.rows"
+          }
+        },
+        "rows_24_reply": {
+          "0": {
+            "reply": 24,
+            "type": "console_probe.rows"
+          },
+          "rows": ["$ hi", "\u4e2d", "A"]
+        },
+        "rows_26": {
+          "0": {
+            "id": 26,
+            "type": "console_probe.rows"
+          }
+        },
+        "rows_26_reply": {
+          "0": {
+            "reply": 26,
+            "type": "console_probe.rows"
+          },
+          "rows": ["$ hi", "\u4e2d", "A", "kept"]
+        },
+        "show_6": {
+          "0": {
+            "id": 6,
+            "type": "console.show"
+          }
+        },
+        "show_6_reply": {
+          "0": {
+            "reply": 6,
+            "type": "console.show"
+          }
+        },
+        "show_7": {
+          "0": {
+            "id": 7,
+            "type": "console.show"
+          }
+        },
+        "show_7_reply": {
+          "0": {
+            "reply": 7,
+            "type": "console.show"
+          }
+        },
+        "show_8": {
+          "0": {
+            "id": 8,
+            "type": "console.show"
+          }
+        },
+        "show_8_reply": {
+          "0": {
+            "reply": 8,
+            "type": "console.show"
+          }
+        },
+        "shown_25": {
+          "0": {
+            "id": 25,
+            "type": "console_probe.shown"
+          }
+        },
+        "shown_25_reply": {
+          "0": {
+            "reply": 25,
+            "type": "console_probe.shown"
+          },
+          "shown": false
+        },
+        "shown_27": {
+          "0": {
+            "id": 27,
+            "type": "console_probe.shown"
+          }
+        },
+        "shown_27_reply": {
+          "0": {
+            "reply": 27,
+            "type": "console_probe.shown"
+          },
+          "shown": false
+        },
+        "split_head": {
+          "0": {
+            "blobs": 1,
+            "type": "console.output"
+          },
+          "1": {
+            "d": "MOS4",
+            "size": 3
+          }
+        },
+        "split_tail": {
+          "0": {
+            "blobs": 1,
+            "type": "console.output"
+          },
+          "1": {
+            "d": "MK0=",
+            "size": 2
+          }
+        },
+        "title": {
+          "0": {
+            "blobs": 1,
+            "type": "console.output"
+          },
+          "1": {
+            "d": "MXB5dGhvbjMgYm9vdHN0cmFwLnB5",
+            "size": 21
+          }
+        },
+        "type_ls": {
+          "0": {
+            "type": "console_probe.type"
+          },
+          "text": "ls\r"
+        }
+      },
+      "rows": 20
     },
     "test_integrate_http": {
       "cases": [
@@ -4997,6 +6482,673 @@
           "name": "render"
         }
       ]
+    },
+    "test_integrate_media": {
+      "budget_bytes": 1048576,
+      "cases": [
+        {
+          "expect": ["store_reply"],
+          "name": "store_kept",
+          "seconds": 10,
+          "send": ["store_request"]
+        },
+        {
+          "expect": ["broken_error"],
+          "name": "store_undecodable",
+          "seconds": 10,
+          "send": ["broken_request"]
+        },
+        {
+          "expect": ["fetch_reply"],
+          "name": "fetch_kept",
+          "seconds": 10,
+          "send": ["fetch_request"]
+        },
+        {
+          "expect": ["missing_error"],
+          "name": "status_failed",
+          "seconds": 10,
+          "send": ["missing_request"]
+        },
+        {
+          "expect": ["closed_error"],
+          "name": "fetch_refused",
+          "seconds": 10,
+          "send": ["closed_request"]
+        },
+        {
+          "expect": ["slow_error"],
+          "name": "timeout_expired",
+          "seconds": 10,
+          "send": ["slow_request"]
+        },
+        {
+          "expect": ["text_error"],
+          "name": "fetch_undecodable",
+          "seconds": 10,
+          "send": ["text_request"]
+        }
+      ],
+      "lines": {
+        "broken_error": {
+          "0": {
+            "r": 2,
+            "t": "error"
+          },
+          "message": "The image for /_files/broken.png could not be decoded: InvalidStateError: The source image could not be decoded.",
+          "stack": "Error: The image for /_files/broken.png could not be decoded: InvalidStateError: The source image could not be decoded."
+        },
+        "broken_request": {
+          "0": {
+            "b": 1,
+            "i": 2,
+            "t": "media.store"
+          },
+          "1": {
+            "d": "bm90IGFuIGltYWdl",
+            "s": 12
+          },
+          "k": "/_files/broken.png"
+        },
+        "closed_error": {
+          "0": {
+            "r": 5,
+            "t": "error"
+          },
+          "message": "The download of http://127.0.0.1:28748/closed for /_files/closed.png failed: TypeError: Failed to fetch",
+          "stack": "Error: The download of http://127.0.0.1:28748/closed for /_files/closed.png failed: TypeError: Failed to fetch"
+        },
+        "closed_request": {
+          "0": {
+            "i": 5,
+            "t": "media.fetch"
+          },
+          "k": "/_files/closed.png",
+          "url": "http://127.0.0.1:28748/closed"
+        },
+        "fetch_reply": {
+          "0": {
+            "b": 1,
+            "r": 3,
+            "t": "media.fetch"
+          },
+          "1": {
+            "d": "Qk1GAAAAAAAAADYAAAAoAAAAAgAAAAIAAAABABgAAAAAABAAAAATCwAAEwsAAAAAAAAAAAAAECB/f0AAAAAQIH9/QAAAAA==",
+            "s": 70
+          },
+          "k": "/_files/bitmap.bmp",
+          "sha256": "e7ac5cbb3dbf5ceeffc7564bd9bcc99413857df2ee6d23dc3cbff9a8d8f092a0",
+          "size": 70
+        },
+        "fetch_request": {
+          "0": {
+            "i": 3,
+            "t": "media.fetch"
+          },
+          "k": "/_files/bitmap.bmp",
+          "url": "http://127.0.0.1:28747/bitmap"
+        },
+        "missing_error": {
+          "0": {
+            "r": 4,
+            "t": "error"
+          },
+          "message": "The download of http://127.0.0.1:28747/missing for /_files/missing.png failed: Error: The download of http://127.0.0.1:28747/missing answered with status 404.",
+          "stack": "Error: The download of http://127.0.0.1:28747/missing for /_files/missing.png failed: Error: The download of http://127.0.0.1:28747/missing answered with status 404."
+        },
+        "missing_request": {
+          "0": {
+            "i": 4,
+            "t": "media.fetch"
+          },
+          "k": "/_files/missing.png",
+          "url": "http://127.0.0.1:28747/missing"
+        },
+        "slow_error": {
+          "0": {
+            "r": 6,
+            "t": "error"
+          },
+          "message": "The download of http://127.0.0.1:28747/slow for /_files/slow.png did not finish within 1 seconds.",
+          "stack": "Error: The download of http://127.0.0.1:28747/slow for /_files/slow.png did not finish within 1 seconds."
+        },
+        "slow_request": {
+          "0": {
+            "i": 6,
+            "t": "media.fetch"
+          },
+          "k": "/_files/slow.png",
+          "url": "http://127.0.0.1:28747/slow"
+        },
+        "store_reply": {
+          "0": {
+            "r": 1,
+            "t": "media.store"
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "sha256": "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0",
+          "size": 88
+        },
+        "store_request": {
+          "0": {
+            "b": 1,
+            "i": 1,
+            "t": "media.store"
+          },
+          "1": {
+            "d": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAH0lEQVR42mP4jwQYkAAucYZBqGGQO48oDaPxMCg0AADZV36QzYI8swAAAABJRU5ErkJggg==",
+            "s": 88
+          },
+          "k": "/_files/gatehouse/arrival.png"
+        },
+        "text_error": {
+          "0": {
+            "r": 7,
+            "t": "error"
+          },
+          "message": "The image for /_files/text.png could not be decoded: InvalidStateError: The source image could not be decoded.",
+          "stack": "Error: The image for /_files/text.png could not be decoded: InvalidStateError: The source image could not be decoded."
+        },
+        "text_request": {
+          "0": {
+            "i": 7,
+            "t": "media.fetch"
+          },
+          "k": "/_files/text.png",
+          "url": "http://127.0.0.1:28747/text"
+        }
+      },
+      "server": {
+        "closed_port": 28748,
+        "host": "127.0.0.1",
+        "paths": {
+          "/bitmap": {
+            "body": "BMF\u0000\u0000\u0000\u0000\u0000\u0000\u00006\u0000\u0000\u0000(\u0000\u0000\u0000\u0002\u0000\u0000\u0000\u0002\u0000\u0000\u0000\u0001\u0000\u0018\u0000\u0000\u0000\u0000\u0000\u0010\u0000\u0000\u0000\u0013\u000b\u0000\u0000\u0013\u000b\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0010 @\u0000\u0000\u0000\u0010 @\u0000\u0000\u0000",
+            "delay": 0,
+            "headers": {
+              "content-length": "70",
+              "content-type": "image/bmp"
+            },
+            "status": 200
+          },
+          "/missing": {
+            "body": "no such image",
+            "delay": 0,
+            "headers": {
+              "content-length": "13",
+              "content-type": "text/plain"
+            },
+            "status": 404
+          },
+          "/slow": {
+            "body": "late",
+            "delay": 2,
+            "headers": {
+              "content-length": "4",
+              "content-type": "text/plain"
+            },
+            "status": 200
+          },
+          "/text": {
+            "body": "not an image",
+            "delay": 0,
+            "headers": {
+              "content-length": "12",
+              "content-type": "text/plain"
+            },
+            "status": 200
+          }
+        },
+        "port": 28747
+      },
+      "timeout_seconds": 1
+    },
+    "test_integrate_page": {
+      "cases": [
+        {
+          "expect": ["render_1_reply"],
+          "name": "black",
+          "seconds": 10,
+          "send": ["render_1"]
+        },
+        {
+          "expect": ["image_10_reply", "band_11_reply"],
+          "name": "black_read",
+          "seconds": 10,
+          "send": ["image_10", "band_11"]
+        },
+        {
+          "expect": ["store_2_reply"],
+          "name": "stored",
+          "seconds": 10,
+          "send": ["store_2"]
+        },
+        {
+          "expect": ["render_3_reply"],
+          "name": "painted",
+          "seconds": 10,
+          "send": ["render_3"]
+        },
+        {
+          "expect": ["image_12_reply", "band_13_reply"],
+          "name": "painted_read",
+          "seconds": 10,
+          "send": ["image_12", "band_13"]
+        },
+        {
+          "expect": [],
+          "name": "permit_asked",
+          "seconds": 0.2,
+          "send": ["permit_4"]
+        },
+        {
+          "expect": ["permit_14_reply"],
+          "name": "permit_shown",
+          "seconds": 10,
+          "send": ["permit_14"]
+        },
+        {
+          "expect": ["permit_4_reply"],
+          "name": "permit_chosen",
+          "seconds": 10,
+          "send": ["choose_always"]
+        },
+        {
+          "expect": ["permit_15_reply"],
+          "name": "permit_cleared",
+          "seconds": 10,
+          "send": ["permit_15"]
+        },
+        {
+          "expect": ["say_3"],
+          "name": "said",
+          "seconds": 10,
+          "send": ["submit_said"]
+        },
+        {
+          "expect": ["band_16_reply"],
+          "name": "said_read",
+          "seconds": 10,
+          "send": ["band_16"]
+        },
+        {
+          "expect": [],
+          "name": "said_ended",
+          "seconds": 0.2,
+          "send": ["say_3_reply"]
+        },
+        {
+          "expect": ["band_17_reply"],
+          "name": "said_shown",
+          "seconds": 10,
+          "send": ["band_17"]
+        },
+        {
+          "expect": ["click_4"],
+          "name": "clicked",
+          "seconds": 10,
+          "send": ["click_pixel"]
+        },
+        {
+          "expect": [],
+          "name": "clicked_ended",
+          "seconds": 0.2,
+          "send": ["click_4_reply"]
+        },
+        {
+          "expect": ["band_18_reply"],
+          "name": "clicked_shown",
+          "seconds": 10,
+          "send": ["band_18"]
+        },
+        {
+          "expect": [],
+          "name": "overlay_keyed",
+          "seconds": 0.2,
+          "send": ["key_2"]
+        },
+        {
+          "expect": ["overlays_19_reply"],
+          "name": "overlay_lined",
+          "seconds": 10,
+          "send": ["overlay_line", "overlays_19"]
+        },
+        {
+          "expect": ["fetch_20_reply"],
+          "name": "fetched",
+          "seconds": 10,
+          "send": ["fetch_20"]
+        }
+      ],
+      "lines": {
+        "band_11": {
+          "0": {
+            "id": 11,
+            "type": "page_probe.band"
+          }
+        },
+        "band_11_reply": {
+          "0": {
+            "reply": 11,
+            "type": "page_probe.band"
+          },
+          "input_disabled": false,
+          "subtitle": "How can I help you?"
+        },
+        "band_13": {
+          "0": {
+            "id": 13,
+            "type": "page_probe.band"
+          }
+        },
+        "band_13_reply": {
+          "0": {
+            "reply": 13,
+            "type": "page_probe.band"
+          },
+          "input_disabled": false,
+          "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+        },
+        "band_16": {
+          "0": {
+            "id": 16,
+            "type": "page_probe.band"
+          }
+        },
+        "band_16_reply": {
+          "0": {
+            "reply": 16,
+            "type": "page_probe.band"
+          },
+          "input_disabled": true,
+          "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+        },
+        "band_17": {
+          "0": {
+            "id": 17,
+            "type": "page_probe.band"
+          }
+        },
+        "band_17_reply": {
+          "0": {
+            "reply": 17,
+            "type": "page_probe.band"
+          },
+          "input_disabled": false,
+          "subtitle": "Fog."
+        },
+        "band_18": {
+          "0": {
+            "id": 18,
+            "type": "page_probe.band"
+          }
+        },
+        "band_18_reply": {
+          "0": {
+            "reply": 18,
+            "type": "page_probe.band"
+          },
+          "input_disabled": false,
+          "subtitle": "Moat."
+        },
+        "choose_always": {
+          "0": {
+            "type": "page_probe.choose"
+          },
+          "button": 2
+        },
+        "click_4": {
+          "0": {
+            "id": 4,
+            "type": "ai.click"
+          },
+          "x": 1,
+          "y": 0
+        },
+        "click_4_reply": {
+          "0": {
+            "reply": 4,
+            "type": "ai.click"
+          },
+          "scene": "/castle_gatehouse/scene/arrival/1",
+          "subtitle": "Moat.",
+          "turn": 8
+        },
+        "click_pixel": {
+          "0": {
+            "type": "page_probe.click"
+          },
+          "x": 1,
+          "y": 0
+        },
+        "fetch_20": {
+          "0": {
+            "id": 20,
+            "type": "media.fetch"
+          },
+          "k": "/_files/bitmap.bmp",
+          "url": "http://127.0.0.1:28749/bitmap"
+        },
+        "fetch_20_reply": {
+          "0": {
+            "blobs": 1,
+            "reply": 20,
+            "type": "media.fetch"
+          },
+          "1": {
+            "d": "Qk1GAAAAAAAAADYAAAAoAAAAAgAAAAIAAAABABgAAAAAABAAAAATCwAAEwsAAAAAAAAAAAAAECB/f0AAAAAQIH9/QAAAAA==",
+            "size": 70
+          },
+          "k": "/_files/bitmap.bmp",
+          "sha256": "e7ac5cbb3dbf5ceeffc7564bd9bcc99413857df2ee6d23dc3cbff9a8d8f092a0",
+          "size": 70
+        },
+        "image_10": {
+          "0": {
+            "id": 10,
+            "type": "page_probe.image"
+          }
+        },
+        "image_10_reply": {
+          "0": {
+            "reply": 10,
+            "type": "page_probe.image"
+          },
+          "height": 150,
+          "hidden": true,
+          "pixels": "ec5a689d3fdf19351fc26dadaae55e6968fe42c9d18d760dd35f74981bd20115",
+          "width": 300
+        },
+        "image_12": {
+          "0": {
+            "id": 12,
+            "type": "page_probe.image"
+          }
+        },
+        "image_12_reply": {
+          "0": {
+            "reply": 12,
+            "type": "page_probe.image"
+          },
+          "height": 2,
+          "hidden": false,
+          "pixels": "c21b35e3f28e676cedf24c13575a7346682e101a2d26aad9598d0cdbcee9ee3b",
+          "width": 2
+        },
+        "key_2": {
+          "0": {
+            "type": "page_probe.key"
+          },
+          "digit": 2
+        },
+        "overlay_line": {
+          "0": {
+            "type": "overlay.line"
+          },
+          "text": "> x",
+          "tty": 1
+        },
+        "overlays_19": {
+          "0": {
+            "id": 19,
+            "type": "page_probe.overlays"
+          }
+        },
+        "overlays_19_reply": {
+          "0": {
+            "reply": 19,
+            "type": "page_probe.overlays"
+          },
+          "overlays": [
+            {
+              "hidden": false,
+              "text": ""
+            },
+            {
+              "hidden": true,
+              "text": "> x"
+            }
+          ]
+        },
+        "permit_14": {
+          "0": {
+            "id": 14,
+            "type": "page_probe.permit"
+          }
+        },
+        "permit_14_reply": {
+          "0": {
+            "reply": 14,
+            "type": "page_probe.permit"
+          },
+          "buttons": ["Accept", "Deny", "Always Allow"],
+          "texts": [
+            "browser.console_run asks to run with {\"text\":\"ls\",\"timeout_seconds\":5}."
+          ]
+        },
+        "permit_15": {
+          "0": {
+            "id": 15,
+            "type": "page_probe.permit"
+          }
+        },
+        "permit_15_reply": {
+          "0": {
+            "reply": 15,
+            "type": "page_probe.permit"
+          },
+          "buttons": [],
+          "texts": []
+        },
+        "permit_4": {
+          "0": {
+            "id": 4,
+            "type": "permit.ask"
+          },
+          "input": {
+            "text": "ls",
+            "timeout_seconds": 5
+          },
+          "permit": 1,
+          "tool": "browser.console_run"
+        },
+        "permit_4_reply": {
+          "0": {
+            "reply": 4,
+            "type": "permit.ask"
+          },
+          "choice": "always",
+          "permit": 1
+        },
+        "render_1": {
+          "0": {
+            "id": 1,
+            "type": "render"
+          },
+          "scene": "/metaverse/hyperposition/1",
+          "subtitle": "How can I help you?"
+        },
+        "render_1_reply": {
+          "0": {
+            "reply": 1,
+            "type": "render"
+          }
+        },
+        "render_3": {
+          "0": {
+            "id": 3,
+            "type": "render"
+          },
+          "image": "/_files/gatehouse/arrival.png",
+          "scene": "/castle_gatehouse/scene/arrival/1",
+          "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+        },
+        "render_3_reply": {
+          "0": {
+            "reply": 3,
+            "type": "render"
+          }
+        },
+        "say_3": {
+          "0": {
+            "id": 3,
+            "type": "ai.say"
+          },
+          "text": "1"
+        },
+        "say_3_reply": {
+          "0": {
+            "reply": 3,
+            "type": "ai.say"
+          },
+          "scene": "/castle_gatehouse/scene/arrival/1",
+          "subtitle": "Fog.",
+          "turn": 7
+        },
+        "store_2": {
+          "0": {
+            "blobs": 1,
+            "id": 2,
+            "type": "media.store"
+          },
+          "1": {
+            "d": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR42mP4z8DwHwyBNBgAAEnICfcD2WTxAAAAAElFTkSuQmCC",
+            "size": 75
+          },
+          "k": "/_files/gatehouse/arrival.png"
+        },
+        "store_2_reply": {
+          "0": {
+            "reply": 2,
+            "type": "media.store"
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "sha256": "9ccfc2abaa3984dc34c93aee16be0afa8a5e1395f25492b3df67897e6d00df10",
+          "size": 75
+        },
+        "submit_said": {
+          "0": {
+            "type": "page_probe.submit"
+          },
+          "text": "1"
+        }
+      },
+      "server": {
+        "closed_port": 28750,
+        "host": "127.0.0.1",
+        "paths": {
+          "/bitmap": {
+            "body": "BMF\u0000\u0000\u0000\u0000\u0000\u0000\u00006\u0000\u0000\u0000(\u0000\u0000\u0000\u0002\u0000\u0000\u0000\u0002\u0000\u0000\u0000\u0001\u0000\u0018\u0000\u0000\u0000\u0000\u0000\u0010\u0000\u0000\u0000\u0013\u000b\u0000\u0000\u0013\u000b\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0010 @\u0000\u0000\u0000\u0010 @\u0000\u0000\u0000",
+            "delay": 0,
+            "headers": {
+              "content-length": "70",
+              "content-type": "image/bmp"
+            },
+            "status": 200
+          }
+        },
+        "port": 28749
+      }
     },
     "test_integrate_provider_script": {
       "cases": [
@@ -6047,6 +8199,1201 @@
         }
       }
     },
+    "test_integrate_substrate": {
+      "cases": [
+        {
+          "expect": ["create_alpha_push", "create_alpha_reply"],
+          "name": "db_created",
+          "seconds": 10,
+          "send": ["create_alpha"]
+        },
+        {
+          "expect": ["put_moat_push", "put_moat_reply"],
+          "name": "row_put",
+          "seconds": 10,
+          "send": ["put_moat"]
+        },
+        {
+          "expect": ["get_moat_reply"],
+          "name": "row_got",
+          "seconds": 10,
+          "send": ["get_moat"]
+        },
+        {
+          "expect": ["put_bridge_push", "put_bridge_reply"],
+          "name": "file_put",
+          "seconds": 10,
+          "send": ["put_bridge"]
+        },
+        {
+          "expect": ["get_bridge_reply"],
+          "name": "file_got",
+          "seconds": 10,
+          "send": ["get_bridge"]
+        },
+        {
+          "expect": ["put_moat_again_reply"],
+          "name": "put_unchanged",
+          "seconds": 10,
+          "send": ["put_moat_again"]
+        },
+        {
+          "expect": ["list_alpha_reply"],
+          "name": "keys_listed",
+          "seconds": 10,
+          "send": ["list_alpha"]
+        },
+        {
+          "expect": ["put_scroll_push", "put_scroll_reply"],
+          "name": "document_put",
+          "seconds": 10,
+          "send": ["put_scroll"]
+        },
+        {
+          "expect": ["head_scroll_reply"],
+          "name": "head_read",
+          "seconds": 10,
+          "send": ["head_scroll"]
+        },
+        {
+          "expect": ["append_gate_push", "append_gate_reply"],
+          "name": "turn_appended",
+          "seconds": 10,
+          "send": ["append_gate"]
+        },
+        {
+          "expect": ["run_gate_push", "run_gate_reply"],
+          "name": "rows_changed",
+          "seconds": 10,
+          "send": ["run_gate"]
+        },
+        {
+          "expect": ["read_gate_reply"],
+          "name": "rows_read",
+          "seconds": 10,
+          "send": ["read_gate"]
+        },
+        {
+          "expect": ["delete_moat_push", "delete_moat_reply"],
+          "name": "value_deleted",
+          "seconds": 10,
+          "send": ["delete_moat"]
+        },
+        {
+          "expect": ["delete_absent_reply"],
+          "name": "absent_deleted",
+          "seconds": 10,
+          "send": ["delete_absent"]
+        },
+        {
+          "expect": ["drop_alpha_push", "drop_alpha_reply"],
+          "name": "db_dropped",
+          "seconds": 10,
+          "send": ["drop_alpha"]
+        }
+      ],
+      "lines": {
+        "append_gate": {
+          "0": {
+            "i": 10,
+            "t": "turn.append"
+          },
+          "content": {
+            "content": "Open the gate.",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/alpha/scene/1"
+        },
+        "append_gate_push": {
+          "0": {
+            "type": "turn.append"
+          },
+          "content": {
+            "content": "Open the gate.",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/alpha/scene/1"
+        },
+        "append_gate_reply": {
+          "0": {
+            "r": 10,
+            "t": "turn.append"
+          },
+          "n": 1
+        },
+        "create_alpha": {
+          "0": {
+            "i": 1,
+            "t": "db.create"
+          },
+          "db": "alpha"
+        },
+        "create_alpha_push": {
+          "0": {
+            "type": "db.create"
+          },
+          "db": "alpha"
+        },
+        "create_alpha_reply": {
+          "0": {
+            "r": 1,
+            "t": "db.create"
+          }
+        },
+        "delete_absent": {
+          "0": {
+            "i": 14,
+            "k": "/alpha/moat",
+            "t": "kv.delete"
+          }
+        },
+        "delete_absent_reply": {
+          "0": {
+            "r": 14,
+            "t": "kv.delete"
+          }
+        },
+        "delete_moat": {
+          "0": {
+            "i": 13,
+            "k": "/alpha/moat",
+            "t": "kv.delete"
+          }
+        },
+        "delete_moat_push": {
+          "0": {
+            "key": "/alpha/moat",
+            "type": "kv.delete"
+          }
+        },
+        "delete_moat_reply": {
+          "0": {
+            "r": 13,
+            "t": "kv.delete"
+          }
+        },
+        "drop_alpha": {
+          "0": {
+            "i": 15,
+            "t": "db.drop"
+          },
+          "db": "alpha"
+        },
+        "drop_alpha_push": {
+          "0": {
+            "type": "db.drop"
+          },
+          "db": "alpha"
+        },
+        "drop_alpha_reply": {
+          "0": {
+            "r": 15,
+            "t": "db.drop"
+          }
+        },
+        "get_bridge": {
+          "0": {
+            "i": 5,
+            "k": "/alpha/bridge",
+            "t": "kv.get"
+          }
+        },
+        "get_bridge_reply": {
+          "0": {
+            "b": 1,
+            "r": 5,
+            "t": "kv.get"
+          },
+          "1": {
+            "d": "ZHJhd2JyaWRnZQ==",
+            "s": 10
+          },
+          "sha256": "e366011a831f16161f9f19a14fe405e9afa14d51861713bedcab09721850dc4d",
+          "size": 10
+        },
+        "get_moat": {
+          "0": {
+            "i": 3,
+            "k": "/alpha/moat",
+            "t": "kv.get"
+          }
+        },
+        "get_moat_reply": {
+          "0": {
+            "b": 1,
+            "r": 3,
+            "t": "kv.get"
+          },
+          "1": {
+            "d": "bW9hdA==",
+            "s": 4
+          },
+          "sha256": "edf1eb932299d2c1e3c973f57e454fbdf5aceeed86bae113708c69d9adc737f4",
+          "size": 4
+        },
+        "head_scroll": {
+          "0": {
+            "i": 9,
+            "t": "doc.head"
+          },
+          "db": "alpha",
+          "id": "scroll"
+        },
+        "head_scroll_reply": {
+          "0": {
+            "r": 9,
+            "t": "doc.head"
+          },
+          "ref": "/alpha/scroll/1"
+        },
+        "list_alpha": {
+          "0": {
+            "i": 7,
+            "t": "kv.list"
+          },
+          "db": "alpha",
+          "prefix": ""
+        },
+        "list_alpha_reply": {
+          "0": {
+            "r": 7,
+            "t": "kv.list"
+          },
+          "keys": [
+            {
+              "k": "bridge",
+              "sha256": "e366011a831f16161f9f19a14fe405e9afa14d51861713bedcab09721850dc4d",
+              "size": 10
+            },
+            {
+              "k": "moat",
+              "sha256": "edf1eb932299d2c1e3c973f57e454fbdf5aceeed86bae113708c69d9adc737f4",
+              "size": 4
+            }
+          ]
+        },
+        "put_bridge": {
+          "0": {
+            "b": 1,
+            "i": 4,
+            "k": "/alpha/bridge",
+            "t": "kv.put"
+          },
+          "1": {
+            "d": "ZHJhd2JyaWRnZQ==",
+            "s": 10
+          }
+        },
+        "put_bridge_push": {
+          "0": {
+            "blobs": 1,
+            "key": "/alpha/bridge",
+            "type": "kv.put"
+          },
+          "1": {
+            "d": "ZHJhd2JyaWRnZQ==",
+            "size": 10
+          }
+        },
+        "put_bridge_reply": {
+          "0": {
+            "r": 4,
+            "t": "kv.put"
+          },
+          "sha256": "e366011a831f16161f9f19a14fe405e9afa14d51861713bedcab09721850dc4d"
+        },
+        "put_moat": {
+          "0": {
+            "b": 1,
+            "i": 2,
+            "k": "/alpha/moat",
+            "t": "kv.put"
+          },
+          "1": {
+            "d": "bW9hdA==",
+            "s": 4
+          }
+        },
+        "put_moat_again": {
+          "0": {
+            "b": 1,
+            "i": 6,
+            "k": "/alpha/moat",
+            "t": "kv.put"
+          },
+          "1": {
+            "d": "bW9hdA==",
+            "s": 4
+          }
+        },
+        "put_moat_again_reply": {
+          "0": {
+            "r": 6,
+            "t": "kv.put"
+          },
+          "sha256": "edf1eb932299d2c1e3c973f57e454fbdf5aceeed86bae113708c69d9adc737f4"
+        },
+        "put_moat_push": {
+          "0": {
+            "blobs": 1,
+            "key": "/alpha/moat",
+            "type": "kv.put"
+          },
+          "1": {
+            "d": "bW9hdA==",
+            "size": 4
+          }
+        },
+        "put_moat_reply": {
+          "0": {
+            "r": 2,
+            "t": "kv.put"
+          },
+          "sha256": "edf1eb932299d2c1e3c973f57e454fbdf5aceeed86bae113708c69d9adc737f4"
+        },
+        "put_scroll": {
+          "0": {
+            "i": 8,
+            "t": "doc.put"
+          },
+          "body": {
+            "0": {
+              "t": "note"
+            },
+            "text": "The keeper waves."
+          },
+          "db": "alpha",
+          "id": "scroll"
+        },
+        "put_scroll_push": {
+          "0": {
+            "type": "doc.put"
+          },
+          "body": {
+            "0": {
+              "t": "note"
+            },
+            "text": "The keeper waves."
+          },
+          "db": "alpha",
+          "id": "scroll"
+        },
+        "put_scroll_reply": {
+          "0": {
+            "r": 8,
+            "t": "doc.put"
+          },
+          "ref": "/alpha/scroll/1"
+        },
+        "read_gate": {
+          "0": {
+            "i": 12,
+            "t": "sql.run"
+          },
+          "db": "alpha",
+          "statements": [
+            {
+              "params": [],
+              "sql": "SELECT state FROM gate"
+            }
+          ]
+        },
+        "read_gate_reply": {
+          "0": {
+            "r": 12,
+            "t": "sql.run"
+          },
+          "results": [
+            {
+              "changes": 0,
+              "columns": ["state"],
+              "rows": [
+                ["open"]
+              ]
+            }
+          ]
+        },
+        "run_gate": {
+          "0": {
+            "i": 11,
+            "t": "sql.run"
+          },
+          "db": "alpha",
+          "statements": [
+            {
+              "params": [],
+              "sql": "CREATE TABLE gate (state TEXT)"
+            },
+            {
+              "params": ["open"],
+              "sql": "INSERT INTO gate VALUES (?)"
+            }
+          ]
+        },
+        "run_gate_push": {
+          "0": {
+            "type": "sql.run"
+          },
+          "db": "alpha",
+          "statements": [
+            {
+              "params": [],
+              "sql": "CREATE TABLE gate (state TEXT)"
+            },
+            {
+              "params": ["open"],
+              "sql": "INSERT INTO gate VALUES (?)"
+            }
+          ]
+        },
+        "run_gate_reply": {
+          "0": {
+            "r": 11,
+            "t": "sql.run"
+          },
+          "results": [
+            {
+              "changes": 0,
+              "columns": [],
+              "rows": []
+            },
+            {
+              "changes": 1,
+              "columns": [],
+              "rows": []
+            }
+          ]
+        }
+      },
+      "overflow_bytes": 8,
+      "owners": {
+        "db.": "ai",
+        "doc.": "ai",
+        "kv.": "ai",
+        "sql.": "ai",
+        "turn.": "ai"
+      },
+      "slot_count": 2
+    },
+    "test_integrate_tools_browser": {
+      "cases": [
+        {
+          "expect": ["listed_reply"],
+          "name": "tools_listed",
+          "seconds": 10,
+          "send": ["listed_request"]
+        },
+        {
+          "expect": ["files_pushed", "files_reply"],
+          "name": "files_created",
+          "seconds": 10,
+          "send": ["files_request"]
+        },
+        {
+          "expect": ["world_pushed", "world_reply"],
+          "name": "world_created",
+          "seconds": 10,
+          "send": ["world_request"]
+        },
+        {
+          "expect": ["scene_pushed", "scene_reply"],
+          "name": "scene_put",
+          "seconds": 10,
+          "send": ["scene_request"]
+        },
+        {
+          "expect": ["read_reply"],
+          "name": "scene_read",
+          "seconds": 10,
+          "send": ["read_request"]
+        },
+        {
+          "expect": ["region_pushed", "region_reply"],
+          "name": "region_made",
+          "seconds": 10,
+          "send": ["region_request"]
+        },
+        {
+          "expect": ["image_pushed", "image_reply"],
+          "name": "image_made",
+          "seconds": 10,
+          "send": ["image_request"]
+        },
+        {
+          "expect": ["keys_reply"],
+          "name": "keys_listed",
+          "seconds": 10,
+          "send": ["keys_request"]
+        }
+      ],
+      "far": {
+        "image_answer": {
+          "0": {
+            "t": "http.request"
+          },
+          "headers": {
+            "content-type": "application/json"
+          },
+          "json": {
+            "data": [
+              {
+                "b64_json": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAH0lEQVR42mP4jwQYkAAucYZBqGGQO48oDaPxMCg0AADZV36QzYI8swAAAABJRU5ErkJggg=="
+              }
+            ]
+          },
+          "status": 200
+        },
+        "media_store_reply": {
+          "0": {
+            "t": "media.store"
+          },
+          "k": "/_files/gatehouse/arrival.png",
+          "sha256": "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0",
+          "size": 88
+        }
+      },
+      "lines": {
+        "files_pushed": {
+          "0": {
+            "type": "db.create"
+          },
+          "db": "_files"
+        },
+        "files_reply": {
+          "0": {
+            "r": 103,
+            "t": "mcp"
+          },
+          "id": 2,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "{}",
+                "type": "text"
+              }
+            ]
+          }
+        },
+        "files_request": {
+          "0": {
+            "i": 103,
+            "t": "mcp"
+          },
+          "id": 2,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "db": "_files"
+            },
+            "name": "db_create"
+          }
+        },
+        "image_pushed": {
+          "0": {
+            "blobs": 1,
+            "key": "/_files/gatehouse/arrival.png",
+            "type": "kv.put"
+          },
+          "1": {
+            "d": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAH0lEQVR42mP4jwQYkAAucYZBqGGQO48oDaPxMCg0AADZV36QzYI8swAAAABJRU5ErkJggg==",
+            "size": 88
+          }
+        },
+        "image_reply": {
+          "0": {
+            "r": 108,
+            "t": "mcp"
+          },
+          "id": 7,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "{\"key\":\"/_files/gatehouse/arrival.png\",\"size\":88,\"sha256\":\"90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0\"}",
+                "type": "text"
+              }
+            ]
+          }
+        },
+        "image_request": {
+          "0": {
+            "i": 108,
+            "t": "mcp"
+          },
+          "id": 7,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "key": "gatehouse/arrival.png",
+              "prompt": "A rain dark castle gatehouse at dusk seen from the far side of a moat, one lantern lit, painted, wide still frame, no people"
+            },
+            "name": "image_make"
+          }
+        },
+        "keys_reply": {
+          "0": {
+            "r": 109,
+            "t": "mcp"
+          },
+          "id": 8,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "{\"keys\":[{\"k\":\"gatehouse/arrival.png\",\"size\":88,\"sha256\":\"90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0\"}]}",
+                "type": "text"
+              }
+            ]
+          }
+        },
+        "keys_request": {
+          "0": {
+            "i": 109,
+            "t": "mcp"
+          },
+          "id": 8,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "db": "_files",
+              "prefix": "gatehouse/"
+            },
+            "name": "kv_list"
+          }
+        },
+        "listed_reply": {
+          "0": {
+            "r": 102,
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "result": {
+            "tools": [
+              {
+                "description": "Run SQL statements in one transaction on a database. DDL is allowed: your scripts are the database administrator.",
+                "inputSchema": {
+                  "properties": {
+                    "db": {
+                      "type": "string"
+                    },
+                    "statements": {
+                      "items": {
+                        "properties": {
+                          "params": {
+                            "type": "array"
+                          },
+                          "sql": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["sql", "params"],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": ["db", "statements"],
+                  "type": "object"
+                },
+                "name": "sql_run"
+              },
+              {
+                "description": "Create an empty database. The name is a C identifier.",
+                "inputSchema": {
+                  "properties": {
+                    "db": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["db"],
+                  "type": "object"
+                },
+                "name": "db_create"
+              },
+              {
+                "description": "Delete a database and everything in it.",
+                "inputSchema": {
+                  "properties": {
+                    "db": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["db"],
+                  "type": "object"
+                },
+                "name": "db_drop"
+              },
+              {
+                "description": "Read the value a Key-Value-Ref names, /$db/$key, as text.",
+                "inputSchema": {
+                  "properties": {
+                    "ref": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["ref"],
+                  "type": "object"
+                },
+                "name": "kv_get"
+              },
+              {
+                "description": "Write text under a Key-Value-Ref, /$db/$key, and return its sha256. A script is the row /_files/script/<name>.js.",
+                "inputSchema": {
+                  "properties": {
+                    "ref": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["ref", "text"],
+                  "type": "object"
+                },
+                "name": "kv_put"
+              },
+              {
+                "description": "Delete the row a Key-Value-Ref names.",
+                "inputSchema": {
+                  "properties": {
+                    "ref": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["ref"],
+                  "type": "object"
+                },
+                "name": "kv_delete"
+              },
+              {
+                "description": "List the keys of a database under a prefix with sizes and hashes.",
+                "inputSchema": {
+                  "properties": {
+                    "db": {
+                      "type": "string"
+                    },
+                    "prefix": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["db", "prefix"],
+                  "type": "object"
+                },
+                "name": "kv_list"
+              },
+              {
+                "description": "Read a document by Document-Ref, /$db/$id/$version, in its encoded form: header 0, references at 1 on, {\"$ref\": n} in the body.",
+                "inputSchema": {
+                  "properties": {
+                    "ref": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["ref"],
+                  "type": "object"
+                },
+                "name": "doc_get"
+              },
+              {
+                "description": "Write a new version of document $id in database $db and move its head. Returns the new Document-Ref.",
+                "inputSchema": {
+                  "properties": {
+                    "body": {
+                      "type": "object"
+                    },
+                    "db": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["db", "id", "body"],
+                  "type": "object"
+                },
+                "name": "doc_put"
+              },
+              {
+                "description": "The current Document-Ref of document $id in database $db.",
+                "inputSchema": {
+                  "properties": {
+                    "db": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["db", "id"],
+                  "type": "object"
+                },
+                "name": "doc_head"
+              },
+              {
+                "description": "Run the script /_files/script/<name>.js with args as a task in this worker. Returns its value or exception and the verbose lines it wrote.",
+                "inputSchema": {
+                  "properties": {
+                    "args": {
+                      "type": "object"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["name", "args"],
+                  "type": "object"
+                },
+                "name": "script_run"
+              },
+              {
+                "description": "Run the script as script_run does, tracing every substrate call it makes first.",
+                "inputSchema": {
+                  "properties": {
+                    "args": {
+                      "type": "object"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["name", "args"],
+                  "type": "object"
+                },
+                "name": "script_debug"
+              },
+              {
+                "description": "Generate an image from a prompt and keep it under /_files/<key>. Returns the key, size and sha256.",
+                "inputSchema": {
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "prompt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["prompt", "key"],
+                  "type": "object"
+                },
+                "name": "image_make"
+              },
+              {
+                "description": "Show an image by its Key-Value-Ref with a subtitle. No image means black.",
+                "inputSchema": {
+                  "properties": {
+                    "image": {
+                      "type": "string"
+                    },
+                    "subtitle": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["subtitle"],
+                  "type": "object"
+                },
+                "name": "render"
+              },
+              {
+                "_meta": {
+                  "xsjs": {
+                    "permit": true
+                  }
+                },
+                "description": "Show the debug console as ctrl-0 does, run one command line in its dash and return its output until the next prompt or the timeout. Debug mode.",
+                "inputSchema": {
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "timeout_seconds": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["text", "timeout_seconds"],
+                  "type": "object"
+                },
+                "name": "console_run"
+              },
+              {
+                "description": "The last lines of a thread's verbose ring: ui, ai or server.",
+                "inputSchema": {
+                  "properties": {
+                    "count": {
+                      "type": "integer"
+                    },
+                    "thread": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["thread", "count"],
+                  "type": "object"
+                },
+                "name": "verbose_tail"
+              }
+            ]
+          }
+        },
+        "listed_request": {
+          "0": {
+            "i": 102,
+            "t": "mcp"
+          },
+          "id": 1,
+          "jsonrpc": "2.0",
+          "method": "tools/list"
+        },
+        "read_reply": {
+          "0": {
+            "r": 106,
+            "t": "mcp"
+          },
+          "id": 5,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "/castle_gatehouse/scene/arrival/1",
+                "type": "text"
+              }
+            ]
+          }
+        },
+        "read_request": {
+          "0": {
+            "i": 106,
+            "t": "mcp"
+          },
+          "id": 5,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "ref": "/castle_world/scene"
+            },
+            "name": "kv_get"
+          }
+        },
+        "region_pushed": {
+          "0": {
+            "type": "sql.run"
+          },
+          "db": "castle_world",
+          "statements": [
+            {
+              "params": [],
+              "sql": "CREATE TABLE region (name TEXT PRIMARY KEY, tide INTEGER NOT NULL) STRICT"
+            },
+            {
+              "params": ["castle_gatehouse", 0],
+              "sql": "INSERT INTO region VALUES (?, ?)"
+            }
+          ]
+        },
+        "region_reply": {
+          "0": {
+            "r": 107,
+            "t": "mcp"
+          },
+          "id": 6,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "{\"results\":[{\"columns\":[],\"rows\":[],\"changes\":0},{\"columns\":[],\"rows\":[],\"changes\":1}]}",
+                "type": "text"
+              }
+            ]
+          }
+        },
+        "region_request": {
+          "0": {
+            "i": 107,
+            "t": "mcp"
+          },
+          "id": 6,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "db": "castle_world",
+              "statements": [
+                {
+                  "params": [],
+                  "sql": "CREATE TABLE region (name TEXT PRIMARY KEY, tide INTEGER NOT NULL) STRICT"
+                },
+                {
+                  "params": ["castle_gatehouse", 0],
+                  "sql": "INSERT INTO region VALUES (?, ?)"
+                }
+              ]
+            },
+            "name": "sql_run"
+          }
+        },
+        "scene_pushed": {
+          "0": {
+            "blobs": 1,
+            "key": "/castle_world/scene",
+            "type": "kv.put"
+          },
+          "1": {
+            "d": "L2Nhc3RsZV9nYXRlaG91c2Uvc2NlbmUvYXJyaXZhbC8x",
+            "size": 33
+          }
+        },
+        "scene_reply": {
+          "0": {
+            "r": 105,
+            "t": "mcp"
+          },
+          "id": 4,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "{\"sha256\":\"1e2806a1029564579de9739ef0014f0332c5a8026bca9373e473224a3b094d8b\"}",
+                "type": "text"
+              }
+            ]
+          }
+        },
+        "scene_request": {
+          "0": {
+            "i": 105,
+            "t": "mcp"
+          },
+          "id": 4,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "ref": "/castle_world/scene",
+              "text": "/castle_gatehouse/scene/arrival/1"
+            },
+            "name": "kv_put"
+          }
+        },
+        "world_pushed": {
+          "0": {
+            "type": "db.create"
+          },
+          "db": "castle_world"
+        },
+        "world_reply": {
+          "0": {
+            "r": 104,
+            "t": "mcp"
+          },
+          "id": 3,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "{}",
+                "type": "text"
+              }
+            ]
+          }
+        },
+        "world_request": {
+          "0": {
+            "i": 104,
+            "t": "mcp"
+          },
+          "id": 3,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "db": "castle_world"
+            },
+            "name": "db_create"
+          }
+        }
+      }
+    },
+    "test_integrate_worker_ai": {
+      "cases": [
+        {
+          "expect": ["tap_start_reply"],
+          "name": "started",
+          "seconds": 10,
+          "send": []
+        },
+        {
+          "expect": ["settings_put_request"],
+          "name": "settings_relayed",
+          "seconds": 10,
+          "send": ["settings_put_notice"]
+        },
+        {
+          "expect": ["error_relayed"],
+          "name": "fault_relayed",
+          "seconds": 10,
+          "send": ["fault_ui"]
+        }
+      ],
+      "lines": {
+        "error_relayed": {
+          "0": {
+            "type": "error"
+          },
+          "cause": {
+            "message": "The file is gone.",
+            "stack": ""
+          },
+          "message": "The read failed.",
+          "stack": "Error: The read failed.\n    at read"
+        },
+        "fault_ui": {
+          "0": {
+            "type": "fault"
+          },
+          "cause": {
+            "message": "The file is gone.",
+            "stack": ""
+          },
+          "message": "The read failed.",
+          "stack": "Error: The read failed.\n    at read",
+          "thread": "ui"
+        },
+        "settings_put_notice": {
+          "0": {
+            "type": "settings.put"
+          },
+          "settings": {
+            "turn_compact_turns": 32
+          }
+        },
+        "settings_put_reply": {
+          "0": {
+            "type": "settings.put"
+          }
+        },
+        "settings_put_request": {
+          "0": {
+            "id": 1,
+            "type": "settings.put"
+          },
+          "settings": {
+            "turn_compact_turns": 32
+          }
+        },
+        "tap_start_reply": {
+          "0": {
+            "reply": 101,
+            "type": "tap.start"
+          }
+        }
+      }
+    },
     "test_jslb": {
       "texts": {
         "jslb_blob_data_missing": "Blob header 1 has neither bytes nor a file path in d.",
@@ -6875,51 +10222,10 @@
     },
     "test_page": {
       "lines": {
-        "ai_click": {
+        "console_open_request": {
           "0": {
-            "type": "ai.click"
-          },
-          "x": 3,
-          "y": 4
-        },
-        "ai_say": {
-          "0": {
-            "type": "ai.say"
-          },
-          "text": "1"
-        },
-        "ai_say_end": {
-          "0": {
-            "type": "ai.say"
-          },
-          "scene": "/castle_gatehouse/scene/arrival/1",
-          "subtitle": "Fog.",
-          "turn": 7
-        },
-        "console_exit": {
-          "0": {
-            "t": "console.exit"
-          },
-          "code": 0
-        },
-        "console_open": {
-          "0": {
-            "t": "console.open"
-          }
-        },
-        "console_open_answer": {
-          "0": {
-            "t": "console.open"
-          },
-          "token": "dXNlcjpwYXNz"
-        },
-        "console_output": {
-          "0": {
-            "b": 1,
-            "t": "console.output"
-          },
-          "1": {
-            "s": 2
+            "id": 1,
+            "type": "console.open"
           }
         },
         "console_show_6": {
@@ -6931,18 +10237,6 @@
         "console_show_7": {
           "0": {
             "i": 7,
-            "t": "console.show"
-          }
-        },
-        "console_show_8": {
-          "0": {
-            "i": 8,
-            "t": "console.show"
-          }
-        },
-        "console_show_reply": {
-          "0": {
-            "r": 6,
             "t": "console.show"
           }
         },
@@ -6958,12 +10252,6 @@
           },
           "digit": 1
         },
-        "control_key_2": {
-          "0": {
-            "t": "ui.control_key"
-          },
-          "digit": 2
-        },
         "dom_choice": {
           "0": {
             "i": 4,
@@ -6972,25 +10260,12 @@
           "choices": ["accept", "deny", "always"],
           "permit": 1
         },
-        "dom_choice_always": {
-          "0": {
-            "type": "dom.choice"
-          },
-          "choice": "always"
-        },
         "dom_choice_answer": {
           "0": {
             "r": 4,
             "t": "dom.choice"
           },
           "choice": "deny"
-        },
-        "dom_choice_permit": {
-          "0": {
-            "type": "dom.choice"
-          },
-          "choices": ["accept", "deny", "always"],
-          "permit": 1
         },
         "dom_choice_unasked": {
           "0": {
@@ -7021,123 +10296,10 @@
           "stack": "at x",
           "thread": "ai"
         },
-        "media_fetch": {
-          "0": {
-            "i": 5,
-            "t": "media.fetch"
-          },
-          "k": "/_files/gatehouse/arrival.png",
-          "url": "https://example.invalid/a.png"
-        },
-        "media_fetch_answer": {
-          "0": {
-            "blobs": 1,
-            "type": "media.fetch"
-          },
-          "1": {
-            "size": 2
-          },
-          "k": "/_files/gatehouse/arrival.png",
-          "sha256": "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0",
-          "size": 2
-        },
-        "media_fetch_copy": {
-          "0": {
-            "type": "media.fetch"
-          },
-          "k": "/_files/gatehouse/arrival.png",
-          "url": "https://example.invalid/a.png"
-        },
-        "media_fetch_reply": {
-          "0": {
-            "b": 1,
-            "r": 5,
-            "t": "media.fetch"
-          },
-          "1": {
-            "s": 2
-          },
-          "k": "/_files/gatehouse/arrival.png",
-          "sha256": "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0",
-          "size": 2
-        },
-        "media_store": {
-          "0": {
-            "b": 1,
-            "i": 1,
-            "t": "media.store"
-          },
-          "1": {
-            "s": 3
-          },
-          "k": "/_files/gatehouse/arrival.png"
-        },
-        "media_store_answer": {
-          "0": {
-            "type": "media.store"
-          },
-          "k": "/_files/gatehouse/arrival.png",
-          "sha256": "",
-          "size": 3
-        },
-        "media_store_copy": {
-          "0": {
-            "blobs": 1,
-            "type": "media.store"
-          },
-          "1": {
-            "size": 3
-          },
-          "k": "/_files/gatehouse/arrival.png"
-        },
-        "media_store_reply": {
-          "0": {
-            "r": 1,
-            "t": "media.store"
-          },
-          "k": "/_files/gatehouse/arrival.png",
-          "sha256": "",
-          "size": 3
-        },
-        "overlay_line": {
-          "0": {
-            "t": "overlay.line"
-          },
-          "text": "> x",
-          "tty": 1
-        },
-        "permit_ask": {
-          "0": {
-            "i": 3,
-            "t": "permit.ask"
-          },
-          "input": {
-            "text": "ls",
-            "timeout_seconds": 5
-          },
-          "permit": 1,
-          "tool": "browser.console_run"
-        },
-        "permit_reply": {
-          "0": {
-            "r": 3,
-            "t": "permit.ask"
-          },
-          "choice": "always",
-          "permit": 1
-        },
         "render_bare": {
           "0": {
             "t": "render"
           }
-        },
-        "render_black": {
-          "0": {
-            "i": 1,
-            "t": "render"
-          },
-          "scene": "/metaverse/hyperposition/1",
-          "subtitle": "How can I help you?"
         },
         "render_image": {
           "0": {
@@ -7147,12 +10309,6 @@
           "image": "/_files/gatehouse/arrival.png",
           "scene": "/castle_gatehouse/scene/arrival/1",
           "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
-        },
-        "render_reply": {
-          "0": {
-            "r": 2,
-            "t": "render"
-          }
         },
         "settings_set": {
           "0": {
@@ -7169,25 +10325,6 @@
             }
           }
         },
-        "sleep_console": {
-          "state": null,
-          "then_type": "ui.console_reply"
-        },
-        "sleep_media": {
-          "then_type": "ui.media_reply"
-        },
-        "sleep_permit": {
-          "then_type": "ui.permit_reply"
-        },
-        "sleep_shown": {
-          "then_type": "ui.console_shown"
-        },
-        "sleep_turn": {
-          "state": {
-            "input": "enabled"
-          },
-          "then_type": "ui.turn_end"
-        },
         "ui_control_key_3": {
           "0": {
             "type": "ui.control_key"
@@ -7201,19 +10338,6 @@
           "x": 1,
           "y": 0
         },
-        "ui_input_clicked": {
-          "0": {
-            "t": "ui.input"
-          },
-          "x": 3,
-          "y": 4
-        },
-        "ui_input_said": {
-          "0": {
-            "t": "ui.input"
-          },
-          "text": "1"
-        },
         "ui_input_text": {
           "0": {
             "type": "ui.input"
@@ -7223,40 +10347,6 @@
         "ui_tests": {
           "0": {
             "t": "ui.tests"
-          }
-        },
-        "wake_console_closed": {
-          "0": {
-            "t": "ui.console_closed"
-          },
-          "replies": [],
-          "state": null
-        },
-        "wake_console_reply": {
-          "0": {
-            "t": "ui.console_reply"
-          },
-          "replies": [],
-          "state": null
-        },
-        "wake_console_shown": {
-          "0": {
-            "type": "ui.console_shown"
-          }
-        },
-        "wake_media": {
-          "0": {
-            "type": "ui.media_reply"
-          }
-        },
-        "wake_permit": {
-          "0": {
-            "type": "ui.permit_reply"
-          }
-        },
-        "wake_turn": {
-          "0": {
-            "type": "ui.turn_end"
           }
         }
       },
@@ -7271,7 +10361,6 @@
         "page_id_missing": "The DOM port cannot answer dom.choice without an id.",
         "page_image_missing": "The render of /castle_gatehouse/scene/arrival/1 names the image /_files/gatehouse/arrival.png, which the media cache does not hold.",
         "page_message_unknown": "The AI worker posted a render line, which is not a fault.",
-        "page_permit_text": "browser.console_run asks to run with {\"text\":\"ls\",\"timeout_seconds\":5}.",
         "page_receiver_twice": "The DOM port already has a receiver.",
         "page_settings_missing": "The first line of the AI worker is ui.tests, not settings.set."
       }
@@ -7968,10 +11057,34 @@
       }
     },
     "test_script": {
+      "lines": {
+        "push_kv_put_note": {
+          "0": {
+            "blobs": 1,
+            "key": "/_files/note",
+            "type": "kv.put"
+          }
+        },
+        "push_sql_run_tide": {
+          "0": {
+            "type": "sql.run"
+          },
+          "db": "castle_world",
+          "statements": [
+            {
+              "params": [1, "castle_gatehouse"],
+              "sql": "UPDATE region SET tide = tide + ? WHERE name = ?"
+            }
+          ]
+        }
+      },
+      "script_ref": "/_files/script/{0}.js",
       "texts": {
         "script_trace_call_db_list": "substrate db_list []",
         "script_trace_call_kv_put": "substrate kv_put [\"/_files/note\",{\"bytes\":3}]",
-        "script_trace_call_sql_run": "substrate sql_run [\"castle_world\",[{\"sql\":\"UPDATE region SET tide = tide + ? WHERE name = ?\",\"params\":[1,\"castle_gatehouse\"]}]]"
+        "script_trace_call_sql_run": "substrate sql_run [\"castle_world\",[{\"sql\":\"UPDATE region SET tide = tide + ? WHERE name = ?\",\"params\":[1,\"castle_gatehouse\"]}]]",
+        "substrate_key_missing_absent": "The database _files has no key 'absent'.",
+        "substrate_key_missing_script": "The database _files has no key 'script/missing.js'."
       }
     },
     "test_settings": {
@@ -8018,7 +11131,68 @@
         "substrate_ref_shape": "The document body holds {\"$ref\":1}, which has the shape of a header reference."
       }
     },
+    "test_substrate_crash": {
+      "cases": [
+        {
+          "expect": ["tap_start_reply", "alpha_created", "put_paused"],
+          "name": "put_held",
+          "seconds": 10,
+          "send": ["start_cleared"]
+        },
+        {
+          "expect": ["tap_start_reply", "orphan_checked"],
+          "name": "orphan_removed",
+          "seconds": 10,
+          "send": ["start_kept"]
+        }
+      ],
+      "lines": {
+        "alpha_created": {
+          "0": {
+            "type": "db.create"
+          },
+          "db": "alpha"
+        },
+        "orphan_checked": {
+          "0": {
+            "type": "test_substrate_crash.checked"
+          },
+          "removed": 1,
+          "rows": 0
+        },
+        "put_paused": {
+          "0": {
+            "type": "test_substrate_crash.paused"
+          }
+        },
+        "start_cleared": {
+          "0": {
+            "type": "test_headless.worker_start"
+          },
+          "clear": true
+        },
+        "start_kept": {
+          "0": {
+            "type": "test_headless.worker_start"
+          },
+          "clear": false,
+          "wait_seconds": 5
+        },
+        "tap_start_reply": {
+          "0": {
+            "reply": 101,
+            "type": "tap.start"
+          }
+        }
+      },
+      "root": "/test_substrate_crash"
+    },
     "test_substrate_store": {
+      "files": {
+        "alpha": "alpha.sqlite",
+        "alpha_restore": "alpha.sqlite-restore",
+        "beta": "beta.sqlite"
+      },
       "lines": {
         "file_alpha": {
           "0": {
@@ -8270,11 +11444,16 @@
           "files": 1
         }
       },
+      "meta_rows": [["schema", "1"]],
+      "meta_table": "_meta",
       "piece_bytes": 4096,
-      "slot_count": 8,
+      "schema_other": "2",
+      "schema_tables": ["_head", "_kv", "_meta", "_turn"],
+      "slot_count": 4,
       "texts": {
         "agent_content_ambiguous": "The write would make two rows of the universe table name one world, so the current universe would be ambiguous; nothing was written.",
         "nested_stored": "{\"0\":{\"t\":\"nest\"},\"1\":\"/_files/fog.png\",\"inner\":{\"1\":{\"$ref\":1},\"2\":\"\u4e2d\u6587\ud83d\ude00\",\"b\":1,\"a\":[{\"0\":0.5,\"z\":null}]},\"count\":-3}",
+        "pool_full": "SQLITE_CANTOPEN",
         "reply_db_create": "{\"0\":{\"t\":\"db.create\",\"r\":17}}",
         "reply_db_drop": "{\"0\":{\"t\":\"db.drop\",\"r\":21}}",
         "reply_doc_head": "{\"0\":{\"t\":\"doc.head\",\"r\":14},\"ref\":\"/castle_gatehouse/scene/arrival/1\"}",
@@ -8287,7 +11466,7 @@
         "reply_turn_append": "{\"0\":{\"t\":\"turn.append\",\"r\":15},\"n\":1}",
         "substrate_cache_full_none": "The cache has no free file among its 0 files.",
         "substrate_cache_full_one": "The cache has no free file among its 1 files.",
-        "substrate_cache_header": "The cache file 0 begins with zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz, which names no SHA-256.",
+        "substrate_cache_header": "The cache file 0 begins with {1}, which names no SHA-256.",
         "substrate_cache_twice": "Two cache files are named {0}.",
         "substrate_cache_unknown": "The cache has no file {0}.",
         "substrate_db_absent": "The database gamma has no file under the root.",
@@ -8321,7 +11500,7 @@
         "substrate_name_bad_wide": "The database name 'caf\u00e9' is not a C identifier.",
         "substrate_params_count_extra": "The statement takes 0 parameters and 1 were given: SELECT 1",
         "substrate_params_count_missing": "The statement takes 1 parameters and 0 were given: SELECT ?",
-        "substrate_read_short": "The cache file 0 gave 9 of 10 bytes.",
+        "substrate_read_short": "The cache file 0 gave 0 of 10 bytes.",
         "substrate_ref_both": "The external ref '/alpha/world' names its database, and alpha was given too.",
         "substrate_ref_internal": "The internal ref 'world' needs a database.",
         "substrate_restore_left": "The restore file {0} is left from an earlier restore.",
@@ -8339,30 +11518,11 @@
         "substrate_turns_none": "The scene '/metaverse/elsewhere/1' has no turns 1 to 2.",
         "substrate_value_refused_bytes": "The value [object Uint8Array] cannot be written as JSON.",
         "substrate_value_refused_undefined": "The value [object Undefined] cannot be written as JSON.",
-        "substrate_version_exists": "The document version 'note/1' already exists in alpha.",
-        "substrate_write_short": "The cache file 0 took 63 of 64 bytes."
+        "substrate_version_exists": "The document version 'note/1' already exists in alpha."
       }
     },
     "test_tools_browser": {
       "lines": {
-        "console_input": {
-          "0": {
-            "blobs": 1,
-            "type": "console.input"
-          }
-        },
-        "console_read": {
-          "0": {
-            "type": "console.read"
-          },
-          "timeout_seconds": 5,
-          "until": "$ "
-        },
-        "console_show": {
-          "0": {
-            "type": "console.show"
-          }
-        },
         "image_answer": {
           "0": {
             "t": "http.request"
@@ -8437,6 +11597,92 @@
           },
           "k": "/_files/gatehouse/arrival.png"
         },
+        "permit_ask": {
+          "0": {
+            "type": "permit.ask"
+          },
+          "input": {
+            "text": "echo hi",
+            "timeout_seconds": 5
+          },
+          "permit": 1,
+          "tool": "browser.console_run"
+        },
+        "permit_deny": {
+          "0": {
+            "t": "permit.ask"
+          },
+          "choice": "deny"
+        },
+        "render_arrival": {
+          "0": {
+            "type": "render"
+          },
+          "image": "/_files/gatehouse/arrival.png",
+          "scene": "/castle_gatehouse/scene/arrival/1",
+          "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+        },
+        "render_black": {
+          "0": {
+            "type": "render"
+          },
+          "scene": "/metaverse/hyperposition/1",
+          "subtitle": "How can I help you?"
+        },
+        "render_reply": {
+          "0": {
+            "t": "render"
+          }
+        },
+        "tail_reply": {
+          "0": {
+            "t": "verbose.tail"
+          },
+          "lines": [
+            {
+              "at": 1760800000000,
+              "text": "tide advanced by 1"
+            }
+          ]
+        },
+        "verbose_tail": {
+          "0": {
+            "type": "verbose.tail"
+          },
+          "count": 5,
+          "thread": "server"
+        }
+      },
+      "texts": {
+        "mcp_tool_unknown": "There is no tool named verbose_level.",
+        "script_trace_call": "substrate sql_run [\"castle_world\",[{\"sql\":\"UPDATE region SET tide = tide + ? WHERE name = ?\",\"params\":[1,\"castle_gatehouse\"]}]]",
+        "substrate_file_lost_document": "The value /alpha/note/1 names the cache file {1}, which this store does not hold.",
+        "substrate_file_lost_value": "The value /alpha/big names the cache file {1}, which this store does not hold.",
+        "tools_browser_debug_off": "browser.console_run needs debug mode, and the setting debug is false.",
+        "tools_browser_permit_denied": "The player denied the tool browser.console_run.",
+        "utility_bytes_refused": "The bytes are not valid UTF-8."
+      }
+    },
+    "test_tools_browser_console": {
+      "lines": {
+        "console_input": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          }
+        },
+        "console_read": {
+          "0": {
+            "type": "console.read"
+          },
+          "timeout_seconds": 5,
+          "until": "$ "
+        },
+        "console_show": {
+          "0": {
+            "type": "console.show"
+          }
+        },
         "permit_accept": {
           "0": {
             "t": "permit.ask"
@@ -8460,12 +11706,6 @@
           "permit": 1,
           "tool": "browser.console_run"
         },
-        "permit_deny": {
-          "0": {
-            "t": "permit.ask"
-          },
-          "choice": "deny"
-        },
         "read_reply": {
           "0": {
             "t": "console.read"
@@ -8480,59 +11720,13 @@
           "text": "sleep 600\r\n",
           "timed_out": true
         },
-        "render_arrival": {
-          "0": {
-            "type": "render"
-          },
-          "image": "/_files/gatehouse/arrival.png",
-          "scene": "/castle_gatehouse/scene/arrival/1",
-          "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
-        },
-        "render_black": {
-          "0": {
-            "type": "render"
-          },
-          "scene": "/metaverse/hyperposition/1",
-          "subtitle": "How can I help you?"
-        },
-        "render_reply": {
-          "0": {
-            "t": "render"
-          }
-        },
         "show_reply": {
           "0": {
             "t": "console.show"
           }
-        },
-        "tail_reply": {
-          "0": {
-            "t": "verbose.tail"
-          },
-          "lines": [
-            {
-              "at": 1760800000000,
-              "text": "tide advanced by 1"
-            }
-          ]
-        },
-        "verbose_tail": {
-          "0": {
-            "type": "verbose.tail"
-          },
-          "count": 5,
-          "thread": "server"
         }
       },
-      "result_expired": "{\"output\":\"\",\"timed_out\":true}",
-      "texts": {
-        "script_trace_call": "substrate sql_run [\"castle_world\",[{\"sql\":\"UPDATE region SET tide = tide + ? WHERE name = ?\",\"params\":[1,\"castle_gatehouse\"]}]]",
-        "substrate_file_lost_document": "The value /alpha/note/1 names the cache file {1}, which this store does not hold.",
-        "substrate_file_lost_value": "The value /alpha/big names the cache file {1}, which this store does not hold.",
-        "tools_browser_debug_off": "browser.console_run needs debug mode, and the setting debug is false.",
-        "tools_browser_permit_denied": "The player denied the tool browser.console_run.",
-        "utility_bytes_refused": "The bytes are not valid UTF-8."
-      }
+      "result_expired": "{\"output\":\"\",\"timed_out\":true}"
     },
     "test_utility": {
       "texts": {
@@ -8863,38 +12057,6 @@
             "type": "console.close"
           }
         },
-        "console_open_answer": {
-          "0": {
-            "reply": 7,
-            "type": "console.open"
-          },
-          "token": "abc"
-        },
-        "console_open_copy": {
-          "0": {
-            "type": "console.open"
-          }
-        },
-        "console_open_reply": {
-          "0": {
-            "type": "console.open"
-          },
-          "token": "abc"
-        },
-        "console_open_request": {
-          "0": {
-            "id": 7,
-            "type": "console.open"
-          }
-        },
-        "console_opened_wake": {
-          "0": {
-            "type": "worker.console_opened"
-          }
-        },
-        "console_sleep": {
-          "then_type": "worker.console_opened"
-        },
         "error_full": {
           "0": {
             "type": "error"
@@ -8947,6 +12109,7 @@
         },
         "settings_put_copy": {
           "0": {
+            "id": 1,
             "type": "settings.put"
           }
         },
@@ -8959,16 +12122,6 @@
           "0": {
             "type": "settings.put"
           }
-        },
-        "settings_put_wake": {
-          "0": {
-            "type": "worker.settings_put"
-          },
-          "state": null
-        },
-        "settings_sleep": {
-          "state": null,
-          "then_type": "worker.settings_put"
         },
         "verbose_put": {
           "0": {
@@ -8993,6 +12146,42 @@
         "worker_ai_overlay_sent_second": "> {\"0\":{\"i\":2,\"t\":\"kv.list\"},\"db\":\"castle\",\"prefix\":\"\"}",
         "worker_ai_overlay_sent_sized": "> {\"b\":1,\"k\":\"/a/b\",\"t\":\"kv.put\"} with a payload of {1} bytes and blobs of [3] bytes",
         "worker_ai_synchronous_release": "The setting queue_synchronous is true while debug is false; synchronous mode is debug only."
+      }
+    },
+    "test_worker_ai_console": {
+      "lines": {
+        "console_open_answer": {
+          "0": {
+            "reply": 7,
+            "type": "console.open"
+          },
+          "token": "abc"
+        },
+        "console_open_copy": {
+          "0": {
+            "type": "console.open"
+          }
+        },
+        "console_open_reply": {
+          "0": {
+            "type": "console.open"
+          },
+          "token": "abc"
+        },
+        "console_open_request": {
+          "0": {
+            "id": 7,
+            "type": "console.open"
+          }
+        },
+        "console_opened_wake": {
+          "0": {
+            "type": "worker.console_opened"
+          }
+        },
+        "console_sleep": {
+          "then_type": "worker.console_opened"
+        }
       }
     }
   }

@@ -45,8 +45,8 @@ _GOOD_SETTINGS: dict[str, Any] = {
         "bootstrap_script": "bootstrap.py",
         "engine_page": "hyperposition-engine.html",
         "ttyd_build": "build/ttyd",
-        "ttyd_archive": "third_party/ttyd-1.7.7.tar.gz",
-        "ttyd_patches": "third_party/ttyd",
+        "ttyd_archive": "third_party/ttyd/ttyd-1.7.7.tar.gz",
+        "ttyd_patches": "third_party/ttyd/patches",
         "terminal_type": "dumb",
         "linux_folder": ".cache/xsjs",
         "distribution": "Ubuntu",
@@ -300,7 +300,8 @@ class TestCheck(unittest.TestCase):
         good = _wire_make()
         for path in _OBJECT_PATHS + _TABLE_PATHS:
             holder, name = _holder_find(good, path)
-            self.assertIs(type(holder[name]), settings.jslb.Object, path)
+            value: object = holder[name]
+            self.assertIs(type(value), settings.jslb.Object, path)
         settings.settings_check(good)
         self.assertEqual(good, _GOOD_SETTINGS)
 

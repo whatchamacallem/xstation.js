@@ -80,7 +80,7 @@ class TestCascade(unittest.TestCase):
 
     # Calls the failing tool and returns the `isError` result it answers.
     def failing_call(self, request_id: int) -> dict[str, Any]:
-        params = {"name": _FAILING_TOOL.name, "arguments": {}}
+        params: dict[str, Any] = {"name": _FAILING_TOOL.name, "arguments": {}}
         request: mcp.Message = {
             "jsonrpc": "2.0",
             "id": request_id,

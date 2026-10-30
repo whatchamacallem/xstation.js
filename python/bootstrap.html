@@ -189,7 +189,7 @@ This file is licensed under the terms of the LICENSE.md file.
         } catch (error) {
           fail(`not UTF-8: ${error.message}`);
         }
-        // The terminal ends lines with CR LF, and a page of lines needs only LF.
+        // Terminal lines end with CR LF, and a page of lines needs only LF.
         text = text.replaceAll("\r", "");
         boot.output += text;
         elements.output.append(text);
@@ -224,7 +224,7 @@ This file is licensed under the terms of the LICENSE.md file.
         render();
       }
 
-      // Writes the socket's state, ttyd's title and preferences, and any failure.
+      // Writes the socket's state, ttyd's title, preferences and any failure.
       function render() {
         const socket = state.socket;
         const lines = [
@@ -235,8 +235,8 @@ This file is licensed under the terms of the LICENSE.md file.
           }` +
             (boot.closed === null
               ? ""
-              : ` code ${boot.closed.code} reason '${boot.closed.reason}' wasClean ` +
-                `${boot.closed.wasClean}`),
+              : ` code ${boot.closed.code} reason '${boot.closed.reason}'` +
+                ` wasClean ${boot.closed.wasClean}`),
           `ttyd title ${boot.ttyd.title === null ? "-" : boot.ttyd.title}`,
           "ttyd preferences " +
             (boot.ttyd.preferences === null ? "-" : boot.ttyd.preferences),

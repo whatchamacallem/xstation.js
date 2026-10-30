@@ -74,6 +74,7 @@ class TestCarried(unittest.TestCase):
     def test_settings_carried(self) -> None:
         values = harness.settings_copy()
         carried = _settings_carried(values)
+        value: object
         for value in (carried, carried["provider"], carried["powershell"]):
             self.assertIs(type(value), jslb.Object)
         settings.settings_check(carried)

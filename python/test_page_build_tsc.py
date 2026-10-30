@@ -2,17 +2,19 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests page_build.py with the real tsc, a later suite that waits only on the
-# SQLite wasm and xterm.js archives, tsc being approved: a python3 child for
-# each template, html/test.html and html/headless.html, builds its page from
-# the real html/, ts/, i18n/en-US.json and the archives third_party_fetch.py
-# places in third_party/, under a name of this run, removed after. Each child
-# prints its page's SHA-256, and each page holds the bundle that tsc compiled
-# by ts/tsconfig.test.json, the strings table in place, and the members it
-# takes from the two archives the gold lists for the pins. Each page is its
-# template with each marker replaced by its piece, the same pieces for both:
-# that bundle, html/engine.css, the vectors written anew into build/vectors/,
-# SQLite's glue and its wasm as base64, and xterm.js and its css.
+# Tests page_build.py with the real tsc, a split suite of page_build that
+# reads the SQLite wasm and xterm.js archives the driver fetches before its
+# first block: a python3 child for each template, html/test.html and
+# html/headless.html, builds its page from the real html/, ts/,
+# i18n/en-US.json and the archives third_party_fetch.py places in their
+# library directories of third_party/, under a name of this run, removed
+# after. Each child prints its page's SHA-256, and each page holds the bundle
+# that tsc compiled by ts/tsconfig.test.json, the strings table in place, and
+# the members it takes from the two archives the gold lists for the pins.
+# Each page is its template with each marker replaced by its piece, the same
+# pieces for both: that bundle, html/engine.css, the vectors written anew
+# into build/vectors/, SQLite's glue and its wasm as base64, and xterm.js and
+# its css.
 
 import base64, harness, hashlib, json, os, page_build, subprocess, sys
 import unittest, uuid

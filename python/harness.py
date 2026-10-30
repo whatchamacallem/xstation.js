@@ -11,7 +11,7 @@
 # writes a root's files from them changes nothing the harness holds.
 
 import copy, json, os
-from typing import Any
+from typing import Any, cast
 
 # The public names of this module, as its stub declares them.
 __all__ = ["gold_copy", "gold_get", "setting_get", "settings_copy"]
@@ -45,7 +45,7 @@ def _value_find(name: str, path: str, id: str) -> Any:
     for part in id.split("."):
         if not isinstance(value, dict) or part not in value:
             raise KeyError(f"{name} has no value with id {id!r}")
-        value = value[part]
+        value = cast(dict[str, Any], value)[part]
     return value
 
 

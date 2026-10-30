@@ -125,7 +125,6 @@ _TEST_DIGESTS: dict[str, dict[str, tuple[bytes, int]]] = {
         "arrival_ref": (b"/castle_gatehouse/scene/arrival/1", 0),
         "byte_ff": (b"\xff", 0),
         "castle_world": (b"castle_world", 0),
-        "document_lost": (b"a document whose cache file is lost", 0),
         "hyperposition_ref": (b"/metaverse/hyperposition/1", 0),
         "metaverse": (b"metaverse", 0),
         "note_a": (b"note/a", 0),
@@ -143,8 +142,6 @@ _TEST_DIGESTS: dict[str, dict[str, tuple[bytes, int]]] = {
             0,
         ),
         "text_wide": (b"\xe4\xb8\xad\xe6\x96\x87\xf0\x9f\x98\x80 text", 0),
-        "value_cached": (b"a value the cache holds", 0),
-        "value_lost": (b"a value whose cache file is lost", 0),
     },
 }
 

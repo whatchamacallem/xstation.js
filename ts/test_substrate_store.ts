@@ -2,27 +2,42 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of substrate.ts's cache and store: the sink's incremental hash
-// against known digests, the cache over slot files kept in memory, and the
-// store on the sqlite3.wasm module and OPFS pool the test page sets as
-// globals: the database of a ref, databases, values, documents, turns,
-// compaction at the threshold, SQL and the names the schema's triggers
-// raise, transactions, snapshots and restores with their cache files, values
-// whose cache file is lost, the push of each committed operation to a
-// notifier double, a put stopped between its cache file and its row, and the
-// handlers. It also holds the pause point of that stop, which a browser rung
-// uses to kill a worker of the test page there. The texts, pushes and reply
-// texts it expects and the lines it sends are its gold in
-// `test_settings.json`, read through the harness with the `overflow_bytes`
-// and `turn_compact_turns` of `settings.json` its stores take. Each digest
-// and its input are one entry of `test_digests.json` in `test_vectors`, under
-// `test_substrate_store`, and the test uses that input.
+// Tests of substrate.ts's cache and store, a block of group B in the AI
+// worker: the sink's incremental hash against known digests, the cache over
+// the open OPFS files the bring up gives the block as `test_slots`, each
+// test clearing the files it takes, and the store on the sqlite3.wasm module
+// and OPFS pool the bring up sets as globals: the database of a ref,
+// databases, values, documents, turns, compaction at the threshold, SQL and
+// the names the schema's triggers raise, transactions, snapshots and
+// restores with their cache files, values whose cache file is lost, the push
+// of each committed operation through a real `queue.TaskQueue` to the test's
+// own end of its server lane, a create that a full pool stops, a file cut
+// under a finished blob, and the handlers, which the test's own register
+// function takes. It also holds the pause point of a put held inside its
+// transaction, which a browser rung uses to kill a worker of the test page
+// there. The texts, pushes, names and reply texts it expects and the lines
+// it sends are its gold in `test_settings.json`, read through the harness
+// with the `overflow_bytes` and `turn_compact_turns` of `settings.json` its
+// stores take. Each digest and its input are one entry of
+// `test_digests.json` in `test_vectors`, under `test_substrate_store`, and
+// the test uses that input.
 namespace test_substrate_store {
-  // The initialized sqlite3.wasm module, a global the test page sets.
+  // The initialized sqlite3.wasm module, a global the bring up sets.
   declare const test_sqlite3: substrate.SqliteModule;
 
-  // Its installed OPFS SAH pool, a global the test page sets.
-  declare const test_pool: substrate.SqlitePool;
+  // The installed OPFS SAH pool, with the counts of its files it also has.
+  interface PoolCounted extends substrate.SqlitePool {
+    // The number of files the pool can hold.
+    getCapacity(): number;
+    // The number of files the pool holds.
+    getFileCount(): number;
+  }
+
+  // The pool of the bring up, a global it sets.
+  declare const test_pool: PoolCounted;
+
+  // The open OPFS files of this block, cleared, a global the bring up sets.
+  declare const test_slots: readonly substrate.SlotHandle[];
 
   // The vector files by name, as base64 text, a global the test page sets.
   declare const test_vectors: { readonly [name: string]: string };
@@ -35,8 +50,6 @@ namespace test_substrate_store {
     compact_small: 3,
     // The start of the root of each store a test makes in the pool.
     root_prefix: "/test_substrate/",
-    // The bytes at the start of a cache file that hold its name.
-    name_bytes: 64,
     // The file of the digest vectors of the test modules.
     digests_name: "test_digests.json",
     // The hyperposition scene, whose conversation the turn tests append to.
@@ -61,32 +74,26 @@ namespace test_substrate_store {
     world_sql:
       "CREATE TABLE world" +
       " (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT",
-    // The `_meta` table alone, as the substrate's SQL file creates it.
-    meta_sql:
-      "CREATE TABLE _meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)" +
-      " WITHOUT ROWID, STRICT",
     // Text beyond ASCII for keys and values, built from its code points.
     text_wide: String.fromCodePoint(0x4e2d, 0x6587, 0x1f600),
     // The first bytes of a database file.
     file_magic: "SQLite format 3",
+    // A file of the pool made apart from any store, under a test's root.
+    foreign_file: "foreign",
     // The database and key of the put that a kill stops.
     kill_db: "alpha",
     kill_key: "big",
-    // The start of the SQL that writes a row to `_kv`.
-    row_insert: "INSERT INTO _kv ",
-    // The message of the stop that stands for the kill in the unit test.
-    kill_message: "The put stopped between its cache file and its row.",
-    // The start of the SQL that writes the first of the substrate's tables.
-    schema_create: "CREATE TABLE _meta ",
-    // The message of the failure the test makes where the schema is written.
-    schema_message: "The schema failed where the test made it fail.",
+    // The thread of each store's queue and the owner its pushes go to.
+    thread: "ai" as const,
+    server: "server" as const,
+    // The setting that picks the mode of a queue.
+    synchronous_setting: "queue_synchronous",
+    // A character no hex digit is, written over the first of a stored name.
+    garble_text: "z",
   });
 
   // The number of the last root a test made, so that each store has its own.
   let root_count = 0;
-
-  // A push a store gave its notifier: the line and its owner.
-  type Pushed = [lines.Line, string | undefined];
 
   // An entry of the digest vectors: its input and its `SHA-256`, in hex.
   interface DigestVector {
@@ -116,6 +123,21 @@ namespace test_substrate_store {
     return gold_value(`lines.${name}`) as lines.Line;
   }
 
+  // The substrate's tables, in order, as the gold names them.
+  function tables_gold(): string[] {
+    return gold_value("schema_tables") as string[];
+  }
+
+  // The name under its root of a file of the pool, as the gold names it.
+  function file_gold(name: string): string {
+    return gold_value(`files.${name}`) as string;
+  }
+
+  // The table of the schema row, as the gold names it.
+  function meta_gold(): string {
+    return gold_value("meta_table") as string;
+  }
+
   // The text of a cache with no file of the name, the name known at run time.
   function unknown_text(name: string): string {
     return gold_text("substrate_cache_unknown").replaceAll("{0}", name);
@@ -136,15 +158,15 @@ namespace test_substrate_store {
   }
 
   // A push of the gold a store gives the server.
-  function push_gold(name: string): Pushed {
-    return [gold_line(name), "server"];
+  function push_gold(name: string): lines.Line {
+    return gold_line(name);
   }
 
   // A push of the gold, its blob 1 the bytes and their size in full names.
-  function push_bytes(name: string, data: Uint8Array): Pushed {
+  function push_bytes(name: string, data: Uint8Array): lines.Line {
     const line = gold_line(name);
     line[1] = { size: data.length, d: data };
-    return [line, "server"];
+    return line;
   }
 
   // The entries of this module in the digest vectors of `test_vectors`.
@@ -245,102 +267,9 @@ namespace test_substrate_store {
     return digest_entry("value_other").data;
   }
 
-  // A cache file double kept in memory, with the calls OPFS gives.
-  class MemorySlot implements substrate.SlotHandle {
-    // The storage, grown by doubling, zero beyond the file.
-    #store = new Uint8Array(0);
-    // The size of the file.
-    #size = 0;
-
-    // A copy of the bytes of the file.
-    bytes_get(): Uint8Array {
-      return this.#store.slice(0, this.#size);
-    }
-
-    // Replaces the bytes of the file.
-    bytes_set(data: Uint8Array): void {
-      this.#store = data.slice();
-      this.#size = data.length;
-    }
-
-    // Reads into the buffer from the offset, as many bytes as the file has.
-    read(buffer: Uint8Array, options: { at: number }): number {
-      const left = this.#size - options.at;
-      const count = Math.max(0, Math.min(buffer.length, left));
-      buffer.set(this.#store.subarray(options.at, options.at + count));
-      return count;
-    }
-
-    // Writes the buffer at the offset, the file growing with zeros.
-    write(buffer: Uint8Array, options: { at: number }): number {
-      const end = options.at + buffer.length;
-      this.#room_make(end);
-      this.#store.set(buffer, options.at);
-      this.#size = Math.max(this.#size, end);
-      return buffer.length;
-    }
-
-    // Sets the size, cutting the file or growing it with zeros.
-    truncate(size: number): void {
-      this.#room_make(size);
-      this.#store.fill(0, Math.min(size, this.#size));
-      this.#size = size;
-    }
-
-    // The size of the file.
-    getSize(): number {
-      return this.#size;
-    }
-
-    // Grows the storage by doubling until it holds the size.
-    #room_make(size: number): void {
-      if (size <= this.#store.length) {
-        return;
-      }
-      const grown = new Uint8Array(Math.max(size, 2 * this.#store.length));
-      grown.set(this.#store);
-      this.#store = grown;
-    }
-  }
-
-  // A cache file double whose reads and writes fall one byte short when told.
-  class ShortSlot extends MemorySlot {
-    // Whether reads and writes report one byte fewer than they moved.
-    short = false;
-
-    // Reads as the double does, reporting one byte fewer when short.
-    read(buffer: Uint8Array, options: { at: number }): number {
-      const count = super.read(buffer, options);
-      return this.short ? count - 1 : count;
-    }
-
-    // Writes as the double does, reporting one byte fewer when short.
-    write(buffer: Uint8Array, options: { at: number }): number {
-      const count = super.write(buffer, options);
-      return this.short ? count - 1 : count;
-    }
-  }
-
-  // Empty cache file doubles, as many as asked.
-  function slots_make(count: number): MemorySlot[] {
-    return Array.from({ length: count }, () => new MemorySlot());
-  }
-
-  // A cache file double holding a stored value under its name.
-  function slot_stored(name: string, data: Uint8Array): MemorySlot {
-    const slot = new MemorySlot();
-    slot.bytes_set(bytes_join([bytes_text(name), data]));
-    return slot;
-  }
-
   // The files of each test store's cache, a count of this module's gold.
   function slot_count(): number {
     return gold_value("slot_count") as number;
-  }
-
-  // A cache over empty file doubles.
-  function cache_make(): substrate.CacheFiles {
-    return new substrate.CacheFiles(slots_make(slot_count()));
   }
 
   // Streams bytes into a cache's sink in pieces and returns the handle.
@@ -354,9 +283,14 @@ namespace test_substrate_store {
     return handle;
   }
 
-  // The hash a fresh sink returns for bytes streamed in pieces of a size.
-  function digest_streamed(data: Uint8Array, piece: number): string {
-    const cache = new substrate.CacheFiles(slots_make(1));
+  // The hash a fresh sink over the file, cleared, gives bytes in pieces.
+  function digest_streamed(
+    slot: substrate.SlotHandle,
+    data: Uint8Array,
+    piece: number,
+  ): string {
+    slot.truncate(0);
+    const cache = new substrate.CacheFiles([slot]);
     const handle = cache.sink_open({ s: data.length });
     for (let offset = 0; offset < data.length; offset += piece) {
       cache.sink_append(handle, data.subarray(offset, offset + piece));
@@ -487,94 +421,14 @@ namespace test_substrate_store {
     };
   }
 
-  // A database of the pool that runs `stop` before SQL with a given start.
-  class StoppedDatabase implements substrate.SqliteDatabase {
-    // The database of the pool.
-    readonly #inner: substrate.SqliteDatabase;
-    // What runs in place of the SQL.
-    readonly #stop: () => never;
-    // The start of the SQL that the stop runs before.
-    readonly #prefix: string;
-
-    // Takes the database it wraps, the stop and the start of the SQL.
-    constructor(
-      inner: substrate.SqliteDatabase,
-      stop: () => never,
-      prefix: string,
-    ) {
-      this.#inner = inner;
-      this.#stop = stop;
-      this.#prefix = prefix;
-    }
-
-    // The `sqlite3` pointer of the connection.
-    get pointer(): number {
-      return this.#inner.pointer;
-    }
-
-    // Runs the SQL, stopping before it when it starts with the prefix.
-    exec(options: substrate.ExecOptions): unknown {
-      if (options.sql.startsWith(this.#prefix)) {
-        this.#stop();
-      }
-      return this.#inner.exec(options);
-    }
-
-    // The first column of the first row the SQL returns.
-    selectValue(sql: string, bind?: unknown[]): unknown {
-      return this.#inner.selectValue(sql, bind);
-    }
-
-    // Prepares the first statement of the SQL.
-    prepare(sql: string): substrate.SqliteStatement {
-      return this.#inner.prepare(sql);
-    }
-
-    // The rows the last statement changed, or all since opening when total.
-    changes(total: boolean): number {
-      return this.#inner.changes(total);
-    }
-
-    // Closes the connection.
-    close(): void {
-      this.#inner.close();
-    }
-  }
-
-  // The pool's files, its databases stopping before SQL with the start.
-  function pool_stopped(
-    pool: substrate.SqlitePool,
-    stop: () => never,
-    prefix: string,
-  ): substrate.SqlitePool {
-    // The pool's database class, its databases wrapped to stop.
-    class PausedDatabase extends StoppedDatabase {
-      // Opens the file as the pool's own class does.
-      constructor(options: { filename: string; flags: string }) {
-        super(new pool.OpfsSAHPoolDb(options), stop, prefix);
-      }
-    }
-    return {
-      OpfsSAHPoolDb: PausedDatabase,
-      getFileNames: () => pool.getFileNames(),
-      importDb: (name, bytes) => pool.importDb(name, bytes),
-      unlink: (name) => pool.unlink(name),
-    };
-  }
-
-  // The pause point: the pool's files, its databases stopping before a row.
-  export function kill_pool(
-    pool: substrate.SqlitePool,
-    stop: () => never,
-  ): substrate.SqlitePool {
-    return pool_stopped(pool, stop, constants.row_insert);
-  }
-
-  // Creates `alpha` and puts a value over `overflow_bytes` under `big` in it.
-  export function kill_put(store: substrate.Store): void {
+  // Creates `alpha`, then holds inside the transaction of a big put to `big`.
+  export function kill_put(store: substrate.Store, paused: () => void): void {
     store.db_create(constants.kill_db);
     const value = bytes_pattern(constants.kill_overflow + 1);
-    store.kv_put(`/${constants.kill_db}/${constants.kill_key}`, value);
+    store.transaction_run(() => {
+      store.kv_put(`/${constants.kill_db}/${constants.kill_key}`, value);
+      kill_hold(paused);
+    });
   }
 
   // Says it is paused, then holds the worker in a loop until it is killed.
@@ -640,22 +494,39 @@ namespace test_substrate_store {
     }
   }
 
-  // A store test: the module and pool read in `setUp`, its roots removed.
-  class StoreCase extends RefusalCase {
-    // The module the test page provides, read in `setUp`.
-    #sqlite: substrate.SqliteModule | undefined = undefined;
-    // The pool the test page provides, read in `setUp`.
-    #pool: substrate.SqlitePool | undefined = undefined;
+  // A test that takes open OPFS files of the bring up, each cleared first.
+  class SlotCase extends RefusalCase {
+    // The number of files of `test_slots` this test took, from the first.
+    #taken = 0;
+
+    // The next files of `test_slots`, cleared, which the block must hold.
+    slots_take(count: number): substrate.SlotHandle[] {
+      const end = this.#taken + count;
+      if (test_slots.length < end) {
+        throw new Error(
+          `test_slots holds ${test_slots.length} files, fewer than ${end}`,
+        );
+      }
+      const slots = test_slots.slice(this.#taken, end);
+      for (const slot of slots) {
+        slot.truncate(0);
+      }
+      this.#taken = end;
+      return slots;
+    }
+
+    // A cache over cleared files, as many as the gold gives each store.
+    cache_make(): substrate.CacheFiles {
+      return new substrate.CacheFiles(this.slots_take(slot_count()));
+    }
+  }
+
+  // A store test: stores on roots of their own, each root's files removed.
+  class StoreCase extends SlotCase {
     // The roots this test made.
     readonly #roots: string[] = [];
-    // The stores this test made, each with the pushes its notifier kept.
-    readonly #stores = new Map<substrate.Store, Pushed[]>();
-
-    // Reads the module and the pool the test page provides.
-    setUp(): void {
-      this.#sqlite = test_sqlite3;
-      this.#pool = test_pool;
-    }
+    // The stores this test made, each with the pushes its server lane took.
+    readonly #stores = new Map<substrate.Store, lines.Line[]>();
 
     // Closes every database of the stores and removes the roots' files.
     tearDown(): void {
@@ -664,24 +535,19 @@ namespace test_substrate_store {
           store.db_close(name);
         }
       }
-      const pool = this.pool_get();
       for (const root of this.#roots) {
-        for (const file of pool.getFileNames()) {
-          if (file.startsWith(`${root}/`)) {
-            pool.unlink(file);
-          }
-        }
+        this.root_clear(root);
       }
     }
 
-    // The module the test page provides.
+    // The module the bring up provides.
     sqlite_get(): substrate.SqliteModule {
-      return this.#sqlite as substrate.SqliteModule;
+      return test_sqlite3;
     }
 
-    // The pool the test page provides.
-    pool_get(): substrate.SqlitePool {
-      return this.#pool as substrate.SqlitePool;
+    // The pool the bring up provides.
+    pool_get(): PoolCounted {
+      return test_pool;
     }
 
     // A new root no other test uses.
@@ -692,26 +558,40 @@ namespace test_substrate_store {
       return root;
     }
 
-    // A store on the root whose notifier double keeps each push and owner.
+    // Removes the files of the pool under a root.
+    root_clear(root: string): void {
+      const pool = this.pool_get();
+      for (const file of pool.getFileNames()) {
+        if (file.startsWith(`${root}/`)) {
+          pool.unlink(file);
+        }
+      }
+    }
+
+    // A store on the root whose queue's server lane keeps each push.
     store_make(
       root: string,
       cache: substrate.CacheFiles,
-      pool: substrate.SqlitePool = this.pool_get(),
       compact_turns = harness.setting_get("turn_compact_turns") as number,
     ): substrate.Store {
-      const pushed: Pushed[] = [];
+      const pushed: lines.Line[] = [];
+      const far = new queue.LocalPort();
+      far.line_receive((line) => {
+        pushed.push(line);
+      });
+      const synchronous = harness.setting_get(
+        constants.synchronous_setting,
+      ) as boolean;
+      const tasks = new queue.TaskQueue(constants.thread, {}, synchronous);
+      tasks.port_add(constants.server, new queue.LocalPort(far));
       const store = new substrate.Store(
         this.sqlite_get(),
-        pool,
+        this.pool_get(),
         cache,
         root,
         overflow_get(),
         compact_turns,
-        {
-          line_notify: (line: lines.Line, owner?: string) => {
-            pushed.push([line, owner]);
-          },
-        },
+        tasks,
       );
       this.#stores.set(store, pushed);
       return store;
@@ -719,22 +599,22 @@ namespace test_substrate_store {
 
     // A store on a new root with a new cache.
     store_fresh(): substrate.Store {
-      return this.store_make(this.root_make(), cache_make());
+      return this.store_make(this.root_make(), this.cache_make());
     }
 
-    // The pushes a store gave its notifier that no test took yet.
-    pushes_of(store: substrate.Store): Pushed[] {
-      return this.#stores.get(store) as Pushed[];
+    // The pushes a store's server lane took that no test took yet.
+    pushes_of(store: substrate.Store): lines.Line[] {
+      return this.#stores.get(store) as lines.Line[];
     }
 
-    // The pushes a store gave its notifier, which are then let go.
-    pushes_taken(store: substrate.Store): Pushed[] {
+    // The pushes a store's server lane took, which are then let go.
+    pushes_taken(store: substrate.Store): lines.Line[] {
       return this.pushes_of(store).splice(0);
     }
 
     // The types of the pushes a store gave, which are then let go.
     types_taken(store: substrate.Store): unknown[] {
-      return this.pushes_taken(store).map(([line]) => type_pushed(line));
+      return this.pushes_taken(store).map((line) => type_pushed(line));
     }
 
     // The names of the files under a root, in order.
@@ -776,6 +656,18 @@ namespace test_substrate_store {
         return this.sqlite_get().capi.sqlite3_js_db_export(database.pointer);
       } finally {
         database.close();
+      }
+    }
+
+    // Makes empty files of the pool under the root until one file is free.
+    pool_fill(root: string): void {
+      const pool = this.pool_get();
+      for (
+        let index = 0;
+        pool.getFileCount() < pool.getCapacity() - 1;
+        index += 1
+      ) {
+        this.raw_open(`${root}/${String(index)}`, "c").close();
       }
     }
   }
@@ -867,9 +759,10 @@ namespace test_substrate_store {
   }
 
   // The sink's incremental `SHA-256`, against the digests of the vectors.
-  export class TestHash extends RefusalCase {
+  export class TestHash extends SlotCase {
     // Streamed values give their known digests.
     test_digest_recorded(): void {
+      const [slot] = this.slots_take(1);
       const names = [
         "castle_world",
         "arrival_ref",
@@ -880,13 +773,14 @@ namespace test_substrate_store {
       for (const name of names) {
         const { data, sha256 } = digest_entry(name);
         for (const piece of [1, 7, 64, 4097, data.length]) {
-          this.assertEqual(digest_streamed(data, piece), sha256);
+          this.assertEqual(digest_streamed(slot, data, piece), sha256);
         }
       }
     }
 
     // Every length around the block and padding bounds, in pieces of any size.
     test_digest_lengths(): void {
+      const [slot] = this.slots_take(1);
       const lengths = [0, 1, 55, 56, 57, 63, 64, 65, 119, 120, 127, 128, 1000];
       for (const length of lengths) {
         const entry = digest_entry(`pattern_${String(length)}`);
@@ -894,7 +788,7 @@ namespace test_substrate_store {
         const digest = entry.sha256;
         for (const piece of [1, 7, 63, 64, 65, Math.max(1, length)]) {
           this.assertEqual(
-            digest_streamed(data, piece),
+            digest_streamed(slot, data, piece),
             digest,
             `${String(length)} by ${String(piece)}`,
           );
@@ -904,10 +798,10 @@ namespace test_substrate_store {
   }
 
   // The cache: the sink, ranges, partial blobs, files found and faults.
-  export class TestCache extends RefusalCase {
+  export class TestCache extends StoreCase {
     // A finished blob reads back by range, a copy of the bytes it was given.
     test_sink_read(): void {
-      const cache = new substrate.CacheFiles(slots_make(2));
+      const cache = new substrate.CacheFiles(this.slots_take(2));
       const entry = digest_entry("pattern_10");
       const data = entry.data;
       const handle = cache.sink_open({ s: 10 });
@@ -926,7 +820,7 @@ namespace test_substrate_store {
 
     // A blob closed short of its size, after a decoder fault, is freed.
     test_sink_partial(): void {
-      const cache = new substrate.CacheFiles(slots_make(1));
+      const cache = new substrate.CacheFiles(this.slots_take(1));
       const handle = cache.sink_open({ s: 10 });
       this.assertEqual(cache.slots_free(), 0);
       const entry = digest_entry("pattern_4");
@@ -943,7 +837,7 @@ namespace test_substrate_store {
 
     // A cache with no free file refuses a blob until a file is added.
     test_cache_full(): void {
-      const cache = new substrate.CacheFiles(slots_make(1));
+      const cache = new substrate.CacheFiles(this.slots_take(1));
       cache.sink_open({ s: 1 });
       this.raised_assert(gold_text("substrate_cache_full_one"), () =>
         cache.sink_open({ s: 1 }),
@@ -952,7 +846,7 @@ namespace test_substrate_store {
       this.raised_assert(gold_text("substrate_cache_full_none"), () =>
         empty.sink_open({ s: 1 }),
       );
-      empty.slot_add(new MemorySlot());
+      empty.slot_add(this.slots_take(1)[0]);
       this.assertEqual(empty.slots_free(), 1);
       empty.sink_open({ s: 1 });
       this.assertEqual(empty.slots_free(), 0);
@@ -960,98 +854,98 @@ namespace test_substrate_store {
 
     // Files hold the value their first bytes name, others are free.
     test_slots_found(): void {
-      const entry = digest_entry("pattern_100");
-      const data = entry.data;
-      const name = entry.sha256;
-      const left = new MemorySlot();
-      left.bytes_set(bytes_join([new Uint8Array(constants.name_bytes), data]));
-      const empty = new MemorySlot();
-      const cache = new substrate.CacheFiles([
-        slot_stored(name, data),
-        left,
-        empty,
-      ]);
+      const slots = this.slots_take(3);
+      const first = new substrate.CacheFiles(slots);
+      const store = this.store_make(this.root_make(), first);
+      store.db_create("alpha");
+      store.kv_put("/alpha/big", value_over());
+      const left = first.sink_open({ s: 200 });
+      first.sink_append(left, bytes_pattern(100));
+      const name = digest_entry("value_over").sha256;
+      const size = overflow_get() + 1;
+      const cache = new substrate.CacheFiles(slots);
       this.assertEqual(cache.slots_free(), 2);
-      this.assertEqual(cache.cache_read(name, 0, 100), data);
-      this.assertEqual(cache.cache_read(name, 90, 20), data.subarray(90));
+      this.assertEqual(
+        cache.cache_read(name, 0, 100),
+        value_over().subarray(0, 100),
+      );
+      this.assertEqual(
+        cache.cache_read(name, size - 10, 20),
+        value_over().subarray(size - 10),
+      );
       const handle = cache.sink_open({ s: 3 });
       cache.sink_append(handle, bytes_pattern(3));
       cache.sink_close(handle);
       this.assertEqual(cache.slots_free(), 1);
-      this.assertEqual(
-        empty.bytes_get(),
-        bytes_join([new Uint8Array(constants.name_bytes), bytes_pattern(3)]),
-      );
+      this.assertEqual(cache.cache_read(handle, 0, 3), bytes_pattern(3));
     }
 
     // A file whose first bytes name no `SHA-256`, or a name twice, throws.
     test_names_bad(): void {
-      const garbled = "z".repeat(constants.name_bytes);
-      this.raised_assert(gold_text("substrate_cache_header"), () => {
-        new substrate.CacheFiles([slot_stored(garbled, bytes_pattern(1))]);
-      });
-      const { data, sha256 } = digest_entry("pattern_1");
+      const slots = this.slots_take(2);
+      for (const slot of slots) {
+        const cache = new substrate.CacheFiles([slot]);
+        const store = this.store_make(this.root_make(), cache);
+        store.db_create("alpha");
+        store.kv_put("/alpha/big", value_over());
+      }
+      const name = digest_entry("value_over").sha256;
       const twice = gold_text("substrate_cache_twice");
-      this.raised_assert(twice.replaceAll("{0}", sha256), () => {
-        new substrate.CacheFiles([
-          slot_stored(sha256, data),
-          slot_stored(sha256, data),
-        ]);
+      this.raised_assert(twice.replaceAll("{0}", name), () => {
+        new substrate.CacheFiles(slots);
+      });
+      const garbled = slots[0];
+      garbled.write(bytes_text(constants.garble_text), { at: 0 });
+      const begun = constants.garble_text + name.slice(1);
+      const header = gold_text("substrate_cache_header");
+      this.raised_assert(header.replaceAll("{1}", begun), () => {
+        new substrate.CacheFiles([garbled]);
       });
     }
 
-    // A read or write the file reports short throws.
-    test_short_io(): void {
-      const free = new ShortSlot();
-      const writer = new substrate.CacheFiles([free]);
-      free.short = true;
-      this.raised_assert(gold_text("substrate_write_short"), () =>
-        writer.sink_open({ s: 1 }),
-      );
-      const { data, sha256: name } = digest_entry("pattern_10");
-      const stored = new ShortSlot();
-      stored.bytes_set(bytes_join([bytes_text(name), data]));
-      const reader = new substrate.CacheFiles([stored]);
-      stored.short = true;
+    // A read the file gives short, the file cut under a finished blob, throws.
+    test_read_short(): void {
+      const [slot] = this.slots_take(1);
+      const reader = new substrate.CacheFiles([slot]);
+      const { data } = digest_entry("pattern_10");
+      const handle = reader.sink_open({ s: data.length });
+      reader.sink_append(handle, data);
+      reader.sink_close(handle);
+      slot.truncate(0);
       this.raised_assert(gold_text("substrate_read_short"), () =>
-        reader.cache_read(name, 0, 10),
+        reader.cache_read(handle, 0, data.length),
       );
     }
   }
 
   // Databases: tables on first use, names, creating, opening, dropping.
   export class TestDatabases extends StoreCase {
-    // A new database gets the substrate's tables and the `schema` row 1.
+    // A new database gets the substrate's tables and the schema row.
     test_tables_created(): void {
       const store = this.store_fresh();
       store.db_create("alpha");
-      this.assertEqual(tables_list(store, "alpha"), [
-        "_head",
-        "_kv",
-        "_meta",
-        "_turn",
-      ]);
-      const meta = "SELECT name, value FROM _meta ORDER BY name";
-      this.assertEqual(rows_query(store, "alpha", meta), [["schema", "1"]]);
+      this.assertEqual(tables_list(store, "alpha"), tables_gold());
+      const meta = `SELECT name, value FROM ${meta_gold()} ORDER BY name`;
+      this.assertEqual(
+        rows_query(store, "alpha", meta),
+        gold_value("meta_rows"),
+      );
       this.assertEqual(store.db_list(), ["alpha"]);
     }
 
     // A database file made elsewhere gets the tables when first opened.
     test_tables_foreign(): void {
       const root = this.root_make();
-      this.raw_run(`${root}/beta.sqlite`, "c", [
+      this.raw_run(`${root}/${file_gold("beta")}`, "c", [
         { sql: "CREATE TABLE note (text TEXT)" },
         { sql: "INSERT INTO note VALUES (?)", bind: [constants.text_wide] },
       ]);
-      const store = this.store_make(root, cache_make());
+      const store = this.store_make(root, this.cache_make());
       store.db_open("beta");
-      this.assertEqual(tables_list(store, "beta"), [
-        "_head",
-        "_kv",
-        "_meta",
-        "_turn",
-        "note",
-      ]);
+      this.assertEqual(
+        tables_list(store, "beta"),
+        [...tables_gold(), "note"].sort(),
+      );
       this.assertEqual(rows_query(store, "beta", "SELECT text FROM note"), [
         [constants.text_wide],
       ]);
@@ -1060,7 +954,7 @@ namespace test_substrate_store {
     // A name that is not a C identifier throws and makes no file.
     test_names_bad(): void {
       const root = this.root_make();
-      const store = this.store_make(root, cache_make());
+      const store = this.store_make(root, this.cache_make());
       const names: [string, string][] = [
         ["", "substrate_name_bad_empty"],
         ["1abc", "substrate_name_bad_digit"],
@@ -1083,7 +977,7 @@ namespace test_substrate_store {
     // A second create, a second open, a missing file and a close all throw.
     test_create_twice(): void {
       const root = this.root_make();
-      const store = this.store_make(root, cache_make());
+      const store = this.store_make(root, this.cache_make());
       store.db_create("alpha");
       this.raised_assert(gold_text("substrate_db_exists"), () =>
         store.db_create("alpha"),
@@ -1094,30 +988,26 @@ namespace test_substrate_store {
       this.raised_assert(gold_text("substrate_db_absent"), () =>
         store.db_open("gamma"),
       );
-      this.assertEqual(this.files_under(root), ["alpha.sqlite"]);
+      this.assertEqual(this.files_under(root), [file_gold("alpha")]);
       this.raised_assert(gold_text("substrate_db_closed_gamma"), () =>
         store.db_close("gamma"),
       );
       this.assertEqual(this.types_taken(store), ["db.create"]);
     }
 
-    // A create whose schema fails throws it, leaves no file, and is redone.
+    // A create that a full pool stops throws, leaves no file, and is redone.
     test_create_failed(): void {
       const root = this.root_make();
-      // The failure the test makes where the schema is written.
-      const schema_stop = (): never => {
-        throw new Error(constants.schema_message);
-      };
-      const prefix = constants.schema_create;
-      const pool = pool_stopped(this.pool_get(), schema_stop, prefix);
-      const failing = this.store_make(root, cache_make(), pool);
-      this.raised_assert(constants.schema_message, () =>
-        failing.db_create("alpha"),
+      const store = this.store_make(root, this.cache_make());
+      const filled = this.root_make();
+      this.pool_fill(filled);
+      this.sqlite_assert(gold_text("pool_full"), () =>
+        store.db_create("alpha"),
       );
       this.assertEqual(this.files_under(root), []);
-      this.assertEqual(failing.db_list(), []);
-      this.assertEqual(this.pushes_of(failing), []);
-      const store = this.store_make(root, cache_make());
+      this.assertEqual(store.db_list(), []);
+      this.assertEqual(this.pushes_of(store), []);
+      this.root_clear(filled);
       store.db_create("alpha");
       this.assertEqual(store.db_list(), ["alpha"]);
     }
@@ -1125,9 +1015,15 @@ namespace test_substrate_store {
     // A file with only some of the substrate's tables throws, kept as it is.
     test_schema_partial(): void {
       const root = this.root_make();
-      const path = `${root}/beta.sqlite`;
-      this.raw_run(path, "c", [{ sql: constants.meta_sql }]);
-      const store = this.store_make(root, cache_make());
+      const store = this.store_make(root, this.cache_make());
+      store.db_create("beta");
+      store.db_close("beta");
+      const path = `${root}/${file_gold("beta")}`;
+      const kept = meta_gold();
+      const drops = tables_gold()
+        .filter((table) => table !== kept)
+        .map((table) => ({ sql: `DROP TABLE ${table}` }));
+      this.raw_run(path, "w", drops);
       this.raised_assert(gold_text("substrate_schema_partial_meta"), () =>
         store.db_open("beta"),
       );
@@ -1143,19 +1039,20 @@ namespace test_substrate_store {
       } finally {
         raw.close();
       }
-      this.assertEqual(rows, [["_meta"]]);
+      this.assertEqual(rows, [[kept]]);
     }
 
-    // A file whose `schema` row is not the substrate's version throws.
+    // A file whose schema row is not the substrate's version throws.
     test_schema_version(): void {
       const root = this.root_make();
-      const store = this.store_make(root, cache_make());
+      const store = this.store_make(root, this.cache_make());
       store.db_create("beta");
       store.db_close("beta");
-      this.raw_run(`${root}/beta.sqlite`, "w", [
+      const [[name]] = gold_value("meta_rows") as string[][];
+      this.raw_run(`${root}/${file_gold("beta")}`, "w", [
         {
-          sql: "UPDATE _meta SET value = ? WHERE name = 'schema'",
-          bind: ["2"],
+          sql: `UPDATE ${meta_gold()} SET value = ? WHERE name = ?`,
+          bind: [gold_value("schema_other"), name],
         },
       ]);
       this.raised_assert(gold_text("substrate_schema_version"), () =>
@@ -1167,7 +1064,7 @@ namespace test_substrate_store {
     // Closing, dropping or restoring a database a transaction wrote throws.
     test_database_busy(): void {
       const root = this.root_make();
-      const store = this.store_make(root, cache_make());
+      const store = this.store_make(root, this.cache_make());
       store.db_create("alpha");
       const data = store.db_snapshot("alpha").data;
       const files = this.files_under(root);
@@ -1194,7 +1091,7 @@ namespace test_substrate_store {
     // Dropping removes the file and the cache files no other database names.
     test_drop_files(): void {
       const root = this.root_make();
-      const cache = cache_make();
+      const cache = this.cache_make();
       const store = this.store_make(root, cache);
       store.db_create("alpha");
       store.db_create("beta");
@@ -1205,7 +1102,7 @@ namespace test_substrate_store {
       store.kv_put("/alpha/alone", alone);
       store.kv_put("/beta/shared", value_over());
       store.db_drop("alpha");
-      this.assertEqual(this.files_under(root), ["beta.sqlite"]);
+      this.assertEqual(this.files_under(root), [file_gold("beta")]);
       this.raised_assert(unknown_text(alone_name), () =>
         cache.cache_read(alone_name, 0, 1),
       );
@@ -1253,7 +1150,7 @@ namespace test_substrate_store {
     // A value of exactly `overflow_bytes` stays in its row, one byte more not.
     test_overflow_boundary(): void {
       const root = this.root_make();
-      const cache = cache_make();
+      const cache = this.cache_make();
       const store = this.store_make(root, cache);
       store.db_create("alpha");
       store.kv_put("/alpha/exact", value_exact());
@@ -1280,7 +1177,7 @@ namespace test_substrate_store {
     // A cache file stays while any row of any database names its hash.
     test_cache_shared(): void {
       const root = this.root_make();
-      const cache = cache_make();
+      const cache = this.cache_make();
       const store = this.store_make(root, cache);
       const name = digest_entry("value_over").sha256;
       // The bytes the cache file gives from its start, one when it is there.
@@ -1307,7 +1204,7 @@ namespace test_substrate_store {
     // A blob the sink streamed moves into place, a small one is refused.
     test_handle_moved(): void {
       const root = this.root_make();
-      const cache = cache_make();
+      const cache = this.cache_make();
       const store = this.store_make(root, cache);
       store.db_create("alpha");
       const handle = sink_fill(cache, value_over());
@@ -1342,14 +1239,14 @@ namespace test_substrate_store {
     // A row whose cache file this store lacks stays, and only its read throws.
     test_file_lost(): void {
       const root = this.root_make();
-      const store = this.store_make(root, cache_make());
+      const store = this.store_make(root, this.cache_make());
       store.db_create("alpha");
       store.kv_put("/alpha/big", value_over());
       const text = "x".repeat(overflow_get() + 1);
       const body = { 0: { t: "note" }, text };
       const ref = store.doc_put("alpha", "note", body).ref;
       store.db_close("alpha");
-      const again = this.store_make(root, cache_make());
+      const again = this.store_make(root, this.cache_make());
       again.db_open("alpha");
       const name = digest_entry("value_over").sha256;
       const big = gold_text("substrate_file_lost_big").replaceAll("{1}", name);
@@ -1590,8 +1487,7 @@ namespace test_substrate_store {
     store_compacting(): substrate.Store {
       return this.store_make(
         this.root_make(),
-        cache_make(),
-        this.pool_get(),
+        this.cache_make(),
         constants.compact_small,
       );
     }
@@ -1736,19 +1632,14 @@ namespace test_substrate_store {
         store.kv_get("/alpha/a"),
       );
       this.assertEqual(store.kv_list("alpha", ""), []);
-      this.assertEqual(tables_list(store, "beta"), [
-        "_head",
-        "_kv",
-        "_meta",
-        "_turn",
-      ]);
+      this.assertEqual(tables_list(store, "beta"), tables_gold());
       this.assertEqual(this.types_taken(store), ["db.create", "db.create"]);
     }
 
     // Rows and values survive closing, reopening and a new store on the root.
     test_reopen(): void {
       const root = this.root_make();
-      const slots = slots_make(slot_count());
+      const slots = this.slots_take(slot_count());
       const first = new substrate.CacheFiles(slots);
       const store = this.store_make(root, first);
       store.db_create("alpha");
@@ -1812,7 +1703,7 @@ namespace test_substrate_store {
       );
       this.assertEqual(content_dump(store, "alpha"), dump);
       this.assertEqual(this.pushes_of(store), []);
-      const cache = cache_make();
+      const cache = this.cache_make();
       const second = this.store_make(this.root_make(), cache);
       const handle = sink_fill(cache, snapshot.data);
       second.db_restore("alpha", handle, []);
@@ -1826,10 +1717,10 @@ namespace test_substrate_store {
     // A file without the substrate's tables throws and the old one stays.
     test_restore_foreign(): void {
       const root = this.root_make();
-      const store = this.store_make(root, cache_make());
+      const store = this.store_make(root, this.cache_make());
       store.db_create("alpha");
       store.kv_put("/alpha/a", bytes_text("one"));
-      const foreign = `${root}/foreign.sqlite`;
+      const foreign = `${root}/${constants.foreign_file}`;
       this.raw_run(foreign, "c", [{ sql: "CREATE TABLE note (x TEXT)" }]);
       const data = this.raw_export(foreign);
       const files = this.files_under(root);
@@ -1844,16 +1735,16 @@ namespace test_substrate_store {
     // A restore file left by an earlier restore throws, and stays.
     test_restore_left(): void {
       const root = this.root_make();
-      const store = this.store_make(root, cache_make());
+      const store = this.store_make(root, this.cache_make());
       store.db_create("alpha");
       const data = store.db_snapshot("alpha").data;
-      const left = `${root}/alpha.sqlite-restore`;
+      const left = `${root}/${file_gold("alpha_restore")}`;
       this.raw_run(left, "c", [{ sql: "CREATE TABLE note (x TEXT)" }]);
       const text = gold_text("substrate_restore_left").replaceAll("{0}", left);
       this.raised_assert(text, () => store.db_restore("alpha", data, []));
       this.assertEqual(this.files_under(root), [
-        "alpha.sqlite",
-        "alpha.sqlite-restore",
+        file_gold("alpha"),
+        file_gold("alpha_restore"),
       ]);
       this.assertEqual(store.db_list(), ["alpha"]);
     }
@@ -1874,7 +1765,7 @@ namespace test_substrate_store {
 
     // A cached value stays held through a snapshot and a restore of no file.
     test_value_held(): void {
-      const cache = cache_make();
+      const cache = this.cache_make();
       const store = this.store_make(this.root_make(), cache);
       store.db_create("alpha");
       store.kv_put("/alpha/big", value_over());
@@ -1893,7 +1784,7 @@ namespace test_substrate_store {
 
     // A restore given one of two cache files reads all but the lost value.
     test_restore_files_lost(): void {
-      const source_cache = cache_make();
+      const source_cache = this.cache_make();
       const source = this.store_make(this.root_make(), source_cache);
       source.db_create("alpha");
       const big: [string, string][] = [
@@ -1910,7 +1801,7 @@ namespace test_substrate_store {
       const size = overflow_get() + 1;
       const [first, second] = image.files;
       const kept = source_cache.cache_read(first, 0, size);
-      const cache = cache_make();
+      const cache = this.cache_make();
       const store = this.store_make(this.root_make(), cache);
       store.db_restore("alpha", image.data, [kept]);
       // The refs of the value whose file came and of the one whose did not.
@@ -1934,14 +1825,14 @@ namespace test_substrate_store {
 
     // A restore takes the database and a file as handles of its own cache.
     test_restore_handle(): void {
-      const source_cache = cache_make();
+      const source_cache = this.cache_make();
       const source = this.store_make(this.root_make(), source_cache);
       source.db_create("alpha");
       source.kv_put("/alpha/big", value_over());
       const image = source.db_snapshot("alpha");
       const name = digest_entry("value_over").sha256;
       const size = overflow_get() + 1;
-      const cache = cache_make();
+      const cache = this.cache_make();
       const store = this.store_make(this.root_make(), cache);
       const data = sink_fill(cache, image.data);
       const file = sink_fill(cache, source_cache.cache_read(name, 0, size));
@@ -1964,18 +1855,18 @@ namespace test_substrate_store {
     // A snapshot names only the cache files its store holds, throwing none.
     test_snapshot_missing_file(): void {
       const root = this.root_make();
-      const store = this.store_make(root, cache_make());
+      const store = this.store_make(root, this.cache_make());
       store.db_create("alpha");
       store.kv_put("/alpha/one", value_over());
       store.kv_put("/alpha/two", value_other());
       store.db_close("alpha");
-      const name = digest_entry("value_over").sha256;
-      const slots = [
-        slot_stored(name, value_over()),
-        ...slots_make(slot_count() - 1),
-      ];
-      const second = this.store_make(root, new substrate.CacheFiles(slots));
+      const cache = this.cache_make();
+      const holder = this.store_make(this.root_make(), cache);
+      holder.db_create("alpha");
+      holder.kv_put("/alpha/held", value_over());
+      const second = this.store_make(root, cache);
       second.db_open("alpha");
+      const name = digest_entry("value_over").sha256;
       this.assertEqual(second.db_snapshot("alpha").files, [name]);
     }
   }
@@ -2002,7 +1893,7 @@ namespace test_substrate_store {
       store.kv_put("/alpha/a", value);
       const pushed = this.pushes_taken(store);
       this.assertEqual(pushed, [push_bytes("push_kv_put_a", value)]);
-      this.assertFalse((pushed[0][0][1] as lines.BlobHeader).d === value);
+      this.assertFalse((pushed[0][1] as lines.BlobHeader).d === value);
       store.kv_put("/alpha/a", bytes_text("one"));
       store.kv_delete("/alpha/absent");
       store.sql_run("alpha", [{ sql: "SELECT 1", params: [] }]);
@@ -2015,7 +1906,7 @@ namespace test_substrate_store {
 
     // A value over `overflow_bytes` goes as its file's bytes, never a handle.
     test_files_pushed(): void {
-      const cache = cache_make();
+      const cache = this.cache_make();
       const store = this.store_make(this.root_make(), cache);
       store.db_create("alpha");
       this.pushes_taken(store);
@@ -2027,7 +1918,7 @@ namespace test_substrate_store {
         push_bytes("push_kv_put_big", value_over()),
         push_bytes("push_kv_put_streamed", other),
       ]);
-      for (const [line] of pushed) {
+      for (const line of pushed) {
         const blob = line[1] as lines.BlobHeader;
         this.assertTrue(blob.d instanceof Uint8Array, "bytes were expected");
       }
@@ -2062,7 +1953,7 @@ namespace test_substrate_store {
         push_gold("push_sql_run_create"),
         push_gold("push_sql_run_insert"),
       ]);
-      this.assertFalse(pushed[2][0].statements === created);
+      this.assertFalse(pushed[2].statements === created);
     }
 
     // The pushes of one transaction follow its commit, in order, or none.
@@ -2093,8 +1984,7 @@ namespace test_substrate_store {
     test_threshold_pushed(): void {
       const store = this.store_make(
         this.root_make(),
-        cache_make(),
-        this.pool_get(),
+        this.cache_make(),
         constants.compact_small,
       );
       store.db_create("alpha");
@@ -2118,36 +2008,6 @@ namespace test_substrate_store {
         },
         { scene, n: 2, role: "user", content: user },
       ]);
-    }
-  }
-
-  // A put stopped between its cache file and its row, as a kill stops it.
-  export class TestCrash extends StoreCase {
-    // The stopped put leaves a file and no row, and `kv_check` removes it.
-    test_kill_between(): void {
-      const root = this.root_make();
-      const slots = slots_make(slot_count());
-      // The stop that stands for the kill: it throws where the rung kills.
-      const kill_stop = (): never => {
-        throw new Error(constants.kill_message);
-      };
-      const pool = kill_pool(this.pool_get(), kill_stop);
-      const cache = new substrate.CacheFiles(slots);
-      const paused = this.store_make(root, cache, pool);
-      this.raised_assert(constants.kill_message, () => kill_put(paused));
-      paused.db_close(constants.kill_db);
-      const name = digest_entry("value_over").sha256;
-      const after = new substrate.CacheFiles(slots);
-      this.assertEqual(
-        after.cache_read(name, 0, 8),
-        value_over().subarray(0, 8),
-      );
-      const checked = this.store_make(root, after);
-      this.assertEqual(kill_check(checked), { rows: 0, removed: 1 });
-      this.raised_assert(unknown_text(name), () =>
-        after.cache_read(name, 0, 1),
-      );
-      this.assertEqual(checked.kv_check(constants.kill_db), 0);
     }
   }
 
@@ -2246,7 +2106,7 @@ namespace test_substrate_store {
 
     // A restore waits for its `db.file` lines, or runs at once with none.
     test_restore_answered(): void {
-      const source_cache = cache_make();
+      const source_cache = this.cache_make();
       const source = this.store_make(this.root_make(), source_cache);
       source.db_create("alpha");
       source.db_create("beta");
@@ -2259,7 +2119,7 @@ namespace test_substrate_store {
       const files = alpha.files.map((name) =>
         source_cache.cache_read(name, 0, size),
       );
-      const cache = cache_make();
+      const cache = this.cache_make();
       const store = this.store_make(this.root_make(), cache);
       const table = this.handlers_get(store);
       this.push_give(table, line_blob("restore_alpha", alpha.data));

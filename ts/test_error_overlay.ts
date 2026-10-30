@@ -2,18 +2,14 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the error overlay, run in both streams, each the cases of its own
-// thread: the screen and the stop function on the main thread, against stubs
-// of the document so that the test page is not replaced, and the report
-// function in the AI worker. The handlers and the Reload button need a real
-// page.
+// Tests of the error overlay on the main thread: the screen, which the real
+// `document.write` writes into the block's own page load, replacing it, and
+// the stop function. A write erases the page's window listeners, so each
+// case installs the page's fault handlers again right after it, and a fault
+// of a later case still reaches the driver as the realm's own. The report
+// function is tested in the AI worker, in a block of its own. The handlers
+// and the Reload button's click need a page of their own.
 namespace test_error_overlay {
-  // The reasons of the skips.
-  const constants = Object.freeze({
-    main_only: "The screen and the stop function run on the main thread.",
-    worker_only: "The report function runs in the AI worker.",
-  });
-
   // The message of the error a function throws, failing the test if none.
   function message_thrown(test: unittest.TestCase, fn: () => unknown): string {
     try {
@@ -24,65 +20,44 @@ namespace test_error_overlay {
     return test.fail("Nothing was thrown.");
   }
 
-  // Skips a case of the main thread where there is no document.
-  function main_need(test: unittest.TestCase): void {
-    if (typeof document === "undefined") {
-      test.skipTest(constants.main_only);
-    }
+  // Runs a call that writes the screen, then installs the handlers it erased.
+  function screen_write(write: () => void): void {
+    write();
+    error_overlay.overlay_install();
   }
 
-  // Skips a case of the AI worker where there is a document.
-  function worker_need(test: unittest.TestCase): void {
-    if (typeof document !== "undefined") {
-      test.skipTest(constants.worker_only);
-    }
+  // The texts of the `pre` elements of the document, in order.
+  function pre_texts(): string[] {
+    return Array.from(
+      document.querySelectorAll("pre"),
+      (pre) => pre.textContent as string,
+    );
   }
 
-  // Runs a new screen on the main thread while the document methods are stubs.
+  // The screens the real document shows, written by `document.write`.
   export class TestOverlay extends unittest.TestCase {
-    // The text each call of the `document.write` stub was given.
-    written: string[] = [];
-
-    // How many times the `document.close` stub ran.
-    closed = 0;
-
-    // The two document methods the stubs replace, saved by `setUp`.
-    saved: Pick<Document, "write" | "close"> | null = null;
-
-    // Saves the two document methods and replaces them with recording stubs.
-    override setUp(): void {
-      main_need(this);
-      this.saved = { write: document.write, close: document.close };
-      document.write = (...text: string[]): void => {
-        this.written.push(...text);
-      };
-      document.close = (): void => {
-        this.closed += 1;
-      };
-    }
-
-    // Puts the two document methods back.
-    override tearDown(): void {
-      const saved = this.saved as Pick<Document, "write" | "close">;
-      document.write = saved.write;
-      document.close = saved.close;
-    }
-
-    // The screen is written once and the document is closed once.
+    // The screen replaces the page, and the document is closed after it.
     test_write_once(): void {
-      new error_overlay.FaultScreen().overlay_show("message", "stack");
-      this.assertEqual(this.written.length, 1);
-      this.assertEqual(this.closed, 1);
+      screen_write(() =>
+        new error_overlay.FaultScreen().overlay_show("message", "stack"),
+      );
+      this.assertEqual(
+        document.body.innerHTML,
+        '<pre>message\nstack</pre><button onclick="location.reload()">' +
+          "Reload</button>",
+      );
+      this.assertEqual(document.head.childElementCount, 0);
+      this.assertEqual(document.readyState, "complete");
     }
 
     // A second show leaves the first fault on screen.
     test_first_only(): void {
       const fault_screen = new error_overlay.FaultScreen();
-      fault_screen.overlay_show("first", "stack");
+      screen_write(() => fault_screen.overlay_show("first", "stack"));
       fault_screen.overlay_show("second", "stack");
-      this.assertEqual(this.written.length, 1);
-      this.assertTrue(this.written[0].startsWith("<pre>first\nstack</pre>"));
-      this.assertEqual(this.closed, 1);
+      this.assertEqual(pre_texts(), ["first\nstack"]);
+      this.assertEqual(document.querySelectorAll("button").length, 1);
+      this.assertEqual(document.readyState, "complete");
     }
 
     // Showing a fault runs no stop function.
@@ -92,26 +67,26 @@ namespace test_error_overlay {
       fault_screen.stop_register((thrown) => {
         stops.push(thrown);
       });
-      fault_screen.overlay_show("message", "stack");
-      this.assertEqual(this.written.length, 1);
+      screen_write(() => fault_screen.overlay_show("unstopped", "stack"));
+      this.assertEqual(pre_texts(), ["unstopped\nstack"]);
       this.assertEqual(stops.length, 0);
     }
 
     // The stop function runs after the screen with the thrown value, once.
     test_stop_after(): void {
       const fault_screen = new error_overlay.FaultScreen();
-      const stops: number[] = [];
+      const shown: string[][] = [];
       const values: unknown[] = [];
       fault_screen.stop_register((thrown) => {
-        stops.push(this.written.length);
+        shown.push(pre_texts());
         values.push(thrown);
       });
-      const first = new Error("first");
-      fault_screen.fault_take(first, null);
+      const first = new Error("stopped");
+      screen_write(() => fault_screen.fault_take(first, null));
       fault_screen.fault_take(new Error("second"), null);
-      this.assertEqual(this.written.length, 1);
-      this.assertTrue(this.written[0].startsWith("<pre>first\n"));
-      this.assertEqual(stops.join(","), "1");
+      const screen = `stopped\n${first.stack as string}`;
+      this.assertEqual(pre_texts(), [screen]);
+      this.assertEqual(shown, [[screen]]);
       this.assertEqual(values.length, 1);
       this.assertTrue(values[0] === first);
     }
@@ -123,44 +98,50 @@ namespace test_error_overlay {
       fault_screen.stop_register((thrown) => {
         values.push(thrown);
       });
-      const image = document.createElement("img");
+      // A document with no window loads nothing, so no fetch of it is made.
+      const inert = document.implementation.createHTMLDocument("");
+      const image = inert.createElement("img");
       image.setAttribute("src", "missing.png");
-      fault_screen.resource_take(image);
+      screen_write(() => fault_screen.resource_take(image));
       const text = 'Failed to load img src="missing.png"';
       this.assertEqual(values.length, 1);
       this.assertTrue(values[0] instanceof Error);
       this.assertEqual((values[0] as Error).message, text);
-      this.assertTrue(this.written[0].startsWith(`<pre>${text}\n`));
+      const stack = (values[0] as Error).stack as string;
+      this.assertEqual(pre_texts(), [`${text}\n${stack}`]);
     }
 
     // The message and the stack sit in a `pre` as text, not as markup.
     test_escaped_text(): void {
-      new error_overlay.FaultScreen().overlay_show("a<b>&c", "d>e&amp;");
-      this.assertEqual(this.written.length, 1);
-      const html = this.written[0];
-      this.assertTrue(
-        html.startsWith("<pre>a&lt;b&gt;&amp;c\nd&gt;e&amp;amp;</pre>"),
+      screen_write(() =>
+        new error_overlay.FaultScreen().overlay_show("a<b>&c", "d>e&amp;"),
       );
-      this.assertFalse(html.includes("<b>"));
+      this.assertEqual(pre_texts(), ["a<b>&c\nd>e&amp;"]);
+      const pre = document.querySelector("pre") as HTMLPreElement;
+      this.assertEqual(pre.childElementCount, 0);
+      this.assertEqual(document.querySelector("b"), null);
     }
 
     // A button follows the text and reloads the page when clicked.
     test_reload_button(): void {
-      new error_overlay.FaultScreen().overlay_show("message", "stack");
-      this.assertEqual(this.written.length, 1);
-      const html = this.written[0];
-      this.assertTrue(html.includes('<button onclick="location.reload()">'));
-      this.assertTrue(html.endsWith("Reload</button>"));
+      screen_write(() =>
+        new error_overlay.FaultScreen().overlay_show("reload", "stack"),
+      );
+      const buttons = Array.from(document.querySelectorAll("button"));
+      this.assertEqual(buttons.length, 1);
+      const pre = document.querySelector("pre") as HTMLPreElement;
+      this.assertTrue(pre.nextElementSibling === buttons[0]);
+      this.assertEqual(
+        buttons[0].getAttribute("onclick"),
+        "location.reload()",
+      );
+      this.assertEqual(buttons[0].textContent, "Reload");
+      this.assertEqual(buttons[0].nextSibling, null);
     }
   }
 
   // The registration of the stop function, which touches no document.
   export class TestStop extends unittest.TestCase {
-    // The stop function belongs to the main thread.
-    override setUp(): void {
-      main_need(this);
-    }
-
     // A second stop function is refused.
     test_stop_twice(): void {
       const fault_screen = new error_overlay.FaultScreen();
@@ -168,129 +149,6 @@ namespace test_error_overlay {
       this.assertEqual(
         message_thrown(this, () => fault_screen.stop_register(() => {})),
         "The stop function was registered twice",
-      );
-    }
-  }
-
-  // The report of a fault of the AI worker, posted by a recording `post`.
-  export class TestReport extends unittest.TestCase {
-    // The report function belongs to the AI worker.
-    override setUp(): void {
-      worker_need(this);
-    }
-
-    // The report gets the thrown value and `done`, which posts the cascade.
-    test_report_done(): void {
-      const fault_screen = new error_overlay.FaultScreen();
-      const posted: object[] = [];
-      const values: unknown[] = [];
-      const dones: (() => void)[] = [];
-      fault_screen.report_register((thrown, done) => {
-        values.push(thrown);
-        dones.push(done);
-      });
-      const inner = new Error("inner");
-      const middle = new Error("middle", { cause: inner });
-      const thrown = new Error("outer", { cause: middle });
-      fault_screen.fault_take(thrown, (line) => {
-        posted.push(line);
-      });
-      this.assertEqual(values.length, 1);
-      this.assertTrue(values[0] === thrown);
-      this.assertEqual(posted.length, 0);
-      dones[0]();
-      this.assertEqual(posted, [
-        {
-          0: { type: "fault" },
-          thread: "ai",
-          message: "outer",
-          stack: thrown.stack,
-          cause: {
-            message: "middle",
-            stack: middle.stack,
-            cause: { message: "inner", stack: inner.stack },
-          },
-        },
-      ]);
-    }
-
-    // With no report function the line is posted at once, the first only.
-    test_posted_at_once(): void {
-      const fault_screen = new error_overlay.FaultScreen();
-      const posted: object[] = [];
-      const post = (line: object): void => {
-        posted.push(line);
-      };
-      fault_screen.fault_take("plain", post);
-      fault_screen.fault_take(new Error("later"), post);
-      this.assertEqual(posted, [
-        { 0: { type: "fault" }, thread: "ai", message: "plain", stack: "" },
-      ]);
-    }
-
-    // A fault while the report waits posts at once, the first under its cause.
-    test_fault_waiting(): void {
-      const fault_screen = new error_overlay.FaultScreen();
-      const posted: object[] = [];
-      const dones: (() => void)[] = [];
-      const post = (line: object): void => {
-        posted.push(line);
-      };
-      fault_screen.report_register((_thrown, done) => {
-        dones.push(done);
-      });
-      const first = new Error("first");
-      const second = new Error("second", { cause: "a text cause" });
-      fault_screen.fault_take(first, post);
-      fault_screen.fault_take(second, post);
-      const expected = {
-        0: { type: "fault" },
-        thread: "ai",
-        message: "second",
-        stack: second.stack,
-        cause: {
-          message: "a text cause",
-          stack: "",
-          cause: { message: "first", stack: first.stack },
-        },
-      };
-      this.assertEqual(posted, [expected]);
-      fault_screen.fault_take(new Error("third"), post);
-      dones[0]();
-      this.assertEqual(posted, [expected]);
-      this.assertEqual(dones.length, 1);
-    }
-
-    // A report that throws is a fault met while it waits, posted at once.
-    test_report_thrown(): void {
-      const fault_screen = new error_overlay.FaultScreen();
-      const posted: object[] = [];
-      const first = new Error("first");
-      const thrown = new Error("report");
-      fault_screen.report_register(() => {
-        throw thrown;
-      });
-      fault_screen.fault_take(first, (line) => {
-        posted.push(line);
-      });
-      this.assertEqual(posted, [
-        {
-          0: { type: "fault" },
-          thread: "ai",
-          message: "report",
-          stack: thrown.stack,
-          cause: { message: "first", stack: first.stack },
-        },
-      ]);
-    }
-
-    // A second report function is refused.
-    test_report_twice(): void {
-      const fault_screen = new error_overlay.FaultScreen();
-      fault_screen.report_register(() => {});
-      this.assertEqual(
-        message_thrown(this, () => fault_screen.report_register(() => {})),
-        "The report function was registered twice",
       );
     }
   }

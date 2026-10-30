@@ -29,7 +29,18 @@
 // realm lane, its end of the UI channel, and the start: `tap.start`, which
 // the page took from the driver, and the block the driver named with its
 // failfast. The platform then starts by the same code as the ttyd worker's,
-// then `worker_ai.tap_start`, the realm lane its server's port, a
+// its pool and test slots cleared at start unless the start's `clear` is
+// false, when the worker keeps what the worker before it left in them. Such
+// a worker first waits for every file of the pool's directory and of the
+// slots' directory to open, since the platform frees the files of a worker
+// it terminated in a loop about 2 s later and tells no one: it opens each
+// file for synchronous access and closes it at once, and a refusal of a file
+// still held, a `DOMException` named `NoModificationAllowedError`, ends the
+// try, which comes again 10 ms later; anything else is thrown. Once a try is
+// refused after the start's `wait_seconds`, it throws `boot.files_busy` with
+// that refusal as its `cause`. The wait comes before the pool's install,
+// since SQLite keeps a failed install as the answer to every later one. Then
+// comes `worker_ai.tap_start`, the realm lane its server's port, a
 // `queue.ThreadPort`, whose end posts the line on the lane and calls back at
 // once, since the lane keeps its order and the page relays each line to the
 // driver as it comes. `run` gets the queue and the start.
@@ -48,9 +59,19 @@ namespace boot {
     installOpfsSAHPoolVfs(options: PoolOptions): Promise<substrate.SqlitePool>;
   }
 
+  // A handle for synchronous access, which the wait closes once it opens.
+  interface SyncHandle extends substrate.SlotHandle {
+    close(): void;
+  }
+
   // A file of OPFS that opens a handle for synchronous access in a worker.
   interface SyncOpener {
-    createSyncAccessHandle(): Promise<substrate.SlotHandle>;
+    createSyncAccessHandle(): Promise<SyncHandle>;
+  }
+
+  // A directory of OPFS listing its entries, which the DOM types lack.
+  interface EntryLister {
+    values(): AsyncIterable<FileSystemHandle>;
   }
 
   // The page's first message to the worker: the channel's end and its address.
@@ -65,12 +86,16 @@ namespace boot {
     base_url: string;
   }
 
-  // What the headless worker's `run` gets beside its queue.
-  export interface HeadlessStart {
+  // What every start of the headless worker holds.
+  interface StartFields {
     first: lines.Line;
     block: string;
     failfast: boolean;
   }
+
+  // A start that clears the test pool and slots, or keeps them and waits.
+  export type HeadlessStart = StartFields &
+    ({ clear: true } | { clear: false; wait_seconds: number });
 
   // The headless page's first message to its worker: its lanes and start.
   export interface HeadlessMessage {
@@ -97,8 +122,13 @@ namespace boot {
     // The test cache's files, its writer's choice, for three streamed echoes.
     test_slot_count: 8,
     test_slots_directory: "xsjs-test-slots",
-    // The test slots, its writer's choice, for two caches and a closed file.
-    test_slots_count: 3,
+    // The test slots, its writer's choice, for two caches of four files.
+    test_slots_count: 8,
+    // The name of the platform's refusal to open a file another worker holds.
+    busy_name: "NoModificationAllowedError",
+    // Between tries of held files: a try took 3.5 ms, the release 2.05 s.
+    busy_ms: 10,
+    second_ms: 1000,
   });
 
   // Calls `fn` with the page's first message, which starts the worker.
@@ -136,23 +166,25 @@ namespace boot {
   }
 
   // Starts sqlite3.wasm, the test pool and the test slots, and sets them.
-  function platform_open(): Promise<void> {
+  function platform_open(clear: boolean): Promise<void> {
     return module_init().then((sqlite3) =>
       sqlite3
         .installOpfsSAHPoolVfs({
           name: constants.test_pool_name,
           directory: constants.test_pool_directory,
           initialCapacity: constants.test_capacity,
-          clearOnInit: true,
+          clearOnInit: clear,
         })
         .then((pool) =>
           slots_open(
             constants.test_slots_directory,
             constants.test_slots_count,
           ).then((test_slots) => {
-            // Cleared at start, as the test pool is.
-            for (const slot of test_slots) {
-              slot.truncate(0);
+            // Cleared at start when the test pool is.
+            if (clear) {
+              for (const slot of test_slots) {
+                slot.truncate(0);
+              }
             }
             Object.assign(globalThis, {
               test_sqlite3: sqlite3,
@@ -162,6 +194,67 @@ namespace boot {
           }),
         ),
     );
+  }
+
+  // The files under an OPFS directory, those of its subdirectories included.
+  async function files_under(
+    directory: FileSystemDirectoryHandle,
+  ): Promise<FileSystemFileHandle[]> {
+    const files: FileSystemFileHandle[] = [];
+    for await (const entry of (directory as unknown as EntryLister).values()) {
+      if (entry.kind === "file") {
+        files.push(entry as FileSystemFileHandle);
+      } else {
+        files.push(...(await files_under(entry as FileSystemDirectoryHandle)));
+      }
+    }
+    return files;
+  }
+
+  // Opens and closes each file of the directories, a refusal of a held one.
+  async function files_try(
+    names: readonly string[],
+  ): Promise<DOMException | undefined> {
+    const root = await navigator.storage.getDirectory();
+    for (const name of names) {
+      const directory = await root.getDirectoryHandle(name, { create: true });
+      for (const file of await files_under(directory)) {
+        const opener = file as unknown as SyncOpener;
+        try {
+          (await opener.createSyncAccessHandle()).close();
+        } catch (error) {
+          if (
+            error instanceof DOMException &&
+            error.name === constants.busy_name
+          ) {
+            return error;
+          }
+          throw error;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  // Waits until no file of the pool or the slots is held, or throws.
+  async function files_wait(seconds: number): Promise<void> {
+    const end = performance.now() + seconds * constants.second_ms;
+    const names = [
+      constants.test_pool_directory,
+      constants.test_slots_directory,
+    ];
+    for (;;) {
+      const busy = await files_try(names);
+      if (busy === undefined) {
+        return;
+      }
+      if (performance.now() >= end) {
+        throw utility.error_wrap(i18n("boot.files_busy", seconds), busy);
+      }
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, constants.busy_ms);
+      });
+    }
   }
 
   // Opens the wire, and at `tap.start` readies the test platform and runs.
@@ -176,7 +269,7 @@ namespace boot {
       settings.settings_get,
     );
     port.wire_open((first: lines.Line) => {
-      platform_open()
+      platform_open(true)
         .then(() =>
           slots_open(
             constants.test_cache_directory,
@@ -208,7 +301,10 @@ namespace boot {
   ): void {
     const server = new queue.ThreadPort(message.server);
     const start = message.start;
-    platform_open().then(() => {
+    const opened = start.clear
+      ? platform_open(true)
+      : files_wait(start.wait_seconds).then(() => platform_open(false));
+    opened.then(() => {
       const parts: worker_ai.TapParts = {
         first: start.first,
         server,

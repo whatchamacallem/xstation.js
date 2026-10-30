@@ -159,7 +159,7 @@ class TestPair(unittest.TestCase):
     class SkipFixture(unittest.TestCase):
         # Skips itself, giving no reason.
         def test_reason_absent(self) -> None:
-            raise unittest.SkipTest()
+            raise unittest.SkipTest("")
 
         # Skips itself with a reason.
         def test_reason_given(self) -> None:

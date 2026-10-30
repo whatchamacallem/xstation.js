@@ -5,6 +5,7 @@
   "agent.content_unsupported": "The result of tool call {0} holds content of type {1}, and a tool message carries only text.",
   "agent.prompt_invalid": "The document {0} is not a prompt: it needs its text as a string in the member text.",
   "agent.reply_empty": "The model's reply {0} has neither tool calls nor content to end the turn with.",
+  "boot.files_busy": "A file of the test pool or the test slots was still held by another worker after {0} s.",
   "bootstrap.lock_held": "Another engine holds the lock {0}.",
   "bootstrap.loop_missing": "The main loop file {0} does not define {1}.",
   "bootstrap.main_loop_name": "The main loop file name {0} is not a plain file name ending in .py.",

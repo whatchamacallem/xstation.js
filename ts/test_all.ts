@@ -51,7 +51,7 @@ namespace test_all {
   // The modules the AI worker runs, in the testing order.
   const worker_modules = Object.freeze<ModuleTable>({
     test_harness: () => test_harness,
-    test_error_overlay: () => test_error_overlay,
+    test_error_overlay_worker: () => test_error_overlay_worker,
     test_ui_strings: () => test_ui_strings,
     test_i18n: () => test_i18n,
     test_utility: () => test_utility,
@@ -74,18 +74,20 @@ namespace test_all {
     test_script: () => test_script,
     test_provider_script: () => test_provider_script,
     test_tools_browser: () => test_tools_browser,
+    test_tools_browser_console: () => test_tools_browser_console,
     test_agent: () => test_agent,
-    test_worker_ai: () => test_worker_ai,
+    test_worker_ai_console: () => test_worker_ai_console,
   });
 
   // The modules the UI thread runs, in the testing order, boot's last.
   const page_modules = Object.freeze<ModuleTable>({
     test_error_overlay: () => test_error_overlay,
     test_media: () => test_media,
-    test_integrate_media: () => test_integrate_media,
+    test_media_cache: () => test_media_cache,
     test_console_view: () => test_console_view,
     test_overlay: () => test_overlay,
     test_page: () => test_page,
+    test_worker_ai: () => test_worker_ai,
     test_boot: () => test_boot,
   });
 

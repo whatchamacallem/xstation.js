@@ -9,8 +9,8 @@
 # worker script, picks the entry on both threads. `html/test.html`, the ttyd
 # page, runs `test_all.suites_run()` and shows its TAP stream in
 # `pre#tap_output`. The start script serves it as the page that
-# `page_build.py test hyperposition-engine` builds, and the wire test, the
-# browser test and `test_page_build_tsc` build it from `test` too.
+# `page_build.py test hyperposition-engine` builds, and the wire test and the
+# browser test build it from `test` too.
 # `html/headless.html`, the headless page of group B, holds the head and the
 # scripts of `html/test.html` in their order, the last one
 # `test_headless.realm_open()` in place of `test_all.suites_run()`, and no

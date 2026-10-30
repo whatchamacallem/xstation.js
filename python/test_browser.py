@@ -126,7 +126,7 @@ _AI_MODULES = (
     "test_tap_producer",
     "test_unittest",
     "test_harness",
-    "test_error_overlay",
+    "test_error_overlay_worker",
     "test_ui_strings",
     "test_i18n",
     "test_utility",
@@ -149,8 +149,9 @@ _AI_MODULES = (
     "test_script",
     "test_provider_script",
     "test_tools_browser",
+    "test_tools_browser_console",
     "test_agent",
-    "test_worker_ai",
+    "test_worker_ai_console",
 )
 
 # The modules of the UI thread's stream, in the order the plan runs them.
@@ -159,10 +160,11 @@ _UI_MODULES = (
     "test_unittest",
     "test_error_overlay",
     "test_media",
-    "test_integrate_media",
+    "test_media_cache",
     "test_console_view",
     "test_overlay",
     "test_page",
+    "test_worker_ai",
     "test_boot",
 )
 
@@ -958,18 +960,16 @@ _PROBE_KIT = r"""(() => {
   probe.kill_put_body = [
     "const store = new substrate.Store(",
     "  sqlite3,",
-    "  test_substrate_store.kill_pool(pool, () =>",
-    "    test_substrate_store.kill_hold(() =>",
-    "      self.postMessage({ paused: true }),",
-    "    ),",
-    "  ),",
+    "  pool,",
     "  cache,",
     "  options.root,",
     "  options.overflow,",
     "  options.compact,",
     "  { line_notify: () => undefined },",
     ");",
-    "test_substrate_store.kill_put(store);",
+    "test_substrate_store.kill_put(store, () =>",
+    "  self.postMessage({ paused: true }),",
+    ");",
   ];
   probe.kill_check_body = [
     "const store = new substrate.Store(",
@@ -3577,7 +3577,7 @@ def rung_blocking_none(session: PageSession) -> str:
     )
 
 
-# A put killed between its cache file and its row leaves the file to remove.
+# A put killed inside its transaction, before its commit, leaves its file.
 def rung_kill_between(session: PageSession) -> str:
     slots = gold_value("kill_slots")
     options = {
@@ -3596,14 +3596,15 @@ def rung_kill_between(session: PageSession) -> str:
     )
     if "fault" in found or found.get("checked") != _KILL_DUE:
         raise CheckFailed(
-            f"the kill of a put between its file and its row gave {found},"
+            f"the kill of a put before its commit gave {found},"
             f" where checked {_KILL_DUE} was due"
         )
     return (
         "a worker of the test bundle opened the OPFS pool"
         f" {_KILL_POOL} and {slots} cache files, created a database and"
-        " stopped its put of a value over overflow_bytes after the cache"
-        " file and before the row; terminated there, a second worker opened"
+        " held its put of a value over overflow_bytes inside its"
+        " transaction, its cache file and its row written and not committed;"
+        " terminated there, a second worker opened"
         f" the same files and found {found['checked']}: no row, and"
         " kv_check removed the one file"
     )

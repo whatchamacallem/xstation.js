@@ -172,7 +172,7 @@ class TestServer(unittest.TestCase):
 
     # Calls the failing tool and returns the `isError` result it answers.
     def failing_call(self, request_id: int) -> dict[str, Any]:
-        params = {"name": "fail", "arguments": {}}
+        params: dict[str, Any] = {"name": "fail", "arguments": {}}
         response = _response_get(
             self.server, _request_make(request_id, "tools/call", params)
         )
@@ -290,7 +290,7 @@ class TestServer(unittest.TestCase):
             mcp.Tool("flag", "Flags.", _EMPTY_SCHEMA, False),
             lambda arguments: flagged,
         )
-        params = {"name": "flag", "arguments": {}}
+        params: dict[str, Any] = {"name": "flag", "arguments": {}}
         response = _response_get(
             self.server, _request_make(6, "tools/call", params)
         )
@@ -328,7 +328,7 @@ class TestServer(unittest.TestCase):
 
     # A tool nobody registered is invalid params, named in the message.
     def test_call_unknown(self) -> None:
-        params = {"name": "nothing", "arguments": {}}
+        params: dict[str, Any] = {"name": "nothing", "arguments": {}}
         response = _response_get(
             self.server, _request_make(9, "tools/call", params)
         )

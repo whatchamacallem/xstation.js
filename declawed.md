@@ -72,7 +72,7 @@ command only to name the log.
   rested on the premise of a forbidden implementation, which made it
   impossible to answer.
 - Always ask to have required apt packages installed and do not use any package
-manager without request.
+  manager without request.
 
 ### Errors and Data
 
@@ -201,6 +201,10 @@ manager without request.
   is not possible to fully test a module without mocking environments that are
   not available then split the test suites for that module and run the later
   suites as it becomes possible to run them on real code.
+- A scripted AI is expected and allowed in testing, whether it is called a
+  script, a double, a mock or anything else. It is the primary exception to
+  the ban on mock test objects: the test suites must run without an AI API
+  endpoint, since an AI API endpoint is non-deterministic.
 - Directly changing a module's internal state during testing to emulate a
   test environment is forbidden. All tests go through the APIs being tested
   and show normal operation. They do not use isolated operation of an

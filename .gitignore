@@ -5,3 +5,7 @@ xsjs_install.ps1.md
 xsjs_start.ps1.md
 xsjs_stop.ps1.md
 powershell/*.ps1.md
+third_party/**
+!third_party/*/
+!third_party/*/patches/
+!third_party/*/patches/**

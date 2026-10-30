@@ -36,7 +36,8 @@ if [ "$(command ls)" = "$_SCRIPT_NAME_" ]; then
 	echo "Extracted all files in $_PROJECT_."
 
 	_FS_TYPE_=$(stat -f -c "%T" . 2>/dev/null) || _FS_TYPE_=""
-	if [ "$_FS_TYPE_" = "v9fs" ] || [ "$_FS_TYPE_" = "fuseblk" ] || [ "$_FS_TYPE_" = "ntfs" ]; then
+	if [ "$_FS_TYPE_" = "v9fs" ] || [ "$_FS_TYPE_" = "fuseblk" ] ||
+		[ "$_FS_TYPE_" = "ntfs" ]; then
 		echo "Windows detected. Setting config core.fileMode false."
 		git config core.fileMode false
 	fi
@@ -62,7 +63,8 @@ git reflog expire --expire=24.hours.ago --expire-unreachable=24.hours.ago --all
 git gc --prune=now --aggressive
 
 # Save everything including local git config.
-tar -cJf "$_DEST_DIR_/$_ARCHIVE_" -C ".." "$_PROJECT_/$_SCRIPT_NAME_" "$_PROJECT_/.git"
+tar -cJf "$_DEST_DIR_/$_ARCHIVE_" -C ".." "$_PROJECT_/$_SCRIPT_NAME_" \
+	"$_PROJECT_/.git"
 
 printf "Wrote: "
 ls -h1s "$_DEST_DIR_/$_ARCHIVE_"

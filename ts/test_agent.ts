@@ -2,21 +2,47 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the agent loop on doubles: a store double that answers the values,
-// documents, statements and turns each test chose and keeps the turns the
-// agent appends, a double of the MCP clients whose tools answer at once, a
-// task queue double that keeps each submitted line, and a register function
-// that keeps the handlers. Each test runs a turn as a queue would, calling
-// the handlers in turn with the wake lines of the gold: the castle turn, in
-// which the player answers 1 and the analyst builds the castle's gatehouse
-// scene, the turn after it, short turns and a click, the system prompt, a
-// scene the store compacted, failed tool calls that store no reply without
-// its results, and every error the agent throws. The request frames, the
-// lines the turns end with and the texts are those of the gold record.
+// Tests of the agent loop on real parts: the agent registered on the realm's
+// dispatch with a real `substrate.Store` on the realm's sqlite3 module and
+// pool, a real `mcp.ClientSet` whose client reaches `tools_browser` on a real
+// `mcp.Server` over the same store, and a real queue of thread `ai` in
+// synchronous mode, which runs the turn, the client's `mcp` lines and the
+// tools alike. The player's text or click comes from the queue of thread
+// `ui`, whose handler of the test's own submits it and keeps the reply its
+// wake gets. The far ends are second real queues whose handlers are the
+// test's own functions, each answering with the reply the test scripted from
+// the gold and keeping every request it got: `http` is the scripted AI,
+// which answers the chat requests with the castle turn's frames and the
+// image request with its image, `ui` keeps the image and renders, and
+// `server` keeps the store's pushes.
+//
+// A realm takes one registration of the agent and of the tools, since each
+// registers its line types in the realm's one dispatch table, so the tests
+// share the one bench, built at the first test, and each test starts in the
+// hyperposition: `setUp` drops every database of the store through its API,
+// then writes the world, the scene, the analyst's prompt, the universe table
+// and the bootstrap script. The castle turn, in which the player answers 1
+// and the analyst builds the castle's gatehouse scene through the tools, is
+// checked by its requests, the store it leaves, its turns and its reply; then
+// the turn after it, short turns and a click, a compacted scene, a round
+// stored only after its tool ran, and the system prompt and its errors. The
+// request frames, the lines the turns end with and the texts are those of
+// the gold record.
 
 namespace test_agent {
-  // The values of the provider, the castle turn and the doubles' answers.
+  // The initialized sqlite3.wasm module, a global the test page sets.
+  declare const test_sqlite3: substrate.SqliteModule;
+
+  // Its installed OPFS SAH pool, a global the test page sets.
+  declare const test_pool: substrate.SqlitePool;
+
+  // The test slots, files cleared at start that no cache holds.
+  declare const test_slots: substrate.SlotHandle[];
+
+  // The values of the provider, the castle turn and the bench.
   const constants = Object.freeze({
+    // The id of this module's gold in `test_settings.json`.
+    gold_id: "typescript.test_agent",
     // A synthetic provider key, which every chat request carries.
     key: "xai-SYNTHETIC-KEY",
     // The provider's address and models of a run that is not scripted.
@@ -25,28 +51,60 @@ namespace test_agent {
       chat_model: "grok-4",
       image_model: "grok-2-image",
     }),
-    // The provider's address and models of a scripted run, empty.
-    scripted_info: Object.freeze<lines.ProviderInfo>({
-      base_url: "",
-      chat_model: "",
-      image_model: "",
+    // The root of the store's databases in the realm's pool.
+    root: "/test_agent",
+    // The settings of the store's sizes.
+    overflow_setting: "overflow_bytes",
+    compact_setting: "turn_compact_turns",
+    // The threads of the bench: the agent's, the provider's, the UI, server.
+    thread: "ai" as const,
+    http_thread: "http" as const,
+    ui_thread: "ui" as const,
+    server_thread: "server" as const,
+    // The identities of the browser's server and of the agent's client.
+    server_name: "xsjs-browser",
+    client_name: "hyperposition-engine",
+    version: "0",
+    // The prefix the agent lists the browser's tools under.
+    prefix: "browser",
+    // The line type of the protocol, and the version of every handler.
+    line_type: "mcp",
+    handler_version: 0,
+    // The test's own types: the handshake's steps, the player's turn.
+    handshake_type: "test_agent.handshake",
+    initialized_type: "test_agent.initialized",
+    listed_type: "test_agent.listed",
+    say_type: "test_agent_ui.say",
+    said_type: "test_agent_ui.said",
+    // The owner table of the agent's queue.
+    owners: Object.freeze<queue.OwnerTable>({
+      mcp: "ai",
+      "ai.": "ai",
+      "tools.": "ai",
+      "test_agent.": "ai",
     }),
-    // The owner whose port answers the provider's requests.
-    provider_owner: "http" as const,
-    // The ids the queue double hands out for the chat requests, in order.
-    request_ids: Object.freeze([21, 22, 23, 24, 25, 26, 27, 28]),
-    // The ids the clients double hands out for the tool calls, in order.
-    call_ids: Object.freeze([31, 32, 33, 34, 35, 36, 37, 38]),
-    // The types of the wakes the agent sleeps with.
-    model_type: "ai.model_reply",
-    tool_type: "ai.tool_reply",
+    // The requests each far end answers, by its thread.
+    http_types: Object.freeze(["http.request"]),
+    ui_types: Object.freeze(["media.store", "render"]),
+    // The pushes of the store, which the server's far end keeps.
+    push_types: Object.freeze([
+      "db.create",
+      "db.drop",
+      "kv.put",
+      "kv.delete",
+      "doc.put",
+      "turn.append",
+      "sql.run",
+    ]),
+    // The header fields of an id, which a submit sets, in both forms.
+    id_fields: Object.freeze(["i", "id"]),
+    // The header fields of the id a reply answers, in both forms.
+    reply_fields: Object.freeze(["r", "reply"]),
     // The hyperposition scene, on screen when the castle turn starts.
     scene: "/metaverse/hyperposition/1",
     // The arrival scene the castle turn writes and enters.
     arrival: "/castle_gatehouse/scene/arrival/1",
-    // The head of the analyst's prompt document in the store double.
-    analyst_ref: "/metaverse/prompt/1",
-    // The analyst's system prompt, which each store double holds.
+    // The analyst's system prompt, the prompt document of the metaverse.
     analyst:
       "You are a very bored British psychoanalyst. You hold the" +
       " hyperposition, a dark place of fog and a few inexplicable lights." +
@@ -54,6 +112,17 @@ namespace test_agent {
       " judgement. Your scripts are the database administrator of every" +
       " universe you create: typed tables, indexes, views, no JSON columns" +
       " unless a document is what fits.",
+    // The universe table and its trigger, as API/sql/metaverse.sql has them.
+    universe_sql:
+      "CREATE TABLE universe (name TEXT PRIMARY KEY, title TEXT NOT NULL," +
+      " player TEXT NOT NULL, world TEXT NOT NULL) WITHOUT ROWID, STRICT",
+    trigger_sql:
+      "CREATE TRIGGER universe_world_insert BEFORE INSERT ON universe" +
+      " WHEN EXISTS (SELECT 1 FROM universe" +
+      " WHERE world = NEW.world AND name <> NEW.name)" +
+      " BEGIN SELECT RAISE(ABORT, 'agent.content_ambiguous'); END",
+    // The ref of the bootstrap script, which the castle turn runs.
+    bootstrap_ref: "/_files/script/bootstrap.js",
     // The subtitle the castle turn ends with.
     subtitle:
       "Mind the moat. The gatehouse keeper has been expecting someone," +
@@ -62,9 +131,8 @@ namespace test_agent {
     image_prompt:
       "A rain dark castle gatehouse at dusk seen from the far side of a" +
       " moat, one lantern lit, painted, wide still frame, no people",
-    // The statements the agent runs: the universe of a world, a head.
-    universe_sql: "SELECT name FROM universe WHERE world = ?",
-    head_sql: "SELECT version FROM _head WHERE id = ?",
+    // The ref of that image.
+    image_ref: "/_files/gatehouse/arrival.png",
     // The result texts of the castle turn's tool calls, in call order.
     bootstrap_result:
       '{"value":{"universe":"castle","world":"castle_world",' +
@@ -84,14 +152,15 @@ namespace test_agent {
     click_reply: "The lights flicker.",
     // The id of the model's replies.
     answer_id: "chatcmpl-answer",
-    // The arguments of the render calls of the error tests.
-    render_arguments: '{"subtitle":"Fog."}',
-    // The arguments of the image calls of the tests of failed calls.
-    image_arguments: '{"prompt":"Fog.","key":"/_files/fog.png"}',
     // A prompt of the castle universe, for the tests of the system prompt.
     castle_prompt: "The castle is cold, and its keeper is patient.",
     // The reference string the encoded prompt document of the gold holds.
     lore: "/castle/lore",
+    // The statement a tool runs to count the turns stored of the scene.
+    count_sql: "SELECT count(*) FROM _turn WHERE scene = ?",
+    // The result of that statement while only the player's turn is stored.
+    count_result:
+      '{"results":[{"columns":["count(*)"],"rows":[[1]],"changes":0}]}',
     // The line types the agent registers, in its order.
     agent_types: Object.freeze([
       "ai.say",
@@ -104,31 +173,53 @@ namespace test_agent {
   // An object of fields by name.
   type FieldTable = { [key: string]: unknown };
 
-  // What a tool double does with its arguments, and the result it gives.
-  type ToolAnswer = (args: FieldTable) => mcp.ToolResult;
+  // What the far ends got and gave in one test, and the turns' replies.
+  interface FarRecord {
+    // The reply frames each far end still gives, by request type, in order.
+    readonly replies: Map<string, lines.Line[]>;
+    // Each request a far end got, in order.
+    readonly got: lines.Line[];
+    // Each push of the store that the server's far end got, in order.
+    readonly pushes: lines.Line[];
+    // The ids the UI's queue gave the turns it submitted, in order.
+    readonly asked: number[];
+    // The reply each turn ended with, in order.
+    readonly answers: lines.Line[];
+  }
 
-  // The tool doubles by their full name.
-  type ToolTable = { [name: string]: ToolAnswer };
-
-  // Each call a double was given: the method's name and its arguments.
-  type CallRecord = [string, unknown[]];
-
-  // The doubles the agent was registered with, and the handlers it gave.
+  // The real parts the tests share, built once per realm.
   interface AgentBench {
-    store: StoreDouble;
-    clients: ClientsDouble;
-    tasks: TasksDouble;
-    handlers: Map<string, dispatch.Handler>;
+    store: substrate.Store;
+    clients: mcp.ClientSet;
+    tasks: queue.TaskQueue;
+    ui: queue.TaskQueue;
+  }
+
+  // The bench of the realm, built at the first test.
+  let bench_kept: AgentBench | undefined = undefined;
+
+  // What the far ends got and gave in the test that runs.
+  let far: FarRecord = far_fresh();
+
+  // A record of the far ends with nothing scripted and nothing got.
+  function far_fresh(): FarRecord {
+    return {
+      replies: new Map(),
+      got: [],
+      pushes: [],
+      asked: [],
+      answers: [],
+    };
   }
 
   // A copy of a value of this module's gold, which the harness keeps frozen.
   function gold_value(name: string): unknown {
-    return structuredClone(harness.gold_get(`typescript.test_agent.${name}`));
+    return structuredClone(harness.gold_get(`${constants.gold_id}.${name}`));
   }
 
   // A text of this module's gold, a run time `{n}` left for the test to fill.
   function gold_text(name: string): string {
-    return harness.gold_get(`typescript.test_agent.texts.${name}`) as string;
+    return harness.gold_get(`${constants.gold_id}.texts.${name}`) as string;
   }
 
   // A copy of a line of this module's gold, a run time part set on the copy.
@@ -136,185 +227,189 @@ namespace test_agent {
     return gold_value(`lines.${name}`) as lines.Line;
   }
 
-  // The answer the test set for the key, which must have been set.
-  function answer_get<T>(answers: Map<string, T>, key: string): T {
-    if (!answers.has(key)) {
-      throw new Error(`The double has no answer for ${key}.`);
-    }
-    return answers.get(key) as T;
+  // The fields of a header, to read and write by name.
+  function fields_of(line: lines.Line): FieldTable {
+    return line[0] as unknown as FieldTable;
   }
 
-  // The next id of the list the test chose, which must not be used up.
-  function id_take(ids: number[], owner: string): number {
-    const id = ids.shift();
-    if (id === undefined) {
-      throw new Error(`The ${owner} double has no id left.`);
+  // A copy of a line, its header's fields of the names taken off.
+  function line_without(
+    line: lines.Line,
+    names: readonly string[],
+  ): lines.Line {
+    const copy = structuredClone(line);
+    for (const name of names) {
+      delete fields_of(copy)[name];
     }
-    return id;
+    return copy;
   }
 
-  // The arguments of each call of the method a double recorded, in order.
-  function calls_of(calls: CallRecord[], name: string): unknown[][] {
-    return calls.filter(([method]) => method === name).map(([, args]) => args);
+  // A line of the test's own type and payload, in the form the settings pick.
+  function line_typed(type: string, payload: FieldTable): lines.Line {
+    const header = jslb.header_make(type, { full: settings.names_full() });
+    return jslb.line_make(header, [], payload);
   }
 
-  // The key of a call of `sql_run`: its database and statements as JSON.
-  function statement_key(
-    db: string,
-    statements: lines.SqlStatement[],
-  ): string {
-    return JSON.stringify([db, statements]);
+  // A far end's answer to a request: the next reply the test scripted for it.
+  function far_answer(line: lines.Line): lines.Line {
+    far.got.push(line);
+    const type = jslb.field_get(line[0], "type") as string;
+    const frame = far.replies.get(type)?.shift();
+    if (frame === undefined) {
+      throw new Error(`the test scripted no reply to ${type}`);
+    }
+    const blobs = jslb.headers_of(frame).slice(1) as lines.BlobHeader[];
+    return dispatch.reply_make(line, jslb.payload_of(frame), blobs);
   }
 
-  // A double of the store: it keeps each call and answers what the test set.
-  class StoreDouble {
-    // Every call, in order.
-    readonly calls: CallRecord[] = [];
-    // The text of each value by its ref.
-    readonly values = new Map<string, string>();
-    // The head of each document by `db/id`, or the error asking it throws.
-    readonly heads = new Map<string, lines.DocRef | Error>();
-    // Each encoded document by its ref.
-    readonly documents = new Map<string, lines.Document>();
-    // The results of each call of `sql_run` by `statement_key`.
-    readonly results = new Map<string, lines.SqlResult[]>();
-    // The turns of each scene: those the test set, then those appended.
-    readonly turns = new Map<string, substrate.TurnRow[]>();
-
-    // The value's bytes, as a small value held in its row is read.
-    kv_get(ref: lines.KvRef): { data: Uint8Array } {
-      this.calls.push(["kv_get", [ref]]);
-      return { data: new TextEncoder().encode(answer_get(this.values, ref)) };
-    }
-
-    // The head of the document, or the throw the test chose.
-    doc_head(db: string, id: string): lines.DocRef {
-      this.calls.push(["doc_head", [db, id]]);
-      const head = answer_get(this.heads, `${db}/${id}`);
-      if (head instanceof Error) {
-        throw head;
-      }
-      return head;
-    }
-
-    // A copy of the encoded document under the ref.
-    doc_get(ref: lines.DocRef): lines.Document {
-      this.calls.push(["doc_get", [ref]]);
-      return structuredClone(answer_get(this.documents, ref));
-    }
-
-    // The results the test set for the statements on the database.
-    sql_run(db: string, statements: lines.SqlStatement[]): lines.SqlResult[] {
-      this.calls.push(["sql_run", [db, statements]]);
-      return structuredClone(
-        answer_get(this.results, statement_key(db, statements)),
-      );
-    }
-
-    // Keeps the turn on its scene, numbered after the scene's last.
-    turn_append(
-      scene: lines.DocRef,
-      role: provider.Role,
-      content: provider.ChatMessage,
-    ): lines.TurnAppendReply {
-      this.calls.push(["turn_append", [scene, role, content]]);
-      const rows = answer_get(this.turns, scene);
-      const n = rows.length + 1;
-      rows.push({ scene, n, role, content });
-      return { n };
-    }
-
-    // The turns of the scene, in order.
-    turn_list(scene: lines.DocRef): substrate.TurnRow[] {
-      this.calls.push(["turn_list", [scene]]);
-      return structuredClone(answer_get(this.turns, scene));
-    }
-
-    // Runs the function, as the store runs it in one transaction.
-    transaction_run<T>(fn: () => T): T {
-      this.calls.push(["transaction_run", []]);
-      return fn();
-    }
+  // Joins a far queue of the thread to the agent's queue by linked ports.
+  function far_join(
+    tasks: queue.TaskQueue,
+    thread: queue.ThreadName,
+    types: readonly string[],
+  ): queue.TaskQueue {
+    const owners = Object.fromEntries(types.map((type) => [type, thread]));
+    const far_tasks = new queue.TaskQueue(thread, owners, true);
+    const port = new queue.LocalPort();
+    tasks.port_add(thread, port);
+    far_tasks.port_add(constants.thread, new queue.LocalPort(port));
+    return far_tasks;
   }
 
-  // A double of the MCP clients: it lists tools and answers by its doubles.
-  class ClientsDouble {
-    // Every call, in order.
-    readonly calls: CallRecord[] = [];
-    // The tools it lists.
-    readonly #tools: mcp.Tool[];
-    // The tool doubles, run at the call.
-    readonly #table: ToolTable;
-    // The ids it hands out, in order.
-    readonly #ids: number[];
-    // The result of each call by its id.
-    readonly #results = new Map<number, mcp.ToolResult>();
-
-    // Takes the tools it lists, their doubles and the ids it hands out.
-    constructor(tools: mcp.Tool[], table: ToolTable, ids: readonly number[]) {
-      this.#tools = tools;
-      this.#table = table;
-      this.#ids = [...ids];
+  // Registers the far ends' answers and keepers, the test's own functions.
+  function far_register(ui: queue.TaskQueue): void {
+    const version = constants.handler_version;
+    for (const type of [...constants.http_types, ...constants.ui_types]) {
+      dispatch.handler_register(type, version, far_answer);
     }
-
-    // The tools as listed.
-    tools_cached(): mcp.Tool[] {
-      this.calls.push(["tools_cached", []]);
-      return this.#tools;
+    for (const type of constants.push_types) {
+      dispatch.handler_register(type, version, (line) => {
+        far.pushes.push(line);
+        return undefined;
+      });
     }
-
-    // Runs the tool's double and hands out the call's id.
-    tool_call(name: string, args: FieldTable): number {
-      this.calls.push(["tool_call", [name, args]]);
-      if (!Object.hasOwn(this.#table, name)) {
-        throw new Error(`The tool doubles have no tool ${name}.`);
-      }
-      const id = id_take(this.#ids, "clients");
-      this.#results.set(id, this.#table[name](args));
-      return id;
-    }
-
-    // The result of the call the reply answers, by the reply's `r`.
-    result_of(reply: lines.Line): mcp.ToolResult {
-      this.calls.push(["result_of", [reply]]);
-      const id = reply[0].r;
-      if (id === undefined || !this.#results.has(id)) {
-        throw new Error(`The clients double made no call ${String(id)}.`);
-      }
-      return this.#results.get(id) as mcp.ToolResult;
-    }
+    dispatch.handler_register(constants.say_type, version, (line) => {
+      const request = jslb.payload_of(line).request as lines.Line;
+      const id = ui.task_submit(request, constants.thread);
+      far.asked.push(id);
+      return dispatch.task_sleep(null, [id], constants.said_type);
+    });
+    dispatch.handler_register(constants.said_type, version, (line) => {
+      far.answers.push((line.replies as lines.Line[])[0]);
+      return undefined;
+    });
   }
 
-  // A double of the task queue: it keeps each line submitted and its owner.
-  class TasksDouble {
-    // Every call, in order.
-    readonly calls: CallRecord[] = [];
-    // The ids it hands out, in order.
-    readonly #ids: number[];
-
-    // Takes the ids it hands out.
-    constructor(ids: readonly number[]) {
-      this.#ids = [...ids];
-    }
-
-    // Keeps the line and its owner and hands out the task's id.
-    task_submit(line: lines.Line, owner: queue.ThreadName): number {
-      this.calls.push(["task_submit", [line, owner]]);
-      return id_take(this.#ids, "queue");
-    }
+  // Registers the steps of the client's handshake, the test's own handlers.
+  function handshake_register(client: mcp.Client): void {
+    const version = constants.handler_version;
+    dispatch.handler_register(constants.handshake_type, version, () =>
+      dispatch.task_sleep(
+        null,
+        [client.initialize_send()],
+        constants.initialized_type,
+      ),
+    );
+    dispatch.handler_register(constants.initialized_type, version, (line) => {
+      client.initialized_send((line.replies as lines.Line[])[0]);
+      const id = client.tools_list();
+      return dispatch.task_sleep(null, [id], constants.listed_type);
+    });
+    dispatch.handler_register(constants.listed_type, version, (line) => {
+      client.tools_read((line.replies as lines.Line[])[0]);
+      return undefined;
+    });
   }
 
-  // The error the function throws, and an error of its own when it doesn't.
-  function thrown_get(fn: () => unknown): Error {
-    try {
-      fn();
-    } catch (error) {
-      if (error instanceof Error) {
-        return error;
-      }
-      throw error;
+  // Builds the bench: the agent and the tools on real parts and queues.
+  function bench_build(): AgentBench {
+    const tasks = new queue.TaskQueue(
+      constants.thread,
+      constants.owners,
+      true,
+    );
+    far_join(tasks, constants.http_thread, constants.http_types);
+    const ui = far_join(tasks, constants.ui_thread, [
+      ...constants.ui_types,
+      constants.say_type,
+      constants.said_type,
+    ]);
+    far_join(tasks, constants.server_thread, constants.push_types);
+    far_register(ui);
+    const store = new substrate.Store(
+      test_sqlite3,
+      test_pool,
+      new substrate.CacheFiles([...test_slots]),
+      constants.root,
+      harness.setting_get(constants.overflow_setting) as number,
+      harness.setting_get(constants.compact_setting) as number,
+      tasks,
+    );
+    const server = new mcp.Server(constants.server_name, constants.version);
+    tools_browser.tools_register(
+      server,
+      store,
+      tasks,
+      constants.http_thread,
+      constants.info,
+      harness.setting_get,
+    );
+    dispatch.handler_register(
+      constants.line_type,
+      constants.handler_version,
+      (line) => server.line_handle(line),
+    );
+    const client = new mcp.Client(
+      constants.client_name,
+      constants.version,
+      tasks,
+      constants.thread,
+    );
+    handshake_register(client);
+    tasks.line_notify(line_typed(constants.handshake_type, {}));
+    const clients = new mcp.ClientSet();
+    clients.client_add(constants.prefix, client);
+    agent.handlers_register(
+      store,
+      clients,
+      tasks,
+      constants.http_thread,
+      constants.info,
+      dispatch.handler_register,
+    );
+    return { store, clients, tasks, ui };
+  }
+
+  // The bench of the realm, built at its first use.
+  function bench_get(): AgentBench {
+    if (bench_kept === undefined) {
+      bench_kept = bench_build();
     }
-    throw new Error("Nothing was thrown.");
+    return bench_kept;
+  }
+
+  // The store the agent and the tools use.
+  function store_get(): substrate.Store {
+    return bench_get().store;
+  }
+
+  // Writes the hyperposition: its world, scene, prompt, table and script.
+  function hyperposition_write(store: substrate.Store): void {
+    store.db_create("metaverse");
+    store.db_create("_files");
+    store.sql_run("metaverse", [
+      { sql: constants.universe_sql, params: [] },
+      { sql: constants.trigger_sql, params: [] },
+    ]);
+    store.kv_put("/metaverse/world", utility.utf8_encode("metaverse"));
+    store.kv_put("/metaverse/scene", utility.utf8_encode(constants.scene));
+    store.doc_put(
+      "metaverse",
+      "prompt",
+      prompt_doc("prompt", constants.analyst),
+    );
+    const bootstrap = gold_value("bootstrap_script") as string;
+    store.kv_put(constants.bootstrap_ref, utility.utf8_encode(bootstrap));
   }
 
   // A call of the named tool with its arguments as JSON text.
@@ -340,7 +435,7 @@ namespace test_agent {
         "call_2",
         "browser.image_make",
         `{"prompt":"${constants.image_prompt}",` +
-          '"key":"/_files/gatehouse/arrival.png"}',
+          '"key":"gatehouse/arrival.png"}',
       ),
       call_make(
         "call_3",
@@ -364,70 +459,13 @@ namespace test_agent {
     ];
   }
 
-  // A tool of the properties given, as the MCP clients list it.
-  function tool_make(
-    name: string,
-    description: string,
-    properties: FieldTable,
-    required: string[],
-  ): mcp.Tool {
-    return {
-      name,
-      description,
-      inputSchema: { type: "object", properties, required },
-    };
-  }
-
-  // The castle turn's tools as the MCP clients list them, in its order.
-  function tools_listed(): mcp.Tool[] {
-    const text_type = { type: "string" };
-    const object_type = { type: "object" };
-    return [
-      tool_make(
-        "browser.kv_put",
-        "Write text under a Key-Value-Ref, /$db/$key. A script is the row" +
-          " /_files/script/<name>.js.",
-        { ref: text_type, text: text_type },
-        ["ref", "text"],
-      ),
-      tool_make(
-        "browser.doc_put",
-        "Write a new version of document $id in database $db and move its" +
-          " head. Returns the new Document-Ref.",
-        { db: text_type, id: text_type, body: object_type },
-        ["db", "id", "body"],
-      ),
-      tool_make(
-        "browser.script_run",
-        "Run the script /_files/script/<name>.js with args as a task in this" +
-          " worker. Returns its value or exception and the verbose lines it" +
-          " wrote.",
-        { name: text_type, args: object_type },
-        ["name", "args"],
-      ),
-      tool_make(
-        "browser.image_make",
-        "Generate an image from a prompt and keep it under /_files/<key>." +
-          " Returns the key, size and sha256.",
-        { prompt: text_type, key: text_type },
-        ["prompt", "key"],
-      ),
-      tool_make(
-        "browser.render",
-        "Show an image by its Key-Value-Ref with a subtitle. No image means" +
-          " black.",
-        { image: text_type, subtitle: text_type },
-        ["subtitle"],
-      ),
-    ];
-  }
-
-  // The function tools the castle turn's requests list for those tools.
+  // The function tools every chat request lists: the browser's, prefixed.
   function functions_recorded(): provider.FunctionTool[] {
-    return tools_listed().map((tool: mcp.Tool): provider.FunctionTool => ({
+    const tools = gold_value("tools") as mcp.Tool[];
+    return tools.map((tool: mcp.Tool): provider.FunctionTool => ({
       type: "function",
       function: {
-        name: tool.name,
+        name: `${constants.prefix}.${tool.name}`,
         description: tool.description,
         parameters: tool.inputSchema,
       },
@@ -512,152 +550,14 @@ namespace test_agent {
     ];
   }
 
-  // The system prompt `prompt_build` makes on the store double.
-  function prompt_of(store: StoreDouble): provider.ChatMessage[] {
-    return agent.prompt_build(store as unknown as substrate.Store);
-  }
-
-  // A tool result of one text part.
-  function text_result(text: string): mcp.ToolResult {
-    return { content: [{ type: "text", text }] };
-  }
-
   // A prompt document of the type given that holds the text given.
   function prompt_doc(type: string, text: unknown): lines.Document {
     return { 0: { t: type }, text };
   }
 
-  // Answers the agent's lookup of the universe of the world with the names.
-  function universe_set(
-    store: StoreDouble,
-    world: string,
-    names: string[],
-  ): void {
-    const statement = { sql: constants.universe_sql, params: [world] };
-    store.results.set(statement_key("metaverse", [statement]), [
-      { columns: ["name"], rows: names.map((name) => [name]), changes: 0 },
-    ]);
-  }
-
-  // Answers the agent's lookup of the head of the universe's prompt.
-  function head_set(
-    store: StoreDouble,
-    universe: string,
-    versions: number[],
-  ): void {
-    const statement = { sql: constants.head_sql, params: ["prompt"] };
-    const rows = versions.map((version) => [version]);
-    store.results.set(statement_key(universe, [statement]), [
-      { columns: ["version"], rows, changes: 0 },
-    ]);
-  }
-
-  // A store double in the hyperposition: its world, scene and the prompt.
-  function store_seeded(): StoreDouble {
-    const store = new StoreDouble();
-    store.values.set("/metaverse/world", "metaverse");
-    store.values.set("/metaverse/scene", constants.scene);
-    store.heads.set("metaverse/prompt", constants.analyst_ref);
-    const analyst = prompt_doc("prompt", constants.analyst);
-    store.documents.set(constants.analyst_ref, analyst);
-    universe_set(store, "metaverse", []);
-    store.turns.set(constants.scene, []);
-    return store;
-  }
-
-  // Makes the castle universe's world the current one.
-  function castle_enter(store: StoreDouble): void {
-    store.values.set("/metaverse/world", "castle_world");
-    universe_set(store, "castle_world", ["castle"]);
-  }
-
-  // The tools of the castle turn: what each changes and the text it gives.
-  function tools_recorded(store: StoreDouble): ToolTable {
-    return {
-      "browser.script_run": () => {
-        castle_enter(store);
-        return text_result(constants.bootstrap_result);
-      },
-      "browser.image_make": () => text_result(constants.image_result),
-      "browser.doc_put": () => text_result(constants.scene_result),
-      "browser.kv_put": (args: FieldTable) => {
-        store.values.set(args.ref as string, args.text as string);
-        return text_result(constants.enter_result);
-      },
-      "browser.render": () => text_result(constants.render_result),
-    };
-  }
-
-  // Tool doubles: a render that answers, an image the agent refuses.
-  function tools_failing(): ToolTable {
-    return {
-      "browser.render": () => text_result(constants.render_result),
-      "browser.image_make": () => ({
-        content: [{ type: "image", data: "", mimeType: "image/png" }],
-      }),
-    };
-  }
-
-  // A bench of doubles on a store double, with the agent registered.
-  function bench_make(
-    tools_make: (store: StoreDouble) => ToolTable,
-    info: lines.ProviderInfo,
-  ): AgentBench {
-    const store = store_seeded();
-    const clients = new ClientsDouble(
-      tools_listed(),
-      tools_make(store),
-      constants.call_ids,
-    );
-    const tasks = new TasksDouble(constants.request_ids);
-    const handlers = new Map<string, dispatch.Handler>();
-    agent.handlers_register(
-      store as unknown as substrate.Store,
-      clients as unknown as mcp.ClientSet,
-      tasks as unknown as queue.TaskQueue,
-      constants.provider_owner,
-      info,
-      (type: string, _version: number, fn: dispatch.Handler) => {
-        handlers.set(type, fn);
-      },
-    );
-    return { store, clients, tasks, handlers };
-  }
-
-  // A bench whose tool doubles are those of the castle turn.
-  function bench_recorded(): AgentBench {
-    const bench = bench_make(tools_recorded, constants.info);
-    head_set(bench.store, "castle", []);
-    bench.store.turns.set(constants.arrival, []);
-    return bench;
-  }
-
-  // Calls the handler the agent registered for the type with the line.
-  function handler_call(
-    bench: AgentBench,
-    type: string,
-    line: lines.Line,
-  ): ReturnType<dispatch.Handler> {
-    const fn = bench.handlers.get(type);
-    if (fn === undefined) {
-      throw new Error(`The agent registered no handler for ${type}.`);
-    }
-    return fn(line);
-  }
-
-  // Whether a handler's outcome is a sleep, which names the type of its wake.
-  function sleep_is(outcome: unknown): outcome is dispatch.Sleep {
-    return (
-      typeof outcome === "object" &&
-      outcome !== null &&
-      Object.hasOwn(outcome, "then_type")
-    );
-  }
-
-  // The provider's answer to the request `id`: a completion of the message.
-  function chat_reply(id: number, message: provider.ChatMessage): lines.Line {
+  // The provider's answer frame: a completion of the message.
+  function chat_reply(message: provider.ChatMessage): lines.Line {
     const line = gold_line("reply_chat");
-    line[0].r = id;
     line.json = {
       id: constants.answer_id,
       model: constants.info.chat_model,
@@ -666,67 +566,11 @@ namespace test_agent {
     return line;
   }
 
-  // The clients' reply to the tool call `id`, whose result the double keeps.
-  function tool_reply(id: number): lines.Line {
-    const line = gold_line("reply_mcp");
-    line[0].r = id;
-    return line;
-  }
-
-  // The wake of a sleep: the model's next answer, or the tools' replies.
-  function wake_next(
-    sleep: dispatch.Sleep,
-    left: provider.ChatMessage[],
-  ): lines.Line {
-    let wake: lines.Line;
-    if (sleep.then_type === constants.model_type) {
-      const answer = left.shift();
-      if (answer === undefined) {
-        throw new Error("The turn has no answer of the model left.");
-      }
-      wake = gold_line("wake_model");
-      wake.replies = [chat_reply(sleep.wait_ids[0], answer)];
-    } else if (sleep.then_type === constants.tool_type) {
-      wake = gold_line("wake_tool");
-      wake.replies = sleep.wait_ids.map((id) => tool_reply(id));
-    } else {
-      throw new Error(`The agent slept with the type ${sleep.then_type}.`);
-    }
-    wake.state = sleep.state;
-    return wake;
-  }
-
-  // Runs a turn as a queue would, each sleep woken with what it waited for.
-  function turn_run(
-    bench: AgentBench,
-    type: string,
-    request: lines.Line,
-    answers: provider.ChatMessage[],
-  ): lines.Line {
-    const left = [...answers];
-    let outcome = handler_call(bench, type, request);
-    while (sleep_is(outcome)) {
-      const wake = wake_next(outcome, left);
-      outcome = handler_call(bench, outcome.then_type, wake);
-    }
-    return outcome as lines.Line;
-  }
-
-  // Runs the castle turn, in which the player answers 1.
-  function castle_run(bench: AgentBench): lines.Line {
-    const say = gold_line("say_castle");
-    return turn_run(bench, "ai.say", say, answers_recorded());
-  }
-
   // The chat request the agent submits for the messages, on a gold frame.
-  function request_expected(
-    name: string,
-    info: lines.ProviderInfo,
-    messages: provider.ChatMessage[],
-  ): lines.Line {
-    const line = gold_line(name);
+  function request_expected(messages: provider.ChatMessage[]): lines.Line {
+    const line = gold_line("request_chat");
     line.json = {
-      model: info.chat_model,
+      model: constants.info.chat_model,
       messages,
       tools: functions_recorded(),
       tool_choice: "auto",
@@ -734,66 +578,193 @@ namespace test_agent {
     return line;
   }
 
-  // The bodies of the chat requests the agent submitted, in order.
-  function requests_of(bench: AgentBench): provider.ChatRequest[] {
-    return calls_of(bench.tasks.calls, "task_submit").map(
-      ([line]) => (line as lines.Line).json as provider.ChatRequest,
-    );
+  // The image answer of the castle turn, its image the gold's.
+  function image_reply(): lines.Line {
+    const line = gold_line("image_answer");
+    const images = line.json as { data: { b64_json?: string }[] };
+    images.data[0].b64_json = gold_value("image_base64") as string;
+    return line;
   }
 
-  // The contents of the turns the agent appended, in order.
-  function contents_of(bench: AgentBench): unknown[] {
-    return calls_of(bench.store.calls, "turn_append").map((args) => args[2]);
+  // The contents of the turns of the scene as the store holds them.
+  function contents_of(scene: lines.DocRef): provider.ChatMessage[] {
+    return store_get()
+      .turn_list(scene)
+      .map((row) => row.content);
   }
 
-  // An agent test, the provider key set.
+  // Makes the castle universe's world the current one, its row written.
+  function castle_enter(store: substrate.Store): void {
+    store.db_create("castle");
+    store.sql_run("metaverse", [
+      {
+        sql: "INSERT INTO universe VALUES (?, ?, ?, ?)",
+        params: ["castle", "The castle", "player", "castle_world"],
+      },
+    ]);
+    store.kv_put("/metaverse/world", utility.utf8_encode("castle_world"));
+  }
+
+  // An agent test: the provider key set, the store in the hyperposition.
   class AgentCase extends unittest.TestCase {
-    // Sets the key every chat request carries.
+    // Sets the key, then drops every database and writes the hyperposition.
     setUp(): void {
       provider.key_set(constants.key);
+      const store = store_get();
+      for (const name of store.db_list()) {
+        store.db_drop(name);
+      }
+      hyperposition_write(store);
+      far = far_fresh();
+    }
+
+    // Checks every scripted reply was given.
+    tearDown(): void {
+      for (const [type, left] of far.replies) {
+        this.assertEqual(left, [], `replies to ${type} were left`);
+      }
+    }
+
+    // Scripts the far end's reply to the next request of the type.
+    reply_script(type: string, frame: lines.Line): void {
+      const left = far.replies.get(type);
+      if (left === undefined) {
+        far.replies.set(type, [frame]);
+      } else {
+        left.push(frame);
+      }
+    }
+
+    // Runs a turn of the gold line, the model answering in order, its reply.
+    turn_run(name: string, answers: provider.ChatMessage[]): lines.Line {
+      for (const answer of answers) {
+        this.reply_script("http.request", chat_reply(answer));
+      }
+      const request = line_without(gold_line(name), constants.id_fields);
+      const before = far.answers.length;
+      bench_get().ui.line_notify(line_typed(constants.say_type, { request }));
+      this.assertEqual(far.answers.length, before + 1, "the turn did not end");
+      return far.answers[before];
+    }
+
+    // Runs the castle turn, in which the player answers 1.
+    castle_run(): lines.Line {
+      const answers = answers_recorded();
+      for (const answer of answers.slice(0, 2)) {
+        this.reply_script("http.request", chat_reply(answer));
+      }
+      this.reply_script("http.request", image_reply());
+      this.reply_script("media.store", gold_line("media_store_reply"));
+      this.reply_script("render", gold_line("render_reply"));
+      return this.turn_run("say_castle", answers.slice(2));
+    }
+
+    // Asserts the reply is the gold line's, to the turn the UI asked last.
+    reply_assert(reply: lines.Line, name: string): void {
+      const expected = gold_line(name);
+      const header = fields_of(expected);
+      const field = constants.reply_fields.find((key) =>
+        Object.hasOwn(header, key),
+      ) as string;
+      header[field] = far.asked[far.asked.length - 1];
+      this.assertEqual(reply, expected);
+    }
+
+    // The chat requests the scripted AI got, in order, their ids taken off.
+    chats_got(): lines.Line[] {
+      return far.got
+        .filter((line) => jslb.field_get(line[0], "type") === "http.request")
+        .filter((line) => (line.url as string).endsWith("/chat/completions"))
+        .map((line) => line_without(line, constants.id_fields));
+    }
+
+    // The messages of the chat requests the scripted AI got, in order.
+    messages_got(): provider.ChatMessage[][] {
+      return this.chats_got().map(
+        (line) => (line.json as provider.ChatRequest).messages,
+      );
+    }
+
+    // The error the function throws, which must be an `Error`.
+    thrown_get(fn: () => unknown): Error {
+      try {
+        fn();
+      } catch (error) {
+        if (error instanceof Error) {
+          return error;
+        }
+        throw error;
+      }
+      return this.fail("Nothing was thrown.");
     }
   }
 
   // The castle turn: the player answers 1 and the analyst builds a scene.
   export class TestTurnRecorded extends AgentCase {
-    // The four chat requests are the castle turn's, on the gold frame.
+    // The four chat requests and the image request are the castle turn's.
     test_requests_recorded(): void {
-      const bench = bench_recorded();
-      castle_run(bench);
-      const expected = messages_recorded().map((messages) => [
-        request_expected("request_chat", constants.info, messages),
-        constants.provider_owner,
-      ]);
-      this.assertEqual(calls_of(bench.tasks.calls, "task_submit"), expected);
+      this.castle_run();
+      const chats = messages_recorded().map((messages) =>
+        request_expected(messages),
+      );
+      this.assertEqual(this.chats_got(), chats);
+      const images = far.got
+        .filter((line) => jslb.field_get(line[0], "type") === "http.request")
+        .filter((line) => (line.url as string).endsWith("/generations"))
+        .map((line) => line_without(line, constants.id_fields));
+      this.assertEqual(images, [gold_line("image_request")]);
     }
 
-    // Each call goes to the clients by its dotted name with its arguments.
+    // Each call reached its tool with its arguments, as the store now shows.
     test_calls_recorded(): void {
-      const bench = bench_recorded();
-      castle_run(bench);
-      const expected = calls_recorded().map((call: provider.ToolCall) => [
-        call.function.name,
-        JSON.parse(call.function.arguments) as unknown,
+      this.castle_run();
+      const store = store_get();
+      this.assertEqual(store.db_list(), [
+        "_files",
+        "castle",
+        "castle_gatehouse",
+        "castle_world",
+        "metaverse",
       ]);
-      this.assertEqual(calls_of(bench.clients.calls, "tool_call"), expected);
+      const [, , scene] = calls_recorded();
+      const body = (JSON.parse(scene.function.arguments) as FieldTable).body;
+      this.assertEqual(store.doc_get(constants.arrival), body);
+      const entered = utility.utf8_decode(
+        store.kv_get("/castle_world/scene").data as Uint8Array,
+      );
+      this.assertEqual(entered, constants.arrival);
+      const image = store.kv_get(constants.image_ref);
+      this.assertEqual(image.sha256, gold_value("image_sha256"));
+      const shown = far.got
+        .filter((line) => jslb.field_get(line[0], "type") !== "http.request")
+        .map((line) => line_without(line, constants.id_fields));
+      const stored = gold_line("media_store");
+      stored[1] = {
+        size: image.size,
+        d: utility.base64_decode(gold_value("image_base64") as string),
+      };
+      this.assertEqual(shown, [stored, gold_line("render_arrival")]);
     }
 
     // Every message of the turn is a turn of the scene, appended in order.
     test_turns_stored(): void {
-      const bench = bench_recorded();
-      castle_run(bench);
+      this.castle_run();
+      const rows = store_get().turn_list(constants.scene);
       const expected = contents_recorded();
-      const appends = calls_of(bench.store.calls, "turn_append");
       this.assertEqual(
-        appends,
-        expected.map((message) => [constants.scene, message.role, message]),
+        rows.map((row) => [row.scene, row.n, row.role, row.content]),
+        expected.map((message, index) => [
+          constants.scene,
+          index + 1,
+          message.role,
+          message,
+        ]),
       );
     }
 
     // The turn ends with the reply to `ai.say`: the new scene, the subtitle.
     test_reply_recorded(): void {
-      const bench = bench_recorded();
-      this.assertEqual(castle_run(bench), gold_line("reply_castle"));
+      this.reply_assert(this.castle_run(), "reply_castle");
     }
   }
 
@@ -801,36 +772,27 @@ namespace test_agent {
   export class TestTurnNext extends AgentCase {
     // The next turn is a new conversation, that of the arrival scene.
     test_scene_new(): void {
-      const bench = bench_recorded();
-      castle_run(bench);
+      this.castle_run();
       const moat = assistant_said(constants.moat_reply);
-      const reply = turn_run(bench, "ai.say", gold_line("say_next"), [moat]);
-      const requests = requests_of(bench);
-      this.assertEqual(requests[requests.length - 1].messages, [
+      const reply = this.turn_run("say_next", [moat]);
+      const requests = this.messages_got();
+      this.assertEqual(requests[requests.length - 1], [
         system_said(constants.analyst),
         user_said("0"),
       ]);
-      const arrived = calls_of(bench.store.calls, "turn_append").filter(
-        ([scene]) => scene === constants.arrival,
-      );
-      this.assertEqual(
-        arrived.map((args) => args[2]),
-        [user_said("0"), moat],
-      );
-      this.assertEqual(reply, gold_line("reply_next"));
+      this.assertEqual(contents_of(constants.arrival), [user_said("0"), moat]);
+      this.reply_assert(reply, "reply_next");
     }
 
     // The universe's prompt follows the analyst's once the scripts made one.
     test_universe_prompt(): void {
-      const bench = bench_recorded();
-      castle_run(bench);
-      head_set(bench.store, "castle", [1]);
+      this.castle_run();
       const doc = prompt_doc("prompt", constants.castle_prompt);
-      bench.store.documents.set("/castle/prompt/1", doc);
+      store_get().doc_put("castle", "prompt", doc);
       const moat = assistant_said(constants.moat_reply);
-      turn_run(bench, "ai.say", gold_line("say_next"), [moat]);
-      const requests = requests_of(bench);
-      this.assertEqual(requests[requests.length - 1].messages, [
+      this.turn_run("say_next", [moat]);
+      const requests = this.messages_got();
+      this.assertEqual(requests[requests.length - 1], [
         system_said(constants.analyst),
         system_said(constants.castle_prompt),
         user_said("0"),
@@ -838,79 +800,32 @@ namespace test_agent {
     }
   }
 
-  // Turns with no tool calls, a click, and a result of several parts.
+  // Turns with no tool calls and a click.
   export class TestTurnShort extends AgentCase {
     // A reply with no tool calls ends the turn, in the request's name form.
     test_turn_short(): void {
-      const bench = bench_recorded();
       const nothing = assistant_said(constants.nothing_reply);
-      const say = gold_line("say_full");
-      const reply = turn_run(bench, "ai.say", say, [nothing]);
-      this.assertEqual(contents_of(bench), [user_said("2"), nothing]);
-      this.assertEqual(reply, gold_line("reply_full"));
+      const reply = this.turn_run("say_full", [nothing]);
+      this.assertEqual(contents_of(constants.scene), [
+        user_said("2"),
+        nothing,
+      ]);
+      this.reply_assert(reply, "reply_full");
+      this.assertEqual(this.chats_got(), [
+        request_expected([system_said(constants.analyst), user_said("2")]),
+      ]);
     }
 
     // A click is told to the model as text, and the reply ends the turn.
     test_click_turn(): void {
-      const bench = bench_recorded();
       const message = assistant_said(constants.click_reply);
-      const click = gold_line("click");
-      const reply = turn_run(bench, "ai.click", click, [message]);
+      const reply = this.turn_run("click", [message]);
       const said = user_said(gold_text("agent_click_text"));
-      this.assertEqual(requests_of(bench)[0].messages, [
-        system_said(constants.analyst),
-        said,
+      this.assertEqual(this.messages_got(), [
+        [system_said(constants.analyst), said],
       ]);
-      this.assertEqual(contents_of(bench), [said, message]);
-      this.assertEqual(reply, gold_line("reply_click"));
-    }
-
-    // The text parts of one tool result are joined by a line feed.
-    test_texts_joined(): void {
-      const call = call_make(
-        "call_1",
-        "browser.render",
-        constants.render_arguments,
-      );
-      const tool_table = (): ToolTable => ({
-        "browser.render": () => ({
-          content: [
-            { type: "text", text: "first" },
-            { type: "text", text: "second" },
-          ],
-        }),
-      });
-      const bench = bench_make(tool_table, constants.info);
-      const answers = [
-        assistant_calls([call]),
-        assistant_said(constants.nothing_reply),
-      ];
-      const say = gold_line("say_castle");
-      const reply = turn_run(bench, "ai.say", say, answers);
-      const messages = requests_of(bench)[1].messages;
-      this.assertEqual(
-        messages[messages.length - 1],
-        tool_said(call, "first\nsecond"),
-      );
-      this.assertEqual(reply.subtitle, constants.nothing_reply);
-    }
-
-    // With a scripted run's empty information the request names no model.
-    test_info_scripted(): void {
-      const bench = bench_make(tools_recorded, constants.scripted_info);
-      const nothing = assistant_said(constants.nothing_reply);
-      const say = gold_line("say_nothing");
-      const reply = turn_run(bench, "ai.say", say, [nothing]);
-      const messages = [system_said(constants.analyst), user_said("2")];
-      const expected = request_expected(
-        "request_scripted",
-        constants.scripted_info,
-        messages,
-      );
-      this.assertEqual(calls_of(bench.tasks.calls, "task_submit"), [
-        [expected, constants.provider_owner],
-      ]);
-      this.assertEqual(reply.subtitle, constants.nothing_reply);
+      this.assertEqual(contents_of(constants.scene), [said, message]);
+      this.reply_assert(reply, "reply_click");
     }
   }
 
@@ -918,27 +833,25 @@ namespace test_agent {
   export class TestCompacted extends AgentCase {
     // A compacted scene goes to the model as listed: its summary, then more.
     test_request_compacted(): void {
-      const bench = bench_recorded();
-      const summary = system_said(gold_text("substrate_turns_compacted"));
-      bench.store.turns.set(constants.scene, [
-        { scene: constants.scene, n: 1, role: "system", content: summary },
-      ]);
+      const store = store_get();
+      const text = gold_text("substrate_turns_compacted");
+      store.turn_append(constants.scene, "user", user_said("1"));
+      const said = assistant_said(constants.nothing_reply);
+      store.turn_append(constants.scene, "assistant", said);
+      store.turn_compact(constants.scene, 2, text);
       const nothing = assistant_said(constants.nothing_reply);
-      turn_run(bench, "ai.say", gold_line("say_nothing"), [nothing]);
-      this.assertEqual(requests_of(bench)[0].messages, [
-        system_said(constants.analyst),
-        summary,
-        user_said("2"),
+      this.turn_run("say_nothing", [nothing]);
+      this.assertEqual(this.messages_got(), [
+        [system_said(constants.analyst), system_said(text), user_said("2")],
       ]);
     }
 
     // A scene kept whole goes to the model with every turn it holds.
     test_request_whole(): void {
-      const bench = bench_recorded();
       const nothing = assistant_said(constants.nothing_reply);
-      turn_run(bench, "ai.say", gold_line("say_nothing"), [nothing]);
-      turn_run(bench, "ai.say", gold_line("say_again"), [nothing]);
-      this.assertEqual(requests_of(bench)[1].messages, [
+      this.turn_run("say_nothing", [nothing]);
+      this.turn_run("say_again", [nothing]);
+      this.assertEqual(this.messages_got()[1], [
         system_said(constants.analyst),
         user_said("2"),
         nothing,
@@ -947,115 +860,49 @@ namespace test_agent {
     }
   }
 
-  // A failed tool call leaves no stored reply that calls tools unanswered.
-  export class TestFailure extends AgentCase {
-    // A failed result stores neither the reply nor the results of its round.
-    test_result_failed(): void {
-      const calls = [
-        call_make("call_1", "browser.render", constants.render_arguments),
-        call_make("call_2", "browser.image_make", constants.image_arguments),
-      ];
-      const bench = bench_make(tools_failing, constants.info);
-      const say = gold_line("say_castle");
-      const error = thrown_get(() =>
-        turn_run(bench, "ai.say", say, [assistant_calls(calls)]),
-      );
-      this.assertEqual(
-        error.message,
-        gold_text("agent_content_unsupported_second"),
-      );
-      this.assertEqual(calls_of(bench.clients.calls, "tool_call").length, 2);
-      this.assertEqual(contents_of(bench), [user_said("1")]);
-    }
-
-    // A call that cannot be made leaves the reply that names it unstored.
-    test_call_unmade(): void {
-      const call = call_make("call_1", "browser.render", "{");
-      const bench = bench_recorded();
-      const say = gold_line("say_castle");
-      const error = thrown_get(() =>
-        turn_run(bench, "ai.say", say, [assistant_calls([call])]),
-      );
-      this.assertEqual(
-        error.message,
-        gold_text("agent_arguments_invalid_unparsed"),
-      );
-      this.assertEqual(contents_of(bench), [user_said("1")]);
-    }
-
-    // An answered round stays stored with its results, the failed one not.
-    test_round_answered(): void {
-      const render = call_make(
-        "call_1",
-        "browser.render",
-        constants.render_arguments,
-      );
-      const image = call_make(
-        "call_2",
-        "browser.image_make",
-        constants.image_arguments,
-      );
-      const bench = bench_make(tools_failing, constants.info);
-      const answers = [assistant_calls([render]), assistant_calls([image])];
-      const say = gold_line("say_castle");
-      const error = thrown_get(() => turn_run(bench, "ai.say", say, answers));
-      this.assertEqual(
-        error.message,
-        gold_text("agent_content_unsupported_second"),
-      );
-      this.assertEqual(contents_of(bench), [
-        user_said("1"),
-        assistant_calls([render]),
-        tool_said(render, constants.render_result),
-      ]);
-    }
-
+  // A round of tool calls is stored with its results, after the tools ran.
+  export class TestRounds extends AgentCase {
     // The reply that calls a tool is stored with its result, after it ran.
     test_round_stored(): void {
-      const render = call_make(
+      const statement = {
+        sql: constants.count_sql,
+        params: [constants.scene],
+      };
+      const count = call_make(
         "call_1",
-        "browser.render",
-        constants.render_arguments,
+        "browser.sql_run",
+        JSON.stringify({ db: "metaverse", statements: [statement] }),
       );
-      const seen: number[] = [];
-      const tool_table = (store: StoreDouble): ToolTable => ({
-        "browser.render": () => {
-          seen.push(calls_of(store.calls, "turn_append").length);
-          return text_result(constants.render_result);
-        },
-      });
-      const bench = bench_make(tool_table, constants.info);
-      const answers = [
-        assistant_calls([render]),
-        assistant_said(constants.nothing_reply),
-      ];
-      turn_run(bench, "ai.say", gold_line("say_castle"), answers);
-      this.assertEqual(seen, [1]);
-      this.assertEqual(contents_of(bench), [
+      const nothing = assistant_said(constants.nothing_reply);
+      this.turn_run("say_castle", [assistant_calls([count]), nothing]);
+      this.assertEqual(contents_of(constants.scene), [
         user_said("1"),
-        assistant_calls([render]),
-        tool_said(render, constants.render_result),
-        assistant_said(constants.nothing_reply),
+        assistant_calls([count]),
+        tool_said(count, constants.count_result),
+        nothing,
       ]);
     }
   }
 
-  // The system prompt `prompt_build` makes.
+  // The system prompt `prompt_build` makes from the store.
   export class TestPrompt extends AgentCase {
     // In the hyperposition the system prompt is the analyst's alone.
     test_prompt_analyst(): void {
-      const store = store_seeded();
-      this.assertEqual(prompt_of(store), [system_said(constants.analyst)]);
+      this.assertEqual(agent.prompt_build(store_get()), [
+        system_said(constants.analyst),
+      ]);
     }
 
     // The prompt of the universe of the current world follows the analyst's.
     test_prompt_universe(): void {
-      const store = store_seeded();
+      const store = store_get();
       castle_enter(store);
-      head_set(store, "castle", [1]);
-      const doc = prompt_doc("prompt", constants.castle_prompt);
-      store.documents.set("/castle/prompt/1", doc);
-      this.assertEqual(prompt_of(store), [
+      store.doc_put(
+        "castle",
+        "prompt",
+        prompt_doc("prompt", constants.castle_prompt),
+      );
+      this.assertEqual(agent.prompt_build(store), [
         system_said(constants.analyst),
         system_said(constants.castle_prompt),
       ]);
@@ -1063,22 +910,24 @@ namespace test_agent {
 
     // A universe without a prompt adds none.
     test_prompt_absent(): void {
-      const store = store_seeded();
+      const store = store_get();
       castle_enter(store);
-      head_set(store, "castle", []);
-      this.assertEqual(prompt_of(store), [system_said(constants.analyst)]);
+      this.assertEqual(agent.prompt_build(store), [
+        system_said(constants.analyst),
+      ]);
     }
 
     // The head of the universe's prompt is read, not an older version.
     test_prompt_head(): void {
-      const store = store_seeded();
+      const store = store_get();
       castle_enter(store);
-      head_set(store, "castle", [2]);
-      const old = prompt_doc("prompt", "An old one.");
-      store.documents.set("/castle/prompt/1", old);
-      const doc = prompt_doc("prompt", constants.castle_prompt);
-      store.documents.set("/castle/prompt/2", doc);
-      this.assertEqual(prompt_of(store), [
+      store.doc_put("castle", "prompt", prompt_doc("prompt", "An old one."));
+      store.doc_put(
+        "castle",
+        "prompt",
+        prompt_doc("prompt", constants.castle_prompt),
+      );
+      this.assertEqual(agent.prompt_build(store), [
         system_said(constants.analyst),
         system_said(constants.castle_prompt),
       ]);
@@ -1086,12 +935,14 @@ namespace test_agent {
 
     // A prompt document of another type is read by its text all the same.
     test_prompt_typed(): void {
-      const store = store_seeded();
+      const store = store_get();
       castle_enter(store);
-      head_set(store, "castle", [1]);
-      const note = prompt_doc("note", constants.castle_prompt);
-      store.documents.set("/castle/prompt/1", note);
-      this.assertEqual(prompt_of(store), [
+      store.doc_put(
+        "castle",
+        "prompt",
+        prompt_doc("note", constants.castle_prompt),
+      );
+      this.assertEqual(agent.prompt_build(store), [
         system_said(constants.analyst),
         system_said(constants.castle_prompt),
       ]);
@@ -1099,130 +950,31 @@ namespace test_agent {
 
     // A prompt text that is a reference string is read back as that text.
     test_prompt_reference(): void {
-      const store = store_seeded();
+      const store = store_get();
       castle_enter(store);
-      head_set(store, "castle", [1]);
       const doc = gold_value("document_lore") as lines.Document;
-      store.documents.set("/castle/prompt/1", doc);
-      this.assertEqual(prompt_of(store), [
+      store.doc_put("castle", "prompt", doc);
+      this.assertEqual(agent.prompt_build(store), [
         system_said(constants.analyst),
         system_said(constants.lore),
       ]);
     }
   }
 
-  // Every error the agent throws, compared with its message.
+  // The errors of the system prompt, compared with their messages.
   export class TestErrors extends AgentCase {
-    // Arguments that are not JSON end the turn, the decoder's error as cause.
-    test_arguments_unparsed(): void {
-      const call = call_make("call_1", "browser.render", "{");
-      const bench = bench_recorded();
-      const say = gold_line("say_castle");
-      const error = thrown_get(() =>
-        turn_run(bench, "ai.say", say, [assistant_calls([call])]),
-      );
-      this.assertEqual(
-        error.message,
-        gold_text("agent_arguments_invalid_unparsed"),
-      );
-      const cause = error.cause as Error;
-      this.assertEqual(cause.constructor.name, "WireError");
-      this.assertEqual(
-        cause.message,
-        gold_text("jslb_text_not_json").replaceAll("{0}", String(cause.cause)),
-      );
-      this.assertEqual(calls_of(bench.clients.calls, "tool_call").length, 0);
-    }
-
-    // Arguments holding a number that overflows a double end the turn.
-    test_arguments_overflow(): void {
-      const text = '{"subtitle":1e400}';
-      const call = call_make("call_1", "browser.render", text);
-      const bench = bench_recorded();
-      const say = gold_line("say_castle");
-      const error = thrown_get(() =>
-        turn_run(bench, "ai.say", say, [assistant_calls([call])]),
-      );
-      this.assertEqual(
-        error.message,
-        gold_text("agent_arguments_invalid_overflow"),
-      );
-      const cause = error.cause as Error;
-      this.assertEqual(cause.constructor.name, "WireError");
-      this.assertEqual(cause.message, gold_text("jslb_number_overflow"));
-      this.assertEqual(calls_of(bench.clients.calls, "tool_call").length, 0);
-    }
-
-    // Arguments that are JSON but not an object end the turn.
-    test_arguments_invalid(): void {
-      const cases = [
-        ["[]", "array"],
-        ["null", "null"],
-        ["5", "number"],
-        ['"Fog."', "string"],
-      ];
-      for (const [text, name] of cases) {
-        const call = call_make("call_1", "browser.render", text);
-        const bench = bench_recorded();
-        const say = gold_line("say_castle");
-        const error = thrown_get(() =>
-          turn_run(bench, "ai.say", say, [assistant_calls([call])]),
-        );
-        this.assertEqual(
-          error.message,
-          gold_text(`agent_arguments_invalid_${name}`),
-        );
-      }
-    }
-
-    // A reply with neither tool calls nor content ends the turn.
-    test_reply_empty(): void {
-      const bench = bench_recorded();
-      const empty: provider.ChatMessage = { role: "assistant", content: null };
-      const say = gold_line("say_castle");
-      const error = thrown_get(() => turn_run(bench, "ai.say", say, [empty]));
-      this.assertEqual(error.message, gold_text("agent_reply_empty"));
-      this.assertEqual(contents_of(bench), [user_said("1")]);
-    }
-
-    // A tool result holding an image ends the turn.
-    test_content_unsupported(): void {
-      const call = call_make(
-        "call_1",
-        "browser.render",
-        constants.render_arguments,
-      );
-      const tool_table = (): ToolTable => ({
-        "browser.render": () => ({
-          content: [{ type: "image", data: "", mimeType: "image/png" }],
-        }),
-      });
-      const bench = bench_make(tool_table, constants.info);
-      const say = gold_line("say_castle");
-      const error = thrown_get(() =>
-        turn_run(bench, "ai.say", say, [assistant_calls([call])]),
-      );
-      this.assertEqual(
-        error.message,
-        gold_text("agent_content_unsupported_first"),
-      );
-    }
-
     // A prompt text not a string throws, the universe's or the analyst's.
     test_prompt_invalid(): void {
-      const store = store_seeded();
+      const store = store_get();
       castle_enter(store);
-      head_set(store, "castle", [1]);
-      const number = prompt_doc("prompt", 5);
-      store.documents.set("/castle/prompt/1", number);
-      const first = thrown_get(() => prompt_of(store));
+      store.doc_put("castle", "prompt", prompt_doc("prompt", 5));
+      const first = this.thrown_get(() => agent.prompt_build(store));
       this.assertEqual(
         first.message,
         gold_text("agent_prompt_invalid_universe"),
       );
-      store.heads.set("metaverse/prompt", "/metaverse/prompt/2");
-      store.documents.set("/metaverse/prompt/2", number);
-      const second = thrown_get(() => prompt_of(store));
+      store.doc_put("metaverse", "prompt", prompt_doc("prompt", 5));
+      const second = this.thrown_get(() => agent.prompt_build(store));
       this.assertEqual(
         second.message,
         gold_text("agent_prompt_invalid_analyst"),
@@ -1231,31 +983,11 @@ namespace test_agent {
 
     // The store's error for a missing analyst's prompt reaches the caller.
     test_analyst_missing(): void {
-      const store = store_seeded();
-      const missing = new Error(gold_text("substrate_id_missing"));
-      store.heads.set("metaverse/prompt", missing);
-      const error = thrown_get(() => prompt_of(store));
-      this.assertEqual(error, missing);
+      const store = store_get();
+      store.db_drop("metaverse");
+      store.db_create("metaverse");
+      const error = this.thrown_get(() => agent.prompt_build(store));
       this.assertEqual(error.message, gold_text("substrate_id_missing"));
-    }
-
-    // An `error` line in answer to the chat request is no chat completion.
-    test_error_line(): void {
-      const bench = bench_recorded();
-      const outcome = handler_call(bench, "ai.say", gold_line("say_nothing"));
-      this.assertTrue(sleep_is(outcome));
-      const sleep = outcome as dispatch.Sleep;
-      const failure = new Error("Unauthorized");
-      const line = gold_line("error_unauthorized");
-      Object.assign(line[0], { reply: sleep.wait_ids[0] });
-      line.stack = failure.stack;
-      const wake = gold_line("wake_model");
-      wake.state = sleep.state;
-      wake.replies = [line];
-      const error = thrown_get(() =>
-        handler_call(bench, constants.model_type, wake),
-      );
-      this.assertEqual(error.message, gold_text("provider_reply_type"));
     }
   }
 
@@ -1272,12 +1004,13 @@ namespace test_agent {
 
     // The four line types are registered at version 0, in order.
     test_types_registered(): void {
+      const bench = bench_get();
       const seen: [string, number][] = [];
       agent.handlers_register(
-        store_seeded() as unknown as substrate.Store,
-        new ClientsDouble([], {}, []) as unknown as mcp.ClientSet,
-        new TasksDouble([]) as unknown as queue.TaskQueue,
-        constants.provider_owner,
+        bench.store,
+        bench.clients,
+        bench.tasks,
+        constants.http_thread,
         constants.info,
         (type: string, version: number) => {
           seen.push([type, version]);

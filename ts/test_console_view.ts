@@ -2,191 +2,81 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the console view with a fake terminal on a container above a band
-// in a frame of a fixed size, put in the page by each test and taken out after
-// it, and a double of the task queue that keeps each line the view gives it
-// and hands each submit the id the test picked. The requests, sleeps and
-// input lines the view makes, the wakes the test gives it, ttyd's first
-// messages and the texts of the view's refusals are the gold record's.
+// Tests of the console view on the real xterm.js terminal, on a container
+// above a band in a frame of a fixed size, put in the page by each test and
+// taken out after it. Each view has a real task queue of its own in
+// synchronous mode, whose lane to the AI worker is one of a linked pair of
+// local ports, the test's end keeping every line the view sends. The
+// requests run in handlers of types each view registers, which take over
+// the view's sleep with a wake of their own and hand the view its wake, as
+// the page's handlers do. Keystrokes and text reach the terminal as DOM
+// events sent to its input. The rows the terminal shows are read from its
+// rows element, and the first message is compared with the gold's text
+// with those rows filled in. The lines, sleeps, wakes and texts of the
+// refusals are the gold record's. What the terminal does with output comes
+// after the call that feeds it, so it is tested by the view's line cases.
 namespace test_console_view {
-  // The owner, the ids the double hands out, the frame and the fake's cells.
+  // The threads, the type prefix, the frame and the elements of xterm.js.
   const constants = Object.freeze({
-    // The thread the view gives its lines to.
-    owner: "ai",
-    // The ids the queue double hands the submits, in order, its writer's.
-    request_ids: Object.freeze([11, 12, 13]),
-    // The pixel sizes of the frame, band and cells, chosen by their writer.
+    // The thread the view gives its lines to, and the view's own thread.
+    owner: "ai" as const,
+    thread: "ui" as const,
+    // The prefix of the types the views register, each one new.
+    type_prefix: "console_test.",
+    // The pixel sizes of the frame and the band, chosen by their writer.
     frame_width: 1000,
     frame_height: 400,
     band_height: 50,
-    cell_width: 8,
-    cell_height: 17,
+    // The height of the frame that leaves fewer rows, its writer's choice.
+    frame_lower: 300,
+    // The width of the frame under the terminal's columns, its writer's.
+    frame_narrow: 500,
+    // The elements xterm.js makes: the terminal, its rows and its input.
+    terminal_selector: ".xterm",
+    screen_selector: ".xterm-screen",
+    rows_selector: ".xterm-rows",
+    input_selector: ".xterm-helper-textarea",
+    // The first byte of ttyd's first message, the brace of its JSON.
+    brace: 0x7b,
   });
 
   // The rigs made since the last `setUp`, whose frames `tearDown` takes out.
   let rigs_made: ViewRig[] = [];
 
-  // The options a terminal is made with.
-  interface TerminalOptions {
-    cols: number;
-    rows: number;
-    disableStdin: boolean;
+  // How many types the views have registered, so that each one is new.
+  let types_made = 0;
+
+  // A view in its frame on its queue, and the test's end of its AI lane.
+  interface ViewRig {
+    frame: HTMLElement;
+    container: HTMLElement;
+    band: HTMLElement;
+    view: console_view.ConsoleView;
+    // The test's end of the lane to the AI worker, and every line it got.
+    lane: queue.LocalPort;
+    came: lines.Line[];
+    // The types whose handlers ask for tty 0 and for its close.
+    open_type: string;
+    close_type: string;
+    // The sleeps the view returned to those handlers, in order.
+    sleeps: dispatch.Sleep[];
   }
 
-  // A stand in for the xterm.js terminal that records what the view does.
-  class FakeTerminal {
-    // Every terminal made since the last `setUp`, in order.
-    static made: FakeTerminal[] = [];
-    cols: number;
-    rows: number;
-    options: { disableStdin: boolean };
-    focused = 0;
-    opened: HTMLElement[] = [];
-    written: Uint8Array[] = [];
-    resized: [number, number][] = [];
-    screen: HTMLElement | undefined = undefined;
-    data_listener: ((data: string) => void) | undefined = undefined;
-
-    // Records the terminal as made, with its size and its input option.
-    constructor(options: TerminalOptions) {
-      this.cols = options.cols;
-      this.rows = options.rows;
-      this.options = { disableStdin: options.disableStdin };
-      FakeTerminal.made.push(this);
-    }
-
-    // Records the element the terminal was opened in and puts its rows there.
-    open(parent: HTMLElement): void {
-      this.opened.push(parent);
-      const document_of = parent.ownerDocument;
-      const element = document_of.createElement("div");
-      const screen = document_of.createElement("div");
-      screen.className = "xterm-screen";
-      element.append(screen);
-      parent.append(element);
-      this.screen = screen;
-      this.screen_size();
-    }
-
-    // Records a resize and takes the new size, as xterm does.
-    resize(cols: number, rows: number): void {
-      this.resized.push([cols, rows]);
-      this.cols = cols;
-      this.rows = rows;
-      this.screen_size();
-    }
-
-    // Records the bytes written to the terminal.
-    write(data: Uint8Array): void {
-      this.written.push(data);
-    }
-
-    // Counts a request for the keyboard focus.
-    focus(): void {
-      this.focused += 1;
-    }
-
-    // Keeps the listener of the text events.
-    onData = (listener: (data: string) => void): void => {
-      this.data_listener = listener;
-    };
-
-    // Types text, which reaches the view only while input is on, as in xterm.
-    text_type(text: string): void {
-      if (!this.options.disableStdin) {
-        this.text_force(text);
-      }
-    }
-
-    // Gives text to the listener of the view whether input is on or off.
-    text_force(text: string): void {
-      (this.data_listener as (data: string) => void)(text);
-    }
-
-    // Sizes the rows' element of a placed terminal at a fixed size per cell.
-    private screen_size(): void {
-      const screen = this.screen;
-      if (screen !== undefined) {
-        screen.style.width = `${this.cols * constants.cell_width}px`;
-        screen.style.height = `${this.rows * constants.cell_height}px`;
-      }
-    }
-  }
-
-  // One line the view gave the queue double: by which call, for which owner.
-  interface LineGiven {
-    call: "task_submit" | "line_notify";
-    line: lines.Line;
-    owner: string;
-  }
-
-  // A double of the task queue, keeping each line the view gives it in order.
-  class TasksDouble {
-    readonly given: LineGiven[] = [];
-    // The ids handed to the submits so far, in order.
-    readonly handed: number[] = [];
-    readonly #ids: number[];
-
-    // Takes the ids the submits get, in order.
-    constructor(ids: readonly number[]) {
-      this.#ids = [...ids];
-    }
-
-    // Keeps a request and returns the next id the test picked.
-    task_submit(line: lines.Line, owner: string): number {
-      const id = this.#ids.shift();
-      if (id === undefined) {
-        throw new Error("The queue double was given no id for this submit.");
-      }
-      this.given.push({ call: "task_submit", line, owner });
-      this.handed.push(id);
-      return id;
-    }
-
-    // Keeps a notification.
-    line_notify(line: lines.Line, owner: string): void {
-      this.given.push({ call: "line_notify", line, owner });
-    }
-  }
-
-  // A test case that stands the fake terminal in for the global `Terminal`.
-  class TerminalCase extends unittest.TestCase {
-    private had = false;
-    private saved: unknown = undefined;
-
-    // Puts the fake terminal in the global scope, keeping what was there.
+  // A test case that takes out the frames of its views, each hidden first.
+  class ViewCase extends unittest.TestCase {
+    // Starts with no rig made.
     setUp(): void {
-      this.had = Object.hasOwn(globalThis, "Terminal");
-      this.saved = Reflect.get(globalThis, "Terminal");
-      FakeTerminal.made = [];
       rigs_made = [];
-      Reflect.set(globalThis, "Terminal", FakeTerminal);
     }
 
-    // Takes the frames out, each view hidden first, and puts the scope back.
+    // Hidden, a view fits nothing when the frame's removal is reported.
     tearDown(): void {
-      // Hidden, a view fits nothing when the frame's removal is reported.
       for (const rig of rigs_made) {
         rig.view.view_hide();
         rig.frame.remove();
       }
       rigs_made = [];
-      if (this.had) {
-        Reflect.set(globalThis, "Terminal", this.saved);
-      } else {
-        Reflect.deleteProperty(globalThis, "Terminal");
-      }
     }
-  }
-
-  // A view in its frame with its terminal and its queue double.
-  interface ViewRig {
-    frame: HTMLElement;
-    container: HTMLElement;
-    band: HTMLElement;
-    tasks: TasksDouble;
-    terminal: FakeTerminal;
-    view: console_view.ConsoleView;
   }
 
   // A copy of a value of this module's gold, which the harness keeps frozen.
@@ -208,16 +98,38 @@ namespace test_console_view {
     return gold_value(`lines.${name}`) as lines.Line;
   }
 
-  // A ttyd first message of the gold, the text the view sends as bytes.
-  function first_message(name: string): string {
-    return gold_value(`first_messages.${name}`) as string;
+  // A gold text with each run time placeholder `{n}` replaced by its value.
+  function text_fill(text: string, values: readonly unknown[]): string {
+    let filled = text;
+    for (const [index, value] of values.entries()) {
+      filled = filled.replaceAll(`{${index}}`, String(value));
+    }
+    return filled;
+  }
+
+  // A ttyd first message of the gold, its rows filled in when it has none.
+  function first_message(name: string, rows?: number): string {
+    const text = gold_value(`first_messages.${name}`) as string;
+    return text_fill(text, [rows]);
+  }
+
+  // Sets a field of a line's header in the header's own name form.
+  function field_set(
+    line: lines.Line,
+    full: string,
+    short: string,
+    value: number,
+  ): lines.Line {
+    const header = line[0] as unknown as { [field: string]: unknown };
+    header[Object.hasOwn(header, "type") ? full : short] = value;
+    return line;
   }
 
   // A wake of the gold whose one reply answers the request of the id.
   function wake_make(name: string, id: number): lines.Line {
     const wake = gold_line(name);
     const replies = wake.replies as lines.Line[];
-    Object.assign(replies[0][0], { reply: id });
+    field_set(replies[0], "reply", "r", id);
     return wake;
   }
 
@@ -228,11 +140,35 @@ namespace test_console_view {
     return sleep;
   }
 
+  // A request of the gold as the view submits it, with the id it got.
+  function request_expected(name: string, id: number): lines.Line {
+    return field_set(gold_line(name), "id", "i", id);
+  }
+
+  // The `console.input` line of the gold that carries one message as blob 1.
+  function input_expected(message: Uint8Array): lines.Line {
+    const line = gold_line("input");
+    line[1] = { size: message.length, d: message };
+    return line;
+  }
+
   // The text of the refusal of a reply to one request while another waits.
   function reply_id_text(answered: number, waited: number): string {
-    return gold_text("console_view_reply_id")
-      .replaceAll("{0}", String(answered))
-      .replaceAll("{1}", String(waited));
+    return text_fill(gold_text("console_view_reply_id"), [answered, waited]);
+  }
+
+  // A type that no other view registers, with its handler.
+  function handler_fresh(fn: dispatch.Handler): string {
+    types_made += 1;
+    const type = `${constants.type_prefix}${types_made}`;
+    dispatch.handler_register(type, 0, fn);
+    return type;
+  }
+
+  // A line of a type, with no payload, in the name form the settings pick.
+  function line_typed(type: string): lines.Line {
+    const header = jslb.header_make(type, { full: settings.names_full() });
+    return jslb.line_make(header, [], {});
   }
 
   // Puts in the page a frame of a fixed size, a column laid out as the page.
@@ -252,7 +188,25 @@ namespace test_console_view {
     return frame;
   }
 
-  // Makes a view on a queue double that hands out the test's ids.
+  // A queue of the view's thread whose lane to the AI worker is the test's.
+  function lane_make(): {
+    tasks: queue.TaskQueue;
+    lane: queue.LocalPort;
+    came: lines.Line[];
+  } {
+    const owners = { [constants.type_prefix]: constants.thread };
+    const tasks = new queue.TaskQueue(constants.thread, owners, true);
+    const near = new queue.LocalPort();
+    const lane = new queue.LocalPort(near);
+    const came: lines.Line[] = [];
+    lane.line_receive((line) => {
+      came.push(line);
+    });
+    tasks.port_add(constants.owner, near);
+    return { tasks, lane, came };
+  }
+
+  // Makes a view in a frame on a queue of its own, its handlers registered.
   function rig_make(): ViewRig {
     const frame = frame_make();
     const container = document.createElement("div");
@@ -263,74 +217,123 @@ namespace test_console_view {
       height: `${constants.band_height}px`,
     });
     frame.append(container, band);
-    const tasks = new TasksDouble(constants.request_ids);
-    const view = new console_view.ConsoleView(
-      container,
-      tasks as unknown as queue.TaskQueue,
+    const { tasks, lane, came } = lane_make();
+    const view = new console_view.ConsoleView(container, tasks);
+    const sleeps: dispatch.Sleep[] = [];
+    // The request's sleep, taken over with the wake of the test's type.
+    const asked = (sleep: dispatch.Sleep, then: string): dispatch.Sleep => {
+      sleeps.push(sleep);
+      return dispatch.task_sleep(null, sleep.wait_ids, then);
+    };
+    const opened = handler_fresh((wake) => {
+      view.open_done(wake);
+      return undefined;
+    });
+    const closed = handler_fresh((wake) => {
+      view.close_done(wake);
+      return undefined;
+    });
+    const open_type = handler_fresh(() => asked(view.open_request(), opened));
+    const close_type = handler_fresh(() =>
+      asked(view.close_request(), closed),
     );
-    const terminal = FakeTerminal.made[FakeTerminal.made.length - 1];
-    const rig: ViewRig = { frame, container, band, tasks, terminal, view };
+    const rig: ViewRig = {
+      frame,
+      container,
+      band,
+      view,
+      lane,
+      came,
+      open_type,
+      close_type,
+      sleeps,
+    };
     rigs_made.push(rig);
     return rig;
   }
 
-  // The id the queue double handed to the last submit.
+  // The id of the last request the view sent, as its line came.
   function id_last(rig: ViewRig): number {
-    return rig.tasks.handed[rig.tasks.handed.length - 1];
+    const requests = rig.came.filter(
+      (line) => jslb.field_get(line[0], "id") !== undefined,
+    );
+    const last = requests[requests.length - 1];
+    return jslb.field_get(last[0], "id") as number;
   }
 
-  // Gives the view the wake of the gold that answers its last request.
-  function open_answer(rig: ViewRig, name: string): void {
-    rig.view.open_done(wake_make(name, id_last(rig)));
+  // Asks for tty 0 from a handler of the view's queue, as ctrl 0 does.
+  function open_ask(rig: ViewRig): void {
+    rig.lane.line_post(line_typed(rig.open_type), []);
   }
 
-  // Gives the view the wake of its last request, the close, as the AI does.
-  function close_answer(rig: ViewRig): void {
-    rig.view.close_done(wake_make("close_wake", id_last(rig)));
+  // Asks to close tty 0 from a handler of the view's queue.
+  function close_ask(rig: ViewRig): void {
+    rig.lane.line_post(line_typed(rig.close_type), []);
+  }
+
+  // Answers the view's last request with a reply of the gold, as the AI does.
+  function request_answer(rig: ViewRig, name: string): void {
+    const reply = field_set(gold_line(name), "reply", "r", id_last(rig));
+    rig.lane.line_post(reply, []);
   }
 
   // Asks for the console and answers with the token, so that it is open.
   function rig_start(rig: ViewRig): void {
-    rig.view.open_request();
-    open_answer(rig, "open_wake");
+    open_ask(rig);
+    request_answer(rig, "open_reply");
   }
 
-  // The lines the view submitted to the queue double, in order.
-  function submits_of(rig: ViewRig): lines.Line[] {
-    return rig.tasks.given
-      .filter((given) => given.call === "task_submit")
-      .map((given) => given.line);
-  }
-
-  // The `console.input` lines the view notified to the queue double.
+  // The `console.input` lines the view sent, in order.
   function inputs_of(rig: ViewRig): lines.Line[] {
-    return rig.tasks.given
-      .filter((given) => given.call === "line_notify")
-      .map((given) => given.line);
-  }
-
-  // The `console.input` line of the gold that carries one message as blob 1.
-  function input_expected(message: Uint8Array): lines.Line {
-    const line = gold_line("input");
-    line[1] = { size: message.length, d: message };
-    return line;
-  }
-
-  // A request of the gold as the view submits it for the AI worker.
-  function submit_expected(name: string): LineGiven {
-    const line = gold_line(name);
-    return { call: "task_submit", line, owner: constants.owner };
-  }
-
-  // A message of ttyd as the view notifies it for the AI worker.
-  function notify_expected(message: Uint8Array): LineGiven {
-    const line = input_expected(message);
-    return { call: "line_notify", line, owner: constants.owner };
+    return rig.came.filter(
+      (line) => jslb.field_get(line[0], "type") === "console.input",
+    );
   }
 
   // The one child element the view made in a container.
   function child_find(container: HTMLElement): HTMLElement {
     return container.firstElementChild as HTMLElement;
+  }
+
+  // The element of the view's terminal that xterm.js names, which is there.
+  function part_find(rig: ViewRig, selector: string): HTMLElement {
+    const part = rig.container.querySelector<HTMLElement>(selector);
+    if (part === null) {
+      throw new Error(`The terminal has no element ${selector} yet.`);
+    }
+    return part;
+  }
+
+  // How many rows the terminal on the page has.
+  function rows_count(rig: ViewRig): number {
+    return part_find(rig, constants.rows_selector).childElementCount;
+  }
+
+  // Types text into the terminal, as an input method gives it.
+  function text_type(rig: ViewRig, text: string): void {
+    const input = part_find(rig, constants.input_selector);
+    input.dispatchEvent(
+      new InputEvent("input", { data: text, inputType: "insertText" }),
+    );
+  }
+
+  // Presses a key in the terminal, with control or without.
+  function key_press(
+    rig: ViewRig,
+    key: string,
+    code: number,
+    control: boolean,
+  ): void {
+    const input = part_find(rig, constants.input_selector);
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key,
+        keyCode: code,
+        ctrlKey: control,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
   }
 
   // The bytes of blob 1 of a line.
@@ -362,39 +365,63 @@ namespace test_console_view {
     throw new Error("Nothing was thrown.");
   }
 
+  // Asserts that the rows fill the space above the band, every one whole.
+  function fit_assert(test: unittest.TestCase, rig: ViewRig): void {
+    const { container, band } = rig;
+    const screen = part_find(rig, constants.screen_selector);
+    const height = screen.getBoundingClientRect().height;
+    const cell = height / rows_count(rig);
+    const top = container.getBoundingClientRect().top;
+    const bars = container.offsetHeight - container.clientHeight;
+    const space = band.getBoundingClientRect().top - top - bars;
+    test.assertTrue(
+      height <= space && space < height + cell,
+      `${height} px of rows of ${cell} px in ${space} px`,
+    );
+    test.assertTrue(
+      container.scrollHeight <= container.clientHeight,
+      `${container.scrollHeight} px of rows in ${container.clientHeight} px`,
+    );
+    test.assertTrue(
+      screen.getBoundingClientRect().bottom <=
+        band.getBoundingClientRect().top,
+      "the rows end below the top of the band",
+    );
+  }
+
   // Making, showing, hiding and toggling the view.
-  export class TestVisibility extends TerminalCase {
-    // The view makes one hidden child and a terminal not opened, input off.
+  export class TestVisibility extends ViewCase {
+    // The view makes one hidden child and no terminal in it, and sends none.
     test_made_hidden(): void {
       const rig = rig_make();
       const child = child_find(rig.container);
       this.assertEqual(rig.container.childElementCount, 1);
       this.assertEqual(child.tagName, "DIV");
       this.assertTrue(child.hidden);
-      this.assertEqual(FakeTerminal.made.length, 1);
-      this.assertEqual(rig.terminal.opened.length, 0);
-      this.assertTrue(rig.terminal.options.disableStdin);
-      this.assertEqual(rig.tasks.given.length, 0);
+      this.assertEqual(child.childElementCount, 0);
+      this.assertEqual(rig.came.length, 0);
     }
 
     // Two views on one queue can be made, as a view registers no handler.
     test_made_twice(): void {
-      const tasks = new TasksDouble([]);
-      for (let count = 0; count < 2; count += 1) {
-        new console_view.ConsoleView(
-          document.createElement("div"),
-          tasks as unknown as queue.TaskQueue,
-        );
+      const { tasks, came } = lane_make();
+      const containers = [0, 1].map(() => document.createElement("div"));
+      for (const container of containers) {
+        new console_view.ConsoleView(container, tasks);
       }
-      this.assertEqual(FakeTerminal.made.length, 2);
-      this.assertEqual(tasks.given.length, 0);
+      for (const container of containers) {
+        this.assertEqual(container.childElementCount, 1);
+        this.assertTrue(child_find(container).hidden);
+      }
+      this.assertEqual(came.length, 0);
     }
 
     // The terminal is made 120 columns wide and 40 rows high.
     test_made_size(): void {
       const rig = rig_make();
-      this.assertEqual(rig.terminal.cols, 120);
-      this.assertEqual(rig.terminal.rows, 40);
+      rig_start(rig);
+      const message = JSON.parse(text_decode(blob_bytes(inputs_of(rig)[0])));
+      this.assertEqual([message.columns, message.rows], [120, 40]);
     }
 
     // The first show reveals the child, opens the terminal in it, focuses it.
@@ -403,10 +430,13 @@ namespace test_console_view {
       rig.view.view_show();
       const child = child_find(rig.container);
       this.assertFalse(child.hidden);
-      this.assertEqual(rig.terminal.opened.length, 1);
-      this.assertTrue(rig.terminal.opened[0] === child);
-      this.assertEqual(rig.terminal.focused, 1);
-      this.assertEqual(rig.tasks.given.length, 0);
+      const terminals = child.querySelectorAll(constants.terminal_selector);
+      this.assertEqual(terminals.length, 1);
+      this.assertTrue(terminals[0].parentElement === child);
+      this.assertTrue(
+        document.activeElement === part_find(rig, constants.input_selector),
+      );
+      this.assertEqual(rig.came.length, 0);
     }
 
     // Later shows reveal the child and focus again, and ask for nothing.
@@ -414,31 +444,42 @@ namespace test_console_view {
       const rig = rig_make();
       rig.view.view_show();
       rig.view.view_hide();
+      part_find(rig, constants.input_selector).blur();
       rig.view.view_show();
-      this.assertFalse(child_find(rig.container).hidden);
-      this.assertEqual(rig.terminal.opened.length, 1);
-      this.assertEqual(rig.terminal.focused, 2);
-      this.assertEqual(rig.tasks.given.length, 0);
+      const child = child_find(rig.container);
+      this.assertFalse(child.hidden);
+      this.assertEqual(
+        child.querySelectorAll(constants.terminal_selector).length,
+        1,
+      );
+      this.assertTrue(
+        document.activeElement === part_find(rig, constants.input_selector),
+      );
+      this.assertEqual(rig.came.length, 0);
     }
 
-    // A hide hides the child and does nothing to the terminal.
+    // A hide hides the child and leaves the terminal in it.
     test_hide_shown(): void {
       const rig = rig_make();
       rig.view.view_show();
       rig.view.view_hide();
-      this.assertTrue(child_find(rig.container).hidden);
-      this.assertEqual(rig.terminal.opened.length, 1);
-      this.assertEqual(FakeTerminal.made.length, 1);
-      this.assertEqual(rig.tasks.given.length, 0);
+      const child = child_find(rig.container);
+      this.assertTrue(child.hidden);
+      this.assertEqual(
+        child.querySelectorAll(constants.terminal_selector).length,
+        1,
+      );
+      this.assertEqual(rig.came.length, 0);
     }
 
     // A hide before any show leaves the terminal out of the page.
     test_hide_idle(): void {
       const rig = rig_make();
       rig.view.view_hide();
-      this.assertTrue(child_find(rig.container).hidden);
-      this.assertEqual(rig.terminal.opened.length, 0);
-      this.assertEqual(rig.tasks.given.length, 0);
+      const child = child_find(rig.container);
+      this.assertTrue(child.hidden);
+      this.assertEqual(child.childElementCount, 0);
+      this.assertEqual(rig.came.length, 0);
     }
 
     // A toggle shows a hidden view and the next toggle hides it again.
@@ -451,8 +492,11 @@ namespace test_console_view {
       this.assertTrue(child.hidden);
       rig.view.view_toggle();
       this.assertFalse(child.hidden);
-      this.assertEqual(rig.terminal.opened.length, 1);
-      this.assertEqual(rig.tasks.given.length, 0);
+      this.assertEqual(
+        child.querySelectorAll(constants.terminal_selector).length,
+        1,
+      );
+      this.assertEqual(rig.came.length, 0);
     }
 
     // Showing an open console fits its rows and sends no resize to tty 0.
@@ -460,10 +504,11 @@ namespace test_console_view {
       const rig = rig_make();
       rig_start(rig);
       rig.view.view_toggle();
+      fit_assert(this, rig);
       rig.view.view_toggle();
-      this.assertEqual(rig.terminal.rows, 20);
-      this.assertEqual(rig.tasks.given.length, 2);
-      this.assertFalse(rig.terminal.options.disableStdin);
+      this.assertEqual(rig.came.length, 2);
+      text_type(rig, "a");
+      this.assertEqual(inputs_of(rig).length, 2);
     }
 
     // The view wants tty 0 when shown while idle, at first and after its end.
@@ -472,28 +517,28 @@ namespace test_console_view {
       this.assertFalse(rig.view.open_wanted());
       rig.view.view_show();
       this.assertTrue(rig.view.open_wanted());
-      rig.view.open_request();
+      open_ask(rig);
       this.assertFalse(rig.view.open_wanted());
-      open_answer(rig, "open_wake");
+      request_answer(rig, "open_reply");
       this.assertFalse(rig.view.open_wanted());
       rig.view.exit_done();
       this.assertTrue(rig.view.open_wanted());
       rig.view.view_hide();
       this.assertFalse(rig.view.open_wanted());
-      this.assertEqual(rig.tasks.given.length, 2);
+      this.assertEqual(rig.came.length, 2);
     }
 
     // The view is open only while tty 0 is open: not idle, opening, closing.
     test_open_is(): void {
       const rig = rig_make();
       this.assertFalse(rig.view.open_is());
-      rig.view.open_request();
+      open_ask(rig);
       this.assertFalse(rig.view.open_is());
-      open_answer(rig, "open_wake");
+      request_answer(rig, "open_reply");
       this.assertTrue(rig.view.open_is());
-      rig.view.close_request();
+      close_ask(rig);
       this.assertFalse(rig.view.open_is());
-      close_answer(rig);
+      request_answer(rig, "close_reply");
       this.assertFalse(rig.view.open_is());
       rig.view.exit_done();
       this.assertFalse(rig.view.open_is());
@@ -501,48 +546,47 @@ namespace test_console_view {
   }
 
   // The request for tty 0, its wake and ttyd's first message.
-  export class TestOpening extends TerminalCase {
-    // A request gives the queue one `console.open` for the AI worker.
+  export class TestOpening extends ViewCase {
+    // A request gives the AI worker one `console.open`, and input stays off.
     test_open_request(): void {
       const rig = rig_make();
-      rig.view.open_request();
-      this.assertEqual(rig.tasks.given, [submit_expected("open_request")]);
-      this.assertTrue(rig.terminal.options.disableStdin);
+      rig.view.view_show();
+      open_ask(rig);
+      this.assertEqual(rig.came, [request_expected("open_request", 1)]);
+      text_type(rig, "x");
+      this.assertEqual(rig.came.length, 1);
     }
 
     // The request returns a sleep on the id it got that wakes with its type.
     test_sleep_returned(): void {
       const rig = rig_make();
-      const sleep = rig.view.open_request();
-      this.assertEqual(
-        sleep,
-        sleep_make("open_sleep", constants.request_ids[0]),
-      );
+      open_ask(rig);
+      this.assertEqual(rig.sleeps, [sleep_make("open_sleep", id_last(rig))]);
     }
 
     // Lines take the name form the settings pick, full exactly in debug mode.
     test_full_names(): void {
       const rig = rig_make();
       rig_start(rig);
-      rig.view.close_request();
+      close_ask(rig);
       const full = harness.setting_get("debug") === true;
-      this.assertEqual(rig.tasks.given.length, 3);
-      for (const given of rig.tasks.given) {
-        this.assertEqual("type" in given.line[0], full);
-        this.assertEqual("t" in given.line[0], !full);
+      this.assertEqual(rig.came.length, 3);
+      for (const line of rig.came) {
+        this.assertEqual("type" in line[0], full);
+        this.assertEqual("t" in line[0], !full);
       }
     }
 
     // A second request while opening or open is refused and gives nothing.
     test_open_twice(): void {
       const opening = rig_make();
-      opening.view.open_request();
+      open_ask(opening);
       const early = thrown_get(() => opening.view.open_request());
       this.assertEqual(
         early.message,
         gold_text("console_view_open_phase_opening"),
       );
-      this.assertEqual(opening.tasks.given.length, 1);
+      this.assertEqual(opening.came.length, 1);
       const open = rig_make();
       rig_start(open);
       const late = thrown_get(() => open.view.open_request());
@@ -550,17 +594,19 @@ namespace test_console_view {
         late.message,
         gold_text("console_view_open_phase_open"),
       );
-      this.assertEqual(open.tasks.given.length, 2);
+      this.assertEqual(open.came.length, 2);
     }
 
     // The wake gives ttyd's first message, the one for an empty token.
     test_first_message(): void {
       const rig = rig_make();
-      rig.view.open_request();
-      open_answer(rig, "open_wake_empty");
+      open_ask(rig);
+      request_answer(rig, "open_reply_empty");
       const message = new TextEncoder().encode(first_message("empty"));
-      this.assertEqual(rig.tasks.given.slice(1), [notify_expected(message)]);
-      this.assertFalse(rig.terminal.options.disableStdin);
+      this.assertEqual(rig.came.slice(1), [input_expected(message)]);
+      rig.view.view_show();
+      text_type(rig, "x");
+      this.assertEqual(inputs_of(rig).length, 2);
     }
 
     // The first message carries the token of the reply.
@@ -576,33 +622,39 @@ namespace test_console_view {
     // The first message has no kind byte and the size the terminal has.
     test_first_size(): void {
       const rig = rig_make();
-      rig.view.open_request();
-      rig.terminal.cols = 100;
-      rig.terminal.rows = 30;
-      open_answer(rig, "open_wake_empty");
+      rig.frame.style.height = `${constants.frame_lower}px`;
+      rig.view.view_show();
+      rig.view.view_hide();
+      open_ask(rig);
+      request_answer(rig, "open_reply_empty");
       const bytes = blob_bytes(inputs_of(rig)[0]);
-      this.assertEqual(bytes[0], 0x7b);
-      this.assertEqual(text_decode(bytes), first_message("sized"));
+      this.assertEqual(bytes[0], constants.brace);
+      this.assertEqual(
+        text_decode(bytes),
+        first_message("sized", rows_count(rig)),
+      );
     }
 
     // A wake before any request is refused and sends nothing.
     test_reply_idle(): void {
       const rig = rig_make();
-      const wake = wake_make("open_wake", constants.request_ids[0]);
-      const error = thrown_get(() => rig.view.open_done(wake));
+      rig.view.view_show();
+      const error = thrown_get(() =>
+        rig.view.open_done(wake_make("open_wake", 1)),
+      );
       this.assertEqual(
         error.message,
         gold_text("console_view_reply_phase_idle"),
       );
-      this.assertEqual(rig.tasks.given.length, 0);
-      this.assertTrue(rig.terminal.options.disableStdin);
+      text_type(rig, "x");
+      this.assertEqual(rig.came.length, 0);
     }
 
     // A second wake is refused and sends nothing more.
     test_reply_twice(): void {
       const rig = rig_make();
       rig_start(rig);
-      const wake = wake_make("open_wake", constants.request_ids[0]);
+      const wake = wake_make("open_wake", id_last(rig));
       const error = thrown_get(() => rig.view.open_done(wake));
       this.assertEqual(
         error.message,
@@ -614,72 +666,91 @@ namespace test_console_view {
     // A reply of another type to the request is refused and sends nothing.
     test_reply_type(): void {
       const rig = rig_make();
-      rig.view.open_request();
-      const error = thrown_get(() =>
-        open_answer(rig, "open_wake_close_reply"),
-      );
+      rig.view.view_show();
+      open_ask(rig);
+      const wake = wake_make("open_wake_close_reply", id_last(rig));
+      const error = thrown_get(() => rig.view.open_done(wake));
       this.assertEqual(
         error.message,
         gold_text("console_view_reply_type_close"),
       );
+      text_type(rig, "x");
       this.assertEqual(inputs_of(rig).length, 0);
-      this.assertTrue(rig.terminal.options.disableStdin);
     }
 
     // A wake with the reply to another request is refused, the right one not.
     test_reply_id(): void {
       const rig = rig_make();
-      rig.view.open_request();
-      const [asked, other] = constants.request_ids;
+      open_ask(rig);
+      const asked = id_last(rig);
+      const other = asked + 1;
       const wake = wake_make("open_wake", other);
       const error = thrown_get(() => rig.view.open_done(wake));
       this.assertEqual(error.message, reply_id_text(other, asked));
       this.assertEqual(inputs_of(rig).length, 0);
-      open_answer(rig, "open_wake");
+      request_answer(rig, "open_reply");
       this.assertEqual(inputs_of(rig).length, 1);
     }
 
     // A reply without a token is refused and sends nothing.
     test_token_missing(): void {
       const rig = rig_make();
-      rig.view.open_request();
-      const error = thrown_get(() => open_answer(rig, "open_wake_bare"));
+      rig.view.view_show();
+      open_ask(rig);
+      const wake = wake_make("open_wake_bare", id_last(rig));
+      const error = thrown_get(() => rig.view.open_done(wake));
       this.assertEqual(error.message, gold_text("console_view_token_invalid"));
+      text_type(rig, "x");
       this.assertEqual(inputs_of(rig).length, 0);
-      this.assertTrue(rig.terminal.options.disableStdin);
     }
   }
 
-  // The keystrokes the terminal emits, as ttyd's input messages.
-  export class TestInput extends TerminalCase {
+  // The keystrokes and text the terminal emits, as ttyd's input messages.
+  export class TestInput extends ViewCase {
+    // Shows the view of a new rig and opens tty 0, so that input is taken.
+    rig_typing(): ViewRig {
+      const rig = rig_make();
+      rig.view.view_show();
+      rig_start(rig);
+      return rig;
+    }
+
     // A batch of text is one line whose blob is a zero and the text.
     test_ascii_batch(): void {
-      const rig = rig_make();
-      rig_start(rig);
-      rig.terminal.text_type("ls\r");
+      const rig = this.rig_typing();
+      text_type(rig, "ls\r");
       this.assertEqual(inputs_of(rig).length, 2);
-      this.assertEqual(rig.tasks.given.slice(2), [
-        notify_expected(Uint8Array.of(0x30, 0x6c, 0x73, 0x0d)),
+      this.assertEqual(rig.came.slice(2), [
+        input_expected(Uint8Array.of(0x30, 0x6c, 0x73, 0x0d)),
       ]);
     }
 
     // Each batch is its own line, in the order the terminal emitted them.
     test_each_batch(): void {
-      const rig = rig_make();
-      rig_start(rig);
-      rig.terminal.text_type("a");
-      rig.terminal.text_type("b");
+      const rig = this.rig_typing();
+      text_type(rig, "a");
+      text_type(rig, "b");
       const inputs = inputs_of(rig);
       this.assertEqual(inputs.length, 3);
       this.assertEqual(blob_bytes(inputs[1]), message_bytes(0x30, "a"));
       this.assertEqual(blob_bytes(inputs[2]), message_bytes(0x30, "b"));
     }
 
+    // Each key pressed is its own line, the key's text after the zero.
+    test_keys_pressed(): void {
+      const rig = this.rig_typing();
+      key_press(rig, "l", 0x4c, false);
+      key_press(rig, "Enter", 0x0d, false);
+      const inputs = inputs_of(rig);
+      this.assertEqual(inputs.length, 3);
+      this.assertEqual(blob_bytes(inputs[1]), message_bytes(0x30, "l"));
+      this.assertEqual(blob_bytes(inputs[2]), Uint8Array.of(0x30, 0x0d));
+    }
+
     // A character of two bytes is sent as its two `UTF-8` bytes.
     test_two_bytes(): void {
-      const rig = rig_make();
-      rig_start(rig);
-      rig.terminal.text_type(String.fromCodePoint(0xe9));
+      const rig = this.rig_typing();
+      text_type(rig, String.fromCodePoint(0xe9));
       this.assertEqual(
         blob_bytes(inputs_of(rig)[1]),
         Uint8Array.of(0x30, 0xc3, 0xa9),
@@ -688,9 +759,8 @@ namespace test_console_view {
 
     // A character of three bytes is sent as its three `UTF-8` bytes.
     test_three_bytes(): void {
-      const rig = rig_make();
-      rig_start(rig);
-      rig.terminal.text_type(String.fromCodePoint(0x4e2d));
+      const rig = this.rig_typing();
+      text_type(rig, String.fromCodePoint(0x4e2d));
       this.assertEqual(
         blob_bytes(inputs_of(rig)[1]),
         Uint8Array.of(0x30, 0xe4, 0xb8, 0xad),
@@ -699,9 +769,8 @@ namespace test_console_view {
 
     // A character of four bytes, two `UTF-16` units, is sent as four bytes.
     test_four_bytes(): void {
-      const rig = rig_make();
-      rig_start(rig);
-      rig.terminal.text_type(String.fromCodePoint(0x1f600));
+      const rig = this.rig_typing();
+      text_type(rig, String.fromCodePoint(0x1f600));
       this.assertEqual(
         blob_bytes(inputs_of(rig)[1]),
         Uint8Array.of(0x30, 0xf0, 0x9f, 0x98, 0x80),
@@ -710,14 +779,13 @@ namespace test_console_view {
 
     // A batch of mixed characters is one line with the bytes in order.
     test_mixed_batch(): void {
-      const rig = rig_make();
-      rig_start(rig);
+      const rig = this.rig_typing();
       const text =
         "a" +
         String.fromCodePoint(0xe9) +
         String.fromCodePoint(0x4e2d) +
         String.fromCodePoint(0x1f600);
-      rig.terminal.text_type(text);
+      text_type(rig, text);
       const inputs = inputs_of(rig);
       this.assertEqual(inputs.length, 2);
       this.assertEqual(
@@ -738,79 +806,57 @@ namespace test_console_view {
       );
     }
 
-    // A control character is sent as its own byte after the zero.
+    // Control with a letter is sent as its control byte after the zero.
     test_control_byte(): void {
-      const rig = rig_make();
-      rig_start(rig);
-      rig.terminal.text_type(String.fromCharCode(0x03));
+      const rig = this.rig_typing();
+      key_press(rig, "c", 0x43, true);
       this.assertEqual(
         blob_bytes(inputs_of(rig)[1]),
         Uint8Array.of(0x30, 0x03),
       );
     }
 
-    // Before any request the terminal takes no input, and the view refuses.
+    // Before any request the terminal takes no input, so nothing is sent.
     test_input_idle(): void {
       const rig = rig_make();
-      rig.terminal.text_type("x");
-      this.assertTrue(rig.terminal.options.disableStdin);
-      const error = thrown_get(() => rig.terminal.text_force("x"));
-      this.assertEqual(
-        error.message,
-        gold_text("console_view_input_phase_idle"),
-      );
-      this.assertEqual(rig.tasks.given.length, 0);
+      rig.view.view_show();
+      text_type(rig, "x");
+      key_press(rig, "c", 0x43, true);
+      this.assertEqual(rig.came.length, 0);
     }
 
     // Before ttyd's first message the terminal takes no input either.
     test_input_opening(): void {
       const rig = rig_make();
-      rig.view.open_request();
-      rig.terminal.text_type("x");
-      this.assertTrue(rig.terminal.options.disableStdin);
-      const error = thrown_get(() => rig.terminal.text_force("x"));
-      this.assertEqual(
-        error.message,
-        gold_text("console_view_input_phase_opening"),
-      );
+      rig.view.view_show();
+      open_ask(rig);
+      text_type(rig, "x");
+      this.assertEqual(rig.came.length, 1);
       this.assertEqual(inputs_of(rig).length, 0);
     }
   }
 
   // The rows fitted to the height the container has above the band.
-  export class TestFit extends TerminalCase {
+  export class TestFit extends ViewCase {
     // A show fits the rows to the space above the band, so none is scrolled.
     test_rows_fitted(): void {
       const rig = rig_make();
       rig.view.view_show();
-      this.assertEqual(rig.terminal.cols, 120);
-      this.assertEqual(rig.terminal.rows, 20);
-      this.assertEqual(rig.terminal.resized, [[120, 20]]);
-      const container = rig.container;
-      this.assertTrue(
-        container.scrollHeight <= container.clientHeight,
-        `${container.scrollHeight} px of rows in ${container.clientHeight} px`,
-      );
-      const placed = rig.terminal.screen as HTMLElement;
-      const screen = placed.getBoundingClientRect();
-      const band = rig.band.getBoundingClientRect();
-      this.assertTrue(
-        screen.bottom <= band.top,
-        `rows end at ${screen.bottom}, the band at ${band.top}`,
-      );
+      fit_assert(this, rig);
+      this.assertEqual(rig.came.length, 0);
     }
 
     // A fit while idle sends nothing, and the first message has the rows.
     test_fitted_first(): void {
       const rig = rig_make();
       rig.view.view_show();
-      this.assertEqual(rig.tasks.given.length, 0);
+      this.assertEqual(rig.came.length, 0);
       rig_start(rig);
       const inputs = inputs_of(rig);
       this.assertEqual(inputs.length, 1);
       this.assertEqual(
         text_decode(blob_bytes(inputs[0])),
-        first_message("fitted"),
+        first_message("fitted", rows_count(rig)),
       );
     }
 
@@ -818,28 +864,24 @@ namespace test_console_view {
     test_space_changed(): void {
       const rig = rig_make();
       rig.view.view_show();
+      const before = rows_count(rig);
       rig.view.view_hide();
-      rig.frame.style.height = "300px";
+      rig.frame.style.height = `${constants.frame_lower}px`;
       rig.view.view_show();
-      this.assertEqual(rig.terminal.rows, 14);
-      this.assertEqual(rig.terminal.resized, [
-        [120, 20],
-        [120, 14],
-      ]);
-      this.assertEqual(rig.tasks.given.length, 0);
+      fit_assert(this, rig);
+      this.assertTrue(rows_count(rig) < before);
+      this.assertEqual(rig.came.length, 0);
     }
 
     // A scroll bar under wide columns is left out of the space.
     test_narrow_frame(): void {
       const rig = rig_make();
-      rig.frame.style.width = "500px";
+      rig.frame.style.width = `${constants.frame_narrow}px`;
       rig.view.view_show();
       const container = rig.container;
       this.assertTrue(container.scrollWidth > container.clientWidth);
-      this.assertTrue(
-        container.scrollHeight <= container.clientHeight,
-        `${container.scrollHeight} px of rows in ${container.clientHeight} px`,
-      );
+      this.assertTrue(container.offsetHeight > container.clientHeight);
+      fit_assert(this, rig);
     }
 
     // A band that leaves no room for one row is refused.
@@ -847,50 +889,22 @@ namespace test_console_view {
       const rig = rig_make();
       rig.band.style.height = `${constants.frame_height}px`;
       const error = thrown_get(() => rig.view.view_show());
-      this.assertEqual(error.message, gold_text("console_view_rows_unfit"));
-      this.assertEqual(rig.terminal.rows, 40);
+      const { container, band } = rig;
+      const screen = part_find(rig, constants.screen_selector);
+      const cell = screen.getBoundingClientRect().height / rows_count(rig);
+      const top = container.getBoundingClientRect().top;
+      const bars = container.offsetHeight - container.clientHeight;
+      const space = band.getBoundingClientRect().top - top - bars;
+      this.assertEqual(
+        error.message,
+        text_fill(gold_text("console_view_rows_unfit"), [space, cell]),
+      );
+      this.assertEqual(rows_count(rig), 40);
     }
   }
 
-  // The messages of ttyd that `output_feed` takes.
-  export class TestOutput extends TerminalCase {
-    // Output is written to the terminal without its kind byte.
-    test_output_written(): void {
-      const rig = rig_make();
-      rig_start(rig);
-      rig.view.output_feed(Uint8Array.of(0x30, 0x68, 0x69));
-      this.assertEqual(rig.terminal.written.length, 1);
-      this.assertEqual(rig.terminal.written[0], Uint8Array.of(0x68, 0x69));
-    }
-
-    // Each output message is a separate write, in order.
-    test_writes_ordered(): void {
-      const rig = rig_make();
-      rig_start(rig);
-      rig.view.output_feed(message_bytes(0x30, "$ "));
-      rig.view.output_feed(message_bytes(0x30, "hi\r\n"));
-      const encoder = new TextEncoder();
-      this.assertEqual(rig.terminal.written.length, 2);
-      this.assertEqual(rig.terminal.written[0], encoder.encode("$ "));
-      this.assertEqual(rig.terminal.written[1], encoder.encode("hi\r\n"));
-    }
-
-    // A title message is ignored.
-    test_title_ignored(): void {
-      const rig = rig_make();
-      rig_start(rig);
-      rig.view.output_feed(message_bytes(0x31, "python3 bootstrap.py"));
-      this.assertEqual(rig.terminal.written.length, 0);
-    }
-
-    // A preferences message is ignored.
-    test_preferences_ignored(): void {
-      const rig = rig_make();
-      rig_start(rig);
-      rig.view.output_feed(message_bytes(0x32, "{}"));
-      this.assertEqual(rig.terminal.written.length, 0);
-    }
-
+  // The messages of ttyd that `output_feed` refuses before writing.
+  export class TestOutput extends ViewCase {
     // A kind byte that is not output, title or preferences is refused.
     test_kind_unknown(): void {
       const rig = rig_make();
@@ -904,7 +918,6 @@ namespace test_console_view {
           gold_text(`console_view_kind_unknown_${kind}`),
         );
       }
-      this.assertEqual(rig.terminal.written.length, 0);
     }
 
     // A message with no bytes has no kind and is refused.
@@ -913,94 +926,46 @@ namespace test_console_view {
       rig_start(rig);
       const error = thrown_get(() => rig.view.output_feed(new Uint8Array(0)));
       this.assertEqual(error.message, gold_text("console_view_message_empty"));
-      this.assertEqual(rig.terminal.written.length, 0);
-    }
-
-    // An output message with no text is a write of no bytes.
-    test_output_bare(): void {
-      const rig = rig_make();
-      rig_start(rig);
-      rig.view.output_feed(Uint8Array.of(0x30));
-      this.assertEqual(rig.terminal.written.length, 1);
-      this.assertEqual(rig.terminal.written[0].length, 0);
-    }
-
-    // Output fed while the view is hidden still goes to the terminal.
-    test_output_hidden(): void {
-      const rig = rig_make();
-      rig.view.view_show();
-      rig_start(rig);
-      rig.view.view_hide();
-      rig.view.output_feed(message_bytes(0x30, "kept"));
-      this.assertEqual(rig.terminal.written.length, 1);
-      this.assertEqual(
-        rig.terminal.written[0],
-        new TextEncoder().encode("kept"),
-      );
-      this.assertEqual(rig.terminal.opened.length, 1);
-    }
-
-    // Bytes of one character split over two messages are passed as they are.
-    test_output_split(): void {
-      const rig = rig_make();
-      rig_start(rig);
-      rig.view.output_feed(Uint8Array.of(0x30, 0xe4, 0xb8));
-      rig.view.output_feed(Uint8Array.of(0x30, 0xad));
-      this.assertEqual(rig.terminal.written.length, 2);
-      this.assertEqual(rig.terminal.written[0], Uint8Array.of(0xe4, 0xb8));
-      this.assertEqual(rig.terminal.written[1], Uint8Array.of(0xad));
-    }
-
-    // Invalid `UTF-8` is passed on, as the terminal decodes its own input.
-    test_output_invalid(): void {
-      const rig = rig_make();
-      rig_start(rig);
-      rig.view.output_feed(Uint8Array.of(0x30, 0xff, 0xfe));
-      this.assertEqual(rig.terminal.written[0], Uint8Array.of(0xff, 0xfe));
     }
   }
 
   // The request to close tty 0, its wake, and the end that follows it.
-  export class TestClosing extends TerminalCase {
-    // A request gives the queue one `console.close` and turns input off.
+  export class TestClosing extends ViewCase {
+    // A request gives the AI worker one `console.close` and turns input off.
     test_close_request(): void {
       const rig = rig_make();
+      rig.view.view_show();
       rig_start(rig);
-      rig.view.close_request();
-      this.assertEqual(rig.tasks.given.length, 3);
-      this.assertEqual(rig.tasks.given[2], submit_expected("close_request"));
-      this.assertTrue(rig.terminal.options.disableStdin);
+      close_ask(rig);
+      this.assertEqual(rig.came.length, 3);
+      this.assertEqual(rig.came[2], request_expected("close_request", 2));
+      text_type(rig, "x");
+      this.assertEqual(rig.came.length, 3);
     }
 
     // The request returns a sleep on the id it got that wakes with its type.
     test_close_sleep(): void {
       const rig = rig_make();
       rig_start(rig);
-      const sleep = rig.view.close_request();
-      this.assertEqual(
-        sleep,
-        sleep_make("close_sleep", constants.request_ids[1]),
-      );
+      close_ask(rig);
+      this.assertEqual(rig.sleeps.length, 2);
+      this.assertEqual(rig.sleeps[1], sleep_make("close_sleep", id_last(rig)));
     }
 
     // The reply leaves the console closing, taking no input and no opening.
     test_close_reply(): void {
       const rig = rig_make();
+      rig.view.view_show();
       rig_start(rig);
-      rig.view.close_request();
-      close_answer(rig);
-      this.assertTrue(rig.terminal.options.disableStdin);
-      const typed = thrown_get(() => rig.terminal.text_force("x"));
-      this.assertEqual(
-        typed.message,
-        gold_text("console_view_input_phase_closing"),
-      );
+      close_ask(rig);
+      request_answer(rig, "close_reply");
+      text_type(rig, "x");
       const again = thrown_get(() => rig.view.open_request());
       this.assertEqual(
         again.message,
         gold_text("console_view_open_phase_closing"),
       );
-      this.assertEqual(rig.tasks.given.length, 3);
+      this.assertEqual(rig.came.length, 3);
     }
 
     // A close while idle, opening or closing is refused and gives nothing.
@@ -1011,31 +976,31 @@ namespace test_console_view {
         first.message,
         gold_text("console_view_close_phase_idle"),
       );
-      this.assertEqual(idle.tasks.given.length, 0);
+      this.assertEqual(idle.came.length, 0);
       const opening = rig_make();
-      opening.view.open_request();
+      open_ask(opening);
       const early = thrown_get(() => opening.view.close_request());
       this.assertEqual(
         early.message,
         gold_text("console_view_close_phase_opening"),
       );
-      this.assertEqual(opening.tasks.given.length, 1);
+      this.assertEqual(opening.came.length, 1);
       const closing = rig_make();
       rig_start(closing);
-      closing.view.close_request();
+      close_ask(closing);
       const twice = thrown_get(() => closing.view.close_request());
       this.assertEqual(
         twice.message,
         gold_text("console_view_close_phase_closing"),
       );
-      this.assertEqual(closing.tasks.given.length, 3);
+      this.assertEqual(closing.came.length, 3);
     }
 
     // A wake of the close before any close is asked for is refused.
     test_closed_early(): void {
       const rig = rig_make();
       rig_start(rig);
-      const wake = wake_make("close_wake", constants.request_ids[1]);
+      const wake = wake_make("close_wake", id_last(rig) + 1);
       const error = thrown_get(() => rig.view.close_done(wake));
       this.assertEqual(error.message, gold_text("console_view_closed_phase"));
     }
@@ -1044,8 +1009,9 @@ namespace test_console_view {
     test_closed_checked(): void {
       const rig = rig_make();
       rig_start(rig);
-      rig.view.close_request();
-      const [opened, closed] = constants.request_ids;
+      const opened = id_last(rig);
+      close_ask(rig);
+      const closed = id_last(rig);
       const other = wake_make("close_wake_open_reply", closed);
       const typed = thrown_get(() => rig.view.close_done(other));
       this.assertEqual(
@@ -1055,39 +1021,42 @@ namespace test_console_view {
       const stray = wake_make("close_wake", opened);
       const wrong = thrown_get(() => rig.view.close_done(stray));
       this.assertEqual(wrong.message, reply_id_text(opened, closed));
-      close_answer(rig);
+      request_answer(rig, "close_reply");
     }
 
     // The end after a close leaves the console idle, and it opens again.
     test_close_reopen(): void {
       const rig = rig_make();
+      rig.view.view_show();
       rig_start(rig);
-      rig.view.close_request();
-      close_answer(rig);
+      close_ask(rig);
+      request_answer(rig, "close_reply");
       rig.view.exit_done();
-      rig.view.open_request();
-      this.assertEqual(submits_of(rig), [
-        gold_line("open_request"),
-        gold_line("close_request"),
-        gold_line("open_request"),
+      open_ask(rig);
+      const requests = rig.came.filter(
+        (line) => jslb.field_get(line[0], "id") !== undefined,
+      );
+      this.assertEqual(requests, [
+        request_expected("open_request", 1),
+        request_expected("close_request", 2),
+        request_expected("open_request", 3),
       ]);
-      open_answer(rig, "open_wake");
+      request_answer(rig, "open_reply");
       this.assertEqual(inputs_of(rig).length, 2);
-      this.assertFalse(rig.terminal.options.disableStdin);
-      rig.terminal.text_type("a");
+      text_type(rig, "a");
       this.assertEqual(inputs_of(rig).length, 3);
     }
   }
 
   // The end of tty 0, after which the console can be asked for again.
-  export class TestExit extends TerminalCase {
+  export class TestExit extends ViewCase {
     // The end turns input off, so typing sends nothing more.
     test_exit_open(): void {
       const rig = rig_make();
+      rig.view.view_show();
       rig_start(rig);
       rig.view.exit_done();
-      this.assertTrue(rig.terminal.options.disableStdin);
-      rig.terminal.text_type("x");
+      text_type(rig, "x");
       this.assertEqual(inputs_of(rig).length, 1);
     }
 
@@ -1099,7 +1068,7 @@ namespace test_console_view {
         idle.message,
         gold_text("console_view_exit_phase_idle"),
       );
-      rig.view.open_request();
+      open_ask(rig);
       const opening = thrown_get(() => rig.view.exit_done());
       this.assertEqual(
         opening.message,
@@ -1119,36 +1088,26 @@ namespace test_console_view {
       );
     }
 
-    // Text that reaches the view after the end is refused and sends nothing.
-    test_input_closed(): void {
-      const rig = rig_make();
-      rig_start(rig);
-      rig.view.exit_done();
-      const error = thrown_get(() => rig.terminal.text_force("x"));
-      this.assertEqual(
-        error.message,
-        gold_text("console_view_input_phase_idle"),
-      );
-      this.assertEqual(inputs_of(rig).length, 1);
-    }
-
     // A request after the end asks for tty 0 again and sends a first message.
     test_open_again(): void {
       const rig = rig_make();
+      rig.view.view_show();
       rig_start(rig);
       rig.view.exit_done();
-      rig.view.open_request();
-      this.assertEqual(rig.tasks.given.length, 3);
-      this.assertEqual(rig.tasks.given[2], submit_expected("open_request"));
-      this.assertTrue(rig.terminal.options.disableStdin);
-      open_answer(rig, "open_wake");
+      open_ask(rig);
+      this.assertEqual(rig.came.length, 3);
+      this.assertEqual(rig.came[2], request_expected("open_request", 2));
+      text_type(rig, "x");
+      this.assertEqual(rig.came.length, 3);
+      request_answer(rig, "open_reply");
       const inputs = inputs_of(rig);
       this.assertEqual(inputs.length, 2);
       this.assertEqual(
         text_decode(blob_bytes(inputs[1])),
-        first_message("token"),
+        first_message("fitted", rows_count(rig)),
       );
-      this.assertFalse(rig.terminal.options.disableStdin);
+      text_type(rig, "x");
+      this.assertEqual(inputs_of(rig).length, 3);
     }
   }
 

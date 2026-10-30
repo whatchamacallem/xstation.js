@@ -24,7 +24,17 @@
 // realm lane, its end of the UI channel, and the start: `tap.start`, which
 // the page took from the driver, and the block the driver named with its
 // failfast. The platform then starts by the same code as the ttyd worker's,
-// then `worker_ai.tap_start`, the realm lane its server's port, a
+// its pool and test slots cleared at start unless the start's `clear` is
+// false, when the worker keeps what the worker before it left in them. Such
+// a worker first waits for every file of the pool's directory and of the
+// slots' directory to open, since the platform frees the files of a worker
+// it terminated in a loop about 2 s later and tells no one: it opens each
+// file for synchronous access and closes it at once, and a refusal of a file
+// still held, a `DOMException` named `NoModificationAllowedError`, ends the
+// try, which comes again 10 ms later; anything else is thrown. Once a try is
+// refused after the start's `wait_seconds`, it throws `boot.files_busy` with
+// that refusal as its `cause`. Then comes `worker_ai.tap_start`, the realm
+// lane its server's port, a
 // `queue.ThreadPort`, whose end posts the line on the lane and calls back at
 // once, since the lane keeps its order and the page relays each line to the
 // driver as it comes. `run` gets the queue and the start.
@@ -36,12 +46,16 @@ declare namespace boot {
     base_url: string;
   }
 
-  // What the headless worker's `run` gets beside its queue.
-  interface HeadlessStart {
+  // What every start of the headless worker holds.
+  interface StartFields {
     first: lines.Line;
     block: string;
     failfast: boolean;
   }
+
+  // A start that clears the test pool and slots, or keeps them and waits.
+  type HeadlessStart = StartFields &
+    ({ clear: true } | { clear: false; wait_seconds: number });
 
   // The headless page's first message to its worker: its lanes and start.
   interface HeadlessMessage {
