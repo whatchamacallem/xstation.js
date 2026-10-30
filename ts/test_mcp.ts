@@ -2,19 +2,27 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the Model Context Protocol of the AI worker: the methods, errors
-// and sleeping tools of the server, the exception it keeps and the failure it
-// returns with its answer, each wake run through the handler table the server
-// registers it in; the requests of the client through a task queue double, in
-// the name form the settings pick, and the reading of its replies; and the set
-// of clients. The lines the tests send, the sleeps of their tools and the
-// texts they expect are read from the gold record, compared with the exact
-// texts of the boot's handshake and of a stdio session where they apply.
+// Tests of the Model Context Protocol of the AI worker: the methods and
+// errors of the server, the exception it keeps and the failure it returns
+// with its answer; its sleeping tools on a real queue in synchronous mode,
+// whose `mcp` handler is the test's function handing each line to the
+// server, and whose lane to `server` reaches a second real queue that answers
+// the requests a tool submits, each wake run by the queue; and the checks of
+// the client and the set of clients, whose requests a real server answers on
+// a real queue joined to theirs by linked local ports. The lines the tests
+// send, the sleeps of their tools and the texts they expect are read from the
+// gold record, compared with the exact texts of the boot's handshake and of a
+// stdio session where they apply. The lines between a client and a server
+// are the line cases of `test_integrate_mcp`.
 
 namespace test_mcp {
   // The test type prefix, the identities and the exact texts of messages.
   const constants = Object.freeze({
     type_prefix: "mcp_test.",
+    line_type: "mcp",
+    thread: "ai" as const,
+    far_thread: "server" as const,
+    test_thread: "ui" as const,
     client_name: "hyperposition-engine",
     browser_name: "xsjs-browser",
     server_name: "xsjs-server",
@@ -66,9 +74,6 @@ namespace test_mcp {
       '"main_loop":{"type":"string"}},"required":["main_loop"]}}]}}',
     stdio_ping: '{"jsonrpc":"2.0","id":3,"method":"ping"}',
     stdio_pong: '{"jsonrpc":"2.0","id":3,"result":{}}',
-    stdio_restart:
-      '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{' +
-      '"name":"system_restart","arguments":{"main_loop":"main_loop.py"}}}',
     script_text:
       '{"sha256":"dbc909cf0e2e7954d586c06b3291728e527d5dee4c109409fcb501e' +
       '200756626","seq":5}',
@@ -80,22 +85,28 @@ namespace test_mcp {
     console_answer:
       '{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text",' +
       '"text":"{\\"output\\":\\"hi\\\\n\\",\\"timed_out\\":false}"}]}}',
-    fault_call:
-      '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{' +
-      '"name":"kv_get","arguments":{"ref":"/metaverse/nothing"}}}',
   });
 
   // An object of fields by name.
   type FieldTable = { [key: string]: unknown };
 
-  // A line the queue double was given and the owner it was given for.
-  type SentLine = [lines.Line, queue.ThreadName];
-
   // A sleep of the gold before the wake type the test made is set on it.
   type SleepPart = Omit<dispatch.Sleep, "then_type">;
 
+  // The state of a sleep of the gold, which waits on the ids a tool submits.
+  type SleepState = Pick<dispatch.Sleep, "state">;
+
+  // A step of a task on the clients' queue: the ids the next step sleeps on.
+  type StepFn = (replies: lines.Line[]) => number[];
+
   // How many types the tests have made, so that each one is new.
   let types_made = 0;
+
+  // How many versions of `mcp` the server benches have registered.
+  let versions_made = 0;
+
+  // The server the `mcp` lines of the clients reach, once one is set.
+  let peer: mcp.Server | undefined = undefined;
 
   // A copy of a value of this module's gold, which the harness keeps frozen.
   function gold_value(name: string): unknown {
@@ -123,12 +134,14 @@ namespace test_mcp {
     return { ...sleep, then_type };
   }
 
-  // The wake of a sleep the server returned, its replies the gold line's.
-  function wake_make(sleep: dispatch.Sleep, name: string): lines.Line {
-    const line = gold_line(name);
-    Object.assign(line[0], { type: sleep.then_type });
-    line.state = sleep.state;
-    return line;
+  // The state of a sleep of the gold, waiting on the ids given for the type.
+  function sleep_on(
+    name: string,
+    then_type: string,
+    wait_ids: number[],
+  ): dispatch.Sleep {
+    const { state } = gold_value(`lines.${name}`) as SleepState;
+    return dispatch.task_sleep(state, wait_ids, then_type);
   }
 
   // The payload of a line with no blobs: every key but its header 0.
@@ -144,54 +157,10 @@ namespace test_mcp {
     return `${constants.type_prefix}${types_made}`;
   }
 
-  // A task queue double that hands out the ids the test picks.
-  class QueueDouble {
-    readonly submitted: SentLine[] = [];
-    readonly notified: SentLine[] = [];
-    private readonly ids: number[];
-
-    // Takes the ids to hand out, in order.
-    constructor(ids: number[]) {
-      this.ids = [...ids];
-    }
-
-    // Keeps the line, sets the next id on its header as the queue does.
-    task_submit(line: lines.Line, owner: queue.ThreadName): number {
-      const id = this.ids.shift();
-      if (id === undefined) {
-        throw new Error("The queue double has no id left to hand out.");
-      }
-      const name = Object.hasOwn(line[0], "type") ? "id" : "i";
-      Object.assign(line[0], { [name]: id });
-      this.submitted.push([line, owner]);
-      return id;
-    }
-
-    // Keeps the line and its owner.
-    line_notify(line: lines.Line, owner: queue.ThreadName): void {
-      this.notified.push([line, owner]);
-    }
-  }
-
-  // Each line the queue double kept as its JSON text, beside its owner.
-  function sent_texts(sent: SentLine[]): [string, queue.ThreadName][] {
-    return sent.map(([line, owner]): [string, queue.ThreadName] => [
-      JSON.stringify(line),
-      owner,
-    ]);
-  }
-
-  // A client of the tests whose server the owner given reaches.
-  function client_make(
-    tasks: QueueDouble,
-    owner: queue.ThreadName,
-  ): mcp.Client {
-    return new mcp.Client(
-      constants.client_name,
-      constants.version,
-      tasks as unknown as queue.TaskQueue,
-      owner,
-    );
+  // A line of the type with no payload, in the name form the settings pick.
+  function line_typed(type: string): lines.Line {
+    const header = jslb.header_make(type, { full: settings.names_full() });
+    return jslb.line_make(header, [], {});
   }
 
   // A server with the name of the browser's server, `xsjs-browser`.
@@ -290,6 +259,141 @@ namespace test_mcp {
       throw new Error("line_handle returned no failure.");
     }
     return failure;
+  }
+
+  // The test's end of a lane: its linked local port and the lines that came.
+  interface LaneEnd {
+    port: queue.LocalPort;
+    came: lines.Line[];
+  }
+
+  // Joins the queue to the thread by linked local ports, one end the test's.
+  function lane_make(
+    tasks: queue.TaskQueue,
+    thread: queue.ThreadName,
+  ): LaneEnd {
+    const near = new queue.LocalPort();
+    const port = new queue.LocalPort(near);
+    const came: lines.Line[] = [];
+    port.line_receive((line) => {
+      came.push(line);
+    });
+    tasks.port_add(thread, near);
+    return { port, came };
+  }
+
+  // Joins two queues by linked local ports, each reaching the other's thread.
+  function queues_join(
+    near: queue.TaskQueue,
+    near_thread: queue.ThreadName,
+    far: queue.TaskQueue,
+    far_thread: queue.ThreadName,
+  ): void {
+    const port = new queue.LocalPort();
+    near.port_add(far_thread, port);
+    far.port_add(near_thread, new queue.LocalPort(port));
+  }
+
+  // A server on a queue, the test's end of `ui`, the far queue's lines.
+  interface ServerBench {
+    tasks: queue.TaskQueue;
+    ui: LaneEnd;
+    server: mcp.Server;
+    version: number;
+    asked: string;
+    got: lines.Line[];
+  }
+
+  // A server whose `mcp` lines of a new version a real queue hands it.
+  function bench_make(): ServerBench {
+    const asked = type_fresh();
+    const got: lines.Line[] = [];
+    // The far queue answers each request a tool submits at once.
+    dispatch.handler_register(asked, 0, (line) => {
+      got.push(line);
+      return dispatch.reply_make(line, {});
+    });
+    const owners: queue.OwnerTable = {
+      [constants.type_prefix]: constants.thread,
+      [constants.line_type]: constants.thread,
+      [asked]: constants.far_thread,
+    };
+    const tasks = new queue.TaskQueue(constants.thread, owners, true);
+    const ui = lane_make(tasks, constants.test_thread);
+    const far_owners = { [constants.type_prefix]: constants.far_thread };
+    const far = new queue.TaskQueue(constants.far_thread, far_owners, true);
+    queues_join(tasks, constants.thread, far, constants.far_thread);
+    const server = browser_make();
+    versions_made += 1;
+    const version = versions_made;
+    dispatch.handler_register(constants.line_type, version, (line) =>
+      server.line_handle(line),
+    );
+    return { tasks, ui, server, version, asked, got };
+  }
+
+  // Submits the request a tool waits on, which the far queue answers.
+  function ask_submit(bench: ServerBench): number {
+    return bench.tasks.task_submit(line_typed(bench.asked));
+  }
+
+  // Posts a gold `mcp` line of the bench's version into its queue from `ui`.
+  function request_send(bench: ServerBench, name: string): void {
+    const line = gold_line(name);
+    const full = Object.hasOwn(line[0], "type");
+    Object.assign(line[0], { [full ? "version" : "v"]: bench.version });
+    bench.ui.port.line_post(line, []);
+  }
+
+  // Sets the server the clients reach, registering `mcp` the first time.
+  function peer_set(server: mcp.Server): void {
+    if (peer === undefined) {
+      dispatch.handler_register(constants.line_type, 0, (line) =>
+        (peer as mcp.Server).line_handle(line),
+      );
+    }
+    peer = server;
+  }
+
+  // The clients' queue, joined to a queue on which the server answers `mcp`.
+  function clients_make(server: mcp.Server): queue.TaskQueue {
+    peer_set(server);
+    const owners = { [constants.type_prefix]: constants.thread };
+    const tasks = new queue.TaskQueue(constants.thread, owners, true);
+    const far_owners = { [constants.line_type]: constants.far_thread };
+    const far = new queue.TaskQueue(constants.far_thread, far_owners, true);
+    queues_join(tasks, constants.thread, far, constants.far_thread);
+    return tasks;
+  }
+
+  // A client of the tests whose server the owner given reaches.
+  function client_make(
+    tasks: queue.TaskQueue,
+    owner: queue.ThreadName,
+  ): mcp.Client {
+    return new mcp.Client(
+      constants.client_name,
+      constants.version,
+      tasks,
+      owner,
+    );
+  }
+
+  // Runs each step as a task woken by the replies to the step before.
+  function steps_run(tasks: queue.TaskQueue, steps: readonly StepFn[]): void {
+    const types = steps.map(() => type_fresh());
+    for (const [index, step] of steps.entries()) {
+      const next = types.at(index + 1);
+      dispatch.handler_register(types[index], 0, (line) => {
+        const replies = index === 0 ? [] : (line.replies as lines.Line[]);
+        const ids = step(replies);
+        if (next === undefined) {
+          return undefined;
+        }
+        return dispatch.task_sleep(null, ids, next);
+      });
+    }
+    tasks.line_notify(line_typed(types[0]));
   }
 
   // The frozen surface of the module and the revision it pins.
@@ -544,26 +648,28 @@ namespace test_mcp {
       this.assertEqual(server.failure_take(), undefined);
     }
 
-    // A tool that submits and then throws: the failure holds its answer.
+    // A tool that submits, then throws: the answer, then the unawaited fault.
     test_tool_submitted(): void {
-      const tasks = new QueueDouble([7]);
-      const server = browser_make();
+      const bench = bench_make();
       const failure = new Error("The tool failed.");
-      server.tool_register(tool_make("render"), () => {
-        tasks.task_submit(gold_line("asked"), "server");
+      bench.server.tool_register(tool_make("render"), () => {
+        ask_submit(bench);
         throw failure;
       });
-      const outcome = failure_of(server.line_handle(gold_line("call_render")));
-      this.assertTrue(outcome.error === failure);
-      this.assertEqual(tasks.submitted.length, 1);
-      this.assertEqual(outcome.reply[0], { t: "mcp", r: 4 });
+      const thrown = thrown_get(() => request_send(bench, "call_render"));
+      this.assertEqual(thrown.message, gold_text("queue_wait_missing_mcp"));
+      this.assertTrue(thrown.cause === failure);
+      this.assertEqual(bench.got.length, 1);
+      this.assertEqual(bench.ui.came.length, 1);
+      const answer = bench.ui.came[0];
+      this.assertEqual(answer[0], { t: "mcp", r: 4 });
       const cascade = { message: "The tool failed.", stack: failure.stack };
       const text = JSON.stringify(cascade);
-      this.assertEqual(payload_get(outcome.reply).result, {
+      this.assertEqual(payload_get(answer).result, {
         content: [{ type: "text", text }],
         isError: true,
       });
-      this.assertEqual(server.failure_take(), undefined);
+      this.assertEqual(bench.server.failure_take(), undefined);
     }
 
     // A second tool of the same name is refused.
@@ -609,89 +715,84 @@ namespace test_mcp {
       this.assertEqual(held.state, { n: 1 });
     }
 
-    // The wake answers the request in its name form.
+    // The queue's wake answers the request in its name form.
     test_wake_answers(): void {
-      const server = browser_make();
+      const bench = bench_make();
       const wake = type_fresh();
       const seen: unknown[] = [];
-      server.wake_register(wake, (state, replies) => {
+      bench.server.wake_register(wake, (state, replies) => {
         seen.push(state, replies.length);
         return { content: [{ type: "text", text: constants.console_text }] };
       });
-      server.tool_register(tool_make("console_run"), () =>
-        sleep_gold("sleep_call", wake),
+      bench.server.tool_register(tool_make("console_run"), () =>
+        sleep_on("sleep_call", wake, [ask_submit(bench)]),
       );
-      const line = gold_line("call_console_full");
-      const sleep = server.line_handle(line) as dispatch.Sleep;
-      this.assertEqual(sleep.wait_ids, [7]);
-      const wakened = wake_make(sleep, "wake_seven");
-      const answer = dispatch.line_dispatch(wakened) as lines.Line;
+      request_send(bench, "call_console_full");
       this.assertEqual(seen, [{ call: 1 }, 1]);
+      this.assertEqual(bench.ui.came.length, 1);
+      const answer = bench.ui.came[0];
       this.assertEqual(answer[0], { type: "mcp", reply: 1 });
       this.assertEqual(
         JSON.stringify(payload_get(answer)),
         constants.console_answer,
       );
+      this.assertEqual(bench.tasks.depth(), 0);
     }
 
     // A wake may sleep again, and the last wake answers.
     test_wake_chain(): void {
-      const server = browser_make();
+      const bench = bench_make();
       const first = type_fresh();
       const second = type_fresh();
       const states: unknown[] = [];
-      server.wake_register(first, (state) => {
+      bench.server.wake_register(first, (state) => {
         states.push(state);
-        return sleep_gold("sleep_second", second);
+        return sleep_on("sleep_second", second, [ask_submit(bench)]);
       });
-      server.wake_register(second, (state) => {
+      bench.server.wake_register(second, (state) => {
         states.push(state);
         return { content: [], isError: true };
       });
-      server.tool_register(tool_make("image_make"), () =>
-        sleep_gold("sleep_first", first),
+      bench.server.tool_register(tool_make("image_make"), () =>
+        sleep_on("sleep_first", first, [ask_submit(bench)]),
       );
-      const line = gold_line("call_image_make");
-      const sleep = server.line_handle(line) as dispatch.Sleep;
-      this.assertEqual(sleep.wait_ids, [7]);
-      const again = dispatch.line_dispatch(
-        wake_make(sleep, "wake_seven"),
-      ) as dispatch.Sleep;
-      this.assertEqual(again.wait_ids, [8]);
-      const answer = dispatch.line_dispatch(wake_make(again, "wake_eight"));
+      request_send(bench, "call_image_make");
       this.assertEqual(states, [{ step: 1 }, { step: 2 }]);
-      this.assertEqual(answer, {
-        0: { t: "mcp", r: 3 },
-        jsonrpc: "2.0",
-        id: 3,
-        result: { content: [], isError: true },
-      });
+      this.assertEqual(bench.got.length, 2);
+      this.assertEqual(bench.ui.came, [
+        {
+          0: { t: "mcp", r: 3 },
+          jsonrpc: "2.0",
+          id: 3,
+          result: { content: [], isError: true },
+        },
+      ]);
     }
 
-    // A throw in a wake: an `isError` result of its cascade, in the failure.
+    // A throw in a wake: its `isError` answer goes out, then the queue fails.
     test_wake_throw(): void {
-      const server = browser_make();
+      const bench = bench_make();
       const wake = type_fresh();
       const first = new Error("The reply was wrong.");
       const failure = new Error("The wake failed.", { cause: first });
-      server.wake_register(wake, () => {
+      bench.server.wake_register(wake, () => {
         throw failure;
       });
-      server.tool_register(tool_make("render"), () =>
-        sleep_gold("sleep_waiting", wake),
+      bench.server.tool_register(tool_make("render"), () =>
+        sleep_on("sleep_waiting", wake, [ask_submit(bench)]),
       );
-      const sleep = server.line_handle(gold_line("call_render"));
-      const wakened = wake_make(sleep as dispatch.Sleep, "wake_seven");
-      const outcome = failure_of(dispatch.line_dispatch(wakened));
-      this.assertTrue(outcome.error === failure);
-      this.assertEqual(server.failure_take(), undefined);
-      this.assertEqual(outcome.reply[0], { t: "mcp", r: 4 });
+      const thrown = thrown_get(() => request_send(bench, "call_render"));
+      this.assertTrue(thrown === failure);
+      this.assertEqual(bench.server.failure_take(), undefined);
+      this.assertEqual(bench.ui.came.length, 1);
+      const answer = bench.ui.came[0];
+      this.assertEqual(answer[0], { t: "mcp", r: 4 });
       const cascade = {
         message: "The wake failed.",
         stack: failure.stack,
         cause: { message: "The reply was wrong.", stack: first.stack },
       };
-      this.assertEqual(payload_get(outcome.reply), {
+      this.assertEqual(payload_get(answer), {
         jsonrpc: "2.0",
         id: 4,
         result: {
@@ -713,244 +814,133 @@ namespace test_mcp {
       );
       const text = gold_text("mcp_wake_unknown").replaceAll("{0}", stray);
       this.assertEqual(error.message, text);
+      const bench = bench_make();
       const wake = type_fresh();
-      server.wake_register(wake, () => sleep_gold("sleep_empty", stray));
-      server.tool_register(tool_make("image_make"), () =>
-        sleep_gold("sleep_waiting", wake),
+      bench.server.wake_register(wake, () => sleep_gold("sleep_empty", stray));
+      bench.server.tool_register(tool_make("image_make"), () =>
+        sleep_on("sleep_waiting", wake, [ask_submit(bench)]),
       );
-      const sleep = server.line_handle(gold_line("call_image_make"));
-      const wakened = wake_make(sleep as dispatch.Sleep, "wake_seven");
-      const again = thrown_get(() => dispatch.line_dispatch(wakened));
+      const again = thrown_get(() => request_send(bench, "call_image_make"));
       this.assertEqual(again.message, text);
+      this.assertEqual(bench.ui.came.length, 0);
     }
   }
 
-  // The requests of the client as the boot sends them.
-  export class TestClientRequests extends unittest.TestCase {
-    // The handshake and the tool list go out and come back as exact texts.
-    test_handshake_recorded(): void {
-      const tasks = new QueueDouble([1, 2]);
-      const client = client_make(tasks, "server");
-      const browser = browser_make();
-      const kv_tool = text_read(constants.kv_tool) as unknown as mcp.Tool;
-      browser.tool_register(kv_tool, call_unexpected);
-      this.assertEqual(client.initialize_send(), 1);
-      const answer = browser.line_handle(tasks.submitted[0][0]) as lines.Line;
-      this.assertEqual(JSON.stringify(answer), gold_text("boot_answer_full"));
-      client.initialized_send(answer);
-      this.assertEqual(client.tools_list(), 2);
-      const tools = browser.line_handle(tasks.submitted[1][0]) as lines.Line;
-      const read = client.tools_read(tools);
-      this.assertEqual(sent_texts(tasks.submitted), [
-        [gold_text("boot_initialize_full"), "server"],
-        [gold_text("boot_list_full"), "server"],
-      ]);
-      this.assertEqual(sent_texts(tasks.notified), [
-        [gold_text("boot_initialized_full"), "server"],
-      ]);
-      this.assertEqual(read, [kv_tool]);
-      this.assertEqual(client.tools_cached(), [kv_tool]);
-    }
-
-    // A client takes no name form: its lines take the form the settings pick.
-    test_names_full(): void {
-      const tasks = new QueueDouble([1]);
-      const client = client_make(tasks, "server");
-      const args = { text: "echo hi", timeout_seconds: 5 };
-      this.assertEqual(client.tool_call("console_run", args), 1);
-      const header = tasks.submitted[0][0][0];
-      const full = harness.setting_get("debug") === true;
-      this.assertEqual(Object.hasOwn(header, "type"), full);
-      this.assertEqual(sent_texts(tasks.submitted), [
-        [gold_text("console_call_full"), "server"],
-      ]);
-    }
-
-    // An `initialize` answer of another revision is refused, nothing sent.
-    test_version_refused(): void {
-      const tasks = new QueueDouble([7]);
-      const client = client_make(tasks, "server");
-      client.initialize_send();
-      const error = thrown_get(() =>
-        client.initialized_send(gold_line("version_reply")),
-      );
-      this.assertEqual(error.message, gold_text("mcp_version_refused"));
-      this.assertEqual(tasks.submitted.length, 1);
-      this.assertEqual(tasks.notified.length, 0);
-    }
-
+  // The checks a client makes of the replies it reads, each thrown.
+  export class TestClientChecks extends unittest.TestCase {
     // The tools of a client cannot be had before they are read.
     test_tools_unread(): void {
-      const client = client_make(new QueueDouble([]), "server");
+      const tasks = clients_make(server_make());
+      const client = client_make(tasks, constants.far_thread);
       const error = thrown_get(() => client.tools_cached());
       this.assertEqual(error.message, gold_text("mcp_tools_unread"));
     }
 
-    // A `tools/list` result that is not a list of tools is refused.
+    // A `tools/list` result whose entry is not a tool is refused.
     test_tools_invalid(): void {
-      const client = client_make(new QueueDouble([7, 8]), "server");
-      const cases: [string, string][] = [
-        ["tools_invalid_object", "mcp_result_invalid_object"],
-        ["tools_invalid_entry", "mcp_result_invalid_entry"],
-      ];
-      for (const [reply, text] of cases) {
-        client.tools_list();
-        const error = thrown_get(() => client.tools_read(gold_line(reply)));
-        this.assertEqual(error.message, gold_text(text));
-      }
-    }
-  }
-
-  // The reading of the replies of a client, and every reply it refuses.
-  export class TestClientReplies extends unittest.TestCase {
-    // A result is read with the error flag when the server sends one.
-    test_result_read(): void {
-      const client = client_make(new QueueDouble([7, 8]), "server");
-      client.tool_call("source_put", {});
-      const read = client.result_of(gold_line("result_flagged"));
-      this.assertEqual(read, {
-        content: [{ type: "text", text: "{}" }],
-        isError: false,
-      });
-      client.tool_call("render", {});
-      const bare = client.result_of(gold_line("result_plain"));
-      this.assertEqual(bare, { content: [{ type: "text", text: "{}" }] });
-      this.assertFalse(Object.hasOwn(bare, "isError"));
+      const server = server_make();
+      const entry = gold_value("tools.undescribed") as mcp.Tool;
+      server.tool_register(entry, call_unexpected);
+      const tasks = clients_make(server);
+      const client = client_make(tasks, constants.far_thread);
+      const errors: Error[] = [];
+      steps_run(tasks, [
+        () => [client.tools_list()],
+        ([reply]) => {
+          errors.push(thrown_get(() => client.tools_read(reply)));
+          return [];
+        },
+      ]);
+      this.assertEqual(
+        errors.map((error) => error.message),
+        [gold_text("mcp_result_invalid_entry")],
+      );
     }
 
     // A result whose content or error flag is not valid is refused.
     test_result_invalid(): void {
-      const client = client_make(new QueueDouble([7, 8]), "server");
-      const cases: [string, string][] = [
-        ["result_content_text", "mcp_result_invalid_content"],
-        ["result_flag_text", "mcp_result_invalid_flag"],
-      ];
-      for (const [reply, text] of cases) {
-        client.tool_call("render", {});
-        const error = thrown_get(() => client.result_of(gold_line(reply)));
-        this.assertEqual(error.message, gold_text(text));
-      }
+      const server = server_make();
+      const content = gold_value("results.content_text") as mcp.ToolResult;
+      const flag = gold_value("results.flag_text") as mcp.ToolResult;
+      server.tool_register(tool_make("render"), () => content);
+      server.tool_register(tool_make("source_put"), () => flag);
+      const tasks = clients_make(server);
+      const client = client_make(tasks, constants.far_thread);
+      const errors: Error[] = [];
+      steps_run(tasks, [
+        () => [client.tool_call("render", {})],
+        ([reply]) => {
+          errors.push(thrown_get(() => client.result_of(reply)));
+          return [client.tool_call("source_put", {})];
+        },
+        ([reply]) => {
+          errors.push(thrown_get(() => client.result_of(reply)));
+          return [];
+        },
+      ]);
+      this.assertEqual(
+        errors.map((error) => error.message),
+        [
+          gold_text("mcp_result_invalid_content"),
+          gold_text("mcp_result_invalid_flag"),
+        ],
+      );
     }
 
-    // A reply to no request of the client, or read twice, is refused.
+    // A reply to a request of another client, or read twice, is refused.
     test_reply_unknown(): void {
-      const client = client_make(new QueueDouble([7]), "server");
-      const stray = thrown_get(() =>
-        client.result_of(gold_line("reply_nine")),
+      const server = server_make();
+      server.tool_register(tool_make("render"), () => ({ content: [] }));
+      const tasks = clients_make(server);
+      const caller = client_make(tasks, constants.far_thread);
+      const other = client_make(tasks, constants.far_thread);
+      const errors: Error[] = [];
+      const read: mcp.ToolResult[] = [];
+      steps_run(tasks, [
+        () => [caller.tool_call("render", {})],
+        ([reply]) => {
+          errors.push(thrown_get(() => other.result_of(reply)));
+          read.push(caller.result_of(reply));
+          errors.push(thrown_get(() => caller.result_of(reply)));
+          return [];
+        },
+      ]);
+      this.assertEqual(read, [{ content: [] }]);
+      this.assertEqual(
+        errors.map((error) => error.message),
+        [
+          gold_text("mcp_reply_unknown_stray"),
+          gold_text("mcp_reply_unknown_again"),
+        ],
       );
-      this.assertEqual(stray.message, gold_text("mcp_reply_unknown_stray"));
-      client.tool_call("render", {});
-      const reply = gold_line("render_reply");
-      client.result_of(reply);
-      const again = thrown_get(() => client.result_of(reply));
-      this.assertEqual(again.message, gold_text("mcp_reply_unknown_again"));
     }
 
     // A reply read as the answer of another method is refused.
     test_reply_method(): void {
-      const client = client_make(new QueueDouble([7]), "server");
-      client.tools_list();
-      const error = thrown_get(() =>
-        client.result_of(gold_line("tools_empty")),
+      const tasks = clients_make(server_make());
+      const client = client_make(tasks, constants.far_thread);
+      const errors: Error[] = [];
+      steps_run(tasks, [
+        () => [client.tools_list()],
+        ([reply]) => {
+          errors.push(thrown_get(() => client.result_of(reply)));
+          return [];
+        },
+      ]);
+      this.assertEqual(
+        errors.map((error) => error.message),
+        [gold_text("mcp_reply_method")],
       );
-      this.assertEqual(error.message, gold_text("mcp_reply_method"));
-    }
-
-    // An error response throws with the error the server sent.
-    test_reply_error(): void {
-      const client = client_make(new QueueDouble([8]), "server");
-      client.tool_call("system_restart", { main_loop: "main_loop.py" });
-      const error = thrown_get(() =>
-        client.result_of(gold_line("restart_refused")),
-      );
-      this.assertEqual(error.message, gold_text("mcp_reply_error"));
-    }
-
-    // A reply that is not a response to the id that was sent is refused.
-    test_response_invalid(): void {
-      const tasks = new QueueDouble([7, 8, 9, 10, 11]);
-      const client = client_make(tasks, "server");
-      const cases: [string, string][] = [
-        ["response_version", "mcp_response_invalid_version"],
-        ["response_id", "mcp_response_invalid_id"],
-        ["response_empty", "mcp_response_invalid_empty"],
-        ["response_list", "mcp_response_invalid_list"],
-        ["response_null", "mcp_response_invalid_null"],
-      ];
-      for (const [reply, text] of cases) {
-        client.tool_call("render", {});
-        const error = thrown_get(() => client.result_of(gold_line(reply)));
-        this.assertEqual(error.message, gold_text(text));
-      }
     }
   }
 
-  // The set of clients: prefixed tools, routed calls and their errors.
+  // The set of clients: the prefixes it refuses and the replies it reads.
   export class TestClientSet extends unittest.TestCase {
-    // The tools of every client are listed in order under dotted names.
-    test_tools_prefixed(): void {
-      const tasks = new QueueDouble([7, 8, 9]);
-      const browser = client_make(tasks, "ui");
-      const server = client_make(tasks, "server");
-      const kv_tool = text_read(constants.kv_tool);
-      const recorded = text_read(constants.stdio_tools);
-      browser.tools_list();
-      const list = { jsonrpc: "2.0", id: 1, result: { tools: [kv_tool] } };
-      browser.tools_read(line_filled("reply_seven", list));
-      server.initialize_send();
-      server.tools_list();
-      server.tools_read(line_filled("reply_nine", recorded));
-      const set = new mcp.ClientSet();
-      set.client_add("browser", browser);
-      set.client_add("server", server);
-      const listed = (recorded.result as { tools: FieldTable[] }).tools;
-      this.assertEqual(set.tools_cached(), [
-        { ...kv_tool, name: "browser.kv_get" },
-        { ...listed[0], name: "server.source_put" },
-        { ...listed[1], name: "server.system_restart" },
-      ]);
-    }
-
-    // A call goes to the client of its prefix by the bare name, and back.
-    test_calls_routed(): void {
-      const tasks = new QueueDouble([7, 8]);
-      const browser = client_make(tasks, "ui");
-      const server = client_make(tasks, "server");
-      const set = new mcp.ClientSet();
-      set.client_add("browser", browser);
-      set.client_add("server", server);
-      const nothing = { ref: "/metaverse/nothing" };
-      const restart = { main_loop: "main_loop.py" };
-      this.assertEqual(set.tool_call("browser.kv_get", nothing), 7);
-      this.assertEqual(set.tool_call("server.system_restart", restart), 8);
-      const [sent, near] = tasks.submitted[0];
-      this.assertEqual(near, "ui");
-      this.assertEqual(
-        JSON.stringify(payload_get(sent)),
-        constants.fault_call,
-      );
-      const [routed, far] = tasks.submitted[1];
-      this.assertEqual(far, "server");
-      const recorded = text_read(constants.stdio_restart);
-      this.assertEqual(payload_get(routed).params, recorded.params);
-      const tools = browser_make();
-      const result: mcp.ToolResult = {
-        content: [{ type: "text", text: "{}" }],
-      };
-      tools.tool_register(tool_make("kv_get"), () => result);
-      const answer = tools.line_handle(sent) as lines.Line;
-      this.assertEqual(set.result_of(answer), result);
-      const error = thrown_get(() =>
-        set.result_of(gold_line("restart_refused")),
-      );
-      this.assertEqual(error.message, gold_text("mcp_reply_error"));
-    }
-
     // A prefix that is empty, dotted or already added is refused.
     test_prefix_refused(): void {
-      const tasks = new QueueDouble([]);
+      const tasks = clients_make(server_make());
       const set = new mcp.ClientSet();
-      set.client_add("server", client_make(tasks, "server"));
+      set.client_add("server", client_make(tasks, constants.far_thread));
       const cases: [string, string][] = [
         ["", "mcp_prefix_refused_empty"],
         ["browser.tools", "mcp_prefix_refused_dotted"],
@@ -958,7 +948,7 @@ namespace test_mcp {
       ];
       for (const [prefix, text] of cases) {
         const error = thrown_get(() =>
-          set.client_add(prefix, client_make(tasks, "ui")),
+          set.client_add(prefix, client_make(tasks, constants.test_thread)),
         );
         this.assertEqual(error.message, gold_text(text));
       }
@@ -966,9 +956,9 @@ namespace test_mcp {
 
     // A name with no dot or with a prefix of no client is refused.
     test_prefix_unknown(): void {
-      const tasks = new QueueDouble([]);
+      const tasks = clients_make(server_make());
       const set = new mcp.ClientSet();
-      set.client_add("server", client_make(tasks, "server"));
+      set.client_add("server", client_make(tasks, constants.far_thread));
       const cases: [string, string][] = [
         ["kv_get", "mcp_prefix_unknown_bare"],
         ["browser.kv_get", "mcp_prefix_unknown_browser"],
@@ -977,14 +967,28 @@ namespace test_mcp {
         const error = thrown_get(() => set.tool_call(name, {}));
         this.assertEqual(error.message, gold_text(text));
       }
-      this.assertEqual(tasks.submitted.length, 0);
     }
 
-    // A reply to no call of the set is refused.
+    // A reply to a call of a client outside the set is refused.
     test_reply_stray(): void {
+      const server = server_make();
+      server.tool_register(tool_make("render"), () => ({ content: [] }));
+      const tasks = clients_make(server);
+      const outside = client_make(tasks, constants.far_thread);
       const set = new mcp.ClientSet();
-      const error = thrown_get(() => set.result_of(gold_line("reply_nine")));
-      this.assertEqual(error.message, gold_text("mcp_reply_unknown_stray"));
+      set.client_add("server", client_make(tasks, constants.far_thread));
+      const errors: Error[] = [];
+      steps_run(tasks, [
+        () => [outside.tool_call("render", {})],
+        ([reply]) => {
+          errors.push(thrown_get(() => set.result_of(reply)));
+          return [];
+        },
+      ]);
+      this.assertEqual(
+        errors.map((error) => error.message),
+        [gold_text("mcp_reply_unknown_stray")],
+      );
     }
   }
 }

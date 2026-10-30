@@ -166,8 +166,7 @@ def _child_end(
         os.kill(os.getpid(), signal.SIGKILL)
 
 
-# The work of a child that opens the root's log with the ring of its
-# settings, as `bootstrap.py` does, prepares the root and serves the pipes.
+# In a child, opens the log as `bootstrap.py` does, prepares, serves the pipes.
 def _session_serve(root: str, read_fd: int, write_fd: int) -> str:
     path = os.path.join(root, "settings.json")
     with open(path, encoding="utf-8") as file:
@@ -244,9 +243,7 @@ class ScratchCase(unittest.TestCase):
 
 # Sessions served by the loop and every module it calls into.
 class TestSession(ScratchCase):
-    # Echoes and pushes in turn, then the browser's failure: the echoes are
-    # written, the pushes and the bail out end the TAP file, the cascade is
-    # logged, and the streamed blob stays in the cache.
+    # Echo, push, fail: echoes out, pushes, bail in TAP, logged, blob cached.
     def test_session_served(self) -> None:
         first = [b"abc", bytes(range(256))]
         streamed = [bytes(index % 256 for index in range(_STREAMED_BYTES))]
@@ -278,9 +275,7 @@ class TestSession(ScratchCase):
         cache = os.path.join(self.root, _CACHE_DIRECTORY)
         self.assertEqual(len(os.listdir(cache)), 1)
 
-    # An echo and a push, then a line of no handler: the echo is written,
-    # then one `error` line with that line's id, the TAP file holds the push
-    # alone, and nothing is logged.
+    # Echo, push, unhandled: echo out, `error` by id, push only in TAP, no log.
     def test_session_failed(self) -> None:
         first = [b"abc"]
         pushed = "ok 1 - first"

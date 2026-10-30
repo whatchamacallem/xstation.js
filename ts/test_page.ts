@@ -54,7 +54,7 @@ namespace test_page {
 
   // Sets the reply field of a line's header in the header's own name form.
   function reply_set(line: lines.Line, id: number): lines.Line {
-    const header = line[0] as { [field: string]: unknown };
+    const header = line[0] as unknown as { [field: string]: unknown };
     header[Object.hasOwn(header, "type") ? "reply" : "r"] = id;
     return line;
   }

@@ -39,8 +39,7 @@ _CONSOLE_ENVIRONMENT = {
     "OTHER": "dropped",
 }
 
-# The variables the shell prints, the kept ones, then `LANG`, never set, and
-# the two dropped.
+# Variables the shell prints: those kept, `LANG`, never set, the two dropped.
 _FOUND_VARIABLES = (
     "HOME",
     "PATH",
@@ -158,8 +157,7 @@ def _root_make(case: unittest.TestCase, level: int) -> ScratchRoot:
     return ScratchRoot(scratch.name, root)
 
 
-# In the forked child: the pty as its tty and its 0, 1 and 2, the
-# environment, the run, how it ended written to the file, then a kill.
+# In the forked child: `login_tty`, environment, run, ending to file, a kill.
 def _child_main(
     slave: int, argv: list[str], environment: dict[str, str], path: str
 ) -> None:
@@ -221,8 +219,7 @@ class ConsoleChild:
         edited = lflag & (termios.ICANON | termios.ECHO)
         return not edited and not oflag & termios.OPOST
 
-    # Reads the shell's echo and output to their end, then returns how the
-    # run ended.
+    # Reads the shell's echo and output to the end, then returns how it ended.
     def run_end(self) -> str:
         while self.bytes_read():
             pass

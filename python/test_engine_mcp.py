@@ -91,8 +91,7 @@ def _fail_run(arguments: dict[str, Any]) -> NoReturn:
     raise ValueError(_TOOL_FAILURE)
 
 
-# A new server named as the gold's `initialize` reply, with the gold's tools:
-# the echo tool and the failing one, in the order `tools/list` gives them.
+# A new server with the gold's name and tools, the echo then the failing one.
 def _server_make() -> engine_mcp.mcp.Server:
     identity = _gold_value("lines.initialize_reply")["result"]["serverInfo"]
     server = engine_mcp.mcp.Server(identity["name"], identity["version"])
@@ -122,8 +121,7 @@ def _lines_handle(lines: list[Any]) -> list[object]:
     ]
 
 
-# The work of a child: registers on a new server, leaves it the failure of a
-# request it handles alone, then calls the handler on the line.
+# In a child: registers on a new server, leaves it a failure, handles the line.
 def _failure_left(line: Any) -> object:
     server = _server_make()
     engine_mcp.handlers_register(server)
@@ -158,8 +156,7 @@ def _child_end(work: Callable[[], object], path: str) -> None:
         os.kill(os.getpid(), signal.SIGKILL)
 
 
-# Gives each test a scratch directory in `build/` and runs its work in
-# children.
+# Gives each test a scratch directory in `build/`, runs its work in children.
 class ScratchCase(unittest.TestCase):
     # Makes the scratch directory.
     def setUp(self) -> None:
@@ -280,8 +277,7 @@ class TestPass(ScratchCase):
         expected = [_gold_raw("lines.ping_reply")]
         self.assertEqual(self.child_value(work), expected)
 
-    # A failure the server keeps when no response comes raises: a `Failure`
-    # needs a reply.
+    # A kept failure with no response raises, as a `Failure` needs a reply.
     def test_failure_unanswered(self) -> None:
         line = _gold_value("lines.initialized")
         self.child_raise(
@@ -299,8 +295,7 @@ class TestPass(ScratchCase):
             _text_get("engine_mcp_not_registered"),
         )
 
-    # The handler is registered under `mcp` at version 0, which the
-    # dispatcher then refuses to register again.
+    # The handler is registered under `mcp` at version 0, a repeat refused.
     def test_handlers_registered(self) -> None:
         self.child_raise(
             _register_twice,

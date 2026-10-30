@@ -60,8 +60,7 @@ _LANGUAGES_REFUSED = (
     ("../typescript", "path"),
 )
 
-# A size chosen by its writer, past every write of a child's log: the bytes
-# of the TypeScript file before a write that the file size limit cuts short.
+# TypeScript file size before a write cut short, chosen above any log write.
 _FILL_BYTES: int = harness.gold_get(f"{_GOLD_ID}.fill_bytes")
 
 # The bytes a write cut short writes: the limit is this far past the fill.
@@ -196,8 +195,7 @@ def _language_handle(root: str, language: str) -> Any:
     return _handler_call(engine_tap.tap_line, line)
 
 
-# The work of a child: opens the root's log through `engine_tap`, registers,
-# handles each text's line, then takes the browser's failure.
+# In a child: opens the log, registers, handles the texts, takes the failure.
 def _failure_take(
     root: str,
     texts: tuple[str, ...],
@@ -211,8 +209,7 @@ def _failure_take(
     engine_tap.error_take(message, _STACK, cause)
 
 
-# The work of a child: opens the root's log, then takes a failure before the
-# registration.
+# The work of a child: opens the log, then takes a failure before registering.
 def _failure_early(root: str) -> None:
     engine_tap.verbose.log_open(root, _RING)
     engine_tap.error_take("boom", _STACK, None)
@@ -224,8 +221,7 @@ def _register_twice(root: str) -> None:
     engine_tap.dispatch.handler_register("tap.line", 0, engine_tap.tap_line)
 
 
-# Runs the work with a file's size limited to `_SHORT_BYTES` past the fill,
-# `SIGXFSZ` ignored, then restores the limit for the ending's write.
+# Runs the work, files capped past the fill, `SIGXFSZ` ignored, then uncaps.
 def _limited_run(work: Callable[[], object]) -> object:
     signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
     soft, hard = resource.getrlimit(resource.RLIMIT_FSIZE)
@@ -455,8 +451,7 @@ class TestRefuse(ScratchCase):
             _text_get("engine_tap_not_registered"),
         )
 
-    # The handler is registered under its type at version 0, which the
-    # dispatcher then refuses to register again.
+    # The handler is registered under its type at version 0, a repeat refused.
     def test_handlers_registered(self) -> None:
         self.child_raise(
             functools.partial(_register_twice, self.root),

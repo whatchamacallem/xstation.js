@@ -78,7 +78,7 @@ import argparse, functools, importlib, os, signal, sys, tempfile, time, types
 import unittest
 from typing import TYPE_CHECKING
 
-# Only the type checker imports it here; `main` imports it first of all.
+# Only the type checker imports it here, and `main` imports it first of all.
 if TYPE_CHECKING:
     import line_coverage
 
@@ -159,8 +159,7 @@ _LATER: list[tuple[str, str]] = [
     ("test_test_posix_formatters", "ruff"),
 ]
 
-# The modules a suite counts for under `--coverage` where they are not the
-# one module its name gives, none for a stdio suite or the pair test.
+# Modules a suite counts for beyond its namesake, none for stdio or pair tests.
 _COUNTED: dict[str, tuple[str, ...]] = {
     "failing_suite": (),
     "test_jslb_vectors": ("jslb",),
@@ -192,8 +191,7 @@ class StreamWriter:
         self._blocks = 0
         self._place = "before the first block"
 
-    # Reads the line, raising unless it fits, naming the block it is in or
-    # follows, then writes it and a newline to stdout, flushed.
+    # Prints the line, flushed, raising first unless it fits, naming its block.
     def line_write(self, text: str) -> None:
         import tap_consumer
 
@@ -267,8 +265,7 @@ def paths_counted(name: str) -> list[str]:
     return [os.path.join(_PYTHON_PATH, module + ".py") for module in modules]
 
 
-# After the passing block of the suite at `index`, checks each module it
-# counts for that no later suite of the run counts for.
+# After suite `index` passes, checks its modules no later suite counts for.
 def coverage_check(
     count: line_coverage.LineCount,
     modules: list[tuple[str, str]],
@@ -358,8 +355,7 @@ def stream_relay(
 def main(arguments: list[str]) -> int:
     import line_coverage
 
-    # With `--coverage`, as the parser below takes it, the count starts
-    # before any other project module loads, so that their imports count.
+    # With `--coverage`, the count starts before other project modules import.
     count = line_coverage.LineCount() if "--coverage" in arguments else None
     import category
 

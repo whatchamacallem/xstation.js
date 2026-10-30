@@ -52,8 +52,7 @@ def _tool_raise(error: Exception, arguments: dict[str, Any]) -> NoReturn:
     raise error
 
 
-# Joins a client to a server: each message the client sends is handled by
-# the server, and each response goes back to the client.
+# Joins a client to a server that handles each send and returns each response.
 class ClientLink:
     # Makes a client whose send is a call of the server.
     def __init__(self, server: mcp.Server) -> None:

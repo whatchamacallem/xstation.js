@@ -134,9 +134,14 @@ _AI_MODULES = (
     "test_queue",
     "test_http",
     "test_wire",
+    "test_wire_end",
     "test_provider",
+    "test_provider_key",
     "test_mcp",
     "test_substrate",
+    "test_substrate_store",
+    "test_jslb_decode",
+    "test_wire_port",
     "test_script",
     "test_provider_script",
     "test_tools_browser",
@@ -150,6 +155,7 @@ _UI_MODULES = (
     "test_unittest",
     "test_error_overlay",
     "test_media",
+    "test_integrate_media",
     "test_console_view",
     "test_overlay",
     "test_page",
@@ -948,8 +954,10 @@ _PROBE_KIT = r"""(() => {
   probe.kill_put_body = [
     "const store = new substrate.Store(",
     "  sqlite3,",
-    "  test_substrate.kill_pool(pool, () =>",
-    "    test_substrate.kill_hold(() => self.postMessage({ paused: true })),",
+    "  test_substrate_store.kill_pool(pool, () =>",
+    "    test_substrate_store.kill_hold(() =>",
+    "      self.postMessage({ paused: true }),",
+    "    ),",
     "  ),",
     "  cache,",
     "  options.root,",
@@ -957,7 +965,7 @@ _PROBE_KIT = r"""(() => {
     "  options.compact,",
     "  { line_notify: () => undefined },",
     ");",
-    "test_substrate.kill_put(store);",
+    "test_substrate_store.kill_put(store);",
   ];
   probe.kill_check_body = [
     "const store = new substrate.Store(",
@@ -969,7 +977,7 @@ _PROBE_KIT = r"""(() => {
     "  options.compact,",
     "  { line_notify: () => undefined },",
     ");",
-    "self.postMessage({ checked: test_substrate.kill_check(store) });",
+    "self.postMessage({ checked: test_substrate_store.kill_check(store) });",
   ];
   probe.kill_run = (options) => {
     probe.kill = null;

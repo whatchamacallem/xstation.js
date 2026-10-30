@@ -168,8 +168,7 @@ class PipeCase(unittest.TestCase):
     def fail_run(self, arguments: dict[str, Any]) -> mcp.ToolResult:
         raise self.error
 
-    # A pipe that holds the text, then closed, as stdin, and a pipe as stdout,
-    # with the descriptor that reads it.
+    # A closed pipe of the text as stdin, a pipe as stdout and its read end.
     def streams_open(self, text: str) -> tuple[TextIO, TextIO, int]:
         input_read, input_write = os.pipe()
         data = text.encode("utf-8")
@@ -189,8 +188,7 @@ class PipeCase(unittest.TestCase):
         code = mcp_stdio.stdio_run(self.register, stdin, stdout)
         return code, _pipe_take(output)
 
-    # Runs the loop on the text, which raises the kind; returns the exception
-    # and the output out so far.
+    # Returns the exception the loop raises on the text, and the output so far.
     def failure_run(
         self, text: str, kind: type[BaseException]
     ) -> tuple[BaseException, str]:
@@ -252,8 +250,7 @@ class TestLoop(PipeCase):
     def test_line_unterminated(self) -> None:
         self.assertEqual(self.loop_run(_PING_LINE), (0, _PING_REPLY + "\n"))
 
-    # Each response is out as it is written, while the loop waits on its
-    # input, and a notification writes nothing.
+    # Responses are out as written, while the loop waits, notifications silent.
     def test_flush_each(self) -> None:
         input_read, input_write = os.pipe()
         output_read, output_write = os.pipe()
@@ -346,8 +343,7 @@ class TestErrors(PipeCase):
         )
         self.assertEqual(output, "")
 
-    # The runner refuses to start without `--root`, its usage error on its
-    # stderr, with usage exit code 2.
+    # Without `--root` the runner refuses, usage error on stderr, exit code 2.
     def test_root_required(self) -> None:
         error_read, error_write = os.pipe()
 

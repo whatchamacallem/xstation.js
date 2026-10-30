@@ -25,8 +25,7 @@ _BUILD_PATH = os.path.join(
 # The open descriptors of the process, which a file closed leaves as before.
 _DESCRIPTORS_PATH = "/proc/self/fd"
 
-# One byte past the largest buffer `open` gives a file, 8 MiB unless
-# `io.DEFAULT_BUFFER_SIZE` is larger, so that a write this long reaches it.
+# One byte past `open`'s largest buffer, so that such a write reaches the file.
 _BUFFER_PAST = max(8 * 1024 * 1024, io.DEFAULT_BUFFER_SIZE) + 1
 
 # The ending a forked child sends when all its checks passed.
@@ -97,8 +96,7 @@ class _ScratchSink:
         return os.path.join(self.directory, f"blob_{len(self.headers)}")
 
 
-# In a forked child: stops its files from growing, runs the checks, sends how
-# they ended through the pipe, and kills itself, never returning to the run.
+# Forked child: stops file growth, runs checks, pipes the ending, kills itself.
 def _child_end(checks: Callable[[], str], write_fd: int) -> None:
     try:
         try:
@@ -978,8 +976,7 @@ class TestDecode(ScratchCase):
 
 # Tests blobs over `overflow_bytes`, streamed into the sink's files.
 class TestStream(ScratchCase):
-    # Runs the checks in a forked child whose files cannot grow, and fails
-    # with what the child sent unless they all passed.
+    # Runs checks in a child whose files cannot grow, failing on what it sent.
     def capped_check(self, checks: Callable[[], str]) -> None:
         read_fd, write_fd = os.pipe()
         pid = os.fork()
@@ -1054,8 +1051,7 @@ class TestStream(ScratchCase):
         with open(path, "rb") as file:
             self.assertEqual(file.read(), b"kept")
 
-    # A streamed blob's file is closed when its bytes cannot be written, at
-    # once or after a line, in a child whose files cannot grow.
+    # A streamed blob's file closes when it cannot grow, now or after a line.
     def test_stream_closed(self) -> None:
         size = _OVERFLOW_BYTES + 1
         line = b'{"0":{"t":"echo","b":1},"1":{"s":%d}}\r' % size
@@ -1081,8 +1077,7 @@ class TestStream(ScratchCase):
 
         self.capped_check(faults_check)
 
-    # A close that fails after a write failed raises, the write's error its
-    # context, in a child whose files cannot grow.
+    # A failed close, after a failed write, raises with that error as context.
     def test_close_failure(self) -> None:
         size = _BUFFER_PAST + 1
         line = b'{"0":{"t":"echo","b":1},"1":{"s":%d}}\r' % size

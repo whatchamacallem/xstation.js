@@ -23,6 +23,12 @@
 // `cause` entries rebuilt as Errors under its `cause`, so the sender's
 // cascade is kept whole. A wake line is built in the form
 // `settings.names_full()` picks.
+//
+// A `LocalPort` hands each line as it is to the receiver of its far end,
+// which is the port itself unless it was made with another as its far end.
+// Two ports so linked join two queues of one thread, each holding one end,
+// so a line posted at one end runs on the other queue within the post. A
+// port that is linked already cannot be linked again.
 
 namespace queue {
   // The names and settings this module reads and writes.
@@ -249,13 +255,27 @@ namespace queue {
     return data as lines.Line;
   }
 
-  // Same thread: a posted line goes as it is to the one receiver.
+  // Same thread: a posted line goes as it is to the receiver of the far end.
   export class LocalPort implements Port {
     private receiver: ((line: lines.Line) => void) | undefined;
+    private far: LocalPort;
+
+    // Links the port given back to this one as its far end, else is its own.
+    constructor(far?: LocalPort) {
+      if (far === undefined) {
+        this.far = this;
+        return;
+      }
+      if (far.far !== far) {
+        throw new Error(i18n("queue.port_linked"));
+      }
+      far.far = this;
+      this.far = far;
+    }
 
     // Hands the line on, as the queue moved its blob bytes before the post.
     line_post(line: lines.Line, _transfer: ArrayBuffer[]): void {
-      const receiver = this.receiver;
+      const receiver = this.far.receiver;
       if (receiver === undefined) {
         throw new Error(i18n("queue.receiver_missing"));
       }

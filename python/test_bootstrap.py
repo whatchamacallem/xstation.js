@@ -85,8 +85,7 @@ _ENDING_NAME = "ending.txt"
 # Bytes after the reply, which the main loop must find unread.
 _AFTER_REPLY = b"the bytes after the reply"
 
-# A main loop that writes its calls to files in the root, its `loop_run`
-# once it has read the bytes after the reply.
+# A main loop writing its calls to the root, `loop_run` after `_AFTER_REPLY`.
 _LOOP_TEXT = (
     "import json, os\n"
     "\n"
@@ -375,8 +374,7 @@ def _lock_hold(root: str) -> tuple[int, int]:
     return pid, release_write
 
 
-# In the forked child: the pty as its tty and its 0, 1 and 2, the
-# environment, the run, how it ended written to the file, then a kill.
+# In the forked child: `login_tty`, environment, run, ending to file, a kill.
 def _child_main(
     slave: int,
     argv: list[str],
@@ -636,8 +634,7 @@ class TestFirst(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(made.root, _RUN_NAME)))
         self.assertEqual(_log_read(made.root), [_failure_line(expected)])
 
-    # Outside debug mode `tap.start` is short, its test settings left unread,
-    # and the stock main loop answers the request after the reply.
+    # No debug: short `tap.start`, test settings unread, stock loop answers.
     def test_first_short(self) -> None:
         made = _root_make(self, False)
         os.remove(os.path.join(made.root, _TESTS_NAME))
@@ -831,8 +828,7 @@ class TestConsole(unittest.TestCase):
         self.assertFalse(child.raw_get())
         _log_absent(self, made.root)
 
-    # A dash that cannot start, as the user may own no more processes, is
-    # logged, then is one error line and exit 1, the pty never raw.
+    # A dash denied a process is logged, one error line, exit 1, pty never raw.
     def test_console_failed(self) -> None:
         made = _level_write(_root_make(self, True), 0)
         argv = ["--root", made.root, "console"]

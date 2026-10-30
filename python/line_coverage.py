@@ -29,8 +29,7 @@ _EXEMPT_MARK = "# pragma: no cover"
 # The name of the code that evaluates deferred annotations when read.
 _ANNOTATE_NAME = "__annotate__"
 
-# The tool ids a count may take, in turn: of the ids 0 to 5, the coverage
-# tool's and those after it, leaving the debugger's.
+# Tool ids to take in turn, from the coverage tool's to 5, past the debugger's.
 _TOOL_IDS = range(sys.monitoring.COVERAGE_ID, 6)
 
 # The name a count's tool id carries.
@@ -64,8 +63,7 @@ class LineCount:
         self._pid = os.getpid()
         # The real path of each file name a code object gives.
         self._paths: dict[str, str] = {}
-        # The real paths of the files whose function lines count now, each
-        # with a byte for each line number, which a forked child sets.
+        # The suite's files by real path, a byte per line a forked child sets.
         self._suite: dict[str, mmap.mmap] = {}
         # The lines counted as run, by the real path of their file.
         self._run: collections.defaultdict[str, set[int]] = (
@@ -86,8 +84,7 @@ class LineCount:
         # A function line turned off outside a suite fires again in this one.
         sys.monitoring.restart_events()
 
-    # Counts the lines the suite's forked children marked; from now, the
-    # function lines of no file count.
+    # Counts what forked children marked, then stops counting function lines.
     def suite_leave(self) -> None:
         for path, marks in self._suite.items():
             lines = range(len(marks))
@@ -123,7 +120,7 @@ class LineCount:
         if path in self._suite and os.getpid() != self._pid:
             # A forked child marks the line for the counting process to read.
             self._suite[path][line] = 1
-        # Function code is optimized; module and class body code is not.
+        # Function code is optimized, and module and class body code is not.
         elif path in self._suite or not code.co_flags & inspect.CO_OPTIMIZED:
             self._run[path].add(line)
         return sys.monitoring.DISABLE
@@ -153,8 +150,7 @@ def _lines_held(module: types.CodeType) -> set[int]:
     return held
 
 
-# The exempt lines: from the first line of each statement that ends with the
-# mark to the end of the block that line opens, or else of the statement.
+# The exempt lines: a marked statement's, and those of the block it opens.
 def _lines_exempt(source: str) -> set[int]:
     lines = source.split("\n")
     exempt: set[int] = set()

@@ -130,8 +130,7 @@ def _lines_serve(root: str, data: bytes) -> list[object]:
     ]
 
 
-# The work of a child: opens the root's log, registers, reads the browser's
-# `error` line from the bytes and hands its cascade to `error_take`.
+# In a child: opens the log, registers, hands an `error` line to `error_take`.
 def _failure_serve(root: str, data: bytes) -> None:
     engine_tap.verbose.log_open(root, _RING)
     engine_tap.handlers_register(root)
@@ -244,8 +243,7 @@ class TestServe(ScratchCase):
         )
         self.assertEqual(os.listdir(self.root), [])
 
-    # A `tap.line` sent as a request is appended, then the dispatcher
-    # refuses it for the reply the handler never gives.
+    # A `tap.line` request is appended, then refused for want of a reply.
     def test_request_refused(self) -> None:
         self.child_raise(
             functools.partial(
@@ -261,8 +259,7 @@ class TestServe(ScratchCase):
 
 # Tests the browser's `error` line read by the decoder and taken.
 class TestFailure(ScratchCase):
-    # The decoded cascade is logged outermost first, then the bail out ends
-    # the TypeScript file.
+    # Cascade logged outermost first, then a bail out ends the TypeScript file.
     def test_failure_taken(self) -> None:
         work = functools.partial(
             _failure_serve, self.root, _gold_bytes("browser_error")

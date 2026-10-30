@@ -1,7 +1,13 @@
 // tappy's producer, with the names and parameters of the Python producer:
 // one TAP version 14 stream, a parent plan, and one indented block per test
 // module, each with its own plan. Each line goes to the stream's writer the
-// moment it is made; the bring up sends each as a `tap.line` at once.
+// moment it is made; the bring up sends each as a `tap.line` at once. A
+// block whose points arrive after the call that starts it, as line cases
+// do, opens with `block_start` and closes with `block_end`, which writes its
+// plan last, then its parent line, or with failfast after a failed point the
+// bail out line, and returns whether it passed. A failed point is `not ok`
+// without a `TODO` directive. No module or block runs while one is open, and
+// the stream does not end then.
 
 declare namespace tap_producer {
   // Writes the lines of one level of a stream the moment each is added.
@@ -29,17 +35,10 @@ declare namespace tap_producer {
     generate_tap_reports(): void;
   }
 
-  // Turns the harness's outcomes into one point per test.
-  class TAPTestResult implements unittest.TestResult {
-    testsRun: number;
-    failures: number;
-    errors: number;
-    skipped: number;
-    unexpectedSuccesses: number;
-    shouldStop: boolean;
+  // Turns the harness's outcomes into one point per test, as Python's does.
+  class TAPTestResult extends unittest.TestResult {
     // `tracker` writes the points, `failfast` stops at the first failure.
     constructor(tracker: Tracker, failfast: boolean);
-    wasSuccessful(): boolean;
     startTest(test: unittest.TestCase): void;
     addSuccess(test: unittest.TestCase): void;
     addSkip(test: unittest.TestCase, reason: string): void;
@@ -55,12 +54,18 @@ declare namespace tap_producer {
   class TAPTestRunner {
     // As `TextTestRunner(failfast=...)`.
     constructor(failfast: boolean);
+    // Whether the first failure ends the stream, as Python's runner keeps it.
+    readonly failfast: boolean;
     // Sends each line to `write` as it is made, the version line first.
     set_stream(write: (text: string) => void): void;
     // Runs the suite as one block, its plan first, and returns its result.
     run(test: unittest.TestSuite): TAPTestResult;
     // Loads and runs one module as a block. True when it passed.
     module_run(module: string, load: () => unittest.TestSuite): boolean;
+    // Opens a block written as its points are added, and returns its tracker.
+    block_start(name: string): Tracker;
+    // Writes the block's plan, then its parent line or failfast's bail out.
+    block_end(name: string): boolean;
     // Writes the parent plan unless the stream bailed out. True if all passed.
     run_end(): boolean;
   }

@@ -382,37 +382,8 @@ namespace test_http {
     }
   }
 
-  // The error lines made from a rejected fetch and from the timer.
+  // The error line made from the timer.
   export class TestFailureReply extends unittest.TestCase {
-    // A rejected fetch is an `error` line naming the url and the cause.
-    test_failure_text(): void {
-      const exchange = exchange_make({});
-      const cause = new TypeError("Failed to fetch");
-      const reply = exchange.failure_reply(cause);
-      this.assertEqual(reply[0], gold_value("lines.header_error"));
-      this.assertEqual(Object.keys(reply).join(","), "0,message,stack");
-      this.assertEqual(
-        message_get(reply),
-        gold_text("http_fetch_failed_error"),
-      );
-      this.assertTrue(String(reply.stack).length > 0);
-    }
-
-    // A cause that is no error is named by its text.
-    test_failure_other(): void {
-      const exchange = exchange_make({});
-      const causes: [unknown, string][] = [
-        ["boom", "http_fetch_failed_text"],
-        [5, "http_fetch_failed_number"],
-        [undefined, "http_fetch_failed_undefined"],
-        [null, "http_fetch_failed_null"],
-      ];
-      for (const [cause, name] of causes) {
-        const reply = exchange.failure_reply(cause);
-        this.assertEqual(message_get(reply), gold_text(name));
-      }
-    }
-
     // The timeout is an `error` line naming the url and the seconds.
     test_timeout_text(): void {
       const exchange = exchange_make({});
@@ -435,20 +406,11 @@ namespace test_http {
       );
     }
 
-    // The timeout message differs from the message of a failed fetch.
-    test_timeout_distinct(): void {
-      const exchange = exchange_make({});
-      const timeout = message_get(exchange.timeout_reply(5));
-      const failure = message_get(exchange.failure_reply(new Error("x")));
-      this.assertFalse(timeout === failure);
-    }
-
-    // Both error lines follow the name form of the request.
+    // The timeout's error line follows the name form of the request.
     test_error_full(): void {
       const exchange = exchange_make({}, "request_full");
       const expected = gold_value("lines.header_error_full");
       this.assertEqual(exchange.timeout_reply(5)[0], expected);
-      this.assertEqual(exchange.failure_reply("x")[0], expected);
     }
   }
 

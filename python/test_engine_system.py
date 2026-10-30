@@ -173,8 +173,7 @@ def _call_message(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-# What a server kept of a tool's exception: its type and text, and the code
-# of an `RpcError`.
+# What a server kept of a tool's exception: type, text, an `RpcError`'s code.
 def _failure_read(failure: BaseException | None) -> object:
     if failure is None:
         return None
@@ -204,8 +203,7 @@ def _tools_list(root: str, debug: bool) -> object:
     return _tools_server(root, debug).message_handle(_LIST_MESSAGE)
 
 
-# The work of a child: calls a tool of a new server, returns the response
-# and the exception the server kept.
+# In a child: calls a new server's tool, returns the response, kept exception.
 def _tool_run(
     root: str, debug: bool, name: str, arguments: dict[str, Any]
 ) -> list[object]:
@@ -507,8 +505,7 @@ class TestSource(ScratchCase):
         self.assertEqual(os.listdir(self.root), [])
 
 
-# Tests what the handler of `system.restart` refuses, each in a child that a
-# restart would replace, so the ending it writes shows the process kept.
+# Tests `system.restart` refusals in children whose endings show none replaced.
 class TestRestart(ScratchCase):
     # A file that does not exist raises.
     def test_file_missing(self) -> None:
@@ -622,8 +619,7 @@ class TestTools(ScratchCase):
         self.tool_failed(True, "source_put", arguments, failure)
         self.assertEqual(os.listdir(self.root), [])
 
-    # With debug mode off the restart tool raises, in a child it would
-    # replace.
+    # With debug mode off the restart tool raises, in a child it would replace.
     def test_restart_gated(self) -> None:
         _loop_write(self.root, "b.py")
         message = _text_get("engine_system_debug_off_restart_tool")
@@ -631,8 +627,7 @@ class TestTools(ScratchCase):
         arguments = {"main_loop": "b.py"}
         self.tool_failed(False, "system_restart", arguments, failure)
 
-    # A missing file or a missing argument raises, in a child it would
-    # replace.
+    # A missing file or a missing argument raises, in a child it would replace.
     def test_restart_refused(self) -> None:
         path = os.path.join(self.loop_path, "b.py")
         missing = _text_get("engine_system_main_loop_missing")
@@ -653,8 +648,7 @@ class TestTools(ScratchCase):
 
 # Tests the registration.
 class TestRegister(ScratchCase):
-    # Each handler is registered under its type at version 0, which the
-    # dispatcher then refuses to register again.
+    # Each handler is registered under its type at version 0, a repeat refused.
     def test_handlers_registered(self) -> None:
         for name, case in _HANDLER_TYPES:
             with self.subTest(name=name):

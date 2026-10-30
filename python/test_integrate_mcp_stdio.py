@@ -4,7 +4,7 @@
 #
 # Tests the runner of the stdio transport, `stdio_serve`, which reads the
 # root's settings and serves the tools of `engine_system` on a real
-# `mcp.Server`, in forked children whose stdin and stdout are pipes, on
+# `mcp.Server`, in forked children whose stdin is a pipe and stdout a file, on
 # roots in build/ that hold the checkout's settings with `debug` set: a
 # session answered against the tools of API/mcp/tools.json, `source_put`
 # writing a main loop file into the root in debug mode, and refused with
@@ -30,6 +30,12 @@ _GOLD_ID = "python.test_integrate_mcp_stdio"
 
 # The file in its scratch directory a child writes how it ended to.
 _ENDING_NAME = "ending.txt"
+
+# The child's stdout, a file: its `sys.stdout` keeps the parent's seekability.
+_OUTPUT_NAME = "output.txt"
+
+# The permissions of the stdout file.
+_OUTPUT_MODE = 0o600
 
 # A client's `initialize` request, which opens a session.
 _INITIALIZE_LINE = (
@@ -130,17 +136,18 @@ class ScratchCase(unittest.TestCase):
     # Serves the text on the root in a child, returns its ending and replies.
     def stdio_run(self, text: str) -> tuple[str, list[dict[str, Any]]]:
         input_read, input_write = os.pipe()
-        output_read, output_write = os.pipe()
+        output_path = os.path.join(self.scratch, _OUTPUT_NAME)
         root = self.root
 
-        # Serves the root with the pipes as stdin and stdout.
+        # Serves the root with the pipe as stdin and the file as stdout.
         def pipes_serve() -> str:
             os.close(input_write)
-            os.close(output_read)
             os.dup2(input_read, 0)
-            os.dup2(output_write, 1)
             os.close(input_read)
-            os.close(output_write)
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            output = os.open(output_path, flags, _OUTPUT_MODE)
+            os.dup2(output, 1)
+            os.close(output)
             return repr(mcp_stdio.stdio_serve(["--root", root]))
 
         path = os.path.join(self.scratch, _ENDING_NAME)
@@ -150,13 +157,12 @@ class ScratchCase(unittest.TestCase):
         if pid == 0:
             _child_end(pipes_serve, path)
         os.close(input_read)
-        os.close(output_write)
         with open(input_write, "wb") as writer:
             writer.write(text.encode("utf-8"))
-        with open(output_read, "rb") as reader:
-            output = reader.read().decode("utf-8")
         _, status = os.waitpid(pid, 0)
         self.assertEqual(os.waitstatus_to_exitcode(status), -signal.SIGKILL)
+        with open(output_path, encoding="utf-8") as file:
+            output = file.read()
         with open(path, encoding="utf-8") as file:
             ending = file.read()
         replies = [json.loads(line) for line in output.splitlines()]
@@ -165,8 +171,7 @@ class ScratchCase(unittest.TestCase):
 
 # Tests the runner on a root, with the tools of `engine_system`.
 class TestServe(ScratchCase):
-    # A session is answered line by line, its tools those of the API file,
-    # and the end of the input ends the runner with 0.
+    # Each line is answered, tools of the API file, and end of input exits 0.
     def test_session_served(self) -> None:
         self.settings_write(True)
         lines = [_INITIALIZE_LINE, _INITIALIZED_LINE, _LIST_LINE]
@@ -176,8 +181,7 @@ class TestServe(ScratchCase):
         expected = [json.loads(_INITIALIZE_REPLY), _list_reply()]
         self.assertEqual(replies, expected)
 
-    # In debug mode `source_put` writes the main loop file and answers with
-    # its digest.
+    # Debug on: `source_put` writes the loop file, answering with its digest.
     def test_source_written(self) -> None:
         self.settings_write(True)
         ending, replies = self.stdio_run(_call_line() + "\n")
@@ -193,8 +197,7 @@ class TestServe(ScratchCase):
         with open(path, "rb") as file:
             self.assertEqual(file.read(), source)
 
-    # With debug false the call is answered as an error, then its exception
-    # ends the runner before the next line, and no file is written.
+    # Debug off: an error answer, a raise ends the run before line 2, no file.
     def test_debug_refused(self) -> None:
         self.settings_write(False)
         text = _call_line() + "\n" + _INITIALIZE_LINE + "\n"

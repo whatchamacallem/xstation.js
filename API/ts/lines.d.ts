@@ -101,6 +101,9 @@
 // ui.console_shown  ui       UI -> UI        0      wake
 // http.request      http     any -> HTTP     0      HttpResponse
 // mcp               mcp      AGENT <-> MCP   0      request or push
+// tap.start         realm    DRIVER -> REALM 0      Empty; `i` is 101
+// tap.line          realm    REALM -> DRIVER 0      push
+// tap.pair          realm    REALM -> DRIVER 0      push, a pair test run
 
 declare namespace lines {
   // Header 0: `t` type, `v` version, `i` id, `r` reply, `k` key, `b` blobs.
@@ -294,6 +297,29 @@ declare namespace lines {
   interface TapLine {
     language: "typescript" | "python";
     text: string;
+  }
+
+  // The oracle of one block of a pair run: its `unittest.TestResult` counts.
+  interface TapPairBlock {
+    module: string;
+    // What `TAPTestRunner.module_run` returned for the block.
+    passed: boolean;
+    // The `countTestCases` of the block's suite.
+    cases: number;
+    tests_run: number;
+    failures: number;
+    errors: number;
+    skipped: number;
+    expected_failures: number;
+    unexpected_successes: number;
+  }
+
+  // tap.pair: one run of the pair fixtures, its TAP lines and its oracle.
+  interface TapPair {
+    run: string;
+    failfast: boolean;
+    lines: string[];
+    blocks: TapPairBlock[];
   }
 
   // tap.run: only `tap_loop.py` serves it, each line of the run a push.

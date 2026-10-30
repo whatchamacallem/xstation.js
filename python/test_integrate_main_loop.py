@@ -341,8 +341,7 @@ class TestEngines(ScratchCase):
         self.assertEqual(texts, [_text_get("main_loop_line_dispatch_tail")])
         self.assertEqual(page, _gold_copy("lines.tail_ui_reply"))
 
-    # In debug mode `source.put` writes a main loop file and `settings.put`
-    # rewrites the settings, each answered.
+    # Debug on: `source.put` writes a loop, `settings.put` settings, answered.
     def test_debug_served(self) -> None:
         self.debug_write(True)
         changed = {**self.values, "verbose_ring": _RING}

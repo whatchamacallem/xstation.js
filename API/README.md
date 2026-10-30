@@ -37,6 +37,7 @@ http     any        <->  HTTP port      one fetch per line, see ts/http.d.ts
 dom      UI thread  <->  DOM port       in the UI thread, see ts/page.d.ts
 ui       UI thread   ->  UI thread      its DOM listeners and its wakes
 ai       AI worker   ->  AI worker      its own pushes and wakes
+realm    driver     <->  test realm     a node process's stdio or DevTools
 ```
 
 ## The first line

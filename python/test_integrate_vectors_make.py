@@ -45,8 +45,7 @@ def _message_line(message: dict[str, Any]) -> jslb.Object:
     return line
 
 
-# Returns a line as it was sent, without the `sha256` a decoder adds to each
-# blob over `overflow_bytes`.
+# Returns the line as sent, less blob `sha256`s added past `overflow_bytes`.
 def _line_sent(line: jslb.Object, overflow_bytes: int) -> jslb.Object:
     sent = jslb.Object(line)
     for number in range(1, jslb.field_get(line[0], "blobs") + 1):
@@ -89,8 +88,7 @@ class TestVectors(unittest.TestCase):
             renders = [jslb.line_render(line) for line in lines]
             self.assertEqual(renders, sidecar["render"], name)
 
-    # A success vector is the jslb encoding of its sidecar's messages exactly
-    # when its sidecar calls it canonical, success vectors of both kinds.
+    # Success vectors of both kinds are their messages' jslb iff canonical.
     def test_encoded_same(self) -> None:
         successes = [
             (name, data, sidecar)

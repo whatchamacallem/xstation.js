@@ -105,8 +105,7 @@ class TestLookup(unittest.TestCase):
         with self.assertRaises(ValueError) as caught:
             i18n(name, *values, "c")
         message = (
-            f"{name}: placeholders {list(range(count))},"
-            f" arguments {count + 1}"
+            f"{name}: placeholders {list(range(count))}, arguments {count + 1}"
         )
         self.assertEqual(caught.exception.args, (message,))
 

@@ -1,17 +1,29 @@
 // The subset of Python's unittest the tests use, the same names, all
-// synchronous. A test module references only its own module, this one and
-// `harness`, which reads the settings and the gold record.
+// synchronous.
 
 declare namespace unittest {
-  // What a run reports to: Python's counts and the outcome of each test.
-  interface TestResult {
+  // Python's result: the tests run and each outcome, kept as Python keeps it.
+  class TestResult {
     testsRun: number;
-    failures: number;
-    errors: number;
-    skipped: number;
+    // Each failed assertion's test and stack: an Error with no stack throws.
+    readonly failures: [TestCase, string][];
+    // Each other throw's test and stack, as `failures` keeps them.
+    readonly errors: [TestCase, string][];
+    // Each skipped test and its reason.
+    readonly skipped: [TestCase, string][];
+    // Each test that failed as expected, and the stack of its error.
+    readonly expectedFailures: [TestCase, string][];
+    // Each test that passed though it was expected to fail.
+    readonly unexpectedSuccesses: TestCase[];
     // When set, the run stops before its next test.
     shouldStop: boolean;
+    // A failure, an error or an unexpected success stops the run when set.
+    readonly failfast: boolean;
+    constructor(failfast: boolean);
+    // Whether no test failed, threw or passed when it was expected to fail.
     wasSuccessful(): boolean;
+    // Sets `shouldStop`.
+    stop(): void;
     startTest(test: TestCase): void;
     addSuccess(test: TestCase): void;
     addFailure(test: TestCase, error: Error): void;

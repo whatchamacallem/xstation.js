@@ -133,8 +133,7 @@ def _chain_raise() -> tuple[RuntimeError, ValueError]:
             return error, first
 
 
-# A handler of the test: keeps the line and the payload, and replies with
-# the fields given and a blob of the bytes of each blob the line carried.
+# A handler that keeps line and payload, replies with fields and echoed blobs.
 def _handler_reply(
     calls: HandlerCalls,
     fields: dict[str, Any],
@@ -243,8 +242,7 @@ class TestWire(ChildCase):
         self.assertEqual(stale, [])
         self.assertEqual(_wire_pass(reply), _PUT_REPLY)
 
-    # The blobs the decoder read reach the handler in the line, apart from
-    # the payload, and the blobs of its reply follow the reply's line.
+    # Blobs read go in the line, not payload, and reply blobs follow the reply.
     @_child_run
     def test_blobs_echoed(self) -> None:
         calls: HandlerCalls = []
@@ -267,8 +265,7 @@ class TestWire(ChildCase):
         self.assertIsNone(dispatch.line_dispatch(line))
         self.assertEqual(calls, [(line, {"text": "x"})])
 
-    # A handler's raise passes through, and the error line written for it
-    # carries the cascade in the name form of the line, with its `r`.
+    # A raise passes through, its error line's cascade in name form, with `r`.
     @_child_run
     def test_error_carried(self) -> None:
         error, first = _chain_raise()

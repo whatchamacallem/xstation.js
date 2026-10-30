@@ -34,7 +34,7 @@ _GOLD_ID = "python.test_integrate_tap_loop"
 # A size chosen by its writer: the most the test reads from the pipe.
 _READ_BYTES: int = harness.gold_get(f"{_GOLD_ID}.read_bytes")
 
-# The failing tests of failing_suite in a normal-test run, as measured.
+# The failing tests of `failing_suite` in a `normal-test` run, as measured.
 _FAILING_FAILURES: int = harness.gold_get(f"{_GOLD_ID}.failing_failures")
 
 # How a child ends when the loop returns at the end of its input.

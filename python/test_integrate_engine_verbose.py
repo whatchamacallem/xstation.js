@@ -120,8 +120,7 @@ def _page_rows(root: str) -> list[tuple[int, str, str]]:
     return [row for row in _rows_read(root) if row[1] != _SERVER_THREAD]
 
 
-# The work of a child: opens the root's log, registers, logs the server's
-# texts, then serves the bytes' lines and returns each reply read back.
+# In a child: opens the log, registers, logs texts, returns each line's reply.
 def _lines_serve(root: str, debug: bool, data: bytes) -> list[object]:
     engine_verbose.verbose.log_open(root, _RING)
     engine_verbose.handlers_register(debug)
@@ -236,8 +235,7 @@ class TestServe(ScratchCase):
         texts = [line["text"] for line in lines]
         self.assertEqual(texts, _SERVER_TEXTS[len(_SERVER_TEXTS) - count :])
 
-    # A field the decoder reads as a bool, a float or a number is refused,
-    # and the batch that holds it is not written.
+    # A field read as a bool, float or number is refused, its batch unwritten.
     def test_fields_refused(self) -> None:
         for case, line in _gold_raw("lines.put_invalid").items():
             with self.subTest(case=case):
@@ -259,8 +257,7 @@ class TestServe(ScratchCase):
         )
         self.assertEqual(_page_rows(self.root), [])
 
-    # A put sent as a request is written, then refused for the reply it
-    # never gets; a tail sent as a push is refused for the reply it gives.
+    # Put requests, written, are refused unanswered, tail pushes for replying.
     def test_kinds_refused(self) -> None:
         data = _gold_bytes("put_request")
         self.child_raise(

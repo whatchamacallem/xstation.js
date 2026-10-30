@@ -237,8 +237,7 @@ def _database_dump(path: str) -> list[str]:
         connection.close()
 
 
-# In the forked child: puts a value over `overflow_bytes`, whose cache file
-# lands whole, and is killed by the file size limit as its row is written.
+# Forked child: puts over `overflow_bytes`, file whole, killed writing the row.
 def _child_put(root: str) -> NoReturn:
     try:
         store = substrate.Store(root, _OVERFLOW_BYTES)
@@ -256,8 +255,7 @@ def _child_put(root: str) -> NoReturn:
         os._exit(1)
 
 
-# A create in a process with one descriptor free, which the open after it
-# lacks. Returns the text of the error and the databases left open.
+# A create one descriptor short, returning the error and databases left open.
 def _create_limited(root: str, write_fd: int) -> str:
     store = substrate.Store(root, _OVERFLOW_BYTES)
     free = os.dup(write_fd)

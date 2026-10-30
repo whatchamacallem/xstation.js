@@ -3,7 +3,8 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // Tests of the provider door: the request lines it builds, the reading of the
-// reply lines, the conversion of MCP tools and the key it keeps in memory.
+// reply lines and the conversion of MCP tools. The key it keeps in memory is
+// tested in `test_provider_key`, whose fresh realm has none set.
 // The request lines it expects, in the full names of debug mode, the reply
 // lines it reads and the texts of its refusals are its gold in
 // `test_settings.json`, read through the harness.
@@ -430,36 +431,6 @@ namespace test_provider {
     // No tools convert to no function tools.
     test_empty_list(): void {
       this.assertEqual(provider.tools_convert([]), []);
-    }
-  }
-
-  // The key `key_set` keeps in memory.
-  export class TestProviderKey extends unittest.TestCase {
-    // A second key replaces the first.
-    test_key_replaced(): void {
-      provider.key_set("first");
-      this.assertEqual(provider.key_get(), "first");
-      provider.key_set("second");
-      this.assertEqual(provider.key_get(), "second");
-    }
-
-    // The empty key a scripted run may carry is kept as it is.
-    test_key_empty(): void {
-      provider.key_set("");
-      this.assertEqual(provider.key_get(), "");
-    }
-
-    // With the key cleared, none is set, which `key_get` refuses.
-    test_key_cleared(): void {
-      provider.key_set("first");
-      provider.key_clear();
-      let message = "";
-      try {
-        provider.key_get();
-      } catch (error) {
-        message = (error as Error).message;
-      }
-      this.assertEqual(message, gold_text("provider_key_missing"));
     }
   }
 }

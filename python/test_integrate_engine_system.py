@@ -108,9 +108,7 @@ def _reply_read(reply: object) -> object:
     return json.loads(piece)
 
 
-# The work of a child: registers on the root, then serves the bytes' lines
-# with a decoder that streams into the root's cache, and returns each reply
-# read back.
+# In a child: registers, serves lines streaming to the cache, returns replies.
 def _lines_serve(root: str, debug: bool, data: bytes) -> list[object]:
     engine_system.handlers_register(root, debug)
     decoder = engine_system.jslb.LineDecoder(
@@ -147,8 +145,7 @@ def _child_end(work: Callable[[], object], path: str) -> None:
         os.kill(os.getpid(), signal.SIGKILL)
 
 
-# Gives each test a scratch root in `build/` that holds an empty cache, and
-# runs its work in children.
+# Gives each test a scratch root, cache empty, in `build/`, work in children.
 class ScratchCase(unittest.TestCase):
     # Makes the scratch directory, the root in it and the root's cache.
     def setUp(self) -> None:
@@ -236,8 +233,7 @@ class TestServe(ScratchCase):
         self.assertEqual(_file_read(path), _STREAMED_SOURCE)
         self.assertEqual(os.listdir(self.cache), [])
 
-    # With debug mode off each write is refused, and a blob the decoder
-    # streamed stays in the cache.
+    # Debug off: each write refused, and a streamed blob stays in the cache.
     def test_debug_off(self) -> None:
         data = _settings_bytes(harness.settings_copy())
         self.child_raise(
@@ -256,8 +252,7 @@ class TestServe(ScratchCase):
         path = os.path.join(self.cache, name)
         self.assertEqual(_file_read(path), _STREAMED_SOURCE)
 
-    # A restart to a file that does not exist is refused, in a child that a
-    # restart would replace.
+    # A restart to a missing file is refused, in a child it would replace.
     def test_restart_refused(self) -> None:
         line = _gold_raw("lines.restart")
         path = os.path.join(self.loop_path, line["main_loop"])

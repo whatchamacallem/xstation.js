@@ -45,8 +45,7 @@ def _sink_refuse(header: jslb.Object) -> NoReturn:
     raise RuntimeError("internal error")
 
 
-# The settings of a `settings.put` line, written and read back as the
-# server reads them, by a decoder of the checkout's limits.
+# `settings.put` settings round tripped by a server decoder at checkout limits.
 def _settings_carried(values: dict[str, Any]) -> Any:
     header = jslb.header_make(_PUT_TYPE, id=_PUT_ID)
     line = jslb.line_make(header, [], settings=values)

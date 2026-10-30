@@ -332,11 +332,6 @@ namespace provider {
     }
     return key_stored;
   }
-
-  // Forgets the key, for the tests only, so `key_get` can be tested unset.
-  export function key_clear(): void {
-    key_stored = undefined;
-  }
 }
 
 Object.freeze(provider);

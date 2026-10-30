@@ -245,7 +245,7 @@ namespace test_provider_script {
     const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
     const word = constants.word_bytes;
     const chunks: PngChunk[] = [];
-    let offset = constants.signature_bytes;
+    let offset: number = constants.signature_bytes;
     while (offset < png.length) {
       const length = view.getUint32(offset);
       const end = offset + 3 * word + length;

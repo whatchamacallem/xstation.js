@@ -2,20 +2,30 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the task manager with port, ring and settings doubles: routing,
+// Tests of the task manager on real ports and a real far queue: routing,
 // ids, replies, sleeps and wakes, the name form of a wake, faults, a
 // handler's failure, an error line's cascade, depth, blob moves, the bound on
 // the blob bytes it holds and `line_bytes`, the trace in debug mode, the
-// verbose sink and its batches, and `entry_fits`. The lines and sleeps the
+// verbose sink and its batches with a real `verbose.LineRing`, `entry_fits`,
+// and linked local ports. The queue under test runs on thread `ai`. Its lane
+// to `ui` is a pair of linked local ports whose far end is the test's: the
+// test posts lines into the queue there and reads what the queue posts back,
+// and never answers a request. Its lane to `server` reaches a second real
+// queue in synchronous mode, whose handlers are the test's own functions,
+// which answers the requests the queue submits. The lines and sleeps the
 // tests build and the texts they expect are the gold of test_settings.json,
 // the parts known only at run time, as a fresh type, an id the queue gave, a
-// blob's bytes or an error's stack, set by the test on its copy.
+// blob's bytes or an error's stack, set by the test on its copy. What only a
+// thread port shows, the transfer list of a post, is in the line cases of
+// `test_integrate_queue`.
 
 namespace test_queue {
-  // The type prefix the tests own and a type that no owner table matches.
+  // The type prefix the tests own, a type no owner table matches, the thread.
   const constants = Object.freeze({
     type_prefix: "queue_test.",
     unrouted_type: "queue_unrouted.type",
+    thread: "ai" as const,
+    ring_setting: "verbose_ring",
   });
 
   // How many types the tests have made, so that each one is new.
@@ -58,89 +68,58 @@ namespace test_queue {
     return text;
   }
 
-  // A port double: it keeps what the queue posts and hands it lines.
-  class PortDouble implements queue.Port {
-    readonly posted: lines.Line[] = [];
-    readonly transfers: ArrayBuffer[][] = [];
-    private readonly name: string;
-    private readonly trace: string[];
-    private receiver: ((line: lines.Line) => void) | undefined;
-
-    // Takes the name it writes in the trace and the trace it shares.
-    constructor(name: string, trace: string[]) {
-      this.name = name;
-      this.trace = trace;
-    }
-
-    // Keeps a posted line and its transfer list, and traces the line.
-    line_post(line: lines.Line, transfer: ArrayBuffer[]): void {
-      this.posted.push(line);
-      this.transfers.push(transfer);
-      this.trace.push(`${this.name} ${JSON.stringify(line)}`);
-    }
-
-    // Takes the receiver, which is the queue.
-    line_receive(fn: (line: lines.Line) => void): void {
-      this.receiver = fn;
-    }
-
-    // Hands a line to the queue as if it came on this port.
-    line_send(line: lines.Line): void {
-      const receiver = this.receiver;
-      if (receiver === undefined) {
-        throw new Error("The port double has no receiver.");
-      }
-      receiver(line);
-    }
+  // The test's end of a lane: its linked local port and the lines that came.
+  interface LaneEnd {
+    port: queue.LocalPort;
+    came: lines.Line[];
   }
 
-  // A verbose ring double that keeps each line it makes and hands it on.
-  class RingDouble {
-    readonly logged: lines.VerboseLine[] = [];
-    private sink: ((line: lines.VerboseLine) => void) | undefined;
-
-    // Takes the one sink: a second throws.
-    sink_set(fn: (line: lines.VerboseLine) => void): void {
-      if (this.sink !== undefined) {
-        throw new Error("The ring double has a sink already.");
-      }
-      this.sink = fn;
-    }
-
-    // Makes a verbose line of the text now, keeps it, and hands it on.
-    log(text: string): void {
-      const sink = this.sink;
-      if (sink === undefined) {
-        throw new Error("The ring double has no sink.");
-      }
-      const line = { at: Date.now(), text };
-      this.logged.push(line);
-      sink(line);
-    }
+  // Joins the queue to the thread by linked local ports, one end the test's.
+  function lane_make(
+    tasks: queue.TaskQueue,
+    thread: queue.ThreadName,
+  ): LaneEnd {
+    const near = new queue.LocalPort();
+    const port = new queue.LocalPort(near);
+    const came: lines.Line[] = [];
+    port.line_receive((line) => {
+      came.push(line);
+    });
+    tasks.port_add(thread, near);
+    return { port, came };
   }
 
-  // A synchronous queue on the thread `ai` with doubles of `ui` and `server`.
+  // A second real queue in synchronous mode joined to the queue as `server`.
+  function far_make(tasks: queue.TaskQueue): queue.TaskQueue {
+    const owners = { [constants.type_prefix]: "server" as const };
+    const far = new queue.TaskQueue("server", owners, true);
+    const near = new queue.LocalPort();
+    tasks.port_add("server", near);
+    far.port_add(constants.thread, new queue.LocalPort(near));
+    return far;
+  }
+
+  // The queue on `ai`, the test's end of its lane to `ui`, the far queue.
   interface QueueBench {
     tasks: queue.TaskQueue;
-    ui: PortDouble;
-    server: PortDouble;
-    trace: string[];
+    ui: LaneEnd;
+    server: queue.TaskQueue;
   }
 
   // Makes a bench with the owner table given.
   function bench_make(owners: queue.OwnerTable): QueueBench {
-    const trace: string[] = [];
-    const tasks = new queue.TaskQueue("ai", owners, true);
-    const ui = new PortDouble("ui", trace);
-    const server = new PortDouble("server", trace);
-    tasks.port_add("ui", ui);
-    tasks.port_add("server", server);
-    return { tasks, ui, server, trace };
+    const tasks = new queue.TaskQueue(constants.thread, owners, true);
+    return { tasks, ui: lane_make(tasks, "ui"), server: far_make(tasks) };
+  }
+
+  // Posts a line into the queue from `ui`, through the test's end.
+  function ui_send(bench: QueueBench, line: lines.Line): void {
+    bench.ui.port.line_post(line, []);
   }
 
   // An owner table: the test prefix here, and each far type to its owner.
   function owners_make(far: queue.OwnerTable): queue.OwnerTable {
-    return { [constants.type_prefix]: "ai", ...far };
+    return { [constants.type_prefix]: constants.thread, ...far };
   }
 
   // A copy of a gold line with the type first in its header, short or full.
@@ -165,17 +144,22 @@ namespace test_queue {
     return blobs_fill(line_build(type, name));
   }
 
-  // A gold reply copy to a request, `t` and `r` first from its `t` and `i`.
-  function reply_build(request: lines.Line, name: string): lines.Line {
-    const reply = gold_line(name);
-    const asked = request[0];
-    reply[0] = { t: asked.t, r: asked.i, ...reply[0] };
-    return reply;
+  // The reply to a request with the payload of a gold line and its blobs.
+  function reply_gold(request: lines.Line, name: string): lines.Line {
+    const gold = blobs_fill(gold_line(name));
+    const blobs = jslb.headers_of(gold).slice(1) as lines.BlobHeader[];
+    return dispatch.reply_make(request, jslb.payload_of(gold), blobs);
   }
 
-  // The gold reply to a request that carries one blob of zeros.
-  function reply_blob(request: lines.Line): lines.Line {
-    return blobs_fill(reply_build(request, "reply_held"));
+  // A type the far queue runs: it keeps each line and answers a request.
+  function far_fresh(got: lines.Line[], name = "bare"): string {
+    return handler_fresh((line) => {
+      got.push(line);
+      if (jslb.field_get(line[0], "id") === undefined) {
+        return undefined;
+      }
+      return reply_gold(line, name);
+    });
   }
 
   // A copy of a gold sleep, woken by the type, on the ids when they are given.
@@ -203,21 +187,9 @@ namespace test_queue {
     return sleep;
   }
 
-  // The cascade of an error as an error line carries it, its causes nested.
-  function cascade_of(error: Error): lines.ErrorCause {
-    const entry: lines.ErrorCause = {
-      message: error.message,
-      stack: error.stack as string,
-    };
-    if (error.cause !== undefined) {
-      entry.cause = cascade_of(error.cause as Error);
-    }
-    return entry;
-  }
-
-  // The gold error line of no line, carrying the cascade of the error.
-  function error_build(error: Error): lines.Line {
-    return Object.assign(gold_line("error_bare"), cascade_of(error));
+  // The request a wake's state keeps, which its reply answers.
+  function request_kept(wake: lines.Line): lines.Line {
+    return (wake.state as { request: lines.Line }).request;
   }
 
   // A field of the header of a line, read by its key.
@@ -247,7 +219,7 @@ namespace test_queue {
     throw new Error("Nothing was thrown.");
   }
 
-  // A settings reader double: the test's own values, else `settings.json`.
+  // A settings reader of the test: its own values, else `settings.json`.
   function reader_make(values: {
     [id: string]: unknown;
   }): (id: string) => unknown {
@@ -283,9 +255,16 @@ namespace test_queue {
     return history.slice(start).map((line) => line.text);
   }
 
-  // A ring double whose sink is the batch.
-  function ring_make(batch: queue.VerboseBatch): RingDouble {
-    const ring = new RingDouble();
+  // A real ring of verbose lines, sized by the setting `verbose_ring`.
+  function ring_new(): verbose.LineRing {
+    return new verbose.LineRing(() =>
+      harness.setting_get(constants.ring_setting),
+    );
+  }
+
+  // A real ring whose sink is the batch.
+  function ring_make(batch: queue.VerboseBatch): verbose.LineRing {
+    const ring = ring_new();
     ring.sink_set((line) => {
       batch.line_add(line);
     });
@@ -318,7 +297,7 @@ namespace test_queue {
       });
       const bench = bench_make(owners_make({}));
       for (const name of ["n_1", "n_2", "n_3"]) {
-        bench.ui.line_send(line_build(note, name));
+        ui_send(bench, line_build(note, name));
       }
       this.assertEqual(seen.join(","), "1,2,3");
       this.assertEqual(bench.tasks.depth(), 0);
@@ -338,34 +317,37 @@ namespace test_queue {
       });
       const first = handler_fresh(() => {
         seen.push("first");
-        bench.ui.line_send(line_build(second));
+        ui_send(bench, line_build(second));
         bench.tasks.line_notify(line_build(inner));
         return undefined;
       });
-      bench.ui.line_send(line_build(first));
+      ui_send(bench, line_build(first));
       this.assertEqual(seen.join(","), "first,inner,second");
     }
 
-    // A line another thread owns goes to that port as the same object.
+    // A line another thread owns goes to that thread's queue unchanged.
     test_forward_unchanged(): void {
-      const far = type_fresh();
+      const got: lines.Line[] = [];
+      const far = far_fresh(got);
       const bench = bench_make(owners_make({ [far]: "server" }));
       const data = Uint8Array.from([1, 2, 3]);
       const line = line_build(far, "forward_kept");
       (line[1] as lines.BlobHeader).d = data;
-      bench.ui.line_send(line);
-      this.assertEqual(bench.server.posted.length, 1);
-      this.assertTrue(bench.server.posted[0] === line);
-      this.assertEqual(bench.server.posted[0].text, "kept");
-      this.assertEqual(bench.server.transfers[0].length, 1);
-      this.assertTrue(bench.server.transfers[0][0] === data.buffer);
-      this.assertEqual(bench.ui.posted.length, 0);
+      ui_send(bench, line);
+      this.assertEqual(got.length, 1);
+      this.assertTrue(got[0] === line);
+      this.assertEqual(got[0].text, "kept");
+      this.assertTrue(bytes_of(got[0][1]) === data);
+      this.assertEqual(Array.from(data).join(","), "1,2,3");
+      this.assertEqual(bench.ui.came.length, 0);
       this.assertEqual(bench.tasks.depth(), 0);
+      this.assertEqual(bench.server.depth(), 0);
     }
 
     // Forwarding a line the thread owns, or a request, throws.
     test_forward_refused(): void {
-      const far = type_fresh();
+      const got: lines.Line[] = [];
+      const far = far_fresh(got);
       const own = line_build(type_fresh());
       const bench = bench_make(owners_make({ [far]: "server" }));
       const local = thrown_get(() => bench.tasks.line_forward(own));
@@ -374,19 +356,19 @@ namespace test_queue {
         text_fill("queue_forward_local", { 1: JSON.stringify(own[0]) }),
       );
       const request = line_build(far, "request_4");
-      const error = thrown_get(() => bench.ui.line_send(request));
+      const error = thrown_get(() => ui_send(bench, request));
       this.assertEqual(
         error.message,
         text_fill("queue_forward_marked", { 1: JSON.stringify(request[0]) }),
       );
-      this.assertEqual(bench.server.posted.length, 0);
+      this.assertEqual(got.length, 0);
     }
 
     // A type that no prefix of the owner table matches throws.
     test_owner_missing(): void {
       const bench = bench_make(owners_make({}));
       const line = line_build(constants.unrouted_type);
-      const error = thrown_get(() => bench.ui.line_send(line));
+      const error = thrown_get(() => ui_send(bench, line));
       this.assertEqual(error.message, gold_text("queue_owner_missing"));
     }
 
@@ -407,15 +389,43 @@ namespace test_queue {
       this.assertTrue(seen[0] === line);
     }
 
+    // Linked local ports hand a post to the receiver at the other end, once.
+    test_local_link(): void {
+      const near = new queue.LocalPort();
+      const far = new queue.LocalPort(near);
+      const out = line_build(type_fresh());
+      const back = line_build(type_fresh());
+      const missing = thrown_get(() => near.line_post(out, []));
+      this.assertEqual(missing.message, gold_text("queue_receiver_missing"));
+      const at_near: lines.Line[] = [];
+      const at_far: lines.Line[] = [];
+      near.line_receive((got) => {
+        at_near.push(got);
+      });
+      far.line_receive((got) => {
+        at_far.push(got);
+      });
+      near.line_post(out, []);
+      far.line_post(back, []);
+      this.assertEqual(at_far.length, 1);
+      this.assertTrue(at_far[0] === out);
+      this.assertEqual(at_near.length, 1);
+      this.assertTrue(at_near[0] === back);
+      for (const linked of [near, far]) {
+        const again = thrown_get(() => new queue.LocalPort(linked));
+        this.assertEqual(again.message, gold_text("queue_port_linked"));
+      }
+    }
+
     // A second port to a thread throws, the thread's own port included.
     test_port_twice(): void {
       const bench = bench_make(owners_make({}));
       const twice = thrown_get(() =>
-        bench.tasks.port_add("ui", new PortDouble("ui", [])),
+        bench.tasks.port_add("ui", new queue.LocalPort()),
       );
       this.assertEqual(twice.message, gold_text("queue_port_twice_ui"));
       const own = thrown_get(() =>
-        bench.tasks.port_add("ai", new queue.LocalPort()),
+        bench.tasks.port_add(constants.thread, new queue.LocalPort()),
       );
       this.assertEqual(own.message, gold_text("queue_port_twice_own"));
     }
@@ -425,12 +435,12 @@ namespace test_queue {
       const far = type_fresh();
       const bench = bench_make(owners_make({ [far]: "ui" }));
       const line = line_build(far);
-      const error = thrown_get(() => bench.ui.line_send(line));
+      const error = thrown_get(() => ui_send(bench, line));
       this.assertEqual(
         error.message,
         text_fill("queue_forward_back", { 1: JSON.stringify(line[0]) }),
       );
-      this.assertEqual(bench.ui.posted.length, 0);
+      this.assertEqual(bench.ui.came.length, 0);
     }
 
     // A thread port takes one receiver, and a second one throws.
@@ -449,7 +459,8 @@ namespace test_queue {
   export class TestRequestReply extends unittest.TestCase {
     // One counter numbers the requests to every port, from 1, in its form.
     test_ids_shared(): void {
-      const to_server = type_fresh();
+      const got: lines.Line[] = [];
+      const to_server = far_fresh(got);
       const to_ui = type_fresh();
       const owners = owners_make({ [to_server]: "server", [to_ui]: "ui" });
       const bench = bench_make(owners);
@@ -462,11 +473,11 @@ namespace test_queue {
         ids.push(bench.tasks.task_submit(full));
         return sleep_build("sleep_null", wake, ids);
       });
-      bench.ui.line_send(line_build(start));
+      ui_send(bench, line_build(start));
       this.assertEqual(ids.join(","), "1,2,3");
-      const [first, third] = bench.server.posted;
+      const [first, third] = got;
       this.assertEqual(field_read(first, "i"), 1);
-      this.assertEqual(field_read(bench.ui.posted[0], "i"), 2);
+      this.assertEqual(field_read(bench.ui.came[0], "i"), 2);
       this.assertEqual(field_read(third, "id"), 3);
       this.assertTrue(Object.hasOwn(first[0], "i"));
       this.assertTrue(Object.hasOwn(third[0], "id"));
@@ -479,84 +490,53 @@ namespace test_queue {
       const bench = bench_make(owners_make({}));
       const made: lines.Line[] = [];
       const ask = handler_fresh((line) => {
-        made.push(reply_build(line, "reply_done"));
+        made.push(reply_gold(line, "reply_done"));
         return made[0];
       });
-      bench.ui.line_send(line_build(ask, "request_5"));
-      this.assertEqual(bench.ui.posted.length, 1);
-      this.assertTrue(bench.ui.posted[0] === made[0]);
-      this.assertEqual(field_read(bench.ui.posted[0], "r"), 5);
-      this.assertEqual(bench.server.posted.length, 0);
+      ui_send(bench, line_build(ask, "request_5"));
+      this.assertEqual(bench.ui.came.length, 1);
+      this.assertTrue(bench.ui.came[0] === made[0]);
+      this.assertEqual(field_read(bench.ui.came[0], "r"), 5);
+      this.assertEqual(bench.ui.came[0].done, true);
     }
 
     // A wake answers the request that slept, on the port it came on.
     test_wake_answers(): void {
-      const far = type_fresh();
+      const got: lines.Line[] = [];
+      const far = far_fresh(got, "reply_seven");
       const bench = bench_make(owners_make({ [far]: "server" }));
       const done = handler_fresh((line) => {
-        const state = line.state as { request: lines.Line };
         const replies = line.replies as lines.Line[];
-        const answer = reply_build(state.request, "bare");
-        answer.got = replies[0].n;
-        return answer;
+        return dispatch.reply_make(request_kept(line), { got: replies[0].n });
       });
       const ask = handler_fresh((line) => {
         const id = bench.tasks.task_submit(line_build(far));
         return sleep_asked(line, done, [id]);
       });
-      bench.ui.line_send(line_build(ask, "request_9"));
-      this.assertEqual(bench.ui.posted.length, 0);
-      const request = bench.server.posted[0];
-      bench.server.line_send(reply_build(request, "reply_seven"));
-      this.assertEqual(bench.ui.posted.length, 1);
-      const answer = bench.ui.posted[0];
+      ui_send(bench, line_build(ask, "request_9"));
+      this.assertEqual(got.length, 1);
+      this.assertEqual(bench.ui.came.length, 1);
+      const answer = bench.ui.came[0];
       this.assertEqual(field_read(answer, "t"), ask);
       this.assertEqual(field_read(answer, "r"), 9);
       this.assertEqual(answer.got, 7);
       this.assertEqual(bench.tasks.depth(), 0);
     }
 
-    // A reply that answers no request sent on its own port throws.
-    test_reply_unknown(): void {
-      const far = type_fresh();
-      const owners = owners_make({ [far]: "server" });
-      const empty = bench_make(owners);
-      const stray = reply_build(line_build(far, "request_99"), "bare");
-      const stray_text = JSON.stringify(stray[0]);
-      const unknown = thrown_get(() => empty.server.line_send(stray));
-      this.assertEqual(
-        unknown.message,
-        text_fill("queue_reply_unknown_server", { 1: stray_text }),
-      );
-      const bench = bench_make(owners);
-      const idle = handler_fresh(() => undefined);
-      const start = handler_fresh(() => {
-        const id = bench.tasks.task_submit(line_build(far));
-        return sleep_build("sleep_null", idle, [id]);
-      });
-      bench.ui.line_send(line_build(start));
-      const reply = reply_build(bench.server.posted[0], "bare");
-      const wrong = thrown_get(() => bench.ui.line_send(reply));
-      this.assertEqual(
-        wrong.message,
-        text_fill("queue_reply_unknown_ui", { 1: JSON.stringify(reply[0]) }),
-      );
-    }
-
     // An error line from a port stops the queue with its message and stack.
     test_error_line(): void {
       const bench = bench_make(owners_make({}));
       const failure = new Error("It failed.");
-      const line = error_build(failure);
-      const thrown = thrown_get(() => bench.server.line_send(line));
+      const line = dispatch.error_make(undefined, failure);
+      const thrown = thrown_get(() =>
+        bench.server.line_notify(line, constants.thread),
+      );
       this.assertEqual(
         thrown.message,
         text_fill("queue_error_line", { 3: failure.stack }),
       );
       this.assertFalse(Object.hasOwn(thrown, "cause"));
-      const later = thrown_get(() =>
-        bench.ui.line_send(line_build(type_fresh())),
-      );
+      const later = thrown_get(() => ui_send(bench, line_build(type_fresh())));
       this.assertEqual(
         later.message,
         text_fill("queue_stopped", { 1: thrown.message, 2: thrown.stack }),
@@ -570,8 +550,10 @@ namespace test_queue {
       const first = new Error("It began.");
       const second = new Error("It spread.", { cause: first });
       const third = new Error("It failed.", { cause: second });
-      const line = error_build(third);
-      const thrown = thrown_get(() => bench.server.line_send(line));
+      const line = dispatch.error_make(undefined, third);
+      const thrown = thrown_get(() =>
+        bench.server.line_notify(line, constants.thread),
+      );
       this.assertEqual(
         thrown.message,
         text_fill("queue_error_line", { 3: third.stack }),
@@ -593,7 +575,8 @@ namespace test_queue {
 
     // A wake must answer the request it owes, and only a request it owes.
     test_reply_owed(): void {
-      const far = type_fresh();
+      const got: lines.Line[] = [];
+      const far = far_fresh(got);
       const owners = owners_make({ [far]: "server" });
       let bench = bench_make(owners);
       const mute = handler_fresh(() => undefined);
@@ -601,23 +584,21 @@ namespace test_queue {
         const id = bench.tasks.task_submit(line_build(far));
         return sleep_asked(line, mute, [id]);
       });
-      bench.ui.line_send(line_build(ask, "request_3"));
-      const first = reply_build(bench.server.posted[0], "bare");
-      const missing = thrown_get(() => bench.server.line_send(first));
+      const missing = thrown_get(() =>
+        ui_send(bench, line_build(ask, "request_3")),
+      );
       this.assertEqual(
         missing.message,
         text_fill("queue_reply_missing", { 0: mute }),
       );
       bench = bench_make(owners);
-      const stray = reply_build(line_build(far, "request_8"), "bare");
+      const stray = dispatch.reply_make(line_build(far, "request_8"), {});
       const loose = handler_fresh(() => stray);
       const note = handler_fresh(() => {
         const id = bench.tasks.task_submit(line_build(far));
         return sleep_build("sleep_null", loose, [id]);
       });
-      bench.ui.line_send(line_build(note));
-      const second = reply_build(bench.server.posted[0], "bare");
-      const unowed = thrown_get(() => bench.server.line_send(second));
+      const unowed = thrown_get(() => ui_send(bench, line_build(note)));
       this.assertEqual(
         unowed.message,
         text_fill("queue_reply_unowed", {
@@ -625,7 +606,7 @@ namespace test_queue {
           2: JSON.stringify(stray[0]),
         }),
       );
-      this.assertEqual(bench.ui.posted.length, 0);
+      this.assertEqual(bench.ui.came.length, 0);
     }
 
     // A type that is not text, or an id that is not a number, throws.
@@ -648,52 +629,33 @@ namespace test_queue {
   export class TestOwnerGiven extends unittest.TestCase {
     // A given owner overrides the table, and the reply comes on its port.
     test_owner_override(): void {
-      const far = type_fresh();
-      const bench = bench_make(owners_make({ [far]: "server" }));
+      const got: lines.Line[] = [];
+      const far = far_fresh(got);
+      const bench = bench_make(owners_make({ [far]: "ui" }));
       const woken: lines.Line[] = [];
       const wake = handler_fresh((line) => {
         woken.push(line);
         return undefined;
       });
       const start = handler_fresh(() => {
-        const id = bench.tasks.task_submit(line_build(far), "ui");
-        bench.tasks.line_notify(line_build(far, "note_true"), "ui");
+        const id = bench.tasks.task_submit(line_build(far), "server");
+        bench.tasks.line_notify(line_build(far, "note_true"), "server");
         return sleep_build("sleep_null", wake, [id]);
       });
-      bench.ui.line_send(line_build(start));
-      this.assertEqual(bench.server.posted.length, 0);
-      this.assertEqual(bench.ui.posted.length, 2);
-      const request = bench.ui.posted[0];
-      this.assertEqual(field_read(request, "i"), 1);
-      this.assertEqual(bench.ui.posted[1].note, true);
-      this.assertEqual(field_read(bench.ui.posted[1], "i"), undefined);
-      bench.ui.line_send(reply_build(request, "bare"));
+      ui_send(bench, line_build(start));
+      this.assertEqual(bench.ui.came.length, 0);
+      this.assertEqual(got.length, 2);
+      this.assertEqual(field_read(got[0], "i"), 1);
+      this.assertEqual(got[1].note, true);
+      this.assertEqual(field_read(got[1], "i"), undefined);
       this.assertEqual(woken.length, 1);
       this.assertEqual(bench.tasks.depth(), 0);
     }
 
-    // A reply to a request sent to a given owner must come on that port.
-    test_owner_reply(): void {
-      const far = type_fresh();
-      const bench = bench_make(owners_make({ [far]: "server" }));
-      const idle = handler_fresh(() => undefined);
-      const start = handler_fresh(() => {
-        const id = bench.tasks.task_submit(line_build(far), "ui");
-        return sleep_build("sleep_null", idle, [id]);
-      });
-      bench.ui.line_send(line_build(start));
-      const reply = reply_build(bench.ui.posted[0], "bare");
-      const reply_text = JSON.stringify(reply[0]);
-      const wrong = thrown_get(() => bench.server.line_send(reply));
-      this.assertEqual(
-        wrong.message,
-        text_fill("queue_reply_unknown_server", { 1: reply_text }),
-      );
-    }
-
     // A given owner with no port throws as an owner from the table would.
     test_owner_unconnected(): void {
-      const far = type_fresh();
+      const got: lines.Line[] = [];
+      const far = far_fresh(got);
       const bench = bench_make(owners_make({ [far]: "server" }));
       const notice = thrown_get(() =>
         bench.tasks.line_notify(line_build(far), "media"),
@@ -703,26 +665,26 @@ namespace test_queue {
         bench.tasks.task_submit(line_build(far), "http");
         return undefined;
       });
-      const submit = thrown_get(() => bench.ui.line_send(line_build(start)));
+      const submit = thrown_get(() => ui_send(bench, line_build(start)));
       this.assertEqual(submit.message, gold_text("queue_port_missing_http"));
-      this.assertEqual(bench.server.posted.length, 0);
+      this.assertEqual(got.length, 0);
     }
 
     // A line posted to this thread runs here whatever owner the table names.
     test_owner_own(): void {
-      const seen: unknown[] = [];
-      const near = handler_fresh((line) => {
-        seen.push(line.n);
+      const near = type_fresh();
+      const bench = bench_make(owners_make({ [near]: "server" }));
+      const seen: string[] = [];
+      // The queue that runs the line counts it in its depth.
+      dispatch.handler_register(near, 0, (line) => {
+        const depths = `${bench.tasks.depth()}:${bench.server.depth()}`;
+        seen.push(`${String(line.n)}:${depths}`);
         return undefined;
       });
-      const bench = bench_make(owners_make({ [near]: "server" }));
-      bench.tasks.line_notify(line_build(near, "n_1"), "ai");
-      this.assertEqual(seen.join(","), "1");
-      this.assertEqual(bench.server.posted.length, 0);
+      bench.tasks.line_notify(line_build(near, "n_1"), constants.thread);
+      this.assertEqual(seen.join(","), "1:1:0");
       bench.tasks.line_notify(line_build(near, "n_2"));
-      this.assertEqual(seen.join(","), "1");
-      this.assertEqual(bench.server.posted.length, 1);
-      this.assertEqual(bench.server.posted[0].n, 2);
+      this.assertEqual(seen.join(","), "1:1:0,2:0:1");
     }
   }
 
@@ -730,44 +692,62 @@ namespace test_queue {
   export class TestSleepWake extends unittest.TestCase {
     // Two replies wake the task once in either order, in submit order.
     test_either_order(): void {
-      const to_server = type_fresh();
-      const to_ui = type_fresh();
-      const owners = owners_make({ [to_server]: "server", [to_ui]: "ui" });
-      const woken: lines.Line[] = [];
+      const quick = type_fresh();
+      const slow = type_fresh();
+      const owners = owners_make({ [quick]: "server", [slow]: "server" });
       let bench = bench_make(owners);
+      const sent = new Map<string, lines.Line>();
+      const order: string[] = [];
+      // The far queue answers a quick request at once.
+      dispatch.handler_register(quick, 0, (line) => {
+        const reply = dispatch.reply_make(line, {});
+        sent.set(quick, reply);
+        order.push("quick");
+        return reply;
+      });
+      const bounce = handler_fresh((line) => dispatch.reply_make(line, {}));
+      const slow_wake = handler_fresh((line) => {
+        const reply = dispatch.reply_make(request_kept(line), {});
+        sent.set(slow, reply);
+        order.push("slow");
+        return reply;
+      });
+      // The far queue answers a slow request once the queue answered it back.
+      dispatch.handler_register(slow, 0, (line) => {
+        const back = line_build(bounce);
+        const id = bench.server.task_submit(back, constants.thread);
+        return sleep_asked(line, slow_wake, [id]);
+      });
+      const woken: lines.Line[] = [];
       const wake = handler_fresh((line) => {
         woken.push(line);
         return undefined;
       });
-      const start = handler_fresh(() => {
-        const first = bench.tasks.task_submit(line_build(to_server));
-        const second = bench.tasks.task_submit(line_build(to_ui));
-        return sleep_build("sleep_kept", wake, [second, first]);
-      });
-      for (const server_first of [true, false]) {
+      const runs: [string, string][] = [
+        [quick, slow],
+        [slow, quick],
+      ];
+      for (const [early, late] of runs) {
         bench = bench_make(owners);
         woken.length = 0;
-        bench.ui.line_send(line_build(start));
-        const server_reply = reply_build(bench.server.posted[0], "bare");
-        const ui_reply = reply_build(bench.ui.posted[0], "bare");
-        const server_send = () => bench.server.line_send(server_reply);
-        const ui_send = () => bench.ui.line_send(ui_reply);
-        const [early, late] = server_first
-          ? [server_send, ui_send]
-          : [ui_send, server_send];
-        early();
-        this.assertEqual(woken.length, 0);
-        this.assertEqual(bench.tasks.depth(), 1);
-        late();
+        order.length = 0;
+        const start = handler_fresh(() => {
+          const first = bench.tasks.task_submit(line_build(early));
+          const second = bench.tasks.task_submit(line_build(late));
+          return sleep_build("sleep_kept", wake, [second, first]);
+        });
+        ui_send(bench, line_build(start));
+        this.assertEqual(order.join(","), "quick,slow");
         this.assertEqual(woken.length, 1);
         const replies = woken[0].replies as lines.Line[];
         this.assertEqual(replies.length, 2);
-        this.assertTrue(replies[0] === server_reply);
-        this.assertTrue(replies[1] === ui_reply);
+        this.assertTrue(replies[0] === sent.get(early));
+        this.assertTrue(replies[1] === sent.get(late));
         this.assertEqual((woken[0].state as { tag: string }).tag, "kept");
-        this.assertEqual(field_read(woken[0], "type"), wake);
-        this.assertEqual(field_read(woken[0], "id"), undefined);
+        this.assertEqual(jslb.field_get(woken[0][0], "type"), wake);
+        this.assertEqual(jslb.field_get(woken[0][0], "id"), undefined);
         this.assertEqual(bench.tasks.depth(), 0);
+        this.assertEqual(bench.server.depth(), 0);
       }
     }
 
@@ -783,7 +763,7 @@ namespace test_queue {
         seen.push("start");
         return sleep_build("sleep_empty", wake);
       });
-      bench.ui.line_send(line_build(start));
+      ui_send(bench, line_build(start));
       this.assertEqual(seen.join(","), "start,wake 0");
       this.assertEqual(bench.tasks.depth(), 0);
     }
@@ -797,7 +777,7 @@ namespace test_queue {
         return undefined;
       });
       const start = handler_fresh(() => sleep_build("sleep_empty", wake));
-      bench.ui.line_send(line_build(start));
+      ui_send(bench, line_build(start));
       this.assertEqual(woken.length, 1);
       const full = harness.setting_get("debug") === true;
       this.assertEqual(Object.hasOwn(woken[0][0], "type"), full);
@@ -806,12 +786,13 @@ namespace test_queue {
 
     // A sleep names every request its handler submitted, each once.
     test_wait_rules(): void {
-      const far = type_fresh();
+      const got: lines.Line[] = [];
+      const far = far_fresh(got);
       const owners = owners_make({ [far]: "server" });
       const wake = handler_fresh(() => undefined);
       let bench = bench_make(owners);
       const unknown = handler_fresh(() => sleep_build("sleep_unknown", wake));
-      let error = thrown_get(() => bench.ui.line_send(line_build(unknown)));
+      let error = thrown_get(() => ui_send(bench, line_build(unknown)));
       this.assertEqual(
         error.message,
         text_fill("queue_wait_unknown", { 0: unknown }),
@@ -822,7 +803,7 @@ namespace test_queue {
         bench.tasks.task_submit(line_build(far));
         return sleep_build("sleep_null", wake, [first]);
       });
-      error = thrown_get(() => bench.ui.line_send(line_build(partial)));
+      error = thrown_get(() => ui_send(bench, line_build(partial)));
       this.assertEqual(
         error.message,
         text_fill("queue_wait_missing_second", { 0: partial }),
@@ -832,7 +813,7 @@ namespace test_queue {
         const id = bench.tasks.task_submit(line_build(far));
         return sleep_build("sleep_null", wake, [id, id]);
       });
-      error = thrown_get(() => bench.ui.line_send(line_build(twice)));
+      error = thrown_get(() => ui_send(bench, line_build(twice)));
       this.assertEqual(
         error.message,
         text_fill("queue_wait_twice", { 0: twice }),
@@ -842,7 +823,7 @@ namespace test_queue {
         bench.tasks.task_submit(line_build(far));
         return undefined;
       });
-      error = thrown_get(() => bench.ui.line_send(line_build(careless)));
+      error = thrown_get(() => ui_send(bench, line_build(careless)));
       this.assertEqual(
         error.message,
         text_fill("queue_wait_missing_first", { 0: careless }),
@@ -851,7 +832,8 @@ namespace test_queue {
 
     // A submit outside a handler, or of a line with an id, throws.
     test_submit_rules(): void {
-      const far = type_fresh();
+      const got: lines.Line[] = [];
+      const far = far_fresh(got);
       const bench = bench_make(owners_make({ [far]: "server" }));
       const outside = thrown_get(() =>
         bench.tasks.task_submit(line_build(far)),
@@ -866,7 +848,7 @@ namespace test_queue {
         inner.push(thrown_get(() => bench.tasks.task_submit(marked)));
         return undefined;
       });
-      bench.ui.line_send(line_build(start));
+      ui_send(bench, line_build(start));
       this.assertEqual(
         inner[0].message,
         text_fill("queue_submit_marked", { 0: JSON.stringify(marked[0]) }),
@@ -876,7 +858,7 @@ namespace test_queue {
         notified.message,
         text_fill("queue_notify_marked", { 0: JSON.stringify(marked[0]) }),
       );
-      this.assertEqual(bench.server.posted.length, 0);
+      this.assertEqual(got.length, 0);
       this.assertEqual(bench.tasks.depth(), 0);
     }
   }
@@ -886,58 +868,60 @@ namespace test_queue {
     // The same inputs give the same posts, handler order and trace twice.
     test_run_twice(): void {
       const to_server = type_fresh();
-      const to_ui = type_fresh();
+      const other = type_fresh();
       const owners = owners_make({
         [to_server]: "server",
-        [to_ui]: "ui",
+        [other]: "server",
         "verbose.": "server",
       });
       let bench = bench_make(owners);
+      let trace: string[] = [];
+      for (const far of [to_server, other]) {
+        dispatch.handler_register(far, 0, (line) => {
+          trace.push(`far ${JSON.stringify(line)}`);
+          return dispatch.reply_make(line, {});
+        });
+      }
       const note = handler_fresh(() => {
-        bench.trace.push("run note");
+        trace.push("run note");
         return undefined;
       });
       const late = handler_fresh(() => {
-        bench.trace.push("run late");
+        trace.push("run late");
         return undefined;
       });
       const done = handler_fresh((line) => {
-        bench.trace.push("run done");
-        const state = line.state as { request: lines.Line };
-        const answer = reply_build(state.request, "bare");
-        answer.count = (line.replies as lines.Line[]).length;
-        return answer;
+        trace.push("run done");
+        const count = (line.replies as lines.Line[]).length;
+        return dispatch.reply_make(request_kept(line), { count });
       });
       const say = handler_fresh((line) => {
-        bench.trace.push("run say");
-        bench.server.line_send(line_build(late));
+        trace.push("run say");
+        bench.server.line_notify(line_build(late), constants.thread);
         bench.tasks.line_notify(line_build(note));
         const first = bench.tasks.task_submit(line_build(to_server));
-        const second = bench.tasks.task_submit(line_build(to_ui));
+        const second = bench.tasks.task_submit(line_build(other));
         return sleep_asked(line, done, [first, second]);
       });
       const runs: string[] = [];
       const logs: string[] = [];
       for (let index = 0; index < 2; index += 1) {
         bench = bench_make(owners);
+        trace = [];
         bench.tasks.sink_attach(() => {}, reader_make({ debug: true }));
         const mark = mark_take();
-        bench.ui.line_send(line_build(say, "say_1"));
-        const request = bench.server.posted[0];
-        bench.ui.line_send(reply_build(bench.ui.posted[0], "bare"));
-        bench.server.line_send(reply_build(request, "bare"));
-        const handlers = bench.trace.filter((entry) =>
-          entry.startsWith("run "),
-        );
+        ui_send(bench, line_build(say, "say_1"));
+        const handlers = trace.filter((entry) => entry.startsWith("run "));
         this.assertEqual(
           handlers.join(","),
           "run say,run note,run late,run done",
         );
-        this.assertEqual(bench.ui.posted.length, 2);
-        this.assertEqual(field_read(bench.ui.posted[1], "r"), 1);
-        this.assertEqual(bench.ui.posted[1].count, 2);
+        this.assertEqual(bench.ui.came.length, 1);
+        this.assertEqual(field_read(bench.ui.came[0], "r"), 1);
+        this.assertEqual(bench.ui.came[0].count, 2);
         this.assertEqual(bench.tasks.depth(), 0);
-        runs.push(bench.trace.join("\n"));
+        const posted = bench.ui.came.map((line) => JSON.stringify(line));
+        runs.push([...trace, ...posted].join("\n"));
         logs.push(texts_after(mark).join("\n"));
       }
       this.assertEqual(runs[0], runs[1]);
@@ -952,10 +936,10 @@ namespace test_queue {
       const boom = handler_fresh(() => {
         throw failure;
       });
-      const thrown = thrown_get(() => bench.ui.line_send(line_build(boom)));
+      const thrown = thrown_get(() => ui_send(bench, line_build(boom)));
       this.assertTrue(thrown === failure);
       this.assertEqual(bench.tasks.depth(), 0);
-      const later = thrown_get(() => bench.ui.line_send(line_build(boom)));
+      const later = thrown_get(() => ui_send(bench, line_build(boom)));
       this.assertEqual(
         later.message,
         text_fill("queue_stopped", { 1: failure.message, 2: failure.stack }),
@@ -970,42 +954,52 @@ namespace test_queue {
         seen.push(line.n);
         return undefined;
       });
-      const tasks = new queue.TaskQueue("ai", owners_make({}), false);
-      const ui = new PortDouble("ui", []);
-      tasks.port_add("ui", ui);
-      ui.line_send(line_build(note, "n_1"));
+      const tasks = new queue.TaskQueue(
+        constants.thread,
+        owners_make({}),
+        false,
+      );
+      const ui = lane_make(tasks, "ui");
+      ui.port.line_post(line_build(note, "n_1"), []);
       this.assertEqual(seen.length, 0);
       this.assertEqual(tasks.depth(), 1);
     }
 
-    // The depth counts the tasks waiting, the one running and the sleeping.
+    // The depth counts the lines held, the task running and the sleeping.
     test_depth_counts(): void {
-      const far = type_fresh();
-      const bench = bench_make(owners_make({ [far]: "server" }));
+      const got: lines.Line[] = [];
+      const far = far_fresh(got);
+      const to_ui = type_fresh();
+      const owners = owners_make({ [far]: "server", [to_ui]: "ui" });
+      const bench = bench_make(owners);
       const during: number[] = [];
       const idle = handler_fresh(() => undefined);
-      const wake = handler_fresh(() => {
-        during.push(bench.tasks.depth());
-        return undefined;
-      });
       const start = handler_fresh(() => {
         during.push(bench.tasks.depth());
-        bench.ui.line_send(line_build(idle));
-        bench.ui.line_send(line_build(idle));
+        ui_send(bench, line_build(idle));
+        ui_send(bench, line_build(idle));
         during.push(bench.tasks.depth());
-        const first = bench.tasks.task_submit(line_build(far));
-        const second = bench.tasks.task_submit(line_build(far));
-        return sleep_build("sleep_null", wake, [first, second]);
+        const answered = bench.tasks.task_submit(line_build(far));
+        during.push(bench.tasks.depth());
+        const waiting = bench.tasks.task_submit(line_build(to_ui));
+        return sleep_build("sleep_null", idle, [answered, waiting]);
       });
       this.assertEqual(bench.tasks.depth(), 0);
-      bench.ui.line_send(line_build(start));
-      this.assertEqual(during.join(","), "1,3");
+      ui_send(bench, line_build(start));
+      this.assertEqual(during.join(","), "1,3,4");
       this.assertEqual(bench.tasks.depth(), 1);
-      bench.server.line_send(reply_build(bench.server.posted[0], "bare"));
-      this.assertEqual(bench.tasks.depth(), 1);
-      bench.server.line_send(reply_build(bench.server.posted[1], "bare"));
-      this.assertEqual(during.join(","), "1,3,1");
-      this.assertEqual(bench.tasks.depth(), 0);
+      const after = bench_make(owners_make({ [far]: "server" }));
+      const wake = handler_fresh(() => {
+        during.push(after.tasks.depth());
+        return undefined;
+      });
+      const asked = handler_fresh(() => {
+        const id = after.tasks.task_submit(line_build(far));
+        return sleep_build("sleep_null", wake, [id]);
+      });
+      ui_send(after, line_build(asked));
+      this.assertEqual(during.join(","), "1,3,4,1");
+      this.assertEqual(after.tasks.depth(), 0);
     }
   }
 
@@ -1017,53 +1011,54 @@ namespace test_queue {
       const failure = new Error("The tool failed.");
       const made: lines.Line[] = [];
       const ask = handler_fresh((line) => {
-        made.push(reply_build(line, "reply_failed"));
+        made.push(reply_gold(line, "reply_failed"));
         const failed: dispatch.Failure = { reply: made[0], error: failure };
         return failed;
       });
       const thrown = thrown_get(() =>
-        bench.ui.line_send(line_build(ask, "request_5")),
+        ui_send(bench, line_build(ask, "request_5")),
       );
       this.assertTrue(thrown === failure);
-      this.assertEqual(bench.ui.posted.length, 1);
-      this.assertTrue(bench.ui.posted[0] === made[0]);
-      this.assertEqual(field_read(bench.ui.posted[0], "r"), 5);
+      this.assertEqual(bench.ui.came.length, 1);
+      this.assertTrue(bench.ui.came[0] === made[0]);
+      this.assertEqual(field_read(bench.ui.came[0], "r"), 5);
       this.assertEqual(bench.tasks.depth(), 0);
       const later = thrown_get(() =>
-        bench.ui.line_send(line_build(ask, "request_6")),
+        ui_send(bench, line_build(ask, "request_6")),
       );
       this.assertEqual(
         later.message,
         text_fill("queue_stopped", { 1: failure.message, 2: failure.stack }),
       );
       this.assertTrue(later.cause === failure);
-      this.assertEqual(bench.ui.posted.length, 1);
+      this.assertEqual(bench.ui.came.length, 1);
     }
 
     // A failure after a submit posts the reply, then fails on the wait.
     test_failure_submitted(): void {
-      const far = type_fresh();
+      const got: lines.Line[] = [];
+      const far = far_fresh(got);
       const bench = bench_make(owners_make({ [far]: "server" }));
       const failure = new Error("The tool failed.");
       const ask = handler_fresh((line) => {
         bench.tasks.task_submit(line_build(far));
         const failed: dispatch.Failure = {
-          reply: reply_build(line, "bare"),
+          reply: dispatch.reply_make(line, {}),
           error: failure,
         };
         return failed;
       });
       const thrown = thrown_get(() =>
-        bench.ui.line_send(line_build(ask, "request_5")),
+        ui_send(bench, line_build(ask, "request_5")),
       );
       this.assertEqual(
         thrown.message,
         text_fill("queue_wait_missing_first", { 0: ask }),
       );
       this.assertTrue(thrown.cause === failure);
-      this.assertEqual(bench.server.posted.length, 1);
-      this.assertEqual(bench.ui.posted.length, 1);
-      this.assertEqual(field_read(bench.ui.posted[0], "r"), 5);
+      this.assertEqual(got.length, 1);
+      this.assertEqual(bench.ui.came.length, 1);
+      this.assertEqual(field_read(bench.ui.came[0], "r"), 5);
     }
   }
 
@@ -1071,7 +1066,8 @@ namespace test_queue {
   export class TestBlobTransfer extends unittest.TestCase {
     // After a submit the caller's bytes are detached and the post holds them.
     test_submit_detaches(): void {
-      const far = type_fresh();
+      const got: lines.Line[] = [];
+      const far = far_fresh(got);
       const bench = bench_make(owners_make({ [far]: "server" }));
       const data = Uint8Array.from([0, 13, 10, 3, 4, 255]);
       const line = line_build(far, "submit_six");
@@ -1081,16 +1077,15 @@ namespace test_queue {
         const id = bench.tasks.task_submit(line);
         return sleep_build("sleep_null", wake, [id]);
       });
-      bench.ui.line_send(line_build(start));
+      ui_send(bench, line_build(start));
       this.assertEqual(data.byteLength, 0);
       this.assertEqual(bytes_of(line[1]).byteLength, 0);
       this.assertEqual(field_read(line, "i"), 1);
-      const posted = bench.server.posted[0];
+      const posted = got[0];
       const moved = bytes_of(posted[1]);
       this.assertEqual(Array.from(moved).join(","), "0,13,10,3,4,255");
       this.assertTrue(posted[0] === line[0]);
-      this.assertEqual(bench.server.transfers[0].length, 1);
-      this.assertTrue(bench.server.transfers[0][0] === moved.buffer);
+      this.assertEqual(bench.tasks.depth(), 0);
     }
 
     // Blobs over one buffer move it once and keep their own views.
@@ -1107,15 +1102,12 @@ namespace test_queue {
       this.assertEqual(whole.byteLength, 0);
       this.assertEqual(bytes_of(head).byteLength, 0);
       this.assertEqual(bytes_of(tail).byteLength, 0);
-      const posted = bench.ui.posted[0];
-      const transfer = bench.ui.transfers[0];
+      const posted = bench.ui.came[0];
       const moved_head = bytes_of(posted[1]);
       const moved_tail = bytes_of(posted[2]);
       this.assertEqual(Array.from(moved_head).join(","), "1,2");
       this.assertEqual(Array.from(moved_tail).join(","), "3,4");
-      this.assertEqual(transfer.length, 1);
-      this.assertTrue(moved_head.buffer === transfer[0]);
-      this.assertTrue(moved_tail.buffer === transfer[0]);
+      this.assertTrue(moved_head.buffer === moved_tail.buffer);
     }
   }
 
@@ -1142,7 +1134,7 @@ namespace test_queue {
         return undefined;
       });
       const bench = bench_bounded({}, 5);
-      bench.ui.line_send(line_build(note, "handle_x"));
+      ui_send(bench, line_build(note, "handle_x"));
       this.assertEqual(seen, ["x"]);
       this.assertEqual(bench.tasks.depth(), 0);
     }
@@ -1151,11 +1143,11 @@ namespace test_queue {
     test_line_measured(): void {
       const note = handler_fresh(() => undefined);
       const bench = bench_bounded({}, 5);
-      bench.ui.line_send(line_build(note, "text_long"));
+      ui_send(bench, line_build(note, "text_long"));
       const line = line_build(note, "measured_two");
       (line[1] as lines.BlobHeader).d = Uint8Array.from([1, 2]);
       (line[2] as lines.BlobHeader).d = Uint8Array.from([3, 4, 5, 6]);
-      const error = thrown_get(() => bench.ui.line_send(line));
+      const error = thrown_get(() => ui_send(bench, line));
       const header_text = JSON.stringify(line[0]);
       this.assertEqual(
         error.message,
@@ -1172,18 +1164,18 @@ namespace test_queue {
         return undefined;
       });
       const bench = bench_bounded({}, 4);
-      bench.ui.line_send(blob_line(note, "blob_ab"));
-      bench.ui.line_send(blob_line(note, "blob_cd"));
+      ui_send(bench, blob_line(note, "blob_ab"));
+      ui_send(bench, blob_line(note, "blob_cd"));
       this.assertEqual(seen.join(","), "ab,cd");
       const over = blob_line(note, "blob_efg");
-      const error = thrown_get(() => bench.ui.line_send(over));
+      const error = thrown_get(() => ui_send(bench, over));
       const over_text = JSON.stringify(over[0]);
       this.assertEqual(
         error.message,
         text_fill("queue_queue_over_exact", { 1: over_text }),
       );
       const later = thrown_get(() =>
-        bench.ui.line_send(blob_line(note, "blob_hi")),
+        ui_send(bench, blob_line(note, "blob_hi")),
       );
       this.assertEqual(
         later.message,
@@ -1205,14 +1197,13 @@ namespace test_queue {
       line.n = 1e16;
       line.m = -1e300;
       const bench = bench_bounded({}, 0);
-      bench.server.line_send(line);
+      bench.server.line_notify(line, constants.thread);
       this.assertEqual(seen, [1e16]);
       this.assertEqual(bench.tasks.depth(), 0);
     }
 
     // A reply's blobs stay held until its wake runs, and then they are free.
     test_replies_held(): void {
-      const far = type_fresh();
       const seen: unknown[] = [];
       const note = handler_fresh((line) => {
         seen.push(line.text);
@@ -1221,28 +1212,39 @@ namespace test_queue {
       const extra = blob_line(note, "blob_held");
       const held = 4;
       const limit = held + 3 - 1;
-      let bench = bench_bounded({ [far]: "server" }, limit);
+      const got: lines.Line[] = [];
+      const loaded = far_fresh(got, "reply_held");
+      const light = far_fresh(got);
+      const to_ui = type_fresh();
+      const owners: queue.OwnerTable = {
+        [loaded]: "server",
+        [light]: "server",
+        [to_ui]: "ui",
+      };
+      let bench = bench_bounded(owners, limit);
       const wake = handler_fresh(() => undefined);
-      const start = handler_fresh(() => {
-        const first = bench.tasks.task_submit(line_build(far));
-        const second = bench.tasks.task_submit(line_build(far));
-        return sleep_build("sleep_null", wake, [first, second]);
+      const waiting = handler_fresh(() => {
+        const answered = bench.tasks.task_submit(line_build(loaded));
+        const unanswered = bench.tasks.task_submit(line_build(to_ui));
+        return sleep_build("sleep_null", wake, [answered, unanswered]);
       });
-      bench.ui.line_send(line_build(start));
-      bench.server.line_send(reply_blob(bench.server.posted[0]));
-      const error = thrown_get(() => bench.ui.line_send(extra));
+      ui_send(bench, line_build(waiting));
+      this.assertEqual(bench.tasks.depth(), 1);
+      const error = thrown_get(() => ui_send(bench, extra));
       const extra_text = JSON.stringify(extra[0]);
       this.assertEqual(
         error.message,
         text_fill("queue_queue_over_replies", { 1: extra_text }),
       );
-      bench = bench_bounded({ [far]: "server" }, limit);
-      bench.ui.line_send(line_build(start));
-      const [asked, also] = bench.server.posted;
-      bench.server.line_send(reply_blob(asked));
-      bench.server.line_send(reply_build(also, "bare"));
+      bench = bench_bounded(owners, limit);
+      const both = handler_fresh(() => {
+        const first = bench.tasks.task_submit(line_build(loaded));
+        const second = bench.tasks.task_submit(line_build(light));
+        return sleep_build("sleep_null", wake, [first, second]);
+      });
+      ui_send(bench, line_build(both));
       this.assertEqual(bench.tasks.depth(), 0);
-      bench.ui.line_send(extra);
+      ui_send(bench, extra);
       this.assertEqual(seen.join(","), "held back");
     }
   }
@@ -1251,15 +1253,15 @@ namespace test_queue {
   export class TestTraceDebug extends unittest.TestCase {
     // With `debug` true a dispatch and its reply are traced, else nothing.
     test_trace_gated(): void {
-      const echo = handler_fresh((line) => reply_build(line, "bare"));
+      const echo = handler_fresh((line) => dispatch.reply_make(line, {}));
       for (const debug of [false, true]) {
         const bench = bench_make(owners_make({ "verbose.": "server" }));
         bench.tasks.sink_attach(() => {}, reader_make({ debug }));
         const request = line_build(echo, "request_1");
         const mark = mark_take();
-        bench.ui.line_send(request);
+        ui_send(bench, request);
         const asked = JSON.stringify(request[0]);
-        const answered = JSON.stringify(bench.ui.posted[0][0]);
+        const answered = JSON.stringify(bench.ui.came[0][0]);
         const expected = debug
           ? [
               text_fill("queue_dispatch", { 2: asked }),
@@ -1272,11 +1274,11 @@ namespace test_queue {
 
     // A queue that has no settings reader yet traces nothing.
     test_trace_unread(): void {
-      const echo = handler_fresh((line) => reply_build(line, "bare"));
+      const echo = handler_fresh((line) => dispatch.reply_make(line, {}));
       const bench = bench_make(owners_make({}));
       const mark = mark_take();
-      bench.ui.line_send(line_build(echo, "request_1"));
-      this.assertEqual(bench.ui.posted.length, 1);
+      ui_send(bench, line_build(echo, "request_1"));
+      this.assertEqual(bench.ui.came.length, 1);
       this.assertEqual(texts_after(mark), []);
     }
   }
@@ -1305,7 +1307,7 @@ namespace test_queue {
       this.assertTrue(Object.hasOwn(put[0], "type"));
       this.assertEqual(put.thread, "ai");
       const sent = put.lines as lines.VerboseLine[];
-      const kept = ring.logged;
+      const kept = ring.history_get(3);
       this.assertEqual(sent.length, 3);
       for (let index = 0; index < kept.length; index += 1) {
         this.assertTrue(sent[index] === kept[index]);
@@ -1338,7 +1340,7 @@ namespace test_queue {
       for (const text of ["a", "b", "c", "d", "e"]) {
         ring.log(text);
       }
-      const [first, second] = ring.logged;
+      const [first, second] = ring.history_get(5);
       const empty = text_bytes(gold_line("put_empty_ai"));
       const pair = empty + text_bytes(first) + 1 + text_bytes(second);
       const limit = pair + 1;
@@ -1359,7 +1361,7 @@ namespace test_queue {
       const ring = ring_make(batch);
       ring.log("a");
       ring.log("a longer line");
-      const longer = ring.logged[1];
+      const longer = ring.history_get(1)[0];
       const bytes = text_bytes(gold_line("put_empty_ui")) + text_bytes(longer);
       value.line_max = bytes;
       const posted: lines.Line[] = [];
@@ -1381,8 +1383,9 @@ namespace test_queue {
       for (const thread of ["ui", "ai"] as const) {
         const value: { [id: string]: unknown } = { debug: true };
         const batch = new queue.VerboseBatch(thread, reader_make(value));
-        ring_make(batch).log(text);
-        const entry = { at: Date.now(), text };
+        const ring = ring_make(batch);
+        ring.log(text);
+        const entry = ring.history_get(1)[0];
         const empty = text_bytes(gold_line(`put_empty_${thread}`));
         const bytes = empty + text_bytes(entry);
         value.line_max = bytes;
@@ -1419,9 +1422,8 @@ namespace test_queue {
         "verbose.": "ai",
       };
       const tasks = new queue.TaskQueue("ui", owners, true);
-      const ai = new PortDouble("ai", []);
-      tasks.port_add("ai", ai);
-      const ring = new RingDouble();
+      const ai = lane_make(tasks, "ai");
+      const ring = ring_new();
       tasks.sink_attach(
         (fn) => {
           ring.sink_set(fn);
@@ -1429,14 +1431,14 @@ namespace test_queue {
         reader_make({ debug: true }),
       );
       ring.log("before");
-      this.assertEqual(ai.posted.length, 0);
+      this.assertEqual(ai.came.length, 0);
       const note = handler_fresh(() => {
         ring.log("during");
         return undefined;
       });
-      ai.line_send(line_build(note));
-      this.assertEqual(ai.posted.length, 1);
-      const put = ai.posted[0];
+      ai.port.line_post(line_build(note), []);
+      this.assertEqual(ai.came.length, 1);
+      const put = ai.came[0];
       this.assertEqual(field_read(put, "type"), "verbose.put");
       this.assertEqual(field_read(put, "id"), undefined);
       this.assertEqual(put.thread, "ui");
@@ -1450,9 +1452,8 @@ namespace test_queue {
         "verbose.": "ai",
       };
       const tasks = new queue.TaskQueue("ui", owners, true);
-      const ai = new PortDouble("ai", []);
-      tasks.port_add("ai", ai);
-      const ring = new RingDouble();
+      const ai = lane_make(tasks, "ai");
+      const ring = ring_new();
       tasks.sink_attach(
         (fn) => {
           ring.sink_set(fn);
@@ -1464,14 +1465,14 @@ namespace test_queue {
         ring.log("during");
         throw failure;
       });
-      const thrown = thrown_get(() => ai.line_send(line_build(boom)));
+      const thrown = thrown_get(() => ai.port.line_post(line_build(boom), []));
       this.assertTrue(thrown === failure);
-      this.assertEqual(ai.posted.length, 0);
+      this.assertEqual(ai.came.length, 0);
     }
 
     // A second sink, or a sink where the thread owns `verbose.put`, throws.
     test_attach_refused(): void {
-      const ring = new RingDouble();
+      const ring = ring_new();
       const reader = reader_make({ debug: true });
       const tasks = new queue.TaskQueue("ui", { "verbose.": "ai" }, true);
       tasks.sink_attach((fn) => {

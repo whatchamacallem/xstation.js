@@ -84,8 +84,7 @@ _HARD_PROGRAM = (
     "os._exit(7)\n"
 )
 
-# A program that holds a text in both of its streams, unflushed whatever its
-# environment, then runs the command line of its last arguments at a level.
+# A program: text unflushed in both streams, then its last args run at a level.
 _HELD_PROGRAM = (
     "import sys\n"
     "sys.pycache_prefix = sys.argv[3]\n"

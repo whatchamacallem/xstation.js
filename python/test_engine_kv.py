@@ -16,7 +16,7 @@
 import base64, dispatch, engine_kv, harness, os, re, signal, substrate, sys
 import tempfile, traceback, unittest
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 # The checkout's build directory, where each test makes its scratch root.
 _BUILD_PATH = os.path.join(
@@ -63,12 +63,12 @@ def _gold_value(name: str) -> Any:
 def _keys_number(value: Any) -> Any:
     if isinstance(value, dict):
         made: dict[int | str, Any] = {}
-        for key, item in value.items():
+        for key, item in cast(dict[str, Any], value).items():
             number = _NUMBER_KEY.fullmatch(key) is not None
             made[int(key) if number else key] = _keys_number(item)
         return made
     if isinstance(value, list):
-        return [_keys_number(item) for item in value]
+        return [_keys_number(item) for item in cast(list[Any], value)]
     return value
 
 
@@ -185,10 +185,15 @@ class TestPut(ScratchCase):
     def test_full_names(self) -> None:
         self.child_run(lambda: self.put_check("put_full", b"one", b"one"))
 
-    # Every byte value and an empty value go to the store as given.
+    # Every byte value goes to the store as given.
     def test_bytes_identical(self) -> None:
-        for value in (_VALUE_BYTES, b""):
-            self.child_run(lambda: self.put_check("put", value, value))
+        self.child_run(
+            lambda: self.put_check("put", _VALUE_BYTES, _VALUE_BYTES)
+        )
+
+    # An empty value goes to the store as given.
+    def test_value_empty(self) -> None:
+        self.child_run(lambda: self.put_check("put", b"", b""))
 
     # A value the decoder streamed goes to the store as the path it took.
     def test_streamed_put(self) -> None:

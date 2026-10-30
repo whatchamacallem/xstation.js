@@ -8,8 +8,8 @@
 // its texts are plain English. The bring-up gives each thread its values
 // once, from `tap.start`, before any suite runs, and the harness keeps deep
 // frozen copies of them. An id is a key, nested keys joined by `.`, as
-// `typescript.test_jslb.limits`. A test module references only its own
-// module, `unittest` and this one.
+// `typescript.test_jslb.texts`. A test module calls into other project
+// modules only once their own suites have passed earlier in the run.
 
 namespace harness {
   // The object of `test_settings.json`.

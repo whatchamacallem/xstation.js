@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests the TAP producer: its tracker, its runner, every way a run of the
-// TypeScript harness can fail, and the marked report. Each failure is an
-// expected failure: the test states the stream the suite must write, its
-// diagnostics by the lines they must hold, and passes only when the suite
-// fails exactly that way. The fixtures are not exported, so that no loader
-// collects them.
+// Tests the TAP producer: its tracker, its runner, the blocks written as their
+// points arrive, every way a run of the TypeScript harness can fail, and the
+// marked report. Each failure is an expected failure: the test states the
+// stream the suite must write, its diagnostics by the lines they must hold,
+// and passes only when the suite fails exactly that way. The fixtures are not
+// exported, so that no loader collects them.
 
 namespace test_tap_producer {
   // The lines and the names the expected streams are made of.
@@ -140,19 +140,6 @@ namespace test_tap_producer {
     // Skips itself.
     test_delta_skips(): void {
       this.skipTest("fixture skip");
-    }
-  }
-
-  // Starts its test and ends it with no outcome.
-  class SilentFixture extends unittest.TestCase {
-    // Reports a start and nothing after it.
-    override run(result: unittest.TestResult): void {
-      result.startTest(this);
-    }
-
-    // Never runs.
-    test_values_equal(): void {
-      this.assertEqual(1, 1);
     }
   }
 
@@ -428,6 +415,131 @@ namespace test_tap_producer {
     }
   }
 
+  // Tests the blocks whose points are added after `block_start` returns.
+  export class TestBlocks extends unittest.TestCase {
+    // Points stream as added, the plan follows them, then the parent line.
+    test_block_passes(): void {
+      const lines: string[] = [];
+      const runner = new tap_producer.TAPTestRunner(false);
+      runner.set_stream((text) => lines.push(text));
+      const tracker = runner.block_start("first");
+      tracker.add_ok("Case", "case_one");
+      this.assertEqual(lines.at(-1), "    ok 1 - case_one");
+      tracker.add_not_ok("Case", "case_two", "TODO later", "note");
+      tracker.add_skip("Case", "case_three", "why");
+      this.assertTrue(runner.block_end("first"));
+      this.assertTrue(runner.module_run("second", class_load(PassingFixture)));
+      this.assertTrue(runner.run_end());
+      this.assertEqual(lines, [
+        constants.version_line,
+        "    ok 1 - case_one",
+        "    not ok 2 - case_two # TODO later",
+        "    # note",
+        "    ok 3 - case_three # SKIP why",
+        "    1..3",
+        "ok 1 - first",
+        "    1..1",
+        "    ok 1 - test_values_equal",
+        "ok 2 - second",
+        "1..2",
+      ]);
+    }
+
+    // Without failfast a failed point fails the block and the stream goes on.
+    test_block_fails(): void {
+      const lines: string[] = [];
+      const runner = new tap_producer.TAPTestRunner(false);
+      runner.set_stream((text) => lines.push(text));
+      const tracker = runner.block_start("first");
+      tracker.add_not_ok("Case", "case_one", "", "why");
+      tracker.add_ok("Case", "case_two");
+      this.assertFalse(runner.block_end("first"));
+      runner.block_start("second");
+      this.assertTrue(runner.block_end("second"));
+      this.assertFalse(runner.run_end());
+      this.assertEqual(lines, [
+        constants.version_line,
+        "    not ok 1 - case_one",
+        "    # why",
+        "    ok 2 - case_two",
+        "    1..2",
+        "not ok 1 - first",
+        "    1..0",
+        "ok 2 - second",
+        "1..2",
+      ]);
+    }
+
+    // With failfast a failed point ends the stream after the block's plan.
+    test_block_failfast(): void {
+      const lines: string[] = [];
+      const runner = new tap_producer.TAPTestRunner(true);
+      runner.set_stream((text) => lines.push(text));
+      this.assertTrue(runner.failfast);
+      const tracker = runner.block_start("first");
+      tracker.add_ok("Case", "case_one");
+      tracker.add_not_ok("Case", "case_two");
+      this.assertFalse(runner.block_end("first"));
+      const late = thrown_message(() => runner.block_start("second"));
+      this.assertEqual(late, 'the TAP stream ended before "second"');
+      this.assertFalse(runner.run_end());
+      this.assertEqual(lines, [
+        constants.version_line,
+        "    ok 1 - case_one",
+        "    not ok 2 - case_two",
+        "    1..2",
+        constants.bail_line,
+      ]);
+    }
+
+    // An open block takes no other block or module, and must end by its name.
+    test_block_open(): void {
+      const lines: string[] = [];
+      const runner = new tap_producer.TAPTestRunner(false);
+      runner.set_stream((text) => lines.push(text));
+      const unopened = thrown_message(() => runner.block_end("first"));
+      this.assertEqual(unopened, 'no TAP block is open to end as "first"');
+      runner.block_start("first");
+      const texts = [
+        thrown_message(() => runner.block_start("second")),
+        thrown_message(() =>
+          runner.module_run("second", () => new unittest.TestSuite()),
+        ),
+        thrown_message(() => runner.block_end("second")),
+        thrown_message(() => runner.run_end()),
+      ];
+      this.assertEqual(texts, [
+        'the TAP block "first" is open before "second"',
+        'the TAP block "first" is open before "second"',
+        'the TAP block "first" is open, not "second"',
+        'the TAP block "first" is open at the end',
+      ]);
+      this.assertTrue(runner.block_end("first"));
+      this.assertTrue(runner.run_end());
+      this.assertEqual(lines, [
+        constants.version_line,
+        "    1..0",
+        "ok 1 - first",
+        "1..1",
+      ]);
+    }
+
+    // A block name that would break its lines is refused, and no block opens.
+    test_block_refused(): void {
+      const lines: string[] = [];
+      const runner = new tap_producer.TAPTestRunner(false);
+      runner.set_stream((text) => lines.push(text));
+      const message = thrown_message(() => runner.block_start("a # b"));
+      this.assertEqual(
+        message,
+        'the TAP point "a # b" # "" does not fit on one line, its ' +
+          "diagnostics: undefined",
+      );
+      this.assertTrue(runner.run_end());
+      this.assertEqual(lines, [constants.version_line, "1..0"]);
+    }
+  }
+
   // Tests each way a run can fail, each stated as the stream it must write.
   export class TestFailures extends unittest.TestCase {
     // A failed assertion is a failing point with the assertion's text.
@@ -575,17 +687,6 @@ namespace test_tap_producer {
         constants.error_line,
         constants.bail_line,
       ]);
-    }
-
-    // A test that ends with no outcome throws when its point is due.
-    test_outcome_missing(): void {
-      const runner = new tap_producer.TAPTestRunner(false);
-      runner.set_stream(() => undefined);
-      const message = thrown_message(() =>
-        runner.module_run(constants.block_name, class_load(SilentFixture)),
-      );
-      const name = new SilentFixture("test_values_equal").id();
-      this.assertEqual(message, `${name} ended with no TAP outcome`);
     }
   }
 

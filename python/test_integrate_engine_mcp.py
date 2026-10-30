@@ -72,8 +72,7 @@ def _fail_run(arguments: dict[str, Any]) -> NoReturn:
     raise ValueError(_TOOL_FAILURE)
 
 
-# A new server named as the gold's `initialize` reply, with the gold's tools:
-# the echo tool and the failing one, in the order `tools/list` gives them.
+# A new server with the gold's name and tools, the echo then the failing one.
 def _server_make() -> engine_mcp.mcp.Server:
     identity = _gold_raw("lines.initialize_reply")["result"]["serverInfo"]
     server = engine_mcp.mcp.Server(identity["name"], identity["version"])
@@ -107,8 +106,7 @@ def _reply_read(reply: engine_mcp.jslb.Object) -> object:
     return json.loads(piece)
 
 
-# What the dispatcher returned, made JSON: a reply read back, and a `Failure`
-# as its reply read back and its error.
+# Dispatch result as JSON: a reply read back, or a `Failure`'s with its error.
 def _result_read(result: object) -> object:
     if result is None:
         return None
@@ -121,8 +119,7 @@ def _result_read(result: object) -> object:
     return _reply_read(result)
 
 
-# The work of a child: registers on a new server, then serves the bytes'
-# lines and returns what each gave.
+# In a child: registers on a new server, then returns what each line gave.
 def _lines_serve(data: bytes) -> list[object]:
     engine_mcp.handlers_register(_server_make())
     return [
@@ -152,8 +149,7 @@ def _child_end(work: Callable[[], object], path: str) -> None:
         os.kill(os.getpid(), signal.SIGKILL)
 
 
-# Gives each test a scratch directory in `build/` and runs its work in
-# children.
+# Gives each test a scratch directory in `build/`, runs its work in children.
 class ScratchCase(unittest.TestCase):
     # Makes the scratch directory.
     def setUp(self) -> None:

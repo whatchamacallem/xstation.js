@@ -9,8 +9,10 @@
 // version line, then per module a block indented four spaces with its plan
 // first, its points and their diagnostics, then a parent line, and the parent
 // plan last. With failfast the first failure ends the stream with a bail out
-// line in place of the parent line and the parent plan. Also marks the failed
-// lines of a stream for the test page.
+// line in place of the parent line and the parent plan. A block whose points
+// arrive after the call that starts it opens with `block_start`, which hands
+// out its tracker, and closes with `block_end`, which writes its plan last.
+// Also marks the failed lines of a stream for the test page.
 
 namespace tap_producer {
   // The fixed text of the stream and of the marked report.
@@ -23,6 +25,7 @@ namespace tap_producer {
     parent_failed: "not ok ",
     point_failed: "    not ok ",
     point_todo: " # TODO",
+    todo_word: "TODO",
     span_close: "</span>",
     span_open: '<span class="failed">',
     surprise_text: "unexpected success",
@@ -144,19 +147,9 @@ namespace tap_producer {
   }
 
   // Turns the harness's outcomes into one point per test, once all are in.
-  export class TAPTestResult implements unittest.TestResult {
-    // The counts of Python's `TestResult`, and its stop flag.
-    testsRun = 0;
-    failures = 0;
-    errors = 0;
-    skipped = 0;
-    unexpectedSuccesses = 0;
-    shouldStop = false;
-
+  export class TAPTestResult extends unittest.TestResult {
     // Writes the points of the block this result runs.
     readonly #tracker: Tracker;
-    // Whether the first failure stops the run.
-    readonly #failfast: boolean;
     // The running test, until its point is written.
     #current: unittest.TestCase | null = null;
     // The outcomes of the running test so far.
@@ -164,62 +157,56 @@ namespace tap_producer {
 
     // `tracker` writes the points, and `failfast` stops at the first failure.
     constructor(tracker: Tracker, failfast: boolean) {
+      super(failfast);
       this.#tracker = tracker;
-      this.#failfast = failfast;
-    }
-
-    // Whether no test failed, threw or passed when it was expected to fail.
-    wasSuccessful(): boolean {
-      return (
-        this.failures === 0 &&
-        this.errors === 0 &&
-        this.unexpectedSuccesses === 0
-      );
     }
 
     // Writes the point of the test before, then marks this one as running.
-    startTest(test: unittest.TestCase): void {
+    override startTest(test: unittest.TestCase): void {
       this.point_flush();
-      this.testsRun += 1;
+      super.startTest(test);
       this.#current = test;
     }
 
     // Keeps a pass.
-    addSuccess(test: unittest.TestCase): void {
+    override addSuccess(test: unittest.TestCase): void {
+      super.addSuccess(test);
       this.#part_add(test, { word: "ok", directive: "", diagnostics: "" });
     }
 
     // Keeps a skip and its reason.
-    addSkip(test: unittest.TestCase, reason: string): void {
-      this.skipped += 1;
+    override addSkip(test: unittest.TestCase, reason: string): void {
+      super.addSkip(test, reason);
       const directive = skip_directive(reason);
       this.#part_add(test, { word: "ok", directive, diagnostics: "" });
     }
 
-    // Keeps a failed assertion and its stack.
-    addFailure(test: unittest.TestCase, error: Error): void {
-      this.failures += 1;
-      this.#failing_add(test, stack_text(test.id(), error));
+    // Keeps a failed assertion and the stack the result kept of it.
+    override addFailure(test: unittest.TestCase, error: Error): void {
+      super.addFailure(test, error);
+      this.#failing_add(test, this.failures[this.failures.length - 1][1]);
     }
 
     // Keeps an error that is not an assertion's, and its stack.
-    addError(test: unittest.TestCase, error: Error): void {
-      this.errors += 1;
-      this.#failing_add(test, stack_text(test.id(), error));
+    override addError(test: unittest.TestCase, error: Error): void {
+      super.addError(test, error);
+      this.#failing_add(test, this.errors[this.errors.length - 1][1]);
     }
 
     // Keeps a failure the test was expected to have, with its stack.
-    addExpectedFailure(test: unittest.TestCase, error: Error): void {
+    override addExpectedFailure(test: unittest.TestCase, error: Error): void {
+      super.addExpectedFailure(test, error);
+      const kept = this.expectedFailures;
       this.#part_add(test, {
         word: "not ok",
         directive: constants.expected_directive,
-        diagnostics: stack_text(test.id(), error),
+        diagnostics: kept[kept.length - 1][1],
       });
     }
 
     // Keeps the pass of a test that was expected to fail, which fails it.
-    addUnexpectedSuccess(test: unittest.TestCase): void {
-      this.unexpectedSuccesses += 1;
+    override addUnexpectedSuccess(test: unittest.TestCase): void {
+      super.addUnexpectedSuccess(test);
       this.#failing_add(test, constants.surprise_text);
     }
 
@@ -257,12 +244,9 @@ namespace tap_producer {
       }
     }
 
-    // Keeps a failing part, which stops the run when failfast is set.
+    // Keeps a failing part, the result having stopped the run if failfast.
     #failing_add(test: unittest.TestCase, diagnostics: string): void {
       this.#part_add(test, { word: "not ok", directive: "", diagnostics });
-      if (this.#failfast) {
-        this.shouldStop = true;
-      }
     }
 
     // Keeps a part of the running test, throwing for an outcome of any other.
@@ -277,10 +261,35 @@ namespace tap_producer {
     }
   }
 
+  // A block's tracker, which keeps whether a point failed, its plan last.
+  class BlockTracker extends Tracker {
+    // Whether a point was `not ok` without a `TODO` directive.
+    failed = false;
+
+    // Writes a failing point and keeps that it failed unless it is a `TODO`.
+    override add_not_ok(
+      class_name: string,
+      description: string,
+      directive = "",
+      diagnostics?: string,
+    ): void {
+      super.add_not_ok(class_name, description, directive, diagnostics);
+      if (!directive.startsWith(constants.todo_word)) {
+        this.failed = true;
+      }
+    }
+  }
+
+  // The block written as its points arrive, until `block_end` closes it.
+  interface OpenBlock {
+    readonly name: string;
+    readonly tracker: BlockTracker;
+  }
+
   // Writes TAP for a unittest run: one plan, one indented block per module.
   export class TAPTestRunner {
-    // Whether the first failure ends the stream.
-    readonly #failfast: boolean;
+    // Whether the first failure ends the stream, as Python's runner keeps it.
+    readonly failfast: boolean;
     // Where the lines go, once `set_stream` has set it.
     #write: ((text: string) => void) | null = null;
     // Writes the parent lines and the parent plan.
@@ -291,10 +300,12 @@ namespace tap_producer {
     #bailed = false;
     // Whether `run_end` was called.
     #ended = false;
+    // The block `block_start` opened, until `block_end` closes it.
+    #open: OpenBlock | null = null;
 
     // `failfast` ends the stream at the first failure, as unittest's does.
     constructor(failfast: boolean) {
-      this.#failfast = failfast;
+      this.failfast = failfast;
       this.#parent = new Tracker((text) => this.#line_write(text));
     }
 
@@ -311,7 +322,7 @@ namespace tap_producer {
     run(test: unittest.TestSuite): TAPTestResult {
       const block = new Tracker((text) => this.#block_write(text));
       block.set_plan(test.countTestCases());
-      const result = new TAPTestResult(block, this.#failfast);
+      const result = new TAPTestResult(block, this.failfast);
       test.run(result);
       result.point_flush();
       return result;
@@ -319,11 +330,7 @@ namespace tap_producer {
 
     // Loads and runs one module as a block, then closes the block.
     module_run(module: string, load: () => unittest.TestSuite): boolean {
-      if (this.#bailed || this.#ended) {
-        throw new Error(
-          `the TAP stream ended before ${JSON.stringify(module)}`,
-        );
-      }
+      this.#block_check(module);
       line_check(module, "", undefined);
       let suite: unittest.TestSuite;
       try {
@@ -337,7 +344,7 @@ namespace tap_producer {
         const block = new Tracker((text) => this.#block_write(text));
         block.set_plan(1);
         block.add_not_ok(module, module, "", stack_text(module, error));
-        return this.#block_end(module, false, this.#failfast);
+        return this.#block_end(module, false, this.failfast);
       }
       const result = this.run(suite);
       return this.#block_end(
@@ -347,16 +354,65 @@ namespace tap_producer {
       );
     }
 
+    // Opens a block written as its points are added, and returns its tracker.
+    block_start(name: string): Tracker {
+      this.#block_check(name);
+      line_check(name, "", undefined);
+      const tracker = new BlockTracker((text) => this.#block_write(text));
+      this.#open = { name, tracker };
+      return tracker;
+    }
+
+    // Writes the block's plan, then its parent line or failfast's bail out.
+    block_end(name: string): boolean {
+      const open = this.#open;
+      if (open === null) {
+        throw new Error(
+          `no TAP block is open to end as ${JSON.stringify(name)}`,
+        );
+      }
+      if (open.name !== name) {
+        throw new Error(
+          `the TAP block ${JSON.stringify(open.name)} is open, not ` +
+            JSON.stringify(name),
+        );
+      }
+      this.#open = null;
+      const failed = open.tracker.failed;
+      open.tracker.generate_tap_reports();
+      return this.#block_end(name, !failed, failed && this.failfast);
+    }
+
     // Writes the parent plan unless the stream bailed out. True if all passed.
     run_end(): boolean {
       if (this.#ended) {
         throw new Error("the TAP stream has ended already");
+      }
+      const open = this.#open;
+      if (open !== null) {
+        throw new Error(
+          `the TAP block ${JSON.stringify(open.name)} is open at the end`,
+        );
       }
       this.#ended = true;
       if (!this.#bailed) {
         this.#parent.generate_tap_reports();
       }
       return this.#passed;
+    }
+
+    // Throws once the stream ended, or while a block is open, before `name`.
+    #block_check(name: string): void {
+      if (this.#bailed || this.#ended) {
+        throw new Error(`the TAP stream ended before ${JSON.stringify(name)}`);
+      }
+      const open = this.#open;
+      if (open !== null) {
+        throw new Error(
+          `the TAP block ${JSON.stringify(open.name)} is open before ` +
+            JSON.stringify(name),
+        );
+      }
     }
 
     // Bails out when the block stopped the run, else writes its parent line.

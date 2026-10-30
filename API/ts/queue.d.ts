@@ -20,6 +20,12 @@
 // cascade is kept whole.
 //
 // A wake line is built in the form `settings.names_full()` picks.
+//
+// A `LocalPort` hands each line as it is to the receiver of its far end,
+// which is the port itself unless it was made with another as its far end.
+// Two ports so linked join two queues of one thread, each holding one end,
+// so a line posted at one end runs on the other queue within the post. A
+// port that is linked already cannot be linked again.
 
 declare namespace queue {
   // The owners a line can have: the threads, the server and the ports.
@@ -32,8 +38,10 @@ declare namespace queue {
     line_receive(fn: (line: lines.Line) => void): void;
   }
 
-  // Same thread: `line_post` queues the line on the receiver's queue.
+  // Same thread: `line_post` hands the line to the receiver of the far end.
   class LocalPort implements Port {
+    // Links the far end given back to this port, else the port is its own.
+    constructor(far?: LocalPort);
     line_post(line: lines.Line, transfer: ArrayBuffer[]): void;
     line_receive(fn: (line: lines.Line) => void): void;
   }

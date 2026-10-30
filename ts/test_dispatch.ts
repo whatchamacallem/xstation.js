@@ -99,6 +99,13 @@ namespace test_dispatch {
     throw new Error("Nothing was thrown.");
   }
 
+  // An Error made on Error's prototype without its constructor, so no stack.
+  function stackless_make(message: string): Error {
+    return Object.create(Error.prototype, {
+      message: { value: message },
+    }) as Error;
+  }
+
   // The registration of handlers.
   export class TestHandlerRegistration extends unittest.TestCase {
     // A second registration of a pair throws and the first one stays.
@@ -499,8 +506,8 @@ namespace test_dispatch {
 
     // An error with no stack cannot be sent, so it throws.
     test_stack_missing(): void {
-      const error = new Error("boom");
-      Object.defineProperty(error, "stack", { value: undefined });
+      const error = stackless_make("boom");
+      this.assertEqual(error.stack, undefined);
       const thrown = thrown_get(() => dispatch.error_make(undefined, error));
       const message = gold_text("dispatch_stack_missing_line");
       this.assertEqual(thrown.message, message);
@@ -566,8 +573,8 @@ namespace test_dispatch {
 
     // A nested `Error` with no stack cannot be sent, so it throws.
     test_stack_missing(): void {
-      const inner = new Error("inner");
-      Object.defineProperty(inner, "stack", { value: undefined });
+      const inner = stackless_make("inner");
+      this.assertEqual(inner.stack, undefined);
       const error = new Error("outer", { cause: inner });
       const thrown = thrown_get(() => dispatch.cause_make(error));
       const message = gold_text("dispatch_stack_missing_nested");

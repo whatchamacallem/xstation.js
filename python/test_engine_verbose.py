@@ -136,8 +136,7 @@ def _lines_put(root: str, debug: bool, lines: list[Any]) -> list[Any]:
     return [_handler_call(engine_verbose.verbose_put, line) for line in lines]
 
 
-# The work of a child: registers, logs the server's texts, writes the gold's
-# page lines through `verbose`, then calls the tail handler on each line.
+# In a child: registers, logs server and page lines, then tails each line.
 def _tails_get(root: str, debug: bool, lines: list[Any]) -> list[Any]:
     _log_register(root, debug)
     for text in _SERVER_TEXTS:
@@ -319,8 +318,7 @@ class TestTail(ScratchCase):
 
 # Tests the registration.
 class TestRegister(ScratchCase):
-    # Each handler is registered under its type at version 0, which the
-    # dispatcher then refuses to register again.
+    # Each handler is registered under its type at version 0, a repeat refused.
     def test_handlers_registered(self) -> None:
         for name, case in (("verbose.put", "put"), ("verbose.tail", "tail")):
             with self.subTest(name=name):

@@ -5,7 +5,8 @@
 // The subset of Python's unittest that the TypeScript tests use, with the
 // same names, all synchronous. A test's parts run in Python's order and its
 // outcomes reach a result as Python reports them, so that the TAP producer
-// writes the same text in both languages.
+// writes the same text in both languages. `TestResult` keeps them as
+// Python's does, and the TAP producer's result extends it.
 
 namespace unittest {
   // The prefix of a test method, and how much of a value a message shows.
@@ -32,30 +33,95 @@ namespace unittest {
     override name = "SkipTest";
   }
 
-  // What a run reports to: Python's counts and the outcome of each test.
-  export interface TestResult {
-    testsRun: number;
-    failures: number;
-    errors: number;
-    skipped: number;
+  // The stack of an error, the text a result keeps of each throw.
+  function stack_text(test: TestCase, error: Error): string {
+    if (error.stack === undefined) {
+      throw new Error(`${test.id()} threw an error with no stack: ${error}`, {
+        cause: error,
+      });
+    }
+    return error.stack;
+  }
+
+  // Python's result: the tests run and each outcome, kept as Python keeps it.
+  export class TestResult {
+    // The tests started.
+    testsRun = 0;
+    // Each failed assertion's test and stack, in the order they came.
+    readonly failures: [TestCase, string][] = [];
+    // Each other throw's test and stack.
+    readonly errors: [TestCase, string][] = [];
+    // Each skipped test and its reason.
+    readonly skipped: [TestCase, string][] = [];
+    // Each test that failed as expected, and the stack of its error.
+    readonly expectedFailures: [TestCase, string][] = [];
+    // Each test that passed though it was expected to fail.
+    readonly unexpectedSuccesses: TestCase[] = [];
     // When set, the run stops before its next test.
-    shouldStop: boolean;
-    // Whether no test failed or raised.
-    wasSuccessful(): boolean;
+    shouldStop = false;
+    // A failure, an error or an unexpected success stops the run when set.
+    readonly failfast: boolean;
+
+    // `failfast` is the attribute of Python's result that its runner sets.
+    constructor(failfast: boolean) {
+      this.failfast = failfast;
+    }
+
+    // Whether no test failed, threw or passed when it was expected to fail.
+    wasSuccessful(): boolean {
+      return (
+        this.failures.length === 0 &&
+        this.errors.length === 0 &&
+        this.unexpectedSuccesses.length === 0
+      );
+    }
+
+    // Asks the run to stop before its next test.
+    stop(): void {
+      this.shouldStop = true;
+    }
+
     // A test starts, before its `setUp`.
-    startTest(test: TestCase): void;
-    // The test passed.
-    addSuccess(test: TestCase): void;
+    startTest(test: TestCase): void {
+      this.testsRun += 1;
+    }
+
+    // The test passed, which Python's result keeps no record of.
+    addSuccess(test: TestCase): void {}
+
     // An assertion of the test failed.
-    addFailure(test: TestCase, error: Error): void;
+    addFailure(test: TestCase, error: Error): void {
+      this.failures.push([test, stack_text(test, error)]);
+      if (this.failfast) {
+        this.stop();
+      }
+    }
+
     // The test threw an error that is not an assertion's.
-    addError(test: TestCase, error: Error): void;
+    addError(test: TestCase, error: Error): void {
+      this.errors.push([test, stack_text(test, error)]);
+      if (this.failfast) {
+        this.stop();
+      }
+    }
+
     // The test skipped itself.
-    addSkip(test: TestCase, reason: string): void;
+    addSkip(test: TestCase, reason: string): void {
+      this.skipped.push([test, reason]);
+    }
+
     // The test failed the way it was expected to.
-    addExpectedFailure(test: TestCase, error: Error): void;
+    addExpectedFailure(test: TestCase, error: Error): void {
+      this.expectedFailures.push([test, stack_text(test, error)]);
+    }
+
     // The test passed though it was expected to fail.
-    addUnexpectedSuccess(test: TestCase): void;
+    addUnexpectedSuccess(test: TestCase): void {
+      this.unexpectedSuccesses.push(test);
+      if (this.failfast) {
+        this.stop();
+      }
+    }
   }
 
   // Marks a test method as expected to fail, as Python's decorator does.

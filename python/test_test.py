@@ -51,8 +51,7 @@ _ALL_REFUSED = "the category 'all' is neither smoke-test nor normal-test"
 # The mark that exempts a statement and the block its first line opens.
 _MARK = "# pragma: no cover"
 
-# A sample module: an import, a constant, a class with a method, and a
-# function of two branches.
+# Sample module: import, constant, class with method, function of two branches.
 _SHAPES = """\
 import os
 
@@ -78,8 +77,7 @@ _AREA_LINE = 10
 # The line of `_SHAPES` that only an even number runs.
 _EVEN_LINE = 16
 
-# A sample module whose lines are exempt in the block of the marked `if`,
-# which is never run, and in the marked `raise`, but not in the `else`.
+# Sample exempt in the marked `if` block, never run, and `raise`, not `else`.
 _EXEMPT = """\
 def sign(value):
     if value < 0:  {mark}
@@ -190,8 +188,7 @@ class TestHarness(unittest.TestCase):
         )
         self.assertEqual(caught.exception.args, (expected,))
 
-    # Each file is read once: two reads of an object's id give the one object
-    # that the first read of the file made.
+    # Files are read once: two gets of an id are the object of the first read.
     def test_read_once(self) -> None:
         for key in keys_nested(self.settings):
             self.assertIs(harness.setting_get(key), harness.setting_get(key))
@@ -444,8 +441,7 @@ class TestLineCount(unittest.TestCase):
         expected = f"line {line} of {path} was never counted as run"
         self.assertEqual(caught.exception.args, (expected,))
 
-    # Calls each function of a run `_SHAPES` in a forked child, which ends by
-    # SIGKILL whatever the calls do.
+    # Calls each `_SHAPES` function in a forked child, always ended by SIGKILL.
     def child_call(self, shapes: dict[str, Any]) -> None:
         pid = os.fork()
         if pid == 0:
@@ -477,8 +473,7 @@ class TestLineCount(unittest.TestCase):
         count.suite_leave()
         self.unrun_check(count, path, _EVEN_LINE)
 
-    # Function lines run outside a suite do not count, and count once run in
-    # a suite, though the first run turned them off.
+    # Function lines count only in a suite, though a run outside disabled them.
     def test_suite_only(self) -> None:
         path = self.sample_write("shapes.py", _SHAPES)
         count = self.count_start()
@@ -509,8 +504,7 @@ class TestLineCount(unittest.TestCase):
         count.lines_check(first)
         self.unrun_check(count, second, _AREA_LINE)
 
-    # The marked `if` and `raise` are exempt with their blocks, the `else`
-    # of the `if` is not.
+    # The marked `if` and `raise` are exempt with their blocks, the `else` not.
     def test_exempt(self) -> None:
         path = self.sample_write("exempt.py", _EXEMPT)
         count = self.count_start()
@@ -566,8 +560,7 @@ class TestLineCount(unittest.TestCase):
         first.lines_check(path)
         self.unrun_check(second, path, _AREA_LINE)
 
-    # Function lines a forked child runs count in a suite, though the child
-    # ends by SIGKILL, and do not count outside one.
+    # Function lines a fork runs count in suites only, though SIGKILL ends it.
     def test_forked_child(self) -> None:
         path = self.sample_write("shapes.py", _SHAPES)
         count = self.count_start()

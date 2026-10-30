@@ -132,8 +132,7 @@ def _push_make(text: str, full: bool) -> dict[str, Any]:
     return {"0": header, "language": "python", "text": text}
 
 
-# The `tap.run` line with a blob of the size given, over `_OVERFLOW_BYTES`,
-# naming one small suite, so that the whole run is never this suite's child.
+# `tap.run` with a blob over `_OVERFLOW_BYTES`, one small suite, not recursing.
 def _blob_line(size: int) -> bytes:
     text = (
         f'{{"0":{{"t":"tap.run","i":1,"b":1}},"1":{{"s":{size}}},'
@@ -269,8 +268,7 @@ class ScratchCase(unittest.TestCase):
         ending, output = self.child_run(work, data)
         return ending, _lines_split(output)
 
-    # Checks a push of each line the driver wrote, then the reply with its
-    # exit code and its stderr, the times in that text aside.
+    # Checks each line pushed, the reply's exit code and stderr, times aside.
     def served_check(
         self,
         lines: list[dict[str, Any]],

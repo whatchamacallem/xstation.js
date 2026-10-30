@@ -116,9 +116,7 @@ def _root_make(case: unittest.TestCase) -> ScratchRoot:
     return ScratchRoot(scratch.name, root)
 
 
-# In the forked child: the pty as its tty and its 0, 1 and 2, the run of
-# the root with the stock main loop, how it ended written to the file, then
-# a kill.
+# In the forked child: `login_tty`, a stock loop run, ending to file, a kill.
 def _child_main(slave: int, root: str, path: str) -> None:
     try:
         try:
@@ -233,8 +231,7 @@ class TestStock(unittest.TestCase):
         child.bytes_write(_REPLY_FULL)
         return made, child
 
-    # The ring `verbose.tail` reads holds bootstrap's trace of `tap.start`,
-    # then the main loop's trace of the request.
+    # `verbose.tail` reads bootstrap's `tap.start` trace, then the main loop's.
     def test_ring_shared(self) -> None:
         _, child = self.engine_start()
         child.bytes_write(_line_bytes("tail_server"))
@@ -248,8 +245,7 @@ class TestStock(unittest.TestCase):
         self.assertEqual(texts, expected)
         self.assertEqual(child.hangup(), _HUNG_UP)
 
-    # A failure of the main loop is logged once and writes one error line,
-    # and bootstrap adds nothing after it.
+    # A loop failure logs once, writes one error line, bootstrap adds nothing.
     def test_failure_once(self) -> None:
         made, child = self.engine_start()
         child.bytes_write(_line_bytes("unknown_request"))
@@ -265,8 +261,7 @@ class TestStock(unittest.TestCase):
         ]
         self.assertEqual(_log_read(made.root), _server_lines(texts))
 
-    # The page's error line ends the TypeScript stream and the run with no
-    # answer, its cascade logged after bootstrap's trace.
+    # A page error ends the TAP file and run unanswered, cascade logged last.
     def test_page_failed(self) -> None:
         made, child = self.engine_start()
         child.bytes_write(_line_bytes("browser_error"))

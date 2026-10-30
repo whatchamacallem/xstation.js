@@ -84,7 +84,4 @@ declare namespace provider {
 
   // The key that was set. Throws `provider.key_missing` when none is.
   function key_get(): string;
-
-  // Forgets the key, for the tests only, so `key_get` can be tested unset.
-  function key_clear(): void;
 }
