@@ -26,8 +26,35 @@ providing a link to the task doc. Provide a single sentence bug, task or other
 description alongside every in-conversation postmortem reference to a numbered
 item that is not itself in the postmortem. Referenced items require enough
 context so that no further lookup is required. The task logs are not checked
-for column width.
+for column width. Do not add simple questions to the log or use the `date` command.
 
+- A message to the maintainer is understood without opening another file.
+  Every identifier it uses, such as a task, question or item number, a test,
+  a class or a file, comes with plain words saying what it is and why it
+  matters there; a number may follow that description for reference, never
+  replace it.
+- Never report a problem without its solutions. Anything that waits on the
+  maintainer, whether a decision, an approval, an install or a command only
+  they may run, is written as a question naming what is being decided, not
+  as a blocker, a problem or an instruction to run something.
+- Give a question's solutions as multiple choice: each option on a line of
+  its own that starts with `[ ]`, so that the maintainer can mark a choice
+  `[x]`, lettered from A. Option A is the default, taken when nothing is
+  marked, so A is the option recommended.
+- The maintainer holds the authority and the intent; the agent holds the
+  context, having written and read the code. A question carries authority
+  or intent back to the agent, and never makes the maintainer gather
+  context the agent already has. Before asking, spend the agent's own
+  means: the rules, the plans, the code, an experiment or a measurement.
+- Ask only when the answer is worth more than the maintainer's time to give
+  it: when only the maintainer may decide, when the right choice depends on
+  intent that nothing written settles, or when a wrong guess is costly or
+  hard to undo. Otherwise decide, and report the decision so that
+  overturning it is cheap. Ask first what blocks the most work, and say
+  what each answer unblocks.
+- Put a question in the maintainer's terms: the requirement at stake, what
+  each choice does and what it costs, with the code's names as references
+  only.
 - Lock files by appending a per-task suffix to the filename for the duration.
 - The Lookup Accelerator may only contain information that an AI agent wouldn't
 already know. No line numbers are allowed as they are fragile.
