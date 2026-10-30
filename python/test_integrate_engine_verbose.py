@@ -120,7 +120,7 @@ def _page_rows(root: str) -> list[tuple[int, str, str]]:
     return [row for row in _rows_read(root) if row[1] != _SERVER_THREAD]
 
 
-# In a child: opens the log, registers, logs texts, returns each line's reply.
+# Child: opens the log, registers, logs server texts, returns lines' replies.
 def _lines_serve(root: str, debug: bool, data: bytes) -> list[object]:
     engine_verbose.verbose.log_open(root, _RING)
     engine_verbose.handlers_register(debug)

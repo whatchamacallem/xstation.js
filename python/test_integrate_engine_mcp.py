@@ -119,7 +119,7 @@ def _result_read(result: object) -> object:
     return _reply_read(result)
 
 
-# In a child: registers on a new server, then returns what each line gave.
+# In a child: registers on a new server, returns what each line of `data` gave.
 def _lines_serve(data: bytes) -> list[object]:
     engine_mcp.handlers_register(_server_make())
     return [

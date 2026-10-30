@@ -10,9 +10,10 @@
 // first, its points and their diagnostics, then a parent line, and the parent
 // plan last. With failfast the first failure ends the stream with a bail out
 // line in place of the parent line and the parent plan. A block whose points
-// arrive after the call that starts it opens with `block_start`, which hands
-// out its tracker, and closes with `block_end`, which writes its plan last.
-// Also marks the failed lines of a stream for the test page.
+// arrive after the call that starts it opens with `block_start`, which writes
+// its plan of the count given and hands out its tracker, and closes with
+// `block_end`, which writes its parent line. Also marks the failed lines of a
+// stream for the test page.
 
 namespace tap_producer {
   // The fixed text of the stream and of the marked report.
@@ -261,7 +262,7 @@ namespace tap_producer {
     }
   }
 
-  // A block's tracker, which keeps whether a point failed, its plan last.
+  // A block's tracker, which keeps whether a point failed.
   class BlockTracker extends Tracker {
     // Whether a point was `not ok` without a `TODO` directive.
     failed = false;
@@ -354,16 +355,17 @@ namespace tap_producer {
       );
     }
 
-    // Opens a block written as its points are added, and returns its tracker.
-    block_start(name: string): Tracker {
+    // Opens a block, writes its plan of `count` points, returns its tracker.
+    block_start(name: string, count: number): Tracker {
       this.#block_check(name);
       line_check(name, "", undefined);
       const tracker = new BlockTracker((text) => this.#block_write(text));
+      tracker.set_plan(count);
       this.#open = { name, tracker };
       return tracker;
     }
 
-    // Writes the block's plan, then its parent line or failfast's bail out.
+    // Writes the block's parent line, or failfast's bail out.
     block_end(name: string): boolean {
       const open = this.#open;
       if (open === null) {
@@ -379,7 +381,6 @@ namespace tap_producer {
       }
       this.#open = null;
       const failed = open.tracker.failed;
-      open.tracker.generate_tap_reports();
       return this.#block_end(name, !failed, failed && this.failfast);
     }
 

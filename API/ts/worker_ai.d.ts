@@ -14,22 +14,31 @@
 // `queue.entry_fits`; such a line is logged as its header and the sizes of
 // its payload and blobs only. A `verbose.put` it sends is not logged.
 //
+// The boot hands over the server's lane as a `queue.Port` and an end
+// function: the ttyd page's wire, `wire.WirePort`, and its `wire_end`; the
+// headless page's realm lane, a `queue.ThreadPort`, and a post of the line.
+//
 // Faults: the worker registers its report function, which sends an `error`
 // line with the cascade of the thrown value by `dispatch.cause_make` through
-// `wire.WirePort.wire_end`, whose callback runs once the server, having
-// logged it, has ended the socket. A `fault` line of the UI thread is sent
-// on the same way, its cascade as it came, and at that callback the worker
-// closes itself. `tap_start` runs once per worker, so each of its
-// pieces is a function of its own, for the unit suites.
+// the end function, whose callback runs once the server has the line: on
+// the ttyd page once the server, having logged it, has ended the socket. A
+// `fault` line of the UI thread is sent on the same way, its cascade as it
+// came, and at that callback the worker closes itself. `tap_start` runs once
+// per worker, so each of its pieces is a function of its own, for the unit
+// suites.
 //
 // The relays of the console and the overlay's note are pieces of the program
 // the suites build toward and run nowhere at bring-up.
 
 declare namespace worker_ai {
+  // Sends the line to the server, then calls `done` once the server has it.
+  type ServerEnd = (line: lines.Line, done: () => void) => void;
+
   // What the boot hands over once `tap.start` is in.
   interface TapParts {
     first: lines.Line;
-    wire: wire.WirePort;
+    server: queue.Port;
+    end: ServerEnd;
     ui: MessagePort;
   }
 
@@ -66,9 +75,9 @@ declare namespace worker_ai {
     log: (text: string) => void,
   ): (text: string) => void;
 
-  // Sends the cascade as an `error` line by `wire_end`, then calls `done`.
+  // Sends the cascade as an `error` line by `end`, which calls `done`.
   function error_send(
-    port: wire.WirePort,
+    end: ServerEnd,
     cascade: lines.ErrorCause,
     done: () => void,
   ): void;
@@ -76,7 +85,7 @@ declare namespace worker_ai {
   // Registers the UI's `fault`: its cascade sent on, then `close` called.
   function fault_register(
     register: (type: string, version: number, fn: dispatch.Handler) => void,
-    port: wire.WirePort,
+    end: ServerEnd,
     close: () => void,
   ): void;
 

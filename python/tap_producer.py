@@ -9,9 +9,18 @@
 # indented four spaces with its plan first, its points and their diagnostics,
 # then a parent line, and the parent plan last. A run that has to stop, by
 # failfast or by a class or module fixture that failed, ends with a bail out
-# line in place of the parent line and the parent plan.
+# line in place of the parent line and the parent plan. A realm's own stream
+# of one block, as a TypeScript realm writes it, is relayed in as a block of
+# this stream, a line at a time as each is fed: its indented lines go to the
+# stream unchanged, so that the consumer reading the stream checks each,
+# then the runner writes the parent line with its own number. That line is
+# `ok` only when the consumer counted no failure in the block and the
+# realm's own parent line was `ok`, and the run fails when the two differ. A
+# bail out line from the realm ends the stream as it stands. The realm's
+# version line, parent line and parent plan, which only the relay reads, are
+# checked by it alone.
 
-import re, traceback, types, unittest
+import re, tap_consumer, traceback, types, unittest
 from collections.abc import Callable
 from typing import NamedTuple, TypeAlias, cast
 
@@ -117,6 +126,17 @@ class Tracker:
         if diagnostics is not None:
             for line in diagnostics.removesuffix("\n").split("\n"):
                 self._write("# " + line)
+
+
+# The relay of a realm's block: its place in the realm's stream, and verdict.
+class _BlockRelay:
+    # Opens before the realm's version line, the reader's failures counted.
+    def __init__(self, module: str, reader: tap_consumer.StreamReader) -> None:
+        self.module = module
+        self.reader = reader
+        self.failed = reader.failed
+        self.place = "version"
+        self.passed = False
 
 
 # Turns unittest's outcomes into one point per test, written once all are in.
@@ -233,12 +253,14 @@ class TAPTestResult(unittest.TestResult):
 
 
 # Writes TAP for a unittest run: one plan, one indented block per module.
-class TAPTestRunner(unittest.TextTestRunner):
+class TAPTestRunner:
     # `failfast` ends the stream at the first failure, as unittest's does.
     def __init__(self, failfast: bool) -> None:
-        super().__init__(failfast=failfast)
+        self.failfast = failfast
         self._write: Callable[[str], None] | None = None
         self._parent = Tracker(self._line_write)
+        self._parser = tap_consumer.Parser()
+        self._relay: _BlockRelay | None = None
         self._passed = True
         self._bailed = False
         self._ended = False
@@ -266,8 +288,7 @@ class TAPTestRunner(unittest.TextTestRunner):
     def module_run(
         self, module: str, load: Callable[[], unittest.TestSuite]
     ) -> bool:
-        if self._bailed or self._ended:
-            raise RuntimeError(f"the TAP stream ended before {module!r}")
+        self._stream_check(module)
         _line_check(module, "", None)
         try:
             suite = load()
@@ -282,21 +303,100 @@ class TAPTestRunner(unittest.TextTestRunner):
             module, result.wasSuccessful(), result.shouldStop
         )
 
+    # Opens the relay of a realm's one block, graded by the stream's reader.
+    def block_relay(
+        self, module: str, reader: tap_consumer.StreamReader
+    ) -> None:
+        self._stream_check(module)
+        _line_check(module, "", None)
+        self._relay = _BlockRelay(module, reader)
+
+    # Takes the next line of the realm's stream, without its newline.
+    def relay_feed(self, text: str) -> None:
+        relay = self._relay
+        if relay is None:
+            raise RuntimeError(f"no TAP relay is open for {text!r}")
+        if relay.place == "block" and text.startswith(_BLOCK_INDENT):
+            self._line_write(text)
+            return
+        line = self._parser.parse_line(text)
+        match relay.place, line:
+            case "version", _ if text == _VERSION_LINE:
+                relay.place = "block"
+            case "block", tap_consumer.Result(
+                depth=0, number=1, directive=""
+            ) if line.description == relay.module:
+                self._relay_parent(relay, line.ok, text)
+            case "block", tap_consumer.Bail(depth=0):
+                self._bail_write(text)
+                relay.place = "bailed"
+            case "parent", tap_consumer.Plan(depth=0, expected_tests=1):
+                relay.place = "ended"
+            case _:
+                raise RuntimeError(
+                    f"the realm's TAP line {text!r} does not fit the relay"
+                    f" of {relay.module!r}"
+                )
+
+    # Ends the relay once the realm exited. True when its block passed.
+    def relay_end(self) -> bool:
+        relay = self._relay
+        if relay is None:
+            raise RuntimeError("no TAP relay is open to end")
+        if relay.place not in ("ended", "bailed"):
+            raise RuntimeError(
+                f"the realm's TAP stream of {relay.module!r} ended before its"
+                " parent plan or a bail out"
+            )
+        self._relay = None
+        return relay.passed
+
     # Writes the parent plan unless the stream bailed out. True if all passed.
     def run_end(self) -> bool:
         if self._ended:
             raise RuntimeError("the TAP stream has ended already")
+        if self._relay is not None:
+            raise RuntimeError(
+                f"the TAP relay of {self._relay.module!r} is open at the end"
+            )
         self._ended = True
         if not self._bailed:
             self._parent.generate_tap_reports()
         return self._passed
 
+    # Raises once the stream ended, or while a relay is open, before `name`.
+    def _stream_check(self, name: str) -> None:
+        if self._bailed or self._ended:
+            raise RuntimeError(f"the TAP stream ended before {name!r}")
+        if self._relay is not None:
+            raise RuntimeError(
+                f"the TAP relay of {self._relay.module!r} is open before"
+                f" {name!r}"
+            )
+
+    # Writes the relayed block's parent line, once the realm's agrees with it.
+    def _relay_parent(
+        self, relay: _BlockRelay, passed: bool, text: str
+    ) -> None:
+        failures = relay.reader.failed - relay.failed
+        if passed != (failures == 0):
+            raise RuntimeError(
+                f"the realm's parent line {text!r} disagrees with the"
+                f" {failures} failures the consumer counted in its block"
+            )
+        relay.passed = self._block_end(relay.module, passed, False)
+        relay.place = "parent"
+
+    # Ends the stream with the bail out line.
+    def _bail_write(self, text: str) -> None:
+        self._line_write(text)
+        self._bailed = True
+        self._passed = False
+
     # Bails out when the block stopped the run, else writes its parent line.
     def _block_end(self, module: str, passed: bool, stopped: bool) -> bool:
         if stopped:
-            self._line_write(_BAIL_LINE)
-            self._bailed = True
-            self._passed = False
+            self._bail_write(_BAIL_LINE)
             return False
         if passed:
             self._parent.add_ok(module, module)

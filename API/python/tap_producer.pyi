@@ -1,9 +1,16 @@
 # tappy's producer, its names recalled from tappy's documentation: one TAP
 # version 14 stream, a parent plan, and one indented block per test module,
 # each with its own plan. Each line goes to the stream's writer the moment it
-# is made, as `test_all.py` writes each to stdout.
+# is made, as `test_all.py` writes each to stdout. A realm's own stream of
+# one block, as a TypeScript realm writes it, is relayed in as a block of
+# this stream, a line at a time as each is fed: its indented lines unchanged,
+# then the parent line with this stream's own number, `ok` only when the
+# consumer reading this stream counted no failure in the block and the
+# realm's parent line was `ok`, the two required to agree; a bail out from
+# the realm ends the stream. No module or relay starts while a relay is
+# open, and the stream does not end then.
 
-import unittest
+import tap_consumer, unittest
 from collections.abc import Callable
 
 # Writes the lines of one level of a stream the moment each is added.
@@ -38,8 +45,10 @@ class TAPTestResult(unittest.TestResult):
     # Writes the point of the last test.
     def point_flush(self) -> None: ...
 
-# tappy's `TAPTestRunner`: a `unittest.TextTestRunner` whose results are TAP.
-class TAPTestRunner(unittest.TextTestRunner):
+# tappy's `TAPTestRunner`, its results TAP, with no base, as TypeScript's.
+class TAPTestRunner:
+    # Whether the stream ends at the first failure, as unittest's does.
+    failfast: bool
     # `failfast` ends the stream at the first failure, as unittest's does.
     def __init__(self, failfast: bool) -> None: ...
     # Sends each line to `write` as it is made, the version line first.
@@ -52,5 +61,13 @@ class TAPTestRunner(unittest.TextTestRunner):
     def module_run(
         self, module: str, load: Callable[[], unittest.TestSuite]
     ) -> bool: ...
+    # Opens the relay of a realm's one block, graded by the stream's reader.
+    def block_relay(
+        self, module: str, reader: tap_consumer.StreamReader
+    ) -> None: ...
+    # Takes the next line of the realm's stream, without its newline.
+    def relay_feed(self, text: str) -> None: ...
+    # Ends the relay once the realm exited. True when its block passed.
+    def relay_end(self) -> bool: ...
     # Writes the parent plan unless the stream bailed out. True if all passed.
     def run_end(self) -> bool: ...

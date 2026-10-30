@@ -3,8 +3,9 @@
 // module, each with its own plan. Each line goes to the stream's writer the
 // moment it is made; the bring up sends each as a `tap.line` at once. A
 // block whose points arrive after the call that starts it, as line cases
-// do, opens with `block_start` and closes with `block_end`, which writes its
-// plan last, then its parent line, or with failfast after a failed point the
+// do, opens with `block_start`, which writes its plan of the count given at
+// once, as every block's plan comes first, and closes with `block_end`,
+// which writes its parent line, or with failfast after a failed point the
 // bail out line, and returns whether it passed. A failed point is `not ok`
 // without a `TODO` directive. No module or block runs while one is open, and
 // the stream does not end then.
@@ -62,9 +63,9 @@ declare namespace tap_producer {
     run(test: unittest.TestSuite): TAPTestResult;
     // Loads and runs one module as a block. True when it passed.
     module_run(module: string, load: () => unittest.TestSuite): boolean;
-    // Opens a block written as its points are added, and returns its tracker.
-    block_start(name: string): Tracker;
-    // Writes the block's plan, then its parent line or failfast's bail out.
+    // Opens a block, writes its plan of `count` points, returns its tracker.
+    block_start(name: string, count: number): Tracker;
+    // Writes the block's parent line, or failfast's bail out.
     block_end(name: string): boolean;
     // Writes the parent plan unless the stream bailed out. True if all passed.
     run_end(): boolean;

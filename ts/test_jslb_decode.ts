@@ -16,7 +16,7 @@
 // blob keeps its file for the life of its cache, and the close test closes
 // a third, so the bring up gives at least three. The decoders built here take
 // their limits from the gold, and the input of a streamed blob and its
-// digest are one entry of test_digests.json, under test_jslb.
+// digest are one entry of test_digests.json, under test_jslb_decode.
 namespace test_jslb_decode {
   // The vector files by name, as base64 text, a global the test page sets.
   declare const test_vectors: { readonly [name: string]: string };
@@ -43,7 +43,7 @@ namespace test_jslb_decode {
     byte_mark: String.fromCharCode(0xfeff),
     gold_id: "typescript.test_jslb_decode",
     digests_name: "test_digests.json",
-    digests_module: "test_jslb",
+    digests_module: "test_jslb_decode",
     // The files of each cache: a line here streams two blobs at most.
     cache_slots: 2,
     // The name of the fault of a call on a closed handle.

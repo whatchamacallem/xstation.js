@@ -386,11 +386,6 @@ namespace provider_script {
       this.receiver = fn;
     }
 
-    // The node the script is in, for assertions.
-    node(): string {
-      return this.current;
-    }
-
     // The JSON body that answers the request, chosen by the path of its url.
     private body_answer(payload: FieldTable): FieldTable {
       if (payload.method !== constants.method) {

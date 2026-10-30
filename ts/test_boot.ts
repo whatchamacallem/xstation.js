@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the bring up's entries: its frozen module and the two entries it
-// gives, the page's its own, the one check that still names the page. The
+// Tests of the bring up's entries: its frozen module and the three entries
+// it gives, the page's its own, the one check that still names the page. The
 // frozen page and AI worker modules are their own tests' to check. Run last
 // on the UI thread, as boot depends on the page and on the AI worker.
 
@@ -15,9 +15,13 @@ namespace test_boot {
       this.assertTrue(Object.isFrozen(boot));
     }
 
-    // The module holds the two entries and nothing else.
+    // The module holds the three entries and nothing else.
     test_entries_only(): void {
-      this.assertEqual(Object.keys(boot).sort(), ["test_page", "test_worker"]);
+      this.assertEqual(Object.keys(boot).sort(), [
+        "headless_worker",
+        "test_page",
+        "test_worker",
+      ]);
     }
 
     // The page's entry is the page module's own.

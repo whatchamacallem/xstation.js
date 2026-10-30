@@ -66,6 +66,9 @@ _INSTALL_SCRIPT = "xsjs_install.ps1"
 # The start of the name of the directory each run makes its roots in.
 _WORK_PREFIX = "test_wire-"
 
+# The template the page is built from, that of the ttyd test page.
+_PAGE_TEMPLATE = "test"
+
 # The name the page is built under, apart from the browser test's page.
 _PAGE_NAME = "test_wire"
 
@@ -883,10 +886,10 @@ def root_restart(
 def roots_run(log: RungLog, work: str, chosen: str) -> None:
     import devtools, page_build
 
-    digest = page_build.page_build(_PAGE_NAME)
+    digest = page_build.page_build(_PAGE_TEMPLATE, _PAGE_NAME)
     log.step_print(f"built {_PAGE_PATH}, sha256 {digest}")
     width, height = gold_value("window_width"), gold_value("window_height")
-    with devtools.Browser(width, height) as browser:
+    with devtools.Browser(width, height, devtools.WindowsRelay()) as browser:
         browser.console_follow(console_copy)
         log.client_bind(browser.client_get())
         root_echo(log, browser, work, chosen)

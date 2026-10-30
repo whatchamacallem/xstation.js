@@ -15,7 +15,7 @@
 import errno, harness, hashlib, io, jslb, json, math, os, resource, signal
 import tempfile, traceback, unittest
 from collections.abc import Callable, Iterable
-from typing import Any
+from typing import Any, cast
 
 # The checkout's build directory, where each test makes its scratch directory.
 _BUILD_PATH = os.path.join(
@@ -25,7 +25,7 @@ _BUILD_PATH = os.path.join(
 # The open descriptors of the process, which a file closed leaves as before.
 _DESCRIPTORS_PATH = "/proc/self/fd"
 
-# One byte past `open`'s largest buffer, so that such a write reaches the file.
+# A byte past `open`'s max buffer, 8 MiB or more, so such writes hit the file.
 _BUFFER_PAST = max(8 * 1024 * 1024, io.DEFAULT_BUFFER_SIZE) + 1
 
 # The ending a forked child sends when all its checks passed.
@@ -651,7 +651,7 @@ class TestDecode(ScratchCase):
         for value in (2**53, -(2**53)):
             data = b'{"0":{"t":"echo"},"n":%d}\r' % value
             number = self.number_read(data)
-            self.assertIs(type(number), int)
+            self.assertIs(type(cast(object, number)), int)
             self.assertEqual(number, value)
         for token, name in zip(_INTEGERS_PAST, _PAST_TEXTS):
             self.token_refused(token, text_get(name))
@@ -678,7 +678,7 @@ class TestDecode(ScratchCase):
         for token in _DOUBLES:
             data = b'{"0":{"t":"echo"},"n":%s}\r' % token.encode()
             number = self.number_read(data)
-            self.assertIs(type(number), float)
+            self.assertIs(type(cast(object, number)), float)
             self.assertEqual(number, float(token))
 
     # Digits in a key or a string are no number, however many they are.
@@ -730,9 +730,9 @@ class TestDecode(ScratchCase):
             (lines[0], "b", "s", b"xy"),
             (lines[1], "blobs", "size", b"z"),
         ):
-            self.assertIs(type(line[0][count]), int)
+            self.assertIs(type(cast(object, line[0][count])), int)
             self.assertEqual(line[0][count], 1)
-            self.assertIs(type(line[1][size]), int)
+            self.assertIs(type(cast(object, line[1][size])), int)
             self.assertEqual(line[1][size], len(data))
             self.assertEqual(line[1].d, data)
 
@@ -1143,11 +1143,11 @@ class TestJsonDecode(_MessageCase):
     def test_numbers_read(self) -> None:
         for value in (2**53, -(2**53)):
             number = jslb.json_decode(str(value))
-            self.assertIs(type(number), int)
+            self.assertIs(type(cast(object, number)), int)
             self.assertEqual(number, value)
         for token in _DOUBLES:
             number = jslb.json_decode(token)
-            self.assertIs(type(number), float)
+            self.assertIs(type(cast(object, number)), float)
             self.assertEqual(number, float(token))
         digits = "1" * 20
         value = jslb.json_decode(f'{{"{digits}":"{digits}"}}')

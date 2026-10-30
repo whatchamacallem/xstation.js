@@ -2,15 +2,19 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests the TAP producer: its tracker, its runner, and every way a run can
-# fail. Each failure is an expected failure: the test states the stream the
-# suite must write, its diagnostics by the lines they must hold, and passes
-# only when the suite fails exactly that way. The fixtures are nested in the
-# test class so that no loader collects them. The failing `setUpModule` runs
-# in a forked child, which registers its module and then kills itself, so
-# that the module reaches no other test.
+# Tests the TAP producer: its tracker, its runner, every way a run can fail,
+# and its relay of a realm's block. Each failure is an expected failure: the
+# test states the stream the suite must write, its diagnostics by the lines
+# they must hold, and passes only when the suite fails exactly that way. The
+# fixtures are nested in the test class so that no loader collects them. The
+# failing `setUpModule` runs in a forked child, which registers its module
+# and then kills itself, so that the module reaches no other test. A relayed
+# realm's stream is real TAP text, most of it written by the producer itself
+# as a realm writes it, relayed into a stream that the real consumer reads a
+# line at a time, as the driver's gate reads its own.
 
-import importlib, os, signal, sys, tap_producer, traceback, types, unittest
+import importlib, os, signal, sys, tap_consumer, tap_producer, traceback
+import types, unittest
 from collections.abc import Callable, Sequence
 from typing import cast
 
@@ -46,6 +50,18 @@ _PARENT_PASSED = "ok 1 - fixture"
 
 # The parent plan of a stream of one block.
 _PARENT_PLAN = "1..1"
+
+# What starts each line of a block.
+_BLOCK_INDENT = "    "
+
+# The name of the block a relayed block follows.
+_FIRST_NAME = "first"
+
+# The refusal of a relay of block `fixture` that ended before its end.
+_UNFINISHED_TEXT = (
+    "the realm's TAP stream of 'fixture' ended before its parent plan or a"
+    " bail out"
+)
 
 # The first diagnostic line of a traceback.
 _TRACEBACK_LINE = "    # Traceback (most recent call last):"
@@ -126,6 +142,76 @@ def stream_expect(
     ended = runner.run_end()
     case.assertEqual(stream_reduce(lines, expected), list(expected))
     case.assertEqual([passed, ended], [_PARENT_PASSED in expected] * 2)
+
+
+# The lines of a realm's stream: the load run as its one block, `fixture`.
+def realm_run(
+    load: Callable[[], unittest.TestSuite], failfast: bool
+) -> list[str]:
+    lines: list[str] = []
+    realm = tap_producer.TAPTestRunner(failfast)
+    realm.set_stream(lines.append)
+    realm.module_run(_BLOCK_NAME, load)
+    realm.run_end()
+    return lines
+
+
+# Keeps each line once the real consumer has read it, as the driver's gate.
+class StreamGate:
+    # Starts before the stream, with a reader of its own.
+    def __init__(self) -> None:
+        self.reader = tap_consumer.StreamReader()
+        self.lines: list[str] = []
+
+    # Keeps the line, raising first unless it fits the stream.
+    def line_write(self, text: str) -> None:
+        line = tap_consumer.Parser().parse_line(text)
+        if not self.reader.line_read(line):
+            raise RuntimeError(
+                f"the TAP line {text!r} does not fit the stream"
+            )
+        self.lines.append(text)
+
+
+# A gated stream with block `first` passed, a relay of `fixture` open after.
+def relay_open(
+    failfast: bool,
+) -> tuple[tap_producer.TAPTestRunner, StreamGate]:
+    gate = StreamGate()
+    runner = tap_producer.TAPTestRunner(failfast)
+    runner.set_stream(gate.line_write)
+    load = class_load(TestFailures.PassingFixture)
+    runner.module_run(_FIRST_NAME, load)
+    runner.block_relay(_BLOCK_NAME, gate.reader)
+    return runner, gate
+
+
+# Relays the realm's lines after block `first`, failing the case unless right.
+def relay_expect(
+    case: unittest.TestCase,
+    realm: list[str],
+    failfast: bool,
+    ending: list[str],
+    stats: tap_consumer.TapStats,
+) -> None:
+    runner, gate = relay_open(failfast)
+    for text in realm:
+        runner.relay_feed(text)
+    passed = runner.relay_end()
+    ended = runner.run_end()
+    block = [text for text in realm if text.startswith(_BLOCK_INDENT)]
+    first = [
+        _VERSION_LINE,
+        "    1..1",
+        "    ok 1 - test_values_equal",
+        f"ok 1 - {_FIRST_NAME}",
+    ]
+    case.assertEqual(gate.lines, first + block + ending)
+    case.assertEqual(passed, "ok 2 - fixture" in ending)
+    case.assertEqual(ended, passed)
+    case.assertTrue(gate.reader.stream_ended())
+    text = "".join(line + "\n" for line in gate.lines)
+    case.assertEqual(tap_consumer.document_stats(text), stats)
 
 
 # In the forked child: runs the work, writes how it ended, kills itself.
@@ -741,6 +827,155 @@ class TestFailures(unittest.TestCase):
             runner.module_run(_BLOCK_NAME, load)
         name = self.SilentFixture("test_values_equal").id()
         message = f"{name} ended with no TAP outcome"
+        self.assertEqual(str(caught.exception), message)
+
+
+# Tests the relay of a realm's block into a stream the real consumer reads.
+class TestRelay(unittest.TestCase):
+    # A passing block is relayed unchanged, its parent line numbered anew.
+    def test_relay_passes(self) -> None:
+        realm = realm_run(class_load(TestFailures.PassingFixture), False)
+        ending = ["ok 2 - fixture", "1..2"]
+        stats = tap_consumer.TapStats(2, 2, 0, 0, True)
+        relay_expect(self, realm, False, ending, stats)
+
+    # An expected failure, which the consumer does not count, passes the block.
+    def test_relay_todo(self) -> None:
+        realm = realm_run(class_load(TestFailures.ExpectedFixture), False)
+        ending = ["ok 2 - fixture", "1..2"]
+        stats = tap_consumer.TapStats(2, 2, 0, 0, True)
+        relay_expect(self, realm, False, ending, stats)
+
+    # A failing block fails its parent line, and the stream goes on to its end.
+    def test_relay_fails(self) -> None:
+        realm = realm_run(class_load(TestFailures.MixedFixture), False)
+        ending = ["not ok 2 - fixture", "1..2"]
+        stats = tap_consumer.TapStats(5, 2, 2, 1, True)
+        relay_expect(self, realm, False, ending, stats)
+
+    # The realm's bail out ends the stream, which then takes no other block.
+    def test_relay_bails(self) -> None:
+        realm = realm_run(class_load(TestFailures.MixedFixture), True)
+        self.assertEqual(realm[-1], _BAIL_LINE)
+        stats = tap_consumer.TapStats(5, 2, 1, 0, True)
+        relay_expect(self, realm, True, [_BAIL_LINE], stats)
+
+    # A realm's parent line that the consumer's count contradicts fails it.
+    def test_relay_disagrees(self) -> None:
+        cases = (
+            ("    not ok 1 - test_one", "ok 1 - fixture", 1),
+            ("    ok 1 - test_one", "not ok 1 - fixture", 0),
+        )
+        for point, parent, failures in cases:
+            with self.subTest(parent=parent):
+                runner, gate = relay_open(False)
+                for text in (_VERSION_LINE, "    1..1", point):
+                    runner.relay_feed(text)
+                with self.assertRaises(RuntimeError) as caught:
+                    runner.relay_feed(parent)
+                message = (
+                    f"the realm's parent line {parent!r} disagrees with the"
+                    f" {failures} failures the consumer counted in its block"
+                )
+                self.assertEqual(str(caught.exception), message)
+                self.assertEqual(gate.lines[-2:], ["    1..1", point])
+
+    # A realm whose stream ends before its parent plan or a bail out fails.
+    def test_relay_unfinished(self) -> None:
+        realm = realm_run(class_load(TestFailures.PassingFixture), False)
+        for count in range(len(realm)):
+            with self.subTest(count=count):
+                runner, _ = relay_open(False)
+                for text in realm[:count]:
+                    runner.relay_feed(text)
+                with self.assertRaises(RuntimeError) as caught:
+                    runner.relay_end()
+                self.assertEqual(str(caught.exception), _UNFINISHED_TEXT)
+
+    # A realm line out of its place in the realm's stream is refused.
+    def test_relay_misfit(self) -> None:
+        realm = realm_run(class_load(TestFailures.PassingFixture), False)
+        cases: tuple[tuple[list[str], str], ...] = (
+            ([], "    1..1"),
+            ([], "ok 1 - fixture"),
+            (realm[:1], _VERSION_LINE),
+            (realm[:3], "ok 1 - other"),
+            (realm[:3], "ok 2 - fixture"),
+            (realm[:3], "ok 1 - fixture # SKIP"),
+            (realm[:3], "1..1"),
+            (realm[:4], "    ok 2 - test_late"),
+            (realm[:4], "1..2"),
+            (realm, "1..1"),
+            (realm, _BAIL_LINE),
+        )
+        for before, misfit in cases:
+            with self.subTest(before=before, misfit=misfit):
+                runner, _ = relay_open(False)
+                for text in before:
+                    runner.relay_feed(text)
+                with self.assertRaises(RuntimeError) as caught:
+                    runner.relay_feed(misfit)
+                message = (
+                    f"the realm's TAP line {misfit!r} does not fit the relay"
+                    " of 'fixture'"
+                )
+                self.assertEqual(str(caught.exception), message)
+
+    # A realm line the relay passes on unchanged meets the consumer's check.
+    def test_relay_gated(self) -> None:
+        runner, gate = relay_open(False)
+        runner.relay_feed(_VERSION_LINE)
+        with self.assertRaises(RuntimeError) as caught:
+            runner.relay_feed("    ok 1 - test_one")
+        message = "the TAP line '    ok 1 - test_one' does not fit the stream"
+        self.assertEqual(str(caught.exception), message)
+        self.assertEqual(gate.lines[-1], f"ok 1 - {_FIRST_NAME}")
+
+    # No module, relay or end of the stream starts while a relay is open.
+    def test_relay_open(self) -> None:
+        runner, _ = relay_open(False)
+        open_text = "the TAP relay of 'fixture' is open"
+        with self.assertRaises(RuntimeError) as caught:
+            runner.module_run("late", unittest.TestSuite)
+        self.assertEqual(str(caught.exception), f"{open_text} before 'late'")
+        with self.assertRaises(RuntimeError) as caught:
+            runner.block_relay("late", tap_consumer.StreamReader())
+        self.assertEqual(str(caught.exception), f"{open_text} before 'late'")
+        with self.assertRaises(RuntimeError) as caught:
+            runner.run_end()
+        self.assertEqual(str(caught.exception), f"{open_text} at the end")
+
+    # With no relay open, a fed line and an end are refused.
+    def test_relay_closed(self) -> None:
+        lines: list[str] = []
+        runner = tap_producer.TAPTestRunner(False)
+        runner.set_stream(lines.append)
+        with self.assertRaises(RuntimeError) as caught:
+            runner.relay_feed(_VERSION_LINE)
+        message = f"no TAP relay is open for {_VERSION_LINE!r}"
+        self.assertEqual(str(caught.exception), message)
+        with self.assertRaises(RuntimeError) as caught:
+            runner.relay_end()
+        message = "no TAP relay is open to end"
+        self.assertEqual(str(caught.exception), message)
+        self.assertEqual(lines, [_VERSION_LINE])
+
+    # A relay takes no block name that would break its parent line.
+    def test_relay_name(self) -> None:
+        lines: list[str] = []
+        runner = tap_producer.TAPTestRunner(False)
+        runner.set_stream(lines.append)
+        with self.assertRaises(ValueError) as caught:
+            runner.block_relay("a # b", tap_consumer.StreamReader())
+        message = (
+            "the TAP point 'a # b' # '' does not fit on one line, its"
+            " diagnostics: None"
+        )
+        self.assertEqual(str(caught.exception), message)
+        runner.run_end()
+        with self.assertRaises(RuntimeError) as caught:
+            runner.block_relay("late", tap_consumer.StreamReader())
+        message = "the TAP stream ended before 'late'"
         self.assertEqual(str(caught.exception), message)
 
 

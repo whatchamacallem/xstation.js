@@ -29,7 +29,7 @@ _EXEMPT_MARK = "# pragma: no cover"
 # The name of the code that evaluates deferred annotations when read.
 _ANNOTATE_NAME = "__annotate__"
 
-# Tool ids to take in turn, from the coverage tool's to 5, past the debugger's.
+# Ids a count may take, in turn: of 0 to 5, coverage's up, not the debugger's.
 _TOOL_IDS = range(sys.monitoring.COVERAGE_ID, 6)
 
 # The name a count's tool id carries.
@@ -63,7 +63,7 @@ class LineCount:
         self._pid = os.getpid()
         # The real path of each file name a code object gives.
         self._paths: dict[str, str] = {}
-        # The suite's files by real path, a byte per line a forked child sets.
+        # Real paths whose function lines count now, a byte a line a fork sets.
         self._suite: dict[str, mmap.mmap] = {}
         # The lines counted as run, by the real path of their file.
         self._run: collections.defaultdict[str, set[int]] = (
@@ -84,7 +84,7 @@ class LineCount:
         # A function line turned off outside a suite fires again in this one.
         sys.monitoring.restart_events()
 
-    # Counts what forked children marked, then stops counting function lines.
+    # Counts the suite's forked children's marks, then no function line counts.
     def suite_leave(self) -> None:
         for path, marks in self._suite.items():
             lines = range(len(marks))
@@ -150,7 +150,7 @@ def _lines_held(module: types.CodeType) -> set[int]:
     return held
 
 
-# The exempt lines: a marked statement's, and those of the block it opens.
+# Exempt: a statement's marked first line to its block's end, or else its end.
 def _lines_exempt(source: str) -> set[int]:
     lines = source.split("\n")
     exempt: set[int] = set()

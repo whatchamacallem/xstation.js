@@ -188,7 +188,7 @@ class PipeCase(unittest.TestCase):
         code = mcp_stdio.stdio_run(self.register, stdin, stdout)
         return code, _pipe_take(output)
 
-    # Returns the exception the loop raises on the text, and the output so far.
+    # Returns the loop's `kind` exception on the text, and the output so far.
     def failure_run(
         self, text: str, kind: type[BaseException]
     ) -> tuple[BaseException, str]:

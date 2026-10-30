@@ -5,8 +5,8 @@
 # Serves the engine, python\bootstrap.py with its page,
 # build\hyperposition-engine.html, through ttyd in WSL on port 5768, now and
 # whenever you sign in to Windows. Run xsjs_install.ps1 once first, build the
-# page in WSL with python3 python/page_build.py hyperposition-engine, then
-# run this from an administrator PowerShell:
+# page in WSL with python3 python/page_build.py test hyperposition-engine,
+# then run this from an administrator PowerShell:
 #
 #     .\xsjs_start.ps1                    http://localhost:5768/
 #     .\xsjs_start.ps1 username:password  https://<this PC>:5768/

@@ -73,17 +73,16 @@ _ARRIVAL_IMAGE = (
 
 # Each TypeScript test's inputs by name: bytes by hand, then a pattern's size.
 _TEST_DIGESTS: dict[str, dict[str, tuple[bytes, int]]] = {
-    "test_jslb": {
+    "test_jslb_decode": {
         "blob_half": (b"", 32768),
         "blob_largest": (b"", 65536),
-        "empty": (b"", 0),
         "stream_long": (b"", 3072),
         "stream_over": (b"", 1025),
     },
     "test_media": {
         "abc": (b"abc", 0),
     },
-    "test_substrate": {
+    "test_substrate_store": {
         "absent": (b"absent", 0),
         "arrival_image": (_ARRIVAL_IMAGE, 0),
         "arrival_ref": (b"/castle_gatehouse/scene/arrival/1", 0),

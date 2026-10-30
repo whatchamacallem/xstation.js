@@ -9,10 +9,11 @@ test producer sends JSLB lines straight to the module under test, compares
 the JSLB lines that come back with expected lines, and reports to a TAP
 consumer.
 
-Nothing in this plan has been carried out. It was written while the agents
-of `PY_GOALPOSTS.md` were running, and every task that touches a file of
-that plan waits for its wave 3 (section 8). "Question Tn" names a question
-of section 9; the T keeps them apart from the numbers of `PY_GOALPOSTS.md`.
+Tasks 5.2, 5.3, 5.4, 5.8, 5.9 and 5.10 were done on 2026-10-29, while the
+agents of `PY_GOALPOSTS.md` ran its wave 3. On 2026-10-30 the maintainer
+answered Questions T1 to T5, which did 5.1. Section 8 gives what is done
+and what follows. "Question Tn" names a question of section 9; the T keeps
+them apart from the numbers of `PY_GOALPOSTS.md`.
 
 Section 1 lists what will be accomplished; section 2 reviews the TS tests
 as they are; section 3 the decisions; section 4 the rules; section 5 group
@@ -28,7 +29,7 @@ analysis.
   T2). Tasks 5.7 and 6.3.
 - No TS suite uses a double or changes a module's state. 18 of the 27
   suites hold one today (2.6). Tasks 5.8 to 5.10 and 6.4 to 6.6.
-- Group A first: 25 blocks run in Node 22 after tsc, a fresh process per
+- Group A first: 27 blocks run in Node 22 after tsc, a fresh process per
   block, before any browser starts (section 5).
 - The TS pair test proves that the Python consumer validates what the TS
   producer writes, against `unittest`'s own counts (`PY_GOALPOSTS.md` 9.2).
@@ -176,7 +177,8 @@ doubles in group C (7.2).
 ## 3 The decisions
 
 Each is class B until the maintainer confirms it (11.2), or rests on a
-question of section 9.
+question of section 9, all answered on 2026-10-30, or was confirmed then
+(11.3).
 
 3.1 Three groups. A: every block that runs in Node 22 after tsc with no
 double. B: every other block that runs in `chrome-headless-shell` with no
@@ -189,9 +191,10 @@ process; in B a dedicated Worker for a worker-side block and a page load
 for a UI-side block. Each block starts in a fresh realm, and no test resets
 a module's state (the project rule, `PY_GOALPOSTS.md` 2.4). Within a block
 each test registers types of its own. A test that needs fresher state than
-its block gives moves to a block of its own, such as `test_provider_key.ts`.
-The ids a realm takes from `dispatch.id_next` start at 102, so expected
-lines can hold them.
+its block gives moves to a block of its own, such as `test_provider_key.ts`,
+and `test_provider_key_unset.ts`, whose one test reads the key unset, which
+it read before only by running first. The ids a realm takes from
+`dispatch.id_next` start at 102, so expected lines can hold them.
 
 3.3 The realm lane. Every realm speaks JSLB with the driver on a new lane,
 `realm`:
@@ -205,8 +208,10 @@ lines can hold them.
    `harness.values_set`, answers Empty, runs its one block, sends each TAP
    line as a `tap.line` push, and ends.
 3. In A the lane is the node process's stdin and stdout, and the block is
-   named as node's argument. Node's writes to a pipe are synchronous on
-   Linux, so a hard exit loses no line.
+   named as node's argument, `node node.js BLOCK [--failfast]`. With
+   `--failfast` the first failure ends the stream with a bail out, as the
+   driver's own `--failfast` does. Node's writes to a pipe are synchronous
+   on Linux, so a hard exit loses no line.
 4. In B the lane rides DevTools: the driver's line is base64 of its bytes in
    a `Runtime.evaluate` call on the page's main thread, and the realm's
    lines go out as base64 through a binding of `Runtime.addBinding`. The
@@ -234,7 +239,7 @@ lines arrive only through a queue; `http`; `media`; `mcp`; `provider_script`;
 `console_view`; and `page`. `wire`'s is in group C. A module with no line
 entry gets none, since its unit suite already runs on its real callees.
 This departs from `PY_GOALPOSTS.md` 2.5, which gives an integration suite to
-every module with a project callee (11.2 item 5). `i18n`, and `ui_strings`,
+every module with a project callee (11.2 item 1). `i18n`, and `ui_strings`,
 the table it reads, do not count as modules when labelling a unit suite,
 as `internationalization` does not.
 
@@ -247,24 +252,39 @@ cases:
    handlers registered through the module's own register function, and
    the module's ports. It returns the test's end of the lane the cases
    speak: a real `queue.ThreadPort` over a MessageChannel whose other end
-   the queue owns.
+   the queue owns. The one exception is `test_integrate_http`, which has no
+   queue: the other end of its ThreadPort pair speaks to the real
+   `http.HttpPort` itself, since an `error` line that reaches a queue stops
+   it by design, so no failed fetch would come back as a line.
 2. The gold `typescript.test_integrate_<module>.cases` lists the cases in
    order, each `{"name", "send", "expect", "seconds"}`. `send` and `expect`
-   name lines of the suite's `lines`.
+   name lines of the suite's `lines`. A blob's bytes in a gold line are
+   base64 under the blob header's key `d`. `line_case.block_run` takes the
+   gold's key as an argument, `block_run(runner, name, id, build, done)`,
+   since `test_line_case` runs several case tables from its own gold; the
+   Node runner passes `typescript.<block>`.
 3. `line_case` sends a case's lines through the test's end, collects every
    line that comes back, and adds one point when every expected line is in
    or the seconds are up. The point is `ok` when the lines equal the
-   expected lines, in order: header and payload by value, each blob by
-   size and `utility.sha256_hex`. Otherwise it is `not ok`, with a
-   diagnostic naming the first difference, a line still missing or a line
-   not expected.
+   expected lines, in order: header and payload by value, each blob header
+   but `d` by value, each blob by size and `utility.sha256_hex`, and an
+   `error` line's `stack`, and each `stack` down its `cause` chain, by its
+   first line only, the error's name and message, since the rest holds
+   build paths and line numbers. Otherwise
+   it is `not ok`, with a diagnostic naming the first difference, a line
+   still missing or a line not expected.
 4. A case never answers a request the module makes (3.9).
 
 3.7 Asynchronous blocks. `tap_producer.TAPTestRunner` gains a block written
-as its points arrive: `block_start(name)` returns the block's `Tracker`, and
-`block_end(name)` writes its plan and parent line. `line_case` writes
-through it. `unittest` stays synchronous: a test whose result arrives after
-its call is a line case.
+as its points arrive: `block_start(name, count)` writes the block's plan of
+`count` points at once and returns the block's `Tracker`, and
+`block_end(name)` writes its parent line, or with failfast after a failed
+point the bail out line. The count is given at the start because every
+producer writes a block's plan first, and the Python consumer refuses a
+block plan that follows the block's points. `line_case` writes through it,
+its count the number of cases, as does `test_line_case`, a block that
+writes its own points. `unittest` stays synchronous: a test whose result
+arrives after its call is a line case.
 
 3.8 `unittest.TestResult`. `unittest` gains Python's `TestResult` class:
 `testsRun`, `failures`, `errors`, `skipped`, `expectedFailures`,
@@ -280,6 +300,16 @@ server, from ttyd, from the console on tty 0, or from a realm that is not
 running is group C. A push the module sends toward the server, such as a
 store's commit or a `tap.line`, is read and compared like a reply.
 
+One far end is scripted, by the answer of 2026-10-30 that the far end of
+a connection may answer with replies the test scripts (3.10, Question T5):
+the driver's HTTP server answers the fetches of `http` and `media`. The
+same answer would admit a scripted far end on the AI worker's server
+lane, through the `queue.Port` that `worker_ai.tap_start` takes by 3.11
+item 4: a ThreadPort pair whose far end is a synchronous queue with the
+test's handlers answering `verbose.tail`, `settings.put`, `source.put`
+and `echo`. That would move 7.1 items 3, 4 and 6 from C to B. It is not
+planned here, and is written down so that the design is not lost.
+
 3.10 HTTP (Question T5). `http.HttpPort` and `media.MediaPort` fetch from a
 real HTTP server: an `http.server` of the standard library that the driver
 starts on 127.0.0.1, answering each path with the status, headers, body
@@ -293,19 +323,21 @@ and delay the suite's gold names. The same server serves the page of B.
 2. The driver's server serves the page on 127.0.0.1, since OPFS needs a
    secure origin that is not opaque.
 3. `boot` gains `headless_worker(run)`: the worker's bring up with its first
-   line from the realm lane in place of `wire.WirePort`, sqlite3 and the
-   pool started as `tests_open` starts them.
+   line from the realm lane in place of `wire.WirePort`, sqlite3, the pool
+   and the test slots started as `tests_open` starts them (6.2).
 4. `worker_ai.tap_start` takes its server lane as a `queue.Port` and an end
    function in place of a `wire.WirePort`, so a block can hand it a
    ThreadPort. `boot.test_worker` passes the WirePort's own.
 5. The ttyd page, `html/test.html` with `test_all.ts`, stays for group C.
 
 3.12 Programs (Question T1). A needs `node` and `tsc`; B also needs
-`chrome-headless-shell`. `tsc` has to be installed. `devtools.py` gains a
-transport for a Linux browser over `--remote-debugging-pipe`, file
-descriptors 3 and 4, standard library only, beside its Windows relay. The
-reason is that the project keeps one DevTools client, `devtools.Browser`,
-and not that the module exists.
+`chrome-headless-shell`. The maintainer approved all three on 2026-10-30
+for `test_all.py`'s TS phases (Question T1 B). tsc is TypeScript 5.2.2 from
+the apt package `node-typescript`, `/usr/bin/tsc`, and no file of the tree
+names any other tsc. `devtools.py` gains a transport for a Linux browser
+over `--remote-debugging-pipe`, file descriptors 3 and 4, standard library
+only, beside its Windows relay. The reason is that the project keeps one
+DevTools client, `devtools.Browser`, and not that the module exists.
 
 3.13 The builds. page_build.py builds the Node bundle `build/ts/node.js` from
 a new `ts/tsconfig.node.json`, which lists the modules of A's blocks, A's
@@ -336,10 +368,12 @@ it. A function never replaces one the module imports.
 4.4 Objects (Question T3). An object written by a test that stands where the
 module takes a project class or a platform object is a double, and is
 replaced by the real one: a real `queue.TaskQueue`, `LocalPort` or
-`ThreadPort`; `verbose.LineRing`; `substrate.Store`; `CacheFiles` over real
-OPFS handles; `mcp.Server` and `ClientSet`; the xterm.js `Terminal`;
-`document`; `ImageBitmap`. A test that cannot have the real object in its
-group moves to a block of a later group.
+`ThreadPort`; `verbose.LineRing`; `substrate.Store`; `CacheFiles`, over real
+OPFS handles when a blob streams to a file; `mcp.Server` and `ClientSet`;
+the xterm.js `Terminal`; `document`; `ImageBitmap`. A test that cannot have
+the real object in its group moves to a block of a later group. The far
+end of a connection is not such an object: it may answer with replies the
+test scripts, as the driver's server of 3.10 does (Question T5).
 
 4.5 System. Nothing is assigned onto `globalThis` or `self`, no prototype is
 patched, and no property of a platform object is redefined. A DOM event a
@@ -352,10 +386,15 @@ driver terminates mid-transaction. Otherwise the test is removed and
 recorded with the code path it reached (`PY_GOALPOSTS.md` 4.8). A cause made
 up in a platform's text is fake data and goes.
 
-4.7 Own data. No export for the tests only: `provider.key_clear` goes. No
-private name is read or written, such as `test_wire`'s `port["socket"]` and
-`message_event`. No layout or name is copied from a module's constants, such
-as `test_substrate`'s cache-file header, restore suffix and
+4.7 Own data. No export for the tests only: `provider.key_clear` goes, and
+`provider_script.ScriptPort.node()`, which only test assertions call, goes
+with its stub; the tests still check every line the provider answers.
+`queue.LocalPort(far?)`, which links two local ports both ways so that two
+real queues on one thread are joined, is a general capability of the
+queue, not an export for the tests, and stays. No private name is read or
+written, such as `test_wire`'s `port["socket"]` and `message_event`. No
+layout or name is copied from a module's constants, such as
+`test_substrate`'s cache-file header, restore suffix and
 `root/name.sqlite`. Values come from `settings.json` and the gold through
 `harness`, or from the module's API.
 
@@ -368,7 +407,7 @@ holds no JSON text.
 1. changes a stub in `API/ts/` or `API/python/` before the code it
    describes;
 2. compiles with both `ts/tsconfig.test.json` and `ts/tsconfig.node.json`,
-   strict, once tsc is installed;
+   strict;
 3. runs `python3 python/reformat.py` twice and reports it if the second run
    changes anything; new files fall under the whitelist globs `ts/*.ts`,
    `API/ts/*.ts`, `html/*.html` and `python/*.py` already;
@@ -377,60 +416,72 @@ holds no JSON text.
 
 ## 5 Group A: the Node run
 
-5.0 The blocks of A, by the survey of 2026-10-28, with Question T3 answered
-A. Under answer B, `test_jslb_decode` and `test_wire_port` stay in A with
-`test_jslb` and `test_wire`.
+5.0 The blocks of A, by the survey of 2026-10-28 with its corrections of
+2026-10-30, with Question T3 answered A. `test_wire_port` runs in A, since
+it passes 26 of 26 in Node on a real, empty `substrate.CacheFiles([])`,
+measured: none of its blobs is large enough to stream to a file.
 
 | Block | Layer | From | What goes |
 | --- | --- | --- | --- |
 | `test_tap_producer` | 0 | whole | `SilentFixture` by 4.6 |
 | `test_unittest` | 0 | whole | `EventLog`, for `unittest.TestResult` (3.8) |
-| `test_harness` | 0 | whole | the `values_missing` test, unreachable once the bring up sets the values (4.6) |
+| `test_harness` | 0 | whole | none |
 | `test_ui_strings` | 0 | whole | none |
 | `test_i18n` | 1 | whole | none |
 | `test_utility` | 2 | whole | none |
 | `test_jslb` | 3 | `TestBuild`, `TestFields`, `TestEncode`, `TestRender`, `TestJsonDecode`, `TestSurface` | the two encode tests that decode with `MemorySink` go to `test_jslb_decode` (B) |
 | `test_settings` | 3 | whole | `settings_make`, for `harness.setting_get` |
 | `test_dispatch` | 4 | whole | the redefined `Error.stack`, for a thrown value with no stack, or removed |
-| `test_http` | 4 | `TestRequestTranslate`, `TestRequestChecks`, `TestAnswerReply`, `TestPortChecks` | `TestFailureReply`'s made-up causes; real failures in `test_integrate_http` |
-| `test_media` | 4 | `TestCacheBudget`, `TestRequestChecks`, `TestReplyLines`, `TestPortChecks` | `TestFailureLines`' made-up causes; `TestCacheEviction` to `test_integrate_media` (B) |
+| `test_http` | 4 | `TestRequestTranslate`, `TestRequestChecks`, `TestAnswerReply`, `TestPortChecks`, and `TestFailureReply`'s timeout tests | `TestFailureReply`'s made-up causes; real failures in `test_integrate_http` |
+| `test_media` | 4 | `TestCacheBudget`, `TestRequestChecks`, `TestReplyLines`, `TestPortChecks`, and `TestFailureLines`' timeout tests | `TestFailureLines`' made-up causes; `TestCacheEviction` to `test_integrate_media` (B) |
 | `test_provider` | 4 | all but `TestProviderKey` | none |
-| `test_provider_key` | 4 | `TestProviderKey` | `key_clear`; the fresh realm gives the unset key |
-| `test_provider_script` | 4 | whole | none |
+| `test_provider_key` | 4 | `TestProviderKey` but `test_key_unset` | `key_clear` |
+| `test_provider_key_unset` | 4 | `TestProviderKey`'s `test_key_unset` alone | none; its own fresh realm gives the unset key |
+| `test_provider_script` | 4 | whole | `ScriptPort.node()` and the assertions that call it (4.7) |
 | `test_verbose` | 4 | whole | none |
-| `test_wire` | 4 | `TestInputFrames`, `TestConsolePort`, `TestConsoleRead`, `TestStrictText`, `TestModuleSurface` | `TestWireMessages`, `TestSettingsPhase`, `TestCloseFault` to `test_wire_port` (B); `TestWireEnd` to C |
+| `test_wire` | 4 | `TestInputFrames`, `TestConsolePort`, `TestConsoleRead`, `TestStrictText`, `TestModuleSurface` | `TestWireMessages`, `TestSettingsPhase`, `TestCloseFault` to `test_wire_port`; `TestWireEnd` to C |
 | `test_queue` | 5 | the synchronous tests | `PortDouble`, for a real `LocalPort` and a second real `TaskQueue`; `RingDouble`, for a real `verbose.LineRing` |
 | `test_substrate` | 5 | the `ref_split`, `doc_encode` and `doc_decode` tests and `TestSurface`, in classes without `StoreCase` | the store and cache tests to `test_substrate_store` (B) |
-| `test_mcp` | 6 | `TestSurface`, `TestServerMethods`, `TestServerErrors`, `TestServerWakes` on a real synchronous queue | `QueueDouble` and `wake_make`; the client classes to `test_integrate_mcp` |
+| `test_mcp` | 6 | `TestSurface`, `TestServerMethods`, `TestServerErrors`, `TestServerWakes` on a real synchronous queue; `TestClientChecks` and `TestClientSet` | `QueueDouble` and `wake_make`; the other client classes to `test_integrate_mcp` |
 | `test_line_case` | 6 | new | none |
+| `test_wire_port` | 6 | `test_wire`'s `TestWireMessages`, `TestSettingsPhase`, `TestCloseFault` | `UnusedSink`, for a real, empty `substrate.CacheFiles([])` |
 | `test_tap_pair_ts` | pair | new, first of A's integration phase | none |
 | `test_integrate_queue` | 5 | new, and `test_queue`'s tests that wait on a `ThreadPort` | none |
 | `test_integrate_http` | 4 | new: `http.request` lines through a real `HttpPort` to the server of 3.10 | none |
 | `test_integrate_provider_script` | 4 | new: chat and image lines through a `ScriptPort` that a real queue owns as `http` | none |
-| `test_integrate_mcp` | 5 | new, and the client classes: `mcp` lines between a real `Client` and `Server` on real queues | none |
+| `test_integrate_mcp` | 6 | new, and `test_mcp`'s other client classes: `mcp` lines between a real `Client` and `Server` on real queues | none |
 
 A layer here counts the edges a test block adds: `test_mcp` and
-`test_line_case` use a real queue, so they follow `test_queue`. Task 5.11
-recomputes every layer.
+`test_line_case` use a real queue, so they follow `test_queue`;
+`test_wire_port` uses a real `CacheFiles`, so it follows `test_substrate`;
+`test_integrate_mcp` runs both `queue` and `mcp`. `TestClientChecks` and
+`TestClientSet` stay unit tests, since they throw inside the client before
+any line is sent, which no line case sees. Task 5.11 recomputes every
+layer.
 
-5.1 Programs (Question T1).
+5.1 Programs (Question T1). Done on 2026-10-30.
 
-1. Needs the answer. The maintainer installs tsc as the answer says.
-2. Done when `tsc --version` answers, and the approvals are written into
-   3.12.
+1. The maintainer installed tsc from the apt package `node-typescript`, as
+   answer B says: `/usr/bin/tsc`, TypeScript 5.2.2.
+2. `tsc --version` answers, and the approvals of `node`, `tsc` and
+   `chrome-headless-shell` are written into 3.12.
 
-5.2 The wire API.
+5.2 The wire API. Done on 2026-10-29.
 
 1. Owns `API/ts/lines.d.ts` and the lane table of `API/README.md`. Needs
    nothing.
 2. Adds the lane `realm`, DRIVER <-> REALM, JSLB over a node process's
    stdio or over DevTools: `tap.start` DRIVER -> REALM, answered Empty, `i`
    101; `tap.line` REALM -> DRIVER, a push; `tap.pair` REALM -> DRIVER, a
-   push carrying one run of the pair fixtures: its TAP lines, and the
-   counts of `unittest.TestResult`.
+   push carrying one run of the pair fixtures: the run's name `run`, its
+   `failfast`, its TAP lines, and for each block its `module`, whether
+   `module_run` `passed`, its `cases` by `countTestCases`, and the counts
+   of `unittest.TestResult`, which the Python pair test's checks need.
 3. Done when the catalogue and the lane table hold them.
 
-5.3 The infrastructure for testing, in TypeScript.
+5.3 The infrastructure for testing, in TypeScript. Done on 2026-10-29; the
+count at `block_start` (3.7) and the stack's first line (3.6 item 3)
+follow in its files (8.2).
 
 1. Owns `ts/unittest.ts`, `ts/tap_producer.ts`, the new `ts/line_case.ts`,
    their stubs in `API/ts/`, `ts/test_unittest.ts`, `ts/test_tap_producer.ts`
@@ -447,15 +498,20 @@ recomputes every layer.
 5. Done when both configs compile and the suites are written. They run in
    task 5.12.
 
-5.4 The Node realm.
+5.4 The Node realm. Done on 2026-10-29.
 
 1. Owns the new `ts/test_node.ts` and `ts/tsconfig.node.json`. Needs 5.2
    and 5.3.
 2. `test_node.ts` follows 3.3 items 1 to 3. The first line must be
    `tap.start` with `i` 101; anything else exits 1 with the cascade on
-   stderr. The block named by `process.argv[2]` is a `unittest` module run
-   through `TAPTestRunner.module_run`, or a line-case block run through
-   `line_case`. The realm exits 0 after `run_end`, and 1 at any throw.
+   stderr. The block named by `process.argv[2]`, followed by `--failfast`
+   or nothing, is an entry of the runner's block table, of one of three
+   kinds: `module`, a `unittest` module run through
+   `TAPTestRunner.module_run`; `topology`, a block of line cases whose
+   topology `line_case.block_run` runs on the gold `typescript.<block>`;
+   or `run`, a block that writes its own points as they arrive, as
+   `test_line_case` does. The realm exits 0 after `run_end`, and 1 at any
+   throw.
 3. `process` is declared in the file with the members it uses: no
    `@types/node` and no package.
 4. `tsconfig.node.json` lists the modules of A's blocks in the order of
@@ -485,14 +541,37 @@ recomputes every layer.
    `python/page_build.py`, its stub, `html/headless.html`, and their tests
    in `test_page_build_tsc.py`, the later suite of `PY_GOALPOSTS.md` 5.12.
    Needs `PY_GOALPOSTS.md` wave 3 and Question T1.
-2. Done when both build and their tests pass.
+2. The Node bundle is built first. The headless page also needs 6.2, and
+   the SQLite wasm and xterm.js archives that page_build.py puts in every
+   page, which `python/third_party_fetch.py` has not fetched on this
+   machine. Whether an agent may run it, or the maintainer runs it, is a
+   question still open with the maintainer, so the headless page waits for
+   that answer, and so does `test_page_build_tsc`, which now waits only on
+   those archives, since tsc is approved.
+3. Done when both build and their tests pass.
+4. Status, 2026-10-30: the Node bundle is done. `page_build.node_build`
+   builds `build/ts/node.js`, and its tests, which need only tsc and node,
+   are the new suite `test_page_build_node.py`, a split suite of
+   `page_build` in the unit phase, not `test_page_build_tsc.py`. The stub's
+   header holds the design of the headless page: `page_build(template,
+   name)`, `html/headless.html` with the markers of `html/test.html`.
 
 5.7 The driver's TS phases (3.3, 3.4).
 
 1. Owns the TS phases of `python/test_all.py` under the lock,
    `TAPTestRunner.block_relay` in `python/tap_producer.py` with its stub, and
    its tests in `python/test_tap_producer.py`. Needs `PY_GOALPOSTS.md` wave
-   3, Questions T1 and T2, and 5.4 and 5.6.
+   3, Questions T1 and T2, and 5.4 and 5.6. It is done as two tasks:
+   5.7.1, the relay and the server, and 5.7.2, the driver's TS phases,
+   items 2 to 5, after 5.7.1.
+   1. 5.7.1 writes `TAPTestRunner.block_relay`, stub first, tested in
+      `python/test_tap_producer.py`, and the server of 3.10 as a new
+      module with its stub and unit suite. The server answers the paths of
+      the gold `typescript.test_integrate_http.server` with their status,
+      headers, body and delay, holds `closed_port` bound but not
+      listening, and serves files of `build/` for the page of B, so that
+      both uses have their API at once.
+   2. 5.7.2 writes the TS phases of `python/test_all.py` under the lock.
 2. The builds run at the start of the TS phases. Each TS block: start its
    realm, write `tap.start`, relay by 3.4 under the block's timer from the
    gold's `module_seconds`, and require exit code 0.
@@ -502,9 +581,15 @@ recomputes every layer.
    when the run ends.
 5. Done when one A block runs alone with `--module`, and a block that fails
    by design stops the stream with the right count under `--failures`.
+6. Status, 2026-10-30: 5.7.1 is done. `TAPTestRunner.block_relay`,
+   `relay_feed` and `relay_end` relay a realm's block; the server is the new
+   module `local_http`, `LocalServer(script, files)`, whose first handler
+   failure is raised in the main thread at once. `test_integrate_http`
+   passes 11 of 11 against it. 5.7.2 is running.
 
 5.8 Doubles out, layers 0 to 3: `tap_producer`, `unittest`, `harness`,
-`ui_strings`, `i18n`, `utility`, `settings`, `jslb`.
+`ui_strings`, `i18n`, `utility`, `settings`, `jslb`. Done on 2026-10-29;
+the digest vectors of item 2 follow (8.2).
 
 1. Owns those suites, the new `ts/test_jslb_decode.ts`, and the modules for
    any fix their suites show, apart from 5.3's. Needs 5.3.
@@ -513,31 +598,45 @@ recomputes every layer.
    `test_jslb_decode.ts`, a B block after `test_substrate_store`, on a real
    `CacheFiles` over real OPFS handles. `FullSink`'s fault becomes a cache
    with no free slot; the faults of `FailingSink` and `BrokenSink` are made
-   real or removed by 4.6.
+   real or removed by 4.6. `test_close_failure` stays: it closes a real
+   OPFS file under a blob being streamed into it, and the next write fails
+   with the browser's own error, a real fault. The digest vectors of
+   `python/vectors_make.py` are filed under the blocks that read them,
+   `test_jslb_decode` and `test_substrate_store`, and its entry `empty`,
+   `FailingSink`'s canned digest, which nothing reads now, goes.
 3. `harness.ts`'s header drops the rule that a test module references only
    its own module, `unittest` and `harness`; rule 4.1 replaces it.
 4. Done when no block of the task holds a double or changes a module's
    state, and both configs compile.
 
 5.9 Doubles out, then line cases: `verbose`, `dispatch`, `queue`, `mcp`.
+Done on 2026-10-29.
 
 1. Owns those suites, the new `test_integrate_queue.ts` and
    `test_integrate_mcp.ts`, and the modules for any fix. Needs 5.3.
 2. The changes of table 5.0. `test_queue` and `test_mcp` build the far side
-   of a lane as a second real `TaskQueue` in synchronous mode, whose
-   handlers are the test's functions (4.3).
+   of the `server` lane as a second real `TaskQueue` in synchronous mode,
+   whose handlers are the test's functions (4.3), joined by a linked pair
+   of `queue.LocalPort`s (4.7). The `ui` lane's far end is the test's own
+   end of a linked pair, since a queue there would lose the line posted
+   just before a fault.
 3. Done as 5.8 item 4.
 
 5.10 Doubles out, then line cases: `http`, `media`, `provider`,
-`provider_script`, `wire`, and the A part of `substrate`.
+`provider_script`, `wire`, and the A part of `substrate`. Done on
+2026-10-29; `test_wire_port` and `test_provider_key_unset` into A and
+`ScriptPort.node()` out follow (8.2).
 
 1. Owns those suites, the new `test_provider_key.ts`,
-   `test_integrate_http.ts`, `test_integrate_provider_script.ts` and
-   `test_wire_port.ts`, the A part of `test_substrate.ts`, and the modules
-   for any fix. Needs 5.3. `test_integrate_http.ts` needs Question T5.
-2. The changes of table 5.0. `provider.key_clear` goes with its stub.
-   `test_wire_port.ts` is a B block after `test_substrate_store`, on a real
-   `CacheFiles`.
+   `test_provider_key_unset.ts`, `test_integrate_http.ts`,
+   `test_integrate_provider_script.ts` and `test_wire_port.ts`, the A part
+   of `test_substrate.ts`, and the modules for any fix. Needs 5.3.
+   `test_integrate_http.ts` needs Question T5.
+2. The changes of table 5.0. `provider.key_clear` goes with its stub, and
+   `ScriptPort.node()` with its stub (4.7). `test_wire_port.ts` is an A
+   block on a real, empty `CacheFiles([])`. `test_key_unset` moves from
+   `test_provider_key.ts` to `test_provider_key_unset.ts`, alone, since it
+   passes only when it runs first in its realm.
 3. Done as 5.8 item 4.
 
 5.11 The A order.
@@ -551,6 +650,27 @@ recomputes every layer.
 4. Every block is labelled `smoke-test` unless the run's timings break the
    120 s of the gold's `smoke_seconds`; then the slowest become
    `normal-test`, by the project rule.
+5. Status, 2026-10-30: done. The layers, from the graph the TypeScript
+   compiler API resolves, type-only uses left out; no two modules call into
+   each other. The TS producer runs in every block, so it is layer 0, and
+   the Node runner's start-up is bring up, which counts for no block. An
+   integration block also follows the integration blocks of the modules
+   that run inside it.
+
+   | Layer | Blocks |
+   | --- | --- |
+   | 0 | `test_tap_producer`, `test_unittest` |
+   | 1 | `test_harness`, `test_ui_strings` |
+   | 2 | `test_i18n` |
+   | 3 | `test_utility` |
+   | 4 | `test_jslb`, `test_settings` |
+   | 5 | `test_dispatch`, `test_http`, `test_media`, `test_provider`, `test_provider_key`, `test_provider_key_unset`, `test_provider_script`, `test_verbose`, `test_wire` |
+   | 6 | `test_queue`, `test_substrate` |
+   | 7 | `test_line_case`, `test_mcp`, `test_wire_port` |
+   | 8 | `test_integrate_queue` |
+   | 9 | `test_integrate_http`, `test_integrate_mcp`, `test_integrate_provider_script` |
+
+   Every block stays `smoke-test`.
 
 5.12 Run and fix A.
 
@@ -560,6 +680,10 @@ recomputes every layer.
    clean; then with `--normal-test`.
 3. Done when the Python phases and A pass inside 120 s. A's time is
    recorded as a measurement.
+4. Status, 2026-10-30: done with no fix. `--stream`, `--normal-test
+   --stream` and `--tty --stream` each pass 85 of 85 blocks, 58 Python and
+   27 of A, 1320 points, in about 29 s. A alone takes 9.54 s, 7.81 s of it
+   inside the block timers and the rest building the Node bundle.
 
 ## 6 Group B: headless Chrome, no tty
 
@@ -574,7 +698,6 @@ recomputes every layer.
 | `test_page` | UI | whole | the five doubles, for a real queue, `Overlay`, `ConsoleView` and `MediaPort` image cache |
 | `test_substrate_store` | worker | the store and cache classes of `test_substrate` | `MemorySlot` and `ShortSlot`, for real OPFS handles; the notifier, for a real queue; the pool wrappers and copied names, by 4.6 and 4.7 |
 | `test_jslb_decode` | worker | 5.8 item 2 | none |
-| `test_wire_port` | worker | 5.10 item 2 | `UnusedSink`, for a real `CacheFiles` |
 | `test_script` | worker | whole | `StoreDouble` and `CacheDouble`, for a real `Store` |
 | `test_tools_browser` | worker | all but `TestConsole` and `test_tail_asked` | the four doubles, for a real `Server`, `Store`, `CacheFiles` and queue |
 | `test_agent` | worker | whole | the five doubles, for a real `Store`, `ClientSet` and queue |
@@ -598,6 +721,9 @@ recomputes every layer.
    descriptors 3 and 4: `Runtime.evaluate`, `Runtime.addBinding` and its
    `Runtime.bindingCalled` events, `Page.navigate`, the console.
 3. Done when its tests pass.
+4. Status, 2026-10-30: done. `devtools.LinuxPipe` beside `WindowsRelay`;
+   `test_devtools_chrome.py` runs in the unit phase, since the browser is
+   approved, 14 tests on the real `chrome-headless-shell`.
 
 6.2 The headless bring up (3.11, Question T4).
 
@@ -608,12 +734,23 @@ recomputes every layer.
    It runs a UI block in its own page load, and a worker block in a fresh
    Worker made from the texts of the `data-worker` scripts, relaying over a
    ThreadPort pair.
-3. Done when both configs compile.
+3. `boot.headless_worker` sets the global `test_slots` as
+   `boot.tests_open` does: three OPFS files of a directory of their own,
+   cleared at start, that no cache holds, which `test_jslb_decode` reads.
+   Start-up is bring up, which the project rules exempt.
+4. Done when both configs compile. `html/headless.html` is written with
+   the headless build of 5.6.
+5. Status, 2026-10-30: done, compiled only. The realm's entry is
+   `test_headless.realm_start(BLOCK, FAILFAST, LINE)` by `Runtime.evaluate`,
+   and its lines go out through the binding `realm_line`. `headless_worker`
+   starts sqlite3, the pool and `test_slots`, and no test cache, since no
+   headless line streams a blob into one.
 
 6.3 The driver's B phases.
 
 1. Owns the B phases of `python/test_all.py` under the lock. Needs 5.7,
-   5.11, 6.1, 6.2 and 5.6.
+   5.11, 6.1, 6.2 and 5.6, and so the answer on the SQLite wasm and
+   xterm.js archives that 5.6 item 2 waits for.
 2. One browser for the run. Each block: a page load from the server of
    3.10, then `tap.start` over DevTools, the relay of 3.4 under the block's
    timer, and the realm's end line.
@@ -629,13 +766,12 @@ recomputes every layer.
    own page by the real `document.write`.
 3. Done as 5.8 item 4.
 
-6.5 Doubles out on the worker side, the store: `substrate`, `jslb`'s and
-`wire`'s B blocks, `script`.
+6.5 Doubles out on the worker side, the store: `substrate`, `jslb`'s B
+block, `script`.
 
 1. Owns `test_substrate_store.ts`, `test_script.ts`,
    `test_integrate_substrate.ts`, and the modules for any fix.
-   `test_jslb_decode.ts` and `test_wire_port.ts` stay with 5.8 and 5.10.
-   Needs 6.2.
+   `test_jslb_decode.ts` stays with 5.8. Needs 6.2.
 2. The store builds from the realm's sqlite3 module and pool, which the
    bring up starts. The crash test terminates the block's worker
    mid-transaction from the driver, or is removed by 4.6.
@@ -691,15 +827,40 @@ as it is.
 
 ## 8 Order and sharing
 
-8.1 Now, while the agents of `PY_GOALPOSTS.md` run: only tasks whose files
-no task of that plan owns can start, and they run nothing until tsc is
-installed: 5.2, 5.3, 5.4, 5.8, 5.9 and 5.10.
+8.1 Done. On 2026-10-29, while the agents of `PY_GOALPOSTS.md` ran its
+wave 3, which passed the same day: 5.2, 5.3, 5.4, 5.8, 5.9 and 5.10,
+compile-checked with a tsc borrowed from outside the tree, which no file
+names. 23 of the 24 A blocks then in the Node runner's table passed in
+Node, 469 tests, run outside the driver; `test_integrate_http` waits for
+the server of 3.10. On 2026-10-30 the maintainer answered Questions T1 to
+T5, which did 5.1.
 
-8.2 After `PY_GOALPOSTS.md` wave 3 and Questions T1 and T2: 5.1, 5.6, 5.7,
-then 5.5, then 5.11, then 5.12.
+8.2 What follows, in waves, each after the one before; the tasks of a wave
+run in parallel, each on the files it owns:
 
-8.3 After 5.12 and Question T4: 6.1 and 6.2, then 6.3, then 6.4, 6.5 and 6.6
-in parallel, then 6.8.
+1. Wave 1:
+   1. The follow-ups of 2026-10-30 in the files of 5.3, 5.8 and 5.10: the
+      count at `block_start` (3.7), the stack's first line (3.6 item 3),
+      `test_wire_port` and `test_provider_key_unset` into A (5.0),
+      `ScriptPort.node()` out (4.7), and the digest vectors (5.8 item 2).
+   2. 5.6, the Node bundle; the headless page waits (5.6 item 2).
+   3. 5.7.1, the relay and the server.
+   4. 6.1 and 6.2, which run beside A's work since they own separate
+      files; 6.2 compiles only, since nothing runs a page yet.
+2. Wave 2: 5.7.2, and 5.5 written beside it; 5.5 is done once it passes in
+   the run that 5.7.2 builds.
+3. Wave 3: 5.11, then 5.12, one agent; `test_integrate_http` passes here.
+4. Wave 4, once the maintainer answers whether an agent may run
+   `python3 python/third_party_fetch.py` for the SQLite wasm and xterm.js
+   archives (5.6 item 2): the archives, the headless page of 5.6 with
+   `html/headless.html`, `test_page_build_tsc` taken out of the later
+   suites (`PY_GOALPOSTS.md` 9.6), and 6.3.
+5. Wave 5: 6.4, 6.5 and 6.6.
+6. Wave 6: 6.8, then the whole runs and two runs of `python/reformat.py`
+   over the whole tree.
+
+8.3 No B block runs before A passes in 5.12, though 6.1 and 6.2 are
+written beside A's tasks.
 
 8.4 Every task works in the main tree, as `PY_GOALPOSTS.md` 7.1 says. A
 task owns the files its section names, and a failure in a file another task
@@ -709,8 +870,8 @@ owns is reported to that task.
 task number appended, such as `ts/queue.ts.5.9`, for one edit, then renamed
 back. A file found missing is waited for, never recreated. The shared files:
 
-1. `python/test_all.py`: tasks 5.7, 5.11, 6.3 and 6.8, after the tasks of
-   `PY_GOALPOSTS.md`.
+1. `python/test_all.py`: tasks 5.7.2, 5.11, 6.3 and 6.8, after the tasks
+   of `PY_GOALPOSTS.md`.
 2. `test_settings.json`: each block's gold under its own id, edited in
    place, never rewritten whole.
 3. `i18n/en-US.json`: new texts under the module's own keys.
@@ -729,16 +890,20 @@ tsc with `npm install --global typescript` into `~/.npm-global`, beside
 prettier. (Recommended: the one place global npm packages live now, and it
 unblocks A and B.)
 
-[ ] B. `node`, `tsc` and `chrome-headless-shell`; tsc from the apt package
+[x] B. `node`, `tsc` and `chrome-headless-shell`; tsc from the apt package
 `node-typescript`, which the maintainer installs.
 
 [ ] C. `node` and `tsc` only: group A runs, group B waits.
 
 [ ] D. None yet: nothing of this plan runs.
 
+Answered B by the maintainer on 2026-10-30: `node`, `tsc` and
+`chrome-headless-shell` are approved, and tsc is installed from
+`node-typescript` as `/usr/bin/tsc`, TypeScript 5.2.2 (3.12, 5.1).
+
 Question T2: how does a TS block join the run of `test_all.py`?
 
-[ ] A. As a block of the one stream: the realm's block lines relayed
+[x] A. As a block of the one stream: the realm's block lines relayed
 unchanged, the parent line written by the driver, and
 `TAPTestRunner.block_relay` added to `python/tap_producer.py` (3.4).
 (Recommended: one run and one stream, as `PY_GOALPOSTS.md` 2.1 decided for
@@ -752,11 +917,14 @@ block, 45 in all.
 no fresh realm per block, so that tests reset state or depend on order,
 against 3.2.
 
+Answered A on 2026-10-30: decided by the agent by `PY_GOALPOSTS.md` 2.1,
+one run and one stream, and the maintainer accepted the decision.
+
 Question T3: is an object a test writes to implement an interface the
 module takes as a parameter, such as `jslb.BlobSink`, `queue.Port` or
 `substrate.SlotHandle`, a double?
 
-[ ] A. Yes. It is replaced by the real implementation, and a test without
+[x] A. Yes. It is replaced by the real implementation, and a test without
 one moves to a later group. (Recommended: `PY_GOALPOSTS.md` 2.3 bans a
 double of any kind, and 4.7 a hand-made reader.) The cost: `test_jslb`'s
 decoder classes and two encode tests, 43 tests, and `test_wire`'s WirePort
@@ -766,10 +934,16 @@ classes, 26 tests, need `substrate.CacheFiles` and move to B.
 the bytes it gets and hashes them with `utility.sha256_hex`. Those 69 tests
 stay in A. `MemorySink`'s canned digests and `UnusedSink` go either way.
 
+Answered A by the maintainer on 2026-10-30, with T5, as one answer:
+nothing stands in for a project part or a platform object that a module
+calls, and the far end of a connection may answer with replies the test
+scripts. The WirePort classes, `test_wire_port`, stay in A all the same,
+since they pass on a real, empty `CacheFiles` (5.0).
+
 Question T4: may the product APIs change so that the AI worker's high level
 integration runs without ttyd?
 
-[ ] A. Yes: `worker_ai.tap_start` takes its server lane as a `queue.Port`
+[x] A. Yes: `worker_ai.tap_start` takes its server lane as a `queue.Port`
 and an end function, `boot` gains `headless_worker`, and a second template
 carries the headless entry (3.11). (Recommended: it is the only way
 `tap_start` runs headless, and `boot.test_worker` keeps passing the
@@ -781,14 +955,21 @@ from each module's register function, and `tap_start` stays in C.
 [ ] C. No: the worker's and the page's bring up stay in C, and
 `test_integrate_worker_ai` is not written.
 
+Answered A by the maintainer on 2026-10-30.
+
 Question T5: is the driver's standard library HTTP server, answering what
 the gold names, the real network for `http` and `media` (3.10)?
 
-[ ] A. Yes. (Recommended: no project module is replaced, and the fetch, its
+[x] A. Yes. (Recommended: no project module is replaced, and the fetch, its
 timeouts and its failures are real.)
 
 [ ] B. No, it is a double of the network: the fetch paths of `http` and
 `media` go to C, and `test_integrate_http` is not written.
+
+Answered A by the maintainer on 2026-10-30, with T3, as one answer:
+nothing stands in for a project part or a platform object that a module
+calls, and the far end of a connection, here the driver's server, may
+answer with replies the test scripts.
 
 ## 10 Outside this plan
 
@@ -815,55 +996,74 @@ itself stays in C.
 
 The requests are those of this conversation, `tmp/tasks_28_1951.md` item 1,
 and the ones of earlier logs that bear on TypeScript: `tmp/tasks_25_1832.md`
-item 10.1 and `PY_GOALPOSTS.md` 9.2. A: unsatisfied or modified without
-cause. B: unsatisfied or modified with cause but without confirmation. C:
-confirmed withdrawn or modified. D: satisfied without modification or
-withdrawal.
+item 10.1 and `PY_GOALPOSTS.md` 9.2; and the maintainer's answers of
+2026-10-30, with the acceptance of every decision reported to the
+maintainer then (`tmp/tasks_29_1354.md` items 21 and 22). A: unsatisfied
+or modified without cause. B: unsatisfied or modified with cause but
+without confirmation. C: confirmed withdrawn or modified. D: satisfied
+without modification or withdrawal.
 
 11.1 Class A: none.
 
 11.2 Class B, each satisfied in this plan with the stated cause, and
 wanting confirmation:
 
+1. Integration suites only for modules that serve lines, against
+   `PY_GOALPOSTS.md` 2.5 (3.5).
+2. The new infrastructure API `unittest.TestResult` (3.8).
+3. A DOM event made by the DOM's constructor and `dispatchEvent` counts as
+   real (4.5).
+4. Question 10 A, which made a handler or a tool a plain function of the
+   test, is extended to every function parameter, recorders and throwing
+   functions included (4.3).
+5. `devtools.py` gains a Linux transport, in place of a new module (3.12).
+6. `harness.ts`'s rule on the references of a test module gives way to
+   rule 4.1 (5.8 item 3).
+7. The driver builds `tap.start` with `jslb` as `bootstrap.py` does, not by
+   calling into `bootstrap.py` (3.3).
+8. 6.1 and 6.2 are written beside A's tasks, where the plan of 2026-10-28
+   put them after 5.12, since they own separate files. No B block runs
+   before A passes, so the request of 11.4 item 7 still holds (8.2, 8.3).
+
+11.3 Class C, confirmed by the answers and acceptances of 2026-10-30:
+
 1. "figure out what TS test suites can be run using the TS toolchain
    without mocking apis": answered by blocks, not suites. Eight suites
    (`jslb`, `http`, `media`, `provider`, `wire`, `queue`, `mcp`,
    `substrate`) split between groups, since their classes need different
-   realms (3.1, 5.0).
-2. "make a plan to move those tests first, before the headless browser
-   tests start": A runs in two phases before B's, and also waits for
-   `PY_GOALPOSTS.md` wave 3 and Question T1 (8.2).
-3. "TAP and jslb driving the high level integration tests, but no tty":
+   realms (3.1, 5.0). Confirmed by Question T3 A and by the accepted moves
+   of `test_wire_port` into A and of `test_key_unset` into a block of its
+   own.
+2. "TAP and jslb driving the high level integration tests, but no tty":
    DevTools carries the realm lane, the first line and the TAP lines, and
    the line cases inside the realm send JSLB straight to the modules (3.3,
-   3.6).
-4. "a TAP test producer sending jslb directly to the modules under test
+   3.6). Confirmed by Questions T1 B and T4 A.
+3. "a TAP test producer sending jslb directly to the modules under test
    ... reporting back to a TAP consumer": the producer is the TS one in the
    realm, through `line_case`, and the consumer the Python one in the
-   driver. A module with no line entry keeps `unittest` tests of its API
-   (3.5).
-5. Integration suites only for modules that serve lines, against
-   `PY_GOALPOSTS.md` 2.5 (3.5).
-6. A realm per block (3.2), the TS form of `PY_GOALPOSTS.md` 4.3's forked
-   child.
-7. New infrastructure APIs: `unittest.TestResult` (3.8),
-   `TAPTestRunner.block_start` and `block_end` (3.7), `line_case` (3.6), and
-   Python's `TAPTestRunner.block_relay` (3.4).
-8. The lane `realm` and the line type `tap.pair` (5.2).
-9. A DOM event made by the DOM's constructor and `dispatchEvent` counts as
-   real (4.5).
-10. Question 10 A, which made a handler or a tool a plain function of the
-    test, is extended to every function parameter, recorders and throwing
-    functions included (4.3).
-11. `devtools.py` gains a Linux transport, in place of a new module (3.12).
-12. `harness.ts`'s rule on the references of a test module gives way to
-    rule 4.1 (5.8 item 3).
-13. The driver builds `tap.start` with `jslb` as `bootstrap.py` does, not by
-    calling into `bootstrap.py` (3.3).
-14. `test_integrate_http` runs in Node, so Chrome's fetch is tested only
-    through `test_integrate_media` (10.2).
-
-11.3 Class C: none.
+   driver, confirmed by Question T2 A. The clause that a module with no line
+   entry keeps `unittest` tests of its API rests on 3.5, still class B
+   (11.2 item 1).
+4. New infrastructure APIs: `TAPTestRunner.block_start` and `block_end`
+   (3.7), with the count at the start; `line_case` (3.6); and Python's
+   `TAPTestRunner.block_relay` (3.4), by Question T2 A.
+5. The lane `realm` and the line type `tap.pair`, with its extra fields
+   (5.2).
+6. `test_integrate_http` runs in Node, so Chrome's fetch is tested only
+   through `test_integrate_media` (10.2). Confirmed by Question T5 A.
+7. The decisions of 2026-10-29 and 2026-10-30 that changed this plan, all
+   accepted: `queue.LocalPort(far?)` kept as a general capability (4.7);
+   the bring up's `test_slots` global (6.2); `test_close_failure` kept as a
+   real fault (5.8 item 2); the `ui` lane of `test_queue` and `test_mcp`
+   the test's own end of a linked pair (5.9 item 2); `TestClientChecks` and
+   `TestClientSet` kept in `test_mcp` (5.0); the Node runner's `--failfast`
+   and its `run` blocks (3.3, 5.4); the gold key of `block_run` and blob
+   bytes as base64 under `d` (3.6 item 2); an `error` line's `stack`
+   compared by its first line (3.6 item 3); `test_integrate_http` with no
+   queue (3.6 item 1); `test_wire_port` in A (5.0); `test_key_unset` in a
+   block of its own (3.2, 5.0); `ScriptPort.node()` removed (4.7); the
+   corrections of table 5.0; and the digest vectors filed under the blocks
+   that read them (5.8 item 2).
 
 11.4 Class D:
 
@@ -879,5 +1079,15 @@ wanting confirmation:
    and `test_integrate_http`.
 6. `tmp/tasks_25_1832.md` item 10.1 and `PY_GOALPOSTS.md` 9.2, the TS
    producer read before its own suite runs: task 5.5 and rule 4.1.
+7. "make a plan to move those tests first, before the headless browser
+   tests start": A runs in two phases before B's (8.2, 8.3); its waits on
+   `PY_GOALPOSTS.md` wave 3 and Question T1 are over.
+8. A realm per block (3.2), the TS form of `PY_GOALPOSTS.md` 4.3's forked
+   child, kept by Question T2 A over its option C.
+9. Questions T1 B (3.12, 5.1), T2 A (3.4), T3 A and T5 A (4.4, 3.10) and
+   T4 A (3.11), answered on 2026-10-30.
 
-11.5 Unresolved: Questions T1 to T5, and the confirmations of 11.2.
+11.5 Unresolved: the confirmations of 11.2, and the question still open
+with the maintainer whether an agent may run
+`python3 python/third_party_fetch.py` for the SQLite wasm and xterm.js
+archives, on which the headless page and every B run wait (5.6 item 2).

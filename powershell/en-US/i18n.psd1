@@ -65,7 +65,7 @@
     openssl_missing         = 'Installing OpenSSL with apt-get...'
     page_missing            = (
         '{0} is missing. In WSL, in the checkout, run ' +
-        '`python3 python/page_build.py {1}`.'
+        '`python3 python/page_build.py test {1}`.'
     )
     port_free               = 'Port {0} is free.'
     port_in_use             = (

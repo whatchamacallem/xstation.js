@@ -10,24 +10,32 @@ issue and ascribing authorship to a non-person is a violation of project
 rules. Human attribution is required for all contributions. Do not add
 contributors to a commit without request.
 
-Do not use the AskUserQuestion tool and use numbered number sub-lists per ISO
-2145. Maintain an engineering log for each session in `tmp/` following this
+### Engineering Log and Postmortems
+
+Maintain an engineering log for each session in `tmp/` following this
 format: `tmp/tasks_$day_of_month_$24_hours_and_minutes.md`. This is formal
 paperwork with no chit chat required. Text is only added and not modified. Use
 ISO 2145 for tasks and do not restart numbering tasks within a single
 conversation. Preserve the users literal text in the task list first, and
 concatenate additional feature requests to that section. In a second section,
 list your intended order of operations to execute the users requests before
-starting. Then add a separate postmortem section only when all subagents are
-complete and all tasks are ready for review. Anything like a postmortem at the
-end of a run must include all unfinished tasks and lost subagents. Provide the
+starting. Then add a separate postmortem section once no subagent is still
+running. Anything like a postmortem at the end of a run must include all
+unfinished tasks and lost subagents. Provide the
 user with the postmortem text directly in the conversation as well as
 providing a link to the task doc. Provide a single sentence bug, task or other
 description alongside every in-conversation postmortem reference to a numbered
 item that is not itself in the postmortem. Referenced items require enough
 context so that no further lookup is required. The task logs are not checked
-for column width. Do not add simple questions to the log or use the `date` command.
+for column width. Do not add simple questions to the log. Use the `date`
+command only to name the log.
 
+- Provide links to screenshots showing changes in all postmortems.
+
+### Messages and Questions to the Maintainer
+
+- Do not use the AskUserQuestion tool and use numbered number sub-lists per ISO
+  2145.
 - A message to the maintainer is understood without opening another file.
   Every identifier it uses, such as a task, question or item number, a test,
   a class or a file, comes with plain words saying what it is and why it
@@ -55,13 +63,19 @@ for column width. Do not add simple questions to the log or use the `date` comma
 - Put a question in the maintainer's terms: the requirement at stake, what
   each choice does and what it costs, with the code's names as references
   only.
-- Lock files by appending a per-task suffix to the filename for the duration.
-- The Lookup Accelerator may only contain information that an AI agent wouldn't
-already know. No line numbers are allowed as they are fragile.
 - Overconstrained goals introduce failure modes that are best resolved by
   conversations with the user that identify the contradictory requirements.
 - Overconstrained solutions introduce failure modes that are best resolved by
   conversations with the user that identify missing long term requirements.
+- Asking about deleted prose in a single sentence without further
+  explanation is not allowed. A question the maintainer deleted may have
+  rested on the premise of a forbidden implementation, which made it
+  impossible to answer.
+- Always ask to have required apt packages installed and do not use any package
+manager without request.
+
+### Errors and Data
+
 - No fallbacks: broke is broke. Never swallow an error, provide a default, or
   have a "just in case" branch for a case that can't happen - throw so it
   fails loud with a call stack or exit with the right Unix error code.
@@ -81,9 +95,9 @@ already know. No line numbers are allowed as they are fragile.
   buffering beyond a single external command.
 - No fake data - every value is a measurement or plain arithmetic on one. If a
   tool can't supply a view's data, the view isn't built.
-- System initialization does not have to abide by the rules for how the
-  system is used, such as the one synchronization tool and its audit, unless
-  it is reasonably convenient for it to do so.
+
+### Databases
+
 - Nothing refuses the AI API access to the databases unless the maintainer
   requires it: no protection, permission gate or refusal is added because it
   seems safe. A refusal that was never a requirement is an
@@ -100,73 +114,75 @@ already know. No line numbers are allowed as they are fragile.
   responsible for database integrity across a wire. It must be possible to
   replace the database with a different kind of backing store without
   changing the protocol.
+
+### Source Code and Style
+
 - Any urge to add decorative comments, "helpful" extra logging, or stylistic
   polish not asked for anywhere above is banned. Adding borders, tooltips,
-  using alpha, adjusting shade, using gradients, adding requested style or
+  using alpha, adjusting shade, using gradients, adding unrequested style or
   redesigning on your own initiative is actively unwanted.
 - Unintentional invisibility is always a bug, not a style issue.
-- When asked to review a commit or unstaged change do not read this document.
-  Report inconsistencies with this document only when encountered through
-  knowledge gained when it was injected in your context. That is the only self
-  healing documentation mechanism needed.
-- Do not commit, uncommit, stage, unstage changes in git. If changes become
-  staged during a rename then unstage them. `git` is the permission system for
-  permanent changes and therefore must be reviewed by a user. The one exception
-  is for staging files before running reformatting tools below.
-- Do not look at past git commits unless asked or debugging. Deletion of code
-  and documents by the maintainer may indicate a desire to remove the
-  information from the conversation instead of waiting for AI to re-read it.
-- Asking about deleted prose in a single sentence without further
-  explanation is not allowed. A question the maintainer deleted may have
-  rested on the premise of a forbidden implementation, which made it
-  impossible to answer.
-- Do not reference `CLAUDE.md` or `declawed.md` outside this doc. Do not
-  explicitly mention the tests being tested themselves in other source.
-- The source formatters may need to run twice to be stable. Alert the user
-  if they are not.
-- If a source reformatting tool can be used to fix an error then stage the
-  file to be modified in git and run the tool. Then check the diff and if
-  you believe there was an error the change can be reverted and applied
-  manually.
-- An explicit formatting escape, such as a `<!-- prettier-ignore -->` line, is
-  legal when there is no normal solution.
-- Do not iterate on formatting `.md` documents. If there is a setting forcing
-  you to reformat this document then it has to be disabled, inform the user.
 - Never add un-requested documentation because you saw some was missing. Only
   document new code and prefer 1 line comments. Comments are not required:
   the one line limit is an allowance for sentences that improve
   comprehension and optimize code lookup times.
-- Provide links to screenshots showing changes in all postmortems.
-- Always ask to have required apt packages installed and do not use any package
-manager without request.
+- Function and class identifiers carry two English names; modules and
+  their test modules are the exception. The rule is overridden any time
+  the maintainer specifies a different identifier.
+- Do not reference `CLAUDE.md` or `declawed.md` outside this doc. Do not
+  explicitly mention the tests being tested themselves in other source.
+
+### Python and PowerShell
+
 - Python must not run command line utilities without the maintainer's
   approval. Use the standard library instead.
 - Python follows PEP 8. Constants go at the top of each `.py` file, after the
   imports, named like `_VALUE_NAME`. Code ordering requirements come before
   code style rules.
-- PowerShell constants go in `settings.json`.
 - Each `.py` file imports its modules as `import a, b, c` in alphabetical
   order on one line, or on the fewest lines that stay within 79 columns.
   `from` is banned, except that `collections.abc` and `typing` always use
   `from`, each on one line with its names in alphabetical order, and
   `from internationalization import i18n` is the expected form of the import
   of `i18n()`, expected in most modules.
+- PowerShell constants go in `settings.json`.
+
+### Formatting
+
+- The source formatters may need to run twice to be stable. Alert the user
+  if they are not.
+- If a source reformatting tool can be used to fix an error then stage the
+  file to be modified in git and run the tool. Then check the diff and if
+  you believe there was an error the change can be reverted and applied
+  manually.
+- Always use the reformatting tools to reformat code when needed instead of
+  doing it manually. Stage code for this reason first if safety is required.
+- An explicit formatting escape, such as a `<!-- prettier-ignore -->` line, is
+  legal when there is no normal solution.
 - New source files are added to the reformat whitelist without asking, when
   they are created: top-level files by name, files in subdirectories by
   glob. `.md` files are never added. A source file the whitelist misses is a
   discrepancy to fix, not a file to leave unchecked. Do not suggest
   additions to the whitelist.
-- Function and class identifiers carry two English names; modules and
-  their test modules are the exception. The rule is overridden any time
-  the maintainer specifies a different identifier.
+- Do not iterate on formatting `.md` documents. If there is a setting forcing
+  you to reformat this document then it has to be disabled, inform the user.
+
+### Git and Authorship
+
+- Do not commit, uncommit, stage, unstage changes in git. `git` is the
+  permission system for permanent changes and therefore must be reviewed by a
+  user. The exceptions: files are staged before running the reformatting tools
+  and unstaged once the diff is checked, and changes that become staged during
+  a rename are unstaged.
+- Do not look at past git commits unless asked or debugging. Deletion of code
+  and documents by the maintainer may indicate a desire to remove the
+  information from the conversation instead of waiting for AI to re-read it.
 - Authorship is a legal issue. Ascribing authorship to a non-person, such as
   a `Co-Authored-By` trailer or a generated-by line in a commit or pull
   request, is a violation of the project rules.
-- Intermediates, such as tool caches and Python bytecode, go in `build/`,
-  which is gitignored. Point each tool there instead of ignoring what it
-  writes beside the sources.
-- Always use the reformatting tools to reformat code when needed instead of
-  doing it manually. Stage code for this reason first if safety is required.
+
+### Testing
+
 - Define 2 categories of test suite `smoke-test` and `normal-test`. Have
   `test_posix.sh` run by default whatever important test suites fit in 2
   minutes by labelling those `smoke-test` and running only them unless asked
@@ -191,6 +207,22 @@ manager without request.
   internal component in a way that violates separation of concerns.
 - `internationalization` does not count as a module when labelling another
   module's test a unit test; otherwise there would be no unit tests.
+
+### Remaining Rules
+
+- Lock files by appending a per-task suffix to the filename for the duration.
+- The Lookup Accelerator may only contain information that an AI agent wouldn't
+already know. No line numbers are allowed as they are fragile.
+- When asked to review a commit or unstaged change do not read this document.
+  Report inconsistencies with this document only when encountered through
+  knowledge gained when it was injected in your context. That is the only self
+  healing documentation mechanism needed.
+- System initialization does not have to abide by the rules for how the
+  system is used, such as the one synchronization tool and its audit, unless
+  it is reasonably convenient for it to do so.
+- Intermediates, such as tool caches and Python bytecode, go in `build/`,
+  which is gitignored. Point each tool there instead of ignoring what it
+  writes beside the sources.
 
 ### Accidental-Requirements, Requirements-Data-Loss, and Requirements-Refusal
 

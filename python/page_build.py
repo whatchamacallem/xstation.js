@@ -3,21 +3,33 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# `python3 python/page_build.py NAME` builds build/NAME.html, the one page
-# there is, the bring up. tsc compiles the test bundle by
-# ts/tsconfig.test.json, the text of i18n/en-US.json takes the place of the
-# bundle's strings table identifier, and the template html/test.html
+# `python3 python/page_build.py TEMPLATE NAME` builds build/NAME.html from
+# the template html/TEMPLATE.html, read first, and prints the page's
+# SHA-256, which page_build returns and never prints, since stdout is the
+# driver's TAP stream when the driver builds the headless page. tsc compiles
+# the test bundle by ts/tsconfig.test.json, the text of i18n/en-US.json
+# takes the place of the bundle's strings table identifier, and the template
 # receives html/engine.css, the bundle, every file of build/vectors/ as
 # base64, written anew by vectors_make.py first, SQLite's JavaScript glue,
 # its wasm as base64, and xterm.js and its css, read from the archives
-# third_party_fetch.py places in third_party/. The start script serves the
-# page as hyperposition-engine.html. Prints the SHA-256 of the page.
+# third_party_fetch.py places in third_party/. Each template takes the same
+# pieces: html/test.html, the ttyd page, which the start script serves as
+# hyperposition-engine.html, and html/headless.html, the headless page of
+# group B, which the driver's HTTP server serves.
+#
+# node_build builds the Node bundle of group A in the build directory it is
+# given: the vectors written anew into its vectors/ first, then tsc compiling
+# ts/tsconfig.node.json into its ts/node.js, the place the config's outFile
+# names in build/, which is rewritten as the strict line, then test_vectors
+# defined as the page defines it, then the bundle with the strings table in
+# place, and its path returned. tsc's output never reaches stdout: a failed
+# compile raises, tsc's output in its cause.
 
 import argparse, base64, hashlib, json, os, re, shutil, subprocess, sys
 import tarfile, zipfile
 
 # The public name of this module, as its stub declares it.
-__all__ = ["page_build"]
+__all__ = ["node_build", "page_build"]
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -28,10 +40,10 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 # The page templates.
 _HTML_PATH = os.path.join(_ROOT_PATH, "html")
 
-# The page template, the one there is.
-_TEMPLATE_NAME = "test.html"
+# The extension of a template and of the page built from it.
+_PAGE_EXTENSION = ".html"
 
-# The engine's style, which the one page carries.
+# The engine's style, which every page carries.
 _ENGINE_CSS_PATH = os.path.join(_HTML_PATH, "engine.css")
 
 # The strings table, the same file the server reads.
@@ -46,8 +58,17 @@ _TS_PATH = os.path.join(_ROOT_PATH, "ts")
 # The `tsc` configuration of the test bundle, whose `outFile` the page takes.
 _CONFIG_NAME = "tsconfig.test.json"
 
+# The `tsc` configuration of the Node bundle, rewritten where its `outFile` is.
+_NODE_CONFIG_NAME = "tsconfig.node.json"
+
+# The start of the Node bundle: the strict line, then `test_vectors` defined.
+_NODE_HEAD = '"use strict";\nvar test_vectors = {};\n'
+
+# The folder of a build directory that the vectors are written into.
+_VECTORS_NAME = "vectors"
+
 # The vectors written for the page, which carries them as `test_vectors`.
-_VECTORS_PATH = os.path.join(_BUILD_PATH, "vectors")
+_VECTORS_PATH = os.path.join(_BUILD_PATH, _VECTORS_NAME)
 
 # The SQLite release archive.
 _SQLITE_ARCHIVE = "sqlite-wasm-3460100.zip"
@@ -91,17 +112,31 @@ _TSC_SECONDS = 120.0
 sys.pycache_prefix = os.path.join(_BUILD_PATH, "pycache")
 
 
-# Compiles the project the `tsc` config names, returning the bundle written.
-def bundle_compile(config_path: str) -> str:
+# Compiles the project of the `tsc` config into the path, returning its text.
+def bundle_compile(config_path: str, out_path: str) -> str:
     tsc_path = shutil.which("tsc")
     if tsc_path is None:
         raise FileNotFoundError("tsc, the TypeScript compiler, is not on PATH")
-    subprocess.run(
-        [tsc_path, "--project", config_path], check=True, timeout=_TSC_SECONDS
+    completed = subprocess.run(
+        [tsc_path, "--project", config_path, "--outFile", out_path],
+        capture_output=True,
+        check=False,
+        timeout=_TSC_SECONDS,
     )
+    if completed.returncode != 0:
+        output = completed.stdout + completed.stderr
+        raise RuntimeError(
+            f"tsc exited with {completed.returncode} compiling {config_path}"
+        ) from RuntimeError(output.decode("utf-8", "replace"))
+    return text_read(out_path)
+
+
+# Returns the place the config's `outFile` names in `build`, in the directory.
+def bundle_path(config_path: str, build_path: str) -> str:
     with open(config_path, encoding="utf-8") as config_file:
         out_file: str = json.load(config_file)["compilerOptions"]["outFile"]
-    return text_read(os.path.join(os.path.dirname(config_path), out_file))
+    named = os.path.join(os.path.dirname(config_path), out_file)
+    return os.path.join(build_path, os.path.relpath(named, _BUILD_PATH))
 
 
 # Raises unless the text can be the raw text of the element, unchanged.
@@ -141,11 +176,26 @@ def member_find(names: list[str], suffix: str) -> str:
     return matches[0]
 
 
-# Builds `build/<name>.html`, the one page. Returns its `SHA-256` hex.
-def page_build(name: str) -> str:
+# Builds the Node bundle in the build directory and returns its path.
+def node_build(build_path: str) -> str:
+    vectors = vectors_build(os.path.join(build_path, _VECTORS_NAME))
+    config_path = os.path.join(_TS_PATH, _NODE_CONFIG_NAME)
+    path = bundle_path(config_path, build_path)
+    bundle = bundle_compile(config_path, path)
+    text = _NODE_HEAD.format(vectors) + table_substitute(
+        bundle, text_read(_TABLE_PATH)
+    )
+    with open(path, "wb") as file:
+        file.write(text.encode("utf-8"))
+    return path
+
+
+# Builds `build/<name>.html` from `html/<template>.html`, its hex returned.
+def page_build(template: str, name: str) -> str:
     # Read first, so a template `html/` lacks fails before `tsc` starts.
-    shell = text_read(os.path.join(_HTML_PATH, _TEMPLATE_NAME))
-    bundle = bundle_compile(os.path.join(_TS_PATH, _CONFIG_NAME))
+    shell = text_read(os.path.join(_HTML_PATH, template + _PAGE_EXTENSION))
+    config_path = os.path.join(_TS_PATH, _CONFIG_NAME)
+    bundle = bundle_compile(config_path, bundle_path(config_path, _BUILD_PATH))
     sqlite_js, sqlite_wasm = zip_read(
         os.path.join(_THIRD_PARTY_PATH, _SQLITE_ARCHIVE),
         [_SQLITE_JS, _SQLITE_WASM],
@@ -165,9 +215,7 @@ def page_build(name: str) -> str:
         "XSJS_BUILD_XTERM_JS": xterm_js.decode("utf-8"),
     }
     page = page_merge(shell, pieces)
-    digest = page_write(os.path.join(_BUILD_PATH, f"{name}.html"), page)
-    print(digest)
-    return digest
+    return page_write(os.path.join(_BUILD_PATH, name + _PAGE_EXTENSION), page)
 
 
 # Returns the template with its markers replaced by the pieces, each checked.
@@ -247,17 +295,22 @@ def zip_read(path: str, suffixes: list[str]) -> list[bytes]:
         ]
 
 
-# Builds the page the command line names.
+# Builds the page the command line names from its template, printing its hex.
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Build build/NAME.html, the one page, from html/test.html,"
-        " the test bundle tsc compiles from ts/, the vectors, written anew"
-        " into build/vectors/, and the archives of third_party/, and print"
-        " its SHA-256."
+        description="Build build/NAME.html from the template"
+        " html/TEMPLATE.html, the test bundle tsc compiles from ts/, the"
+        " vectors, written anew into build/vectors/, and the archives of"
+        " third_party/, and print its SHA-256."
     )
-    parser.add_argument("name", help="the page's file name without .html")
+    parser.add_argument(
+        "template", help="the template's file name in html/ without .html"
+    )
+    parser.add_argument(
+        "name", help="the page's file name in build/ without .html"
+    )
     arguments = parser.parse_args()
-    page_build(arguments.name)
+    print(page_build(arguments.template, arguments.name))
 
 
 if __name__ == "__main__":

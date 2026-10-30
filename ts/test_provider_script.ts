@@ -326,11 +326,9 @@ namespace test_provider_script {
       );
       this.assertEqual(first.message.content, null);
       this.assertEqual(first.finish_reason, "tool_calls");
-      this.assertEqual(bench.port.node(), "hyperposition");
       results_add(messages, first.message);
       const second = chat_post(bench, messages, 2);
       this.assertEqual(names_of(second), ["browser.image_make"]);
-      this.assertEqual(bench.port.node(), "castle");
       results_add(messages, second.message);
       const third = chat_post(bench, messages, 3);
       this.assertEqual(names_of(third), [
@@ -338,7 +336,6 @@ namespace test_provider_script {
         "browser.kv_put",
         "browser.render",
       ]);
-      this.assertEqual(bench.port.node(), "imaged");
       results_add(messages, third.message);
       const last = chat_post(bench, messages, 4);
       this.assertEqual(last.message, {
@@ -346,11 +343,9 @@ namespace test_provider_script {
         content: constants.subtitle,
       });
       this.assertEqual(last.finish_reason, "stop");
-      this.assertEqual(bench.port.node(), "gatehouse");
       messages.push(last.message, user_say("0"));
       const next = chat_post(bench, messages, 5);
       this.assertEqual(next.message.content, "Still the moat.");
-      this.assertEqual(bench.port.node(), "gatehouse");
     }
 
     // The reply comes inside the post, shaped as a chat completion reply.
@@ -419,7 +414,6 @@ namespace test_provider_script {
       this.assertEqual(choice.message.content, "To the gatehouse.");
       this.assertEqual(choice.finish_reason, "stop");
       this.assertFalse(Object.hasOwn(choice.message, "tool_calls"));
-      this.assertEqual(bench.port.node(), "gatehouse");
       messages.push(choice.message, user_say("0"));
       this.assertEqual(
         chat_post(bench, messages, 2).message.content,
@@ -446,7 +440,7 @@ namespace test_provider_script {
       const bench = bench_make();
       const messages = [user_say("4")];
       const choice = chat_post(bench, messages, 1);
-      this.assertEqual(bench.port.node(), "nowhere");
+      this.assertEqual(choice.message.content, "Gone.");
       messages.push(choice.message, user_say("1"));
       const error = thrown_get(() => chat_post(bench, messages, 2));
       this.assertEqual(
@@ -477,7 +471,6 @@ namespace test_provider_script {
         );
       }
       this.assertEqual(bench.received.length, 0);
-      this.assertEqual(bench.port.node(), "hyperposition");
     }
 
     // An integer the node has no reply for is refused.
@@ -543,7 +536,6 @@ namespace test_provider_script {
         );
       }
       this.assertEqual(bench.received.length, 1);
-      this.assertEqual(bench.port.node(), "hyperposition");
     }
 
     // Tool results that lead to a node with no reply after them are refused.
@@ -616,7 +608,6 @@ namespace test_provider_script {
         this.assertEqual(error.message, gold_text(name));
       }
       this.assertEqual(bench.received.length, 0);
-      this.assertEqual(bench.port.node(), "hyperposition");
     }
   }
 
@@ -639,7 +630,8 @@ namespace test_provider_script {
       const expected = gold_line("reply_image");
       expected.json = reply.json;
       this.assertEqual(reply, expected);
-      this.assertEqual(bench.port.node(), "hyperposition");
+      const choice = chat_post(bench, [user_say("2")], 2);
+      this.assertEqual(choice.message.content, "Nothing happens.");
     }
 
     // The pattern is given as many times as the request asks.
@@ -756,7 +748,7 @@ namespace test_provider_script {
         stream.byteLength,
       );
       const rows: number[] = [];
-      let offset = constants.stream_head;
+      let offset: number = constants.stream_head;
       let last = false;
       while (!last) {
         const head = stream[offset];

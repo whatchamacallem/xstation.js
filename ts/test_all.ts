@@ -64,6 +64,7 @@ namespace test_all {
     test_wire: () => test_wire,
     test_wire_end: () => test_wire_end,
     test_provider: () => test_provider,
+    test_provider_key_unset: () => test_provider_key_unset,
     test_provider_key: () => test_provider_key,
     test_mcp: () => test_mcp,
     test_substrate: () => test_substrate,

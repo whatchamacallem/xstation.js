@@ -18,13 +18,18 @@
 // `queue.entry_fits`; such a line is logged as its header and the sizes of
 // its payload and blobs only. A `verbose.put` it sends is not logged.
 //
+// The boot hands over the server's lane as a `queue.Port` and an end
+// function: the ttyd page's wire, `wire.WirePort`, and its `wire_end`; the
+// headless page's realm lane, a `queue.ThreadPort`, and a post of the line.
+//
 // Faults: the worker registers its report function, which sends an `error`
 // line with the cascade of the thrown value by `dispatch.cause_make` through
-// `wire.WirePort.wire_end`, whose callback runs once the server, having
-// logged it, has ended the socket. A `fault` line of the UI thread is sent
-// on the same way, its cascade as it came, and at that callback the worker
-// closes itself. `tap_start` runs once per worker, so each of its pieces is
-// a function of its own, for the unit suites.
+// the end function, whose callback runs once the server has the line: on
+// the ttyd page once the server, having logged it, has ended the socket. A
+// `fault` line of the UI thread is sent on the same way, its cascade as it
+// came, and at that callback the worker closes itself. `tap_start` runs once
+// per worker, so each of its pieces is a function of its own, for the unit
+// suites.
 //
 // The relays of the console and the overlay's note are pieces of the program
 // the suites build toward and run nowhere at bring up.
@@ -61,10 +66,14 @@ namespace worker_ai {
     fn: dispatch.Handler,
   ) => void;
 
+  // Sends the line to the server, then calls `done` once the server has it.
+  export type ServerEnd = (line: lines.Line, done: () => void) => void;
+
   // What the boot hands over once `tap.start` is in.
   export interface TapParts {
     first: lines.Line;
-    wire: wire.WirePort;
+    server: queue.Port;
+    end: ServerEnd;
     ui: MessagePort;
   }
 
@@ -240,9 +249,9 @@ namespace worker_ai {
     return synchronous;
   }
 
-  // Sends the cascade as an `error` line by `wire_end`, then calls `done`.
+  // Sends the cascade as an `error` line by `end`, which calls `done`.
   export function error_send(
-    port: wire.WirePort,
+    end: ServerEnd,
     cascade: lines.ErrorCause,
     done: () => void,
   ): void {
@@ -253,19 +262,19 @@ namespace worker_ai {
     if (cascade.cause !== undefined) {
       payload.cause = cascade.cause;
     }
-    port.wire_end(line_build(constants.error_type, payload), done);
+    end(line_build(constants.error_type, payload), done);
   }
 
   // Registers the UI's `fault`: its cascade sent on, then `close` called.
   export function fault_register(
     register: HandlerRegister,
-    port: wire.WirePort,
+    end: ServerEnd,
     close: () => void,
   ): void {
     register(constants.fault_type, constants.handler_version, (line) => {
       const fault = jslb.payload_of(line) as unknown as lines.Fault;
       const { message, stack, cause } = fault;
-      error_send(port, { message, stack, cause }, close);
+      error_send(end, { message, stack, cause }, close);
       return undefined;
     });
   }
@@ -290,8 +299,8 @@ namespace worker_ai {
     tasks.port_add(constants.ui_owner, new queue.ThreadPort(parts.ui));
     const debug = settings.settings_get(constants.debug_setting) === true;
     const server: queue.Port = debug
-      ? new WireTap(parts.wire, verbose.log)
-      : parts.wire;
+      ? new WireTap(parts.server, verbose.log)
+      : parts.server;
     tasks.port_add(constants.server_owner, server);
     settings_register(tasks, dispatch.handler_register, payload.settings);
     settings.sender_register((put: lines.SettingsPut) => {
@@ -299,9 +308,9 @@ namespace worker_ai {
       tasks.line_notify(line, constants.thread);
     });
     error_overlay.report_register((thrown, done) =>
-      error_send(parts.wire, dispatch.cause_make(thrown), done),
+      error_send(parts.end, dispatch.cause_make(thrown), done),
     );
-    fault_register(dispatch.handler_register, parts.wire, () => self.close());
+    fault_register(dispatch.handler_register, parts.end, () => self.close());
     const notice: { [key: string]: unknown } = { settings: payload.settings };
     if (gold !== undefined) {
       notice.test_settings = gold;

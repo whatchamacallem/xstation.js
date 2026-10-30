@@ -21,7 +21,7 @@
 import contextlib, engine_tap, functools, harness, json, os, re, resource
 import signal, sqlite3, sys, tempfile, traceback, unittest
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -60,7 +60,7 @@ _LANGUAGES_REFUSED = (
     ("../typescript", "path"),
 )
 
-# TypeScript file size before a write cut short, chosen above any log write.
+# TypeScript file size before a write the limit cuts, chosen above log writes.
 _FILL_BYTES: int = harness.gold_get(f"{_GOLD_ID}.fill_bytes")
 
 # The bytes a write cut short writes: the limit is this far past the fill.
@@ -110,12 +110,12 @@ def _gold_value(name: str) -> Any:
 def _keys_number(value: Any) -> Any:
     if isinstance(value, dict):
         made: dict[int | str, Any] = {}
-        for key, item in value.items():
+        for key, item in cast(dict[str, Any], value).items():
             number = _NUMBER_KEY.fullmatch(key) is not None
             made[int(key) if number else key] = _keys_number(item)
         return made
     if isinstance(value, list):
-        return [_keys_number(item) for item in value]
+        return [_keys_number(item) for item in cast(list[Any], value)]
     return value
 
 
@@ -195,7 +195,7 @@ def _language_handle(root: str, language: str) -> Any:
     return _handler_call(engine_tap.tap_line, line)
 
 
-# In a child: opens the log, registers, handles the texts, takes the failure.
+# Child: opens the log, registers, handles texts, takes the browser's failure.
 def _failure_take(
     root: str,
     texts: tuple[str, ...],
@@ -209,7 +209,7 @@ def _failure_take(
     engine_tap.error_take(message, _STACK, cause)
 
 
-# The work of a child: opens the log, then takes a failure before registering.
+# In a child: opens the root's log, then takes a failure before registering.
 def _failure_early(root: str) -> None:
     engine_tap.verbose.log_open(root, _RING)
     engine_tap.error_take("boom", _STACK, None)
@@ -221,7 +221,7 @@ def _register_twice(root: str) -> None:
     engine_tap.dispatch.handler_register("tap.line", 0, engine_tap.tap_line)
 
 
-# Runs the work, files capped past the fill, `SIGXFSZ` ignored, then uncaps.
+# Runs work capped past the fill, `SIGXFSZ` ignored, uncapped for the ending.
 def _limited_run(work: Callable[[], object]) -> object:
     signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
     soft, hard = resource.getrlimit(resource.RLIMIT_FSIZE)

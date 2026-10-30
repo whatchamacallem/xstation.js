@@ -88,7 +88,7 @@ class TestVectors(unittest.TestCase):
             renders = [jslb.line_render(line) for line in lines]
             self.assertEqual(renders, sidecar["render"], name)
 
-    # Success vectors of both kinds are their messages' jslb iff canonical.
+    # Success vectors, both kinds, are sidecar messages' jslb iff canonical.
     def test_encoded_same(self) -> None:
         successes = [
             (name, data, sidecar)

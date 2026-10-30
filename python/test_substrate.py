@@ -237,7 +237,7 @@ def _database_dump(path: str) -> list[str]:
         connection.close()
 
 
-# Forked child: puts over `overflow_bytes`, file whole, killed writing the row.
+# Child: puts over `overflow_bytes`, file whole, size limit kills on the row.
 def _child_put(root: str) -> NoReturn:
     try:
         store = substrate.Store(root, _OVERFLOW_BYTES)

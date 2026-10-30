@@ -40,13 +40,17 @@
     "test_substrate.ts",
     "test_provider.ts",
     "test_provider_key.ts",
+    "test_provider_key_unset.ts",
     "test_provider_script.ts",
     "test_mcp.ts",
     "test_line_case.ts",
+    "test_wire_port.ts",
+    "test_tap_pair.ts",
     "test_integrate_http.ts",
     "test_integrate_provider_script.ts",
     "test_integrate_queue.ts",
     "test_integrate_mcp.ts",
+    "failing_block.ts",
     "line_case.ts",
     "test_node.ts"
   ]

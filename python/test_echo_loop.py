@@ -167,7 +167,7 @@ def _echo_serve(root: str, read_fd: int, write_fd: int) -> str:
     return _ENDING_RETURNED
 
 
-# In a child, opens the root's log as `bootstrap.py` does and echoes the pipes.
+# Child: opens the root's log as `bootstrap.py` does, echoes pipes to the end.
 def _logged_serve(root: str, read_fd: int, write_fd: int) -> str:
     path = os.path.join(root, "settings.json")
     with open(path, encoding="utf-8") as file:

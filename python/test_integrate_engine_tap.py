@@ -130,7 +130,7 @@ def _lines_serve(root: str, data: bytes) -> list[object]:
     ]
 
 
-# In a child: opens the log, registers, hands an `error` line to `error_take`.
+# Child: opens the log, registers, hands `error_take` an `error`'s cascade.
 def _failure_serve(root: str, data: bytes) -> None:
     engine_tap.verbose.log_open(root, _RING)
     engine_tap.handlers_register(root)

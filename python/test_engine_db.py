@@ -18,7 +18,7 @@
 import dispatch, engine_db, harness, os, re, signal, substrate, sys, tempfile
 import traceback, unittest
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 # The checkout's build directory, where each test makes its scratch root.
 _BUILD_PATH = os.path.join(
@@ -68,12 +68,12 @@ def _gold_value(name: str) -> Any:
 def _keys_number(value: Any) -> Any:
     if isinstance(value, dict):
         made: dict[int | str, Any] = {}
-        for key, item in value.items():
+        for key, item in cast(dict[str, Any], value).items():
             number = _NUMBER_KEY.fullmatch(key) is not None
             made[int(key) if number else key] = _keys_number(item)
         return made
     if isinstance(value, list):
-        return [_keys_number(item) for item in value]
+        return [_keys_number(item) for item in cast(list[Any], value)]
     return value
 
 

@@ -7,7 +7,7 @@ import types
 class PageEvents:
     lifecycle: set[tuple[str, str]]
 
-# Speaks the DevTools protocol over a WebSocket on a byte channel.
+# Speaks the DevTools protocol over a channel of whole messages.
 class ProtocolClient:
     # Returns the result of a DevTools method, on the page once attached.
     def method_call(
@@ -25,23 +25,41 @@ class ProtocolClient:
     # Ends every later wait at `end`, a `time.monotonic()` value, if sooner.
     def deadline_set(self, end: float) -> None: ...
 
-# Headless Chrome over DevTools, through the `powershell.exe` relay.
+# Chrome, or else Edge, on Windows, through a relay in `powershell.exe`.
+class WindowsRelay:
+    # Finds `powershell.exe` on the PATH, starting nothing yet.
+    def __init__(self) -> None: ...
+
+# `/usr/local/bin/chrome-headless-shell` on Linux, with DevTools on fds 3, 4.
+class LinuxPipe:
+    # Starts nothing yet: the start makes its profile and caches in `build/`.
+    def __init__(self) -> None: ...
+
+# Headless Chrome over DevTools, on the transport it is given.
 class Browser:
     events: PageEvents
-    # Keeps the window size and names a profile, starting nothing yet.
-    def __init__(self, width_px: int, height_px: int) -> None: ...
-    # Starts the browser, its relay and its page, cleaning up if that fails.
+    # Keeps the window size and the transport, starting nothing yet.
+    def __init__(
+        self,
+        width_px: int,
+        height_px: int,
+        transport: WindowsRelay | LinuxPipe,
+    ) -> None: ...
+    # Starts the browser and its page, cleaning up if that fails.
     def __enter__(self) -> Self: ...
-    # Releases the browser whatever ended the block.
+    # Stops the browser, removes its profile, fails on an exit no call saw.
     def __exit__(
         self,
         exception_type: type[BaseException] | None,
         exception: BaseException | None,
         traceback: types.TracebackType | None,
     ) -> None: ...
+    # Opens the URL and waits for its load, sent again if refused on the relay.
     def page_open(self, url: str) -> None: ...
     # Evaluates JavaScript on the page and returns its JSON value.
     def script_evaluate(self, text: str) -> object: ...
+    # Calls `fn` with each payload the page calls `name` with, on every load.
+    def binding_add(self, name: str, fn: Callable[[str], None]) -> None: ...
     # Calls `fn` with each console message from now on.
     def console_follow(self, fn: Callable[[str], None]) -> None: ...
     def screenshot_save(self, path: str) -> None: ...

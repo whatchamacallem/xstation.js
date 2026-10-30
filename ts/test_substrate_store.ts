@@ -16,7 +16,7 @@
 // `test_settings.json`, read through the harness with the `overflow_bytes`
 // and `turn_compact_turns` of `settings.json` its stores take. Each digest
 // and its input are one entry of `test_digests.json` in `test_vectors`, under
-// `test_substrate`, and the test uses that input.
+// `test_substrate_store`, and the test uses that input.
 namespace test_substrate_store {
   // The initialized sqlite3.wasm module, a global the test page sets.
   declare const test_sqlite3: substrate.SqliteModule;
@@ -163,10 +163,10 @@ namespace test_substrate_store {
     const vectors = JSON.parse(text) as {
       [module: string]: { [name: string]: DigestVector };
     };
-    if (!Object.hasOwn(vectors, "test_substrate")) {
-      throw new Error(`${name} has no module test_substrate`);
+    if (!Object.hasOwn(vectors, "test_substrate_store")) {
+      throw new Error(`${name} has no module test_substrate_store`);
     }
-    digests_kept = vectors.test_substrate;
+    digests_kept = vectors.test_substrate_store;
     return digests_kept;
   }
 

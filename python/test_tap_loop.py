@@ -132,7 +132,7 @@ def _push_make(text: str, full: bool) -> dict[str, Any]:
     return {"0": header, "language": "python", "text": text}
 
 
-# `tap.run` with a blob over `_OVERFLOW_BYTES`, one small suite, not recursing.
+# `tap.run`, blob `size` over `_OVERFLOW_BYTES`, one small suite, no recursion.
 def _blob_line(size: int) -> bytes:
     text = (
         f'{{"0":{{"t":"tap.run","i":1,"b":1}},"1":{{"s":{size}}},'

@@ -20,7 +20,7 @@
 import engine_mcp, functools, harness, json, os, re, signal, sys, tempfile
 import traceback, unittest
 from collections.abc import Callable
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -55,12 +55,12 @@ def _gold_raw(name: str) -> Any:
 def _keys_number(value: Any) -> Any:
     if isinstance(value, dict):
         made: dict[int | str, Any] = {}
-        for key, item in value.items():
+        for key, item in cast(dict[str, Any], value).items():
             number = _NUMBER_KEY.fullmatch(key) is not None
             made[int(key) if number else key] = _keys_number(item)
         return made
     if isinstance(value, list):
-        return [_keys_number(item) for item in value]
+        return [_keys_number(item) for item in cast(list[Any], value)]
     return value
 
 
@@ -121,7 +121,7 @@ def _lines_handle(lines: list[Any]) -> list[object]:
     ]
 
 
-# In a child: registers on a new server, leaves it a failure, handles the line.
+# Child: registers on a new server, it fails a request alone, handles the line.
 def _failure_left(line: Any) -> object:
     server = _server_make()
     engine_mcp.handlers_register(server)

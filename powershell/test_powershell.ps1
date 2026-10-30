@@ -16,8 +16,8 @@
 # page build\hyperposition-engine.html.
 # Make the page in WSL in the checkout: python3 python/third_party_fetch.py
 # fetches the pinned archives over the network, then
-# python3 python/page_build.py hyperposition-engine builds the page from
-# them with tsc.
+# python3 python/page_build.py test hyperposition-engine builds the page
+# from them with tsc.
 #
 # The test command has to be run as admin:
 #

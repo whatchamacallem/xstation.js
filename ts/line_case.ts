@@ -12,21 +12,26 @@
 // added when as many lines came as the case expects, or when its seconds are
 // up, so a case that expects none waits its seconds. The point is `ok` when
 // the lines that came equal the expected lines in order: the header and the
-// payload by value, each blob header but `d` by value, and each blob's bytes
-// by their size and `utility.sha256_hex`. Otherwise it is `not ok` with one
-// diagnostic line naming the first difference, a line still missing or a
-// line not expected. With the runner's failfast the first failed point ends
-// the cases. The block is written through `block_start` and `block_end` of
+// payload by value, each blob header but `d` by value, each blob's bytes by
+// their size and `utility.sha256_hex`, and an `error` line's `stack`, and
+// each `stack` down its `cause` chain, by its first line only, the error's
+// name and message, since the rest holds build paths and line numbers.
+// Otherwise it is `not ok` with one diagnostic line naming the first
+// difference, a line still missing or a line not expected. With the runner's
+// failfast the first failed point ends the cases. The block is written
+// through `block_start`, its plan the number of cases, and `block_end` of
 // the runner. A line that comes once the last point is in throws. A case
 // never answers a request the module makes.
 
 namespace line_case {
-  // The keys of a block's gold and the field of a blob's bytes.
+  // The keys of a block's gold, the field of a blob's bytes, the error type.
   const constants = Object.freeze({
     cases_key: "cases",
     lines_key: "lines",
     data_field: "d",
     second_ms: 1000,
+    error_type: "error",
+    stack_break: "\n",
   });
 
   // One case of the gold: the names of the lines sent and expected, a wait.
@@ -108,6 +113,25 @@ namespace line_case {
     return line;
   }
 
+  // A copy of an error, each `stack` down its `cause` chain cut to line one.
+  function stacks_cut(error: lines.ErrorCause): lines.ErrorCause {
+    const first = error.stack.split(constants.stack_break)[0];
+    const cut: lines.ErrorCause = { ...error, stack: first };
+    if (error.cause !== undefined) {
+      cut.cause = stacks_cut(error.cause);
+    }
+    return cut;
+  }
+
+  // The payload a line is compared by, an error's stacks cut to line one.
+  function payload_compared(line: lines.Line): { [key: string]: unknown } {
+    const payload = jslb.payload_of(line);
+    if (jslb.field_get(line[0], "type") !== constants.error_type) {
+      return payload;
+    }
+    return { ...stacks_cut(payload as unknown as lines.ErrorCause) };
+  }
+
   // The first difference of a line that came from the one expected, if any.
   function line_compare(
     number: number,
@@ -122,8 +146,8 @@ namespace line_case {
         utility.json_text(expected[0]),
       );
     }
-    const payload = jslb.payload_of(came);
-    const wanted = jslb.payload_of(expected);
+    const payload = payload_compared(came);
+    const wanted = payload_compared(expected);
     if (!value_equal(payload, wanted)) {
       return i18n(
         "line_case.payload_differs",
@@ -304,7 +328,7 @@ namespace line_case {
     done: (passed: boolean) => void,
   ): void {
     const cases = harness.gold_get(`${id}.${constants.cases_key}`) as Case[];
-    const tracker = runner.block_start(name);
+    const tracker = runner.block_start(name, cases.length);
     const port = build();
     new CaseRun(runner, name, id, tracker, port, cases, done).cases_start();
   }

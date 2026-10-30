@@ -2,23 +2,38 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Headless Chrome, or else Edge, on Windows, driven from WSL over the DevTools
-# protocol. A Browser starts it with a profile of its own that goes when it
-# does, and drives one page of it: opens a URL, evaluates JavaScript, follows
-# the console, saves a screenshot, traces it, pauses one of its workers in the
-# debugger and closes the page, and picks out a trace's synchronous loads on
-# the page's UI thread. WSL's NAT networking can't reach Windows' 127.0.0.1,
+# Headless Chrome driven over the DevTools protocol by one client, the
+# Browser, on one of two transports. WindowsRelay drives Chrome, or else Edge,
+# on Windows from WSL: WSL's NAT networking can't reach Windows' 127.0.0.1,
 # where Chrome serves DevTools, so a relay in `powershell.exe` carries the
-# WebSocket over its stdin and stdout. Standard library only, and
-# `powershell.exe` and `wslpath` are the programs it starts.
+# WebSocket over its stdin and stdout. LinuxPipe drives
+# /usr/local/bin/chrome-headless-shell, started with --remote-debugging-pipe,
+# which reads DevTools messages from its descriptor 3 and writes them to its
+# descriptor 4, each ended by a NUL byte, and XDG_CACHE_HOME set to the
+# profile, where fontconfig caches fonts. A Browser starts the browser with a
+# profile of its own that goes when it does, and drives one page of it: opens a
+# URL, evaluates JavaScript, passes on the calls of a binding, follows the
+# console, saves a screenshot, traces it, pauses one of its workers in the
+# debugger and closes the page, and picks out a trace's synchronous loads on
+# the page's UI thread. On Linux the browser's exit closes its pipe, and the
+# call or wait under way raises one ConnectionError whose cause is the exit
+# code; an exit with an error code that no call saw fails the Browser's end.
+# Standard library only, and `powershell.exe`, `wslpath` and
+# chrome-headless-shell are the programs it starts.
 
-import base64, errno, functools, hashlib, json, os, select, shutil
-import subprocess, time, types, uuid
+import base64, errno, fcntl, functools, hashlib, json, os, select, shutil
+import signal, subprocess, tempfile, time, types, uuid
 from collections.abc import Callable
-from typing import Any, IO, NamedTuple, Self, cast
+from typing import Any, IO, NamedTuple, NoReturn, Self, cast
 
 # The public names of this module, as its stub declares them.
-__all__ = ["Browser", "blocking_categories", "blocking_find"]
+__all__ = [
+    "Browser",
+    "LinuxPipe",
+    "WindowsRelay",
+    "blocking_categories",
+    "blocking_find",
+]
 
 # The trace categories of the synchronous loads and of the thread names.
 _BLOCKING_CATEGORIES = ("loading", "__metadata")
@@ -41,8 +56,25 @@ _BROWSER_LOCATIONS: tuple[tuple[str, str], ...] = (
     ("ProgramFiles", r"Microsoft\Edge\Application\msedge.exe"),
 )
 
+# The build directory of the checkout, where a Linux browser's profile goes.
+_BUILD_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
+)
+
+# The Linux browser, the one the test driver may start.
+_CHROME_PATH = "/usr/local/bin/chrome-headless-shell"
+
+# The Linux browser's name, as its errors give it.
+_CHROME_NAME = os.path.basename(_CHROME_PATH)
+
+# The descriptor the Linux browser reads DevTools from, as the pipe flag sets.
+_COMMAND_DESCRIPTOR = 3
+
 # The longest a command started here may run, a default chosen by its writer.
 _COMMAND_WAIT_SECONDS = 60
+
+# The lowest descriptor a browser's end of a pipe is copied to before start.
+_DESCRIPTOR_FLOOR = 5
 
 # The file the browser writes its DevTools port and path to, in the profile.
 _DEVTOOLS_PORT_FILE_NAME = "DevToolsActivePort"
@@ -61,6 +93,12 @@ foreach ($name_ in 'LOCALAPPDATA', 'ProgramFiles', 'ProgramFiles(x86)',
 }
 ConvertTo-Json $values_ -Compress
 """
+
+# What ends each DevTools message on the Linux browser's pipes.
+_PIPE_END = b"\0"
+
+# The bytes a read of a pipe asks for, 64 KiB, a default chosen by its writer.
+_PIPE_READ_BYTES = 65536
 
 # How often a polling wait looks again, a default chosen by its writer.
 _POLL_SECONDS = 0.1
@@ -122,6 +160,9 @@ public static class XsjsDevToolsRelay {
 '@
 [XsjsDevToolsRelay]::RelayRun($port_)
 """
+
+# The descriptor the Linux browser writes DevTools to, as the pipe flag sets.
+_REPLY_DESCRIPTOR = 4
 
 # Seconds for one answer, event or page load, a default chosen by its writer.
 _REPLY_WAIT_SECONDS = 60
@@ -226,11 +267,12 @@ class WaitTimer:
         )
 
 
-# Keeps page loads, trace events, workers and pauses, and passes console on.
+# Keeps page loads, trace events, workers and pauses, passes console and calls.
 class PageEvents:
-    # Starts with no followers and nothing seen.
+    # Starts with no followers, no bindings and nothing seen.
     def __init__(self) -> None:
         self.followers: list[Callable[[str], None]] = []
+        self.bindings: dict[str, Callable[[str], None]] = {}
         self.lifecycle: set[tuple[str, str]] = set()
         self.trace: list[dict[str, Any]] = []
         self.trace_done = False
@@ -238,7 +280,7 @@ class PageEvents:
         self.workers: dict[str, str] = {}
         self.paused: set[str] = set()
 
-    # Records a load, trace, worker or pause event, or passes console text on.
+    # Records a load, trace, worker or pause, or passes console text or a call.
     def message_handle(self, message: dict[str, Any]) -> None:
         method = message["method"]
         if method == "Page.lifecycleEvent":
@@ -248,6 +290,9 @@ class PageEvents:
             text = console_text(message["params"]["args"])
             for follower in self.followers:
                 follower(text)
+        elif method == "Runtime.bindingCalled":
+            params = message["params"]
+            self.bindings[params["name"]](params["payload"])
         elif method == "Tracing.dataCollected":
             self.trace += message["params"]["value"]
         elif method == "Tracing.tracingComplete":
@@ -270,18 +315,117 @@ class PageEvents:
             self.paused.add(message["sessionId"])
 
 
-# Speaks the DevTools protocol over a WebSocket on a byte channel.
-class ProtocolClient:
-    # Keeps the channel's reader and writer, and where events go.
+# A program started by `os.posix_spawn`, its exit read from a pidfd.
+class SpawnedProcess:
+    # Keeps the program's name and process id, and opens its pidfd.
+    def __init__(self, name: str, pid: int) -> None:
+        self.name = name
+        self.pid = pid
+        self.exit_fd = os.pidfd_open(pid)
+        self.exit_code: int | None = None
+
+    # Returns the exit code once the program exits, failing when timed out.
+    def exit_wait(self, timer: WaitTimer) -> int:
+        while self.exit_code is None:
+            ready = select.select([self.exit_fd], [], [], timer.seconds_left())
+            if ready[0]:
+                status = os.waitpid(self.pid, 0)[1]
+                os.close(self.exit_fd)
+                self.exit_code = os.waitstatus_to_exitcode(status)
+        return self.exit_code
+
+
+# DevTools messages as WebSocket text frames on a byte channel.
+class SocketChannel:
+    # Keeps the channel's reader and writer.
     def __init__(
         self,
         reader: Callable[[WaitTimer, int], bytes],
         writer: Callable[[bytes], None],
-        event_fn: Callable[[dict[str, Any]], None],
-        wait_seconds: float,
     ) -> None:
         self.reader = reader
         self.writer = writer
+
+    # Sends one WebSocket frame, masked as a client's must be.
+    def frame_send(self, opcode: int, payload: bytes) -> None:
+        self.writer(frame_encode(opcode, payload, os.urandom(4)))
+
+    # Sends the WebSocket upgrade and checks that DevTools accepted the key.
+    def handshake_open(self, host: str, path: str, timer: WaitTimer) -> None:
+        key = base64.b64encode(os.urandom(16)).decode()
+        self.writer(handshake_request(host, path, key))
+        head = head_read(functools.partial(self.reader, timer))
+        handshake_check(key, head)
+
+    # Returns the next message, joining fragments and answering pings.
+    def message_receive(self, timer: WaitTimer) -> bytes:
+        return message_read(
+            functools.partial(self.reader, timer), self.frame_send
+        )
+
+    # Sends one message as a text frame.
+    def message_send(self, data: bytes) -> None:
+        self.frame_send(_WEBSOCKET_OPCODE_TEXT, data)
+
+
+# DevTools messages each ended by a NUL byte, on the Linux browser's pipes.
+class PipeChannel:
+    # Keeps the browser and the ends of its pipes this side holds.
+    def __init__(
+        self, process: SpawnedProcess, command_fd: int, reply_fd: int
+    ) -> None:
+        self.process = process
+        self.command_fd = command_fd
+        self.reply_fd = reply_fd
+        self.pending = bytearray()
+
+    # Raises that the browser closed its pipe, the cause its exit code.
+    def closed_raise(self) -> NoReturn:
+        name = self.process.name
+        timer = WaitTimer(
+            f"{name} to exit, its pipe closed", _STOP_WAIT_SECONDS
+        )
+        code = self.process.exit_wait(timer)
+        raise ConnectionError(
+            f"{name} closed its DevTools pipe"
+        ) from RuntimeError(f"{name} exited with {code}")
+
+    # Returns the next message, without its NUL, failing when the timer ends.
+    def message_receive(self, timer: WaitTimer) -> bytes:
+        end = self.pending.find(_PIPE_END)
+        while end < 0:
+            chunk = pipe_read(self.reply_fd, timer, _PIPE_READ_BYTES)
+            if not chunk:
+                self.closed_raise()
+            found = chunk.find(_PIPE_END)
+            if found >= 0:
+                end = len(self.pending) + found
+            self.pending += chunk
+        message = bytes(self.pending[:end])
+        del self.pending[: end + 1]
+        return message
+
+    # Sends one message and its NUL, all of it, as a write may take part.
+    def message_send(self, data: bytes) -> None:
+        left = memoryview(data + _PIPE_END)
+        while left:
+            try:
+                written = os.write(self.command_fd, left)
+            except BrokenPipeError:
+                self.closed_raise()
+            left = left[written:]
+
+
+# Speaks the DevTools protocol over a channel of whole messages.
+class ProtocolClient:
+    # Keeps the channel and where events go.
+    def __init__(
+        self,
+        channel: SocketChannel | PipeChannel,
+        event_fn: Callable[[dict[str, Any]], None],
+        wait_seconds: float,
+    ) -> None:
+        self.channel = channel
         self.event_fn = event_fn
         self.wait_seconds = wait_seconds
         self.call_id = 0
@@ -304,23 +448,11 @@ class ProtocolClient:
                 )
             self.event_fn(message)
 
-    # Sends one WebSocket frame, masked as a client's must be.
-    def frame_send(self, opcode: int, payload: bytes) -> None:
-        self.writer(frame_encode(opcode, payload, os.urandom(4)))
-
-    # Sends the WebSocket upgrade and checks that DevTools accepted the key.
-    def handshake_open(self, host: str, path: str) -> None:
-        key = base64.b64encode(os.urandom(16)).decode()
-        self.writer(handshake_request(host, path, key))
-        timer = self.timer_start("the DevTools handshake answer")
-        head = head_read(functools.partial(self.reader, timer))
-        handshake_check(key, head)
-
     # Returns the next DevTools message, decoded, failing when the timer ends.
     def message_next(self, timer: WaitTimer) -> dict[str, Any]:
-        read = functools.partial(self.reader, timer)
-        data = message_read(read, self.frame_send)
-        message: dict[str, Any] = json.loads(data)
+        message: dict[str, Any] = json.loads(
+            self.channel.message_receive(timer)
+        )
         return message
 
     # Returns the result of a DevTools method, on the page once attached.
@@ -347,7 +479,7 @@ class ProtocolClient:
         }
         if session_id:
             request["sessionId"] = session_id
-        self.frame_send(_WEBSOCKET_OPCODE_TEXT, json.dumps(request).encode())
+        self.channel.message_send(json.dumps(request).encode())
         timer = self.timer_start(f"the reply to {method}")
         while True:
             message = self.message_next(timer)
@@ -372,42 +504,22 @@ class ProtocolClient:
         return timer
 
 
-# Headless Chrome over DevTools, through the `powershell.exe` relay.
-class Browser:
-    # Keeps the window size and names a profile, starting nothing yet.
-    def __init__(self, width_px: int, height_px: int) -> None:
+# Chrome, or else Edge, on Windows, through a relay in `powershell.exe`.
+class WindowsRelay:
+    # WSL forwards a new listener to Windows late, so a refusal is sent again.
+    refused_retried = True
+
+    # Finds `powershell.exe` and names a profile, starting nothing yet.
+    def __init__(self) -> None:
         powershell = shutil.which(_POWERSHELL_NAME)
         if powershell is None:
             raise RuntimeError(f"{_POWERSHELL_NAME} isn't on the PATH")
-        self.width_px = width_px
-        self.height_px = height_px
         self.powershell = powershell
         self.profile_name = _PROFILE_PREFIX + uuid.uuid4().hex
         self.profile_path = ""
         self.executable_name = ""
         self.browser_process: subprocess.Popen[bytes] | None = None
         self.relay_process: subprocess.Popen[bytes] | None = None
-        self.client: ProtocolClient | None = None
-        self.events = PageEvents()
-        self.target_id = ""
-
-    # Starts the browser, its relay and its page, cleaning up if that fails.
-    def __enter__(self) -> Self:
-        try:
-            self.browser_start()
-        except BaseException:
-            self.resources_release()
-            raise
-        return self
-
-    # Releases the browser whatever ended the block.
-    def __exit__(
-        self,
-        exception_type: type[BaseException] | None,
-        exception: BaseException | None,
-        traceback: types.TracebackType | None,
-    ) -> None:
-        self.resources_release()
 
     # Returns the WSL path of the first browser installed.
     def browser_find(self, environment: dict[str, str | None]) -> str:
@@ -425,56 +537,6 @@ class Browser:
             "no Chrome or Edge found. Tried: " + ", ".join(tried)
         )
 
-    # Starts the browser on a new profile, a relay to its DevTools and a page.
-    def browser_start(self) -> None:
-        environment: dict[str, str | None] = json.loads(
-            self.powershell_run(
-                "reading the Windows environment", _ENVIRONMENT_SCRIPT
-            )
-        )
-        browser_path = self.browser_find(environment)
-        self.executable_name = os.path.basename(browser_path)
-        temp_windows_path = environment["TEMP"]
-        if not temp_windows_path:
-            raise RuntimeError("Windows has no TEMP folder")
-        temp_windows_path = temp_windows_path.rstrip("\\")
-        temp_path = path_wsl(temp_windows_path)
-        self.profile_path = os.path.join(temp_path, self.profile_name)
-        self.browser_process = subprocess.Popen(
-            [
-                browser_path,
-                "--headless=new",
-                "--hide-scrollbars",
-                "--no-default-browser-check",
-                "--no-first-run",
-                "--remote-debugging-port=0",
-                f"--user-data-dir={temp_windows_path}\\{self.profile_name}",
-                f"--window-size={self.width_px},{self.height_px}",
-                "about:blank",
-            ],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            cwd=temp_path,
-        )
-        address = self.devtools_wait()
-        self.relay_process = subprocess.Popen(
-            powershell_command(self.powershell, relay_script(address.port)),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            cwd=temp_path,
-        )
-        relay_input = cast(IO[bytes], self.relay_process.stdin)
-        relay_output = cast(IO[bytes], self.relay_process.stdout)
-        self.client = ProtocolClient(
-            functools.partial(pipe_read, relay_output.fileno()),
-            functools.partial(stream_write, relay_input),
-            self.events.message_handle,
-            _REPLY_WAIT_SECONDS,
-        )
-        self.client.handshake_open(f"127.0.0.1:{address.port}", address.path)
-        self.target_attach()
-
     # Stops the browser, which outlives its WSL side and holds the profile.
     def browser_stop(self) -> None:
         if self.browser_process is None:
@@ -487,16 +549,6 @@ class Browser:
             f"$milliseconds_ = {round(_POLL_SECONDS * 1000)}\n" + _STOP_SCRIPT,
         )
         self.process_wait(self.executable_name, self.browser_process)
-
-    # Returns the DevTools client, failing if the browser isn't started.
-    def client_get(self) -> ProtocolClient:
-        if self.client is None:
-            raise RuntimeError("the browser isn't started: use a with block")
-        return self.client
-
-    # Calls `fn` with the text of each console message from now on.
-    def console_follow(self, fn: Callable[[str], None]) -> None:
-        self.events.followers.append(fn)
 
     # Returns the DevTools port and path once the browser has written them.
     def devtools_wait(self) -> EndpointAddress:
@@ -521,31 +573,6 @@ class Browser:
                     " serving DevTools"
                 )
             time.sleep(min(_POLL_SECONDS, timer.seconds_left()))
-
-    # Closes the page, so no more calls to it work.
-    def page_close(self) -> None:
-        self.client_get().method_call(
-            "Target.closeTarget", {"targetId": self.target_id}
-        )
-
-    # Navigates to the URL, again while refused, and returns once it loads.
-    def page_open(self, url: str) -> None:
-        client = self.client_get()
-        timer = WaitTimer(
-            f"{url} to accept connections after {_REFUSED_ERROR_TEXT}",
-            _SERVER_WAIT_SECONDS,
-        )
-        navigated = client.method_call("Page.navigate", {"url": url})
-        while navigated.get("errorText") == _REFUSED_ERROR_TEXT:
-            time.sleep(min(_POLL_SECONDS, timer.seconds_left()))
-            navigated = client.method_call("Page.navigate", {"url": url})
-        if "errorText" in navigated:
-            raise RuntimeError(f"{url}: {navigated['errorText']}")
-        loader_id = navigated["loaderId"]
-        client.events_pump(
-            f"{url} to load",
-            lambda: (loader_id, "load") in self.events.lifecycle,
-        )
 
     # Returns what the script printed in PowerShell, as `UTF-8`.
     def powershell_run(self, what: str, script: str) -> str:
@@ -595,7 +622,7 @@ class Browser:
         cast(IO[bytes], process.stdout).close()
 
     # Stops the browser and the relay, then removes the profile.
-    def resources_release(self) -> None:
+    def transport_close(self) -> None:
         try:
             self.browser_stop()
         finally:
@@ -603,6 +630,225 @@ class Browser:
                 self.relay_stop()
             finally:
                 self.profile_remove()
+
+    # Starts the browser on a new profile and opens a relay to its DevTools.
+    def transport_open(self, width_px: int, height_px: int) -> SocketChannel:
+        environment: dict[str, str | None] = json.loads(
+            self.powershell_run(
+                "reading the Windows environment", _ENVIRONMENT_SCRIPT
+            )
+        )
+        browser_path = self.browser_find(environment)
+        self.executable_name = os.path.basename(browser_path)
+        temp_windows_path = environment["TEMP"]
+        if not temp_windows_path:
+            raise RuntimeError("Windows has no TEMP folder")
+        temp_windows_path = temp_windows_path.rstrip("\\")
+        temp_path = path_wsl(temp_windows_path)
+        self.profile_path = os.path.join(temp_path, self.profile_name)
+        self.browser_process = subprocess.Popen(
+            [
+                browser_path,
+                "--headless=new",
+                "--hide-scrollbars",
+                "--no-default-browser-check",
+                "--no-first-run",
+                "--remote-debugging-port=0",
+                f"--user-data-dir={temp_windows_path}\\{self.profile_name}",
+                f"--window-size={width_px},{height_px}",
+                "about:blank",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            cwd=temp_path,
+        )
+        address = self.devtools_wait()
+        self.relay_process = subprocess.Popen(
+            powershell_command(self.powershell, relay_script(address.port)),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            cwd=temp_path,
+        )
+        relay_input = cast(IO[bytes], self.relay_process.stdin)
+        relay_output = cast(IO[bytes], self.relay_process.stdout)
+        channel = SocketChannel(
+            functools.partial(pipe_read, relay_output.fileno()),
+            functools.partial(stream_write, relay_input),
+        )
+        timer = WaitTimer("the DevTools handshake answer", _REPLY_WAIT_SECONDS)
+        channel.handshake_open(
+            f"127.0.0.1:{address.port}", address.path, timer
+        )
+        return channel
+
+
+# `chrome-headless-shell` on Linux, with DevTools on its descriptors 3 and 4.
+class LinuxPipe:
+    # A refusal on this machine's own 127.0.0.1 is final, as nothing forwards.
+    refused_retried = False
+
+    # Starts nothing yet: the browser's start makes its profile and pipes.
+    def __init__(self) -> None:
+        self.profile_path = ""
+        self.command_fd = -1
+        self.reply_fd = -1
+        self.process: SpawnedProcess | None = None
+
+    # Ends the browser by closing its command pipe, failing on an unseen exit.
+    def browser_stop(self) -> None:
+        process = self.process
+        if process is None:
+            return
+        # A code read before the stop was raised by the pipe that saw it.
+        seen = process.exit_code is not None
+        os.close(self.command_fd)
+        self.command_fd = -1
+        try:
+            code = process.exit_wait(
+                WaitTimer(f"{_CHROME_NAME} to exit", _STOP_WAIT_SECONDS)
+            )
+        except TimeoutError:
+            os.kill(process.pid, signal.SIGKILL)
+            process.exit_wait(
+                WaitTimer(
+                    f"{_CHROME_NAME} to exit once killed", _STOP_WAIT_SECONDS
+                )
+            )
+            raise
+        if code != 0 and not seen:
+            raise RuntimeError(f"{_CHROME_NAME} exited with {code}")
+
+    # Stops the browser, closes this side's pipe ends and removes the profile.
+    def transport_close(self) -> None:
+        try:
+            self.browser_stop()
+        finally:
+            for fd in (self.command_fd, self.reply_fd):
+                if fd >= 0:
+                    os.close(fd)
+            self.command_fd = -1
+            self.reply_fd = -1
+            if self.profile_path:
+                shutil.rmtree(self.profile_path)
+
+    # Starts the browser on a new profile in `build/`, DevTools on its pipes.
+    def transport_open(self, width_px: int, height_px: int) -> PipeChannel:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+        self.profile_path = tempfile.mkdtemp(
+            prefix=_PROFILE_PREFIX, dir=_BUILD_PATH
+        )
+        command_read, self.command_fd = os.pipe()
+        command_read = descriptor_raise(command_read)
+        self.reply_fd, reply_write = os.pipe()
+        reply_write = descriptor_raise(reply_write)
+        try:
+            pid = os.posix_spawn(
+                _CHROME_PATH,
+                [
+                    _CHROME_PATH,
+                    "--remote-debugging-pipe",
+                    f"--user-data-dir={self.profile_path}",
+                    f"--window-size={width_px},{height_px}",
+                ],
+                {**os.environ, "XDG_CACHE_HOME": self.profile_path},
+                file_actions=[
+                    (os.POSIX_SPAWN_OPEN, 0, os.devnull, os.O_RDONLY, 0),
+                    (os.POSIX_SPAWN_OPEN, 1, os.devnull, os.O_WRONLY, 0),
+                    (os.POSIX_SPAWN_OPEN, 2, os.devnull, os.O_WRONLY, 0),
+                    (os.POSIX_SPAWN_DUP2, command_read, _COMMAND_DESCRIPTOR),
+                    (os.POSIX_SPAWN_DUP2, reply_write, _REPLY_DESCRIPTOR),
+                ],
+            )
+        finally:
+            os.close(command_read)
+            os.close(reply_write)
+        self.process = SpawnedProcess(_CHROME_NAME, pid)
+        return PipeChannel(self.process, self.command_fd, self.reply_fd)
+
+
+# Headless Chrome over DevTools, on the transport it is given.
+class Browser:
+    # Keeps the window size and the transport, starting nothing yet.
+    def __init__(
+        self,
+        width_px: int,
+        height_px: int,
+        transport: WindowsRelay | LinuxPipe,
+    ) -> None:
+        self.width_px = width_px
+        self.height_px = height_px
+        self.transport = transport
+        self.client: ProtocolClient | None = None
+        self.events = PageEvents()
+        self.target_id = ""
+
+    # Starts the browser and its page, cleaning up if that fails.
+    def __enter__(self) -> Self:
+        try:
+            channel = self.transport.transport_open(
+                self.width_px, self.height_px
+            )
+            self.client = ProtocolClient(
+                channel, self.events.message_handle, _REPLY_WAIT_SECONDS
+            )
+            self.target_attach()
+        except BaseException:
+            self.transport.transport_close()
+            raise
+        return self
+
+    # Stops the browser and removes its profile, whatever ended the block.
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception: BaseException | None,
+        traceback: types.TracebackType | None,
+    ) -> None:
+        self.transport.transport_close()
+
+    # Calls `fn` with each payload the page calls `name` with, on every load.
+    def binding_add(self, name: str, fn: Callable[[str], None]) -> None:
+        self.events.bindings[name] = fn
+        self.client_get().method_call("Runtime.addBinding", {"name": name})
+
+    # Returns the DevTools client, failing if the browser isn't started.
+    def client_get(self) -> ProtocolClient:
+        if self.client is None:
+            raise RuntimeError("the browser isn't started: use a with block")
+        return self.client
+
+    # Calls `fn` with the text of each console message from now on.
+    def console_follow(self, fn: Callable[[str], None]) -> None:
+        self.events.followers.append(fn)
+
+    # Closes the page, so no more calls to it work.
+    def page_close(self) -> None:
+        self.client_get().method_call(
+            "Target.closeTarget", {"targetId": self.target_id}
+        )
+
+    # Opens the URL and waits for its load, sent again if refused on the relay.
+    def page_open(self, url: str) -> None:
+        client = self.client_get()
+        timer = WaitTimer(
+            f"{url} to accept connections after {_REFUSED_ERROR_TEXT}",
+            _SERVER_WAIT_SECONDS,
+        )
+        navigated = client.method_call("Page.navigate", {"url": url})
+        while (
+            self.transport.refused_retried
+            and navigated.get("errorText") == _REFUSED_ERROR_TEXT
+        ):
+            time.sleep(min(_POLL_SECONDS, timer.seconds_left()))
+            navigated = client.method_call("Page.navigate", {"url": url})
+        if "errorText" in navigated:
+            raise RuntimeError(f"{url}: {navigated['errorText']}")
+        loader_id = navigated["loaderId"]
+        client.events_pump(
+            f"{url} to load",
+            lambda: (loader_id, "load") in self.events.lifecycle,
+        )
 
     # Saves a PNG of the page to the path.
     def screenshot_save(self, path: str) -> None:
@@ -803,6 +1049,13 @@ def console_text(args: list[dict[str, Any]]) -> str:
         else:
             texts.append(arg["type"])
     return " ".join(texts)
+
+
+# Moves the descriptor above 4, so that its copy onto 3 or 4 clobbers neither.
+def descriptor_raise(fd: int) -> int:
+    raised = fcntl.fcntl(fd, fcntl.F_DUPFD_CLOEXEC, _DESCRIPTOR_FLOOR)
+    os.close(fd)
+    return raised
 
 
 # Returns a thrown exception's text with its stack, from DevTools' details.

@@ -6,7 +6,8 @@
 // double: the owner table, the synchronous mode, the wire's tap in its full
 // and sized forms, the note of tty 1, the relays of the console and of the
 // settings, called through the handlers they register, and the cascade of a
-// fault sent as an `error` line by `wire_end`, the worker's own and the UI's.
+// fault sent as an `error` line by the end function `tap_start` takes, the
+// worker's own and the UI's.
 // The lines the tests send and expect and the texts of the notes and throws
 // are those of the gold record, test_settings.json. `tap_start` runs once
 // per worker, at bring up, which is its integration test, so no test here
@@ -25,9 +26,6 @@ namespace test_worker_ai {
 
   // An object of fields by name.
   type FieldTable = { [key: string]: unknown };
-
-  // The port `error_send` and `fault_register` take, by their signature.
-  type EndPort = Parameters<typeof worker_ai.error_send>[0];
 
   // A line and the owner it was given to the queue for.
   type Owned = [lines.Line, queue.ThreadName | undefined];
@@ -412,15 +410,15 @@ namespace test_worker_ai {
     }
   }
 
-  // A fault's cascade sent to the server as an `error` line by `wire_end`.
+  // A fault's cascade sent to the server as an `error` line by the end.
   export class TestFaults extends unittest.TestCase {
     // The cascade goes as one `error` line, its `cause` only when present.
     test_error_sent(): void {
       const wire = new WireDouble();
       const done: number[] = [];
-      const port = wire as unknown as EndPort;
+      const end: worker_ai.ServerEnd = (line, fn) => wire.wire_end(line, fn);
       const cascade = cascade_make();
-      worker_ai.error_send(port, cascade, () => {
+      worker_ai.error_send(end, cascade, () => {
         done.push(wire.ended.length);
       });
       this.assertEqual(wire.ended.length, 1);
@@ -432,7 +430,7 @@ namespace test_worker_ai {
       this.assertEqual(line, { ...gold_line("error_full"), ...cascade });
       this.assertEqual(done, [1]);
       const alone = { message: "The read failed.", stack: "" };
-      worker_ai.error_send(port, alone, () => {
+      worker_ai.error_send(end, alone, () => {
         done.push(wire.ended.length);
       });
       this.assertEqual(wire.ended[1], {
@@ -447,9 +445,9 @@ namespace test_worker_ai {
     test_fault_sent(): void {
       routed.clear();
       const wire = new WireDouble();
-      const port = wire as unknown as EndPort;
+      const end: worker_ai.ServerEnd = (line, fn) => wire.wire_end(line, fn);
       let closes = 0;
-      worker_ai.fault_register(register_route, port, () => {
+      worker_ai.fault_register(register_route, end, () => {
         closes += 1;
       });
       const cascade = cascade_make();

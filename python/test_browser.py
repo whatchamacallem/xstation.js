@@ -34,7 +34,7 @@
 import argparse, base64, contextlib, fcntl, hashlib, http.server, json, os, re
 import select, shutil, signal, socket, sqlite3, subprocess, sys, tempfile
 import threading, time, traceback, types
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from typing import Any, NamedTuple, Protocol, Self, cast
 
 # The checkout's `python` directory, which holds this file.
@@ -72,6 +72,9 @@ _SEED_PATH = os.path.join(_PYTHON_PATH, "seed")
 
 # The seed of the scripted provider's script, which a fresh root holds.
 _SEED_SCRIPT_PATH = os.path.join(_SEED_PATH, "provider_script.json")
+
+# The template the page is built from, that of the ttyd test page.
+_PAGE_TEMPLATE = "test"
 
 # The name the one page is built under, as the plan names it.
 _PAGE_NAME = "test"
@@ -136,6 +139,7 @@ _AI_MODULES = (
     "test_wire",
     "test_wire_end",
     "test_provider",
+    "test_provider_key_unset",
     "test_provider_key",
     "test_mcp",
     "test_substrate",
@@ -1862,7 +1866,7 @@ def stub_ready(context: RunContext) -> StubServer:
 
 # Blocks the stub's failure signal for a cleanup, so a failure lands after it.
 @contextlib.contextmanager
-def failure_held() -> Iterator[None]:
+def failure_held() -> Generator[None]:
     previous = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR1})
     try:
         yield
@@ -2540,7 +2544,7 @@ def port_lines(
 
 # Sends one GET of an HTTP port with the id.
 def get_send(session: PageSession, name: str, line_id: int, url: str) -> None:
-    payload = {"method": "GET", "url": url, "headers": {}}
+    payload: dict[str, Any] = {"method": "GET", "url": url, "headers": {}}
     session.probe_call("request_send", name, _HTTP_TYPE, line_id, payload, [])
 
 
@@ -2755,7 +2759,12 @@ def rung_order(session: PageSession, stub: StubServer) -> str:
 def rung_body(session: PageSession, stub: StubServer) -> str:
     session.probe_call("http_port", "body", gold_value("http_seconds"))
     url = stub.url_make(_TEXT_PATH)
-    payload = {"method": "GET", "url": url, "headers": {}, "body": _GET_BODY}
+    payload: dict[str, Any] = {
+        "method": "GET",
+        "url": url,
+        "headers": {},
+        "body": _GET_BODY,
+    }
     session.probe_call("request_send", "body", _HTTP_TYPE, 1, payload, [])
     line = port_lines(session, "body", 1)[0]
     pattern = pattern_make(text_fill("http_fetch_failed", {0: url, 1: _ANY}))
@@ -2816,7 +2825,7 @@ def rung_thread(session: PageSession) -> str:
     replies = json_list(
         session.probe_wait("the worker's reply", "thread_when")
     )
-    due = [
+    due: list[dict[str, Any]] = [
         {
             "header": {"t": "probe.ask", "r": 1},
             "payload": {"text": "across", "thread": "probe"},
@@ -3056,7 +3065,7 @@ def rung_store(session: PageSession, png: bytes, budget: int) -> str:
         "request_send", "store", "media.store", 1, {"k": key}, [list(png)]
     )
     reply = port_lines(session, "store", 1)[0]
-    due = {
+    due: dict[str, Any] = {
         "header": {"t": "media.store", "r": 1},
         "payload": {"k": key, "size": len(png), "sha256": sha256_text(png)},
         "blobs": [],
@@ -4013,7 +4022,7 @@ def page_ready(context: RunContext) -> None:
     if _PAGE_NAME in context.built:
         return
     context.log.rung_start(f"build {_PAGE_NAME}", gold_value("rung_seconds"))
-    digest = page_build.page_build(_PAGE_NAME)
+    digest = page_build.page_build(_PAGE_TEMPLATE, _PAGE_NAME)
     context.log.setup_print(f"built {_PAGE_PATH}, sha256 {digest}")
     context.built.add(_PAGE_NAME)
 
@@ -4059,7 +4068,9 @@ def stages_run(log: RungLog, work: str) -> None:
     width, height = gold_value("window_width"), gold_value("window_height")
     with (
         HeldExit(contextlib.ExitStack()) as stack,
-        HeldExit(devtools.Browser(width, height)) as browser,
+        HeldExit(
+            devtools.Browser(width, height, devtools.WindowsRelay())
+        ) as browser,
     ):
         browser.console_follow(console_copy)
         log.client_bind(browser.client_get())

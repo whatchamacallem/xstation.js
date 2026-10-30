@@ -5,12 +5,16 @@
 # Tests the parts of page_build.py that call into no project module and
 # start no program but python3: the strings table substitution, the archive
 # member lookup by path suffix, the base64 of the vectors and the wasm, the
-# markers of the one template, html/test.html, and the check of each piece,
-# the command line refusing an option before anything is built, run as a
-# python3 child, and the hash of the page written. No test starts tsc.
+# markers of the two templates, html/test.html and html/headless.html, and
+# the check of each piece, the headless template holding the head and the
+# scripts of the test template in their order, its own entry last, and no
+# pre for the TAP stream, a template html/ lacks refused with no page
+# written, the command line refusing an option, or a name with no template,
+# before anything is built, run as a python3 child, and the hash of the page
+# written. No test starts tsc.
 
-import base64, hashlib, io, json, os, page_build, subprocess, sys, tarfile
-import tempfile, unittest, zipfile
+import base64, hashlib, html.parser, io, json, os, page_build, subprocess, sys
+import tarfile, tempfile, unittest, zipfile
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -36,8 +40,35 @@ _PAGE_MARKERS = [
     "XSJS_BUILD_XTERM_JS",
 ]
 
-# The marker of the vectors, which the one template holds too.
+# The marker of the vectors, which each template holds too.
 _VECTORS_MARKER = "XSJS_BUILD_TEST_VECTORS"
+
+# The extension of a template and of the page built from it.
+_PAGE_EXTENSION = ".html"
+
+# The template of the ttyd test page.
+_TEST_TEMPLATE = "test"
+
+# The template of the headless page of group B.
+_HEADLESS_TEMPLATE = "headless"
+
+# A template `html/` lacks.
+_ABSENT_TEMPLATE = "page_build_absent"
+
+# The last script of the test template, its entry on both threads.
+_TEST_ENTRY = "test_all.suites_run();"
+
+# The last script of the headless template, in place of the test entry.
+_HEADLESS_ENTRY = "test_headless.realm_open();"
+
+# The start tag of the test template's element for the TAP stream.
+_OUTPUT_TAG = ("pre", [("id", "tap_output")])
+
+# The start tag of a template's head.
+_HEAD_START = "<head>"
+
+# The end tag of a template's head.
+_HEAD_END = "</head>"
 
 # The script whose command line the tests give, beside this file.
 _SCRIPT_PATH = os.path.join(
@@ -46,6 +77,61 @@ _SCRIPT_PATH = os.path.join(
 
 # The name of the page a refused command line names, which is never built.
 _REFUSED_NAME = "page_build_refused"
+
+# The page of that name, which no test may leave written.
+_REFUSED_PATH = os.path.join(_BUILD_PATH, _REFUSED_NAME + _PAGE_EXTENSION)
+
+
+# The start tags of a template in order, and the text of each of its scripts.
+class TemplateReader(html.parser.HTMLParser):
+    # Reads the whole text of the template.
+    def __init__(self, text: str) -> None:
+        super().__init__()
+        self.tags: list[tuple[str, list[tuple[str, str | None]]]] = []
+        self.scripts: list[str] = []
+        self._inside = False
+        self.feed(text)
+        self.close()
+
+    # Keeps each start tag with its attributes, and opens a script's text.
+    def handle_starttag(
+        self, tag: str, attrs: list[tuple[str, str | None]]
+    ) -> None:
+        self.tags.append((tag, attrs))
+        if tag == "script":
+            self._inside = True
+            self.scripts.append("")
+
+    # Closes a script's text at its end tag.
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script":
+            self._inside = False
+
+    # Adds the text inside a script to that script's text.
+    def handle_data(self, data: str) -> None:
+        if self._inside:
+            self.scripts[-1] += data
+
+
+# Runs the command line in a python3 child with the arguments, to its end.
+def command_run(arguments: list[str]) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        [sys.executable, _SCRIPT_PATH, *arguments],
+        capture_output=True,
+        check=False,
+    )
+
+
+# Returns the head of the text, from its start tag to its end tag.
+def head_cut(text: str) -> str:
+    return text[text.index(_HEAD_START) : text.index(_HEAD_END)]
+
+
+# Returns the text of the template of `html/` by its name.
+def template_text(name: str) -> str:
+    return page_build.text_read(
+        os.path.join(_HTML_PATH, name + _PAGE_EXTENSION)
+    )
 
 
 # Writes a gzipped tar of each member, a name ending in a slash being a folder.
@@ -332,21 +418,70 @@ class TestMarkers(unittest.TestCase):
         page = page_build.markers_fill(page_build.text_read(path), pieces)
         self.assertNotIn("XSJS_BUILD_", page)
 
+    # The headless template holds the same markers once, from the same pieces.
+    def test_template_headless(self) -> None:
+        pieces = {marker: "" for marker in [*_PAGE_MARKERS, _VECTORS_MARKER]}
+        template = template_text(_HEADLESS_TEMPLATE)
+        page = page_build.markers_fill(template, pieces)
+        self.assertNotIn("XSJS_BUILD_", page)
 
-# The command line, which names the page and nothing else, in a child.
+
+# The headless template beside the test template, and a template `html/` lacks.
+class TestTemplates(unittest.TestCase):
+    # The head of the headless template is that of the test template.
+    def test_head_same(self) -> None:
+        tests = head_cut(template_text(_TEST_TEMPLATE))
+        headless = head_cut(template_text(_HEADLESS_TEMPLATE))
+        self.assertEqual(headless, tests)
+
+    # Its elements are those of the test template, but the TAP stream's `pre`.
+    def test_elements_same(self) -> None:
+        tests = TemplateReader(template_text(_TEST_TEMPLATE)).tags
+        headless = TemplateReader(template_text(_HEADLESS_TEMPLATE)).tags
+        self.assertIn(_OUTPUT_TAG, tests)
+        self.assertEqual(
+            headless, [tag for tag in tests if tag != _OUTPUT_TAG]
+        )
+
+    # Its scripts are those of the test template in order, its own entry last.
+    def test_scripts_same(self) -> None:
+        reader = TemplateReader(template_text(_TEST_TEMPLATE))
+        tests = [script.strip() for script in reader.scripts]
+        reader = TemplateReader(template_text(_HEADLESS_TEMPLATE))
+        headless = [script.strip() for script in reader.scripts]
+        self.assertEqual(tests[-1], _TEST_ENTRY)
+        self.assertEqual(headless, [*tests[:-1], _HEADLESS_ENTRY])
+
+    # A template `html/` lacks is refused by name, and no page is written.
+    def test_template_absent(self) -> None:
+        with self.assertRaises(FileNotFoundError) as caught:
+            page_build.page_build(_ABSENT_TEMPLATE, _REFUSED_NAME)
+        self.assertEqual(
+            caught.exception.filename,
+            os.path.join(_HTML_PATH, _ABSENT_TEMPLATE + _PAGE_EXTENSION),
+        )
+        self.assertFalse(os.path.exists(_REFUSED_PATH))
+
+
+# The command line, which names the template and the page, in a child.
 class TestCommand(unittest.TestCase):
     # The old `--test` option is refused with the usage code 2, unbuilt.
     def test_option_refused(self) -> None:
-        completed = subprocess.run(
-            [sys.executable, _SCRIPT_PATH, _REFUSED_NAME, "--test"],
-            capture_output=True,
-            check=False,
-        )
+        completed = command_run([_TEST_TEMPLATE, _REFUSED_NAME, "--test"])
         self.assertEqual(completed.returncode, 2)
         self.assertIn(b"unrecognized arguments: --test", completed.stderr)
         self.assertEqual(completed.stdout, b"")
-        page_path = os.path.join(_BUILD_PATH, _REFUSED_NAME + ".html")
-        self.assertFalse(os.path.exists(page_path))
+        self.assertFalse(os.path.exists(_REFUSED_PATH))
+
+    # A name with no template, the command line before the templates, unbuilt.
+    def test_name_alone(self) -> None:
+        completed = command_run([_REFUSED_NAME])
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn(
+            b"the following arguments are required: name", completed.stderr
+        )
+        self.assertEqual(completed.stdout, b"")
+        self.assertFalse(os.path.exists(_REFUSED_PATH))
 
 
 # Pieces that would change meaning as the raw text of their element.

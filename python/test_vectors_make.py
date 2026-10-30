@@ -7,8 +7,8 @@
 # directory made when it is missing, a file an earlier run left removed, the
 # two vectors at the edge of blob_max, the six number vectors, the digest
 # vectors, inputs of 55, 56 and 64 bytes each beside its SHA-256 digest, and
-# the TypeScript test modules' digests, each input in lowercase hex beside its
-# SHA-256 digest.
+# the TypeScript test modules' digests, filed under the names of the blocks
+# that read them, each input in lowercase hex beside its SHA-256 digest.
 
 import hashlib, json, os, tempfile, unittest, vectors_make
 from typing import Any
@@ -26,6 +26,14 @@ _DIGEST_INPUTS = {"sha256_55": 55, "sha256_56": 56, "sha256_64": 64}
 
 # The file of the TypeScript test modules' digests, read by name.
 _TEST_DIGESTS_NAME = "test_digests.json"
+
+# The TypeScript blocks that read those digests, each under its own name.
+_DIGEST_BLOCKS = (
+    "test_jslb_decode",
+    "test_media",
+    "test_substrate_store",
+    "test_tools_browser",
+)
 
 # The number vectors by name, each with the slug of its fault and its token.
 _NUMBER_VECTORS = {
@@ -89,14 +97,14 @@ class TestVectorsWrite(unittest.TestCase):
                 vector["sha256"], hashlib.sha256(data).hexdigest(), name
             )
 
-    # Each module has entries, an input in lowercase hex beside its digest.
+    # Each block has entries, an input in lowercase hex beside its digest.
     def test_modules_written(self) -> None:
         with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
             vectors_make.vectors_write(scratch)
             path = os.path.join(scratch, _TEST_DIGESTS_NAME)
             with open(path, encoding="utf-8") as file:
                 digests: dict[str, dict[str, dict[str, str]]] = json.load(file)
-        self.assertTrue(digests)
+        self.assertEqual(sorted(digests), list(_DIGEST_BLOCKS))
         for module, entries in digests.items():
             self.assertTrue(entries, module)
             for name, entry in entries.items():

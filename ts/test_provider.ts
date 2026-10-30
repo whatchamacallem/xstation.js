@@ -4,7 +4,8 @@
 //
 // Tests of the provider door: the request lines it builds, the reading of the
 // reply lines and the conversion of MCP tools. The key it keeps in memory is
-// tested in `test_provider_key`, whose fresh realm has none set.
+// tested in `test_provider_key`, and unset in `test_provider_key_unset`,
+// whose fresh realm has none set.
 // The request lines it expects, in the full names of debug mode, the reply
 // lines it reads and the texts of its refusals are its gold in
 // `test_settings.json`, read through the harness.

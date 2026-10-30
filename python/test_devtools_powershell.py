@@ -4,16 +4,16 @@
 #
 # Tests the parts of devtools.py that need a browser, a later suite that
 # waits on powershell.exe and on Chrome or Edge on Windows. Each test starts
-# a Browser of its own, on a profile of its own, at the DevTools address its
-# port file gives, and a local HTTP server of the standard library, bound to
-# the address of settings.json, that serves a scratch directory of pages
-# under build/ once the test has it listen. The page opens again while it is
-# refused, and fails on any other error or once its timer ends; page methods
-# go on the page's session and browser and target methods on the browser's;
-# a console message reaches every follower; a trace starts afresh and ends
-# with every event sent, a synchronous load among them; a worker is paused
-# in its debugger; and the page closes while another page stays. The waits
-# the tests give are the gold's.
+# a Browser of its own on the Windows relay, on a profile of its own, at the
+# DevTools address its port file gives, and a local HTTP server of the
+# standard library, bound to the address of settings.json, that serves a
+# scratch directory of pages under build/ once the test has it listen. The
+# page opens again while it is refused, and fails on any other error or once
+# its timer ends; page methods go on the page's session and browser and
+# target methods on the browser's; a console message reaches every follower;
+# a trace starts afresh and ends with every event sent, a synchronous load
+# among them; a worker is paused in its debugger; and the page closes while
+# another page stays. The waits the tests give are the gold's.
 
 import devtools, functools, harness, http.server, os, tempfile, threading, time
 import unittest
@@ -113,7 +113,7 @@ class BrowserCase(unittest.TestCase):
         self.addCleanup(self.server.server_close)
         self.server.server_bind()
         self.browser = self.enterContext(
-            devtools.Browser(_WIDTH_PX, _HEIGHT_PX)
+            devtools.Browser(_WIDTH_PX, _HEIGHT_PX, devtools.WindowsRelay())
         )
 
     # Listens after the seconds and serves on a thread until the test ends.

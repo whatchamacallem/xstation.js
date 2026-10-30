@@ -10,8 +10,11 @@
 // list of lines, the writer of `set_stream`, and the test adds one point when
 // that stream equals the stream of the gold and the verdict is as stated: a
 // run of cases that pass, a run whose cases fail by design, each a different
-// way, and that run again with failfast. The block is written as its points
-// arrive, through `block_start` and `block_end` of the runner it is handed.
+// way, and that run again with failfast. One handler answers with a real
+// `error` line built by `dispatch.error_make`, whose stack and whose cause's
+// stack hold every frame, and the cases compare each by its first line. The
+// block is written as its points arrive, through `block_start`, its plan the
+// number of runs, and `block_end` of the runner it is handed.
 
 namespace test_line_case {
   // The names of the gold, the threads, the types and the handlers' version.
@@ -24,6 +27,7 @@ namespace test_line_case {
     echo_type: "line_case_test.echo",
     note_type: "line_case_test.note",
     handle_type: "line_case_test.handle",
+    fail_type: "line_case_test.fail",
     handler_version: 0,
     synchronous_setting: "queue_synchronous",
   });
@@ -68,6 +72,12 @@ namespace test_line_case {
     size: number;
   }
 
+  // The messages a `fail` request names: the error's and its cause's.
+  interface FailRequest {
+    message: string;
+    cause: string;
+  }
+
   // Registers the handlers of the queue, the test's own functions.
   function handlers_register(): void {
     dispatch.handler_register(
@@ -92,6 +102,15 @@ namespace test_line_case {
         const asked = jslb.payload_of(line) as unknown as HandleRequest;
         const blob: lines.BlobHeader = { s: asked.size, d: asked.handle };
         return dispatch.reply_make(line, {}, [blob]);
+      },
+    );
+    dispatch.handler_register(
+      constants.fail_type,
+      constants.handler_version,
+      (line) => {
+        const asked = jslb.payload_of(line) as unknown as FailRequest;
+        const cause = new Error(asked.cause);
+        return dispatch.error_make(line, new Error(asked.message, { cause }));
       },
     );
   }
@@ -200,7 +219,7 @@ namespace test_line_case {
     done: (passed: boolean) => void,
   ): void {
     handlers_register();
-    const tracker = runner.block_start(name);
+    const tracker = runner.block_start(name, runs.length);
     runs_check(runner, tracker, 0, () => done(runner.block_end(name)));
   }
 }

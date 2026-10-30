@@ -166,7 +166,7 @@ def _child_end(
         os.kill(os.getpid(), signal.SIGKILL)
 
 
-# In a child, opens the log as `bootstrap.py` does, prepares, serves the pipes.
+# Child: opens the log as `bootstrap.py` does, prepares the root, serves pipes.
 def _session_serve(root: str, read_fd: int, write_fd: int) -> str:
     path = os.path.join(root, "settings.json")
     with open(path, encoding="utf-8") as file:

@@ -58,6 +58,7 @@
     "test_substrate_store.ts",
     "test_provider.ts",
     "test_provider_key.ts",
+    "test_provider_key_unset.ts",
     "test_provider_script.ts",
     "test_integrate_provider_script.ts",
     "test_mcp.ts",
@@ -72,6 +73,7 @@
     "test_boot.ts",
     "test_line_case.ts",
     "test_wire_rungs.ts",
-    "test_all.ts"
+    "test_all.ts",
+    "test_headless.ts"
   ]
 }

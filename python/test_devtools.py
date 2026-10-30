@@ -6,13 +6,14 @@
 # and without masks, the handshake, joining a message from its fragments, the
 # relay script and the PowerShell arguments, the DevTools address, the
 # timers, a client on real pipes, filled before it reads or never written
-# to, the synchronous loads picked out of a trace, and the page's loads,
-# trace, workers and pauses kept. Every byte a function reads, and every
+# to, a descriptor moved above the Linux browser's 3 and 4, the synchronous
+# loads picked out of a trace, and the page's loads, trace, workers and
+# pauses kept. Every byte a function reads, and every
 # frame a client writes, rides a real pipe, and a pipe in packet mode gives
 # the short reads. No process is started. The waits the tests give and the
 # size of a pipe are the gold's.
 
-import devtools, fcntl, functools, harness, json, os, time, unittest
+import devtools, errno, fcntl, functools, harness, json, os, time, unittest
 from collections.abc import Callable
 from typing import Any, BinaryIO
 
@@ -170,19 +171,23 @@ class PipeCase(unittest.TestCase):
         self.addCleanup(os.close, write_fd)
         return read_fd
 
-    # Returns a client reading the descriptor and writing to a new pipe.
-    def client_make(
-        self, read_fd: int, wait_seconds: float, events: list[dict[str, Any]]
-    ) -> devtools.ProtocolClient:
+    # Returns a WebSocket channel reading the descriptor, writing a new pipe.
+    def channel_make(self, read_fd: int) -> devtools.SocketChannel:
         self.written_fd, write_fd = os.pipe()
         self.addCleanup(os.close, self.written_fd)
         self.writer = open(write_fd, "wb")
         self.addCleanup(self.writer.close)
-        return devtools.ProtocolClient(
+        return devtools.SocketChannel(
             functools.partial(devtools.pipe_read, read_fd),
             functools.partial(devtools.stream_write, self.writer),
-            events.append,
-            wait_seconds,
+        )
+
+    # Returns a client on a channel reading the descriptor, its events kept.
+    def client_make(
+        self, read_fd: int, wait_seconds: float, events: list[dict[str, Any]]
+    ) -> devtools.ProtocolClient:
+        return devtools.ProtocolClient(
+            self.channel_make(read_fd), events.append, wait_seconds
         )
 
     # Returns a client reading the bytes from a pipe, its events kept.
@@ -284,9 +289,9 @@ class TestMessages(PipeCase):
     def frames_read(
         self, frames: str, sent: int
     ) -> tuple[bytes, list[devtools.SocketFrame]]:
-        client = self.client_idle(_WAIT_SECONDS, [])
+        channel = self.channel_make(self.pipe_idle())
         message = devtools.message_read(
-            self.reader_filled(bytes.fromhex(frames)), client.frame_send
+            self.reader_filled(bytes.fromhex(frames)), channel.frame_send
         )
         return message, self.frames_written(sent)
 
@@ -517,11 +522,28 @@ class TestTimers(PipeCase):
         )
 
 
+# A pipe's end moved above 4, so that the Linux browser's 3 and 4 are copies.
+class TestDescriptors(unittest.TestCase):
+    # The end moves above 4, closed at an exec, and the old number closes.
+    def test_raise_above(self) -> None:
+        read_fd, write_fd = os.pipe()
+        self.addCleanup(os.close, write_fd)
+        raised = devtools.descriptor_raise(read_fd)
+        self.addCleanup(os.close, raised)
+        self.assertGreater(raised, 4)
+        self.assertFalse(os.get_inheritable(raised))
+        with self.assertRaises(OSError) as caught:
+            os.fstat(read_fd)
+        self.assertEqual(caught.exception.errno, errno.EBADF)
+        os.write(write_fd, b"a")
+        self.assertEqual(os.read(raised, 1), b"a")
+
+
 # The protocol client's calls, events and timers, on real pipes.
 class TestClient(PipeCase):
     # A reply is matched by its id and events before it are passed on.
     def test_call_reply(self) -> None:
-        event = {"method": "Page.frameNavigated", "params": {}}
+        event: dict[str, Any] = {"method": "Page.frameNavigated", "params": {}}
         reply = {"id": 1, "result": {"frameId": "F"}}
         events: list[dict[str, Any]] = []
         client = self.client_filled(
@@ -608,8 +630,8 @@ class TestClient(PipeCase):
 
     # Events are passed on until the condition holds.
     def test_pump_events(self) -> None:
-        first = {"method": "A.one", "params": {}}
-        second = {"method": "A.two", "params": {}}
+        first: dict[str, Any] = {"method": "A.one", "params": {}}
+        second: dict[str, Any] = {"method": "A.two", "params": {}}
         events: list[dict[str, Any]] = []
         client = self.client_filled(
             message_frame(first) + message_frame(second), _WAIT_SECONDS, events

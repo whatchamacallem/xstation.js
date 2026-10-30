@@ -29,8 +29,6 @@ declare namespace provider_script {
     constructor(script: Script);
     line_post(line: lines.Line, transfer: ArrayBuffer[]): void;
     line_receive(fn: (line: lines.Line) => void): void;
-    // The node the script is in, for assertions.
-    node(): string;
   }
 
   // A low resolution PNG test pattern with hard pixel edges, drawn here.

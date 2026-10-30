@@ -2625,6 +2625,48 @@
         "jslb_unknown_line_field_x": "The line header has the unknown field x."
       }
     },
+    "test_local_http": {
+      "server": {
+        "closed_port": 28744,
+        "host": "127.0.0.1",
+        "paths": {
+          "/empty": {
+            "body": "",
+            "delay": 0,
+            "headers": {},
+            "status": 204
+          },
+          "/json": {
+            "body": "{\"a\":[1,2]}",
+            "delay": 0,
+            "headers": {
+              "content-length": "11",
+              "content-type": "application/json"
+            },
+            "status": 200
+          },
+          "/missing": {
+            "body": "no such page",
+            "delay": 0,
+            "headers": {
+              "content-length": "12",
+              "content-type": "text/plain"
+            },
+            "status": 404
+          },
+          "/slow": {
+            "body": "late",
+            "delay": 0.5,
+            "headers": {
+              "content-length": "4",
+              "content-type": "text/plain"
+            },
+            "status": 200
+          }
+        },
+        "port": 28743
+      }
+    },
     "test_main_loop": {
       "chunk_bytes": 1000,
       "lines": {
@@ -6137,6 +6179,12 @@
             "name": "line_unexpected",
             "seconds": 0.2,
             "send": ["echo_one"]
+          },
+          {
+            "expect": ["fail_reply_other"],
+            "name": "stack_differs",
+            "seconds": 10,
+            "send": ["fail_request"]
           }
         ],
         "lines": {
@@ -6202,6 +6250,26 @@
             },
             "text": "one"
           },
+          "fail_reply_other": {
+            "0": {
+              "reply": 6,
+              "type": "error"
+            },
+            "cause": {
+              "message": "inner failure",
+              "stack": "Error: other failure"
+            },
+            "message": "outer failure",
+            "stack": "Error: outer failure"
+          },
+          "fail_request": {
+            "0": {
+              "id": 6,
+              "type": "line_case_test.fail"
+            },
+            "cause": "inner failure",
+            "message": "outer failure"
+          },
           "handle_reply": {
             "0": {
               "blobs": 1,
@@ -6254,6 +6322,12 @@
             "name": "push_unanswered",
             "seconds": 0.2,
             "send": ["note"]
+          },
+          {
+            "expect": ["fail_reply"],
+            "name": "stacks_first",
+            "seconds": 10,
+            "send": ["fail_request"]
           }
         ],
         "lines": {
@@ -6321,6 +6395,26 @@
             },
             "text": "three"
           },
+          "fail_reply": {
+            "0": {
+              "reply": 6,
+              "type": "error"
+            },
+            "cause": {
+              "message": "inner failure",
+              "stack": "Error: inner failure"
+            },
+            "message": "outer failure",
+            "stack": "Error: outer failure"
+          },
+          "fail_request": {
+            "0": {
+              "id": 6,
+              "type": "line_case_test.fail"
+            },
+            "cause": "inner failure",
+            "message": "outer failure"
+          },
           "note": {
             "0": {
               "type": "line_case_test.note"
@@ -6332,14 +6426,15 @@
       "streams": {
         "failfast": [
           "TAP version 14",
+          "    1..9",
           "    ok 1 - echo_answered",
           "    not ok 2 - payload_differs",
           "    # Line 1 has the payload {\"text\":\"one\"}, expected {\"text\":\"two\"}.",
-          "    1..2",
           "Bail out! failfast"
         ],
         "graded": [
           "TAP version 14",
+          "    1..9",
           "    ok 1 - echo_answered",
           "    not ok 2 - payload_differs",
           "    # Line 1 has the payload {\"text\":\"one\"}, expected {\"text\":\"two\"}.",
@@ -6355,17 +6450,19 @@
           "    # Line 1 did not come in 0.2 s: {\"0\":{\"reply\":1,\"type\":\"line_case_test.echo\"},\"text\":\"one\"}",
           "    not ok 8 - line_unexpected",
           "    # Line 1 was not expected: {\"0\":{\"type\":\"line_case_test.echo\",\"reply\":1},\"text\":\"one\"}",
-          "    1..8",
+          "    not ok 9 - stack_differs",
+          "    # Line 1 has the payload {\"message\":\"outer failure\",\"stack\":\"Error: outer failure\",\"cause\":{\"message\":\"inner failure\",\"stack\":\"Error: inner failure\"}}, expected {\"cause\":{\"message\":\"inner failure\",\"stack\":\"Error: other failure\"},\"message\":\"outer failure\",\"stack\":\"Error: outer failure\"}.",
           "not ok 1 - test_line_case",
           "1..1"
         ],
         "passing": [
           "TAP version 14",
+          "    1..5",
           "    ok 1 - echo_answered",
           "    ok 2 - blob_echoed",
           "    ok 3 - replies_ordered",
           "    ok 4 - push_unanswered",
-          "    1..4",
+          "    ok 5 - stacks_first",
           "ok 1 - test_line_case",
           "1..1"
         ]
@@ -7264,7 +7361,7 @@
         "provider_reply_type_kv_get": "The provider reply is a line of type kv.get instead of http.request."
       }
     },
-    "test_provider_key": {
+    "test_provider_key_unset": {
       "texts": {
         "provider_key_missing": "No provider key has been set."
       }

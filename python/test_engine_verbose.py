@@ -19,7 +19,7 @@
 import contextlib, engine_verbose, functools, harness, json, os, re, signal
 import sqlite3, sys, tempfile, traceback, unittest
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -69,12 +69,12 @@ def _gold_raw(name: str) -> Any:
 def _keys_number(value: Any) -> Any:
     if isinstance(value, dict):
         made: dict[int | str, Any] = {}
-        for key, item in value.items():
+        for key, item in cast(dict[str, Any], value).items():
             number = _NUMBER_KEY.fullmatch(key) is not None
             made[int(key) if number else key] = _keys_number(item)
         return made
     if isinstance(value, list):
-        return [_keys_number(item) for item in value]
+        return [_keys_number(item) for item in cast(list[Any], value)]
     return value
 
 
@@ -136,7 +136,7 @@ def _lines_put(root: str, debug: bool, lines: list[Any]) -> list[Any]:
     return [_handler_call(engine_verbose.verbose_put, line) for line in lines]
 
 
-# In a child: registers, logs server and page lines, then tails each line.
+# Child: registers, logs server texts, puts gold page lines, tails each line.
 def _tails_get(root: str, debug: bool, lines: list[Any]) -> list[Any]:
     _log_register(root, debug)
     for text in _SERVER_TEXTS:

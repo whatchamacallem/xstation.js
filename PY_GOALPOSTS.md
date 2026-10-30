@@ -138,10 +138,16 @@ answer to the first restart question removed the choice that
 28), so `mcp_stdio.py` keeps the tool and, by the same rule, re-execs
 itself (10.2 item 6).
 
-2.10 Programs (Question 8 A). `python3` alone is approved, for
-`bootstrap.py` and `mcp_stdio.py`. `dash`, ttyd, `tsc`, and the formatters
-and linters of `reformat_table.json` are not approved. `powershell.exe`
-and Chrome were never asked.
+2.10 Programs (Question 8 A). Question 8 A approved `python3` alone, for
+`bootstrap.py` and `mcp_stdio.py`. On 2026-10-30 the maintainer also
+approved `node`, `tsc` and `chrome-headless-shell` for the TypeScript
+phases of `test_all.py` (`TEST_PLAN_TS.md` Question T1 B), with tsc from
+the apt package `node-typescript`: `/usr/bin/tsc`, TypeScript 5.2.2. So
+`test_page_build_tsc` now waits only on the SQLite wasm and xterm.js
+archives of `third_party_fetch.py`, which are not fetched on this machine.
+`dash`, ttyd, and the formatters and linters of `reformat_table.json` are
+not approved. `powershell.exe` was never asked, nor any Chrome but
+`chrome-headless-shell`.
 
 2.11 Callbacks (Question 10 A). A module that calls a function it was
 handed does not call into the module that handed it over, and the import
@@ -375,7 +381,8 @@ without write permission refuses new files. `resource.setrlimit` with
 `RLIMIT_FSIZE`, with `SIGXFSZ` ignored, gives EFBIG.
 
 4.6 Program: a test that needs a program 2.10 does not approve (`dash`,
-`tsc`, the formatters, ttyd, `powershell.exe`, Chrome) moves to a later
+the formatters, ttyd, `powershell.exe`, Windows Chrome or Edge; `tsc` and
+`chrome-headless-shell` are approved since 2026-10-30) moves to a later
 suite, `test_<module>_<program>.py`. Each is listed apart in `test_all.py`,
 beside `_FAILING`, with the program it waits on, and no category runs it
 until the program is approved.

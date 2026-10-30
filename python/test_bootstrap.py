@@ -85,7 +85,7 @@ _ENDING_NAME = "ending.txt"
 # Bytes after the reply, which the main loop must find unread.
 _AFTER_REPLY = b"the bytes after the reply"
 
-# A main loop writing its calls to the root, `loop_run` after `_AFTER_REPLY`.
+# A main loop filing calls in the root, `loop_run` once `_AFTER_REPLY` is read.
 _LOOP_TEXT = (
     "import json, os\n"
     "\n"

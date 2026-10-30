@@ -417,12 +417,13 @@ namespace test_tap_producer {
 
   // Tests the blocks whose points are added after `block_start` returns.
   export class TestBlocks extends unittest.TestCase {
-    // Points stream as added, the plan follows them, then the parent line.
+    // The plan comes at the start, points stream as added, then the parent.
     test_block_passes(): void {
       const lines: string[] = [];
       const runner = new tap_producer.TAPTestRunner(false);
       runner.set_stream((text) => lines.push(text));
-      const tracker = runner.block_start("first");
+      const tracker = runner.block_start("first", 3);
+      this.assertEqual(lines.at(-1), "    1..3");
       tracker.add_ok("Case", "case_one");
       this.assertEqual(lines.at(-1), "    ok 1 - case_one");
       tracker.add_not_ok("Case", "case_two", "TODO later", "note");
@@ -432,11 +433,11 @@ namespace test_tap_producer {
       this.assertTrue(runner.run_end());
       this.assertEqual(lines, [
         constants.version_line,
+        "    1..3",
         "    ok 1 - case_one",
         "    not ok 2 - case_two # TODO later",
         "    # note",
         "    ok 3 - case_three # SKIP why",
-        "    1..3",
         "ok 1 - first",
         "    1..1",
         "    ok 1 - test_values_equal",
@@ -450,19 +451,19 @@ namespace test_tap_producer {
       const lines: string[] = [];
       const runner = new tap_producer.TAPTestRunner(false);
       runner.set_stream((text) => lines.push(text));
-      const tracker = runner.block_start("first");
+      const tracker = runner.block_start("first", 2);
       tracker.add_not_ok("Case", "case_one", "", "why");
       tracker.add_ok("Case", "case_two");
       this.assertFalse(runner.block_end("first"));
-      runner.block_start("second");
+      runner.block_start("second", 0);
       this.assertTrue(runner.block_end("second"));
       this.assertFalse(runner.run_end());
       this.assertEqual(lines, [
         constants.version_line,
+        "    1..2",
         "    not ok 1 - case_one",
         "    # why",
         "    ok 2 - case_two",
-        "    1..2",
         "not ok 1 - first",
         "    1..0",
         "ok 2 - second",
@@ -470,24 +471,24 @@ namespace test_tap_producer {
       ]);
     }
 
-    // With failfast a failed point ends the stream after the block's plan.
+    // With failfast a failed point ends the stream before its planned points.
     test_block_failfast(): void {
       const lines: string[] = [];
       const runner = new tap_producer.TAPTestRunner(true);
       runner.set_stream((text) => lines.push(text));
       this.assertTrue(runner.failfast);
-      const tracker = runner.block_start("first");
+      const tracker = runner.block_start("first", 3);
       tracker.add_ok("Case", "case_one");
       tracker.add_not_ok("Case", "case_two");
       this.assertFalse(runner.block_end("first"));
-      const late = thrown_message(() => runner.block_start("second"));
+      const late = thrown_message(() => runner.block_start("second", 0));
       this.assertEqual(late, 'the TAP stream ended before "second"');
       this.assertFalse(runner.run_end());
       this.assertEqual(lines, [
         constants.version_line,
+        "    1..3",
         "    ok 1 - case_one",
         "    not ok 2 - case_two",
-        "    1..2",
         constants.bail_line,
       ]);
     }
@@ -499,9 +500,9 @@ namespace test_tap_producer {
       runner.set_stream((text) => lines.push(text));
       const unopened = thrown_message(() => runner.block_end("first"));
       this.assertEqual(unopened, 'no TAP block is open to end as "first"');
-      runner.block_start("first");
+      runner.block_start("first", 0);
       const texts = [
-        thrown_message(() => runner.block_start("second")),
+        thrown_message(() => runner.block_start("second", 0)),
         thrown_message(() =>
           runner.module_run("second", () => new unittest.TestSuite()),
         ),
@@ -529,7 +530,7 @@ namespace test_tap_producer {
       const lines: string[] = [];
       const runner = new tap_producer.TAPTestRunner(false);
       runner.set_stream((text) => lines.push(text));
-      const message = thrown_message(() => runner.block_start("a # b"));
+      const message = thrown_message(() => runner.block_start("a # b", 0));
       this.assertEqual(
         message,
         'the TAP point "a # b" # "" does not fit on one line, its ' +

@@ -17,14 +17,15 @@
 // moment it is made. A block is a unittest module, run through
 // `TAPTestRunner.module_run`, a block of line cases, whose suite's topology
 // `line_case.block_run` runs on the gold `typescript.BLOCK`, or a block that
-// writes its own points as they arrive, as `test_line_case` does. With
-// `--failfast` the first failure ends the stream with a bail out. The realm
-// exits 0 after `run_end`. Any other first line, a second line, or any throw
-// exits 1 with the cascade on stderr, which is Node's own report of a throw
-// no handler caught. Node writes to a pipe synchronously on Linux, so a hard
-// exit loses no line. The queues' MessageChannels keep Node's loop alive,
-// so the realm ends by exiting. `process` is declared here with the members
-// this file uses, as no package declares it.
+// writes its own points as they arrive, as `test_line_case` does, and may
+// send lines of its own to the driver, as `test_tap_pair` sends `tap.pair`.
+// With `--failfast` the first failure ends the stream with a bail out. The
+// realm exits 0 after `run_end`. Any other first line, a second line, or
+// any throw exits 1 with the cascade on stderr, which is Node's own report
+// of a throw no handler caught. Node writes to a pipe synchronously on
+// Linux, so a hard exit loses no line. The queues' MessageChannels keep
+// Node's loop alive, so the realm ends by exiting. `process` is declared
+// here with the members this file uses, as no package declares it.
 
 namespace test_node {
   // The members of Node's `process` that this file uses.
@@ -59,6 +60,9 @@ namespace test_node {
   // What a block's run calls once its stream is written: its verdict.
   type BlockDone = (passed: boolean) => void;
 
+  // What a block's run calls to send a line of its own to the driver.
+  type LineSend = (line: lines.Line) => void;
+
   // A block: a unittest module, a block of line cases, or its own writer.
   type Block =
     | { readonly module: () => { [name: string]: unknown } }
@@ -68,6 +72,7 @@ namespace test_node {
           runner: tap_producer.TAPTestRunner,
           name: string,
           done: BlockDone,
+          send: LineSend,
         ) => void;
       };
 
@@ -86,6 +91,7 @@ namespace test_node {
     test_media: { module: () => test_media },
     test_provider: { module: () => test_provider },
     test_provider_key: { module: () => test_provider_key },
+    test_provider_key_unset: { module: () => test_provider_key_unset },
     test_provider_script: { module: () => test_provider_script },
     test_verbose: { module: () => test_verbose },
     test_wire: { module: () => test_wire },
@@ -93,12 +99,15 @@ namespace test_node {
     test_substrate: { module: () => test_substrate },
     test_mcp: { module: () => test_mcp },
     test_line_case: { run: test_line_case.block_run },
+    test_wire_port: { module: () => test_wire_port },
+    test_tap_pair: { run: test_tap_pair.block_run },
     test_integrate_http: { topology: test_integrate_http.topology_build },
     test_integrate_provider_script: {
       topology: test_integrate_provider_script.topology_build,
     },
     test_integrate_queue: { topology: test_integrate_queue.topology_build },
     test_integrate_mcp: { topology: test_integrate_mcp.topology_build },
+    failing_block: { module: () => failing_block },
   });
 
   // The block's name and whether failfast is set, from the command line.
@@ -160,7 +169,7 @@ namespace test_node {
       const id = `${constants.gold_prefix}${name}`;
       line_case.block_run(runner, name, id, block.topology, done);
     } else {
-      block.run(runner, name, done);
+      block.run(runner, name, done, line_write);
     }
   }
 
