@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// The entry of the test page on both threads. Each thread runs its share of
-// the test modules as one TAP stream on the queue its bring up hands over:
-// the tests of the TAP producer and of the harness first, then the others in
-// the testing order of the DAG. The worker's stream runs first, as the DAG
-// asks, since the UI only modules depend on modules the worker tests: it
-// runs in the task of `worker.tests`, which the worker notifies itself in
-// debug mode, and once it has ended it sends the UI thread `ui.tests`, at
-// which the UI thread's stream runs. Each line goes out as a `tap.line` the
+// The entry of the ttyd test page on both threads. Each thread runs its share
+// of the test modules as one TAP stream on the queue its bring up hands over.
+// The three tables hold no block, as every block runs in group A or B, so
+// each stream is a document of no block, the TAP version line and `1..0`,
+// written through the page's real bring up, ttyd and the server. The
+// worker's stream runs first: it runs in the task of `worker.tests`, which
+// the worker notifies itself in debug mode, and once it has ended it sends
+// the UI thread `ui.tests`, at which the UI thread's stream runs. Each line goes out as a `tap.line` the
 // moment it is made, and the stream stops after the first module that fails.
 // The UI thread also shows its own stream with the failed lines marked. The
 // gold's `typescript.run` picks the run: "unit" runs both streams, "wire"
@@ -42,54 +42,14 @@ namespace test_all {
   // Test modules by name, in the order their blocks run.
   type ModuleTable = { readonly [name: string]: ModuleRead };
 
-  // The tests of the TAP producer and of the harness, first on each thread.
-  const first_modules = Object.freeze<ModuleTable>({
-    test_tap_producer: () => test_tap_producer,
-    test_unittest: () => test_unittest,
-  });
+  // The modules first on each thread: none, as each runs in group A or B.
+  const first_modules = Object.freeze<ModuleTable>({});
 
-  // The modules the AI worker runs, in the testing order.
-  const worker_modules = Object.freeze<ModuleTable>({
-    test_harness: () => test_harness,
-    test_error_overlay_worker: () => test_error_overlay_worker,
-    test_ui_strings: () => test_ui_strings,
-    test_i18n: () => test_i18n,
-    test_utility: () => test_utility,
-    test_settings: () => test_settings,
-    test_verbose: () => test_verbose,
-    test_jslb: () => test_jslb,
-    test_dispatch: () => test_dispatch,
-    test_queue: () => test_queue,
-    test_http: () => test_http,
-    test_wire: () => test_wire,
-    test_wire_end: () => test_wire_end,
-    test_provider: () => test_provider,
-    test_provider_key_unset: () => test_provider_key_unset,
-    test_provider_key: () => test_provider_key,
-    test_mcp: () => test_mcp,
-    test_substrate: () => test_substrate,
-    test_substrate_store: () => test_substrate_store,
-    test_jslb_decode: () => test_jslb_decode,
-    test_wire_port: () => test_wire_port,
-    test_script: () => test_script,
-    test_provider_script: () => test_provider_script,
-    test_tools_browser: () => test_tools_browser,
-    test_tools_browser_console: () => test_tools_browser_console,
-    test_agent: () => test_agent,
-    test_worker_ai_console: () => test_worker_ai_console,
-  });
+  // The modules the AI worker runs: none, as each runs in group A or B.
+  const worker_modules = Object.freeze<ModuleTable>({});
 
-  // The modules the UI thread runs, in the testing order, boot's last.
-  const page_modules = Object.freeze<ModuleTable>({
-    test_error_overlay: () => test_error_overlay,
-    test_media: () => test_media,
-    test_media_cache: () => test_media_cache,
-    test_console_view: () => test_console_view,
-    test_overlay: () => test_overlay,
-    test_page: () => test_page,
-    test_worker_ai: () => test_worker_ai,
-    test_boot: () => test_boot,
-  });
+  // The modules the UI thread runs: none, as each runs in group A or B.
+  const page_modules = Object.freeze<ModuleTable>({});
 
   // Sends one line of the stream at once, as a `tap.line` to its owner.
   function line_send(tasks: queue.TaskQueue, text: string): void {

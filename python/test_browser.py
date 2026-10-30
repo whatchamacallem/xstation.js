@@ -3,18 +3,26 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# The browser test. It builds the one page with page_build.py, makes server
-# roots under build/ as the start script makes them, each with settings.json
-# and test_settings.json, keeping them after the run, serves each through the
-# ttyd xsjs_install.ps1 builds, and drives headless Chrome or Edge through
-# devtools.py, rung by rung, each rung under a timer and named by the stage of
-# the plan it proves. The suites root runs the TypeScript suites over TAP and
-# checks the TAP file the server keeps with the TAP consumer. The other rungs
-# drive the one page's modules through the probe kit, a stub HTTP server of
-# this process and the server, and check what the page shows and what the
-# server holds. Some roots name a main loop file in ttyd's command, and one
-# has ttyd ask a credential. PNGs of the surveyed states go to
-# build/test_browser/. Each root and each rung is labelled smoke-test or
+# The browser test. It builds two pages with page_build.py, the ttyd page of
+# html/test.html, whose bring up runs through ttyd and the server, and the
+# headless page of html/headless.html, which starts no worker until a block
+# asks. It makes server roots under build/ as the start script makes them,
+# each with settings.json and test_settings.json, keeping them after the run,
+# serves each through a ttyd of its own, build/ttyd/ttyd as ttyd_build.py
+# builds it, and drives chrome-headless-shell through devtools.LinuxPipe, rung
+# by rung, each rung under a timer and named by the stage of the plan it
+# proves. The suites root runs the ttyd page's bring up over TAP, each thread
+# writing a document of no block, as every block runs in group A or B, and
+# checks the TAP file the server keeps with the TAP consumer. The probe,
+# credential and echo roots serve the headless page, whose binding of the
+# realm lane the browser adds before any page loads, and drive its modules on
+# the page's main thread through the probe kit, a stub HTTP server of this
+# process and the server; the other roots serve the ttyd page. The rungs
+# check what the page shows and what the server holds, and a fault the
+# headless page's realm reports that no rung waited for fails the run. Some
+# roots name a main loop file in ttyd's command, and one has ttyd ask a
+# credential. PNGs of the surveyed states go to build/test_browser/, each of
+# the gold's window size. Each root and each rung is labelled smoke-test or
 # normal-test: a smoke-test run, the default, runs the
 # rungs labelled smoke-test and starts no ttyd and no page for a root with
 # none, a normal-test run runs every rung, and a mislabel fails the run. It
@@ -32,8 +40,8 @@
 #     python3 python/test_browser.py [--smoke-test | --normal-test]
 
 import argparse, base64, contextlib, fcntl, hashlib, http.server, json, os, re
-import select, shutil, signal, socket, sqlite3, subprocess, sys, tempfile
-import threading, time, traceback, types
+import select, shutil, signal, sqlite3, subprocess, sys, tempfile, threading
+import time, traceback, types
 from collections.abc import Callable, Generator
 from typing import Any, NamedTuple, Protocol, Self, cast
 
@@ -49,8 +57,8 @@ _BUILD_PATH = os.path.join(_CHECKOUT_PATH, "build")
 # The id of this driver's gold in `test_settings.json`.
 _GOLD_ID = "python.test_browser"
 
-# The script that builds ttyd, which a missing ttyd names.
-_INSTALL_SCRIPT = "xsjs_install.ps1"
+# The module that builds ttyd, which a missing ttyd names.
+_TTYD_BUILDER = os.path.join("python", "ttyd_build.py")
 
 # The start of the name of the directory each run makes and keeps its roots in.
 _WORK_PREFIX = "test_browser-"
@@ -61,7 +69,7 @@ _PNG_PATH = os.path.join(_BUILD_PATH, "test_browser")
 # The name of the test settings, the gold record, in a root.
 _TEST_SETTINGS_NAME = "test_settings.json"
 
-# The TypeScript run of the browser test: the unit suites of both threads.
+# The TypeScript run of the ttyd page: the bring up of both threads.
 _RUN_UNIT = "unit"
 
 # The strings file, which the start script copies into the root.
@@ -73,14 +81,14 @@ _SEED_PATH = os.path.join(_PYTHON_PATH, "seed")
 # The seed of the scripted provider's script, which a fresh root holds.
 _SEED_SCRIPT_PATH = os.path.join(_SEED_PATH, "provider_script.json")
 
-# The template the page is built from, that of the ttyd test page.
-_PAGE_TEMPLATE = "test"
+# The template and name of the ttyd page, whose bring up runs both threads.
+_TTYD_PAGE = "test"
 
-# The name the one page is built under, as the plan names it.
-_PAGE_NAME = "test"
+# The template and name of the headless page, which runs nothing at load.
+_HEADLESS_PAGE = "headless"
 
-# The page `page_build.py` writes under that name, which each root copies.
-_PAGE_PATH = os.path.join(_BUILD_PATH, f"{_PAGE_NAME}.html")
+# The binding the headless page's realm lane calls, one call per line.
+_REALM_BINDING = "realm_line"
 
 # The directory of a root that holds the main loop files.
 _MAIN_LOOP_DIRECTORY = "main_loop"
@@ -121,52 +129,11 @@ _BAIL_PREFIX = "Bail out! "
 # The TAP documents the page writes: the AI worker's, then the UI thread's.
 _TAP_DOCUMENTS = 2
 
-# The modules of the AI worker's stream, in the order the plan runs them.
-_AI_MODULES = (
-    "test_tap_producer",
-    "test_unittest",
-    "test_harness",
-    "test_error_overlay_worker",
-    "test_ui_strings",
-    "test_i18n",
-    "test_utility",
-    "test_settings",
-    "test_verbose",
-    "test_jslb",
-    "test_dispatch",
-    "test_queue",
-    "test_http",
-    "test_wire",
-    "test_wire_end",
-    "test_provider",
-    "test_provider_key_unset",
-    "test_provider_key",
-    "test_mcp",
-    "test_substrate",
-    "test_substrate_store",
-    "test_jslb_decode",
-    "test_wire_port",
-    "test_script",
-    "test_provider_script",
-    "test_tools_browser",
-    "test_tools_browser_console",
-    "test_agent",
-    "test_worker_ai_console",
-)
+# The modules of the AI worker's stream: none, as each runs in group A or B.
+_AI_MODULES: tuple[str, ...] = ()
 
-# The modules of the UI thread's stream, in the order the plan runs them.
-_UI_MODULES = (
-    "test_tap_producer",
-    "test_unittest",
-    "test_error_overlay",
-    "test_media",
-    "test_media_cache",
-    "test_console_view",
-    "test_overlay",
-    "test_page",
-    "test_worker_ai",
-    "test_boot",
-)
+# The modules of the UI thread's stream: none, as each runs in group A or B.
+_UI_MODULES: tuple[str, ...] = ()
 
 # The name `argparse` shows, as `sys.argv` may be empty.
 _PROGRAM_NAME = "test_browser.py"
@@ -230,23 +197,17 @@ _HTTP_OK = 200
 # The status of an answer with no body.
 _NO_CONTENT = 204
 
-# The status a missing file gets: a media download's and the stub's icon's.
+# The status the stub's icon gets, a missing file's.
 _MISSING_STATUS = 404
 
 # The status of a request without the credential ttyd asks.
 _UNAUTHORIZED = 401
-
-# The failing statuses the HTTP port must report.
-_STATUSES = (400, 401, 500)
 
 # The media type of JSON.
 _JSON_MEDIA = "application/json"
 
 # The media type of plain text.
 _TEXT_MEDIA = "text/plain"
-
-# The media type of a PNG.
-_PNG_MEDIA = "image/png"
 
 # The stub's path that takes a POST and answers JSON.
 _ECHO_PATH = "/echo"
@@ -257,17 +218,8 @@ _TEXT_PATH = "/text"
 # The stub's path that answers JSON.
 _JSON_PATH = "/json"
 
-# The stub's path that answers the PNG.
-_PNG_STUB_PATH = "/png"
-
 # The icon the browser asks of a page it opens, which the stub answers 404.
 _FAVICON_PATH = "/favicon.ico"
-
-# The start of the stub's paths that answer with a status.
-_STATUS_PREFIX = "/status/"
-
-# The stub's path that never answers.
-_SILENT_PATH = "/silent"
 
 # The stub's path that sends its head and part of its body, then stalls.
 _STALL_PATH = "/stall"
@@ -350,11 +302,8 @@ _UNKNOWN_ID = 7
 # The close code a browser reports when the connection ended with no frame.
 _CLOSE_LOST = 1006
 
-# The period of the byte pattern of the rungs' blobs.
-_PATTERN_PERIOD = 251
-
-# Bytes that no image decoder takes.
-_UNDECODABLE = b"not an image"
+# The bytes of a PNG through the width and height of its header chunk.
+_PNG_HEAD_BYTES = 24
 
 # The message of the error thrown after the page loaded.
 _THROWN_MESSAGE = "rung thrown error"
@@ -364,15 +313,6 @@ _SECOND_MESSAGE = "rung second fault"
 
 # The message of the promise rejection nothing handles.
 _REJECTED_MESSAGE = "rung rejected promise"
-
-# The message the worker throws once its script ran.
-_POSTED_MESSAGE = "rung worker fault"
-
-# The message the worker throws before anything of its script ran.
-_LOAD_MESSAGE = "rung worker load fault"
-
-# The message the worker constructor throws while the parser runs.
-_APPEND_MESSAGE = "rung fault while parsing"
 
 # The message of the HTTP port's receiver that throws.
 _RECEIVER_MESSAGE = "rung receiver throws"
@@ -407,107 +347,22 @@ _INPUT_KIND = "0"
 # The whole seconds wire.ts waits for its socket to send its buffered bytes.
 _DRAIN_SECONDS = 120
 
-# The SAH pool the kill rung's workers open, apart from the test page's.
-_KILL_POOL = "xsjs-kill-pool"
-
-# The OPFS directory of that pool.
-_KILL_DIRECTORY = ".xsjs-kill-pool"
-
-# The OPFS directory of the kill rung's cache files.
-_KILL_SLOTS_DIRECTORY = "xsjs-kill-cache"
-
-# The root of the kill rung's store in that pool.
-_KILL_ROOT = "/kill"
-
-# The check after the kill: no row of the value, its cache file removed.
-_KILL_DUE = {"rows": 0, "removed": 1}
-
-# The thread whose lines the AI worker sends to the server.
-_AI_THREAD = "ai"
-
 # The thread under which the server keeps the lines it logs itself.
 _SERVER_THREAD = "server"
 
 # The first byte of a ttyd message of program output.
 _OUTPUT_KIND = 0x30
 
-# Replaces `Worker` so that the page starts no worker of its own.
-_WORKER_STUB = """globalThis.xsjs_worker_original = globalThis.Worker;
-globalThis.Worker = class {
-  postMessage() {}
-  terminate() {}
-};
-"""
-
-# Adds a prefix and a suffix to the text of every script `Blob`.
-_BLOB_PATCH = """(() => {
-  const OriginalBlob = globalThis.Blob;
-  globalThis.Blob = class extends OriginalBlob {
-    constructor(parts, options) {
-      const script =
-        options !== undefined && options.type === "text/javascript";
-      super(script ? [XSJS_PREFIX, ...parts, XSJS_SUFFIX] : parts, options);
-    }
-  };
-})();
-"""
-
-# Replaces `Worker` by a class whose constructor throws.
-_WORKER_THROW = """globalThis.Worker = class {
-  constructor() {
-    throw new Error(XSJS_MESSAGE);
-  }
-};
-"""
-
 # The page's probes: functions the rungs call through `Runtime.evaluate`.
 _PROBE_KIT = r"""(() => {
   const probe = {
     lines: {},
     ports: {},
-    sink_bytes: {},
-    sink_count: 0,
     wire: {},
     worker_lines: [],
-    kept: {},
     long_tasks: [],
-    order: [],
-    thread_replies: [],
     pair_replies: [],
     console: null,
-  };
-  probe.bytes_join = (parts) => {
-    let total = 0;
-    for (const part of parts) {
-      total += part.length;
-    }
-    const joined = new Uint8Array(total);
-    let offset = 0;
-    for (const part of parts) {
-      joined.set(part, offset);
-      offset += part.length;
-    }
-    return joined;
-  };
-  probe.sink = {
-    sink_open: () => {
-      probe.sink_count += 1;
-      const handle = "probe/" + probe.sink_count;
-      probe.sink_bytes[handle] = [];
-      return handle;
-    },
-    sink_append: (handle, data) => {
-      probe.sink_bytes[handle].push(data.slice());
-    },
-    sink_close: (handle) => {
-      const joined = probe.bytes_join(probe.sink_bytes[handle]);
-      probe.sink_bytes[handle] = joined;
-      return utility.sha256_hex(joined);
-    },
-  };
-  probe.blob_bytes = (blob) => {
-    const data = jslb.field_get(blob, "data");
-    return typeof data === "string" ? probe.sink_bytes[data] : data;
   };
   probe.summary_make = (line) => ({
     header: line[0],
@@ -516,7 +371,7 @@ _PROBE_KIT = r"""(() => {
       .headers_of(line)
       .slice(1)
       .map((blob) => {
-        const bytes = probe.blob_bytes(blob);
+        const bytes = jslb.field_get(blob, "data");
         return { size: bytes.length, sha256: utility.sha256_hex(bytes) };
       }),
   });
@@ -528,12 +383,6 @@ _PROBE_KIT = r"""(() => {
   };
   probe.http_port = (name, seconds) => {
     const port = new http.HttpPort(seconds);
-    port.line_receive(probe.receiver_make(name));
-    probe.ports[name] = port;
-    return true;
-  };
-  probe.media_port = (name, budget, seconds) => {
-    const port = new media.MediaPort(budget, seconds);
     port.line_receive(probe.receiver_make(name));
     probe.ports[name] = port;
     return true;
@@ -561,21 +410,13 @@ _PROBE_KIT = r"""(() => {
     }
     return null;
   };
-  probe.sink_free = (line) => {
-    for (const blob of jslb.headers_of(line).slice(1)) {
-      const data = jslb.field_get(blob, "data");
-      if (typeof data === "string") {
-        delete probe.sink_bytes[data];
-      }
-    }
-  };
   probe.wire_open = (name, base) => {
     const record = { first: null, lines: [], closes: [] };
     const values = {};
-    const port = new wire.WirePort(base, probe.sink, (id) => values[id]);
+    const cache = new substrate.CacheFiles([]);
+    const port = new wire.WirePort(base, cache, (id) => values[id]);
     port.line_receive((line) => {
       record.lines.push(probe.summary_make(line));
-      probe.sink_free(line);
     });
     port.close_receive((code, had_error) => {
       record.closes.push([code, had_error]);
@@ -691,27 +532,8 @@ _PROBE_KIT = r"""(() => {
     verbose.history_get(settings.settings_get("verbose_ring"));
   probe.sink_twice = () =>
     probe.thrown_message(() => verbose.sink_set(() => undefined));
-  probe.ring_refused = () =>
-    probe.thrown_message(() =>
-      new overlay.Overlay(document.createElement("div"), 0),
-    );
   probe.line_of = (type, payload) =>
     jslb.line_make(jslb.header_make(type), [], payload);
-  probe.schedule_run = (type) => {
-    const tasks = new queue.TaskQueue("ui", {}, false);
-    dispatch.handler_register(type, 0, (line) => {
-      probe.order.push(line.n);
-      queueMicrotask(() => probe.order.push("micro " + line.n));
-      return undefined;
-    });
-    tasks.line_notify(probe.line_of(type, { n: 1 }), "ui");
-    tasks.line_notify(probe.line_of(type, { n: 2 }), "ui");
-    probe.order.push("returned");
-    probe.schedule_tasks = tasks;
-    return true;
-  };
-  probe.order_when = (count) =>
-    probe.order.length >= count ? probe.order : null;
   probe.worker_source = (code) => {
     const scripts = Array.from(
       document.querySelectorAll("script[data-worker]"),
@@ -723,45 +545,7 @@ _PROBE_KIT = r"""(() => {
     );
   };
   probe.worker_make = (code) =>
-    new globalThis.xsjs_worker_original(probe.worker_source(code), {
-      name: "probe",
-    });
-  probe.worker_real = (code, name) =>
-    new Worker(probe.worker_source(code), { name });
-  probe.thread_code = [
-    "self.onmessage = (event) => {",
-    '  const owners = { "probe.": "ai" };',
-    '  const tasks = new queue.TaskQueue("ai", owners, false);',
-    '  dispatch.handler_register("probe.ask", 0, (line) =>',
-    "    dispatch.reply_make(line, { text: line.text, thread: self.name }),",
-    "  );",
-    '  tasks.port_add("ui", new queue.ThreadPort(event.data));',
-    "  self.probe_tasks = tasks;",
-    "};",
-  ].join("\n");
-  probe.thread_run = (begin, done) => {
-    const channel = new MessageChannel();
-    const worker = probe.worker_make(probe.thread_code);
-    worker.postMessage(channel.port2, [channel.port2]);
-    const tasks = new queue.TaskQueue("ui", {}, false);
-    tasks.port_add("ai", new queue.ThreadPort(channel.port1));
-    dispatch.handler_register(begin, 0, () => {
-      const ask = probe.line_of("probe.ask", { text: "across" });
-      const id = tasks.task_submit(ask, "ai");
-      return dispatch.task_sleep({}, [id], done);
-    });
-    dispatch.handler_register(done, 0, (wake) => {
-      probe.thread_replies = wake.replies.map((line) =>
-        probe.summary_make(line),
-      );
-      return undefined;
-    });
-    tasks.line_notify(probe.line_of(begin, {}), "ui");
-    probe.thread_parts = { tasks, worker };
-    return true;
-  };
-  probe.thread_when = () =>
-    probe.thread_replies.length > 0 ? probe.thread_replies : null;
+    new Worker(probe.worker_source(code), { name: "probe" });
   probe.pair_run = (begin, done, urls, seconds) => {
     const tasks = new queue.TaskQueue("ui", {}, false);
     tasks.port_add("http", new http.HttpPort(seconds));
@@ -825,21 +609,6 @@ _PROBE_KIT = r"""(() => {
   };
   probe.worker_when = () =>
     probe.worker_lines.length > 0 ? probe.worker_lines : null;
-  probe.png_bytes = () => Array.from(provider_script.image_pattern());
-  probe.image_size = (name, key) => {
-    const image = probe.ports[name].image_get(key);
-    return image === undefined
-      ? null
-      : { width: image.width, height: image.height };
-  };
-  probe.image_keep = (name, key) => {
-    probe.kept[key] = probe.ports[name].image_get(key);
-    return true;
-  };
-  probe.kept_size = (key) => ({
-    width: probe.kept[key].width,
-    height: probe.kept[key].height,
-  });
   probe.long_start = () => {
     const observer = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) {
@@ -892,21 +661,27 @@ _PROBE_KIT = r"""(() => {
   probe.console_state = () => probe.console;
   probe.console_when = () =>
     probe.console.closes.length > 0 ? probe.console : null;
-  probe.echo_burst = (name, count, size) => {
+  probe.noise_make = (size) => {
+    const data = new Uint8Array(size);
+    // Each call of getRandomValues fills at most 65536 bytes.
+    for (let at = 0; at < size; at += 65536) {
+      crypto.getRandomValues(data.subarray(at, at + 65536));
+    }
+    probe.noise = data;
+    let binary = "";
+    for (let at = 0; at < size; at += 32768) {
+      binary += String.fromCharCode(...data.subarray(at, at + 32768));
+    }
+    return btoa(binary);
+  };
+  probe.echo_burst = (name, count) => {
     const port = probe.wire[name].port;
-    const data = probe.pattern_make(size);
     for (let number = 1; number <= count; number += 1) {
       const header = jslb.header_make("echo", { id: number });
-      port.line_post(jslb.line_make(header, [jslb.blob_make(data)], {}), []);
+      const blob = jslb.blob_make(probe.noise);
+      port.line_post(jslb.line_make(header, [blob], {}), []);
     }
     return true;
-  };
-  probe.wire_pending = (name) => {
-    const port = probe.wire[name].port;
-    return {
-      buffered: port.socket.bufferedAmount,
-      polling: port.poll_id !== undefined,
-    };
   };
   probe.sync_get = () => {
     const request = new XMLHttpRequest();
@@ -914,103 +689,6 @@ _PROBE_KIT = r"""(() => {
     request.send();
     return request.status;
   };
-  probe.kill_code = (options, body) =>
-    [
-      "(() => {",
-      "  const options = " + JSON.stringify(options) + ";",
-      "  const slots_open = () =>",
-      "    navigator.storage",
-      "      .getDirectory()",
-      "      .then((root) =>",
-      "        root.getDirectoryHandle(options.slot_directory, {",
-      "          create: true,",
-      "        }),",
-      "      )",
-      "      .then((directory) =>",
-      "        Promise.all(",
-      "          Array.from({ length: options.slots }, (_value, index) =>",
-      "            directory",
-      "              .getFileHandle(String(index), { create: true })",
-      "              .then((file) => file.createSyncAccessHandle()),",
-      "          ),",
-      "        ),",
-      "      );",
-      "  const binary = utility.base64_decode(sqlite3_wasm_base64);",
-      "  sqlite3InitModule({ wasmBinary: binary })",
-      "    .then((sqlite3) =>",
-      "      sqlite3",
-      "        .installOpfsSAHPoolVfs({",
-      "          name: options.pool,",
-      "          directory: options.directory,",
-      "          initialCapacity: options.capacity,",
-      "          clearOnInit: options.clear,",
-      "        })",
-      "        .then((pool) =>",
-      "          slots_open().then((slots) => {",
-      "            const cache = new substrate.CacheFiles(slots);",
-      ...body,
-      "          }),",
-      "        ),",
-      "    )",
-      "    .catch((error) => {",
-      "      self.postMessage({ fault: String(error.stack) });",
-      "    });",
-      "})();",
-    ].join("\n");
-  probe.kill_put_body = [
-    "const store = new substrate.Store(",
-    "  sqlite3,",
-    "  pool,",
-    "  cache,",
-    "  options.root,",
-    "  options.overflow,",
-    "  options.compact,",
-    "  { line_notify: () => undefined },",
-    ");",
-    "test_substrate_store.kill_put(store, () =>",
-    "  self.postMessage({ paused: true }),",
-    ");",
-  ];
-  probe.kill_check_body = [
-    "const store = new substrate.Store(",
-    "  sqlite3,",
-    "  pool,",
-    "  cache,",
-    "  options.root,",
-    "  options.overflow,",
-    "  options.compact,",
-    "  { line_notify: () => undefined },",
-    ");",
-    "self.postMessage({ checked: test_substrate_store.kill_check(store) });",
-  ];
-  probe.kill_run = (options) => {
-    probe.kill = null;
-    const fault_keep = (text) => {
-      probe.kill = { fault: text };
-    };
-    const first = probe.worker_real(
-      probe.kill_code({ ...options, clear: true }, probe.kill_put_body),
-      "kill_put",
-    );
-    first.onerror = (event) => fault_keep(String(event.message));
-    first.onmessage = (event) => {
-      if (event.data.paused !== true) {
-        fault_keep(JSON.stringify(event.data));
-        return;
-      }
-      first.terminate();
-      const second = probe.worker_real(
-        probe.kill_code({ ...options, clear: false }, probe.kill_check_body),
-        "kill_check",
-      );
-      second.onerror = (event) => fault_keep(String(event.message));
-      second.onmessage = (event) => {
-        probe.kill = event.data;
-      };
-    };
-    return true;
-  };
-  probe.kill_when = () => probe.kill;
   globalThis.xsjs_probe = probe;
   return true;
 })()
@@ -1080,14 +758,14 @@ class BrowserDriver(Protocol):
     # Calls `fn` with the text of each console message from now on.
     def console_follow(self, fn: Callable[[str], None]) -> None: ...
 
+    # Calls `fn` with each payload the page calls `name` with, on every load.
+    def binding_add(self, name: str, fn: Callable[[str], None]) -> None: ...
+
     # Saves a PNG of the page to the path.
     def screenshot_save(self, path: str) -> None: ...
 
     # Returns the DevTools client of the page.
     def client_get(self) -> DriverClient: ...
-
-    # Pauses the page's worker of that name in its debugger, waiting for it.
-    def worker_pause(self, name: str) -> None: ...
 
     # Starts a trace of the categories on the page.
     def trace_start(self, categories: list[str]) -> None: ...
@@ -1379,7 +1057,6 @@ class StubServer(http.server.ThreadingHTTPServer):
         self.released = False
         self.failure = ""
         self.failure_raised = False
-        self.png = b""
         self.thread = threading.Thread(target=self.serve_forever, daemon=True)
         self.main_id = cast(int, threading.main_thread().ident)
         self.handler_kept = signal.getsignal(signal.SIGUSR1)
@@ -1573,18 +1250,11 @@ class StubHandler(http.server.BaseHTTPRequestHandler):
             self.answer_send(_HTTP_OK, _TEXT_MEDIA, _PLAIN_TEXT.encode())
         elif path == _JSON_PATH:
             self.json_send(_JSON_VALUE)
-        elif path == _PNG_STUB_PATH:
-            self.answer_send(_HTTP_OK, _PNG_MEDIA, stub.png)
         elif path == _FAVICON_PATH:
             self.answer_send(_MISSING_STATUS, _TEXT_MEDIA, b"")
             stub.log.note_print(
                 f"the stub answered GET {path} with {_MISSING_STATUS}"
             )
-        elif path.startswith(_STATUS_PREFIX):
-            status = int(path.removeprefix(_STATUS_PREFIX))
-            self.answer_send(status, _TEXT_MEDIA, f"status {status}".encode())
-        elif path == _SILENT_PATH:
-            stub.hold_wait(lambda: False)
         elif path == _STALL_PATH:
             self.stall_send()
             stub.hold_wait(lambda: False)
@@ -1621,7 +1291,7 @@ class StubHandler(http.server.BaseHTTPRequestHandler):
 
 # One root's page in the browser: its address, its probes and its inputs.
 class PageSession:
-    # Takes the browser, the rung log, ttyd and the root's two settings files.
+    # Takes the browser, the log, ttyd, the root's settings and the realm's.
     def __init__(
         self,
         browser: BrowserDriver,
@@ -1629,6 +1299,7 @@ class PageSession:
         ttyd: TtydServer,
         values: dict[str, Any],
         gold: dict[str, Any],
+        realm_lines: list[str],
     ) -> None:
         self.browser = browser
         self.log = log
@@ -1636,6 +1307,7 @@ class PageSession:
         self.root = ttyd.root
         self.values = values
         self.gold = gold
+        self.realm_lines = realm_lines
         self.url = f"http://{bind_address()}:{ttyd.port}/"
         self.mark = len(ttyd.lines)
 
@@ -1660,9 +1332,21 @@ class PageSession:
         self.browser.page_open(self.url)
         self.browser.script_evaluate(_PROBE_KIT)
 
-    # Waits for the fault screen and returns its text.
+    # Waits for the fault screen, takes the realm's report of it, its text.
     def fault_wait(self, what: str) -> str:
-        return cast(str, self.probe_wait(what, "fault_text"))
+        text = cast(str, self.probe_wait(what, "fault_text"))
+        # The stop function sends it in the task that wrote the screen.
+        self.realm_lines.clear()
+        return text
+
+    # Fails if the headless page's realm reported a fault no rung waited for.
+    def realm_check(self) -> None:
+        if self.realm_lines:
+            line = base64.b64decode(self.realm_lines[0]).decode()
+            raise CheckFailed(
+                f"the page's realm lane reported a fault no rung waited for:"
+                f" {line}"
+            )
 
     # Fails if the page shows the fault screen.
     def fault_none(self, what: str) -> None:
@@ -1676,6 +1360,7 @@ class PageSession:
 
     # Leaves the page for a blank one and waits for its programs to end.
     def page_leave(self) -> None:
+        self.realm_check()
         self.browser.page_open(_BLANK_URL)
         self.programs_wait(0, "the end of the programs of the page left")
 
@@ -1700,25 +1385,19 @@ class PageSession:
         y = view["top"] + view["height"] / 2
         self.mouse_click(x, y)
 
-    # Saves a PNG of the page under the name and returns its path.
+    # Saves a PNG of the page under the name, of the window's size, its path.
     def shot_save(self, name: str) -> str:
         path = os.path.join(_PNG_PATH, name + ".png")
         self.browser.screenshot_save(path)
+        with open(path, "rb") as file:
+            size = png_size(file.read(_PNG_HEAD_BYTES))
+        due = (gold_value("window_width"), gold_value("window_height"))
+        if size != due:
+            raise CheckFailed(
+                f"{path} is {size[0]}x{size[1]} pixels, not the window's"
+                f" {due[0]}x{due[1]}"
+            )
         return path
-
-    # Adds a script every new document of the page runs first.
-    def preload_add(self, source: str) -> str:
-        result = self.browser.client_get().method_call(
-            "Page.addScriptToEvaluateOnNewDocument", {"source": source}
-        )
-        return cast(str, result["identifier"])
-
-    # Removes a script `preload_add` added.
-    def preload_remove(self, identifier: str) -> None:
-        self.browser.client_get().method_call(
-            "Page.removeScriptToEvaluateOnNewDocument",
-            {"identifier": identifier},
-        )
 
     # Clicks the fault screen's Reload and waits for the new page to load.
     def reload_click(self, view: dict[str, Any]) -> None:
@@ -1736,15 +1415,15 @@ class PageSession:
         self.browser.script_evaluate(_PROBE_KIT)
 
 
-# The parts every stage shares: the browser, the log, the page and the stub.
+# The parts every stage shares: the browser, the log, the pages and the stub.
 class RunContext(NamedTuple):
     browser: BrowserDriver
     log: RungLog
     work: str
     stack: contextlib.ExitStack
     stubs: list[StubServer]
-    closed_port: int
     built: set[str]
+    realm_lines: list[str]
 
 
 # A value of this driver's gold, `python.test_browser` of the test settings.
@@ -1778,7 +1457,7 @@ def bind_address() -> str:
     return address
 
 
-# The ttyd the install script builds from the pinned release and its patches.
+# The ttyd `ttyd_build.py` builds from the pinned release and its patches.
 def ttyd_path() -> str:
     build: str = setting_value("powershell.ttyd_build")
     return os.path.join(_CHECKOUT_PATH, build, "ttyd")
@@ -1819,12 +1498,6 @@ def sha256_text(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-# The bytes the probes' `pattern` makes: each index modulo the period.
-def pattern_bytes(size: int) -> bytes:
-    period = bytes(range(_PATTERN_PERIOD))
-    return (period * (size // _PATTERN_PERIOD + 1))[:size]
-
-
 # A pattern of a string's text in which each `_ANY` matches any text.
 def pattern_make(text: str) -> re.Pattern[str]:
     escaped = re.escape(text).replace(re.escape(_ANY), "(.*)")
@@ -1834,6 +1507,11 @@ def pattern_make(text: str) -> re.Pattern[str]:
 # The file of a database under the root.
 def database_path(root: str, db: str) -> str:
     return os.path.join(root, db + _DB_EXTENSION)
+
+
+# The file `page_build.py` writes for the page of the name.
+def page_path(page: str) -> str:
+    return os.path.join(_BUILD_PATH, f"{page}.html")
 
 
 # A file's whole lines, untranslated, or nothing while it does not exist yet.
@@ -1846,13 +1524,6 @@ def file_text(path: str) -> str:
 # Copies each console message of the page to stderr.
 def console_copy(text: str) -> None:
     sys.stderr.write(f"console: {text}\n")
-
-
-# A port on the local host held bound for the run and never listening.
-def port_closed(stack: contextlib.ExitStack) -> int:
-    sock = stack.enter_context(socket.socket())
-    sock.bind((bind_address(), 0))
-    return cast(int, sock.getsockname()[1])
 
 
 # The run's stub server, started the first time a rung needs it.
@@ -1881,10 +1552,22 @@ def process_parent(pid: int) -> int:
     return int(stat[stat.rindex(b")") + 2 :].split()[1])
 
 
-# Fails unless the pid is ttyd's child running its command.
-def program_check(ttyd: TtydServer, pid: int) -> None:
+# The words of a process's command line, none while it has none to read.
+def cmdline_read(pid: int) -> list[bytes]:
     with open(f"/proc/{pid}/cmdline", "rb") as file:
-        cmdline = file.read().split(b"\0")[:-1]
+        return file.read().split(b"\0")[:-1]
+
+
+# Fails unless the pid is ttyd's child running its command, once it runs one.
+def program_check(session: PageSession, pid: int) -> None:
+    ttyd = session.ttyd
+    forked = cmdline_read(ttyd.process.pid)
+    # Until its exec ends, ttyd's child reads as ttyd's command line or none.
+    cmdline = server_wait(
+        session,
+        f"the server's pid {pid} to run a command",
+        lambda: None if (read := cmdline_read(pid)) in ([], forked) else read,
+    )
     due = [word.encode() for word in ttyd.command]
     if cmdline != due:
         raise CheckFailed(f"the server's pid {pid} runs {cmdline}, not {due}")
@@ -1911,7 +1594,7 @@ def server_wait[T](
 
 # Makes a root as the start script does, debug, level, scripted and run pinned.
 def root_make(
-    work: str, name: str, overrides: dict[str, Any]
+    work: str, name: str, page: str, overrides: dict[str, Any]
 ) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
     import harness
 
@@ -1946,8 +1629,9 @@ def root_make(
         os.path.join(root, _TEST_SETTINGS_NAME), "w", encoding="utf-8"
     ) as file:
         file.write(text)
-    index = os.path.join(root, os.path.basename(_PAGE_PATH))
-    shutil.copyfile(_PAGE_PATH, index)
+    built = page_path(page)
+    index = os.path.join(root, os.path.basename(built))
+    shutil.copyfile(built, index)
     return root, index, values, gold
 
 
@@ -2221,9 +1905,9 @@ def rung_suites_order(session: PageSession, seen: list[str]) -> str:
     return (
         f"the first time {path} held a second {_TAP_VERSION!r} line, the"
         " document before it was already whole and well formed, plan"
-        f" {stats.plan}: the AI worker's, its {len(_AI_MODULES)} modules in"
-        " the plan's order, ahead of the UI thread's, its"
-        f" {len(_UI_MODULES)} modules in order"
+        f" {stats.plan}: the AI worker's, reporting the modules"
+        f" {list(_AI_MODULES)}, ahead of the UI thread's, reporting"
+        f" {list(_UI_MODULES)}"
     )
 
 
@@ -2338,84 +2022,6 @@ def rung_svg(session: PageSession, href: str) -> str:
     )
 
 
-# A worker that throws once its script ran posts its fault to the page.
-def rung_posted(session: PageSession) -> str:
-    session.page_leave()
-    suffix = f"\nthrow new Error({json.dumps(_POSTED_MESSAGE)});\n"
-    identifier = session.preload_add(blob_patch("", suffix))
-    session.page_open()
-    text = session.fault_wait("the fault the worker posts")
-    session.preload_remove(identifier)
-    session.programs_wait(0, "the end of the worker's programs")
-    if "Error: " + _POSTED_MESSAGE not in text.split("\n"):
-        raise CheckFailed(
-            f"the fault screen shows {text!r}, where the worker's posted"
-            f" fault with its stack line 'Error: {_POSTED_MESSAGE}' was due"
-        )
-    return (
-        "the worker's script, run from its Blob URL, threw at its end after"
-        " error_overlay was installed in it, and the page showed the posted"
-        f" fault {_POSTED_MESSAGE!r} with the worker's stack"
-    )
-
-
-# A worker that throws before anything ran reaches the page's `onerror`.
-def rung_load(session: PageSession) -> str:
-    session.page_leave()
-    prefix = f"throw new Error({json.dumps(_LOAD_MESSAGE)});\n"
-    identifier = session.preload_add(blob_patch(prefix, ""))
-    session.page_open()
-    text = session.fault_wait("the fault of the worker's load")
-    session.preload_remove(identifier)
-    session.programs_wait(0, "the end of the worker's programs")
-    unknown: dict[int, object] = {0: _ANY, 1: _ANY, 2: _ANY}
-    where = pattern_make(text_fill("page_worker_where", unknown))
-    lines = text.split("\n")
-    if _LOAD_MESSAGE not in lines[0] or not any(
-        where.fullmatch(line) for line in lines[1:]
-    ):
-        raise CheckFailed(
-            f"the fault screen shows {text!r}, where {_LOAD_MESSAGE!r} and"
-            " the worker's file, line and column were due"
-        )
-    return (
-        "the worker's Blob script threw on its first line, before any"
-        f" handler, and the page's onerror showed {_LOAD_MESSAGE!r} with"
-        f" {lines[1]!r}"
-    )
-
-
-# A fault while the parser runs a script is appended, not replacing the page.
-def rung_append(session: PageSession) -> str:
-    session.page_leave()
-    source = _WORKER_THROW.replace("XSJS_MESSAGE", json.dumps(_APPEND_MESSAGE))
-    identifier = session.preload_add(source)
-    session.page_open()
-    text = session.fault_wait("the fault of the start script")
-    session.preload_remove(identifier)
-    if _APPEND_MESSAGE not in text:
-        raise CheckFailed(f"the fault screen shows {text!r}")
-    if session.probe_call("tap_kept") is not True:
-        raise CheckFailed(
-            "the fault while the parser ran replaced the document, where"
-            " document.write appends while a script of the parser runs"
-        )
-    png = session.shot_save("stage0_fault_appended")
-    return (
-        f"the worker constructor threw {_APPEND_MESSAGE!r} inside the start"
-        " script while the parser ran it: the fault's pre was appended and"
-        " the page's #tap_output stayed, where a fault after load replaces"
-        f" the document; PNG {png}"
-    )
-
-
-# The preload that adds the prefix and suffix to every script `Blob`.
-def blob_patch(prefix: str, suffix: str) -> str:
-    return _BLOB_PATCH.replace("XSJS_PREFIX", json.dumps(prefix)).replace(
-        "XSJS_SUFFIX", json.dumps(suffix)
-    )
-
-
 # The pid of the server ttyd started since the page opened, from its log.
 def server_pid(session: PageSession) -> int:
     _, found = session.ttyd.line_wait(
@@ -2446,7 +2052,7 @@ def rung_first_line(session: PageSession) -> str:
             " and no blob were due"
         )
     pid = server_pid(session)
-    program_check(session.ttyd, pid)
+    program_check(session, pid)
     return (
         f"a WirePort on the page's main thread got {header['type']} with id"
         f" {header['id']} in full names from pid {pid}, ttyd's child, carrying"
@@ -2602,76 +2208,6 @@ def rung_preflight(stub: StubServer) -> str:
     )
 
 
-# A text answer gives `text`, a JSON answer `json`.
-def rung_answers(session: PageSession, stub: StubServer) -> str:
-    session.probe_call("http_port", "plain", gold_value("http_seconds"))
-    get_send(session, "plain", 1, stub.url_make(_TEXT_PATH))
-    get_send(session, "plain", 2, stub.url_make(_JSON_PATH))
-    lines = port_lines(session, "plain", 2)
-    by_id = {line["header"]["r"]: line["payload"] for line in lines}
-    text, value = by_id[1], by_id[2]
-    if (
-        text["status"] != _HTTP_OK
-        or text["text"] != _PLAIN_TEXT
-        or "json" in text
-        or value["status"] != _HTTP_OK
-        or value["json"] != _JSON_VALUE
-        or "text" in value
-    ):
-        raise CheckFailed(f"the answers were {lines}")
-    return (
-        f"text/plain gave text {_PLAIN_TEXT!r} and application/json gave the"
-        " parsed JSON"
-    )
-
-
-# The statuses 400, 401 and 500 are `error` lines naming the body.
-def rung_statuses(session: PageSession, stub: StubServer) -> str:
-    session.probe_call("http_port", "status", gold_value("http_seconds"))
-    for line_id, status in enumerate(_STATUSES, 1):
-        url = stub.url_make(f"{_STATUS_PREFIX}{status}")
-        get_send(session, "status", line_id, url)
-    lines = port_lines(session, "status", len(_STATUSES))
-    by_id = {line["header"]["r"]: line for line in lines}
-    for line_id, status in enumerate(_STATUSES, 1):
-        url = stub.url_make(f"{_STATUS_PREFIX}{status}")
-        due = text_fill(f"http_status_failed_{status}", {0: url})
-        line = by_id[line_id]
-        if line["header"]["t"] != "error" or line["payload"]["message"] != due:
-            raise CheckFailed(f"status {status} gave {line}, not {due!r}")
-    return f"the statuses {_STATUSES} each gave an error line naming the body"
-
-
-# A closed port is an `error` line of the failed fetch.
-def rung_refused(session: PageSession, closed_port: int) -> str:
-    session.probe_call("http_port", "closed", gold_value("http_seconds"))
-    url = f"http://{bind_address()}:{closed_port}/"
-    get_send(session, "closed", 1, url)
-    line = port_lines(session, "closed", 1)[0]
-    pattern = pattern_make(text_fill("http_fetch_failed", {0: url, 1: _ANY}))
-    message = cast(str, line["payload"].get("message", ""))
-    if line["header"] != {"t": "error", "r": 1} or not pattern.fullmatch(
-        message
-    ):
-        raise CheckFailed(f"the closed port gave {line}")
-    return f"a GET of the closed port {closed_port} gave {message!r}"
-
-
-# A server that never answers is a timeout `error` line.
-def rung_never(session: PageSession, stub: StubServer) -> str:
-    session.probe_call("http_port", "silent", gold_value("http_seconds"))
-    url = stub.url_make(_SILENT_PATH)
-    get_send(session, "silent", 1, url)
-    line = port_lines(session, "silent", 1)[0]
-    due = text_fill("http_timeout_expired", {0: url})
-    if (
-        line["header"] != {"t": "error", "r": 1}
-        or line["payload"]["message"] != due
-    ):
-        raise CheckFailed(f"the silent server gave {line}, not {due!r}")
-    return f"a server that never answered gave {due!r}"
-
-
 # A body that stalls after its head is a timeout `error` line.
 def rung_stall(session: PageSession, stub: StubServer) -> str:
     session.probe_call("http_port", "stall", gold_value("http_seconds"))
@@ -2806,40 +2342,6 @@ def rung_receiver(session: PageSession, stub: StubServer) -> str:
     )
 
 
-# A queue in its normal mode runs one item per task, after the notify.
-def rung_schedule(session: PageSession) -> str:
-    session.probe_call("schedule_run", "rung_schedule.step")
-    order = session.probe_wait("the two items", "order_when", 5)
-    due = ["returned", 1, "micro 1", 2, "micro 2"]
-    if order != due:
-        raise CheckFailed(f"the queue ran {order}, not {due}")
-    return (
-        "two notified items ran after the notify returned, each in a task of"
-        " its own, the first one's microtask before the second item"
-    )
-
-
-# A ThreadPort carries a request and its reply across a real worker.
-def rung_thread(session: PageSession) -> str:
-    session.probe_call("thread_run", "rung_thread.begin", "rung_thread.done")
-    replies = json_list(
-        session.probe_wait("the worker's reply", "thread_when")
-    )
-    due: list[dict[str, Any]] = [
-        {
-            "header": {"t": "probe.ask", "r": 1},
-            "payload": {"text": "across", "thread": "probe"},
-            "blobs": [],
-        }
-    ]
-    if replies != due:
-        raise CheckFailed(f"the wake carried {replies}, not {due}")
-    return (
-        "a task slept on a request to a worker's queue over ThreadPort and"
-        " woke with its reply"
-    )
-
-
 # A task sleeping on two requests wakes with both, in submit order.
 def rung_pair(session: PageSession, stub: StubServer) -> str:
     urls = [stub.url_make(_FIRST_PATH), stub.url_make(_SECOND_PATH)]
@@ -2951,7 +2453,7 @@ def console_closed(session: PageSession, count: int) -> int:
 def rung_cycle(session: PageSession) -> str:
     session.page_leave()
     session.page_open()
-    # With the worker stubbed the page's settings never come: full names.
+    # The headless page runs no worker, so no settings come: full names.
     full = True
     session.probe_call("console_port", session.url)
     console_start(session, 1, full)
@@ -3056,173 +2558,9 @@ def rung_closing(session: PageSession, stub: StubServer) -> str:
     )
 
 
-# A PNG stored is decoded and kept at its own size.
-def rung_store(session: PageSession, png: bytes, budget: int) -> str:
-    key = "/_files/rung/stored.png"
-    seconds = gold_value("media_seconds")
-    session.probe_call("media_port", "store", budget, seconds)
-    session.probe_call(
-        "request_send", "store", "media.store", 1, {"k": key}, [list(png)]
-    )
-    reply = port_lines(session, "store", 1)[0]
-    due: dict[str, Any] = {
-        "header": {"t": "media.store", "r": 1},
-        "payload": {"k": key, "size": len(png), "sha256": sha256_text(png)},
-        "blobs": [],
-    }
-    size = session.probe_call("image_size", "store", key)
-    width, height = png_size(png)
-    if reply != due or size != {"width": width, "height": height}:
-        raise CheckFailed(f"media.store gave {reply} and kept {size}")
-    return (
-        f"the provider's {len(png)} byte PNG was decoded and kept as"
-        f" {width}x{height}, its reply naming its size and sha256"
-    )
-
-
 # The width and height of a PNG from its header chunk.
 def png_size(png: bytes) -> tuple[int, int]:
     return int.from_bytes(png[16:20]), int.from_bytes(png[20:24])
-
-
-# A download is kept and replied with its bytes as blob 1.
-def rung_fetch(
-    session: PageSession, stub: StubServer, png: bytes, budget: int
-) -> str:
-    key = "/_files/rung/fetched.png"
-    seconds = gold_value("media_seconds")
-    session.probe_call("media_port", "fetch", budget, seconds)
-    payload = {"url": stub.url_make(_PNG_STUB_PATH), "k": key}
-    session.probe_call("request_send", "fetch", "media.fetch", 1, payload, [])
-    reply = port_lines(session, "fetch", 1)[0]
-    digest = sha256_text(png)
-    due = {
-        "header": {"t": "media.fetch", "r": 1, "b": 1},
-        "payload": {"k": key, "size": len(png), "sha256": digest},
-        "blobs": [{"size": len(png), "sha256": digest}],
-    }
-    size = session.probe_call("image_size", "fetch", key)
-    width, height = png_size(png)
-    if reply != due or size != {"width": width, "height": height}:
-        raise CheckFailed(f"media.fetch gave {reply} and kept {size}")
-    return (
-        f"the PNG downloaded from the stub came back as blob 1, {len(png)}"
-        f" bytes, sha256 {digest[:12]}, and was kept as {width}x{height}"
-    )
-
-
-# A download that cannot connect is an `error` line naming the failure.
-def rung_lost(session: PageSession, closed_port: int, budget: int) -> str:
-    key = "/_files/rung/lost.png"
-    url = f"http://{bind_address()}:{closed_port}/"
-    seconds = gold_value("media_seconds")
-    session.probe_call("media_port", "lost", budget, seconds)
-    payload = {"url": url, "k": key}
-    session.probe_call("request_send", "lost", "media.fetch", 1, payload, [])
-    line = port_lines(session, "lost", 1)[0]
-    due = text_fill("media_download_failed_lost", {0: url, 2: _ANY})
-    pattern = pattern_make(due)
-    message = cast(str, line["payload"].get("message", ""))
-    if line["header"] != {"t": "error", "r": 1} or not pattern.fullmatch(
-        message
-    ):
-        raise CheckFailed(f"the lost download gave {line}")
-    return f"a download from a closed port gave {message!r}"
-
-
-# A download answered 404 is an `error` line naming the status.
-def rung_missing(session: PageSession, stub: StubServer, budget: int) -> str:
-    key = "/_files/rung/missing.png"
-    url = stub.url_make(f"{_STATUS_PREFIX}{_MISSING_STATUS}")
-    seconds = gold_value("media_seconds")
-    session.probe_call("media_port", "missing", budget, seconds)
-    payload = {"url": url, "k": key}
-    session.probe_call(
-        "request_send", "missing", "media.fetch", 1, payload, []
-    )
-    line = port_lines(session, "missing", 1)[0]
-    due = text_fill("media_download_failed_missing", {0: url})
-    if (
-        line["header"] != {"t": "error", "r": 1}
-        or line["payload"]["message"] != due
-    ):
-        raise CheckFailed(f"the missing download gave {line}, not {due!r}")
-    return f"a download answered {_MISSING_STATUS} gave {due!r}"
-
-
-# A download that never comes is a timeout `error` line.
-def rung_late(session: PageSession, stub: StubServer, budget: int) -> str:
-    key = "/_files/rung/late.png"
-    url = stub.url_make(_SILENT_PATH)
-    seconds = gold_value("media_seconds")
-    session.probe_call("media_port", "late", budget, seconds)
-    payload = {"url": url, "k": key}
-    session.probe_call("request_send", "late", "media.fetch", 1, payload, [])
-    line = port_lines(session, "late", 1)[0]
-    due = text_fill("media_download_expired", {0: url})
-    if (
-        line["header"] != {"t": "error", "r": 1}
-        or line["payload"]["message"] != due
-    ):
-        raise CheckFailed(f"the late download gave {line}, not {due!r}")
-    return f"a download that never came gave {due!r}"
-
-
-# Bytes that are no image are an `error` line of the decode.
-def rung_garbage(session: PageSession, budget: int) -> str:
-    key = "/_files/rung/garbage.png"
-    seconds = gold_value("media_seconds")
-    session.probe_call("media_port", "garbage", budget, seconds)
-    session.probe_call(
-        "request_send",
-        "garbage",
-        "media.store",
-        1,
-        {"k": key},
-        [list(_UNDECODABLE)],
-    )
-    line = port_lines(session, "garbage", 1)[0]
-    pattern = pattern_make(text_fill("media_decode_failed", {1: _ANY}))
-    message = cast(str, line["payload"].get("message", ""))
-    if line["header"] != {"t": "error", "r": 1} or not pattern.fullmatch(
-        message
-    ):
-        raise CheckFailed(f"the undecodable bytes gave {line}")
-    return f"{len(_UNDECODABLE)} bytes that are no image gave {message!r}"
-
-
-# Over the budget the oldest image is evicted and its bitmap closed.
-def rung_evict(session: PageSession, png: bytes) -> str:
-    width, height = png_size(png)
-    budget = width * height * 4
-    first, second = "/_files/rung/first.png", "/_files/rung/second.png"
-    seconds = gold_value("media_seconds")
-    session.probe_call("media_port", "evict", budget, seconds)
-    session.probe_call(
-        "request_send", "evict", "media.store", 1, {"k": first}, [list(png)]
-    )
-    port_lines(session, "evict", 1)
-    session.probe_call("image_keep", "evict", first)
-    session.probe_call(
-        "request_send", "evict", "media.store", 2, {"k": second}, [list(png)]
-    )
-    port_lines(session, "evict", 2)
-    gone = session.probe_call("image_size", "evict", first)
-    closed = session.probe_call("kept_size", first)
-    kept = session.probe_call("image_size", "evict", second)
-    if (
-        gone is not None
-        or closed != {"width": 0, "height": 0}
-        or kept != {"width": width, "height": height}
-    ):
-        raise CheckFailed(
-            f"after the second image the first is {gone}, its bitmap"
-            f" {closed}, the second {kept}"
-        )
-    return (
-        f"with a budget of {budget} bytes, one {width}x{height} image, the"
-        " second store evicted the first and closed its ImageBitmap"
-    )
 
 
 # The live verbose ring of the UI holds its lines, each an at and a text.
@@ -3246,15 +2584,6 @@ def rung_sink(session: PageSession) -> str:
     if message != due:
         raise CheckFailed(f"sink_set threw {message!r}, not {due!r}")
     return f"a second sink_set on the live verbose threw {due!r}"
-
-
-# The bundle's strings table holds the overlay's text.
-def rung_strings(session: PageSession) -> str:
-    message = session.probe_call("ring_refused")
-    due = text_fill("overlay_ring_invalid", {})
-    if message != due:
-        raise CheckFailed(f"the overlay threw {message!r}, not {due!r}")
-    return f"an overlay of ring 0 threw {due!r}, the text of the server's file"
 
 
 # The long tasks the UI thread ran since the observer started.
@@ -3338,7 +2667,7 @@ def rung_refused_role(session: PageSession) -> str:
 def rung_stalled(session: PageSession) -> str:
     session.page_open()
     pid = server_pid(session)
-    program_check(session.ttyd, pid)
+    program_check(session, pid)
     text = session.fault_wait("the fault of the wait for the first line")
     due = text_fill("wire_wait_expired_first", {})
     if due not in text:
@@ -3364,7 +2693,7 @@ def rung_credential(session: PageSession) -> str:
     session.probe_call("wire_open", "credential", session.url)
     session.probe_wait("the first line", "wire_first", "credential")
     pid = server_pid(session)
-    program_check(session.ttyd, pid)
+    program_check(session, pid)
     url = session.url + _TOKEN_PATH
     granted = json_object(session.probe_call("token_read", url))
     client.method_call("Network.setExtraHTTPHeaders", {"headers": {}})
@@ -3444,10 +2773,16 @@ def rungs_locked(session: PageSession) -> None:
         )
 
 
-# The echoes due back for that many echo lines of one pattern blob each.
-def echoes_due(count: int) -> list[dict[str, Any]]:
-    size: int = gold_value("echo_blob_bytes")
-    digest = sha256_text(pattern_bytes(size))
+# Random bytes the page keeps for its echoes, which ttyd's deflate can't shrink.
+def noise_make(session: PageSession, size: int) -> bytes:
+    text = cast(str, session.probe_call("noise_make", size))
+    return base64.b64decode(text, validate=True)
+
+
+# The echoes due back for that many echo lines of the blob each.
+def echoes_due(count: int, blob: bytes) -> list[dict[str, Any]]:
+    size = len(blob)
+    digest = sha256_text(blob)
     return [
         {
             "header": {"t": "echo", "r": number, "b": 1},
@@ -3469,49 +2804,44 @@ def drain_open(session: PageSession) -> None:
 # Echoes posted while ttyd is stopped wait on the port's poll, then all come.
 def rung_drain_poll(session: PageSession) -> str:
     ttyd = session.ttyd
-    size: int = gold_value("echo_blob_bytes")
+    # Each blob stays in memory, as no cache file is free to stream into.
+    size: int = session.values["overflow_bytes"]
     stall: float = gold_value("stall_seconds")
     count = gold_value("large_bytes") // size
     drain_open(session)
+    blob = noise_make(session, size)
     ttyd.signal_send(signal.SIGSTOP)
     try:
-        session.probe_call("echo_burst", "drain", count, size)
+        session.probe_call("echo_burst", "drain", count)
         time.sleep(stall)
-        pending = json_object(session.probe_call("wire_pending", "drain"))
     finally:
         with failure_held():
             ttyd.signal_send(signal.SIGCONT)
-    if pending["polling"] is not True:
-        raise CheckFailed(
-            f"with ttyd stopped for {stall:g} s the port's socket buffered"
-            f" {pending['buffered']} bytes and no poll waited, so the stall"
-            " never held a frame back"
-        )
     lines = json_list(
         session.probe_wait("the echoes", "wire_lines", "drain", count)
     )
-    if lines != echoes_due(count):
+    if lines != echoes_due(count, blob):
         raise CheckFailed(f"the echoes came back as {lines}")
     session.fault_none("the echoes after the stall")
     return (
-        f"with ttyd stopped, {count} echo requests of one {size} byte blob"
-        " each, posted at once, filled the socket, which buffered"
-        f" {pending['buffered']} bytes after {stall:g} s with the port's poll"
-        " waiting; continued, ttyd took the rest and every echo came back"
-        " equal by sha256, with no fault"
+        f"with ttyd stopped for {stall:g} s, {count} echo requests of one"
+        f" random {size} byte blob each, overflow_bytes, posted at once, more"
+        " than the socket takes, as the drain timer rung shows of the same"
+        " burst; continued, ttyd took the rest and every echo came back equal"
+        " by sha256, with no fault"
     )
 
 
 # A socket that takes no bytes for the drain wait faults the port.
 def rung_drain_timer(session: PageSession) -> str:
-    blob_max: int = session.values["blob_max"]
     ttyd = session.ttyd
-    size: int = gold_value("echo_blob_bytes")
-    count = blob_max // size
+    size: int = session.values["overflow_bytes"]
+    count = gold_value("large_bytes") // size
     drain_open(session)
+    noise_make(session, size)
     ttyd.signal_send(signal.SIGSTOP)
     try:
-        session.probe_call("echo_burst", "drain", count, size)
+        session.probe_call("echo_burst", "drain", count)
         text = session.fault_wait("the fault of the wait for the drain")
     finally:
         with failure_held():
@@ -3521,9 +2851,9 @@ def rung_drain_timer(session: PageSession) -> str:
     if due not in text:
         raise CheckFailed(f"the fault screen shows {text!r}, not {due!r}")
     return (
-        f"with ttyd stopped, {count} echo requests of one {size} byte blob"
-        f" each posted at once, their blobs within blob_max {blob_max}, filled"
-        f" the socket, and the port faulted with {due!r}"
+        f"with ttyd stopped, {count} echo requests of one random {size} byte"
+        " blob each, overflow_bytes, posted at once, filled the socket past"
+        f" what it sends for the drain wait, and the port faulted with {due!r}"
     )
 
 
@@ -3577,39 +2907,6 @@ def rung_blocking_none(session: PageSession) -> str:
     )
 
 
-# A put killed inside its transaction, before its commit, leaves its file.
-def rung_kill_between(session: PageSession) -> str:
-    slots = gold_value("kill_slots")
-    options = {
-        "pool": _KILL_POOL,
-        "directory": _KILL_DIRECTORY,
-        "capacity": gold_value("kill_capacity"),
-        "slot_directory": _KILL_SLOTS_DIRECTORY,
-        "slots": slots,
-        "root": _KILL_ROOT,
-        "overflow": session.values["overflow_bytes"],
-        "compact": session.values["turn_compact_turns"],
-    }
-    session.probe_call("kill_run", options)
-    found = json_object(
-        session.probe_wait("the check after the kill", "kill_when")
-    )
-    if "fault" in found or found.get("checked") != _KILL_DUE:
-        raise CheckFailed(
-            f"the kill of a put before its commit gave {found},"
-            f" where checked {_KILL_DUE} was due"
-        )
-    return (
-        "a worker of the test bundle opened the OPFS pool"
-        f" {_KILL_POOL} and {slots} cache files, created a database and"
-        " held its put of a value over overflow_bytes inside its"
-        " transaction, its cache file and its row written and not committed;"
-        " terminated there, a second worker opened"
-        f" the same files and found {found['checked']}: no row, and"
-        " kv_check removed the one file"
-    )
-
-
 # The whole lines of a file from a byte offset on, as text.
 def lines_after(path: str, begin: int) -> str:
     with open(path, "rb") as file:
@@ -3618,50 +2915,7 @@ def lines_after(path: str, begin: int) -> str:
     return data[: data.rfind(b"\n") + 1].decode("utf-8")
 
 
-# A worker paused in the UI's stream keeps every TAP line before the pause.
-def rung_worker_hang(session: PageSession) -> str:
-    import tap_consumer
-
-    path = os.path.join(session.root, _TAP_FILE)
-    begin = os.path.getsize(path)
-    session.page_leave()
-    session.page_open()
-    seen = tap_documents(path, lines_after(path, begin))
-    while len(seen) < _TAP_DOCUMENTS:
-        what = "the first line of the UI thread's TAP document"
-        poll: float = gold_value("poll_seconds")
-        time.sleep(min(poll, session.log.timer.seconds_left(what)))
-        session.ttyd.log_poll()
-        seen = tap_documents(path, lines_after(path, begin))
-    session.browser.worker_pause(_AI_THREAD)
-    documents = tap_documents(path, lines_after(path, begin))
-    session.page_leave()
-    whole = tap_consumer.document_stats(documents[0])
-    cut = tap_consumer.document_stats(documents[1])
-    if (
-        len(documents) != _TAP_DOCUMENTS
-        or documents[0] != seen[0]
-        or not whole.well_formed
-        or cut.well_formed
-    ):
-        raise CheckFailed(
-            f"with the worker {_AI_THREAD} paused, {path} holds"
-            f" {len(documents)} documents past byte {begin}, the first well"
-            f" formed {whole.well_formed} and the second {cut.well_formed},"
-            " where the worker's whole document and the UI's cut one were"
-            " due"
-        )
-    return (
-        f"once {path} held the AI worker's TAP document and the first line"
-        f" of the UI thread's past byte {begin}, the worker {_AI_THREAD} was"
-        " paused in its debugger: the worker's document stayed whole and"
-        f" well formed, plan {whole.plan}, and the UI's, whose lines pass"
-        f" through the worker, stopped cut, its {cut.passed} points kept;"
-        " the page was left"
-    )
-
-
-# The suites root: the TypeScript suites over TAP, then the page they leave.
+# The suites root: the ttyd page's documents over TAP, then the page.
 def rungs_suites(session: PageSession) -> None:
     log = session.log
     seen: list[str] = []
@@ -3695,20 +2949,9 @@ def rungs_suites(session: PageSession) -> None:
         lambda: rung_blocking_control(session),
     )
     log.rung_run(
-        "stage 6: kill between file and row",
-        "normal-test",
-        lambda: rung_kill_between(session),
-    )
-    log.rung_run(
         "stage 5: no synchronous load on the UI thread",
         "normal-test",
         lambda: rung_blocking_none(session),
-        suites,
-    )
-    log.rung_run(
-        "stage 0: worker hang keeps the TAP lines before it",
-        "normal-test",
-        lambda: rung_worker_hang(session),
         suites,
     )
 
@@ -3770,29 +3013,12 @@ def rungs_faults(session: PageSession) -> None:
         "normal-test",
         lambda: rung_svg(session, "/rung-missing-svg.png"),
     )
-    log.rung_run(
-        "stage 0: worker fault posted",
-        "normal-test",
-        lambda: rung_posted(session),
-    )
-    log.rung_run(
-        "stage 0: worker throws at load",
-        "normal-test",
-        lambda: rung_load(session),
-    )
-    log.rung_run(
-        "stage 0: write versus append",
-        "normal-test",
-        lambda: rung_append(session),
-    )
 
 
-# The probe root of stages 5, 7 and 8: the ports on the page's main thread.
+# The probe root of stages 5 and 7: the ports on the page's main thread.
 def rungs_probe(session: PageSession, context: RunContext) -> None:
     log = session.log
     stub = stub_ready(context)
-    closed = context.closed_port
-    identifier = session.preload_add(_WORKER_STUB)
     log.rung_run(
         "stage 5: wire first line",
         "normal-test",
@@ -3817,26 +3043,6 @@ def rungs_probe(session: PageSession, context: RunContext) -> None:
     )
     log.rung_run(
         "stage 5: http preflight", "normal-test", lambda: rung_preflight(stub)
-    )
-    log.rung_run(
-        "stage 5: http text and json",
-        "normal-test",
-        lambda: rung_answers(session, stub),
-    )
-    log.rung_run(
-        "stage 5: http statuses",
-        "normal-test",
-        lambda: rung_statuses(session, stub),
-    )
-    log.rung_run(
-        "stage 5: http closed port",
-        "normal-test",
-        lambda: rung_refused(session, closed),
-    )
-    log.rung_run(
-        "stage 5: http never answers",
-        "normal-test",
-        lambda: rung_never(session, stub),
     )
     log.rung_run(
         "stage 5: http stalled body",
@@ -3864,62 +3070,9 @@ def rungs_probe(session: PageSession, context: RunContext) -> None:
         lambda: rung_worker(session, stub),
     )
     log.rung_run(
-        "stage 5: queue scheduling",
-        "normal-test",
-        lambda: rung_schedule(session),
-    )
-    log.rung_run(
-        "stage 5: queue thread port",
-        "normal-test",
-        lambda: rung_thread(session),
-    )
-    log.rung_run(
         "stage 5: queue two replies",
         "normal-test",
         lambda: rung_pair(session, stub),
-    )
-    log.rung_run(
-        "stage 5: overlay strings",
-        "normal-test",
-        lambda: rung_strings(session),
-    )
-    png = bytes(cast(list[int], session.probe_call("png_bytes")))
-    stub.png = png
-    budget: int = session.values["media_db_bytes"]
-    log.rung_run(
-        "stage 8: media png kept",
-        "normal-test",
-        lambda: rung_store(session, png, budget),
-    )
-    log.rung_run(
-        "stage 8: media download as blob 1",
-        "normal-test",
-        lambda: rung_fetch(session, stub, png, budget),
-    )
-    log.rung_run(
-        "stage 8: media network failure",
-        "normal-test",
-        lambda: rung_lost(session, closed, budget),
-    )
-    log.rung_run(
-        "stage 8: media status",
-        "normal-test",
-        lambda: rung_missing(session, stub, budget),
-    )
-    log.rung_run(
-        "stage 8: media timeout",
-        "normal-test",
-        lambda: rung_late(session, stub, budget),
-    )
-    log.rung_run(
-        "stage 8: media undecodable",
-        "normal-test",
-        lambda: rung_garbage(session, budget),
-    )
-    log.rung_run(
-        "stage 8: media eviction",
-        "normal-test",
-        lambda: rung_evict(session, png),
     )
     log.rung_run(
         "stage 5: http throwing receiver",
@@ -3959,7 +3112,6 @@ def rungs_probe(session: PageSession, context: RunContext) -> None:
         "normal-test",
         lambda: rung_closing(session, stub),
     )
-    session.preload_remove(identifier)
 
 
 # The root whose ttyd runs a main loop that never writes the first line.
@@ -3974,18 +3126,15 @@ def rungs_stalled(session: PageSession) -> None:
 
 # The root whose ttyd asks a credential, the ports on the page's thread.
 def rungs_credential(session: PageSession) -> None:
-    identifier = session.preload_add(_WORKER_STUB)
     session.log.rung_run(
         "stage 7: token with a credential",
         "normal-test",
         lambda: rung_credential(session),
     )
-    session.preload_remove(identifier)
 
 
 # The root whose ttyd runs the echo main loop, the port on the page's thread.
 def rungs_echo(session: PageSession) -> None:
-    identifier = session.preload_add(_WORKER_STUB)
     session.log.rung_run(
         "stage 5: wire drain poll",
         "normal-test",
@@ -3998,7 +3147,6 @@ def rungs_echo(session: PageSession) -> None:
         lambda: rung_drain_timer(session),
         _DRAIN_SECONDS + gold_value("rung_seconds"),
     )
-    session.preload_remove(identifier)
 
 
 # The root with debug false: the page runs nothing, the console is refused.
@@ -4016,23 +3164,24 @@ def rungs_release(session: PageSession) -> None:
     )
 
 
-# Builds the one page the first time a root of the run serves it.
-def page_ready(context: RunContext) -> None:
+# Builds the page of the name the first time a root of the run serves it.
+def page_ready(context: RunContext, page: str) -> None:
     import page_build
 
-    if _PAGE_NAME in context.built:
+    if page in context.built:
         return
-    context.log.rung_start(f"build {_PAGE_NAME}", gold_value("rung_seconds"))
-    digest = page_build.page_build(_PAGE_TEMPLATE, _PAGE_NAME)
-    context.log.setup_print(f"built {_PAGE_PATH}, sha256 {digest}")
-    context.built.add(_PAGE_NAME)
+    context.log.rung_start(f"build {page}", gold_value("rung_seconds"))
+    digest = page_build.page_build(page, page)
+    context.log.setup_print(f"built {page_path(page)}, sha256 {digest}")
+    context.built.add(page)
 
 
-# When the category runs the root: makes it, serves it, runs `body` on it.
+# When the category runs the root: makes it, serves its page, runs `body`.
 def session_run(
     context: RunContext,
     name: str,
     label: str,
+    page: str,
     overrides: dict[str, Any],
     extras: ServerExtras,
     place: Callable[[str, dict[str, Any]], None],
@@ -4041,13 +3190,15 @@ def session_run(
     log = context.log
     if not log.book.root_enter(name, label):
         return
-    page_ready(context)
-    root, index, values, gold = root_make(context.work, name, overrides)
+    page_ready(context, page)
+    root, index, values, gold = root_make(context.work, name, page, overrides)
     place(root, values)
     seconds: float = gold_value("rung_seconds")
     log.rung_start(f"ttyd for the root {name}", seconds)
     with TtydServer(root, index, values, extras, log) as ttyd:
-        session = PageSession(context.browser, log, ttyd, values, gold)
+        session = PageSession(
+            context.browser, log, ttyd, values, gold, context.realm_lines
+        )
         body(session)
         log.rung_start(f"leaving the root {name}", seconds)
         session.page_leave()
@@ -4070,18 +3221,19 @@ def stages_run(log: RungLog, work: str) -> None:
     with (
         HeldExit(contextlib.ExitStack()) as stack,
         HeldExit(
-            devtools.Browser(width, height, devtools.WindowsRelay())
+            devtools.Browser(width, height, devtools.LinuxPipe())
         ) as browser,
     ):
         browser.console_follow(console_copy)
         log.client_bind(browser.client_get())
-        context = RunContext(
-            browser, log, work, stack, [], port_closed(stack), set()
-        )
+        context = RunContext(browser, log, work, stack, [], set(), [])
+        # Before any page loads, as the headless page's start throws without.
+        browser.binding_add(_REALM_BINDING, context.realm_lines.append)
         session_run(
             context,
             "suites",
             "smoke-test",
+            _TTYD_PAGE,
             {},
             ServerExtras(*_EXTRAS_NONE),
             nothing_place,
@@ -4091,6 +3243,7 @@ def stages_run(log: RungLog, work: str) -> None:
             context,
             "faults",
             "normal-test",
+            _TTYD_PAGE,
             {},
             ServerExtras(*_EXTRAS_NONE),
             nothing_place,
@@ -4105,6 +3258,7 @@ def stages_run(log: RungLog, work: str) -> None:
             context,
             "probe",
             "normal-test",
+            _HEADLESS_PAGE,
             {},
             ServerExtras(*_EXTRAS_NONE),
             nothing_place,
@@ -4114,6 +3268,7 @@ def stages_run(log: RungLog, work: str) -> None:
             context,
             "credential",
             "normal-test",
+            _HEADLESS_PAGE,
             {},
             ServerExtras((_CREDENTIAL_OPTION, _CREDENTIAL), ()),
             nothing_place,
@@ -4123,6 +3278,7 @@ def stages_run(log: RungLog, work: str) -> None:
             context,
             "echo",
             "normal-test",
+            _HEADLESS_PAGE,
             {"debug": True},
             ServerExtras((), (_LOOP_OPTION, _ECHO_LOOP_NAME)),
             echo_place,
@@ -4132,6 +3288,7 @@ def stages_run(log: RungLog, work: str) -> None:
             context,
             "stalled",
             "normal-test",
+            _TTYD_PAGE,
             {"debug": True},
             ServerExtras((), (_LOOP_OPTION, _STALL_LOOP_NAME)),
             stall_place,
@@ -4141,6 +3298,7 @@ def stages_run(log: RungLog, work: str) -> None:
             context,
             "release",
             "normal-test",
+            _TTYD_PAGE,
             {"debug": False},
             ServerExtras(*_EXTRAS_NONE),
             nothing_place,
@@ -4150,6 +3308,7 @@ def stages_run(log: RungLog, work: str) -> None:
             context,
             "locked",
             "normal-test",
+            _TTYD_PAGE,
             {},
             ServerExtras(*_EXTRAS_NONE),
             nothing_place,
@@ -4168,9 +3327,10 @@ def main(arguments: list[str]) -> int:
 
     parser = argparse.ArgumentParser(
         prog=_PROGRAM_NAME,
-        description="Run the browser test: the TypeScript suites over TAP and"
-        " the rungs of the one page, in roots under build/, through the ttyd"
-        " the install script builds, in headless Chrome.",
+        description="Run the browser test: the ttyd page's documents over TAP"
+        " and the rungs of the ttyd page and the headless page, in roots"
+        " under build/, through the ttyd ttyd_build.py builds, in"
+        " chrome-headless-shell.",
     )
     category.options_add(parser)
     chosen: str = parser.parse_args(arguments).category
@@ -4180,9 +3340,7 @@ def main(arguments: list[str]) -> int:
     try:
         ttyd = ttyd_path()
         if not os.path.isfile(ttyd):
-            raise CheckFailed(
-                f"{ttyd} is missing: {_INSTALL_SCRIPT} builds it"
-            )
+            raise CheckFailed(f"{ttyd} is missing: {_TTYD_BUILDER} builds it")
         work = tempfile.mkdtemp(prefix=_WORK_PREFIX, dir=_BUILD_PATH)
         log.setup_print(f"the roots of this run are kept in {work}")
         stages_run(log, work)

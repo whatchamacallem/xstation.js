@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// The headless realm of one block of group B, on the page whose last
+// The headless realm of one block of group B or C, on the page whose last
 // script, a worker script, is `test_headless.realm_open()`: it runs on both
 // threads and reads `self.name`, as `test_all.suites_run()` does on the ttyd
 // page, "ai" in the worker, "" on the main thread.
@@ -29,9 +29,10 @@
 // the harness's values are set, an Empty reply answers `tap.start`, and the
 // block runs as the one block of a TAP stream, each line sent as a
 // `tap.line` push the moment it is made. A block is a unittest module, run
-// through `TAPTestRunner.module_run`, or a block of line cases, whose
-// suite's topology `line_case.block_run` runs on the gold
-// `typescript.BLOCK`.
+// through `TAPTestRunner.module_run`, a block of line cases, whose suite's
+// topology `line_case.block_run` runs on the gold `typescript.BLOCK`, or a
+// block that writes its own points as they arrive, as `test_line_case`
+// does in the Node realm.
 //
 // A worker block runs in a fresh Worker made from the texts of the
 // `data-worker` scripts and named "ai", which `boot.headless_worker` brings
@@ -141,17 +142,25 @@ namespace test_headless {
     ready: () => void,
   ) => void;
 
-  // A block: a unittest module or line cases on a thread, or of a side.
+  // A block: a unittest module, line cases or own points, or of a side.
   type Block =
     | {
         readonly side: Side;
         readonly module: () => { [name: string]: unknown };
       }
     | { readonly side: Side; readonly topology: line_case.TopologyBuild }
+    | {
+        readonly side: Side;
+        readonly run: (
+          runner: tap_producer.TAPTestRunner,
+          name: string,
+          done: (passed: boolean) => void,
+        ) => void;
+      }
     | { readonly side: "lanes"; readonly lanes: LanesBuild }
     | { readonly side: "workers"; readonly worker: WorkerRun };
 
-  // The blocks of group B by name.
+  // The blocks of groups B and C by name.
   const blocks = Object.freeze<{ readonly [name: string]: Block }>({
     test_error_overlay: { side: "ui", module: () => test_error_overlay },
     test_error_overlay_worker: {
@@ -207,6 +216,19 @@ namespace test_headless {
     test_agent_faults: {
       side: "workers",
       worker: test_agent_faults.worker_run,
+    },
+    test_integrate_wire: {
+      side: "ui",
+      topology: test_integrate_wire.topology_build,
+    },
+    test_wire_end: { side: "ui", run: test_wire_end.block_run },
+    test_worker_ai_console: {
+      side: "ui",
+      topology: test_worker_ai_console.topology_build,
+    },
+    test_tools_browser_console: {
+      side: "worker",
+      topology: test_tools_browser_console.topology_build,
     },
   });
 
@@ -270,6 +292,8 @@ namespace test_headless {
     } else if ("topology" in block) {
       const id = `${constants.gold_prefix}${name}`;
       line_case.block_run(runner, name, id, block.topology, done);
+    } else if ("run" in block) {
+      block.run(runner, name, done);
     } else {
       throw new Error("internal error");
     }

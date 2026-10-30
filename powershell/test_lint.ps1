@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
+# Offline since 2026-10-30, kept, run by nothing, and to be brought back later.
+#
 # Checks that the PowerShell files python/reformat_whitelist.txt lists have
 # LF line endings, formats them, then checks them with PSScriptAnalyzer,
 # stopping at the first file with a fault. It matches the whitelist's lines

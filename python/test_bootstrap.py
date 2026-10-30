@@ -828,7 +828,7 @@ class TestConsole(unittest.TestCase):
         self.assertFalse(child.raw_get())
         _log_absent(self, made.root)
 
-    # A dash denied a process is logged, one error line, exit 1, pty never raw.
+    # A sandbox denied a process is logged, one error line, exit 1, never raw.
     def test_console_failed(self) -> None:
         made = _level_write(_root_make(self, True), 0)
         argv = ["--root", made.root, "console"]
@@ -842,7 +842,7 @@ class TestConsole(unittest.TestCase):
         self.assertTrue(message.startswith(_SPAWN_REFUSED), message)
         self.assertEqual(_log_read(made.root), [_failure_line(message)])
 
-    # The console role with `--main-loop` is refused, raw, before dash runs.
+    # The console role with `--main-loop` is refused, raw, before any shell.
     def test_console_loop(self) -> None:
         made = _root_make(self, True)
         argv = ["--root", made.root, "console", "--main-loop", _LOOP_NAME]

@@ -1,3 +1,9 @@
+# Headless Chrome driven over the DevTools protocol by one client, the
+# Browser, on one of two transports: LinuxPipe, to chrome-headless-shell on
+# its descriptors 3 and 4, and WindowsRelay, to Chrome or Edge on Windows
+# through `powershell.exe`. WindowsRelay is offline since 2026-10-30, kept,
+# run by nothing, and to be brought back later.
+
 from collections.abc import Callable
 from typing import Any, Self
 

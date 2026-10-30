@@ -1,4 +1,4 @@
-// The headless realm of one block of group B, on the page whose last
+// The headless realm of one block of group B or C, on the page whose last
 // script, a worker script, is `test_headless.realm_open()`: on the main
 // thread it opens the lane `realm` to the driver over DevTools, and in the
 // worker named "ai" it brings the worker up by `boot.headless_worker`. The

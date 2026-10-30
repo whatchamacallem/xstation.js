@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
+# Offline since 2026-10-30, kept, run by nothing, and to be brought back later.
+#
 # Tests the parts of devtools.py that need a browser, a later suite that
 # waits on powershell.exe and on Chrome or Edge on Windows. Each test starts
 # a Browser of its own on the Windows relay, on a profile of its own, at the

@@ -2,17 +2,26 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests the console role in debug mode, which runs dash: each run of
-# `bootstrap_run` is a forked child whose controlling tty, stdin, stdout and
-# stderr are a new pty of `pty.openpty`, as ttyd runs it, with its
-# environment set in the child, and the test types a command line to the
-# shell on the other side of the pty. Dash runs in the root with only the
-# variables the console keeps, at the shell's verbose level of the settings,
-# its code given back, 128 plus the signal when a signal ended it. The
-# expected texts are the gold's. The scratch directories go under build/.
+# Tests the console role in debug mode, which runs the console's shell, dash
+# in its bubblewrap sandbox: each run of `bootstrap_run` is a forked child
+# whose controlling tty, stdin, stdout and stderr are a new pty of
+# `pty.openpty`, as ttyd runs it, with its environment set in the child, and
+# the test types a command line to the shell on the other side of the pty
+# once its first prompt has come. The test reads only what the shell prints
+# on the pty, from its first prompt on, and finds a command's output between
+# two markers that `printf` escapes make, so that no echo of the input holds
+# them. Dash starts in the sandbox's /tmp with only the variables the
+# console keeps, at the shell's verbose level of the settings, its code
+# given back; SIGTERM sent from outside to the sandbox the console role
+# forked, found by its parent pid in /proc, gives 128 plus the signal; and a
+# heredoc of binary bytes typed to `cat` comes back as the pty's output
+# processing changes it, so that a connection that is not binary fails. The
+# logged argv, the prompt, the start directory, the codes of the terminated
+# sandbox, the heredoc's payload and output, and the expected texts are the
+# gold's. The scratch directories go under build/.
 
-import bootstrap, contextlib, errno, harness, json, os, pty, signal, sqlite3
-import sys, tempfile, termios, traceback, unittest
+import base64, bootstrap, contextlib, errno, harness, json, os, pty, signal
+import sqlite3, sys, tempfile, termios, traceback, unittest
 from typing import NamedTuple
 
 # The checkout's top directory, above this file's `python/`.
@@ -26,6 +35,39 @@ _GOLD_ID = "python.test_bootstrap_dash"
 
 # The most bytes a read of the pty takes at once.
 _READ_BYTES: int = harness.gold_get(f"{_GOLD_ID}.read_bytes")
+
+# The test's own copy of the console's shell, as the log names it.
+_DASH_ARGV: list[str] = harness.gold_get(f"{_GOLD_ID}.argv")
+
+# The test's own copy of the shell's verbose form.
+_DASH_VERBOSE: list[str] = harness.gold_get(f"{_GOLD_ID}.argv_verbose")
+
+# The prompt dash writes when it waits for a command.
+_PROMPT: bytes = harness.gold_get(f"{_GOLD_ID}.prompt").encode("utf-8")
+
+# The directory dash starts in, the sandbox's own.
+_START_DIRECTORY: str = harness.gold_get(f"{_GOLD_ID}.start_directory")
+
+# The heredoc's lines: every byte value dash keeps, and bad UTF 8 sequences.
+_PAYLOAD = base64.b64decode(harness.gold_get(f"{_GOLD_ID}.binary.payload.d"))
+
+# What the pty prints of the payload, after its output processing.
+_OUTPUT = base64.b64decode(harness.gold_get(f"{_GOLD_ID}.binary.output.d"))
+
+# The bytes the pty's line discipline acts on, each typed after `_LNEXT`.
+_ACTED: list[int] = harness.gold_get(f"{_GOLD_ID}.binary.acted")
+
+# The line discipline's literal next, which makes the byte after it plain.
+_LNEXT = b"\x16"
+
+# The heredoc's delimiter, quoted on the command line so that nothing expands.
+_HEREDOC_END = "END"
+
+# The marker the output of a command starts after.
+_MARK_START = b"<<B>>"
+
+# The marker the output of a command ends before.
+_MARK_END = b"<<E>>"
 
 # The environment variable that once held the provider key, a setting.
 _PROVIDER_VARIABLE: str = harness.setting_get("provider.variable")
@@ -62,17 +104,8 @@ _FOUND_VALUES = [
     _UNSET_TEXT,
 ]
 
-# The file, in the directory the shell runs in, that it prints to.
-_FOUND_NAME = "found.txt"
-
 # The code the shell exits with after printing what it found.
 _FOUND_CODE = 3
-
-# The program the console runs.
-_DASH_ARGV = ["/bin/dash"]
-
-# The verbose form of the program the console runs.
-_DASH_VERBOSE = ["/bin/dash", "-v"]
 
 # The command line that ends the shell with code 0.
 _EXIT_COMMAND = b"exit 0\n"
@@ -82,6 +115,24 @@ _KILL_COMMAND = b"kill -KILL $$\n"
 
 # The code a shell gives a program a signal ended: this plus the signal.
 _SIGNAL_BASE = 128
+
+# The console role's code once SIGTERM from outside ended its sandbox.
+_TERMINATED_CODE: int = harness.gold_get(f"{_GOLD_ID}.terminated.code")
+
+# The code `verbose.exec` logs for that sandbox, minus the signal.
+_TERMINATED_EXEC: int = harness.gold_get(f"{_GOLD_ID}.terminated.exec_code")
+
+# The verbose level that logs the shell's start and exit, not verbose.
+_LOGGED_LEVEL = 1
+
+# The directory of the processes, each under its pid.
+_PROC_PATH = "/proc"
+
+# The file of a process that holds its parent's pid.
+_STATUS_NAME = "status"
+
+# The start of the line of that file which holds the parent's pid.
+_PPID_FIELD = b"PPid:"
 
 # The file in the root that holds the log.
 _LOG_NAME = "_verbose.sqlite"
@@ -113,12 +164,35 @@ def _text_get(name: str, *values: str) -> str:
     return text
 
 
-# The command line that prints the variables and the directory to the file.
+# The `printf` escapes of the bytes, which print them and never hold them.
+def _escapes_make(data: bytes) -> str:
+    return "".join(f"\\{value:03o}" for value in data)
+
+
+# The command line printing a marker, the command's output, a marker, `then`.
+def _marked_line(command: str, then: str) -> bytes:
+    start = _escapes_make(_MARK_START)
+    end = _escapes_make(_MARK_END)
+    text = f"printf '{start}'; {command}; printf '{end}'; {then}\n"
+    return text.encode("utf-8")
+
+
+# The command line that prints the variables and the directory, then exits.
 def _found_command() -> bytes:
     words = [f'"${{{name}-{_UNSET_TEXT}}}"' for name in _FOUND_VARIABLES]
-    printed = f"printf '%s\\n' {' '.join(words)} > {_FOUND_NAME}"
-    text = f"{printed}; pwd -P >> {_FOUND_NAME}; exit {_FOUND_CODE}\n"
-    return text.encode("utf-8")
+    printed = f"printf '%s\\n' {' '.join(words)}; pwd -P"
+    return _marked_line(printed, f"exit {_FOUND_CODE}")
+
+
+# The heredoc to `cat` of the payload as typed, then the shell's exit.
+def _heredoc_typed(payload: bytes) -> bytes:
+    typed = bytearray(_marked_line(f"cat <<'{_HEREDOC_END}'", "exit 0"))
+    for value in payload:
+        if value in _ACTED:
+            typed += _LNEXT
+        typed.append(value)
+    typed += f"{_HEREDOC_END}\n".encode("utf-8")
+    return bytes(typed)
 
 
 # The log lines of the shell's run and of its exit with the code.
@@ -192,17 +266,21 @@ class ConsoleChild:
         self.pid = pid
         self.master = master
         self.reaped = False
+        self.printed = bytearray()
+        self.prompted = 0
         case.addCleanup(self.cleanup)
 
-    # Reads what the child wrote, empty once no process holds its side.
+    # Reads and keeps what the child wrote, empty once no process holds it.
     def bytes_read(self) -> bytes:
         try:
-            return os.read(self.master, _READ_BYTES)
+            data = os.read(self.master, _READ_BYTES)
         except OSError as error:
             # Linux reads EIO from a pty whose other side no process holds.
             if error.errno != errno.EIO:
                 raise
             return b""
+        self.printed += data
+        return data
 
     # Writes all the bytes to the child, as typed.
     def bytes_write(self, data: bytes) -> None:
@@ -210,6 +288,43 @@ class ConsoleChild:
         while view:
             written = os.write(self.master, view)
             view = view[written:]
+
+    # Reads up to the shell's first prompt, where every comparison starts.
+    def prompt_wait(self) -> None:
+        while _PROMPT not in self.printed:
+            if not self.bytes_read():
+                raise AssertionError(f"no prompt: {bytes(self.printed)!r}")
+        self.prompted = self.printed.index(_PROMPT)
+
+    # The pid of the one process the console role forked, its sandbox.
+    def sandbox_find(self) -> int:
+        found: list[int] = []
+        for name in os.listdir(_PROC_PATH):
+            if not name.isdigit():
+                continue
+            path = os.path.join(_PROC_PATH, name, _STATUS_NAME)
+            try:
+                with open(path, "rb") as file:
+                    lines = file.read().splitlines()
+            except (FileNotFoundError, ProcessLookupError):
+                # A process may end between the listing and the read.
+                continue
+            for line in lines:
+                if line.startswith(_PPID_FIELD):
+                    if int(line[len(_PPID_FIELD) :]) == self.pid:
+                        found.append(int(name))
+        if len(found) != 1:
+            raise AssertionError(f"the children of {self.pid}: {found}")
+        return found[0]
+
+    # The bytes printed between the markers, from the first prompt on.
+    def marked_get(self) -> bytes:
+        shown = bytes(self.printed[self.prompted :])
+        start = shown.find(_MARK_START)
+        end = shown.find(_MARK_END, start + len(_MARK_START))
+        if start < 0 or end < 0:
+            raise AssertionError(f"no markers: {shown!r}")
+        return shown[start + len(_MARK_START) : end]
 
     # Whether the pty is raw: no line editing, no echo, no output processing.
     def raw_get(self) -> bool:
@@ -242,20 +357,18 @@ class ConsoleChild:
         os.close(self.master)
 
 
-# Tests the console role, which runs dash in debug mode.
+# Tests the console role, which runs the sandboxed dash in debug mode.
 class TestConsole(unittest.TestCase):
-    # Dash runs in the root with only the kept variables, its code given back.
+    # Dash starts in its own /tmp with only the kept variables, its code back.
     def test_console_scrubbed(self) -> None:
         made = _root_make(self, harness.setting_get("verbose_level"))
         child = ConsoleChild(self, made)
+        child.prompt_wait()
         child.bytes_write(_found_command())
         self.assertEqual(child.run_end(), repr(_FOUND_CODE))
         self.assertFalse(child.raw_get())
-        path = os.path.join(made.root, _FOUND_NAME)
-        with open(path, encoding="utf-8") as file:
-            lines = file.read().splitlines()
-        self.assertEqual(lines[:-1], _FOUND_VALUES)
-        self.assertTrue(os.path.samefile(lines[-1], made.root))
+        lines = child.marked_get().decode("utf-8").splitlines()
+        self.assertEqual(lines, [*_FOUND_VALUES, _START_DIRECTORY])
 
     # Dash runs at the verbose level of the settings, and its verbose form.
     def test_console_level(self) -> None:
@@ -267,14 +380,35 @@ class TestConsole(unittest.TestCase):
         for level, expected in enumerate(logged):
             made = _root_make(self, level)
             child = ConsoleChild(self, made)
+            child.prompt_wait()
             child.bytes_write(_EXIT_COMMAND)
             self.assertEqual(child.run_end(), repr(0))
             self.assertEqual(_log_read(made.root), expected)
 
-    # A dash a signal ended gives the shell's code, 128 plus the signal.
+    # A dash a signal ended gives its sandbox's code, 128 plus the signal.
     def test_console_signal(self) -> None:
         made = _root_make(self, harness.setting_get("verbose_level"))
         child = ConsoleChild(self, made)
+        child.prompt_wait()
         child.bytes_write(_KILL_COMMAND)
         code = _SIGNAL_BASE + signal.SIGKILL
         self.assertEqual(child.run_end(), repr(code))
+
+    # SIGTERM from outside to the sandbox gives 128 plus it, and is logged.
+    def test_console_terminated(self) -> None:
+        made = _root_make(self, _LOGGED_LEVEL)
+        child = ConsoleChild(self, made)
+        child.prompt_wait()
+        os.kill(child.sandbox_find(), signal.SIGTERM)
+        self.assertEqual(child.run_end(), repr(_TERMINATED_CODE))
+        expected = _exec_lines(_DASH_ARGV, _TERMINATED_EXEC)
+        self.assertEqual(_log_read(made.root), expected)
+
+    # A heredoc of binary bytes to `cat` comes back as the pty prints them.
+    def test_console_binary(self) -> None:
+        made = _root_make(self, harness.setting_get("verbose_level"))
+        child = ConsoleChild(self, made)
+        child.prompt_wait()
+        child.bytes_write(_heredoc_typed(_PAYLOAD))
+        self.assertEqual(child.run_end(), repr(0))
+        self.assertEqual(child.marked_get(), _OUTPUT)

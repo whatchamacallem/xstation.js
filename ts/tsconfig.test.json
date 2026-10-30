@@ -53,6 +53,7 @@
     "test_wire.ts",
     "test_wire_port.ts",
     "test_wire_end.ts",
+    "test_integrate_wire.ts",
     "test_media.ts",
     "test_media_cache.ts",
     "test_integrate_media.ts",

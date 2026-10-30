@@ -11,13 +11,16 @@
 # refuses any reply. The browser's `error` line, its failure, goes to
 # `engine_tap.error_take`, then the loop exits 1 with nothing written back:
 # the browser waits for the server to end, which ttyd's close of the socket
-# gives it. A `tap.line` is appended through `engine_tap`, and an `echo` is
-# answered with the payload of its request and the bytes of each of its
-# blobs, a blob over overflow_bytes going through a file in the root's cache
-# directory both ways. A failure of its own writes one error line and exits
-# 1, as the stock main loop does.
+# gives it. A `tap.line` is appended through `engine_tap`; the page's
+# `verbose.put` and `verbose.tail` are served through `engine_verbose`, as
+# the stock main loop serves them, since the page sends its threads' lines
+# in debug mode; and an `echo` is answered with the payload of its request
+# and the bytes of each of its blobs, a blob over overflow_bytes going
+# through a file in the root's cache directory both ways. A failure of its
+# own writes one error line and exits 1, as the stock main loop does.
 
-import dispatch, engine_tap, functools, jslb, os, select, settings, uuid
+import dispatch, engine_tap, engine_verbose, functools, jslb, os, select
+import settings, uuid
 from internationalization import i18n
 from typing import Any, NoReturn, cast
 
@@ -143,6 +146,7 @@ def loop_run(read_fd: int, write_fd: int, root: str) -> None:
     values = cast(dict[str, Any], _STATE.values)
     dispatch.handler_register(_ECHO_TYPE, _ECHO_VERSION, echo_reply)
     engine_tap.handlers_register(root)
+    engine_verbose.handlers_register(values["debug"])
     decoder = jslb.LineDecoder(
         values["line_max"],
         values["blob_max"],

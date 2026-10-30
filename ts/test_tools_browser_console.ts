@@ -2,409 +2,232 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the browser's tool `console_run` past its permit, group C: the
-// console shown first as ctrl 0 shows it, the command typed into tty 0 and
-// its output read back until the prompt or the timeout, and the permits
-// asked and allowed always. A server double, a store double and a queue
-// double stand in for the server, the store and the queue, as no realm
-// without ttyd has the console on tty 0, so this module runs only on the
-// ttyd page. The lines the test sends and expects are the gold of
-// test_settings.json. The provider key is set by provider.key_set.
+// The line cases of the browser's tool `console_run`, group C, in a fresh
+// worker of the headless page that the block's own ttyd serves: `mcp` lines
+// through a real queue of thread `ai`, whose `mcp` handler hands each one to
+// a real `mcp.Server` that holds the tools of `tools_browser` over a real
+// `substrate.Store` on the realm's sqlite3 module and pool, with
+// `worker_ai.console_register` on the same queue and a real
+// `wire.ConsolePort` at the page's address as its `console` owner, which
+// types into dash on ttyd's tty 0 through the console's shell. The queue's
+// owners are the AI thread's, with `mcp` its own. Its `server` and `ui`
+// lanes each end in this file's junction, joined by linked local ports, and
+// the test's end is a real `queue.ThreadPort` over a MessageChannel whose
+// other end the junction holds. A case's `mcp` line goes on the `server`
+// lane and every other line it sends on the `ui` lane, so tty 0 is opened
+// from the UI's side as the console view opens it. Every line of the
+// `server` lane goes to the test's end, and every line of the `ui` lane but
+// `console.output`, tty 0's output, which is not compared; a request of the
+// `ui` lane also goes to the scripted UI, a second real queue of thread `ui`
+// in synchronous mode joined by linked local ports, whose handlers, this
+// file's functions, answer `permit.ask` by its number with the gold's
+// `permit_accept` or `permit_always` and `console.show` with the gold's
+// Empty reply, which go back on the `ui` lane. The junction holds the
+// cases' `mcp` lines until dash's first prompt has shown in tty 0's output,
+// so that each command's read starts after it. The port's close receiver,
+// this file's own, pushes the end of tty 0 to the UI as `console.exit`,
+// though no case closes it. The cases, the gold of the block's id: tty 0
+// opened and ttyd's token back; ttyd's first message sent with the gold's
+// size, then `echo hi` asked, accepted, shown, typed and read back to the
+// prompt; `echo 2` asked again with the next number; `echo 3` allowed
+// always; `pwd` with no ask; and `sleep 600` read until the tool's timeout.
 
 namespace test_tools_browser_console {
-  // Finishes a tool's result from the state and replies of its wake.
-  type WakeFinish = (
-    state: unknown,
-    replies: lines.Line[],
-  ) => mcp.ToolResult | dispatch.Sleep;
+  // The initialized sqlite3.wasm module, a global the test page sets.
+  declare const test_sqlite3: substrate.SqliteModule;
 
-  // A line a tool sent: the line, its owner and, for a request, its id.
-  interface SentLine {
-    line: lines.Line;
-    owner: queue.ThreadName | undefined;
-    id: number | undefined;
-  }
+  // Its installed OPFS SAH pool, a global the test page sets.
+  declare const test_pool: substrate.SqlitePool;
 
-  // What a double gives for one call: the value the test chose, or a throw.
-  type Answer = { value: unknown } | { error: Error };
+  // The test slots, files cleared at start that no cache holds.
+  declare const test_slots: substrate.SlotHandle[];
 
-  // One call a double was given: the method's name and its arguments.
-  type Call = [string, unknown[]];
-
-  // The doubles one test registers the tools on.
-  interface ToolBench {
-    store: StoreDouble;
-    server: ServerDouble;
-    tasks: TasksDouble;
-  }
-
-  // The names, texts and data the tests use.
+  // The gold, the threads, the types, the settings and the store's names.
   const constants = Object.freeze({
-    // The id of this module's gold in `test_settings.json`.
     gold_id: "typescript.test_tools_browser_console",
-    // The store's methods the tools and the script module call or bind.
-    store_methods: Object.freeze<readonly string[]>([
-      "sql_run",
-      "db_list",
-      "db_create",
-      "db_drop",
-      "kv_get",
-      "kv_put",
-      "kv_delete",
-      "kv_list",
-      "doc_get",
-      "doc_put",
-      "doc_head",
-      "turn_append",
-      "turn_list",
-      "turn_compact",
-      "transaction_run",
-      "sink",
-    ]),
-    // A synthetic provider key, which every image request carries.
-    key: "xai-SYNTHETIC-KEY",
-    // The provider's address and models a hello carries when not scripted.
-    info: Object.freeze<lines.ProviderInfo>({
-      base_url: "https://api.x.ai/v1",
-      chat_model: "grok-4",
-      image_model: "grok-2-image",
-    }),
-    // The owner the image requests go to.
-    provider_owner: "http" as const,
-    // The input message of ttyd's protocol that types `echo hi`.
-    console_input: "0echo hi\n",
-    // The result of `console_run` for the output of `echo hi`, trimmed.
-    console_result: '{"output":"hi\\n","timed_out":false}',
+    thread: "ai" as const,
+    server_thread: "server" as const,
+    ui_thread: "ui" as const,
+    console_thread: "console" as const,
+    provider_thread: "http" as const,
+    line_type: "mcp",
+    permit_type: "permit.ask",
+    show_type: "console.show",
+    output_type: "console.output",
+    exit_type: "console.exit",
+    handler_version: 0,
+    synchronous_setting: "queue_synchronous",
+    overflow_setting: "overflow_bytes",
+    compact_setting: "turn_compact_turns",
+    root: "/test_tools_browser_console",
+    server_name: "xsjs-browser",
+    version: "0",
+    // The path of the page that ttyd serves, below the origin.
+    page_path: "/",
   });
 
-  // A copy of a value of this module's gold, which the harness keeps frozen.
+  // A copy of a value of this block's gold, which the harness keeps frozen.
   function gold_value(name: string): unknown {
     return structuredClone(harness.gold_get(`${constants.gold_id}.${name}`));
   }
 
-  // A copy of a line of this module's gold, a run time part set on the copy.
-  function gold_line(name: string): lines.Line {
-    return gold_value(`lines.${name}`) as lines.Line;
+  // The payload of a reply line of the gold that the scripted UI answers.
+  function far_payload(name: string): { [key: string]: unknown } {
+    return jslb.payload_of(gold_value(`far.${name}`) as lines.Line);
   }
 
-  // A copy of a reply line of the gold, to the request of the id.
-  function reply_gold(name: string, id: number): lines.Line {
-    const line = gold_line(name);
-    line[0].r = id;
-    return line;
+  // The type of a line.
+  function type_of(line: lines.Line): unknown {
+    return jslb.field_get(line[0], "type");
   }
 
-  // The line of the gold that types a message into tty 0, its blob set.
-  function input_line(typed: string): lines.Line {
-    const data = new TextEncoder().encode(typed);
-    const line = gold_line("console_input");
-    line[1] = { size: data.length, d: data };
-    return line;
+  // The scripted UI, a real queue in synchronous mode, and the junction's port.
+  function far_make(): queue.LocalPort {
+    const owners: queue.OwnerTable = {
+      [constants.permit_type]: constants.ui_thread,
+      [constants.show_type]: constants.ui_thread,
+    };
+    const far = new queue.TaskQueue(constants.ui_thread, owners, true);
+    const version = constants.handler_version;
+    // Answers an ask with the gold's choice for its number, the number kept.
+    dispatch.handler_register(constants.permit_type, version, (line) => {
+      const permit = jslb.payload_of(line).permit;
+      const name = gold_value(`far.choices.${String(permit)}`) as string;
+      return dispatch.reply_make(line, { ...far_payload(name), permit });
+    });
+    // Answers a show with the gold's Empty reply, as the shown console does.
+    dispatch.handler_register(constants.show_type, version, (line) =>
+      dispatch.reply_make(line, far_payload("show_reply")),
+    );
+    const near = new queue.LocalPort();
+    far.port_add(constants.thread, new queue.LocalPort(near));
+    return near;
   }
 
-  // A settings reader: the test's own values for some ids, else the harness.
-  function reader_make(values: {
-    [id: string]: unknown;
-  }): (id: string) => unknown {
-    return (id: string) =>
-      Object.hasOwn(values, id) ? values[id] : harness.setting_get(id);
-  }
-
-  // Keeps each call and gives the next answer the test added for its method.
-  class CallDouble {
-    // The calls, in order.
-    readonly calls: Call[] = [];
-    // The answers not yet given, by method.
-    readonly #answers = new Map<string, Answer[]>();
-
-    // Adds the answer of a later call of the method, after those added.
-    answer_add(name: string, answer: Answer): void {
-      const left = this.#answers.get(name);
-      if (left === undefined) {
-        this.#answers.set(name, [answer]);
+  // Joins the test's end to the queue's two lanes and to the scripted UI.
+  function lanes_join(
+    end: queue.ThreadPort,
+    server: queue.LocalPort,
+    ui: queue.LocalPort,
+    far: queue.LocalPort,
+  ): void {
+    const kind = gold_value("output_kind") as string;
+    const prompt = gold_value("prompt") as string;
+    // tty 0's output until dash's first prompt has shown in it, then nothing.
+    let output: string | undefined = "";
+    // The cases' `mcp` lines that wait for that prompt, in order.
+    const held: lines.Line[] = [];
+    // Keeps the output of a message of tty 0, then posts the held lines.
+    const output_scan = (line: lines.Line): void => {
+      if (output === undefined) {
+        return;
+      }
+      const blob = line[1] as lines.BlobHeader;
+      const data = jslb.field_get(blob, "data") as Uint8Array;
+      if (String.fromCharCode(data[0]) !== kind) {
+        return;
+      }
+      let text = output;
+      for (const byte of data.subarray(1)) {
+        text += String.fromCharCode(byte);
+      }
+      if (!text.includes(prompt)) {
+        output = text;
+        return;
+      }
+      output = undefined;
+      for (const waiting of held.splice(0)) {
+        server.line_post(waiting, []);
+      }
+    };
+    // A case's `mcp` line goes on the server lane once the prompt showed.
+    end.line_receive((line) => {
+      if (type_of(line) !== constants.line_type) {
+        ui.line_post(line, []);
+      } else if (output === undefined) {
+        server.line_post(line, []);
       } else {
-        left.push(answer);
+        held.push(line);
       }
-    }
-
-    // Keeps the call and gives its answer, or throws when none is left.
-    call_answer(name: string, values: unknown[]): unknown {
-      this.calls.push([name, values]);
-      const left = this.#answers.get(name);
-      const answer = left === undefined ? undefined : left.shift();
-      if (answer === undefined) {
-        throw new Error(`the double has no answer for a call of ${name}`);
+    });
+    server.line_receive((line) => {
+      end.line_post(line, []);
+    });
+    // A line of the UI lane: a request to the test's end and the scripted UI.
+    ui.line_receive((line) => {
+      if (type_of(line) === constants.output_type) {
+        output_scan(line);
+        return;
       }
-      if ("error" in answer) {
-        throw answer.error;
+      end.line_post(line, []);
+      if (jslb.field_get(line[0], "id") !== undefined) {
+        far.line_post(line, []);
       }
-      return answer.value;
-    }
+    });
+    far.line_receive((line) => {
+      ui.line_post(line, []);
+    });
   }
 
-  // A store double with every method the tools and the script module call.
-  class StoreDouble extends CallDouble {
-    // Makes each method of the store keep its call and give its answer.
-    constructor() {
-      super();
-      const methods = this as unknown as { [name: string]: unknown };
-      for (const name of constants.store_methods) {
-        methods[name] = (...values: unknown[]): unknown =>
-          this.call_answer(name, values);
-      }
-    }
-  }
-
-  // A server double that keeps the tools and the wakes registered on it.
-  class ServerDouble {
-    // The tools, in the order they were registered.
-    readonly tools: mcp.Tool[] = [];
-    // The function of each tool, by name.
-    readonly runs = new Map<string, mcp.ToolFn>();
-    // The function of each wake, by type.
-    readonly wakes = new Map<string, WakeFinish>();
-
-    // Keeps a tool and its function.
-    tool_register(tool: mcp.Tool, fn: mcp.ToolFn): void {
-      this.tools.push(tool);
-      this.runs.set(tool.name, fn);
-    }
-
-    // Keeps a wake type and its function.
-    wake_register(then_type: string, fn: WakeFinish): void {
-      this.wakes.set(then_type, fn);
-    }
-  }
-
-  // A queue double that keeps each line and gives the ids the test picked.
-  class TasksDouble {
-    // The lines sent, in order.
-    readonly sent: SentLine[] = [];
-    // The ids not yet given, in the order the requests get them.
-    readonly #ids: number[];
-
-    // Keeps the ids the test picked for the requests to come.
-    constructor(ids: number[]) {
-      this.#ids = [...ids];
-    }
-
-    // Keeps a request and gives it the next id, or throws when none is left.
-    task_submit(line: lines.Line, owner?: queue.ThreadName): number {
-      const id = this.#ids.shift();
-      if (id === undefined) {
-        throw new Error("the queue double has no id left for a request");
-      }
-      this.sent.push({ line, owner, id });
-      return id;
-    }
-
-    // Keeps a notification.
-    line_notify(line: lines.Line, owner?: queue.ThreadName): void {
-      this.sent.push({ line, owner, id: undefined });
-    }
-  }
-
-  // A tool test: the provider key set, the tools on new doubles.
-  class ToolCase extends unittest.TestCase {
-    // Sets the provider key, which the image requests carry.
-    setUp(): void {
-      provider.key_set(constants.key);
-    }
-
-    // The tools registered on new doubles, the queue giving the ids picked.
-    bench_make(
-      ids: number[],
-      values: { [id: string]: unknown } = {},
-    ): ToolBench {
-      const store = new StoreDouble();
-      const server = new ServerDouble();
-      const tasks = new TasksDouble(ids);
-      tools_browser.tools_register(
-        server as unknown as mcp.Server,
-        store as unknown as substrate.Store,
-        tasks as unknown as queue.TaskQueue,
-        constants.provider_owner,
-        constants.info,
-        reader_make(values),
-      );
-      return { store, server, tasks };
-    }
-
-    // Runs a tool by name on its arguments.
-    tool_run(
-      bench: ToolBench,
-      name: string,
-      args: { [key: string]: unknown },
-    ): mcp.ToolResult | dispatch.Sleep {
-      const fn = bench.server.runs.get(name) as mcp.ToolFn;
-      return fn(args);
-    }
-
-    // Runs the wake a sleep names with the replies it waited for.
-    wake_run(
-      bench: ToolBench,
-      sleep: dispatch.Sleep,
-      replies: lines.Line[],
-    ): mcp.ToolResult | dispatch.Sleep {
-      const fn = bench.server.wakes.get(sleep.then_type) as WakeFinish;
-      return fn(sleep.state, replies);
-    }
-
-    // The result a tool or a wake returned, which must be no sleep.
-    result_of(value: mcp.ToolResult | dispatch.Sleep): mcp.ToolResult {
-      this.assertTrue("content" in value, "a result was expected");
-      return value as mcp.ToolResult;
-    }
-
-    // The text of a result that holds one text block and is no error.
-    text_of(value: mcp.ToolResult | dispatch.Sleep): string {
-      const result = this.result_of(value);
-      this.assertFalse("isError" in result);
-      this.assertEqual(result.content.length, 1);
-      const block = result.content[0];
-      this.assertEqual(block.type, "text");
-      return (block as { type: "text"; text: string }).text;
-    }
-
-    // A sleep of the type, waiting on exactly the requests sent from `start`.
-    sleep_check(
-      bench: ToolBench,
-      value: mcp.ToolResult | dispatch.Sleep,
-      start: number,
-      then_type: string,
-    ): dispatch.Sleep {
-      this.assertTrue("then_type" in value, "a sleep was expected");
-      const sleep = value as dispatch.Sleep;
-      this.assertEqual(sleep.then_type, then_type);
-      const ids = bench.tasks.sent
-        .slice(start)
-        .filter((entry) => entry.id !== undefined)
-        .map((entry) => entry.id);
-      this.assertEqual(sleep.wait_ids, ids);
-      return sleep;
-    }
-  }
-
-  // The tool that runs a command line in the debug console.
-  export class TestConsole extends ToolCase {
-    // Runs the tool on a command and returns its sleep on the permit.
-    permit_start(bench: ToolBench, text: string): dispatch.Sleep {
-      const start = bench.tasks.sent.length;
-      return this.sleep_check(
-        bench,
-        this.tool_run(bench, "console_run", { text, timeout_seconds: 5 }),
-        start,
-        "tools.permit_reply",
-      );
-    }
-
-    // The permit's reply of the gold, to the last request sent.
-    choice_make(bench: ToolBench, name: string): lines.Line {
-      const ask = bench.tasks.sent[bench.tasks.sent.length - 1];
-      const reply = reply_gold(name, ask.id as number);
-      reply.permit = ask.line.permit;
-      return reply;
-    }
-
-    // The sleep on the `console.show` sent at `start`, then on the read.
-    show_answer(
-      bench: ToolBench,
-      value: mcp.ToolResult | dispatch.Sleep,
-      start: number,
-    ): dispatch.Sleep {
-      const wake = "tools.show_reply";
-      const showing = this.sleep_check(bench, value, start, wake);
-      const show = bench.tasks.sent[start];
-      this.assertEqual(show.owner, "ui");
-      this.assertEqual(show.line, gold_line("console_show"));
-      const shown = reply_gold("show_reply", show.id as number);
-      return this.sleep_check(
-        bench,
-        this.wake_run(bench, showing, [shown]),
-        start + 1,
-        "tools.console_reply",
-      );
-    }
-
-    // A command asks, shows the console, runs and returns its output trimmed.
-    test_console_recorded(): void {
-      const bench = this.bench_make([41, 42, 43]);
-      const asked = this.permit_start(bench, "echo hi");
-      const ask = bench.tasks.sent[0];
-      this.assertEqual(ask.owner, "ui");
-      this.assertEqual(ask.line, gold_line("permit_ask"));
-      const accepted = this.choice_make(bench, "permit_accept");
-      const reading = this.show_answer(
-        bench,
-        this.wake_run(bench, asked, [accepted]),
-        1,
-      );
-      const [input, read] = bench.tasks.sent.slice(2);
-      this.assertEqual(input.owner, "console");
-      this.assertEqual(input.id, undefined);
-      this.assertEqual(input.line, input_line(constants.console_input));
-      this.assertEqual(read.owner, "console");
-      this.assertEqual(read.line, gold_line("console_read"));
-      const output = reply_gold("read_reply", read.id as number);
-      const result = this.wake_run(bench, reading, [output]);
-      this.assertEqual(this.text_of(result), constants.console_result);
-    }
-
-    // Always Allow shows and runs this command and every later one, no ask.
-    test_permit_always(): void {
-      const bench = this.bench_make([45, 46, 47, 48, 49]);
-      const asked = this.permit_start(bench, "echo hi");
-      const always = this.choice_make(bench, "permit_always");
-      this.show_answer(bench, this.wake_run(bench, asked, [always]), 1);
-      this.show_answer(
-        bench,
-        this.tool_run(bench, "console_run", {
-          text: "pwd",
-          timeout_seconds: 5,
-        }),
-        4,
-      );
-      const later = bench.tasks.sent.slice(4).map((entry) => entry.line);
-      this.assertEqual(later, [
-        gold_line("console_show"),
-        input_line("0pwd\n"),
-        gold_line("console_read"),
-      ]);
-    }
-
-    // Each permit asked has the next number, and Accept lasts one command.
-    test_permits_counted(): void {
-      const bench = this.bench_make([51, 52, 53, 54, 55, 56]);
-      for (const number of [1, 2]) {
-        const start = bench.tasks.sent.length;
-        const asked = this.permit_start(bench, `echo ${number}`);
-        const ask = bench.tasks.sent[start];
-        this.assertEqual(ask.line.permit, number);
-        this.show_answer(
-          bench,
-          this.wake_run(bench, asked, [
-            this.choice_make(bench, "permit_accept"),
-          ]),
-          start + 1,
-        );
-      }
-    }
-
-    // A read that timed out keeps the output after the echo, with no prompt.
-    test_console_expired(): void {
-      const bench = this.bench_make([57, 58, 59]);
-      const asked = this.permit_start(bench, "sleep 600");
-      const accepted = this.choice_make(bench, "permit_accept");
-      const reading = this.show_answer(
-        bench,
-        this.wake_run(bench, asked, [accepted]),
-        1,
-      );
-      const read = bench.tasks.sent[3];
-      const output = reply_gold("read_reply_expired", read.id as number);
-      const result = this.wake_run(bench, reading, [output]);
-      this.assertEqual(this.text_of(result), gold_value("result_expired"));
-    }
+  // The tool and the relays on a real queue, store, server and console port.
+  export function topology_build(): queue.ThreadPort {
+    const synchronous = harness.setting_get(
+      constants.synchronous_setting,
+    ) as boolean;
+    const owners: queue.OwnerTable = {
+      ...worker_ai.owners_make(),
+      [constants.line_type]: constants.thread,
+    };
+    const tasks = new queue.TaskQueue(constants.thread, owners, synchronous);
+    const store = new substrate.Store(
+      test_sqlite3,
+      test_pool,
+      new substrate.CacheFiles([...test_slots]),
+      constants.root,
+      harness.setting_get(constants.overflow_setting) as number,
+      harness.setting_get(constants.compact_setting) as number,
+      tasks,
+    );
+    const server = new mcp.Server(constants.server_name, constants.version);
+    tools_browser.tools_register(
+      server,
+      store,
+      tasks,
+      constants.provider_thread,
+      gold_value("info") as lines.ProviderInfo,
+      harness.setting_get,
+    );
+    dispatch.handler_register(
+      constants.line_type,
+      constants.handler_version,
+      (line) => server.line_handle(line),
+    );
+    // The page's address: the origin a worker made from a Blob URL shares.
+    const page = new URL(constants.page_path, location.origin).href;
+    const port = new wire.ConsolePort(page);
+    // The end of tty 0, pushed to the UI with its code.
+    port.close_receive((code) => {
+      const header = jslb.header_make(constants.exit_type, {
+        full: settings.names_full(),
+      });
+      tasks.line_notify(jslb.line_make(header, [], { code }));
+    });
+    tasks.port_add(constants.console_thread, port);
+    worker_ai.console_register(tasks, dispatch.handler_register, () => {
+      port.console_close();
+    });
+    const server_lane = new queue.LocalPort();
+    tasks.port_add(constants.server_thread, new queue.LocalPort(server_lane));
+    const ui_lane = new queue.LocalPort();
+    tasks.port_add(constants.ui_thread, new queue.LocalPort(ui_lane));
+    const lane = new MessageChannel();
+    lanes_join(
+      new queue.ThreadPort(lane.port2),
+      server_lane,
+      ui_lane,
+      far_make(),
+    );
+    return new queue.ThreadPort(lane.port1);
   }
 }
 

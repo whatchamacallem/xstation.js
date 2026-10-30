@@ -21,9 +21,12 @@
 # code. Every suite and block has a timer, the gold record's module_seconds.
 # Before the first block, in this process and outside every timer, the run
 # has third_party_fetch.py fetch each pinned third party file that is not in
-# place with its pinned digest, and a failed fetch fails the run there.
+# place with its pinned digest, then has ttyd_build.py build ttyd where
+# settings.json says, from the pinned archive and the project's patches,
+# unless it was built from them, its programs' output in a log there, and a
+# failed fetch or build fails the run there.
 #
-# The suites run in strict dependency order, in seven phases that only the
+# The suites run in strict dependency order, in eight phases that only the
 # order of the lists shows. Three are of Python: the unit suites,
 # test_<module>.py, by layer; then the pair test of the TAP producer and
 # consumer, test_tap_pair.py, and the integration suites,
@@ -34,12 +37,13 @@
 # of the TypeScript TAP producer and the Python consumer, test_tap_pair_ts.py,
 # and the integration blocks, test_integrate_<module>.ts, by the layer of
 # their block. Two are of group B, the TypeScript blocks run in headless
-# Chrome: the unit blocks, then the integration blocks, each by layer as in
-# A. A module calls into another when it imports it, at the top
-# or in a function, loads its file, runs it as a program, or has it run
-# inside the block of its suite, as this file has the TAP producer and
-# consumer in every block; a call of a function it was handed is no call
-# into the module that handed it over. A suite runs only after the suites of
+# Chrome: the unit blocks, then the integration blocks, each by layer as in A.
+# One is of group C, the TypeScript blocks behind ttyd: its integration blocks,
+# by layer as in A. A module calls into another when it imports it, at the top
+# or in a function, loads its file, runs it as a program, or has it run inside
+# the block of its suite, as this file has the TAP producer and consumer in
+# every block; a call of a function it was handed is no call into the module
+# that handed it over. A suite runs only after the suites of
 # every module that its module or its own code calls into, directly or
 # transitively, have passed. Layer 0 holds the suites of the TAP producer
 # and consumer, whose only callees are the two of them, so the blocks of the
@@ -93,6 +97,31 @@
 # the stream ends, before the servers, so that it holds none of their
 # connections.
 #
+# A block of group C runs as a block of B does, on the headless page that a
+# ttyd of its own serves as its index, so that the block's ports to tty 0
+# and tty 1 reach that ttyd and the server it runs. Before the block,
+# outside its timer and inside the deadline, the run makes the block's
+# root in build/ as the start script makes the server's: the modules of
+# powershell.runtime_modules and the seed in its python/, i18n/en-US.json,
+# settings.json with debug true, the gold record as test_settings.json,
+# and in its main_loop/ the main loop file of python/ that the gold's
+# typescript.BLOCK.root names under main_loop, if it names one. It starts
+# the ttyd that ttyd_build.py built, in a session of its own, with the
+# start script's options, --port 0, --interface the bind address,
+# --writable, --check-origin, --terminal-type, --url-arg and
+# --srv-buf-size, and --index build/headless.html, to run python3
+# ROOT/python/bootstrap.py --root ROOT, with --main-loop and the file's
+# name when the gold names one. ttyd writes its log to a file of its own,
+# from which the run reads its version and its port, and a ttyd that
+# ends first fails the run, its log in the cause. The block loads
+# http://ADDRESS:PORT/. After the block's about:blank, outside its timer
+# and inside the deadline, the run stops ttyd's process group by SIGTERM,
+# kills it when it still runs after the gold's
+# typescript.test_headless.stop_seconds, copies ttyd's log to the block's
+# log, removes the root, then fails the run if ttyd was killed or had
+# ended before its stop; the block's relay ends after. A root made for a
+# block that did not run stops before the browser, its log to stderr.
+#
 # After each module it writes "<module>: <label>, <s> s" to stderr, so that
 # stdout stays the TAP stream. After the checks of test_posix.py it prints
 # "test_posix.py: smoke-test, <s> s", and a passing run ends with "the
@@ -127,8 +156,9 @@
 # stdio suite, or a TypeScript block, for none. It counts in this process,
 # so it refuses --tty.
 
-import argparse, base64, contextlib, functools, importlib, json, os, signal
-import subprocess, sys, tempfile, time, types, unittest
+import argparse, base64, contextlib, functools, importlib, json, os, re
+import shutil, signal, subprocess, sys, tempfile, time, types, unittest
+from collections.abc import Callable
 from typing import Any, IO, NoReturn, TYPE_CHECKING, cast
 
 # Only type checks import these here, and `main` imports `line_coverage` first.
@@ -183,12 +213,14 @@ _MODULES: list[tuple[str, str]] = [
     ("test_page_build_node", "smoke-test"),
     ("test_page_build_tsc", "smoke-test"),
     ("test_tap_loop", "smoke-test"),
+    ("test_ttyd_build", "smoke-test"),
     ("test_echo_loop", "smoke-test"),
     ("test_engine_mcp", "smoke-test"),
     ("test_engine_system", "smoke-test"),
     ("test_main_loop", "smoke-test"),
     ("test_mcp_stdio", "smoke-test"),
     ("test_bootstrap", "smoke-test"),
+    ("test_bootstrap_dash", "smoke-test"),
     ("test_tap_pair", "smoke-test"),
     ("test_integrate_test_posix", "smoke-test"),
     ("test_integrate_dispatch", "smoke-test"),
@@ -279,8 +311,23 @@ _B_INTEGRATION: list[tuple[str, str]] = [
     ("test_integrate_agent.ts", "smoke-test"),
 ]
 
+# Group C's integration phase, the blocks whose page ttyd serves, by layer.
+_C_INTEGRATION: list[tuple[str, str]] = [
+    ("test_worker_ai_console.ts", "smoke-test"),
+    ("test_wire_end.ts", "smoke-test"),
+    ("test_tools_browser_console.ts", "smoke-test"),
+    ("test_integrate_wire.ts", "smoke-test"),
+]
+
 # Every suite and block of a run, in the phases of the order above.
-_PHASES = _MODULES + _A_UNIT + _A_INTEGRATION + _B_UNIT + _B_INTEGRATION
+_PHASES = (
+    _MODULES
+    + _A_UNIT
+    + _A_INTEGRATION
+    + _B_UNIT
+    + _B_INTEGRATION
+    + _C_INTEGRATION
+)
 
 # The suites and blocks that fail by design, which only `--module` runs.
 _FAILING: list[tuple[str, str]] = [
@@ -298,8 +345,13 @@ _NODE_BLOCKS = frozenset(
     if name.endswith(_TS_SUFFIX)
 )
 
-# The TypeScript blocks that a page load runs, those of group B.
-_CHROME_BLOCKS = frozenset(name for name, _ in _B_UNIT + _B_INTEGRATION)
+# The TypeScript blocks that a page load runs, those of groups B and C.
+_CHROME_BLOCKS = frozenset(
+    name for name, _ in _B_UNIT + _B_INTEGRATION + _C_INTEGRATION
+)
+
+# The TypeScript blocks whose page ttyd serves, each on a root of its own.
+_TTYD_BLOCKS = frozenset(name for name, _ in _C_INTEGRATION)
 
 # The gold id of the script of the local HTTP server, by each block it serves.
 _SERVED: dict[str, str] = {
@@ -316,6 +368,46 @@ _PAGE_NAME = "headless"
 
 # The headless page's path on the local HTTP server, which serves `build`.
 _PAGE_PATH = f"/build/{_PAGE_NAME}.html"
+
+# The headless page in `build`, which ttyd serves a block of C as its index.
+_INDEX_PATH = os.path.join(_BUILD_PATH, f"{_PAGE_NAME}.html")
+
+# The gold id of the seconds ttyd has to stop after SIGTERM.
+_STOP_ID = f"{_HEADLESS_ID}.stop_seconds"
+
+# The key of a block's gold under which its root's gold is.
+_ROOT_KEY = "root"
+
+# The key of a root's gold that names a main loop file of `python`.
+_LOOP_KEY = "main_loop"
+
+# A root's directories: its modules and seed, its strings, its main loop.
+_ROOT_PYTHON = "python"
+_ROOT_STRINGS = "i18n"
+_ROOT_LOOPS = "main_loop"
+
+# The seed of `python`, which a root holds beside its modules.
+_SEED_NAME = "seed"
+
+# The strings, which a root holds where the checkout does.
+_STRINGS_PATH = os.path.join(_ROOT_PATH, _ROOT_STRINGS, "en-US.json")
+
+# The program that runs the server's bootstrap, the command ttyd runs.
+_PYTHON_PROGRAM = "python3"
+
+# ttyd's first log line, with its version and that of libwebsockets.
+_VERSION_PATTERN = re.compile(
+    r" N: (ttyd \S+ \(libwebsockets \S+\))$", re.MULTILINE
+)
+
+# ttyd's log line of the port it listens on.
+_PORT_PATTERN = re.compile(r" N:  Listening on port: (\d+)$", re.MULTILINE)
+
+# The wait between two reads of ttyd's log for its port, its writer's.
+_POLL_SECONDS = 0.01
+
+# What ttyd's log lines are written after in a block's log.
+_TTYD_SOURCE = "ttyd"
 
 # The binding through which the headless realm sends each of its lines.
 _BINDING_NAME = "realm_line"
@@ -358,8 +450,11 @@ _READ_BYTES = 65536
 
 # The later suites, each with what it waits on, which no run takes.
 _LATER: list[tuple[str, str]] = [
-    ("test_bootstrap_dash", "dash"),
-    ("test_devtools_powershell", "powershell.exe, and Chrome or Edge"),
+    (
+        "test_devtools_powershell",
+        "offline since 2026-10-30, kept, run by nothing, and to be brought"
+        " back later; then powershell.exe, and Chrome or Edge",
+    ),
     ("test_reformat_formatters", "ruff, shfmt and prettier"),
     ("test_test_posix_formatters", "ruff"),
 ]
@@ -747,7 +842,161 @@ class PageLane:
             raise EOFError("the realm's lines ended in a line")
 
 
-# Runs each TypeScript block of group B in a page load of its own.
+# One block's root in `build`, as the start script makes one, and its ttyd.
+class RootServer:
+    # Makes the root, starts ttyd on it, and reads ttyd's version and port.
+    def __init__(self, name: str, ttyd: str, loaded: dict[str, Any]) -> None:
+        import harness
+
+        block = name.removesuffix(_TS_SUFFIX)
+        gold_id = f"{_LANGUAGE}.{block}.{_ROOT_KEY}"
+        gold: dict[str, Any] = harness.gold_get(gold_id)
+        self._stop_seconds = float(harness.gold_get(_STOP_ID))
+        powershell: dict[str, Any] = loaded["powershell"]
+        self.version = ttyd
+        self._host: str = powershell["bind_address"]
+        self._port = 0
+        self._process: subprocess.Popen[bytes] | None = None
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+        self._log = tempfile.TemporaryFile(dir=_BUILD_PATH, buffering=0)
+        self.root = tempfile.mkdtemp(prefix=f"root-{block}-", dir=_BUILD_PATH)
+        try:
+            command = self.root_make(gold, loaded)
+            self._process = subprocess.Popen(
+                [
+                    ttyd,
+                    "--port",
+                    "0",
+                    "--interface",
+                    self._host,
+                    "--writable",
+                    "--check-origin",
+                    "--terminal-type",
+                    powershell["terminal_type"],
+                    "--url-arg",
+                    f"--srv-buf-size={loaded['srv_buf_size']}",
+                    "--index",
+                    _INDEX_PATH,
+                    *command,
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=self._log,
+                stderr=self._log,
+                start_new_session=True,
+            )
+            self.version, self._port = self.start_read(self._process)
+        except BaseException:
+            self.server_stop(stderr_write)
+            raise
+
+    # Writes the root's files, and returns the command ttyd runs on it.
+    def root_make(
+        self, gold: dict[str, Any], loaded: dict[str, Any]
+    ) -> list[str]:
+        powershell: dict[str, Any] = loaded["powershell"]
+        python_path = os.path.join(self.root, _ROOT_PYTHON)
+        os.makedirs(python_path)
+        for module in powershell["runtime_modules"]:
+            file_name = f"{module}.py"
+            shutil.copyfile(
+                os.path.join(_PYTHON_PATH, file_name),
+                os.path.join(python_path, file_name),
+            )
+        shutil.copytree(
+            os.path.join(_PYTHON_PATH, _SEED_NAME),
+            os.path.join(python_path, _SEED_NAME),
+        )
+        strings_path = os.path.join(self.root, _ROOT_STRINGS)
+        os.makedirs(strings_path)
+        shutil.copyfile(
+            _STRINGS_PATH,
+            os.path.join(strings_path, os.path.basename(_STRINGS_PATH)),
+        )
+        settings_path = os.path.basename(_SETTINGS_PATH)
+        with open(
+            os.path.join(self.root, settings_path), "w", encoding="utf-8"
+        ) as file:
+            values = {**loaded, "debug": True}
+            file.write(json.dumps(values, ensure_ascii=False, indent=2) + "\n")
+        shutil.copyfile(
+            _TESTS_PATH, os.path.join(self.root, os.path.basename(_TESTS_PATH))
+        )
+        bootstrap = os.path.join(python_path, powershell["bootstrap_script"])
+        command = [_PYTHON_PROGRAM, bootstrap, "--root", self.root]
+        if _LOOP_KEY in gold:
+            loop: str = gold[_LOOP_KEY]
+            loops_path = os.path.join(self.root, _ROOT_LOOPS)
+            os.makedirs(loops_path)
+            shutil.copyfile(
+                os.path.join(_PYTHON_PATH, loop),
+                os.path.join(loops_path, loop),
+            )
+            command += ["--main-loop", loop]
+        return command
+
+    # The text of ttyd's log so far, read with no move of its offset.
+    def log_text(self) -> str:
+        descriptor = self._log.fileno()
+        size = os.fstat(descriptor).st_size
+        return os.pread(descriptor, size, 0).decode("utf-8")
+
+    # Reads ttyd's version and port from its log, failing if it ends first.
+    def start_read(self, process: subprocess.Popen[bytes]) -> tuple[str, int]:
+        while True:
+            code = process.poll()
+            text = self.log_text()
+            version = _VERSION_PATTERN.search(text)
+            port = _PORT_PATTERN.search(text)
+            if version is not None and port is not None:
+                return version.group(1), int(port.group(1))
+            if code is not None:
+                raise RuntimeError(
+                    f"{self.version} exited with {code} before it listened"
+                ) from RuntimeError(f"ttyd's log:\n{text}")
+            time.sleep(_POLL_SECONDS)
+
+    # The page's address on this ttyd.
+    def url_get(self) -> str:
+        return f"http://{self._host}:{self._port}/"
+
+    # Stops ttyd's group, writes its log, removes the root, returns a failure.
+    def server_stop(self, write: Callable[[str, str], None]) -> str | None:
+        process = self._process
+        failure: str | None = None
+        try:
+            if process is not None:
+                code = process.poll()
+                if code is not None:
+                    failure = (
+                        f"{self.version} exited with {code} before its stop"
+                    )
+                else:
+                    os.killpg(process.pid, signal.SIGTERM)
+                    seconds = self._stop_seconds
+                    try:
+                        process.wait(seconds)
+                    except subprocess.TimeoutExpired:
+                        failure = (
+                            f"{self.version} still ran {seconds:g} s after"
+                            " SIGTERM and was killed"
+                        )
+        finally:
+            try:
+                # A stop cut short, as by an alarm, kills the group too.
+                if process is not None and process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                for text in self.log_text().splitlines():
+                    write(_TTYD_SOURCE, text)
+                if failure is not None:
+                    write(_TTYD_SOURCE, failure)
+            finally:
+                self._log.close()
+                shutil.rmtree(self.root)
+        return failure
+
+
+# Runs each TypeScript block of groups B and C in a page load of its own.
 class PageRunner:
     # Holds no page, browser or `tap.start` yet: each is made at first need.
     def __init__(
@@ -755,17 +1004,20 @@ class PageRunner:
         runner: tap_producer.TAPTestRunner,
         reader: tap_consumer.StreamReader,
         servers: ServerPool,
+        ttyd: str,
     ) -> None:
         self._runner = runner
         self._reader = reader
         self._servers = servers
+        self._ttyd = ttyd
         self._stack = contextlib.ExitStack()
         self._browser: devtools.Browser | None = None
         self._line = ""
         self._settings: dict[str, Any] = {}
         self._lane: PageLane | None = None
+        self._root: RootServer | None = None
 
-    # Builds the page and `tap.start`, starts the browser, once, then a server.
+    # Builds the page, `tap.start` and the browser once, then a server or root.
     def block_prepare(
         self, name: str, limit: float | None, started: float
     ) -> None:
@@ -789,16 +1041,31 @@ class PageRunner:
             browser.binding_add(_BINDING_NAME, self.binding_call)
             self._browser = browser
             timer_stop()
-        self._servers.server_need(page_script(name))
+        if name in _TTYD_BLOCKS:
+            what = f"the root and ttyd of {name}"
+            elapsed = time.monotonic() - started
+            timer_start(category.alarm_plan(what, None, limit, elapsed))
+            self._root = RootServer(name, self._ttyd, self._settings)
+            timer_stop()
+        else:
+            self._servers.server_need(page_script(name))
 
     # Runs the block in a fresh page load, relaying its stream, then ends it.
-    def block_run(self, name: str, end: float) -> None:
+    def block_run(
+        self, name: str, end: float, limit: float | None, started: float
+    ) -> None:
         import harness
 
         block = name.removesuffix(_TS_SUFFIX)
         browser = cast("devtools.Browser", self._browser)
-        script = harness.gold_get(page_script(name))
-        url = f"http://{script['host']}:{script['port']}{_PAGE_PATH}"
+        root: RootServer | None = None
+        if name in _TTYD_BLOCKS:
+            root = cast(RootServer, self._root)
+            self._root = None
+            url = root.url_get()
+        else:
+            script = harness.gold_get(page_script(name))
+            url = f"http://{script['host']}:{script['port']}{_PAGE_PATH}"
         call = (
             f"test_headless.realm_start({json.dumps(block)},"
             f" {json.dumps(self._runner.failfast)}, {json.dumps(self._line)})"
@@ -808,20 +1075,28 @@ class PageRunner:
             lane = PageLane(self._runner, self._settings, log)
             self._lane = lane
             try:
-                client = browser.client_get()
-                # The end of the block's timer ends each of its waits, alone.
-                client.limit_set(end)
-                browser.page_open(url)
-                browser.script_evaluate(call)
-                # A wait for each next line, the block's timer over them all.
-                while not lane.ended:
-                    calls = lane.calls
-                    client.events_pump(
-                        f"the next line of the realm of {name}",
-                        lambda: lane.calls > calls,
-                    )
-                browser.page_open(_BLANK_URL)
-                lane.end_check()
+                try:
+                    client = browser.client_get()
+                    # The end of the block's timer ends each of its waits.
+                    client.limit_set(end)
+                    browser.page_open(url)
+                    browser.script_evaluate(call)
+                    # A wait for each next line, the block's timer over all.
+                    while not lane.ended:
+                        calls = lane.calls
+                        client.events_pump(
+                            f"the next line of the realm of {name}",
+                            lambda: lane.calls > calls,
+                        )
+                    browser.page_open(_BLANK_URL)
+                    lane.end_check()
+                except BaseException:
+                    # The root of a failed block stops too, its failure kept.
+                    if root is not None:
+                        root.server_stop(lane.log_write)
+                    raise
+                if root is not None:
+                    root_stop(name, root, lane, limit, started)
             except Exception as error:
                 log.seek(0)
                 cause = RuntimeError(
@@ -847,13 +1122,47 @@ class PageRunner:
     def lane_get(self) -> PageLane:
         if self._lane is None:
             raise RuntimeError(
-                "the page spoke while no block of B was running"
+                "the page spoke while no block of B or C was running"
             )
         return self._lane
 
-    # Stops the browser, if started, once the stream has ended.
+    # Stops a root no block ran on, then the browser, once the stream ended.
     def browser_stop(self) -> None:
-        self._stack.close()
+        root = self._root
+        self._root = None
+        try:
+            if root is not None:
+                root.server_stop(stderr_write)
+        finally:
+            self._stack.close()
+
+
+# Stops a passing block's root outside its timer, inside the deadline.
+def root_stop(
+    name: str,
+    root: RootServer,
+    lane: PageLane,
+    limit: float | None,
+    started: float,
+) -> None:
+    import category
+
+    timer_stop()
+    failure: str | None = None
+    try:
+        what = f"the stop of the root of {name}"
+        elapsed = time.monotonic() - started
+        timer_start(category.alarm_plan(what, None, limit, elapsed))
+    finally:
+        failure = root.server_stop(lane.log_write)
+    if failure is not None:
+        raise RuntimeError(failure)
+
+
+# Writes one text of a log to stderr, after what it came from.
+def stderr_write(source: str, text: str) -> None:
+    sys.stderr.write(f"{source}: {text}\n")
+    sys.stderr.flush()
 
 
 # The gold id of the script of the server of a B block's page.
@@ -871,6 +1180,7 @@ def stream_run(
     limit: float | None,
     started: float,
     count: line_coverage.LineCount | None,
+    ttyd: str,
 ) -> None:
     import category, harness, tap_producer
 
@@ -880,7 +1190,7 @@ def stream_run(
     loader = unittest.TestLoader()
     servers = ServerPool()
     realms = RealmRunner(runner, stream.reader, servers)
-    pages = PageRunner(runner, stream.reader, servers)
+    pages = PageRunner(runner, stream.reader, servers, ttyd)
     try:
         for index, (name, label) in enumerate(modules):
             failed = stream.reader.failed
@@ -903,7 +1213,7 @@ def stream_run(
             elif page:
                 # A block has seconds of its own, so its alarm has a plan.
                 seconds, _ = cast(tuple[float, str], plan)
-                pages.block_run(name, begun + seconds)
+                pages.block_run(name, begun + seconds, limit, started)
             else:
                 load = functools.partial(suite_load, loader, name)
                 runner.module_run(name, load)
@@ -1023,10 +1333,11 @@ def main(arguments: list[str]) -> int:
             " the stream in another"
         )
     modules = modules_chosen(parser, parsed.module, chosen)
-    import third_party_fetch
+    import third_party_fetch, ttyd_build
 
-    # Bring up: the pins are in place before the first block and its timer.
+    # Bring up: the pins and ttyd are in place before the first block's timer.
     third_party_fetch.pins_fetch()
+    ttyd = ttyd_build.checkout_build()
     started = time.monotonic()
     limit = category.limit_seconds(chosen)
     stream = StreamWriter([name for name, _ in modules])
@@ -1036,7 +1347,7 @@ def main(arguments: list[str]) -> int:
             stream, modules, chosen, failfast, failures, limit, started
         )
     else:
-        stream_run(stream, modules, failfast, limit, started, count)
+        stream_run(stream, modules, failfast, limit, started, count, ttyd)
         if count is not None:
             count.count_stop()
     reader = stream.reader

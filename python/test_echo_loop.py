@@ -10,7 +10,8 @@
 # test. The browser's `error` line goes to the real `engine_tap`, which logs
 # its cascade in the root's log, opened first by the child, through
 # `echo_loop`, as `bootstrap.py` opens it, and ends the root's TAP file with
-# a bail out, both read from the root.
+# a bail out, both read from the root. A page thread's `verbose.put` goes to
+# the real `engine_verbose`, which writes its lines to that same log.
 
 import contextlib, echo_loop, functools, harness, json, os, signal, sqlite3
 import sys, tempfile, traceback, unittest
@@ -59,6 +60,25 @@ _LINE_CUT = b'{"0":{"t":"echo","i":1}}'
 # A `tap.line` push of the TypeScript stream.
 _TAP_LINE = (
     b'{"0":{"t":"tap.line"},"language":"typescript","text":"ok 1 - x"}\r'
+)
+
+# The page thread whose lines the `verbose.put` push carries.
+_PAGE_THREAD = "ai"
+
+# Its lines, each a time and a text, in the order the push holds them.
+_PAGE_LINES = ((1, "the first line of the page"), (2, "the second line"))
+
+# A `verbose.put` push of that thread's lines, as the page sends in debug.
+_VERBOSE_PUT = (
+    json.dumps(
+        {
+            "0": {"t": "verbose.put"},
+            "thread": _PAGE_THREAD,
+            "lines": [{"at": at, "text": text} for at, text in _PAGE_LINES],
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    + b"\r"
 )
 
 # The TAP file of the TypeScript stream in a root.
@@ -338,4 +358,13 @@ class TestEcho(ScratchCase):
             "at first",
         ]
         expected = [(_SERVER_THREAD, text) for text in texts]
+        self.assertEqual(_log_read(self.root), expected)
+
+    # A page thread's `verbose.put` is written to the log, nothing written.
+    def test_verbose_put(self) -> None:
+        work = functools.partial(_logged_serve, self.root)
+        ending, output = self.child_run(work, _VERBOSE_PUT)
+        self.assertEqual(ending, _ENDING_RETURNED)
+        self.assertEqual(output, b"")
+        expected = [(_PAGE_THREAD, text) for _, text in _PAGE_LINES]
         self.assertEqual(_log_read(self.root), expected)

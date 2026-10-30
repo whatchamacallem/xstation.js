@@ -15,11 +15,11 @@
 # root, its rungs, the digest of the tool's text, and the text and digest of
 # the restart's main loop file. The texts this file finds in the server's
 # log, its timers and its sizes are python.test_wire too. Each root gets
-# its own ttyd as xsjs_install.ps1 builds it, given its
+# its own ttyd as python/ttyd_build.py builds it, given its
 # options as the start script gives them and the built page as --index,
 # running `python3 <root>/python/bootstrap.py --root <root>`, with
 # --main-loop echo_loop.py on the echo root, and its own load of the page in
-# headless Chrome or Edge through devtools.py. The page meets ttyd's
+# chrome-headless-shell through devtools.LinuxPipe. The page meets ttyd's
 # protocol as ts/wire.ts annotates it: the token from /token, /ws and
 # /ws?arg=console with the subprotocol tty, a first message of JSON text,
 # then '0' input, and from ttyd '0' output, '1' the title and '2' the
@@ -33,8 +33,11 @@
 # resident size after the large rung and its end when killed after the echo
 # stream; the stock server's database files, its log and its exit after the
 # unknown rung; and on the restart root a stream that ended passing, then
-# the server's log of the page's refusal of the second first line, its exit
-# and its pid kept by the exec. Each root and rung is labelled smoke-test or
+# the server's exit and its pid kept by the exec, its log of the reply it
+# did not expect to its second first line, which names the page's refusal
+# or, by a race of the design, a verbose.put push of the page's log in
+# flight across the exec, and the page's fault screen holding its refusal,
+# where it always shows. Each root and rung is labelled smoke-test or
 # normal-test: a smoke-test run, the default, leaves the normal-test rungs
 # out of the gold, and a mislabel fails the run. It exits 0, or 1 at the
 # first failed check, naming its rung. ttyd's log and the page's console are
@@ -46,7 +49,7 @@
 import argparse, contextlib, hashlib, json, os, pathlib, re, select, shutil
 import signal, sqlite3, subprocess, sys, tempfile, time, types
 from collections.abc import Callable
-from typing import Any, NamedTuple, Protocol, Self
+from typing import Any, NamedTuple, Protocol, Self, cast
 
 # The checkout's `python` directory, which holds this file.
 _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -60,8 +63,8 @@ _BUILD_PATH = os.path.join(_CHECKOUT_PATH, "build")
 # The id of this driver's gold in `test_settings.json`.
 _GOLD_ID = "python.test_wire"
 
-# The script that builds ttyd, which a missing ttyd names.
-_INSTALL_SCRIPT = "xsjs_install.ps1"
+# The module that builds ttyd, which a missing ttyd names.
+_BUILD_SCRIPT = os.path.join("python", "ttyd_build.py")
 
 # The start of the name of the directory each run makes its roots in.
 _WORK_PREFIX = "test_wire-"
@@ -90,8 +93,11 @@ _ECHO_NAME = "echo_loop.py"
 # That file in the checkout, beside this one.
 _ECHO_PATH = os.path.join(_PYTHON_PATH, _ECHO_NAME)
 
+# The option of `bootstrap.py` that names a main loop file of the root.
+_LOOP_OPTION = "--main-loop"
+
 # The arguments that run the echo main loop file on the echo root.
-_ECHO_ARGS = ("--main-loop", _ECHO_NAME)
+_ECHO_ARGS = (_LOOP_OPTION, _ECHO_NAME)
 
 # The arguments of the stock main loop: none.
 _STOCK_ARGS: tuple[str, ...] = ()
@@ -155,6 +161,19 @@ _ENDED_PATTERN = re.compile(
 # How ttyd's log says a program exited with a code.
 _EXITED_WORDS = "exited with code"
 
+# The text of the page's fault screen, its message and stack, or null.
+_FAULT_SCRIPT = (
+    "(() => { const pre = document.querySelector("
+    '"body > pre:not(#tap_output)"); return pre === null ? null :'
+    " pre.textContent; })()"
+)
+
+# The type of the page's refusal of the restarted server's first line.
+_REFUSAL_TYPE = "error"
+
+# The type of a push of the page's log, which may be in flight at the exec.
+_PUSH_TYPE = "verbose.put"
+
 # The code a failed program exits with.
 _PROGRAM_FAILED = 1
 
@@ -195,6 +214,9 @@ class BrowserDriver(Protocol):
 
     # Calls `fn` with the text of each console message from now on.
     def console_follow(self, fn: Callable[[str], None]) -> None: ...
+
+    # Evaluates JavaScript on the page and returns its JSON value.
+    def script_evaluate(self, text: str) -> object: ...
 
     # Returns the DevTools client of the page.
     def client_get(self) -> DriverClient: ...
@@ -530,7 +552,7 @@ def gold_value(name: str) -> Any:
     return harness.gold_get(f"{_GOLD_ID}.{name}")
 
 
-# The ttyd the install script builds from the pinned release and its patches.
+# The ttyd `ttyd_build.py` builds from the pinned release and its patches.
 def ttyd_path() -> str:
     import harness
 
@@ -564,23 +586,28 @@ def process_parent(pid: int) -> int:
     return int(stat[stat.rindex(b")") + 2 :].split()[1])
 
 
-# Fails unless the pid is ttyd's child running its command.
-def program_check(ttyd: TtydServer, pid: int) -> None:
+# Returns which command the pid runs, failing unless it is ttyd's child.
+def program_check(
+    ttyd: TtydServer, pid: int, commands: list[list[str]]
+) -> int:
     with open(f"/proc/{pid}/cmdline", "rb") as file:
         cmdline = file.read().split(b"\0")[:-1]
-    due = [word.encode() for word in ttyd.command]
-    if cmdline != due:
-        raise CheckFailed(f"the server's pid {pid} runs {cmdline}, not {due}")
+    dues = [[word.encode() for word in command] for command in commands]
+    if cmdline not in dues:
+        raise CheckFailed(
+            f"the server's pid {pid} runs {cmdline}, not one of {dues}"
+        )
     parent = process_parent(pid)
     if parent != ttyd.process.pid:
         raise CheckFailed(
             f"the server's pid {pid} is the child of {parent}, not of ttyd's"
             f" {ttyd.process.pid}"
         )
+    return dues.index(cmdline)
 
 
-# Returns the pid of the one program ttyd runs, checked to run its command.
-def server_find(ttyd: TtydServer) -> int:
+# The pid of the one program ttyd runs and which command: ttyd's, or an exec's.
+def server_find(ttyd: TtydServer, execed: list[list[str]]) -> tuple[int, int]:
     pid = ttyd.process.pid
     # The kernel's list of the children of ttyd's main thread.
     with open(f"/proc/{pid}/task/{pid}/children", encoding="ascii") as file:
@@ -589,8 +616,8 @@ def server_find(ttyd: TtydServer) -> int:
         raise CheckFailed(
             f"{ttyd.version} runs the programs {children}, where one was due"
         )
-    program_check(ttyd, children[0])
-    return children[0]
+    found = program_check(ttyd, children[0], [ttyd.command, *execed])
+    return children[0], found
 
 
 # Reads a process's resident size and its peak, in KiB, from its status file.
@@ -633,6 +660,28 @@ def log_find(root: str, parts: list[str], what: str) -> str:
         if all(part in text for part in parts):
             return text
     raise CheckFailed(f"{what}: no line of the server's log holds {parts}")
+
+
+# Returns the line the server's log names in the text, which holds no blob.
+def line_named(root: str, unexpected: str, what: str) -> dict[str, Any]:
+    refused = unexpected.replace("{0}", "")
+    text = log_find(root, [refused], what)
+    rendered = text[text.index(refused) + len(refused) :]
+    line, end = json.JSONDecoder().raw_decode(rendered)
+    if end != len(rendered):
+        raise CheckFailed(f"{what}: the line {rendered!r} holds blobs")
+    named: dict[str, Any] = line
+    return named
+
+
+# Returns the page's fault screen once written, waiting under the rung's timer.
+def fault_wait(browser: BrowserDriver, ttyd: TtydServer, what: str) -> str:
+    while True:
+        text = cast(str | None, browser.script_evaluate(_FAULT_SCRIPT))
+        if text is not None:
+            return text
+        left = ttyd.log.timer.seconds_left(what)
+        ttyd.log_poll(min(float(gold_value("poll_seconds")), left))
 
 
 # Fails unless a query of the database gives the rows due.
@@ -782,6 +831,7 @@ def stream_run(
     ttyd: TtydServer,
     root: str,
     rungs: list[tuple[str, str]],
+    execed: list[list[str]],
 ) -> int:
     import tap_consumer
 
@@ -793,10 +843,16 @@ def stream_run(
     (first, first_label), *rest = rungs
     log.rung_enter(f"{root}: {first}", first_label)
     line = stream.point_next(first)
-    pid = server_find(ttyd)
+    # The page runs on past its first point, so a later rung may have execed.
+    pid, found = server_find(ttyd, execed)
+    running = (
+        "its command"
+        if found == 0
+        else f"its command execed in place as {execed[found - 1]}"
+    )
     log.rung_print(
-        f"{line.strip()}; the server is pid {pid}, ttyd's child running its"
-        " command",
+        f"{line.strip()}; the server is pid {pid}, ttyd's child running"
+        f" {running}",
         first_label,
     )
     for rung, label in rest:
@@ -828,7 +884,7 @@ def root_echo(
     shutil.copyfile(_ECHO_PATH, os.path.join(directory, _ECHO_NAME))
     log.rung_start("echo: ttyd")
     with TtydServer(root, values, _ECHO_ARGS, log) as ttyd:
-        pid = stream_run(log, browser, ttyd, "echo", rungs)
+        pid = stream_run(log, browser, ttyd, "echo", rungs, [])
         log.rung_start("echo: ttyd killed")
         log.step_print(kill_check(ttyd, pid))
     log.book.root_leave()
@@ -844,7 +900,7 @@ def root_stock(
     root, values = root_make(work, "stock", [rung for rung, _ in rungs])
     log.rung_start("stock: ttyd")
     with TtydServer(root, values, _STOCK_ARGS, log) as ttyd:
-        pid = stream_run(log, browser, ttyd, "stock", rungs)
+        pid = stream_run(log, browser, ttyd, "stock", rungs, [])
         log.rung_start("stock: server end")
         exit_check(ttyd, pid, "ttyd's log of the server's end")
         message: str = gold_value("texts.dispatch_handler_unknown")
@@ -867,17 +923,35 @@ def root_restart(
     root, values = root_make(work, "restart", [rung for rung, _ in rungs])
     log.rung_start("restart: ttyd")
     with TtydServer(root, values, _STOCK_ARGS, log) as ttyd:
-        pid = stream_run(log, browser, ttyd, "restart", rungs)
+        # The command `system.restart` execs the server into, in place.
+        main_loop: str = gold_value("rungs.restart_name")
+        restarted = [*ttyd.command, _LOOP_OPTION, main_loop]
+        pid = stream_run(log, browser, ttyd, "restart", rungs, [restarted])
         log.rung_start("restart: server end")
         exit_check(ttyd, pid, "ttyd's log of the restarted server's end")
         unexpected: str = gold_value("texts.bootstrap_reply_unexpected")
-        refused = unexpected.replace("{0}", "")
         twice: str = gold_value("texts.wire_start_twice")
-        log_find(root, [refused, twice], "the server's log of the refusal")
+        what = "the server's log of the reply to its second first line"
+        line = line_named(root, unexpected, what)
+        kind = line["0"]["type"]
+        refusal = kind == _REFUSAL_TYPE and line["message"] == twice
+        # A push sent before the exec may reach the restarted server first.
+        if not refusal and kind != _PUSH_TYPE:
+            raise CheckFailed(
+                f"{what}: it names {line}, neither the page's refusal nor a"
+                f" {_PUSH_TYPE} push"
+            )
+        fault = fault_wait(browser, ttyd, "the page's fault screen")
+        if fault.split("\n", 1)[0] != twice:
+            raise CheckFailed(
+                f"the page's fault screen shows {fault!r}, not {twice!r}"
+            )
+        named = "the page's refusal" if refusal else f"a {_PUSH_TYPE} push"
         log.step_print(
             f"the server execed in place as pid {pid}, then logged"
-            f" {twice!r} inside {refused!r} and exited with code"
-            f" {_PROGRAM_FAILED} as ttyd logged"
+            f" {unexpected.replace('{0}', '')!r} naming {named} and exited"
+            f" with code {_PROGRAM_FAILED} as ttyd logged; the page's fault"
+            f" screen shows {twice!r}"
         )
     log.book.root_leave()
 
@@ -889,7 +963,7 @@ def roots_run(log: RungLog, work: str, chosen: str) -> None:
     digest = page_build.page_build(_PAGE_TEMPLATE, _PAGE_NAME)
     log.step_print(f"built {_PAGE_PATH}, sha256 {digest}")
     width, height = gold_value("window_width"), gold_value("window_height")
-    with devtools.Browser(width, height, devtools.WindowsRelay()) as browser:
+    with devtools.Browser(width, height, devtools.LinuxPipe()) as browser:
         browser.console_follow(console_copy)
         log.client_bind(browser.client_get())
         root_echo(log, browser, work, chosen)
@@ -909,8 +983,8 @@ def main(arguments: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog=_PROGRAM_NAME,
         description="Run the wire test: the page's wire rungs on roots under"
-        " build/, through the ttyd the install script builds, in headless"
-        " Chrome or Edge, their TAP stream read from each root.",
+        " build/, through the ttyd python/ttyd_build.py builds, in"
+        " chrome-headless-shell, their TAP stream read from each root.",
     )
     category.options_add(parser)
     chosen: str = parser.parse_args(arguments).category
@@ -920,9 +994,7 @@ def main(arguments: list[str]) -> int:
     try:
         path = ttyd_path()
         if not os.path.isfile(path):
-            raise CheckFailed(
-                f"{path} is missing: {_INSTALL_SCRIPT} builds it"
-            )
+            raise CheckFailed(f"{path} is missing: {_BUILD_SCRIPT} builds it")
         with tempfile.TemporaryDirectory(
             prefix=_WORK_PREFIX, dir=_BUILD_PATH
         ) as work:

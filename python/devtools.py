@@ -6,20 +6,22 @@
 # Browser, on one of two transports. WindowsRelay drives Chrome, or else Edge,
 # on Windows from WSL: WSL's NAT networking can't reach Windows' 127.0.0.1,
 # where Chrome serves DevTools, so a relay in `powershell.exe` carries the
-# WebSocket over its stdin and stdout. LinuxPipe drives
-# /usr/local/bin/chrome-headless-shell, started with --remote-debugging-pipe,
-# which reads DevTools messages from its descriptor 3 and writes them to its
-# descriptor 4, each ended by a NUL byte, and XDG_CACHE_HOME set to the
-# profile, where fontconfig caches fonts. A Browser starts the browser with a
-# profile of its own that goes when it does, and drives one page of it: opens a
-# URL, evaluates JavaScript, passes on the calls of a binding, follows the
-# console, saves a screenshot, traces it, pauses one of its workers in the
-# debugger and closes the page, and picks out a trace's synchronous loads on
-# the page's UI thread. On Linux the browser's exit closes its pipe, and the
-# call or wait under way raises one ConnectionError whose cause is the exit
-# code; an exit with an error code that no call saw fails the Browser's end.
-# Standard library only, and `powershell.exe`, `wslpath` and
-# chrome-headless-shell are the programs it starts.
+# WebSocket over its stdin and stdout; WindowsRelay is offline since
+# 2026-10-30, kept, run by nothing, and to be brought back later. LinuxPipe
+# drives /usr/local/bin/chrome-headless-shell, started with
+# --remote-debugging-pipe, which reads DevTools messages from its descriptor
+# 3 and writes them to its descriptor 4, each ended by a NUL byte, and
+# XDG_CACHE_HOME set to the profile, where fontconfig caches fonts. A
+# Browser starts the browser with a profile of its own that goes when it
+# does, and drives one page of it: opens a URL, evaluates JavaScript, passes
+# on the calls of a binding, follows the console, saves a screenshot, traces
+# it, pauses one of its workers in the debugger and closes the page, and
+# picks out a trace's synchronous loads on the page's UI thread. On Linux
+# the browser's exit closes its pipe, and the call or wait under way raises
+# one ConnectionError whose cause is the exit code; an exit with an error
+# code that no call saw fails the Browser's end. Standard library only, and
+# `powershell.exe`, `wslpath` and chrome-headless-shell are the programs it
+# starts.
 
 import base64, errno, fcntl, functools, hashlib, json, math, os, select
 import shutil, signal, subprocess, tempfile, time, types, uuid

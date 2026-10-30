@@ -74,19 +74,80 @@
       }
     },
     "test_bootstrap_dash": {
+      "argv": [
+        "bwrap",
+        "--ro-bind",
+        "/",
+        "/",
+        "--dev",
+        "/dev",
+        "--proc",
+        "/proc",
+        "--tmpfs",
+        "/tmp",
+        "--tmpfs",
+        "/home",
+        "--tmpfs",
+        "/mnt",
+        "--tmpfs",
+        "/root",
+        "--unshare-all",
+        "--new-session",
+        "--die-with-parent",
+        "--chdir",
+        "/tmp",
+        "/bin/dash"
+      ],
+      "argv_verbose": [
+        "bwrap",
+        "--ro-bind",
+        "/",
+        "/",
+        "--dev",
+        "/dev",
+        "--proc",
+        "/proc",
+        "--tmpfs",
+        "/tmp",
+        "--tmpfs",
+        "/home",
+        "--tmpfs",
+        "/mnt",
+        "--tmpfs",
+        "/root",
+        "--unshare-all",
+        "--new-session",
+        "--die-with-parent",
+        "--chdir",
+        "/tmp",
+        "/bin/dash",
+        "-v"
+      ],
+      "binary": {
+        "acted": [3, 4, 13, 17, 18, 19, 21, 22, 23, 26, 28, 127],
+        "output": {
+          "d": "AQIDBAUGBwgJDQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8NCoCBgoOEhYaHiImKi4yNjo+QkZKTlJWWl5iZmpucnZ6foKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr/AwcLDxMXGx8jJysvMzc7P0NHS09TV1tfY2drb3N3e3+Dh4uPk5ebn6Onq6+zt7u/w8fLz9PX29/j5+vv8/f7/DQqAwK/toID/DQo="
+        },
+        "payload": {
+          "d": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5Ojs8PT4/QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl9gYWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1+fwqAgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/wqAwK/toID/Cg=="
+        }
+      },
+      "prompt": "$ ",
       "read_bytes": 65536,
+      "start_directory": "/tmp",
+      "terminated": {
+        "code": 143,
+        "exec_code": -15
+      },
       "texts": {
         "verbose_exec_exit": "`{0}` exited with code {1}.",
         "verbose_exec_run": "Running `{0}`."
       }
     },
     "test_browser": {
-      "echo_blob_bytes": 8388608,
       "echo_seconds": 600,
       "hold_seconds": 120,
       "http_seconds": 2,
-      "kill_capacity": 32,
-      "kill_slots": 8,
       "large_bytes": 134217728,
       "lines": {
         "console_open_reply": {
@@ -106,7 +167,6 @@
           }
         }
       },
-      "media_seconds": 2,
       "order_count": 3,
       "order_seconds": 30,
       "poll_seconds": 0.1,
@@ -126,16 +186,7 @@
         "dispatch_handler_unknown": "No handler is registered for type rung.unknown version 0.",
         "engine_tap_browser_failed": "The browser failed: {0}",
         "http_fetch_failed": "The request to {0} failed: {1}",
-        "http_status_failed_400": "The request to {0} answered with status 400: status 400",
-        "http_status_failed_401": "The request to {0} answered with status 401: status 401",
-        "http_status_failed_500": "The request to {0} answered with status 500: status 500",
         "http_timeout_expired": "The request to {0} did not finish within 2 seconds.",
-        "media_decode_failed": "The image for /_files/rung/garbage.png could not be decoded: {1}",
-        "media_download_expired": "The download of {0} for /_files/rung/late.png did not finish within 2 seconds.",
-        "media_download_failed_lost": "The download of {0} for /_files/rung/lost.png failed: {2}",
-        "media_download_failed_missing": "The download of {0} for /_files/rung/missing.png failed: Error: The download of {0} answered with status 404.",
-        "overlay_ring_invalid": "The overlay ring 0 is not a whole number from 1 up.",
-        "page_worker_where": "{0} line {1} column {2}",
         "verbose_sink_twice": "A sink is already set for the verbose lines of this thread.",
         "wire_blobs_over": "The blobs of the kv.put line come to {1} bytes, over the blob_max of {2}.",
         "wire_close_silent": "connection closed with code 1006 and no error line",
@@ -153,6 +204,11 @@
     "test_devtools": {
       "expiry_seconds": 0.05,
       "pipe_bytes": 131072,
+      "wait_seconds": 60
+    },
+    "test_devtools_chrome": {
+      "poll_seconds": 0.1,
+      "quiet_seconds": 0.5,
       "wait_seconds": 60
     },
     "test_devtools_powershell": {
@@ -3416,6 +3472,19 @@
         ]
       ]
     },
+    "test_ttyd_build": {
+      "patch_code": 1,
+      "patch_lines": [
+        "patching file CMakeLists.txt",
+        "Hunk #1 FAILED at 1.",
+        "1 out of 1 hunk FAILED -- saving rejects to file CMakeLists.txt.rej"
+      ],
+      "refused_code": 255,
+      "refused_size": -1,
+      "refused_text": "ttyd: invalid srv-buf-size: -1\n",
+      "unrecognized_text": "{0}: unrecognized option '{1}'\n",
+      "version_text": "ttyd version 1.7.7\n"
+    },
     "test_verbose": {
       "history_all": 100,
       "ring_lines": 10,
@@ -4829,6 +4898,7 @@
         "paths": {},
         "port": 28745
       },
+      "stop_seconds": 5,
       "window_height": 720,
       "window_width": 1280
     },
@@ -9319,6 +9389,293 @@
         }
       }
     },
+    "test_integrate_wire": {
+      "cases": [
+        {
+          "expect": ["console_open_reply"],
+          "name": "console_opened",
+          "seconds": 10,
+          "send": ["console_open"]
+        },
+        {
+          "expect": [],
+          "name": "first_sent",
+          "seconds": 1,
+          "send": ["first_message"]
+        },
+        {
+          "expect": ["heredoc_output"],
+          "name": "binary_echoed",
+          "seconds": 10,
+          "send": [
+            "heredoc_command",
+            "heredoc_row_01",
+            "heredoc_row_02",
+            "heredoc_row_03",
+            "heredoc_row_04",
+            "heredoc_row_05",
+            "heredoc_row_06",
+            "heredoc_row_07",
+            "heredoc_row_08",
+            "heredoc_row_09",
+            "heredoc_row_10",
+            "heredoc_row_11",
+            "heredoc_row_12",
+            "heredoc_row_13",
+            "heredoc_row_14",
+            "heredoc_row_15",
+            "heredoc_row_16",
+            "heredoc_row_17",
+            "heredoc_end"
+          ]
+        },
+        {
+          "expect": ["console_exit"],
+          "name": "console_closed",
+          "seconds": 10,
+          "send": ["console_close"]
+        }
+      ],
+      "lines": {
+        "console_close": {
+          "0": {
+            "type": "console.close"
+          }
+        },
+        "console_exit": {
+          "0": {
+            "type": "console.exit"
+          },
+          "code": 1000
+        },
+        "console_open": {
+          "0": {
+            "id": 1,
+            "type": "console.open"
+          }
+        },
+        "console_open_reply": {
+          "0": {
+            "reply": 1,
+            "type": "console.open"
+          },
+          "token": ""
+        },
+        "first_message": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "eyJBdXRoVG9rZW4iOiIiLCJjb2x1bW5zIjo4MCwicm93cyI6MjR9",
+            "size": 39
+          }
+        },
+        "heredoc_command": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MHByaW50ZiAnXDA3NFwwNzRcMTcwXDE2M1wxNTJcMTYzXDA1NVwxNDJcMTQ1XDE0N1wxNTFcMTU2XDA3NlwwNzYnOyBjYXQgPDwnRU5EJzsgcHJpbnRmICdcMDc0XDA3NFwxNzBcMTYzXDE1MlwxNjNcMDU1XDE0NVwxNTZcMTQ0XDA3NlwwNzYnCg==",
+            "size": 139
+          }
+        },
+        "heredoc_end": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MEVORAo=",
+            "size": 5
+          }
+        },
+        "heredoc_output": {
+          "0": {
+            "blobs": 1,
+            "type": "console.output"
+          },
+          "1": {
+            "d": "AQIDBAUGBwgJCwwNDg8NChAREhMUFRYXGBkaGxwdHh8NCiAhIiMkJSYnKCkqKywtLi8NCjAxMjM0NTY3ODk6Ozw9Pj8NCkBBQkNERUZHSElKS0xNTk8NClBRUlNUVVZXWFlaW1xdXl8NCmBhYmNkZWZnaGlqa2xtbm8NCnBxcnN0dXZ3eHl6e3x9fn8NCoCBgoOEhYaHiImKi4yNjo8NCpCRkpOUlZaXmJmam5ydnp8NCqChoqOkpaanqKmqq6ytrq8NCrCxsrO0tba3uLm6u7y9vr8NCsDBwsPExcbHyMnKy8zNzs8NCtDR0tPU1dbX2Nna29zd3t8NCuDh4uPk5ebn6Onq6+zt7u8NCvDx8vP09fb3+Pn6+/z9/v8NCoDAr+CAr+2ggP8NCg==",
+            "size": 298
+          }
+        },
+        "heredoc_row_01": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MAECFgMWBAUGBwgJCwwWDQ4PCg==",
+            "size": 19
+          }
+        },
+        "heredoc_row_02": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MBAWERYSFhMUFhUWFhYXGBkWGhsWHB0eHwo=",
+            "size": 26
+          }
+        },
+        "heredoc_row_03": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MCAhIiMkJSYnKCkqKywtLi8K",
+            "size": 18
+          }
+        },
+        "heredoc_row_04": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MDAxMjM0NTY3ODk6Ozw9Pj8K",
+            "size": 18
+          }
+        },
+        "heredoc_row_05": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MEBBQkNERUZHSElKS0xNTk8K",
+            "size": 18
+          }
+        },
+        "heredoc_row_06": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MFBRUlNUVVZXWFlaW1xdXl8K",
+            "size": 18
+          }
+        },
+        "heredoc_row_07": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MGBhYmNkZWZnaGlqa2xtbm8K",
+            "size": 18
+          }
+        },
+        "heredoc_row_08": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MHBxcnN0dXZ3eHl6e3x9fhZ/Cg==",
+            "size": 19
+          }
+        },
+        "heredoc_row_09": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MICBgoOEhYaHiImKi4yNjo8K",
+            "size": 18
+          }
+        },
+        "heredoc_row_10": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MJCRkpOUlZaXmJmam5ydnp8K",
+            "size": 18
+          }
+        },
+        "heredoc_row_11": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MKChoqOkpaanqKmqq6ytrq8K",
+            "size": 18
+          }
+        },
+        "heredoc_row_12": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MLCxsrO0tba3uLm6u7y9vr8K",
+            "size": 18
+          }
+        },
+        "heredoc_row_13": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MMDBwsPExcbHyMnKy8zNzs8K",
+            "size": 18
+          }
+        },
+        "heredoc_row_14": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MNDR0tPU1dbX2Nna29zd3t8K",
+            "size": 18
+          }
+        },
+        "heredoc_row_15": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MODh4uPk5ebn6Onq6+zt7u8K",
+            "size": 18
+          }
+        },
+        "heredoc_row_16": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MPDx8vP09fb3+Pn6+/z9/v8K",
+            "size": 18
+          }
+        },
+        "heredoc_row_17": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "MIDAr+CAr+2ggP8K",
+            "size": 12
+          }
+        }
+      },
+      "marker_end": "<<xsjs-end>>",
+      "marker_start": "<<xsjs-begin>>",
+      "root": {}
+    },
     "test_integrate_worker_ai": {
       "cases": [
         {
@@ -11664,24 +12021,49 @@
       }
     },
     "test_tools_browser_console": {
-      "lines": {
-        "console_input": {
-          "0": {
-            "blobs": 1,
-            "type": "console.input"
-          }
+      "cases": [
+        {
+          "expect": ["open_reply"],
+          "name": "opened",
+          "seconds": 10,
+          "send": ["open_request"]
         },
-        "console_read": {
-          "0": {
-            "type": "console.read"
-          },
-          "timeout_seconds": 5,
-          "until": "$ "
+        {
+          "expect": ["recorded_ask", "recorded_show", "recorded_reply"],
+          "name": "recorded",
+          "seconds": 10,
+          "send": ["first_input", "recorded_request"]
         },
-        "console_show": {
-          "0": {
-            "type": "console.show"
-          }
+        {
+          "expect": ["counted_ask", "counted_show", "counted_reply"],
+          "name": "counted",
+          "seconds": 10,
+          "send": ["counted_request"]
+        },
+        {
+          "expect": ["always_ask", "always_show", "always_reply"],
+          "name": "always",
+          "seconds": 10,
+          "send": ["always_request"]
+        },
+        {
+          "expect": ["allowed_show", "allowed_reply"],
+          "name": "allowed",
+          "seconds": 10,
+          "send": ["allowed_request"]
+        },
+        {
+          "expect": ["expired_show", "expired_reply"],
+          "name": "expired",
+          "seconds": 10,
+          "send": ["expired_request"]
+        }
+      ],
+      "far": {
+        "choices": {
+          "1": "permit_accept",
+          "2": "permit_accept",
+          "3": "permit_always"
         },
         "permit_accept": {
           "0": {
@@ -11695,8 +12077,220 @@
           },
           "choice": "always"
         },
-        "permit_ask": {
+        "show_reply": {
           "0": {
+            "t": "console.show"
+          }
+        }
+      },
+      "info": {
+        "base_url": "https://api.x.ai/v1",
+        "chat_model": "grok-4",
+        "image_model": "grok-2-image"
+      },
+      "lines": {
+        "allowed_reply": {
+          "0": {
+            "r": 106,
+            "t": "mcp"
+          },
+          "id": 4,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "{\"output\":\"/tmp\\n\",\"timed_out\":false}",
+                "type": "text"
+              }
+            ]
+          }
+        },
+        "allowed_request": {
+          "0": {
+            "i": 106,
+            "t": "mcp"
+          },
+          "id": 4,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "text": "pwd",
+              "timeout_seconds": 5
+            },
+            "name": "console_run"
+          }
+        },
+        "allowed_show": {
+          "0": {
+            "id": 11,
+            "type": "console.show"
+          }
+        },
+        "always_ask": {
+          "0": {
+            "id": 8,
+            "type": "permit.ask"
+          },
+          "input": {
+            "text": "echo 3",
+            "timeout_seconds": 5
+          },
+          "permit": 3,
+          "tool": "browser.console_run"
+        },
+        "always_reply": {
+          "0": {
+            "r": 105,
+            "t": "mcp"
+          },
+          "id": 3,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "{\"output\":\"3\\n\",\"timed_out\":false}",
+                "type": "text"
+              }
+            ]
+          }
+        },
+        "always_request": {
+          "0": {
+            "i": 105,
+            "t": "mcp"
+          },
+          "id": 3,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "text": "echo 3",
+              "timeout_seconds": 5
+            },
+            "name": "console_run"
+          }
+        },
+        "always_show": {
+          "0": {
+            "id": 9,
+            "type": "console.show"
+          }
+        },
+        "counted_ask": {
+          "0": {
+            "id": 5,
+            "type": "permit.ask"
+          },
+          "input": {
+            "text": "echo 2",
+            "timeout_seconds": 5
+          },
+          "permit": 2,
+          "tool": "browser.console_run"
+        },
+        "counted_reply": {
+          "0": {
+            "r": 104,
+            "t": "mcp"
+          },
+          "id": 2,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "{\"output\":\"2\\n\",\"timed_out\":false}",
+                "type": "text"
+              }
+            ]
+          }
+        },
+        "counted_request": {
+          "0": {
+            "i": 104,
+            "t": "mcp"
+          },
+          "id": 2,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "text": "echo 2",
+              "timeout_seconds": 5
+            },
+            "name": "console_run"
+          }
+        },
+        "counted_show": {
+          "0": {
+            "id": 6,
+            "type": "console.show"
+          }
+        },
+        "expired_reply": {
+          "0": {
+            "r": 107,
+            "t": "mcp"
+          },
+          "id": 5,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "{\"output\":\"\",\"timed_out\":true}",
+                "type": "text"
+              }
+            ]
+          }
+        },
+        "expired_request": {
+          "0": {
+            "i": 107,
+            "t": "mcp"
+          },
+          "id": 5,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "text": "sleep 600",
+              "timeout_seconds": 2
+            },
+            "name": "console_run"
+          }
+        },
+        "expired_show": {
+          "0": {
+            "id": 13,
+            "type": "console.show"
+          }
+        },
+        "first_input": {
+          "0": {
+            "blobs": 1,
+            "type": "console.input"
+          },
+          "1": {
+            "d": "eyJBdXRoVG9rZW4iOiIiLCJjb2x1bW5zIjoxMjAsInJvd3MiOjQwfQ==",
+            "size": 40
+          }
+        },
+        "open_reply": {
+          "0": {
+            "reply": 102,
+            "type": "console.open"
+          },
+          "token": ""
+        },
+        "open_request": {
+          "0": {
+            "id": 102,
+            "type": "console.open"
+          }
+        },
+        "recorded_ask": {
+          "0": {
+            "id": 2,
             "type": "permit.ask"
           },
           "input": {
@@ -11706,27 +12300,48 @@
           "permit": 1,
           "tool": "browser.console_run"
         },
-        "read_reply": {
+        "recorded_reply": {
           "0": {
-            "t": "console.read"
+            "r": 103,
+            "t": "mcp"
           },
-          "text": "echo hi\r\nhi\r\n$ ",
-          "timed_out": false
+          "id": 1,
+          "jsonrpc": "2.0",
+          "result": {
+            "content": [
+              {
+                "text": "{\"output\":\"hi\\n\",\"timed_out\":false}",
+                "type": "text"
+              }
+            ]
+          }
         },
-        "read_reply_expired": {
+        "recorded_request": {
           "0": {
-            "t": "console.read"
+            "i": 103,
+            "t": "mcp"
           },
-          "text": "sleep 600\r\n",
-          "timed_out": true
+          "id": 1,
+          "jsonrpc": "2.0",
+          "method": "tools/call",
+          "params": {
+            "arguments": {
+              "text": "echo hi",
+              "timeout_seconds": 5
+            },
+            "name": "console_run"
+          }
         },
-        "show_reply": {
+        "recorded_show": {
           "0": {
-            "t": "console.show"
+            "id": 3,
+            "type": "console.show"
           }
         }
       },
-      "result_expired": "{\"output\":\"\",\"timed_out\":true}"
+      "output_kind": "0",
+      "prompt": "$ ",
+      "root": {}
     },
     "test_utility": {
       "texts": {
@@ -11920,36 +12535,39 @@
       }
     },
     "test_wire_end": {
+      "close_lost": 1006,
       "lines": {
-        "first": {
+        "first_reply": {
           "0": {
-            "i": 101,
-            "t": "tap.start"
-          },
-          "settings": {
-            "root": "/home/t/.cache/xsjs"
-          }
-        },
-        "notice_mcp": {
-          "0": {
-            "t": "mcp"
-          }
-        },
-        "notice_tap_line": {
-          "0": {
-            "t": "tap.line"
+            "reply": 101,
+            "type": "tap.start"
           }
         },
         "report": {
           "0": {
             "type": "error"
           },
-          "message": "The server sent tap.start a second time.",
-          "stack": "Error: The server sent tap.start a second time."
+          "message": "A fault the page reports by wire_end.",
+          "stack": "Error: A fault the page reports by wire_end."
+        },
+        "unserved": {
+          "0": {
+            "id": 7,
+            "type": "line.unserved"
+          }
+        },
+        "unserved_error": {
+          "0": {
+            "reply": 7,
+            "type": "error"
+          },
+          "message": "No handler is registered for type line.unserved version 0.",
+          "stack": "Traceback (most recent call last):"
         }
       },
-      "texts": {
-        "jslb_no_header_zero": "The line has no header 0."
+      "point_seconds": 10,
+      "root": {
+        "main_loop": "echo_loop.py"
       }
     },
     "test_wire_port": {
@@ -12149,40 +12767,54 @@
       }
     },
     "test_worker_ai_console": {
-      "lines": {
-        "console_open_answer": {
-          "0": {
-            "reply": 7,
-            "type": "console.open"
-          },
-          "token": "abc"
+      "cases": [
+        {
+          "expect": ["open_1_reply"],
+          "name": "console_opened",
+          "seconds": 10,
+          "send": ["open_1"]
         },
-        "console_open_copy": {
-          "0": {
-            "type": "console.open"
-          }
-        },
-        "console_open_reply": {
-          "0": {
-            "type": "console.open"
-          },
-          "token": "abc"
-        },
-        "console_open_request": {
-          "0": {
-            "id": 7,
-            "type": "console.open"
-          }
-        },
-        "console_opened_wake": {
-          "0": {
-            "type": "worker.console_opened"
-          }
-        },
-        "console_sleep": {
-          "then_type": "worker.console_opened"
+        {
+          "expect": ["close_2_reply", "exit"],
+          "name": "console_closed",
+          "seconds": 10,
+          "send": ["close_2"]
         }
-      }
+      ],
+      "lines": {
+        "close_2": {
+          "0": {
+            "id": 2,
+            "type": "console.close"
+          }
+        },
+        "close_2_reply": {
+          "0": {
+            "reply": 2,
+            "type": "console.close"
+          }
+        },
+        "exit": {
+          "0": {
+            "type": "console.exit"
+          },
+          "code": 1000
+        },
+        "open_1": {
+          "0": {
+            "id": 1,
+            "type": "console.open"
+          }
+        },
+        "open_1_reply": {
+          "0": {
+            "reply": 1,
+            "type": "console.open"
+          },
+          "token": ""
+        }
+      },
+      "root": {}
     }
   }
 }

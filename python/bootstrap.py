@@ -18,14 +18,18 @@
 # provider file: no program but the test suites runs. --main-loop is served
 # only to the engine role with the setting debug true, and neither option
 # may be given twice. With the role console, when the setting debug is true,
-# it opens the root's log and runs dash in the root with a scrubbed
-# environment through verbose.exec at the setting verbose_level, the shell's
-# level, and it exits 1 otherwise. Any exception writes one error line, its
-# cascade under cause, in full names since it may come before the settings,
-# and exits 1; once the log is open the exception's message is logged before
-# its error line is written. In debug mode the log traces tap.start. The
-# modules beside this file are imported inside the functions that use them,
-# after their bytecode has been sent to build/.
+# it opens the root's log and runs the console's shell, dash in the
+# bubblewrap sandbox of the argv below, with a scrubbed environment through
+# verbose.exec at the setting verbose_level, the shell's level, and it exits
+# 1 otherwise. The sandbox binds / read only, gives dash empty /tmp, /home,
+# /mnt and /root, unshares every namespace, gives it a session of its own,
+# ends it with the console role and starts it in its own /tmp, so dash never
+# sees the root and nothing it writes outlives it. Any exception writes one
+# error line, its cascade under cause, in full names since it may come
+# before the settings, and exits 1; once the log is open the exception's
+# message is logged before its error line is written. In debug mode the log
+# traces tap.start. The modules beside this file are imported inside the
+# functions that use them, after their bytecode has been sent to build/.
 
 import argparse, fcntl, importlib.machinery, importlib.util, json, os, sys
 import termios, traceback, tty, types
@@ -71,11 +75,34 @@ _LOCK_MODE = 0o600
 # The role that runs the console, the only role there is.
 _CONSOLE_ROLE = "console"
 
-# The shell the console role runs.
-_DASH_PATH = "/bin/dash"
+# The console's shell: dash in the bubblewrap sandbox the maintainer gave.
+_DASH_ARGV = (
+    "bwrap",
+    "--ro-bind",
+    "/",
+    "/",
+    "--dev",
+    "/dev",
+    "--proc",
+    "/proc",
+    "--tmpfs",
+    "/tmp",
+    "--tmpfs",
+    "/home",
+    "--tmpfs",
+    "/mnt",
+    "--tmpfs",
+    "/root",
+    "--unshare-all",
+    "--new-session",
+    "--die-with-parent",
+    "--chdir",
+    "/tmp",
+    "/bin/dash",
+)
 
-# The option of dash that prints its input as it reads it, its verbose form.
-_DASH_VERBOSE = "-v"
+# Its verbose form, with dash's option that prints its input as it reads it.
+_DASH_VERBOSE = (*_DASH_ARGV, "-v")
 
 # The environment variables the console keeps when they are set.
 _CONSOLE_VARIABLES = ("HOME", "LANG", "PATH", "TERM")
@@ -144,7 +171,7 @@ def _arguments_parse(argv: list[str]) -> _RunArguments:
         "role",
         nargs="?",
         choices=[_CONSOLE_ROLE],
-        help="console runs dash in the root in debug mode",
+        help="console runs dash in its sandbox in debug mode",
     )
     parsed = parser.parse_args(argv)
     roots: list[str] = parsed.root
@@ -338,8 +365,8 @@ def _engine_run(root: str, main_loop: str | None) -> int:
     )
 
 
-# Runs dash through `verbose.exec` at the level, and returns the shell's code.
-def _dash_run(root: str, level: int) -> int:
+# Runs the sandboxed dash through `verbose.exec` at the level, its code back.
+def _dash_run(level: int) -> int:
     import verbose
 
     kept = {
@@ -349,17 +376,16 @@ def _dash_run(root: str, level: int) -> int:
     }
     os.environ.clear()
     os.environ.update(kept)
-    os.chdir(root)
-    code = verbose.exec(level, [_DASH_PATH], [_DASH_PATH, _DASH_VERBOSE])
+    code = verbose.exec(level, list(_DASH_ARGV), list(_DASH_VERBOSE))
     return code if code >= 0 else _SIGNAL_BASE - code
 
 
-# Runs dash in the root with a scrubbed environment, in debug mode only.
+# Runs the sandboxed dash with a scrubbed environment, in debug mode only.
 def _console_run(root: str, loaded: dict[str, Any]) -> int:
     if not loaded["debug"]:
         return _EXIT_FAILURE
     level: int = loaded["verbose_level"]
-    return _logged_run(root, loaded, lambda: _dash_run(root, level))
+    return _logged_run(root, loaded, lambda: _dash_run(level))
 
 
 # The cascade of an exception, by the rule of `dispatch.cause_make`.

@@ -2,134 +2,52 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the AI worker's relay of the console's opening, group C: the UI's
-// `console.open` goes to the console port on tty 0 and its token comes back.
-// A queue double and a register double stand in the queue and the dispatch,
-// as no realm without ttyd has the console on tty 0, so this module runs
-// only on the ttyd page. The lines the test sends and expects are the gold
-// of test_settings.json.
+// The line cases of the AI worker's relays of the console, group C, on the
+// UI side of the headless page that the block's own ttyd serves: a real
+// queue of thread `ai` in synchronous mode in the page's realm, with
+// `worker_ai.console_register` registered through the real dispatch, its
+// `console` owner a real `wire.ConsolePort` at the page's address, which
+// reaches ttyd's tty 0, and its `ui` owner a `queue.ThreadPort` over a
+// MessageChannel whose other end is the test's. The UI's `console.open` goes
+// to the port, which fetches ttyd's token and opens tty 0, then the token
+// comes back to the UI. The UI's `console.close` closes tty 0 through the
+// port and is answered at once, then the socket's end comes back as the
+// `console.exit` that the port's close receiver, the test's own, pushes to
+// the UI with the close code, as the AI worker pushes it. No case sends
+// ttyd a first message on tty 0, so ttyd starts no process. The lines the
+// cases send and expect are the gold of test_settings.json.
 
 namespace test_worker_ai_console {
-  // The values the tests use.
+  // The thread, the owners of its lanes, the type of the console's end.
   const constants = Object.freeze({
-    // The id the queue double answers for a request, chosen by its writer.
-    submit_id: 41,
+    thread: "ai" as const,
+    ui_owner: "ui" as const,
+    console_owner: "console" as const,
+    exit_type: "console.exit",
   });
 
-  // A line and the owner it was given to the queue for.
-  type Owned = [lines.Line, queue.ThreadName | undefined];
-
-  // The handlers the code under test registered, by line type.
-  const routed = new Map<string, dispatch.Handler>();
-
-  // A register that keeps each handler in `routed`, checked at version 0.
-  function register_route(
-    type: string,
-    version: number,
-    fn: dispatch.Handler,
-  ): void {
-    if (version !== 0) {
-      throw new Error(`${type} was registered at version ${String(version)}.`);
-    }
-    routed.set(type, fn);
-  }
-
-  // The handler registered for a type, which must have been registered.
-  function routed_get(type: string): dispatch.Handler {
-    const fn = routed.get(type);
-    if (fn === undefined) {
-      throw new Error(`No handler was registered for ${type}.`);
-    }
-    return fn;
-  }
-
-  // A copy of a value of this module's gold, which the harness keeps frozen.
-  function gold_value(name: string): unknown {
-    return structuredClone(
-      harness.gold_get(`typescript.test_worker_ai_console.${name}`),
+  // The relays on a real queue and a real console port, the test's lane end.
+  export function topology_build(): queue.ThreadPort {
+    const tasks = new queue.TaskQueue(
+      constants.thread,
+      worker_ai.owners_make(),
+      true,
     );
-  }
-
-  // A copy of a line of this module's gold, a run time part set on the copy.
-  function gold_line(name: string): lines.Line {
-    return gold_value(`lines.${name}`) as lines.Line;
-  }
-
-  // A queue double: it answers the ids the test picks and keeps each line.
-  class TasksDouble {
-    readonly submitted: Owned[] = [];
-    readonly notified: Owned[] = [];
-    private readonly ids: number[];
-
-    // Takes the ids `task_submit` answers, in order.
-    constructor(ids: number[]) {
-      this.ids = [...ids];
-    }
-
-    // Keeps the request and its owner, and answers the next id picked.
-    task_submit(line: lines.Line, owner?: queue.ThreadName): number {
-      const id = this.ids.shift();
-      if (id === undefined) {
-        throw new Error("The queue double has no id left to answer.");
-      }
-      this.submitted.push([line, owner]);
-      return id;
-    }
-
-    // Keeps the notification and its owner.
-    line_notify(line: lines.Line, owner?: queue.ThreadName): void {
-      this.notified.push([line, owner]);
-    }
-  }
-
-  // A queue double answering the ids given, with no handler routed.
-  function tasks_make(ids: number[]): TasksDouble {
-    routed.clear();
-    return new TasksDouble(ids);
-  }
-
-  // The queue double as the queue the code under test takes.
-  function queue_of(tasks: TasksDouble): queue.TaskQueue {
-    return tasks as unknown as queue.TaskQueue;
-  }
-
-  // Whether a line was built in full names, as `settings.names_full()` says.
-  function full_of(line: lines.Line): boolean {
-    return Object.hasOwn(line[0], "type");
-  }
-
-  // The relay of the UI's console opening.
-  export class TestRelays extends unittest.TestCase {
-    // The UI's opening goes to the console port, and its token comes back.
-    test_console_opened(): void {
-      const id = constants.submit_id;
-      const tasks = tasks_make([id]);
-      let closes = 0;
-      worker_ai.console_register(queue_of(tasks), register_route, () => {
-        closes += 1;
+    const lane = new MessageChannel();
+    tasks.port_add(constants.ui_owner, new queue.ThreadPort(lane.port2));
+    const port = new wire.ConsolePort(location.href);
+    // The end of tty 0, pushed to the UI as the AI worker pushes it.
+    port.close_receive((code) => {
+      const header = jslb.header_make(constants.exit_type, {
+        full: settings.names_full(),
       });
-      const request = gold_line("console_open_request");
-      const sleep = routed_get("console.open")(request);
-      this.assertEqual(tasks.submitted.length, 1);
-      const [opening, owner] = tasks.submitted[0];
-      this.assertEqual(opening, gold_line("console_open_copy"));
-      this.assertEqual(owner, "console");
-      this.assertEqual(full_of(opening), harness.setting_get("debug"));
-      this.assertTrue(opening !== request);
-      const expected = gold_value("lines.console_sleep") as dispatch.Sleep;
-      expected.state = { request };
-      expected.wait_ids = [id];
-      this.assertEqual(sleep, expected);
-      const reply = gold_line("console_open_reply");
-      Object.assign(reply[0], { reply: id });
-      const wake = gold_line("console_opened_wake");
-      wake.state = (sleep as dispatch.Sleep).state;
-      wake.replies = [reply];
-      const answer = routed_get("worker.console_opened")(wake);
-      this.assertEqual(answer, gold_line("console_open_answer"));
-      this.assertEqual(tasks.notified.length, 0);
-      this.assertEqual(closes, 0);
-    }
+      tasks.line_notify(jslb.line_make(header, [], { code }));
+    });
+    tasks.port_add(constants.console_owner, port);
+    worker_ai.console_register(tasks, dispatch.handler_register, () => {
+      port.console_close();
+    });
+    return new queue.ThreadPort(lane.port1);
   }
 }
 

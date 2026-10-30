@@ -177,7 +177,11 @@ function _xsjs_install_step_build_ttyd {
         $apply_failed_ = $i18n_.ttyd_patch_failed -f $patch_.Name
         _xsjs_install_run_linux $apply_ $apply_failed_
     }
-    $configure_ = 'cmake', '-S', $source_path_, '-B', $ttyd_build_path_
+    # Keeps cmake from starting git, whose `git describe` reads the checkout.
+    $configure_ = @(
+        'cmake', '-S', $source_path_, '-B', $ttyd_build_path_
+        '-DCMAKE_DISABLE_FIND_PACKAGE_Git=TRUE'
+    )
     _xsjs_install_run_linux $configure_ $i18n_.ttyd_configure_failed
     $build_ = 'cmake', '--build', $ttyd_build_path_
     _xsjs_install_run_linux $build_ $i18n_.ttyd_build_failed

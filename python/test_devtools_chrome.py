@@ -15,9 +15,18 @@
 # the Browser's end alone. The profile is read from the browser's own command
 # line, through the process id DevTools gives, and is a directory under build/
 # that goes when the browser does, holding the fontconfig cache the browser
-# makes.
+# makes. The methods the browser test calls are tested here first, as the
+# Windows suite tested them on the relay, the pages served from a scratch
+# directory under build/ by a local HTTP server of the standard library on
+# 127.0.0.1: a screenshot is a PNG of the window's width and height; a trace
+# started afresh ends with every event sent, a synchronous load on the UI
+# thread among them, and none of the trace before; a worker that posts every
+# 10 ms posts nothing once paused in its debugger; a load the page starts
+# itself shows in the lifecycle events under a loader of its own; and the
+# page closes while another page stays. The waits are the gold's.
 
-import devtools, os, signal, socket, unittest
+import devtools, functools, harness, http.server, os, signal, socket, struct
+import tempfile, threading, time, unittest
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,6 +57,75 @@ _FONTCONFIG_NAME = "fontconfig"
 
 # The flag that names the browser's profile on its command line.
 _PROFILE_FLAG = b"--user-data-dir="
+
+# The id of this module's gold in `test_settings.json`.
+_GOLD_ID = "python.test_devtools_chrome"
+
+# How often a polling wait looks again.
+_POLL_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.poll_seconds")
+
+# How long a paused worker is watched for a message, each of two times.
+_QUIET_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.quiet_seconds")
+
+# A wait no test reaches the end of.
+_WAIT_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.wait_seconds")
+
+# A PNG's signature, then its first chunk's length, type, width and height.
+_PNG_HEAD = struct.Struct(">8sI4sII")
+
+# The signature that starts every PNG.
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+# The type of a PNG's first chunk, which holds its width and height.
+_PNG_SIZE_CHUNK = b"IHDR"
+
+# The name the screenshot is saved under, in a scratch directory.
+_SHOT_NAME = "shot.png"
+
+# The lifecycle events every load of a document has, as DevTools names them.
+_LOAD_NAMES = frozenset(("DOMContentLoaded", "load"))
+
+# The lifecycle event of a document that finished loading.
+_LOAD_EVENT = "load"
+
+# The name of the worker the worker page starts, its target's title.
+_WORKER_NAME = "ai"
+
+# A page that loads nothing more.
+_INDEX_PAGE = "<!DOCTYPE html>\n<title>index</title>\n"
+
+# A page that loads another synchronously on the UI thread as it is parsed.
+_SYNC_PAGE = (
+    "<!DOCTYPE html>\n<title>sync</title>\n<script>\n"
+    "const request = new XMLHttpRequest();\n"
+    'request.open("GET", "index.html", false);\n'
+    "request.send();\n"
+    "</script>\n"
+)
+
+# A page that starts the named worker and keeps the last count it posted.
+_WORKER_PAGE = (
+    "<!DOCTYPE html>\n<title>worker</title>\n<script>\n"
+    f'const worker = new Worker("worker.js", {{ name: "{_WORKER_NAME}" }});\n'
+    "let count = 0;\n"
+    "worker.onmessage = (event) => {\n"
+    "  count = event.data;\n"
+    "};\n"
+    "</script>\n"
+)
+
+# The worker's script, which posts a count every 10 ms while it runs.
+_WORKER_SCRIPT = (
+    "let count = 0;\nsetInterval(() => postMessage(++count), 10);\n"
+)
+
+# The files of each scratch directory the server serves, by name.
+_PAGES = {
+    "index.html": _INDEX_PAGE,
+    "sync.html": _SYNC_PAGE,
+    "worker.html": _WORKER_PAGE,
+    "worker.js": _WORKER_SCRIPT,
+}
 
 
 # Returns the process id of the browser, as DevTools gives it.
@@ -96,6 +174,36 @@ class BrowserCase(unittest.TestCase):
         self.assertEqual(
             str(error.__cause__), f"{_BROWSER_NAME} exited with {code}"
         )
+
+
+# Gives each test the pages, served on a thread, then a browser.
+class ServedCase(BrowserCase):
+    # Writes the pages and serves them, then starts the browser.
+    def setUp(self) -> None:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+        pages_path = self.enterContext(
+            tempfile.TemporaryDirectory(dir=_BUILD_PATH)
+        )
+        for name, text in _PAGES.items():
+            path = os.path.join(pages_path, name)
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(text)
+        handler = functools.partial(
+            http.server.SimpleHTTPRequestHandler, directory=pages_path
+        )
+        server = http.server.ThreadingHTTPServer((_LOCAL_ADDRESS, 0), handler)
+        # Closed after the browser stops, so no connection of it is open.
+        self.addCleanup(server.server_close)
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        self.addCleanup(thread.join)
+        self.addCleanup(server.shutdown)
+        self.port = server.server_port
+        super().setUp()
+
+    # Returns the address of a page of the server.
+    def url_make(self, name: str) -> str:
+        return f"http://{_LOCAL_ADDRESS}:{self.port}/{name}"
 
 
 # JavaScript evaluated on the page, and the errors of the page and DevTools.
@@ -181,6 +289,117 @@ class TestConsole(BrowserCase):
             "the console message", lambda: bool(texts)
         )
         self.assertEqual(texts, ["ok 1 - x 2"])
+
+
+# A screenshot of the page, saved as a PNG.
+class TestScreenshot(BrowserCase):
+    # The PNG has the window's width and height in its header.
+    def test_screenshot_size(self) -> None:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+        shots_path = self.enterContext(
+            tempfile.TemporaryDirectory(dir=_BUILD_PATH)
+        )
+        path = os.path.join(shots_path, _SHOT_NAME)
+        self.browser.page_open("data:text/html,<title>shot</title>")
+        self.browser.screenshot_save(path)
+        with open(path, "rb") as file:
+            head = file.read(_PNG_HEAD.size)
+        signature, _, chunk, width, height = _PNG_HEAD.unpack(head)
+        self.assertEqual(signature, _PNG_SIGNATURE)
+        self.assertEqual(chunk, _PNG_SIZE_CHUNK)
+        self.assertEqual((width, height), (_WIDTH_PX, _HEIGHT_PX))
+
+
+# Traces of the page's loads, each started afresh.
+class TestTrace(ServedCase):
+    # Ending a trace returns every event sent until it completed.
+    def test_trace_end(self) -> None:
+        self.browser.trace_start(devtools.blocking_categories())
+        self.browser.page_open(self.url_make("sync.html"))
+        events = self.browser.trace_end()
+        self.assertTrue(devtools.blocking_find(events))
+
+    # A trace starts afresh, holding none of the loads of the one before.
+    def test_trace_start(self) -> None:
+        categories = devtools.blocking_categories()
+        self.browser.trace_start(categories)
+        self.browser.page_open(self.url_make("sync.html"))
+        first = self.browser.trace_end()
+        self.browser.trace_start(categories)
+        self.browser.page_open(self.url_make("index.html"))
+        second = self.browser.trace_end()
+        self.assertTrue(devtools.blocking_find(first))
+        self.assertEqual(devtools.blocking_find(second), [])
+
+
+# A worker of the page, paused in its debugger.
+class TestWorker(ServedCase):
+    # A worker that posts while it runs posts nothing once it is paused.
+    def test_worker_pause(self) -> None:
+        self.browser.page_open(self.url_make("worker.html"))
+        timer = devtools.WaitTimer("the worker's first count", _WAIT_SECONDS)
+        while not self.browser.script_evaluate("count"):
+            time.sleep(min(_POLL_SECONDS, timer.seconds_left()))
+        self.browser.worker_pause(_WORKER_NAME)
+        # What the worker posted before its pause lands within the first wait.
+        time.sleep(_QUIET_SECONDS)
+        paused = self.browser.script_evaluate("count")
+        time.sleep(_QUIET_SECONDS)
+        self.assertEqual(self.browser.script_evaluate("count"), paused)
+        title = self.browser.script_evaluate("document.title")
+        self.assertEqual(title, "worker")
+
+
+# The page's loads, as its lifecycle events give them.
+class TestLifecycle(ServedCase):
+    # A load the page starts itself shows under a loader of its own.
+    def test_load_events(self) -> None:
+        self.browser.page_open(self.url_make("index.html"))
+        lifecycle = self.browser.events.lifecycle
+        seen = set(lifecycle)
+        self.browser.script_evaluate("location.reload()")
+        self.browser.client_get().events_pump(
+            "the reloaded page to load",
+            lambda: any(
+                name == _LOAD_EVENT and (loader, name) not in seen
+                for loader, name in lifecycle
+            ),
+        )
+        (loader,) = {
+            loader
+            for loader, name in lifecycle
+            if name == _LOAD_EVENT and (loader, name) not in seen
+        }
+        self.assertNotIn(loader, {loader for loader, _ in seen})
+        names = {name for found, name in lifecycle if found == loader}
+        self.assertLessEqual(_LOAD_NAMES, names)
+
+
+# The page closed, gone from the browser's targets while another stays.
+class TestClose(BrowserCase):
+    # Returns the ids of the browser's page targets.
+    def pages_list(self, client: devtools.ProtocolClient) -> list[str]:
+        listed = client.method_call("Target.getTargets")
+        return [
+            target["targetId"]
+            for target in listed["targetInfos"]
+            if target["type"] == "page"
+        ]
+
+    # Closing the page closes its target, and no more calls to it work.
+    def test_close_target(self) -> None:
+        client = self.browser.client_get()
+        created = client.method_call(
+            "Target.createTarget", {"url": "about:blank"}
+        )
+        other: str = created["targetId"]
+        self.browser.page_close()
+        timer = devtools.WaitTimer("the page to close", _WAIT_SECONDS)
+        while self.pages_list(client) != [other]:
+            time.sleep(min(_POLL_SECONDS, timer.seconds_left()))
+        with self.assertRaises(RuntimeError) as caught:
+            self.browser.script_evaluate("1 + 1")
+        self.assertTrue(str(caught.exception).startswith("Runtime.evaluate: "))
 
 
 # The browser's exit, which closes its pipe, its code the cause.
