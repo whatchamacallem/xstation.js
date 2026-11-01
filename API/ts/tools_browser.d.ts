@@ -10,8 +10,10 @@
 //
 // console_run, in debug mode, asks the player's permit unless it was always
 // allowed, then submits `console.show` to the UI and sleeps on
-// `tools.show_reply`, then types the command into tty 0 and sleeps on its
-// output. Outside debug mode it throws `tools_browser.debug_off`. Every line
+// `tools.show_reply`, then notifies the UI `console.busy`, types the command
+// into tty 0 and sleeps on its output, and notifies `console.idle` when the
+// read ends, so that the player watches the command and types once it is
+// over. Outside debug mode it throws `tools_browser.debug_off`. Every line
 // a tool builds takes the form `settings.names_full()` picks. A tool that
 // throws, before or after it submitted a request, fails the server as
 // `mcp.d.ts` says, its own message kept.

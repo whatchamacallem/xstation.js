@@ -24,7 +24,7 @@
 # place with its pinned digest, then has ttyd_build.py build ttyd where
 # settings.json says, from the pinned archive and the project's patches,
 # unless it was built from them, its programs' output in a log there, and a
-# failed fetch or build fails the run there.
+# failed fetch or build fails the run there. It refuses to start as root.
 #
 # The suites run in strict dependency order, in eight phases that only the
 # order of the lists shows. Three are of Python: the unit suites,
@@ -133,6 +133,7 @@
 #
 #     python3 python/test_all.py [--smoke-test | --normal-test] [--failfast]
 #         [--stream] [--module NAME]... [--failures N] [--tty] [--coverage]
+#         [--anthropic] [--debug] [--verbose]
 #
 # --smoke-test is the default. In a smoke-test run, or with --failfast, the
 # first failing test ends the stream. --stream ends the run once the stream
@@ -154,7 +155,8 @@
 # module's first line never counted as run. A unit suite counts for the
 # module of its name, or for those listed for it, and an integration or
 # stdio suite, or a TypeScript block, for none. It counts in this process,
-# so it refuses --tty.
+# so it refuses --tty. --anthropic, --debug and --verbose turn on the run's
+# switches of switches.py, here and in every process the run starts.
 
 import argparse, base64, contextlib, functools, importlib, json, os, re
 import shutil, signal, subprocess, sys, tempfile, time, types, unittest
@@ -178,6 +180,12 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 # The settings that `tap.start` carries to a realm.
 _SETTINGS_PATH = os.path.join(_ROOT_PATH, "settings.json")
 
+# The effective user id of root, which a run refuses.
+_ROOT_UID = 0
+
+# What a signal's number is added to for the exit code, as a shell does.
+_SIGNAL_BASE = 128
+
 # The gold record that `tap.start` carries to a realm as its test settings.
 _TESTS_PATH = os.path.join(_ROOT_PATH, "test_settings.json")
 
@@ -188,6 +196,7 @@ _MODULES: list[tuple[str, str]] = [
     ("test_internationalization", "smoke-test"),
     ("test_reformat", "smoke-test"),
     ("test_test", "smoke-test"),
+    ("test_switches", "smoke-test"),
     ("test_third_party_fetch", "smoke-test"),
     ("test_devtools", "smoke-test"),
     ("test_jslb", "smoke-test"),
@@ -253,6 +262,7 @@ _A_UNIT: list[tuple[str, str]] = [
     ("test_harness.ts", "smoke-test"),
     ("test_ui_strings.ts", "smoke-test"),
     ("test_i18n.ts", "smoke-test"),
+    ("test_switches.ts", "smoke-test"),
     ("test_utility.ts", "smoke-test"),
     ("test_jslb.ts", "smoke-test"),
     ("test_settings.ts", "smoke-test"),
@@ -313,10 +323,10 @@ _B_INTEGRATION: list[tuple[str, str]] = [
 
 # Group C's integration phase, the blocks whose page ttyd serves, by layer.
 _C_INTEGRATION: list[tuple[str, str]] = [
-    ("test_worker_ai_console.ts", "smoke-test"),
     ("test_wire_end.ts", "smoke-test"),
-    ("test_tools_browser_console.ts", "smoke-test"),
     ("test_integrate_wire.ts", "smoke-test"),
+    ("test_worker_ai_console.ts", "smoke-test"),
+    ("test_tools_browser_console.ts", "smoke-test"),
 ]
 
 # Every suite and block of a run, in the phases of the order above.
@@ -599,13 +609,19 @@ def sink_refuse(header: jslb.Object) -> NoReturn:
 
 # Builds `tap.start` as the engine's start builds it, and returns its settings.
 def start_encode() -> tuple[bytes, dict[str, Any]]:
-    import jslb, settings
+    import jslb, settings, switches
 
     loaded = settings.settings_load(_SETTINGS_PATH)
     with open(_TESTS_PATH, encoding="utf-8") as file:
         tests: object = jslb.json_decode(file.read())
     header = jslb.header_make(_FIRST_TYPE, id=_FIRST_ID, full=loaded["debug"])
-    line = jslb.line_make(header, [], settings=loaded, test_settings=tests)
+    line = jslb.line_make(
+        header,
+        [],
+        settings=loaded,
+        switches=switches.switches_get(),
+        test_settings=tests,
+    )
     # The JSON text bytes, the one piece the encoder yields with no blob.
     (piece,) = jslb.line_encode(line)
     return cast(bytes, piece), loaded
@@ -1042,6 +1058,9 @@ class PageRunner:
             self._browser = browser
             timer_stop()
         if name in _TTYD_BLOCKS:
+            # From here, past every suite that forks, a hangup stops ttyd.
+            for number in (signal.SIGHUP, signal.SIGTERM):
+                signal.signal(number, signal_exit)
             what = f"the root and ttyd of {name}"
             elapsed = time.monotonic() - started
             timer_start(category.alarm_plan(what, None, limit, elapsed))
@@ -1061,7 +1080,6 @@ class PageRunner:
         root: RootServer | None = None
         if name in _TTYD_BLOCKS:
             root = cast(RootServer, self._root)
-            self._root = None
             url = root.url_get()
         else:
             script = harness.gold_get(page_script(name))
@@ -1074,6 +1092,9 @@ class PageRunner:
         with tempfile.TemporaryFile(dir=_BUILD_PATH, buffering=0) as log:
             lane = PageLane(self._runner, self._settings, log)
             self._lane = lane
+            # From here the block's own stops take its root, not the browser's.
+            if root is not None:
+                self._root = None
             try:
                 try:
                     client = browser.client_get()
@@ -1091,8 +1112,9 @@ class PageRunner:
                     browser.page_open(_BLANK_URL)
                     lane.end_check()
                 except BaseException:
-                    # The root of a failed block stops too, its failure kept.
+                    # A failed block's root stops too, its alarm stopped first.
                     if root is not None:
+                        timer_stop()
                         root.server_stop(lane.log_write)
                     raise
                 if root is not None:
@@ -1266,13 +1288,18 @@ def stream_relay(
     return code
 
 
+# Exits with 128 plus the signal's number, so the blocks stop ttyd.
+def signal_exit(number: int, frame: types.FrameType | None) -> None:
+    sys.exit(_SIGNAL_BASE + number)
+
+
 # Runs the modules of the category, checks the stream, then runs the rest.
 def main(arguments: list[str]) -> int:
     import line_coverage
 
     # With `--coverage`, counting precedes project imports, so that they count.
     count = line_coverage.LineCount() if "--coverage" in arguments else None
-    import category
+    import category, switches
 
     parser = argparse.ArgumentParser(
         description="Run the suites of a category: the Python test modules"
@@ -1321,7 +1348,15 @@ def main(arguments: list[str]) -> int:
         " first line of its modules never counted as run",
     )
     category.options_add(parser)
+    switches.options_add(parser)
     parsed = parser.parse_args(arguments)
+    if os.geteuid() == _ROOT_UID:
+        raise PermissionError(
+            "test_all.py refuses to run as root: dash then prompts '# ' where"
+            " the gold has '$ ', RLIMIT_NPROC binds no root process, and"
+            " Chrome's sandbox refuses root; run it as a user that is not root"
+        )
+    switches.switches_set(parsed)
     failfast: bool = parsed.failfast
     chosen: str = parsed.category
     failures: int = parsed.failures

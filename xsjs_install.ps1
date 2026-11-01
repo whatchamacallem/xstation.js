@@ -171,7 +171,7 @@ function _xsjs_install_step_build_ttyd {
         Sort-Object Name
     foreach ($patch_ in $patches_) {
         $apply_ = @(
-            'patch', '-p1', '-d', $source_path_
+            'patch', '--batch', '-p1', '-d', $source_path_
             '-i', "$checkout_linux_/$patches_folder_/$($patch_.Name)"
         )
         $apply_failed_ = $i18n_.ttyd_patch_failed -f $patch_.Name

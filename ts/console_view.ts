@@ -11,7 +11,8 @@
 // or the band changes size while the view is shown, so every row is seen
 // without scrolling. The fit changes only the terminal on the page: no
 // resize goes to tty 0, whose size is the one the first message gives at its
-// opening, which is debug only.
+// opening, which is debug only. While the AI's command runs, from
+// `console.busy` to `console.idle`, the terminal takes no keystrokes.
 
 // The xterm.js 5.5.0 members that the view uses, which no package declares.
 declare class Terminal {
@@ -87,6 +88,8 @@ namespace console_view {
     private cell = 0;
     private open_id: number | undefined = undefined;
     private close_id: number | undefined = undefined;
+    // Whether the AI's command runs, so that no keystroke is taken.
+    private held = false;
 
     // Makes the hidden child and the terminal, which is not yet in the page.
     constructor(container: HTMLElement, tasks: queue.TaskQueue) {
@@ -171,7 +174,7 @@ namespace console_view {
       const message = utility.utf8_encode(text);
       this.tasks.line_notify(input_line(message), constants.owner);
       this.phase = "open";
-      this.terminal.options.disableStdin = false;
+      this.terminal.options.disableStdin = this.held;
     }
 
     // Asks the AI worker to close tty 0, from a UI handler that sleeps on it.
@@ -207,6 +210,18 @@ namespace console_view {
       this.terminal.options.disableStdin = true;
     }
 
+    // Takes no keystrokes while the AI's command runs.
+    input_hold(): void {
+      this.held = true;
+      this.terminal.options.disableStdin = true;
+    }
+
+    // Takes keystrokes again once the AI's command ends, while tty 0 is open.
+    input_free(): void {
+      this.held = false;
+      this.terminal.options.disableStdin = this.phase !== "open";
+    }
+
     // Writes a ttyd output message and ignores the title and preferences.
     output_feed(data: Uint8Array): void {
       if (data.length === 0) {
@@ -230,6 +245,9 @@ namespace console_view {
     private input_send(data: string): void {
       if (this.phase !== "open") {
         throw new Error(i18n("console_view.input_phase", this.phase));
+      }
+      if (this.held) {
+        throw new Error(i18n("console_view.input_held"));
       }
       const body = utility.utf8_encode(data);
       const message = message_make(constants.input_kind, body);

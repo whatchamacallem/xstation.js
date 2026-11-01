@@ -48,7 +48,7 @@ namespace test_wire_rungs {
     server_owner: "server" as const,
     first_type: "tap.start",
     first_id: 101,
-    first_keys: Object.freeze(["settings", "test_settings"]),
+    first_keys: Object.freeze(["settings", "switches", "test_settings"]),
     echo_type: "echo",
     tail_type: "verbose.tail",
     tail_thread: "server",
@@ -296,7 +296,6 @@ namespace test_wire_rungs {
         control: () => this.#blob_run("control", gold_value("control_bytes")),
         fit: () =>
           this.#blob_run("fit", harness.setting_get(constants.blob_setting)),
-        large: () => this.#blob_run("large", gold_value("large_bytes")),
         mcp: () => this.#mcp_run(),
         commits: () => this.#commits_run(),
         verbose: () => this.#verbose_run(),
@@ -468,7 +467,7 @@ namespace test_wire_rungs {
       return this.#pass(rung);
     }
 
-    // control, fit and large: one blob of the size given, echoed.
+    // control and fit: one blob of the size given, echoed.
     #blob_run(rung: string, size: unknown): dispatch.Sleep {
       const data = bytes_counted(size as number);
       this.#sent_size = data.length;

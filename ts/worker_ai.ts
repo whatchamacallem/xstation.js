@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// The AI worker once the boot has handed over its objects. At bring up it
-// sets this thread's settings and, in debug mode, the gold record from
-// `tap.start`, builds the queue with its ports to the UI thread and to the
-// server, sends `settings.set` to the UI thread, answers `tap.start` with an
-// Empty reply, and in debug mode notifies itself `worker.tests`, whose task
+// The AI worker once the boot has handed over its objects. At bring up it sets
+// this thread's settings, its switches and, in debug mode, the gold record
+// from `tap.start`, builds the queue with its ports to the UI thread and to
+// the server, sends `settings.set` to the UI thread, answers `tap.start` with
+// an Empty reply, and in debug mode notifies itself `worker.tests`, whose task
 // runs the worker's suites by `run`, which sends `ui.tests` when its stream
-// ends. Outside debug mode no gold arrives, so no suite runs and nothing
-// else does. Every line the worker builds takes the form
-// `settings.names_full()` picks.
+// ends. Outside debug mode no gold arrives, so no suite runs and nothing else
+// does. Every line the worker builds takes the form `settings.names_full()`
+// picks.
 //
 // In debug mode the server's port is a `WireTap`: each line it carries is
 // logged with `verbose.log` as its rendering by `jslb.line_render`, unless
@@ -21,6 +21,11 @@
 // The boot hands over the server's lane as a `queue.Port` and an end
 // function: the ttyd page's wire, `wire.WirePort`, and its `wire_end`; the
 // headless page's realm lane, a `queue.ThreadPort`, and a post of the line.
+// The ttyd page's boot also hands over tty 0's port, a `wire.ConsolePort`
+// at the page's address, which `console_attach` adds as the `console`
+// owner's port, whose UI relays it registers by `console_register` with the
+// port's `console_close`, and whose close it pushes to the UI as
+// `console.exit` with the code; the headless page hands over none.
 //
 // Faults: the worker registers its report function, which sends an `error`
 // line with the cascade of the thrown value by `dispatch.cause_make` through
@@ -31,8 +36,8 @@
 // per worker, so each of its pieces is a function of its own, for the unit
 // suites.
 //
-// The relays of the console and the overlay's note are pieces of the program
-// the suites build toward and run nowhere at bring up.
+// The overlay's note is a piece of the program the suites build toward and
+// runs nowhere at bring up.
 
 namespace worker_ai {
   // The owners, settings, line types and numbers of the worker.
@@ -48,6 +53,7 @@ namespace worker_ai {
     put_type: "settings.put",
     open_type: "console.open",
     close_type: "console.close",
+    exit_type: "console.exit",
     overlay_type: "overlay.line",
     verbose_type: "verbose.put",
     error_type: "error",
@@ -75,6 +81,7 @@ namespace worker_ai {
     server: queue.Port;
     end: ServerEnd;
     ui: MessagePort;
+    console: wire.ConsolePort | undefined;
   }
 
   // What a relay's wake keeps: the request it owes the reply to.
@@ -129,6 +136,8 @@ namespace worker_ai {
       "console.input": "console",
       "console.output": "ui",
       "console.exit": "ui",
+      "console.busy": "ui",
+      "console.idle": "ui",
       "verbose.": "server",
       "tap.": "server",
       fault: "ai",
@@ -201,6 +210,21 @@ namespace worker_ai {
     register(constants.close_type, version, (line) => {
       close();
       return dispatch.reply_make(line, {});
+    });
+  }
+
+  // Adds tty 0's port as the console's owner, its relays and its exit push.
+  export function console_attach(
+    tasks: queue.TaskQueue,
+    port: wire.ConsolePort,
+  ): void {
+    tasks.port_add(constants.console_owner, port);
+    console_register(tasks, dispatch.handler_register, () =>
+      port.console_close(),
+    );
+    port.close_receive((code) => {
+      const exit = line_build(constants.exit_type, { code });
+      tasks.line_notify(exit, constants.ui_owner);
     });
   }
 
@@ -286,6 +310,7 @@ namespace worker_ai {
   ): void {
     const payload = jslb.payload_of(parts.first) as unknown as lines.TapStart;
     settings.settings_set(payload.settings);
+    switches.switches_set(payload.switches);
     const gold = payload.test_settings;
     if (gold !== undefined) {
       harness.values_set(payload.settings, gold);
@@ -311,7 +336,13 @@ namespace worker_ai {
       error_send(parts.end, dispatch.cause_make(thrown), done),
     );
     fault_register(dispatch.handler_register, parts.end, () => self.close());
-    const notice: { [key: string]: unknown } = { settings: payload.settings };
+    if (parts.console !== undefined) {
+      console_attach(tasks, parts.console);
+    }
+    const notice: { [key: string]: unknown } = {
+      settings: payload.settings,
+      switches: payload.switches,
+    };
     if (gold !== undefined) {
       notice.test_settings = gold;
     }

@@ -6,25 +6,28 @@
 # steps of xsjs_install.ps1's ttyd build, for the test driver's bring up.
 # checkout_build reads powershell.ttyd_archive, powershell.ttyd_patches and
 # powershell.ttyd_build of settings.json, paths from the checkout's top, and
-# hands them to inputs_build. A build directory holds the record inputs.json,
-# the SHA-256 of the archive, then the name and SHA-256 of each patch in the
-# order they apply; one whose ttyd is present and whose record's bytes equal
-# those the inputs give now is left alone, with no program started. Every
-# other call builds from the archive, as a patch applies only once: the build
-# directory is removed, the archive unpacked by tarfile into its source/ with
-# the first component of each path stripped, each *.patch applied in name
-# order with patch -p1, then cmake -S, with git's package disabled so that
-# cmake starts no git, and cmake --build run and the built ttyd --version,
-# and the record written last, so that a failed build leaves none. Python
-# starts patch, cmake and the built ttyd, and nothing else. Each program's
-# stdin is /dev/null and its stdout and stderr go to build.log in
-# the build directory, which the program writes itself, so nothing reaches
-# stdout, the driver's TAP stream, and a hard exit loses no line of the log.
-# A program that exits other than 0 raises naming its command line, its exit
-# code and the log, the log's last lines in the cause. No program has a time
-# limit, since the build is outside every limit of the run.
+# hands them to inputs_build; with the switch anthropic the archive is the
+# package manager's, third_party_fetch.package_path's, of the same tree, and
+# tarfile reads either compression. A build directory holds the record
+# inputs.json, the SHA-256 of the archive, then the name and SHA-256 of each
+# patch in the order they apply; one whose ttyd is present and whose record's
+# bytes equal those the inputs give now is left alone, with no program started.
+# Every other call builds from the archive, as a patch applies only once: the
+# build directory is removed, the archive unpacked by tarfile into its source/
+# with the first component of each path and hard link target stripped, each
+# *.patch applied in name order with patch --batch -p1, then cmake -S, with
+# git's package disabled so that cmake starts no git, and cmake --build run and
+# the built ttyd --version, and the record written last, so that a failed build
+# leaves none. Python starts patch, cmake and the built ttyd, and nothing else.
+# Each program's stdin is /dev/null and its stdout and stderr go to build.log
+# in the build directory, which the program writes itself, so nothing reaches
+# stdout, the driver's TAP stream, and a hard exit loses no line of the log. A
+# program that exits other than 0 raises naming its command line, its exit code
+# and the log, the log's last lines in the cause. No program has a time limit,
+# since the build is outside every limit of the run.
 
-import hashlib, json, os, settings, shlex, shutil, subprocess, tarfile
+import hashlib, json, os, settings, shlex, shutil, subprocess, switches
+import tarfile, third_party_fetch
 from typing import IO
 
 # The public names of this module, as its stub declares them.
@@ -58,14 +61,18 @@ _GIT_OPTION = "-DCMAKE_DISABLE_FIND_PACKAGE_Git=TRUE"
 _TAIL_LINES = 20
 
 
-# Unpacks the gzipped tar into the folder, cutting each path's first part.
+# Unpacks the compressed tar into the folder, cutting each path's first part.
 def archive_unpack(archive_path: str, source_path: str) -> None:
-    with tarfile.open(archive_path, "r:gz") as archive:
+    with tarfile.open(archive_path, "r:*") as archive:
         members: list[tarfile.TarInfo] = []
         for member in archive.getmembers():
             _, _, rest = member.name.partition("/")
             # The top folder itself has no path left, as with `tar`.
             if rest:
+                # A hard link's target loses its first part too, as with `tar`.
+                if member.islnk():
+                    _, _, target = member.linkname.partition("/")
+                    member = member.replace(linkname=target, deep=False)
                 members.append(member.replace(name=rest, deep=False))
         archive.extractall(source_path, members=members, filter="data")
 
@@ -73,8 +80,11 @@ def archive_unpack(archive_path: str, source_path: str) -> None:
 # Builds ttyd where `settings.json` says, returning the path of its `ttyd`.
 def checkout_build() -> str:
     loaded = settings.settings_load(_SETTINGS_PATH)["powershell"]
+    archive = os.path.join(_ROOT_PATH, loaded["ttyd_archive"])
+    if switches.anthropic:  # pragma: no cover
+        archive = third_party_fetch.package_path()
     return inputs_build(
-        os.path.join(_ROOT_PATH, loaded["ttyd_archive"]),
+        archive,
         os.path.join(_ROOT_PATH, loaded["ttyd_patches"]),
         os.path.join(_ROOT_PATH, loaded["ttyd_build"]),
     )
@@ -112,7 +122,9 @@ def inputs_build(archive_path: str, patches_path: str, build_path: str) -> str:
         archive_unpack(archive_path, source_path)
         for patch in patches:
             program_run(
-                ["patch", "-p1", "-d", source_path, "-i", patch], log, log_path
+                ["patch", "--batch", "-p1", "-d", source_path, "-i", patch],
+                log,
+                log_path,
             )
         program_run(
             ["cmake", "-S", source_path, "-B", build_path, _GIT_OPTION],

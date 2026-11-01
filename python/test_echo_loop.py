@@ -3,15 +3,15 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the echo main loop in forked children over pipes, with roots in
-# `build/` whose settings are the checkout's with the gold's sizes, and its
-# error texts against the gold. Each child writes how its work ended to a
-# file, or to stderr with the failure when that write fails, then kills
-# itself whatever happened, so the handlers it registers never reach another
-# test. The browser's `error` line goes to the real `engine_tap`, which logs
-# its cascade in the root's log, opened first by the child, through
-# `echo_loop`, as `bootstrap.py` opens it, and ends the root's TAP file with
-# a bail out, both read from the root. A page thread's `verbose.put` goes to
-# the real `engine_verbose`, which writes its lines to that same log.
+# `build/` whose settings are the checkout's with the gold's sizes and debug
+# true, and its error texts against the gold. Each child writes how its work
+# ended to a file, or to stderr with the failure when that write fails, then
+# kills itself whatever happened, so the handlers it registers never reach
+# another test. The browser's `error` line goes to the real `engine_tap`, which
+# logs its cascade in the root's log, opened first by the child, through
+# `echo_loop`, as `bootstrap.py` opens it, and ends the root's TAP file with a
+# bail out, both read from the root. A page thread's `verbose.put` goes to the
+# real `engine_verbose`, which writes its lines to that same log.
 
 import contextlib, echo_loop, functools, harness, json, os, signal, sqlite3
 import sys, tempfile, traceback, unittest
@@ -216,6 +216,8 @@ class ScratchCase(unittest.TestCase):
         self.root = os.path.join(scratch.name, "root")
         os.mkdir(self.root)
         values = harness.settings_copy()
+        # The echo loop serves only a root in debug mode, whatever the file's.
+        values["debug"] = True
         values["overflow_bytes"] = _OVERFLOW_BYTES
         values["chunk_bytes"] = _CHUNK_BYTES
         path = os.path.join(self.root, "settings.json")

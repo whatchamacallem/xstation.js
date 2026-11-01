@@ -20,8 +20,9 @@
 # sandbox, the heredoc's payload and output, and the expected texts are the
 # gold's. The scratch directories go under build/.
 
-import base64, bootstrap, contextlib, errno, harness, json, os, pty, signal
-import sqlite3, sys, tempfile, termios, traceback, unittest
+import base64, bootstrap, contextlib, errno, harness, json, os, pty, select
+import shlex, signal, sqlite3, sys, tempfile, termios, time, traceback
+import unittest
 from typing import NamedTuple
 
 # The checkout's top directory, above this file's `python/`.
@@ -35,6 +36,9 @@ _GOLD_ID = "python.test_bootstrap_dash"
 
 # The most bytes a read of the pty takes at once.
 _READ_BYTES: int = harness.gold_get(f"{_GOLD_ID}.read_bytes")
+
+# The seconds a wait for dash's prompt takes before it fails, its bytes shown.
+_PROMPT_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.prompt_seconds")
 
 # The test's own copy of the console's shell, as the log names it.
 _DASH_ARGV: list[str] = harness.gold_get(f"{_GOLD_ID}.argv")
@@ -197,7 +201,7 @@ def _heredoc_typed(payload: bytes) -> bytes:
 
 # The log lines of the shell's run and of its exit with the code.
 def _exec_lines(argv: list[str], code: int) -> list[tuple[str, str]]:
-    command = " ".join(argv)
+    command = shlex.join(argv)
     return [
         (_SERVER_THREAD, _text_get("verbose_exec_run", command)),
         (_SERVER_THREAD, _text_get("verbose_exec_exit", command, str(code))),
@@ -291,7 +295,14 @@ class ConsoleChild:
 
     # Reads up to the shell's first prompt, where every comparison starts.
     def prompt_wait(self) -> None:
+        end = time.monotonic() + _PROMPT_SECONDS
         while _PROMPT not in self.printed:
+            left = max(end - time.monotonic(), 0.0)
+            if not select.select([self.master], [], [], left)[0]:
+                raise AssertionError(
+                    f"no prompt in {_PROMPT_SECONDS} s:"
+                    f" {bytes(self.printed)!r}"
+                )
             if not self.bytes_read():
                 raise AssertionError(f"no prompt: {bytes(self.printed)!r}")
         self.prompted = self.printed.index(_PROMPT)

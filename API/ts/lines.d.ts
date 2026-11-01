@@ -64,6 +64,8 @@
 // console.output    ui-ai    AI -> UI        1      push
 // console.close     ui-ai    UI -> AI        0      Empty
 // console.exit      ui-ai    AI -> UI        0      push
+// console.busy      ui-ai    AI -> UI        0      push, the AI's command runs
+// console.idle      ui-ai    AI -> UI        0      push, that command ended
 // overlay.line      ui-ai    AI -> UI        0      push (debug)
 // verbose.put       ui-ai    UI -> AI        0      push, then forwarded
 // tap.line          ui-ai    UI -> AI        0      push, then forwarded
@@ -175,9 +177,10 @@ declare namespace lines {
     image_model: string;
   }
 
-  // tap.start: the first line, `settings.json` and, in debug mode, the gold.
+  // tap.start: the first line: settings, switches and, in debug mode, gold.
   interface TapStart {
     settings: settings.Settings;
+    switches: switches.Switches;
     test_settings?: harness.Gold;
   }
 
@@ -360,6 +363,7 @@ declare namespace lines {
   // settings.set: what `tap.start` carried, for the UI thread.
   interface SettingsSet {
     settings: settings.Settings;
+    switches: switches.Switches;
     test_settings?: harness.Gold;
   }
 
@@ -464,6 +468,9 @@ declare namespace lines {
   interface ConsoleExit {
     code: number;
   }
+
+  // console.busy and console.idle: the view takes no keys between the two.
+  interface ConsoleTurn {}
 
   // overlay.line: one rendered line of tty `tty` for the UI's ring.
   interface OverlayLine {

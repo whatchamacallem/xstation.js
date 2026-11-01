@@ -8,7 +8,8 @@
 # puts there is removed when the test ends, and the directory with it. Then
 # `pins_fetch` on the pins already in place, the gold's paths and digests.
 
-import harness, hashlib, os, pathlib, tempfile, third_party_fetch, unittest
+import harness, hashlib, os, pathlib, switches, tempfile, third_party_fetch
+import unittest
 
 # The checkout's top directory.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -25,14 +26,20 @@ _LIBRARY_NAME = "test_third_party_fetch"
 # The gold's pins, each its path in `third_party/` and its sha256, in order.
 _PINS_ID = "python.test_third_party_fetch.pins"
 
+# A command that places a file, which `package_check` names when it is absent.
+_PACKAGE_COMMAND = "apt-get source --download-only test-package=1.0-1"
+
+# The gold id of the pins with ttyd's from the package manager, by switch.
+_PINS_ANTHROPIC_ID = "python.test_third_party_fetch.pins_anthropic"
+
 
 # Returns the name in the scratch library of the file name.
 def name_make(file_name: str) -> str:
     return _LIBRARY_NAME + "/" + file_name
 
 
-# Tests of `file_fetch` with a source file in scratch and the real target.
-class TestFetch(unittest.TestCase):
+# A test with a scratch source file and the scratch library of the target.
+class LibraryCase(unittest.TestCase):
     # Makes the scratch directory that holds the source file.
     def setUp(self) -> None:
         os.makedirs(_BUILD_PATH, exist_ok=True)
@@ -63,6 +70,9 @@ class TestFetch(unittest.TestCase):
         self.removal_add(path)
         return path
 
+
+# Tests of `file_fetch` with a source file in scratch and the real target.
+class TestFetch(LibraryCase):
     # An existing file with another digest is replaced by the fetched bytes.
     def test_existing_replaced(self) -> None:
         data = b"new bytes"
@@ -133,11 +143,53 @@ class TestFetch(unittest.TestCase):
         self.assertFalse(os.path.exists(self.library_path))
 
 
+# Tests of `package_check` on files of the scratch library, and its path.
+class TestPackage(LibraryCase):
+    # A file there with its digest is returned, with no fetch.
+    def test_package_placed(self) -> None:
+        data = b"packaged bytes"
+        name = name_make("packaged.tar.xz")
+        path = self.target_write(name, data)
+        digest = hashlib.sha256(data).hexdigest()
+        self.assertEqual(
+            third_party_fetch.package_check(name, _PACKAGE_COMMAND, digest),
+            path,
+        )
+
+    # An absent file is refused, naming the command that places it.
+    def test_package_absent(self) -> None:
+        name = name_make("absent.tar.xz")
+        digest = hashlib.sha256(b"").hexdigest()
+        with self.assertRaises(FileNotFoundError) as context:
+            third_party_fetch.package_check(name, _PACKAGE_COMMAND, digest)
+        self.assertIn(_PACKAGE_COMMAND, str(context.exception))
+
+    # A file with another digest is refused, showing both digests.
+    def test_package_wrong(self) -> None:
+        name = name_make("wrong.tar.xz")
+        self.target_write(name, b"other bytes")
+        wanted = hashlib.sha256(b"packaged bytes").hexdigest()
+        actual = hashlib.sha256(b"other bytes").hexdigest()
+        with self.assertRaises(ValueError) as context:
+            third_party_fetch.package_check(name, _PACKAGE_COMMAND, wanted)
+        self.assertIn(actual, str(context.exception))
+        self.assertIn(wanted, str(context.exception))
+
+    # ttyd's archive from the package manager is the first of the gold's.
+    def test_package_path(self) -> None:
+        pins: list[list[str]] = harness.gold_get(_PINS_ANTHROPIC_ID)
+        self.assertEqual(
+            third_party_fetch.package_path(),
+            os.path.join(_THIRD_PARTY_PATH, pins[0][0]),
+        )
+
+
 # Tests of `pins_fetch` on the pins, which the run fetched before its blocks.
 class TestPins(unittest.TestCase):
     # Each pin is at its path with its digest, and a second fetch keeps it.
     def test_pins_placed(self) -> None:
-        pins: list[list[str]] = harness.gold_get(_PINS_ID)
+        chosen = _PINS_ANTHROPIC_ID if switches.anthropic else _PINS_ID
+        pins: list[list[str]] = harness.gold_get(chosen)
         paths = [os.path.join(_THIRD_PARTY_PATH, name) for name, _ in pins]
         self.assertEqual(third_party_fetch.pins_fetch(), paths)
         for path, (_, digest) in zip(paths, pins):

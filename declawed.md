@@ -114,6 +114,10 @@ command only to name the log.
   responsible for database integrity across a wire. It must be possible to
   replace the database with a different kind of backing store without
   changing the protocol.
+- The maximum size of everything in the system is set to be the maximum size
+  of a single SQLite binary database that Chrome will store: `blob_max` of
+  `settings.json`, 10 MiB, 10485760 bytes. A single database of that size is
+  transmissible in a single message.
 
 ### Source Code and Style
 

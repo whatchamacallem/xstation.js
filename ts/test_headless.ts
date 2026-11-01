@@ -15,23 +15,23 @@
 //
 //     test_headless.realm_start(BLOCK, FAILFAST, LINE)
 //
-// with the name of a block of the table below, a boolean, true when the
-// first failure ends the stream with a bail out, and the base64 of the bytes
-// of the first line, which must be `tap.start` with `i` 101, carrying the
-// settings and the test settings. It is decoded by `jslb.LineDecoder` over
-// an empty `substrate.CacheFiles`, under the bounds the wire reads the
-// page's first line with. A throw while `realm_start` runs, as at any other
-// first line, an unknown block, a call before `realm_open()` or after a
-// first call, or in a UI block's synchronous run, is the exception of the
+// with the name of a block of the table below, a boolean, true when the first
+// failure ends the stream with a bail out, and the base64 of the bytes of the
+// first line, which must be `tap.start` with `i` 101, carrying the settings,
+// the switches and the test settings. It is decoded by `jslb.LineDecoder` over
+// an empty `substrate.CacheFiles`, under the bounds the wire reads the page's
+// first line with. A throw while `realm_start` runs, as at any other first
+// line, an unknown block, a call before `realm_open()` or after a first call,
+// or in a UI block's synchronous run, is the exception of the
 // `Runtime.evaluate` call, and not a line of the lane.
 //
-// A UI block runs on the main thread, in its own page load: the settings and
-// the harness's values are set, an Empty reply answers `tap.start`, and the
-// block runs as the one block of a TAP stream, each line sent as a
-// `tap.line` push the moment it is made. A block is a unittest module, run
-// through `TAPTestRunner.module_run`, a block of line cases, whose suite's
-// topology `line_case.block_run` runs on the gold `typescript.BLOCK`, or a
-// block that writes its own points as they arrive, as `test_line_case`
+// A UI block runs on the main thread, in its own page load: the settings, the
+// switches and the harness's values are set, an Empty reply answers
+// `tap.start`, and the block runs as the one block of a TAP stream, each line
+// sent as a `tap.line` push the moment it is made. A block is a unittest
+// module, run through `TAPTestRunner.module_run`, a block of line cases, whose
+// suite's topology `line_case.block_run` runs on the gold `typescript.BLOCK`,
+// or a block that writes its own points as they arrive, as `test_line_case`
 // does in the Node realm.
 //
 // A worker block runs in a fresh Worker made from the texts of the
@@ -331,10 +331,11 @@ namespace test_headless {
     return first;
   }
 
-  // Sets the settings and the harness's values here, and answers `tap.start`.
+  // Sets the settings, switches and harness's values, and answers `tap.start`.
   function start_answer(start: boot.HeadlessStart): void {
     const payload = jslb.payload_of(start.first) as unknown as lines.TapStart;
     settings.settings_set(payload.settings);
+    switches.switches_set(payload.switches);
     harness.values_set(
       payload.settings,
       payload.test_settings as harness.Gold,

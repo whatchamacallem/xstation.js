@@ -7,7 +7,9 @@
 // and a later fit changes only the terminal on the page, which is debug only.
 // ttyd's server messages, each one `console.output` line: '0' output, '1'
 // the title and '2' the preferences, the last two ignored. ctrl 0 toggles the
-// view, which keeps its scrollback, colours and features while hidden.
+// view, which keeps its scrollback, colours and features while hidden. While
+// the AI's command runs, from `console.busy` to `console.idle`, the view takes
+// no keystrokes, and the person watches the command and its output.
 
 declare namespace console_view {
   class ConsoleView {
@@ -28,6 +30,10 @@ declare namespace console_view {
     close_done(wake: lines.Line): void;
     // Ends tty 0: the screen stays, input is off, a later show opens it.
     exit_done(): void;
+    // Takes no keystrokes while the AI's command runs, at `console.busy`.
+    input_hold(): void;
+    // Takes keystrokes again while tty 0 is open, at `console.idle`.
+    input_free(): void;
     output_feed(data: Uint8Array): void;
   }
 }

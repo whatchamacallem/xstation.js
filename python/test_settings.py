@@ -27,11 +27,11 @@ _GOOD_SETTINGS: dict[str, Any] = {
     "verbose_level": 1,
     "verbose_ring": 1000,
     "line_max": 1048576,
-    "blob_max": 2147483391,
+    "blob_max": 10485760,
     "overflow_bytes": 131072,
     "chunk_bytes": 1048576,
     "srv_buf_size": 1048576,
-    "media_db_bytes": 268435456,
+    "media_db_bytes": 10485760,
     "turn_compact_turns": 64,
     "provider": {
         "scripted": True,

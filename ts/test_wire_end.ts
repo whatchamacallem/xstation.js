@@ -16,7 +16,9 @@
 // `block_start`, its plan the number of points, and `block_end` of the
 // runner it is handed. A point with no verdict within the gold's
 // `point_seconds` fails, naming what it waited for, and a point that comes
-// to a second verdict throws. The lines the points send and expect and the
+// to a second verdict throws. A failed point ends the block, failfast or
+// not, since its port may still hold the server whose lock the next point's
+// server would meet. After `wire_close` any line taken fails the point. The lines the points send and expect and the
 // close code are the gold of test_settings.json; an `error` line's `stack`,
 // and each `stack` down its `cause` chain, is compared by its first line
 // only, as line cases compare it.
@@ -218,9 +220,11 @@ namespace test_wire_end {
   // `wire_end` after `wire_close`: `fn` runs at once and nothing is sent.
   function close_ended(point: PointRun): void {
     const port = port_make();
-    const came: lines.Line[] = [];
+    // A line taken after `wire_close` fails the point, or throws after it.
     port.line_receive((line) => {
-      came.push(line);
+      point.point_end(
+        `a line came after wire_close: ${utility.json_text(line)}`,
+      );
     });
     // Called after the verdict, it throws as a second verdict.
     port.close_receive((code, had_error) => {
@@ -237,7 +241,7 @@ namespace test_wire_end {
         });
         point.point_end(
           ends === 1
-            ? lines_compare(came, [])
+            ? undefined
             : `wire_end called its function ${ends} times at once`,
         );
       });
@@ -251,9 +255,8 @@ namespace test_wire_end {
     { name: "close_ended", run: close_ended },
   ]);
 
-  // Runs the points from `index` on, to the first failed if failfast.
+  // Runs the points from `index` on, to the first failed.
   function points_run(
-    runner: tap_producer.TAPTestRunner,
     tracker: tap_producer.Tracker,
     name: string,
     index: number,
@@ -268,13 +271,11 @@ namespace test_wire_end {
     const point = new PointRun(entry.name, seconds, (difference) => {
       if (difference === undefined) {
         tracker.add_ok(name, entry.name);
+        points_run(tracker, name, index + 1, then);
       } else {
+        // A failed point's port may still hold its server and the root's lock.
         tracker.add_not_ok(name, entry.name, "", difference);
-      }
-      if (difference !== undefined && runner.failfast) {
         then();
-      } else {
-        points_run(runner, tracker, name, index + 1, then);
       }
     });
     entry.run(point);
@@ -287,7 +288,7 @@ namespace test_wire_end {
     done: (passed: boolean) => void,
   ): void {
     const tracker = runner.block_start(name, points.length);
-    points_run(runner, tracker, name, 0, () => done(runner.block_end(name)));
+    points_run(tracker, name, 0, () => done(runner.block_end(name)));
   }
 }
 

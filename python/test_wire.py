@@ -4,47 +4,46 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # The wire test, a TAP run: the producer is JavaScript in the page,
-# ts/test_wire_rungs.ts, which runs the rungs on the page's own wire, and
-# this file is the consumer. It builds the one page with page_build.py,
-# makes three roots under build/ as the start script makes the server root,
-# echo, stock and restart, each with its settings.json and its
-# test_settings.json, whose typescript.run is "wire" and whose
-# typescript.test_wire_rungs names the rungs the root runs and their gold.
-# That gold is the rungs' fixed parameters, python.test_wire.rungs of the
-# checkout's test_settings.json, with the parts known at run time added: the
-# root, its rungs, the digest of the tool's text, and the text and digest of
-# the restart's main loop file. The texts this file finds in the server's
-# log, its timers and its sizes are python.test_wire too. Each root gets
-# its own ttyd as python/ttyd_build.py builds it, given its
-# options as the start script gives them and the built page as --index,
-# running `python3 <root>/python/bootstrap.py --root <root>`, with
-# --main-loop echo_loop.py on the echo root, and its own load of the page in
+# ts/test_wire_rungs.ts, which runs the rungs on the page's own wire, and this
+# file is the consumer. It builds the one page with page_build.py, makes three
+# roots under build/ as the start script makes the server root, echo, stock and
+# restart, each with its settings.json and its test_settings.json, whose
+# typescript.run is "wire" and whose typescript.test_wire_rungs names the rungs
+# the root runs and their gold. That gold is the rungs' fixed parameters,
+# python.test_wire.rungs of the checkout's test_settings.json, with the parts
+# known at run time added: the root, its rungs, the digest of the tool's text,
+# and the text and digest of the restart's main loop file. The texts this file
+# finds in the server's log, its timers and its sizes are python.test_wire too.
+# Each root gets its own ttyd as python/ttyd_build.py builds it, given its
+# options as the start script gives them and the built page as --index, running
+# `python3 <root>/python/bootstrap.py --root <root>`, with --main-loop
+# echo_loop.py on the echo root, and its own load of the page in
 # chrome-headless-shell through devtools.LinuxPipe. The page meets ttyd's
 # protocol as ts/wire.ts annotates it: the token from /token, /ws and
-# /ws?arg=console with the subprotocol tty, a first message of JSON text,
-# then '0' input, and from ttyd '0' output, '1' the title and '2' the
-# preferences. That ttyd 1.7.7 accepts a first message without a size is
-# from memory, owed to testing. The server appends each line of the page's
-# stream to <root>/tap/typescript.tap; this file reads it as it grows,
-# through tap_consumer.py, a line at a time under the timer of the rung it
-# waits for, prints one line per point with its label and seconds, and
-# stops at the first not ok, bail out or line that does not fit, naming it.
-# Around the streams it makes the checks only this process can make: ttyd's
-# resident size after the large rung and its end when killed after the echo
-# stream; the stock server's database files, its log and its exit after the
-# unknown rung; and on the restart root a stream that ended passing, then
-# the server's exit and its pid kept by the exec, its log of the reply it
-# did not expect to its second first line, which names the page's refusal
-# or, by a race of the design, a verbose.put push of the page's log in
-# flight across the exec, and the page's fault screen holding its refusal,
-# where it always shows. Each root and rung is labelled smoke-test or
-# normal-test: a smoke-test run, the default, leaves the normal-test rungs
-# out of the gold, and a mislabel fails the run. It exits 0, or 1 at the
-# first failed check, naming its rung. ttyd's log and the page's console are
-# copied to stderr. ttyd, the browser and tsc through page_build.py are the
-# programs it starts:
+# /ws?arg=console with the subprotocol tty, a first message of JSON text, then
+# '0' input, and from ttyd '0' output, '1' the title and '2' the preferences.
+# That ttyd 1.7.7 accepts a first message without a size is from memory, owed
+# to testing. The server appends each line of the page's stream to
+# <root>/tap/typescript.tap; this file reads it as it grows, through
+# tap_consumer.py, a line at a time under the timer of the rung it waits for,
+# prints one line per point with its label and seconds, and stops at the first
+# not ok, bail out or line that does not fit, naming it. Around the streams it
+# makes the checks only this process can make: ttyd's resident size after the
+# fit rung, the largest blob, and its end when killed after the echo stream;
+# the stock server's database files, its log and its exit after the unknown
+# rung; and on the restart root a stream that ended passing, then the server's
+# exit and its pid kept by the exec, its log of the reply it did not expect to
+# its second first line, which names the page's refusal or, by a race of the
+# design, a verbose.put push of the page's log in flight across the exec, and
+# the page's fault screen holding its refusal, where it always shows. Each root
+# and rung is labelled smoke-test or normal-test: a smoke-test run, the
+# default, leaves the normal-test rungs out of the gold, and a mislabel fails
+# the run. It exits 0, or 1 at the first failed check, naming its rung. ttyd's
+# log and the page's console are copied to stderr. ttyd, the browser and tsc
+# through page_build.py are the programs it starts:
 #
 #     python3 python/test_wire.py [--smoke-test | --normal-test]
+#         [--anthropic] [--debug] [--verbose]
 
 import argparse, contextlib, hashlib, json, os, pathlib, re, select, shutil
 import signal, sqlite3, subprocess, sys, tempfile, time, types
@@ -114,7 +113,6 @@ _ECHO_RUNGS = (
     ("echo", _SMOKE_TEST),
     ("control", _SMOKE_TEST),
     ("fit", _NORMAL_TEST),
-    ("large", _NORMAL_TEST),
 )
 
 # The stock root's rungs and their labels, in the order they run.
@@ -350,8 +348,7 @@ class TtydServer:
                     "--index",
                     page,
                     "--url-arg",
-                    _BUFFER_OPTION,
-                    str(values["srv_buf_size"]),
+                    f"{_BUFFER_OPTION}={values['srv_buf_size']}",
                     *self.command,
                 ],
                 stdin=subprocess.DEVNULL,
@@ -858,7 +855,7 @@ def stream_run(
     for rung, label in rest:
         log.rung_enter(f"{root}: {rung}", label)
         summary = stream.point_next(rung).strip()
-        if rung == "large":
+        if rung == "fit":
             use = memory_read(ttyd.process.pid)
             summary += (
                 f"; ttyd's resident size {use.resident} KiB, its peak"
@@ -978,7 +975,7 @@ def signal_exit(number: int, frame: types.FrameType | None) -> None:
 
 # Runs the roots of the chosen category in order and returns the exit code.
 def main(arguments: list[str]) -> int:
-    import category
+    import category, switches
 
     parser = argparse.ArgumentParser(
         prog=_PROGRAM_NAME,
@@ -987,7 +984,10 @@ def main(arguments: list[str]) -> int:
         " chrome-headless-shell, their TAP stream read from each root.",
     )
     category.options_add(parser)
-    chosen: str = parser.parse_args(arguments).category
+    switches.options_add(parser)
+    parsed = parser.parse_args(arguments)
+    chosen: str = parsed.category
+    switches.switches_set(parsed)
     for number in (signal.SIGHUP, signal.SIGTERM):
         signal.signal(number, signal_exit)
     log = RungLog(chosen)

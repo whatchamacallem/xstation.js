@@ -66,6 +66,7 @@
         "bootstrap_reply_unexpected_payload_extra": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"tap.start\",\"r\":101},\"extra\":1}",
         "bootstrap_reply_unexpected_reply_one": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"tap.start\",\"r\":1}}",
         "bootstrap_reply_unexpected_reply_true": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"tap.start\",\"r\":true}}",
+        "bootstrap_root_outside": "The console's root /usr is not under /home/, which the sandbox hides from dash.",
         "bootstrap_run_failed": "The server failed: {0}",
         "bootstrap_start_submit": "server submits to ai: {\"type\":\"tap.start\",\"id\":101}",
         "bootstrap_tests_not_object": "The test settings file {0} does not hold a JSON object.",
@@ -133,6 +134,7 @@
         }
       },
       "prompt": "$ ",
+      "prompt_seconds": 10,
       "read_bytes": 65536,
       "start_directory": "/tmp",
       "terminated": {
@@ -148,7 +150,6 @@
       "echo_seconds": 600,
       "hold_seconds": 120,
       "http_seconds": 2,
-      "large_bytes": 134217728,
       "lines": {
         "console_open_reply": {
           "0": {
@@ -3470,6 +3471,20 @@
           "xterm/xterm-5.5.0.tgz",
           "bd954fa721872170188cc5d7e83e88db3c83c9a18a4e8d24c2783d26491f59d2"
         ]
+      ],
+      "pins_anthropic": [
+        [
+          "ttyd/ttyd_1.7.7.orig.tar.xz",
+          "48eba3f76af237f4c09cceb5ddbe0f845832557819f7e5c60c88285f8822af88"
+        ],
+        [
+          "sqlite/sqlite-wasm-3460100.zip",
+          "79b5fbfd1c5ca35f492624bb6b9323e6c74e483e2a55ff18ce5904a8cdb1b38c"
+        ],
+        [
+          "xterm/xterm-5.5.0.tgz",
+          "bd954fa721872170188cc5d7e83e88db3c83c9a18a4e8d24c2783d26491f59d2"
+        ]
       ]
     },
     "test_ttyd_build": {
@@ -3597,7 +3612,6 @@
           },
           "text": "na\u00efve \u65e5\u672c \ud83d\ude00"
         },
-        "large_bytes": 134217728,
         "lines_command": "( i=1; while [ \"$i\" -le 100000 ]; do echo \"$i\"; i=$((i + 1)); done )",
         "lines_count": 100000,
         "mcp_call": {
@@ -9674,6 +9688,7 @@
       },
       "marker_end": "<<xsjs-end>>",
       "marker_start": "<<xsjs-begin>>",
+      "output_kind": "0",
       "root": {}
     },
     "test_integrate_worker_ai": {
@@ -11878,6 +11893,19 @@
         "substrate_version_exists": "The document version 'note/1' already exists in alpha."
       }
     },
+    "test_switches": {
+      "texts": {
+        "switches_already_set": "The switches were already set on this thread.",
+        "switches_malformed_array": "The switches [true,false,true] are not exactly anthropic, debug and verbose, each true or false.",
+        "switches_malformed_extra": "The switches {\"anthropic\":false,\"debug\":false,\"verbose\":false,\"other\":false} are not exactly anthropic, debug and verbose, each true or false.",
+        "switches_malformed_missing": "The switches {\"anthropic\":false,\"debug\":false} are not exactly anthropic, debug and verbose, each true or false.",
+        "switches_malformed_null": "The switches null are not exactly anthropic, debug and verbose, each true or false.",
+        "switches_malformed_number": "The switches 1 are not exactly anthropic, debug and verbose, each true or false.",
+        "switches_malformed_string": "The switches {\"anthropic\":\"1\",\"debug\":false,\"verbose\":false} are not exactly anthropic, debug and verbose, each true or false.",
+        "switches_malformed_undefined": "The switches undefined are not exactly anthropic, debug and verbose, each true or false.",
+        "switches_not_set": "The switches were used before they were set."
+      }
+    },
     "test_tools_browser": {
       "lines": {
         "image_answer": {
@@ -12029,31 +12057,31 @@
           "send": ["open_request"]
         },
         {
-          "expect": ["recorded_ask", "recorded_show", "recorded_reply"],
+          "expect": ["recorded_ask", "recorded_show", "console_busy", "console_idle", "recorded_reply"],
           "name": "recorded",
           "seconds": 10,
           "send": ["first_input", "recorded_request"]
         },
         {
-          "expect": ["counted_ask", "counted_show", "counted_reply"],
+          "expect": ["counted_ask", "counted_show", "console_busy", "console_idle", "counted_reply"],
           "name": "counted",
           "seconds": 10,
           "send": ["counted_request"]
         },
         {
-          "expect": ["always_ask", "always_show", "always_reply"],
+          "expect": ["always_ask", "always_show", "console_busy", "console_idle", "always_reply"],
           "name": "always",
           "seconds": 10,
           "send": ["always_request"]
         },
         {
-          "expect": ["allowed_show", "allowed_reply"],
+          "expect": ["allowed_show", "console_busy", "console_idle", "allowed_reply"],
           "name": "allowed",
           "seconds": 10,
           "send": ["allowed_request"]
         },
         {
-          "expect": ["expired_show", "expired_reply"],
+          "expect": ["expired_show", "console_busy", "console_idle", "expired_reply"],
           "name": "expired",
           "seconds": 10,
           "send": ["expired_request"]
@@ -12089,6 +12117,16 @@
         "image_model": "grok-2-image"
       },
       "lines": {
+        "console_busy": {
+          "0": {
+            "type": "console.busy"
+          }
+        },
+        "console_idle": {
+          "0": {
+            "type": "console.idle"
+          }
+        },
         "allowed_reply": {
           "0": {
             "r": 106,
@@ -12769,28 +12807,28 @@
     "test_worker_ai_console": {
       "cases": [
         {
-          "expect": ["open_1_reply"],
+          "expect": ["open_reply"],
           "name": "console_opened",
           "seconds": 10,
-          "send": ["open_1"]
+          "send": ["open_request"]
         },
         {
-          "expect": ["close_2_reply", "exit"],
+          "expect": ["close_reply", "exit"],
           "name": "console_closed",
           "seconds": 10,
-          "send": ["close_2"]
+          "send": ["close_request"]
         }
       ],
       "lines": {
-        "close_2": {
+        "close_reply": {
           "0": {
-            "id": 2,
+            "reply": 103,
             "type": "console.close"
           }
         },
-        "close_2_reply": {
+        "close_request": {
           "0": {
-            "reply": 2,
+            "id": 103,
             "type": "console.close"
           }
         },
@@ -12800,18 +12838,18 @@
           },
           "code": 1000
         },
-        "open_1": {
+        "open_reply": {
           "0": {
-            "id": 1,
-            "type": "console.open"
-          }
-        },
-        "open_1_reply": {
-          "0": {
-            "reply": 1,
+            "reply": 102,
             "type": "console.open"
           },
           "token": ""
+        },
+        "open_request": {
+          "0": {
+            "id": 102,
+            "type": "console.open"
+          }
         }
       },
       "root": {}

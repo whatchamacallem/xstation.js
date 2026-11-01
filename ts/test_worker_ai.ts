@@ -144,6 +144,8 @@ namespace test_worker_ai {
         "console.input": "console",
         "console.output": "ui",
         "console.exit": "ui",
+        "console.busy": "ui",
+        "console.idle": "ui",
         "verbose.": "server",
         "tap.": "server",
         fault: "ai",
@@ -385,6 +387,7 @@ namespace test_worker_ai {
       this.assertTrue(Object.isFrozen(worker_ai));
       this.assertEqual(Object.keys(worker_ai).sort(), [
         "WireTap",
+        "console_attach",
         "console_register",
         "error_send",
         "fault_register",

@@ -16,7 +16,7 @@
 # output in its cause.
 
 import base64, harness, jslb, json, os, page_build, shutil, subprocess
-import tap_consumer, tempfile, unittest
+import switches, tap_consumer, tempfile, unittest
 from typing import NoReturn, cast
 
 # The checkout's top directory, above this file's `python/`.
@@ -98,7 +98,11 @@ def start_bytes(line_type: str) -> bytes:
     header = jslb.header_make(line_type, id=_FIRST_ID, full=True)
     tests = jslb.json_decode(json.dumps(harness.gold_copy()))
     line = jslb.line_make(
-        header, [], settings=harness.settings_copy(), test_settings=tests
+        header,
+        [],
+        settings=harness.settings_copy(),
+        switches=switches.switches_get(),
+        test_settings=tests,
     )
     (piece,) = jslb.line_encode(line)
     return cast(bytes, piece)

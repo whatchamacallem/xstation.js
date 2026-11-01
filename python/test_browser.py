@@ -6,38 +6,39 @@
 # The browser test. It builds two pages with page_build.py, the ttyd page of
 # html/test.html, whose bring up runs through ttyd and the server, and the
 # headless page of html/headless.html, which starts no worker until a block
-# asks. It makes server roots under build/ as the start script makes them,
-# each with settings.json and test_settings.json, keeping them after the run,
-# serves each through a ttyd of its own, build/ttyd/ttyd as ttyd_build.py
-# builds it, and drives chrome-headless-shell through devtools.LinuxPipe, rung
-# by rung, each rung under a timer and named by the stage of the plan it
-# proves. The suites root runs the ttyd page's bring up over TAP, each thread
-# writing a document of no block, as every block runs in group A or B, and
-# checks the TAP file the server keeps with the TAP consumer. The probe,
-# credential and echo roots serve the headless page, whose binding of the
-# realm lane the browser adds before any page loads, and drive its modules on
-# the page's main thread through the probe kit, a stub HTTP server of this
-# process and the server; the other roots serve the ttyd page. The rungs
-# check what the page shows and what the server holds, and a fault the
-# headless page's realm reports that no rung waited for fails the run. Some
+# asks. It makes server roots under build/ as the start script makes them, each
+# with settings.json and test_settings.json, removing them once the run passes
+# and keeping them after a failure, serves each through a ttyd of its own,
+# build/ttyd/ttyd as ttyd_build.py builds it, and drives chrome-headless-shell
+# through devtools.LinuxPipe, rung by rung, each rung under a timer and named
+# by the stage of the plan it proves. The suites root runs the ttyd page's
+# bring up over TAP, each thread writing a document of no block, as every block
+# runs in group A or B, and checks the TAP file the server keeps with the TAP
+# consumer. The probe, credential and echo roots serve the headless page, whose
+# binding of the realm lane the browser adds before any page loads, and drive
+# its modules on the page's main thread through the probe kit, a stub HTTP
+# server of this process and the server; the other roots serve the ttyd page.
+# The rungs check what the page shows and what the server holds, and a fault
+# the headless page's realm reports that no rung waited for fails the run. Some
 # roots name a main loop file in ttyd's command, and one has ttyd ask a
 # credential. PNGs of the surveyed states go to build/test_browser/, each of
 # the gold's window size. Each root and each rung is labelled smoke-test or
-# normal-test: a smoke-test run, the default, runs the
-# rungs labelled smoke-test and starts no ttyd and no page for a root with
-# none, a normal-test run runs every rung, and a mislabel fails the run. It
-# prints one line per rung that runs, ending with its label and seconds, and
-# one per request for /favicon.ico, which the stub answers 404, and exits 0,
-# or stops at the first failed check, names its rung and exits 1. ttyd's log
-# and the page's console are copied to stderr. Its timers, sizes and the
-# roots' pinned settings, the texts it expects and the headers it checks
-# come from its gold, python.test_browser of test_settings.json, read through
-# harness.py, and the values of settings.json it repeats from that file; the
-# server's databases are read with sqlite3 by the substrate's tables. It
-# imports the standard library and the infrastructure for testing only, and
-# ttyd, the browser and tsc through page_build.py are the programs it starts:
+# normal-test: a smoke-test run, the default, runs the rungs labelled
+# smoke-test and starts no ttyd and no page for a root with none, a normal-test
+# run runs every rung, and a mislabel fails the run. It prints one line per
+# rung that runs, ending with its label and seconds, and one per request for
+# /favicon.ico, which the stub answers 404, and exits 0, or stops at the first
+# failed check, names its rung and exits 1. ttyd's log and the page's console
+# are copied to stderr. Its timers, sizes and the roots' pinned settings, the
+# texts it expects and the headers it checks come from its gold,
+# python.test_browser of test_settings.json, read through harness.py, and the
+# values of settings.json it repeats from that file; the server's databases are
+# read with sqlite3 by the substrate's tables. It imports the standard library
+# and the infrastructure for testing only, and ttyd, the browser and tsc
+# through page_build.py are the programs it starts:
 #
 #     python3 python/test_browser.py [--smoke-test | --normal-test]
+#         [--anthropic] [--debug] [--verbose]
 
 import argparse, base64, contextlib, fcntl, hashlib, http.server, json, os, re
 import select, shutil, signal, sqlite3, subprocess, sys, tempfile, threading
@@ -893,8 +894,7 @@ class TtydServer:
                     *extras.options,
                     _INDEX_OPTION,
                     page,
-                    _BUFFER_OPTION,
-                    str(values["srv_buf_size"]),
+                    f"{_BUFFER_OPTION}={values['srv_buf_size']}",
                     *self.command,
                 ],
                 stdin=subprocess.DEVNULL,
@@ -2030,8 +2030,10 @@ def server_pid(session: PageSession) -> int:
     return int(found.group(1))
 
 
-# The wire port's first line: `tap.start` with the root's two settings files.
+# The wire port's first line: `tap.start`, the two settings files, switches.
 def rung_first_line(session: PageSession) -> str:
+    import switches
+
     session.page_open()
     session.probe_call("wire_open", "first", session.url)
     first = json_object(
@@ -2041,23 +2043,24 @@ def rung_first_line(session: PageSession) -> str:
     payload = json_object(first["payload"])
     if (
         first["header"] != header
-        or sorted(payload) != ["settings", "test_settings"]
+        or sorted(payload) != ["settings", "switches", "test_settings"]
         or payload["settings"] != session.values
+        or payload["switches"] != switches.switches_get()
         or payload["test_settings"] != session.gold
         or first["blobs"] != []
     ):
         raise CheckFailed(
             f"the first line is {json.dumps(first)}, where the header"
-            f" {json.dumps(header)}, the root's settings and test settings"
-            " and no blob were due"
+            f" {json.dumps(header)}, the root's settings, the run's switches,"
+            " the root's test settings and no blob were due"
         )
     pid = server_pid(session)
     program_check(session, pid)
     return (
         f"a WirePort on the page's main thread got {header['type']} with id"
         f" {header['id']} in full names from pid {pid}, ttyd's child, carrying"
-        " the root's settings.json and test_settings.json and no blob, and"
-        " answered it"
+        " the root's settings.json, the run's switches and test_settings.json"
+        " and no blob, and answered it"
     )
 
 
@@ -2807,7 +2810,7 @@ def rung_drain_poll(session: PageSession) -> str:
     # Each blob stays in memory, as no cache file is free to stream into.
     size: int = session.values["overflow_bytes"]
     stall: float = gold_value("stall_seconds")
-    count = gold_value("large_bytes") // size
+    count = session.values["blob_max"] // size
     drain_open(session)
     blob = noise_make(session, size)
     ttyd.signal_send(signal.SIGSTOP)
@@ -2836,7 +2839,7 @@ def rung_drain_poll(session: PageSession) -> str:
 def rung_drain_timer(session: PageSession) -> str:
     ttyd = session.ttyd
     size: int = session.values["overflow_bytes"]
-    count = gold_value("large_bytes") // size
+    count = session.values["blob_max"] // size
     drain_open(session)
     noise_make(session, size)
     ttyd.signal_send(signal.SIGSTOP)
@@ -3323,7 +3326,7 @@ def signal_exit(number: int, frame: types.FrameType | None) -> None:
 
 # Runs the rungs of the chosen category in order and returns the exit code.
 def main(arguments: list[str]) -> int:
-    import category
+    import category, switches
 
     parser = argparse.ArgumentParser(
         prog=_PROGRAM_NAME,
@@ -3333,7 +3336,10 @@ def main(arguments: list[str]) -> int:
         " chrome-headless-shell.",
     )
     category.options_add(parser)
-    chosen: str = parser.parse_args(arguments).category
+    switches.options_add(parser)
+    parsed = parser.parse_args(arguments)
+    chosen: str = parsed.category
+    switches.switches_set(parsed)
     for number in (signal.SIGHUP, signal.SIGTERM):
         signal.signal(number, signal_exit)
     log = RungLog(chosen)
@@ -3342,8 +3348,9 @@ def main(arguments: list[str]) -> int:
         if not os.path.isfile(ttyd):
             raise CheckFailed(f"{ttyd} is missing: {_TTYD_BUILDER} builds it")
         work = tempfile.mkdtemp(prefix=_WORK_PREFIX, dir=_BUILD_PATH)
-        log.setup_print(f"the roots of this run are kept in {work}")
+        log.setup_print(f"the roots of this run are in {work} until it passes")
         stages_run(log, work)
+        shutil.rmtree(work)
     except CheckFailed as failure:
         # A stub's failure landing after a cleanup prints the failure before.
         if failure.__context__ is not None:

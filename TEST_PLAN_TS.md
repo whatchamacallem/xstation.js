@@ -388,7 +388,29 @@ only, beside its Windows relay. The reason is that the project keeps one
 DevTools client, `devtools.Browser`, and not that the module exists.
 Since 2026-10-30 the Windows relay is offline with the rest of the Windows
 test path (3.16), and every test that drives a browser drives
-`chrome-headless-shell` through `devtools.LinuxPipe`.
+`chrome-headless-shell` through `devtools.LinuxPipe`. Since 2026-10-30, by
+the maintainer's request of `tmp/tasks_30_2127.md` item 2, `test_all.py`,
+`test_wire.py`, `test_browser.py` and `test_posix.sh` take `--anthropic`
+for Anthropic's cloud container. Since 2026-11-01, by the maintainer's
+answer to 11.2 item 29, the three switches `--anthropic`, `--debug` and
+`--verbose` are global bools of `python/switches.py` in every Python
+process of a run, carried to its children as `XSJS_ANTHROPIC`,
+`XSJS_DEBUG` and `XSJS_VERBOSE` set to 1, and to the TypeScript realms in
+`tap.start` (3.17). With `switches.anthropic`, `LinuxPipe` starts the one
+match of
+`/opt/pw-browsers/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell`,
+Playwright's chrome-headless-shell, in place of
+`/usr/local/bin/chrome-headless-shell`. Without it nothing changes, and
+its lines are exempt from `--coverage`, since one of its two paths runs on
+each machine; and ttyd is built from the package manager's archive of
+ttyd 1.7.7, `third_party/ttyd/ttyd_1.7.7.orig.tar.xz` of Ubuntu's source
+package `1.7.7-4build1`, whose tree equals the pin's, checked by its own
+digest and placed by `apt-get source --download-only ttyd=1.7.7-4build1`
+in the container's setup, with a `deb-src` entry of Ubuntu resolute's
+universe, since github.com answers 403 there (Question T11). The
+container's other differences are met by its setup, not by code. The runs
+are made as a user other than root, and since 2026-11-01 `test_all.py`
+refuses to start as root (Question T8).
 
 3.13 The builds. page_build.py builds the Node bundle `build/ts/node.js` from
 a new `ts/tsconfig.node.json`, which lists the modules of A's blocks, A's
@@ -551,6 +573,22 @@ test path, and the second answer as no test starting a Windows program
    bubblewrap since 2026-10-30 (7.4), in use too, and the install script
    neither checks for nor names the apt package `bubblewrap`; and its ttyd
    build could run `python/ttyd_build.py` through WSL (3.15 item 8).
+
+3.17 The switches, by the maintainer's answer of 2026-11-01 to 11.2 item
+29: "so far we have --anthropic --debug and --verbose and i want them all
+passed and readable in some native form everywhere. even if as global
+bools." `API/python/switches.pyi` holds the design: `options_add` and
+`switches_set` on the command lines of `test_all.py`, `test_wire.py`,
+`test_browser.py` and `third_party_fetch.py`, which `test_posix.sh` passes
+each at most once; each switch given sets its variable, which every child
+process inherits, ttyd's commands, Node and Chrome included, and a process
+reads the three at import, an unset variable false and a value but 1
+refused. The TypeScript threads take them from `tap.start` and
+`settings.set`, which carry `switches` as `switches.switches_get()` gives
+it, and read them through `API/ts/switches.d.ts`. `anthropic` picks the
+container's browser and ttyd's source (3.12); `debug` and `verbose` change
+nothing yet (Question T15). Dash keeps its scrubbed environment, which
+carries none of the three, since the sandbox's shell is the person's.
 
 ## 4 The rules every task follows
 
@@ -2357,6 +2395,20 @@ console's new shell (7.4), and run once task 7.8.1 has landed; `console_last`
 and the `lines` rung's whole output are compared from the typing on, after
 the first prompt (7.4 item 2.3). `ts/test_wire_rungs.ts` changes only for a
 fix the run shows.
+Recorded on 2026-10-30 by the review of commit 2cab3f3, class B: the
+restart root's check of the restarted server's log takes a `verbose.put`
+push of the page's log in place of the page's refusal, a push in flight
+across the exec, as the file's header says (Question T13); and the check of
+each root's exit by ttyd's log fails when ttyd logs the exit after the
+socket's close, with no code (Question T10). Since 2026-11-01, by Question
+T10 A, `third_party/ttyd/patches/02_exit_code.patch` has ttyd log
+`process exited with code N` in both orders, keeping `process killed with
+signal N` for a signal's death, and `exit_check` is exact unchanged: three
+smoke runs passed, the stock root's third with the socket closing first.
+Since 2026-11-01, by the maintainer's answer to Question T7, the echo root's
+rung `large`, a blob of 128 MiB, is removed, since no size of the system
+exceeds `blob_max`, and ttyd's resident size is read after `fit`, the
+largest blob.
 
 7.8 Wave 2, in parallel, each task on the files it owns. A shared file is
 edited only under its lock (8.5), and every run of `python/test_all.py`,
@@ -2441,6 +2493,16 @@ first, and ends with the report of 4.9 item 4.
    smoke and normal, each case broken once on purpose and undone, then
    `--stream`. Done when the block passes and its report names each of
    `TestWireEnd`'s tests as a case or as removed with its path.
+   1. Status, recorded on 2026-10-30 by the review of commit 2cab3f3,
+      which found no record of it: `test_end_waits` is the point
+      `end_waits`, `test_end_closed` the points `end_closed` and
+      `close_ended`, and `test_fault_open` is removed by 4.6 with the path
+      it reached, `WirePort.message_event`'s catch, which sets `taking`
+      false, stops the timers and leaves the socket open, so that a later
+      message is not taken and a line can still be posted. No point reaches
+      it: the catch throws the fault on in the socket's message listener, a
+      fault of the page's thread, which the error overlay takes and which
+      fails the block, so no point can read the socket left open after it.
 4. 7.8.4, `test_tools_browser_console` (7.5 item 6). Owns
    `ts/test_tools_browser_console.ts`. Under the lock: its gold, its entry
    in `ts/test_headless.ts`, and its entry in `_C_INTEGRATION`. Writes and
@@ -2457,6 +2519,18 @@ first, and ends with the report of 4.9 item 4.
    Runs `python3 python/test_wire.py --smoke-test` and `--normal-test`, the
    stock root's `console` and `lines` rungs once 7.8.1 has landed. Done
    when both categories exit 0. A fault of `devtools.py` goes to 7.8.6.
+   1. Status, 2026-10-30, measured in Anthropic's cloud container with
+      `--anthropic`: `--smoke-test` exits 0, and `--normal-test` fails at
+      the echo root's rung `fit`, the page's `Bail out! Array buffer
+      allocation failed`. The rung echoes one blob of `blob_max`,
+      2147483391 bytes, and chrome-headless-shell 153.0.8010.12 allocates
+      no ArrayBuffer over 2145386496 bytes, 2^31 less 2^21, PartitionAlloc's
+      largest direct map, measured by bisection on a page's main thread,
+      the same with and without its sandbox, while 2000 MiB is allocated.
+      Question T7, answered on 2026-11-01: `blob_max` is 10485760, and
+      `fit` echoes a blob of 10 MiB, measured passing in 1.1 s to 1.2 s in
+      two normal runs, ttyd's peak resident size 15468 KiB. One of the two
+      failed at the restart root's first point (Question T16).
 6. 7.8.6, the browser test on Linux (7.6, 7.2 items 3 and 5). Owns
    `python/test_browser.py`, `ts/test_all.ts` under the lock (23.6.1's
    shared list), and, for 7.6 item 6 and any fix the Linux browser needs,
@@ -2472,6 +2546,32 @@ first, and ends with the report of 4.9 item 4.
    block is taken (7.2 item 3), and its report confirms the table of 7.6
    item 5, each moved rung with the case that reaches its path and each
    removed rung with its path.
+   1. Status, 2026-10-30, by the review of commit 2cab3f3, which found no
+      record of it: the rung `stage 0: worker hang keeps the TAP lines
+      before it`, which 7.6 item 5's table keeps, was removed by the commit
+      with `_AI_THREAD` and the protocol's `worker_pause`. Restored for
+      three runs of `--normal-test` and undone, the file's SHA-256 checked,
+      each run failed it after 60 s waiting for the worker `ai` to pause:
+      with documents of no block the worker runs no JavaScript once its
+      document is written, so `Debugger.pause` has no statement to stop at,
+      and the UI's document of two lines is whole once its first line is
+      in. Removed, class B, with the path it reached: the worker's relay of
+      the UI's TAP lines, cut by a pause of the worker in the middle of the
+      UI's document, which no part of the plan reaches now.
+      `Browser.worker_pause` stays tested by `test_devtools_chrome` (7.6
+      item 6), and no rung calls it.
+   2. Status, 2026-10-30, measured in Anthropic's cloud container with
+      `--anthropic`: `--smoke-test` exits 0, and `--normal-test` fails at
+      the probe root's rung `stage 5: blob_max plus one refused`, whose
+      `line_post` of a blob of 2147483392 bytes throws `Array buffer
+      allocation failed` before the page's refusal, by the browser's
+      largest ArrayBuffer of 7.8.5 item 1. Question T7, answered on
+      2026-11-01: the rung posts 10485761 bytes. The drain rungs post
+      `blob_max` over `overflow_bytes` echoes, 80 of 128 KiB, in place of
+      the gold's `large_bytes`, 128 MiB, which is removed. Measured on
+      2026-11-01: the refusal, the drain poll and the drain timer pass,
+      80 echoes being more than the stopped socket takes, and the run fails
+      later at `stage 5: error before the first line` (Question T17).
 7. 7.8.7, the Windows path's documents (3.16). Owns the headers of
    `powershell/test_powershell.ps1`, `powershell/test_lint.ps1` and
    `python/test_devtools_powershell.py`. Under the lock: `_LATER`'s reason
@@ -2506,6 +2606,16 @@ first, and ends with the report of 4.9 item 4.
    its start to the end of `test_browser.py` and moving labels by 7.2 item
    4. Done when both categories pass whole, the smoke run within 120 s,
    each label moved reported with its seconds.
+   1. Status, 2026-10-30, the order alone, by the review of commit 2cab3f3:
+      `_C_INTEGRATION` is `test_wire_end`, `test_integrate_wire`,
+      `test_worker_ai_console`, `test_tools_browser_console`, by 6.8 item
+      7's rules read by hand: an integration block follows the unit and the
+      integration blocks of the modules that run inside it, so `wire`'s two
+      blocks, `WirePort`'s before `ConsolePort`'s, run before the two that
+      run a real `ConsolePort`, and `test_tools_browser_console` runs
+      `worker_ai.console_register` as `test_worker_ai_console` tests it. C's
+      layer table by the compiler API, the whole runs and the label moves
+      wait.
 3. 7.9.3, the check agent, alone, last: `python3 python/reformat.py` twice
    over the whole tree, staged first and unstaged after; both configs; ruff
    and pyright strict over `python/`; nothing staged, no lock left,
@@ -2720,6 +2830,274 @@ to confirm that the pinned versions are downloaded, with no network traffic
 when they already are, and `third_party/` takes a canonical structure
 (3.14).
 
+Questions T7 to T13 were asked on 2026-10-30 by the session of
+`tmp/tasks_30_2127.md`, after its review and runs of commit 2cab3f3 in
+Anthropic's cloud container. Option A is taken when none is marked.
+
+Question T7: what is the largest blob the page takes? chrome-headless-shell
+holds at most 2145386496 bytes in one ArrayBuffer, and `blob_max` is
+2147483391, so the wire test's normal rung `fit` and the browser test's
+normal rung `blob_max plus one refused` cannot pass (7.8.5 item 1, 7.8.6
+item 2).
+
+[ ] A. `blob_max` becomes 2145386496 in `settings.json`, the gold's values
+made from it following, every reader of the setting checked first.
+(Recommended: the limit becomes one the browser meets, and `fit` keeps its
+meaning, the largest blob echoed.)
+
+[ ] B. `blob_max` stays, and `fit` echoes a blob of the browser's measured
+largest, a value of its gold; the page then takes blobs it cannot hold.
+
+[ ] C. `blob_max` stays, and the page holds a blob over the browser's
+largest in parts, a product change of `jslb` and the stores, planned before
+any code.
+
+Answered by the maintainer on 2026-11-01 in place of the options: the
+maximum size of everything in the system is the maximum size of a single
+SQLite binary database that Chrome will store, about 10 MiB by the
+maintainer's estimate, a rule of the project's rules; a single database of
+that size is transmissible in one message, tested with room for the
+message's overhead; and no test allocates a buffer of 1 GiB. Done:
+`blob_max` and `media_db_bytes` are 10485760 in `settings.json` and
+`API/settings.json`, so that one message is at most `line_max` plus
+`blob_max`, 11 MiB, `line_max` the room for its JSON; `fit` echoes 10 MiB
+and `blob_max plus one refused` posts 10485761 bytes; the rung `large` and
+the gold's `large_bytes`, 128 MiB, are removed (7.7, 7.8.6 item 2); the
+vectors at `blob_max`'s edge are made from it as before. From 2026-10-21 to
+2026-11-01 `blob_max` was 2147483391, SQLite's default
+`SQLITE_MAX_ALLOCATION_SIZE`, the largest image `sqlite3_serialize` makes,
+chosen by a planning session of 2026-10-21 as the smallest documented limit
+on the path; before it `blob_max` was 10485760. What Chrome itself stores is
+Question T14.
+
+Question T8: may the tests run as root, as a Docker container does by
+default? As root dash's prompt is `# `, so `test_bootstrap_dash` waits for
+`$ ` until its module's alarm; root ignores `RLIMIT_NPROC`, so
+`test_bootstrap`'s `test_console_failed` starts a real shell; and Chrome's
+sandbox refuses root (3.12, 7.10 item 4).
+
+[ ] A. No: `test_all.py` refuses to start as root, naming the cause, and
+the Docker image runs it as a user. (Recommended: the runs then measure what
+the maintainer's machine has, by one check at the start.)
+
+[ ] B. Yes: the console's bwrap argv gains `--uid` and `--gid` of a user
+that is not root, with the gold's copy, and Chrome takes `--no-sandbox` as
+root.
+
+[ ] C. Yes: the gold keeps both prompts, chosen by the effective uid,
+`test_console_failed` refuses the process another way, and Chrome takes
+`--no-sandbox` as root.
+
+Answered A by the maintainer on 2026-11-01, with "no need for root logins
+at this time": `test_all.py` refuses to start as root, raising a
+`PermissionError` that names the three causes, before the pins are fetched;
+and the console role refuses a root that is not under `/home/`, which the
+sandbox hides from dash (`bootstrap_run`, `test_bootstrap`'s
+`test_console_outside`), by the maintainer's answer to the review's item of
+bootstrap's header (`tmp/tasks_30_2127.md` item 7.2).
+
+Question T9: what does `test_devtools_chrome`'s `test_cache_profile`
+measure? It fails wherever the system's font cache, `/var/cache/fontconfig`,
+is current, as a Docker image's usually is, since fontconfig then writes no
+cache at all; in the container it passed only once that cache was moved
+aside.
+
+[ ] A. That the browser runs with `XDG_CACHE_HOME` at its profile, read
+from `/proc/PID/environ` of the browser's process, whatever fontconfig
+writes. (Recommended: it measures what `LinuxPipe` does, on every machine.)
+
+[ ] B. As now, the Docker image's setup leaving no current system font
+cache.
+
+[ ] C. `LinuxPipe` also gives fontconfig a configuration of its own with no
+system cache directory, so the cache is always made in the profile, at the
+cost of a font scan at each browser start.
+
+Answered A by the maintainer on 2026-11-01. Done: `test_cache_profile` takes
+the browser's pid from DevTools' `SystemInfo.getProcessInfo`, its profile
+from `--user-data-dir=` of its `/proc/PID/cmdline`, and checks that
+`XDG_CACHE_HOME` of its `/proc/PID/environ` is that profile, under `build/`;
+3 of 3 runs passed with the container's system font cache current again.
+
+Question T10: how does the wire test read the exit code of the server ttyd
+runs? ttyd 1.7.7 logs `process exited with code N` only when the process
+ends before its socket closes; when the pty's end closes the socket first,
+it logs `process killed with signal 0` with no code, read in its
+`protocol.c`. So `exit_check` of the stock and restart roots fails by a
+race of ttyd, measured once in three smoke runs in the container (7.7).
+
+[ ] A. A second project patch of ttyd under `third_party/ttyd/patches/`
+logs the exit code in both orders, and `exit_check` reads it. (Recommended:
+the code stays ttyd's measurement, and the check stays exact.)
+
+[ ] B. `exit_check` takes `killed with signal 0` as a normal exit whose
+code ttyd did not log, and takes the failure from the server's own log,
+which the rung reads already.
+
+[ ] C. The roots' checks of the exit go, recorded with the path they
+reached.
+
+Answered A by the maintainer on 2026-11-01. Done (7.7):
+`third_party/ttyd/patches/02_exit_code.patch`.
+
+Question T11: how does a session in Anthropic's cloud container get ttyd's
+pinned archive? Its network refuses github.com and codeload.github.com with
+403. The session of 2026-10-30 made the archive by `git archive` of ttyd's
+tag 1.7.7 through the container's git proxy, piped to `gzip -n`, and its
+SHA-256 equals the pin's (3.14).
+
+[ ] A. The maintainer adds github.com and codeload.github.com to the
+environment's allowed domains, and `pins_fetch` runs unchanged.
+(Recommended: no code changes, and the archive comes from the pin's URL.)
+
+[ ] B. `third_party_fetch.py` gains `--anthropic`, which makes the archive
+by `git clone` and `git archive | gzip -n` and checks it against the pin,
+Python starting git and gzip by the maintainer's approval.
+
+[ ] C. Each session makes it by hand, as that one did.
+
+Answered by the maintainer on 2026-11-01 in place of the options: "you have
+full network access. use the Linux package manager to get the source for
+the ttyd normally on the cloud host." github.com and codeload.github.com
+still answered 403 through the container's proxy on 2026-11-01, and
+noble's own source package is ttyd 1.7.4. Done (3.12): a `deb-src` entry of
+Ubuntu resolute's universe, then `apt-get source --download-only
+ttyd=1.7.7-4build1`, which gave `ttyd_1.7.7.orig.tar.xz`, checked by apt
+against its signed index, SHA-256
+48eba3f76af237f4c09cceb5ddbe0f845832557819f7e5c60c88285f8822af88, its tree
+equal to the pin's archive's by `diff -r`; under `--anthropic`
+`third_party_fetch` checks it in place of ttyd's pin, failing loud with the
+command when it is absent, and `ttyd_build` builds from it, both patches
+applying. Python runs no package manager.
+
+Question T12: does the AI worker build the console's port? No product code
+builds a `wire.ConsolePort` or calls `worker_ai.console_register`, though
+the stub of `ConsolePort.close_receive` says that the AI worker pushes
+`console.exit`; the blocks of C build the path themselves (7.8.2 item 4).
+
+[ ] A. Yes, a product task planned before any code: the worker's bring up
+builds the port at the page's address, registers the relays and pushes
+`console.exit` at the port's close, and the blocks of C keep their own
+topologies. (Recommended: the stub then states what the product does.)
+
+[ ] B. Not yet: the stub says the worker will, and the blocks' comments say
+that no product code does yet, as they do since 2026-10-30.
+
+Answered A by the maintainer on 2026-11-01, with requirements of the AI's
+console: a pre-built MCP API in TypeScript for the AI's use of dash, ttyd's
+protocol over the wire so that xterm.js is integrated without seams, and
+one console that the AI writes to and reads from while the person at the
+page watches a running command and types when none runs. Planned in
+`PLAN_AI_CONSOLE.md` before any code, with its Questions C1 and C2, then
+built on 2026-11-01 but for what C1 and C2 decide (`PLAN_AI_CONSOLE.md` 6):
+`worker_ai.console_attach` adds the ttyd page's `wire.ConsolePort` and
+pushes `console.exit`, and `console_run`'s `console.busy` and
+`console.idle` hold the view's keys while its command runs.
+
+Question T13: is a push in flight across `system.restart`'s exec the
+design? `test_wire.py`'s restart root passes when the restarted server's
+log names a `verbose.put` push of the page's log, not the page's
+`wire.start_twice` refusal, as its header says, "by a race of the design";
+the restarted server then exits 1 on a push meant for the one before it.
+No item of this plan recorded the check (7.7).
+
+[ ] A. Yes: the check stays, recorded in 7.7 as class B. (Recommended: it
+is the behavior the wire test already measures.)
+
+[ ] B. No: the page holds its pushes from the restart's request until the
+new `tap.start`, a product change of the worker planned before any code,
+and the check takes the refusal alone.
+
+Not answered on 2026-11-01, so A is taken, the default of a question with
+none marked: the check stays, class B (11.2 item 30).
+
+Questions T14 to T17 were asked on 2026-11-01 by the session of
+`tmp/tasks_30_2127.md`, task 3. Option A is taken when none is marked.
+
+Question T14: is the largest database a limit the system enforces, and is
+it 10 MiB? Read in Chromium's source and measured on 2026-11-01: Chrome
+caps no OPFS file but by the origin's quota, 60% of the disk's total in a
+normal profile, and about 5% to 7% of the machine's RAM in
+chrome-headless-shell's default profile, which is incognito; one
+ArrayBuffer holds at most 2145386496 bytes, PartitionAlloc's largest
+allocation; the pinned sqlite3.wasm's memory is at most 2 GiB, and its
+largest blob 1000000000 bytes; and 10485760 bytes is exactly Chrome's
+localStorage quota of an origin. So 10 MiB is the project's choice, not a
+limit of Chrome's, and nothing stops a database from growing past
+`blob_max`, past which it no longer moves as one message.
+
+[ ] A. 10 MiB, enforced: each store sets SQLite's `max_page_count` on every
+database it opens so that no file grows past `blob_max`, and a write past
+it fails loud with SQLite's "database or disk is full"; a product change of
+`ts/substrate.ts` and `python/substrate.py`, planned before any code, and a
+refusal the maintainer requires, as the rules of the databases ask.
+(Recommended: the rule then holds by construction, and no database too big
+to move can be made.)
+
+[ ] B. 10 MiB, not enforced: `blob_max` bounds only what moves.
+
+[ ] C. Another value, named by the maintainer; the rule's sentence in the
+project rules follows it.
+
+Question T15: what do `--debug` and `--verbose` change? Since 2026-11-01
+they are carried to every process and realm and readable there (3.17), and
+read by nothing; the settings `debug` and `verbose_level` of
+`settings.json` are what turn on debug mode and the shell's verbose level.
+
+[ ] A. Nothing yet: they stay carried and readable until a task names what
+reads them. (Recommended: no behavior is invented, and the settings keep
+their meaning.)
+
+[ ] B. They override the settings for the run: `--debug` makes `debug`
+true and `--verbose` makes `verbose_level` 2 in every settings object a
+process loads, and the tests whose roots set `debug` false or a level of
+their own keep the file's value by an exception named in each.
+
+[ ] C. They replace the settings `debug` and `verbose_level`, which leave
+`settings.json`.
+
+Question T16: how does the restart root's first point find the server's
+command once the server has ended? The page runs on past its first point,
+so by the time the point is read the server may have execed for the
+restart and then exited 1, as the restarted server does by design; a child
+ttyd has not yet reaped has an empty `/proc/PID/cmdline`, and `server_find`
+then fails with "runs []". Measured on 2026-11-01 in 1 of 2 normal runs of
+`test_wire.py`, the other finding it execed in place; the smoke runs passed.
+
+[ ] A. `server_find` takes a child in state Z, a program that has ended
+and that ttyd has not yet reaped, as the program ttyd started, its command
+read from ttyd's log line of the start in place of its `cmdline`.
+(Recommended: the point keeps its checks of the pid and the parent, and the
+restart's own point reads the exec from the server's log.)
+
+[ ] B. The page's restart rung waits for the driver to have read the first
+point, a change of `ts/test_wire_rungs.ts` and of the wire test's protocol.
+
+[ ] C. The first point reads the server before the page runs on, by a hold
+of the page's next rung until a second push of the driver, as B, for every
+root.
+
+Question T17: may the server be killed by ttyd's hangup after it has
+written its error line? In the browser test's normal rung `stage 5: error
+before the first line`, the server writes its error line and exits 1, while
+the page, faulted by that line, closes tty 1; ttyd then sends SIGHUP, its
+close signal, and kills the server before its own exit, logging `process
+killed with signal 1`, where the rung wants `exited with code 1`. Measured
+once on 2026-11-01, the first normal run to reach the rung since the 2 GiB
+rungs failed before it.
+
+[ ] A. bootstrap ignores SIGHUP from the moment it writes an error line, so
+that the server always ends by its own exit 1 and ttyd logs `exited with
+code 1` in either order, by the patch of Question T10; a product change of
+`python/bootstrap.py`'s failure path, with a case in `test_bootstrap`.
+(Recommended: the exit code stays the server's measurement.)
+
+[ ] B. The rung takes `killed with signal 1` after the page's close as the
+end of a server whose failure its log records, and reads that log.
+
+[ ] C. The page keeps tty 1 open after an error before the first line
+until ttyd's close, a product change of `wire.WirePort`.
+
 ## 10 Outside this plan
 
 10.1 Group C was outside this plan until 2026-10-30, when section 7 planned
@@ -2778,7 +3156,9 @@ that the tests may build and start ttyd and dash (item 35), with the
 coordinator's decisions after it (item 36), and the answer on how dash
 runs (item 39), with the coordinator's decisions after it (item 40); and the
 maintainer's request that the console's binary connection carry a binary
-heredoc (item 44), with the coordinator's decisions after it (item 45). A:
+heredoc (item 44), with the coordinator's decisions after it (item 45);
+and the maintainer's answers and requests of 2026-11-01
+(`tmp/tasks_30_2127.md` task 3), with the session's decisions after them. A:
 unsatisfied
 or modified without cause. B: unsatisfied or modified with cause but
 without confirmation. C: confirmed withdrawn or modified. D: satisfied
@@ -2929,8 +3309,47 @@ wanting confirmation:
     until dash's first prompt, and its cases' order with the case `allowed`
     and `opened` beside the four of 7.5 item 6 (7.5 item 6.1 to 6.4),
     written by task 7.8.4.
+29. Moved to 11.3 item 14 on 2026-11-01, modified by the maintainer.
+30. The session's decisions of 2026-10-30 after the review of commit
+    2cab3f3, unconfirmed: C's order (7.9.2 item 1); the worker hang rung
+    removed with its measured cause (7.8.6 item 1); `test_fault_open`
+    recorded as removed (7.8.3 item 1); `test_all.py` stopping ttyd and
+    its root on SIGHUP and SIGTERM from the first ttyd root on, not from
+    its start, since the Python suites fork children that take a handler
+    with them; the ids of `test_worker_ai_console`'s UI requests 102 and
+    103, apart from the queue's own; and `test_integrate_wire`'s output
+    kind from its gold.
+31. The session's decisions of 2026-11-01 for Question T7's answer: the
+    largest database is 10 MiB, `blob_max` 10485760, by the maintainer's
+    estimate, which is no limit of Chrome's (Question T14); `media_db_bytes`,
+    read by no code, lowered from 256 MiB to the same 10 MiB; one message's
+    room for its overhead is `line_max`, 1 MiB, unchanged; the rung `large`
+    removed and ttyd's resident size read after `fit`; the drain rungs'
+    burst made of `blob_max` over `overflow_bytes` echoes; and the rule's
+    sentence placed under the project rules' Databases section.
+32. Question T8's refusal raised in `test_all.py`'s `main` after its
+    arguments are parsed, so that `--help` still answers as root; and the
+    root check of the console role alone, before it reads the settings,
+    since only the console runs dash; the engine role keeps any root.
+33. The switches' design (3.17): environment variables set to 1, read at
+    import, the options on the four command lines that a person runs and
+    not on `bootstrap.py` or `mcp_stdio.py`, which their parent starts with
+    the environment; dash's environment kept scrubbed; the TypeScript
+    threads reading them from `tap.start` and `settings.set`; and
+    `test_switches.py`'s forked children.
+34. Question T11's source: Ubuntu resolute's `1.7.7-4build1`, of the same
+    upstream release as the pin, in place of noble's 1.7.4, the one the
+    container's own release has, since the plan, the patches and the
+    stubs are of ttyd 1.7.7; the archive placed by the container's setup,
+    never by Python; and a second pin list in the gold of
+    `test_third_party_fetch`, `pins_anthropic`.
+35. `test_cache_profile`'s pid from DevTools' `SystemInfo.getProcessInfo`,
+    where the question named `/proc/PID/environ` only.
+36. The AI console's design and its class B items, `PLAN_AI_CONSOLE.md`
+    7.2, and its Questions C1 and C2.
 
-11.3 Class C, confirmed by the answers and acceptances of 2026-10-30:
+11.3 Class C, confirmed by the answers and acceptances of 2026-10-30 and
+2026-11-01:
 
 1. "figure out what TS test suites can be run using the TS toolchain
    without mocking apis": answered by blocks, not suites. Eight suites
@@ -2997,6 +3416,20 @@ wanting confirmation:
     35.4). Neither is built, and 11.2 item 13's deferral of `failed_tests`
     is withdrawn.
 
+14. "so far we have --anthropic --debug and --verbose and i want them all
+    passed and readable in some native form everywhere. even if as global
+    bools" (2026-11-01), modifying item 29 of 11.2, the browser path only:
+    the three switches, `python/switches.py` and `ts/switches.ts` (3.17).
+15. Question T7, answered in place of the options on 2026-11-01: the rule of
+    the system's largest size, 10 MiB, in the project rules, one database
+    of it moving in one message (11.2 item 31).
+16. Question T8 A, with "no need for root logins at this time", and "for Q7
+    require the dash root to be under /home/", the review's item 7.2 of
+    `tmp/tasks_30_2127.md`.
+17. Question T9 A, Question T10 A and Question T12 A.
+18. Question T11, answered in place of the options: the package manager's
+    source (3.12, 11.2 item 34).
+
 11.4 Class D:
 
 1. "other agents are running, make a plan only": no source, test, settings
@@ -3031,7 +3464,9 @@ wanting confirmation:
 15. "try bwrap ... /bin/dash" (item 39): the command is the console's shell,
     exactly as given, its verbose form adding `-v` (7.4, task 7.8.1).
 
-11.5 Unresolved: the confirmations of 11.2, items 1 to 28. Each is
+11.5 Unresolved on 2026-11-01: the confirmations of 11.2, items 1 to 28,
+30 and 31 to 36; Questions T14 to T17; and `PLAN_AI_CONSOLE.md`'s
+Questions C1 and C2. Earlier record: Each is
 satisfied in this plan with its cause, or planned in 7.8 and 7.9 and
 satisfied once they pass, and none needs a question of the maintainer: no
 requirement of items 35, 39 or 44 is left unmet, and no two rules were found

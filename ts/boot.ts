@@ -288,6 +288,7 @@ namespace boot {
             server: port,
             end: (line, done) => port.wire_end(line, done),
             ui: message.port,
+            console: new wire.ConsolePort(message.base_url),
           };
           worker_ai.tap_start(parts, (tasks) => run(tasks, start));
         });
@@ -314,6 +315,8 @@ namespace boot {
           done();
         },
         ui: message.ui,
+        // The headless page has no ttyd, so no tty 0.
+        console: undefined,
       };
       worker_ai.tap_start(parts, (tasks) => run(tasks, start));
     });

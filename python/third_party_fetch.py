@@ -9,9 +9,15 @@
 # place, and a file already there with the right digest is left alone. The
 # test driver calls pins_fetch before each run:
 #
-#     python3 python/third_party_fetch.py
+#     python3 python/third_party_fetch.py [--anthropic] [--debug] [--verbose]
+#
+# With the switch anthropic, in Anthropic's cloud container, ttyd's pin is
+# replaced by the archive Ubuntu's package manager places, the upstream
+# archive of the source package ttyd 1.7.7-4build1, whose tree is the pin's:
+# it is checked by its own digest and never fetched, and a missing one fails
+# naming the command that places it. Python runs no package manager.
 
-import argparse, hashlib, os, re, tempfile, urllib.request
+import argparse, hashlib, os, re, switches, tempfile, urllib.request
 
 # The checkout's top directory.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -40,6 +46,19 @@ _PINS: tuple[tuple[str, str, str], ...] = (
         "bd954fa721872170188cc5d7e83e88db3c83c9a18a4e8d24c2783d26491f59d2",
     ),
 )
+
+# The package manager's file for ttyd's pin: path, command and digest.
+_PACKAGE_PIN = (
+    "ttyd/ttyd_1.7.7.orig.tar.xz",
+    "apt-get source --download-only ttyd=1.7.7-4build1",
+    "48eba3f76af237f4c09cceb5ddbe0f845832557819f7e5c60c88285f8822af88",
+)
+
+# The path in `third_party/` of the pin that `_PACKAGE_PIN` replaces.
+_PACKAGE_REPLACED = "ttyd/ttyd-1.7.7.tar.gz"
+
+# Where the package manager's sources hold ttyd `1.7.7-4build1`.
+_PACKAGE_SOURCE = "a deb-src entry of Ubuntu resolute's universe"
 
 # Seconds a connect or a read may stall, a default chosen by its writer.
 _SOCKET_SECONDS = 60.0
@@ -76,16 +95,45 @@ def file_fetch(url: str, sha256: str, name: str) -> str:
     return path
 
 
+# Returns the path of the package manager's file, checked by its digest.
+def package_check(name: str, command: str, sha256: str) -> str:
+    path = os.path.join(_THIRD_PARTY_PATH, name)
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"{name}: absent; the package manager places it in"
+            f" {os.path.dirname(path)} by `{command}`, with {_PACKAGE_SOURCE}"
+        )
+    with open(path, "rb") as file:
+        actual = hashlib.file_digest(file, "sha256").hexdigest()
+    if actual != sha256:
+        raise ValueError(f"{name}: sha256 {actual}, expected {sha256}")
+    return path
+
+
+# Returns the path of ttyd's archive from the package manager.
+def package_path() -> str:
+    return os.path.join(_THIRD_PARTY_PATH, _PACKAGE_PIN[0])
+
+
 # Returns the paths of the pinned files, fetched to the first failure.
 def pins_fetch() -> list[str]:
-    return [file_fetch(url, sha256, name) for name, url, sha256 in _PINS]
+    paths: list[str] = []
+    for name, url, sha256 in _PINS:
+        packaged = switches.anthropic and name == _PACKAGE_REPLACED
+        if packaged:  # pragma: no cover
+            paths.append(package_check(*_PACKAGE_PIN))
+        else:
+            paths.append(file_fetch(url, sha256, name))
+    return paths
 
 
 # Fetches every pinned file from the command line, printing nothing.
 def main() -> None:
-    argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         description="Fetch the pinned third party files into third_party/."
-    ).parse_args()
+    )
+    switches.options_add(parser)
+    switches.switches_set(parser.parse_args())
     pins_fetch()
 
 

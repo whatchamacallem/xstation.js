@@ -24,10 +24,11 @@
 // as `console.open`, which only a handler's submit sends. The far end calls
 // `ConsolePort.console_close` for the push `console.close`, the one line the
 // port does not take, and passes the port's close on as the push
-// `console.exit` with the close code. The console port's receiver passes on
-// every line but the `console.output` pushes: it joins the bytes of their
-// messages of kind 0, ttyd's output, and once the end marker has come after
-// the start marker it passes the bytes between them on as one
+// `console.exit` with the close code, as `worker_ai.console_attach` does for
+// the ttyd page's port. The console port's receiver
+// passes on every line but the `console.output` pushes: it joins the bytes of
+// their messages of kind 0, ttyd's output, and once the end marker has come
+// after the start marker it passes the bytes between them on as one
 // `console.output` line, which the case compares by size and SHA-256 with
 // the gold's line, the payload as the pty's output processing changes it.
 // So neither the terminal's echo of the typed lines, which holds only the
@@ -35,14 +36,14 @@
 // markers are compared.
 
 namespace test_integrate_wire {
-  // The gold of this block, the line types, the output message's kind.
+  // The gold of this block and the line types.
   const constants = Object.freeze({
     start_id: "typescript.test_integrate_wire.marker_start",
     end_id: "typescript.test_integrate_wire.marker_end",
+    kind_id: "typescript.test_integrate_wire.output_kind",
     output_type: "console.output",
     close_type: "console.close",
     exit_type: "console.exit",
-    output_kind: 0x30,
   });
 
   // The bytes of the two arrays, one after the other.
@@ -87,6 +88,8 @@ namespace test_integrate_wire {
     readonly #start: Uint8Array;
     readonly #end: Uint8Array;
     readonly #pass: (line: lines.Line) => void;
+    // The kind of ttyd's output messages, the gold's.
+    readonly #kind = harness.gold_get(constants.kind_id) as string;
     // The output since the last end marker, or since the start.
     #joined = new Uint8Array(0);
 
@@ -103,7 +106,7 @@ namespace test_integrate_wire {
       if (!(message instanceof Uint8Array)) {
         throw new Error("internal error");
       }
-      if (message[0] !== constants.output_kind) {
+      if (String.fromCharCode(message[0]) !== this.#kind) {
         return;
       }
       this.#joined = bytes_join(this.#joined, message.subarray(1));

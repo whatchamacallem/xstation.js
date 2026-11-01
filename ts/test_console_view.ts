@@ -834,6 +834,46 @@ namespace test_console_view {
       this.assertEqual(rig.came.length, 1);
       this.assertEqual(inputs_of(rig).length, 0);
     }
+
+    // While the AI's command runs the terminal takes no keys: nothing is sent.
+    test_input_held(): void {
+      const rig = this.rig_typing();
+      rig.view.input_hold();
+      text_type(rig, "x");
+      key_press(rig, "c", 0x43, true);
+      this.assertEqual(inputs_of(rig).length, 1);
+    }
+
+    // Once the AI's command has ended the terminal takes keys again.
+    test_input_freed(): void {
+      const rig = this.rig_typing();
+      rig.view.input_hold();
+      rig.view.input_free();
+      text_type(rig, "a");
+      const inputs = inputs_of(rig);
+      this.assertEqual(inputs.length, 2);
+      this.assertEqual(blob_bytes(inputs[1]), message_bytes(0x30, "a"));
+    }
+
+    // Freed while tty 0 is idle, the terminal still takes no keys.
+    test_freed_idle(): void {
+      const rig = rig_make();
+      rig.view.view_show();
+      rig.view.input_hold();
+      rig.view.input_free();
+      text_type(rig, "x");
+      this.assertEqual(rig.came.length, 0);
+    }
+
+    // Held before tty 0 opens, the terminal takes no keys once it is open.
+    test_held_opening(): void {
+      const rig = rig_make();
+      rig.view.view_show();
+      rig.view.input_hold();
+      rig_start(rig);
+      text_type(rig, "x");
+      this.assertEqual(inputs_of(rig).length, 1);
+    }
   }
 
   // The rows fitted to the height the container has above the band.

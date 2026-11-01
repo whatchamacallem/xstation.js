@@ -18,7 +18,8 @@
 // else, when the shown view `open_wanted()`, through `open_request()`, whose
 // sleep the handler takes over with the wake `ui.console_shown`, which runs
 // `open_done` and replies Empty. A view that is opening or closing cannot
-// answer and throws `page.console_busy`.
+// answer and throws `page.console_busy`. `console.busy` and `console.idle`,
+// pushes of the AI worker around its command, hold and free the view's keys.
 //
 // A worker's `fault` line shows the fault screen, its stack followed by each
 // cause's message and stack, then the page terminates the worker, which has
@@ -63,6 +64,8 @@ namespace page {
     choice_type: "dom.choice",
     output_type: "console.output",
     exit_type: "console.exit",
+    busy_type: "console.busy",
+    idle_type: "console.idle",
     show_type: "console.show",
     overlay_type: "overlay.line",
     handler_version: 0,
@@ -97,6 +100,8 @@ namespace page {
     close_done(wake: lines.Line): void;
     exit_done(): void;
     output_feed(data: Uint8Array): void;
+    input_hold(): void;
+    input_free(): void;
   }
 
   // The overlays as the handlers drive them.
@@ -140,6 +145,8 @@ namespace page {
       "console.": "ai",
       "console.output": "ui",
       "console.exit": "ui",
+      "console.busy": "ui",
+      "console.idle": "ui",
       "console.show": "ui",
       "ai.": "ai",
       "settings.put": "ai",
@@ -503,6 +510,18 @@ namespace page {
       return undefined;
     }
 
+    // Holds the view's keys while the AI's command runs.
+    busy_take(): undefined {
+      this.#parts.view.input_hold();
+      return undefined;
+    }
+
+    // Frees the view's keys once the AI's command has ended.
+    idle_take(): undefined {
+      this.#parts.view.input_free();
+      return undefined;
+    }
+
     // Adds a rendered line to the overlay of its tty.
     overlay_take(line: lines.Line): undefined {
       const shown = jslb.payload_of(line) as unknown as lines.OverlayLine;
@@ -555,6 +574,8 @@ namespace page {
       handlers.output_take(line),
     );
     register(constants.exit_type, version, () => handlers.exit_take());
+    register(constants.busy_type, version, () => handlers.busy_take());
+    register(constants.idle_type, version, () => handlers.idle_take());
     register(constants.overlay_type, version, (line) =>
       handlers.overlay_take(line),
     );
@@ -616,12 +637,13 @@ namespace page {
     worker.postMessage({ port, base_url: location.href }, [port]);
   }
 
-  // Sets the settings, then the queue, its sink, its AI port and its sender.
+  // Sets the settings and switches, then the queue, its sink, AI port, sender.
   function thread_open(
     port: MessagePort,
-    value: settings.Settings,
+    set: lines.SettingsSet,
   ): queue.TaskQueue {
-    settings.settings_set(value);
+    settings.settings_set(set.settings);
+    switches.switches_set(set.switches);
     const synchronous = settings.settings_get(
       constants.synchronous_setting,
     ) as boolean;
@@ -649,7 +671,7 @@ namespace page {
     );
     channel.port1.onmessage = (event: MessageEvent<unknown>) => {
       const set = settings_take(event.data);
-      const tasks = thread_open(channel.port1, set.settings);
+      const tasks = thread_open(channel.port1, set);
       if (set.test_settings !== undefined) {
         harness.values_set(set.settings, set.test_settings);
       }

@@ -10,8 +10,9 @@
 # With no role it is the engine: it puts its pty in raw mode, takes the
 # engine.lock file of the root, reads the settings and opens the root's log,
 # loads the main loop file and has it prepare the root, then writes the
-# first line, tap.start with the fixed id 101, which carries the settings
-# and, in debug mode, the root's test_settings.json as test_settings, read
+# first line, tap.start with the fixed id 101, which carries the settings,
+# the run's switches of switches.py, read from the environment ttyd passes
+# on, and, in debug mode, the root's test_settings.json as test_settings, read
 # by jslb.json_decode, in full names in debug mode. It reads the Empty reply
 # to 101 a byte at a time, then runs the main loop, whose own requests take
 # their ids from dispatch.id_next, from 102. It reads no provider key and no
@@ -23,8 +24,9 @@
 # verbose.exec at the setting verbose_level, the shell's level, and it exits
 # 1 otherwise. The sandbox binds / read only, gives dash empty /tmp, /home,
 # /mnt and /root, unshares every namespace, gives it a session of its own,
-# ends it with the console role and starts it in its own /tmp, so dash never
-# sees the root and nothing it writes outlives it. Any exception writes one
+# ends it with the console role and starts it in its own /tmp; the console
+# role first refuses a root that is not under /home/, so dash never sees the
+# root and nothing it writes outlives it. Any exception writes one
 # error line, its cascade under cause, in full names since it may come
 # before the settings, and exits 1; once the log is open the exception's
 # message is logged before its error line is written. In debug mode the log
@@ -103,6 +105,9 @@ _DASH_ARGV = (
 
 # Its verbose form, with dash's option that prints its input as it reads it.
 _DASH_VERBOSE = (*_DASH_ARGV, "-v")
+
+# The directory a console's root must be under, an empty tmpfs to dash.
+_CONSOLE_HOME = "/home/"
 
 # The environment variables the console keeps when they are set.
 _CONSOLE_VARIABLES = ("HOME", "LANG", "PATH", "TERM")
@@ -272,11 +277,14 @@ def _bytes_write(data: bytes) -> None:
 def _first_write(
     loaded: dict[str, Any], tests: dict[str, Any] | None, full: bool
 ) -> None:
-    import jslb, verbose
+    import jslb, switches, verbose
     from internationalization import i18n
 
     header = jslb.header_make(_FIRST_TYPE, id=_FIRST_ID, full=full)
-    payload: dict[str, Any] = {"settings": loaded}
+    payload: dict[str, Any] = {
+        "settings": loaded,
+        "switches": switches.switches_get(),
+    }
     if tests is not None:
         payload["test_settings"] = tests
     line = jslb.line_make(header, [], **payload)
@@ -380,6 +388,16 @@ def _dash_run(level: int) -> int:
     return code if code >= 0 else _SIGNAL_BASE - code
 
 
+# Refuses a console's root that is not under `/home/`, links resolved.
+def _home_check(root: str) -> None:
+    from internationalization import i18n
+
+    if not os.path.realpath(root).startswith(_CONSOLE_HOME):
+        raise PermissionError(
+            i18n("bootstrap.root_outside", root, _CONSOLE_HOME)
+        )
+
+
 # Runs the sandboxed dash with a scrubbed environment, in debug mode only.
 def _console_run(root: str, loaded: dict[str, Any]) -> int:
     if not loaded["debug"]:
@@ -423,6 +441,7 @@ def bootstrap_run(argv: list[str]) -> int:
         return _EXIT_FAILURE
     try:
         if arguments.role == _CONSOLE_ROLE:
+            _home_check(arguments.root)
             loaded = _settings_read(arguments.root)
             return _console_run(arguments.root, loaded)
         return _engine_run(arguments.root, arguments.main_loop)

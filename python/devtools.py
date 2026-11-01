@@ -21,10 +21,12 @@
 # one ConnectionError whose cause is the exit code; an exit with an error
 # code that no call saw fails the Browser's end. Standard library only, and
 # `powershell.exe`, `wslpath` and chrome-headless-shell are the programs it
-# starts.
+# starts. With the switch `switches.anthropic`, LinuxPipe starts the
+# headless shell of Anthropic's cloud container, Playwright's, in its place.
 
-import base64, errno, fcntl, functools, hashlib, json, math, os, select
-import shutil, signal, subprocess, tempfile, time, types, uuid
+import base64, errno, fcntl, functools, glob, hashlib, json, math, os
+import select, shutil, signal, subprocess, switches, tempfile, time, types
+import uuid
 from collections.abc import Callable
 from typing import Any, IO, NamedTuple, NoReturn, Self, cast
 
@@ -36,6 +38,12 @@ __all__ = [
     "blocking_categories",
     "blocking_find",
 ]
+
+# The Linux browser of Anthropic's cloud container, Playwright's, one match.
+_ANTHROPIC_CHROME_PATTERN = (
+    "/opt/pw-browsers/chromium_headless_shell-*/chrome-headless-shell-linux64"
+    "/chrome-headless-shell"
+)
 
 # The trace categories of the synchronous loads and of the thread names.
 _BLOCKING_CATEGORIES = ("loading", "__metadata")
@@ -749,11 +757,12 @@ class LinuxPipe:
         command_read = descriptor_raise(command_read)
         self.reply_fd, reply_write = os.pipe()
         reply_write = descriptor_raise(reply_write)
+        path = chrome_path()
         try:
             pid = os.posix_spawn(
-                _CHROME_PATH,
+                path,
                 [
-                    _CHROME_PATH,
+                    path,
                     "--remote-debugging-pipe",
                     f"--user-data-dir={self.profile_path}",
                     f"--window-size={width_px},{height_px}",
@@ -1014,6 +1023,19 @@ def bytes_exact(read: Callable[[int], bytes], count: int) -> bytes:
             raise ConnectionError("DevTools closed the connection")
         data += chunk
     return bytes(data)
+
+
+# Returns the Linux browser's path, Anthropic's by its switch.
+def chrome_path() -> str:
+    if switches.anthropic:  # pragma: no cover
+        paths = glob.glob(_ANTHROPIC_CHROME_PATTERN)
+        if len(paths) != 1:
+            raise FileNotFoundError(
+                f"{len(paths)} browsers match {_ANTHROPIC_CHROME_PATTERN},"
+                " not 1"
+            )
+        return paths[0]
+    return _CHROME_PATH
 
 
 # Runs a command to its end under a timer and returns its stdout as `UTF-8`.

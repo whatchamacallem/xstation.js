@@ -14,7 +14,8 @@
 // else, when the shown view `open_wanted()`, through `open_request()`, whose
 // sleep the handler takes over with the wake `ui.console_shown`, which runs
 // `open_done` and replies Empty. A view that is opening or closing cannot
-// answer and throws `page.console_busy`.
+// answer and throws `page.console_busy`. `console.busy` and `console.idle`,
+// pushes of the AI worker around its command, hold and free the view's keys.
 //
 // A worker's `fault` line shows the fault screen, its stack followed by each
 // cause's message and stack, then the page terminates the worker, which has
@@ -46,6 +47,8 @@ declare namespace page {
     close_done(wake: lines.Line): void;
     exit_done(): void;
     output_feed(data: Uint8Array): void;
+    input_hold(): void;
+    input_free(): void;
   }
 
   // The overlays as the handlers drive them.

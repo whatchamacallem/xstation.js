@@ -11,7 +11,7 @@
 // test cache, its files cleared at start, as the wire's sink, so that a
 // reply's blob over `overflow_bytes` streams to a file, then
 // `worker_ai.tap_start`, the wire its server's port and `wire_end` its end,
-// which answers `tap.start` and runs the worker's suites, whose stream sends
+// and a `wire.ConsolePort` at the page's address its tty 0, which answers `tap.start` and runs the worker's suites, whose stream sends
 // `ui.tests` at its end. `run` gets the queue and, for the wire rungs, the
 // first line and the page's address.
 //

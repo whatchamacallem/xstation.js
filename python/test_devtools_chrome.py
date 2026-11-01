@@ -14,16 +14,17 @@
 # cause, whether the browser is closed, crashes or is killed, the last seen by
 # the Browser's end alone. The profile is read from the browser's own command
 # line, through the process id DevTools gives, and is a directory under build/
-# that goes when the browser does, holding the fontconfig cache the browser
-# makes. The methods the browser test calls are tested here first, as the
-# Windows suite tested them on the relay, the pages served from a scratch
-# directory under build/ by a local HTTP server of the standard library on
-# 127.0.0.1: a screenshot is a PNG of the window's width and height; a trace
-# started afresh ends with every event sent, a synchronous load on the UI
-# thread among them, and none of the trace before; a worker that posts every
-# 10 ms posts nothing once paused in its debugger; a load the page starts
-# itself shows in the lifecycle events under a loader of its own; and the
-# page closes while another page stays. The waits are the gold's.
+# that goes when the browser does, which the browser's own environment, read
+# by the same id, names as its XDG_CACHE_HOME. The methods the browser test
+# calls are tested here first, as the Windows suite tested them on the relay,
+# the pages served from a scratch directory under build/ by a local HTTP
+# server of the standard library on 127.0.0.1: a screenshot is a PNG of the
+# window's width and height; a trace started afresh ends with every event
+# sent, a synchronous load on the UI thread among them, and none of the trace
+# before; a worker that posts every 10 ms posts nothing once paused in its
+# debugger; a load the page starts itself shows in the lifecycle events under
+# a loader of its own; and the page closes while another page stays. The
+# waits are the gold's.
 
 import devtools, functools, harness, http.server, os, signal, socket, struct
 import tempfile, threading, time, unittest
@@ -52,8 +53,8 @@ _LARGE_CHARACTERS = 1 << 20
 # The address a refused navigation is sent to, as the driver's server binds.
 _LOCAL_ADDRESS = "127.0.0.1"
 
-# The directory fontconfig makes in the browser's cache home.
-_FONTCONFIG_NAME = "fontconfig"
+# The variable of the browser's environment that names its cache home.
+_CACHE_VARIABLE = "XDG_CACHE_HOME"
 
 # The flag that names the browser's profile on its command line.
 _PROFILE_FLAG = b"--user-data-dir="
@@ -151,6 +152,19 @@ def profile_read(browser: devtools.Browser) -> str:
         if argument.startswith(_PROFILE_FLAG)
     ]
     return os.fsdecode(profile)
+
+
+# Returns the environment the browser started with, as its process holds it.
+def environment_read(browser: devtools.Browser) -> dict[str, str]:
+    with open(f"/proc/{browser_pid(browser)}/environ", "rb") as file:
+        entries = file.read().split(b"\0")
+    environment: dict[str, str] = {}
+    for entry in entries[:-1]:
+        name, equals, value = os.fsdecode(entry).partition("=")
+        if not equals:
+            raise ValueError(f"the browser's environment holds {entry!r}")
+        environment[name] = value
+    return environment
 
 
 # Returns a Browser on the Linux pipe, not yet started.
@@ -444,14 +458,13 @@ class TestProfile(unittest.TestCase):
             self.assertTrue(os.path.isdir(profile))
         self.assertFalse(os.path.exists(profile))
 
-    # The fontconfig cache is made in the profile, not in the home directory.
+    # The browser runs with its cache home at its profile, whatever caches.
     def test_cache_profile(self) -> None:
         with browser_make() as browser:
             profile = profile_read(browser)
             self.assertEqual(os.path.dirname(profile), _BUILD_PATH)
-            self.assertTrue(
-                os.listdir(os.path.join(profile, _FONTCONFIG_NAME))
-            )
+            environment = environment_read(browser)
+            self.assertEqual(environment[_CACHE_VARIABLE], profile)
 
     # A browser killed while no call waits fails the Browser's end.
     def test_exit_unseen(self) -> None:

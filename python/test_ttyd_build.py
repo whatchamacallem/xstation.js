@@ -12,10 +12,14 @@
 # the cause, leaving no record and no ttyd; and a build from no patches,
 # whose ttyd names the option unrecognized, is built again from the
 # project's patches, then left alone, then built again once its ttyd is
-# removed. The option takes its value after =, since an unpatched ttyd
-# takes a separate value as its start command and starts serving.
+# removed; and an archive whose hard link names its target under the top
+# folder unpacks the link to the stripped target, then fails at cmake. The
+# option takes its value after =, since an unpatched ttyd takes a separate
+# value as its start command and starts serving. With the switch anthropic
+# the archive is the package manager's, as the run's build is.
 
-import harness, os, subprocess, tempfile, ttyd_build, unittest
+import harness, io, os, subprocess, switches, tarfile, tempfile
+import third_party_fetch, ttyd_build, unittest
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -136,6 +140,8 @@ class TestInputs(unittest.TestCase):
             tempfile.TemporaryDirectory(dir=_BUILD_PATH)
         )
         self.archive = setting_path("powershell.ttyd_archive")
+        if switches.anthropic:
+            self.archive = third_party_fetch.package_path()
         self.patches = setting_path("powershell.ttyd_patches")
         self.build = os.path.join(self.scratch, "build")
 
@@ -174,6 +180,31 @@ class TestInputs(unittest.TestCase):
         self.assertEqual(
             sorted(os.listdir(self.build)), [_LOG_NAME, _SOURCE_NAME]
         )
+
+    # A hard link's target loses its first part as its name does, as `tar`'s.
+    def test_link_stripped(self) -> None:
+        archive = os.path.join(self.scratch, "linked.tar.gz")
+        data = b"linked bytes\n"
+        with tarfile.open(archive, "w:gz") as made:
+            target = tarfile.TarInfo("top/target.txt")
+            target.size = len(data)
+            made.addfile(target, io.BytesIO(data))
+            link = tarfile.TarInfo("top/link.txt")
+            link.type = tarfile.LNKTYPE
+            link.linkname = "top/target.txt"
+            made.addfile(link)
+        empty = self.patches_write("empty", {})
+        with self.assertRaises(RuntimeError) as context:
+            ttyd_build.inputs_build(archive, empty, self.build)
+        self.assertEqual(str(context.exception).split()[0], "cmake")
+        source = os.path.join(self.build, _SOURCE_NAME)
+        stats = [
+            os.lstat(os.path.join(source, name))
+            for name in ("target.txt", "link.txt")
+        ]
+        self.assertEqual(stats[0].st_ino, stats[1].st_ino)
+        with open(os.path.join(source, "link.txt"), "rb") as file:
+            self.assertEqual(file.read(), data)
 
     # Other patches build again, the same are kept, a removed ttyd is built.
     def test_inputs_changed(self) -> None:

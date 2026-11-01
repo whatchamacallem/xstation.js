@@ -1,0 +1,27 @@
+Subject: [PATCH] log the exit code when the socket closed first
+
+When the WebSocket closes before the process's exit is reaped,
+process_exit_cb logged "process killed with signal 0" for a process that
+exited by itself, dropping its code. Log "process exited with code N" for
+every process that exited, whichever ended first, and "process killed with
+signal N" only for a process a signal ended.
+
+---
+ src/protocol.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/protocol.c b/src/protocol.c
+--- a/src/protocol.c
++++ b/src/protocol.c
+@@ -95,7 +95,10 @@
+ static void process_exit_cb(pty_process *process) {
+   pty_ctx_t *ctx = (pty_ctx_t *)process->ctx;
+   if (ctx->ws_closed) {
+-    lwsl_notice("process killed with signal %d, pid: %d\n", process->exit_signal, process->pid);
++    if (process->exit_signal == 0)
++      lwsl_notice("process exited with code %d, pid: %d\n", process->exit_code, process->pid);
++    else
++      lwsl_notice("process killed with signal %d, pid: %d\n", process->exit_signal, process->pid);
+     goto done;
+   }
+ 

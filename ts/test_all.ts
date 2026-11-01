@@ -4,13 +4,14 @@
 //
 // The entry of the ttyd test page on both threads. Each thread runs its share
 // of the test modules as one TAP stream on the queue its bring up hands over.
-// The three tables hold no block, as every block runs in group A or B, so
-// each stream is a document of no block, the TAP version line and `1..0`,
+// The three tables hold no block, as every block runs in group A, B or C,
+// so each stream is a document of no block, the TAP version line and `1..0`,
 // written through the page's real bring up, ttyd and the server. The
 // worker's stream runs first: it runs in the task of `worker.tests`, which
 // the worker notifies itself in debug mode, and once it has ended it sends
-// the UI thread `ui.tests`, at which the UI thread's stream runs. Each line goes out as a `tap.line` the
-// moment it is made, and the stream stops after the first module that fails.
+// the UI thread `ui.tests`, at which the UI thread's stream runs. Each line
+// goes out as a `tap.line` the moment it is made, and the stream stops after
+// the first module that fails.
 // The UI thread also shows its own stream with the failed lines marked. The
 // gold's `typescript.run` picks the run: "unit" runs both streams, "wire"
 // runs the wire rungs only, on the worker, and the UI thread runs nothing.
@@ -42,13 +43,13 @@ namespace test_all {
   // Test modules by name, in the order their blocks run.
   type ModuleTable = { readonly [name: string]: ModuleRead };
 
-  // The modules first on each thread: none, as each runs in group A or B.
+  // The modules first on each thread: none, as each runs in group A, B or C.
   const first_modules = Object.freeze<ModuleTable>({});
 
-  // The modules the AI worker runs: none, as each runs in group A or B.
+  // The modules the AI worker runs: none, as each runs in group A, B or C.
   const worker_modules = Object.freeze<ModuleTable>({});
 
-  // The modules the UI thread runs: none, as each runs in group A or B.
+  // The modules the UI thread runs: none, as each runs in group A, B or C.
   const page_modules = Object.freeze<ModuleTable>({});
 
   // Sends one line of the stream at once, as a `tap.line` to its owner.

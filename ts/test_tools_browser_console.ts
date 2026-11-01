@@ -6,9 +6,9 @@
 // worker of the headless page that the block's own ttyd serves: `mcp` lines
 // through a real queue of thread `ai`, whose `mcp` handler hands each one to
 // a real `mcp.Server` that holds the tools of `tools_browser` over a real
-// `substrate.Store` on the realm's sqlite3 module and pool, with
-// `worker_ai.console_register` on the same queue and a real
-// `wire.ConsolePort` at the page's address as its `console` owner, which
+// `substrate.Store` on the realm's sqlite3 module and pool, with a real
+// `wire.ConsolePort` at the page's address attached to the same queue by
+// `worker_ai.console_attach`, as the ttyd page's bring up attaches it, which
 // types into dash on ttyd's tty 0 through the console's shell. The queue's
 // owners are the AI thread's, with `mcp` its own. Its `server` and `ui`
 // lanes each end in this file's junction, joined by linked local ports, and
@@ -24,13 +24,14 @@
 // `permit_accept` or `permit_always` and `console.show` with the gold's
 // Empty reply, which go back on the `ui` lane. The junction holds the
 // cases' `mcp` lines until dash's first prompt has shown in tty 0's output,
-// so that each command's read starts after it. The port's close receiver,
-// this file's own, pushes the end of tty 0 to the UI as `console.exit`,
-// though no case closes it. The cases, the gold of the block's id: tty 0
+// so that each command's read starts after it. `console_attach` pushes the
+// end of tty 0 to the UI as `console.exit`, though no case closes it. Each
+// command's `console.busy` before its typing and `console.idle` once its read
+// ends come on the `ui` lane between the show and the tool's reply. The cases, the gold of the block's id: tty 0
 // opened and ttyd's token back; ttyd's first message sent with the gold's
 // size, then `echo hi` asked, accepted, shown, typed and read back to the
-// prompt; `echo 2` asked again with the next number; `echo 3` allowed
-// always; `pwd` with no ask; and `sleep 600` read until the tool's timeout.
+// prompt; `echo 2` asked again with the next number; `echo 3` allowed always;
+// `pwd` with no ask; and `sleep 600` read until the tool's timeout.
 
 namespace test_tools_browser_console {
   // The initialized sqlite3.wasm module, a global the test page sets.
@@ -48,13 +49,11 @@ namespace test_tools_browser_console {
     thread: "ai" as const,
     server_thread: "server" as const,
     ui_thread: "ui" as const,
-    console_thread: "console" as const,
     provider_thread: "http" as const,
     line_type: "mcp",
     permit_type: "permit.ask",
     show_type: "console.show",
     output_type: "console.output",
-    exit_type: "console.exit",
     handler_version: 0,
     synchronous_setting: "queue_synchronous",
     overflow_setting: "overflow_bytes",
@@ -204,18 +203,7 @@ namespace test_tools_browser_console {
     );
     // The page's address: the origin a worker made from a Blob URL shares.
     const page = new URL(constants.page_path, location.origin).href;
-    const port = new wire.ConsolePort(page);
-    // The end of tty 0, pushed to the UI with its code.
-    port.close_receive((code) => {
-      const header = jslb.header_make(constants.exit_type, {
-        full: settings.names_full(),
-      });
-      tasks.line_notify(jslb.line_make(header, [], { code }));
-    });
-    tasks.port_add(constants.console_thread, port);
-    worker_ai.console_register(tasks, dispatch.handler_register, () => {
-      port.console_close();
-    });
+    worker_ai.console_attach(tasks, new wire.ConsolePort(page));
     const server_lane = new queue.LocalPort();
     tasks.port_add(constants.server_thread, new queue.LocalPort(server_lane));
     const ui_lane = new queue.LocalPort();

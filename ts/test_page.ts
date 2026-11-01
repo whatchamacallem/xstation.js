@@ -132,12 +132,14 @@ namespace test_page {
 
   // The owner table of the UI thread.
   export class TestOwnerTable extends unittest.TestCase {
-    // The console goes to the worker but for its output, end and show.
+    // The console goes to the worker but for its output, end, show and turns.
     test_console_routes(): void {
       const owners = page.owners_make();
       this.assertEqual(owners["console."], "ai");
       this.assertEqual(owners["console.output"], "ui");
       this.assertEqual(owners["console.exit"], "ui");
+      this.assertEqual(owners["console.busy"], "ui");
+      this.assertEqual(owners["console.idle"], "ui");
       this.assertEqual(owners["console.show"], "ui");
       this.assertEqual(owners["media."], "ui");
       this.assertEqual(owners["render"], "ui");

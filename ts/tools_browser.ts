@@ -14,8 +14,10 @@
 //
 // console_run, in debug mode, asks the player's permit unless it was always
 // allowed, then submits `console.show` to the UI and sleeps on
-// `tools.show_reply`, then types the command into tty 0 and sleeps on its
-// output. Outside debug mode it throws `tools_browser.debug_off`. Every line
+// `tools.show_reply`, then notifies the UI `console.busy`, types the command
+// into tty 0 and sleeps on its output, and notifies `console.idle` when the
+// read ends, so that the player watches the command and types once it is
+// over. Outside debug mode it throws `tools_browser.debug_off`. Every line
 // a tool builds takes the form `settings.names_full()` picks. A tool that
 // throws, before or after it submitted a request, fails the server as
 // `mcp.d.ts` says, its own message kept.
@@ -80,6 +82,8 @@ namespace tools_browser {
     read_type: "console.read",
     tail_type: "verbose.tail",
     show_type: "console.show",
+    busy_type: "console.busy",
+    idle_type: "console.idle",
     // The wake types of the tools, one per reply they sleep on.
     image_wake: "tools.image_reply",
     media_wake: "tools.media_reply",
@@ -388,8 +392,12 @@ namespace tools_browser {
       );
     }
 
-    // Types a command line into the console and sleeps on reading its output.
+    // Holds the player's keys, types a command line and sleeps on its output.
     console_send(text: string, timeout_seconds: number): dispatch.Sleep {
+      this.tasks.line_notify(
+        line_build(constants.busy_type, {}),
+        constants.ui_owner,
+      );
       const typed = constants.input_command + text + constants.line_end;
       const blob = jslb.blob_make(utility.utf8_encode(typed));
       this.tasks.line_notify(
@@ -618,8 +626,12 @@ namespace tools_browser {
         const { text, timeout_seconds } = state as ConsoleState;
         return context.console_send(text, timeout_seconds);
       },
-      // Returns the command's output and whether the read timed out.
+      // Frees the player's keys, returns the output and whether it timed out.
       [constants.console_wake]: (state, replies) => {
+        context.tasks.line_notify(
+          line_build(constants.idle_type, {}),
+          constants.ui_owner,
+        );
         const { text } = state as ConsoleState;
         const reply = reply_payload(replies);
         const timed_out = reply.timed_out as boolean;

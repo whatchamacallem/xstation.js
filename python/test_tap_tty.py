@@ -25,8 +25,8 @@
 # counts are this module's gold.
 
 import contextlib, copy, harness, hashlib, jslb, json, os, shutil, signal
-import sqlite3, subprocess, sys, tap_consumer, tap_tty, tempfile, time
-import unittest
+import sqlite3, subprocess, switches, sys, tap_consumer, tap_tty, tempfile
+import time, unittest
 from typing import Any, NoReturn
 
 # The checkout's top directory, above this file's `python/`.
@@ -269,6 +269,7 @@ class TestStock(ScratchCase):
         engine = self.engine_run(values, None)
         first = self.start_answer(engine, True)
         self.assertEqual(first["settings"], values)
+        self.assertEqual(first["switches"], switches.switches_get())
         self.assertEqual(first["test_settings"], harness.gold_copy())
         engine.bytes_write(_line_bytes("tail_ui"))
         reply = _plain(engine.line_read())
@@ -283,7 +284,14 @@ class TestStock(ScratchCase):
         values = self.root_make(False, None)
         engine = self.engine_run(values, None)
         first = self.start_answer(engine, False)
-        self.assertEqual(first, {"0": first["0"], "settings": values})
+        self.assertEqual(
+            first,
+            {
+                "0": first["0"],
+                "settings": values,
+                "switches": switches.switches_get(),
+            },
+        )
         engine.bytes_write(_line_bytes("tail_short"))
         reply = _plain(engine.line_read())
         self.assertEqual(reply, _line_get("tail_short_reply"))

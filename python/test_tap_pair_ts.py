@@ -23,8 +23,8 @@
 # outcomes in one test. A bail out counts for nothing, since the producer
 # writes one only after a failed point, where the consumer counts none.
 
-import harness, jslb, json, os, page_build, shutil, subprocess, tap_consumer
-import tempfile, unittest
+import harness, jslb, json, os, page_build, shutil, subprocess, switches
+import tap_consumer, tempfile, unittest
 from typing import Any, NamedTuple, NoReturn, cast
 
 # The checkout's top directory, above this file's `python/`.
@@ -83,7 +83,11 @@ def start_bytes() -> bytes:
     header = jslb.header_make(_FIRST_TYPE, id=_FIRST_ID, full=True)
     tests = jslb.json_decode(json.dumps(harness.gold_copy()))
     line = jslb.line_make(
-        header, [], settings=harness.settings_copy(), test_settings=tests
+        header,
+        [],
+        settings=harness.settings_copy(),
+        switches=switches.switches_get(),
+        test_settings=tests,
     )
     (piece,) = jslb.line_encode(line)
     return cast(bytes, piece)

@@ -3,23 +3,24 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the platform services in process: each run of `bootstrap_run` is a
-# forked child whose controlling tty, stdin, stdout and stderr are a new pty
-# of `pty.openpty`, as ttyd runs it, with its environment set in the child,
-# and the test plays the page on the other side of the pty. It tests the
-# arguments, the engine lock, the raw mode of the pty, the first line,
-# `tap.start` with the fixed id 101, its settings and, in debug mode only,
-# its test settings, and no provider field, the reply, the choice and
-# loading of the main loop file, the console role where it runs no shell,
-# the error line in full names with its cascade, and the lines bootstrap
-# writes to the root's log. The test main loop files, named by `--main-loop`
-# in debug mode, write their calls to files in the root; with no
-# `--main-loop` the stock main_loop.py answers a request. Each child writes
-# how its run ended to a file, then kills itself, so that the lock, the log
-# and the loaded main loop never reach another test. The expected texts and
-# lines are the gold's. The scratch directories go under build/.
+# forked child whose controlling tty, stdin, stdout and stderr are a new pty of
+# `pty.openpty`, as ttyd runs it, with its environment set in the child, and
+# the test plays the page on the other side of the pty. It tests the arguments,
+# the engine lock, the raw mode of the pty, the first line, `tap.start` with
+# the fixed id 101, its settings, the run's switches and, in debug mode only,
+# its test settings, and no provider field, the reply, the choice and loading
+# of the main loop file, the console role where it runs no shell, the error
+# line in full names with its cascade, and the lines bootstrap writes to the
+# root's log. The test main loop files, named by `--main-loop` in debug mode,
+# write their calls to files in the root; with no `--main-loop` the stock
+# main_loop.py answers a request. Each child writes how its run ended to a
+# file, then kills itself, so that the lock, the log and the loaded main loop
+# never reach another test. The expected texts and lines are the gold's. The
+# scratch directories go under build/.
 
 import bootstrap, contextlib, errno, fcntl, harness, json, os, pty, resource
-import signal, sqlite3, sys, tempfile, termios, traceback, unittest
+import signal, sqlite3, switches, sys, tempfile, termios, traceback
+import unittest
 from typing import Any, NamedTuple
 
 # The checkout's top directory, above this file's `python/`.
@@ -52,11 +53,14 @@ _CONSOLE_ENVIRONMENT = {
     "OTHER": "dropped",
 }
 
+# A console root that is not under `/home/`, which the console refuses.
+_OUTSIDE_ROOT = "/usr"
+
 # The keys of `tap.start` outside debug mode, in written order.
-_FIRST_KEYS = ["0", "settings"]
+_FIRST_KEYS = ["0", "settings", "switches"]
 
 # The keys of `tap.start` in debug mode, the test settings last.
-_FIRST_KEYS_DEBUG = ["0", "settings", "test_settings"]
+_FIRST_KEYS_DEBUG = ["0", "settings", "switches", "test_settings"]
 
 # The file in the root that holds the test settings.
 _TESTS_NAME = "test_settings.json"
@@ -602,7 +606,7 @@ class TestLock(unittest.TestCase):
         self.assertEqual(child.rest_read(), (0, b"taken"))
 
 
-# Tests the first line, its settings and test settings, and the loop calls.
+# Tests the first line, its settings, switches, test settings, loop calls.
 class TestFirst(unittest.TestCase):
     # Checks `tap.start`'s payload, no provider field, and the loop's calls.
     def first_check(
@@ -612,6 +616,7 @@ class TestFirst(unittest.TestCase):
         self.assertEqual(list(first), keys)
         self.assertEqual(first["settings"], made.settings)
         self.assertEqual(list(first["settings"]), list(made.settings))
+        self.assertEqual(first["switches"], switches.switches_get())
         if debug:
             self.assertEqual(first["test_settings"], made.tests)
         self.assertEqual(_marker_read(made.root, _PREPARE_NAME), [made.root])
@@ -646,6 +651,7 @@ class TestFirst(unittest.TestCase):
         self.assertEqual(list(first), _FIRST_KEYS)
         self.assertEqual(first["settings"], made.settings)
         self.assertEqual(list(first["settings"]), list(made.settings))
+        self.assertEqual(first["switches"], switches.switches_get())
         child.bytes_write(_REPLY_SHORT + _line_bytes("tail_short"))
         self.assertEqual(child.line_read(), _line_get("tail_short_reply"))
         self.assertEqual(child.hangup(), _HUNG_UP)
@@ -841,6 +847,19 @@ class TestConsole(unittest.TestCase):
         message = _raised_check(self, line, "BlockingIOError")
         self.assertTrue(message.startswith(_SPAWN_REFUSED), message)
         self.assertEqual(_log_read(made.root), [_failure_line(message)])
+
+    # A root outside `/home/`, which dash's sandbox hides, is refused first.
+    def test_console_outside(self) -> None:
+        made = _root_make(self, True)
+        argv = ["--root", _OUTSIDE_ROOT, "console"]
+        child = EngineChild(self, made, argv, _CONSOLE_ENVIRONMENT)
+        line = child.line_read()
+        self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
+        self.assertFalse(child.raw_get())
+        self.assertEqual(
+            _error_check(self, line), _text_get("bootstrap_root_outside")
+        )
+        _log_absent(self, made.root)
 
     # The console role with `--main-loop` is refused, raw, before any shell.
     def test_console_loop(self) -> None:

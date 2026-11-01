@@ -12,10 +12,11 @@
 // to the port, which fetches ttyd's token and opens tty 0, then the token
 // comes back to the UI. The UI's `console.close` closes tty 0 through the
 // port and is answered at once, then the socket's end comes back as the
-// `console.exit` that the port's close receiver, the test's own, pushes to
-// the UI with the close code, as the AI worker pushes it. No case sends
-// ttyd a first message on tty 0, so ttyd starts no process. The lines the
-// cases send and expect are the gold of test_settings.json.
+// `console.exit` that the port's close receiver, the test's own, pushes to the
+// UI with the close code, as `worker_ai.console_attach` does for the ttyd
+// page's port. No case sends ttyd a first message on
+// tty 0, so ttyd starts no process. The lines the cases send and expect are
+// the gold of test_settings.json.
 
 namespace test_worker_ai_console {
   // The thread, the owners of its lanes, the type of the console's end.
@@ -36,7 +37,7 @@ namespace test_worker_ai_console {
     const lane = new MessageChannel();
     tasks.port_add(constants.ui_owner, new queue.ThreadPort(lane.port2));
     const port = new wire.ConsolePort(location.href);
-    // The end of tty 0, pushed to the UI as the AI worker pushes it.
+    // The end of tty 0, pushed to the UI as the stub says the AI worker will.
     port.close_receive((code) => {
       const header = jslb.header_make(constants.exit_type, {
         full: settings.names_full(),

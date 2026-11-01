@@ -2,7 +2,9 @@
 # Browser, on one of two transports: LinuxPipe, to chrome-headless-shell on
 # its descriptors 3 and 4, and WindowsRelay, to Chrome or Edge on Windows
 # through `powershell.exe`. WindowsRelay is offline since 2026-10-30, kept,
-# run by nothing, and to be brought back later.
+# run by nothing, and to be brought back later. The switch
+# `switches.anthropic` has LinuxPipe start Playwright's headless shell of
+# Anthropic's cloud container in place of chrome-headless-shell's path.
 
 from collections.abc import Callable
 from typing import Any, Self
