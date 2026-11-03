@@ -10,10 +10,10 @@
 # _SYNCHRONIZATION_MODULES for await, .then(, new Promise, Atomics and
 # SharedArrayBuffer outside its comments and its string, template and regular
 # expression literals, then, in the category that --smoke-test, the default,
-# or --normal-test chooses, checks the formatting of the whitelisted files
-# with reformat.py in a smoke-test run, rewriting nothing, after an advisory
-# to wait for a normal-test run, or formats them in a normal-test run, then
-# lints them with the linters of their rows. reformat_table.json gives each
+# or --normal-test chooses, formats the whitelisted files with reformat.py in
+# a normal-test run, or in a smoke-test run runs no formatter and prints an
+# advisory to wait for a normal-test run, then lints them with the linters of
+# their rows. reformat_table.json gives each
 # extension its comment lexer, codec, checker, formatter and linter; a
 # PowerShell file, formatted on Windows, is read past a UTF-8 byte order mark
 # at its start and only its characters and comments are checked. Below a
@@ -58,10 +58,10 @@ _AUDIT_REFUSED = (
     "const t = `${await x}`;\n",
 )
 
-# What a `smoke-test` run prints before it checks the formatting.
-_CHECK_ADVISORY = (
-    "test_posix.py: this smoke-test run checks the formatting and rewrites"
-    " nothing; wait for a normal-test run, which does the reformatting."
+# What a `smoke-test` run prints in place of the formatting.
+_FORMAT_ADVISORY = (
+    "test_posix.py: this smoke-test run leaves the formatting alone; wait"
+    " for a normal-test run, which does the reformatting."
 )
 
 # A Doxygen code span, cut from a comment before its punctuation is checked.
@@ -126,7 +126,7 @@ _POWERSHELL_SINGLE = re.compile(r"'(?:[^']|'')*'")
 # What PowerShell can have before a `#` comment.
 _POWERSHELL_TOKEN_BREAK = " \t\n;|&(){},"
 
-# The label of the reformatting, which a `smoke-test` run only checks.
+# The label of the reformatting, which a `smoke-test` run leaves out.
 _REFORMAT_LABEL = "normal-test"
 
 # A shell here document's start: `<<`, `-` to strip tabs, a quote, its word.
@@ -268,15 +268,14 @@ def end_find(path: str, text: str, i: int, needle: str) -> int:
     return end + len(needle)
 
 
-# Formats in a `normal-test` run, only checks in a `smoke-test` run.
+# Formats in a `normal-test` run, only advises in a `smoke-test` run.
 def formatter_run(paths: list[str], chosen: str) -> None:
     import category, reformat
 
     if category.suite_runs(_REFORMAT_LABEL, chosen):
         reformat.reformat(paths)
     else:
-        print(_CHECK_ADVISORY, flush=True)
-        reformat.format_check(paths)
+        print(_FORMAT_ADVISORY, flush=True)
 
 
 # Adds the comments of HTML and of its script and style elements.
@@ -641,16 +640,15 @@ def typescript_paths() -> list[str]:
     return sorted(os.path.join(_ROOT_PATH, path) for path in matched)
 
 
-# Checks and audits the files, then checks or formats and lints them.
+# Checks and audits the files, then formats them in a normal run, lints them.
 def main(arguments: list[str]) -> None:
     import category, reformat
 
     parser = argparse.ArgumentParser(
         description="Check the characters and comments of the files"
         " reformat_whitelist.txt lists, audit the ts/*.ts files for"
-        " synchronization tokens, then check the formatting of the files of"
-        " the linux rows of reformat_table.json, or format them in a"
-        " normal-test run, and lint them."
+        " synchronization tokens, then format the files of the linux rows"
+        " of reformat_table.json in a normal-test run, and lint them."
     )
     category.options_add(parser)
     chosen: str = parser.parse_args(arguments).category

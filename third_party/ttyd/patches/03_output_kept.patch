@@ -1,0 +1,74 @@
+Subject: [PATCH] keep each frame until libwebsockets is done with it
+
+wsi_output freed each OUTPUT frame as soon as lws_write returned, and
+send_initial_message sent from the stack. With permessage-deflate,
+libwebsockets keeps zlib's input on the frame and goes on compressing it
+on later writeable events, reading freed memory: AddressSanitizer reports
+a heap-use-after-free in deflate, and a release build sends corrupted
+bytes or ends with SIGSEGV. Hold the frame lws_write last took in the
+session and free it when the next frame is sent or the socket closes;
+libwebsockets calls the writeable callback only once draining is over.
+
+---
+diff --git a/src/protocol.c b/src/protocol.c
+--- a/src/protocol.c
++++ b/src/protocol.c
+@@ -10,11 +10,17 @@
+ #include "server.h"
+ #include "utils.h"
+ 
++// Holds the frame lws_write took and frees the one before, which permessage-deflate read on.
++static void output_keep(struct pss_tty *pss, char *message) {
++  free(pss->output);
++  pss->output = message;
++}
++
+ // initial message list
+ static char initial_cmds[] = {SET_WINDOW_TITLE, SET_PREFERENCES};
+ 
+ static int send_initial_message(struct lws *wsi, int index) {
+-  unsigned char message[LWS_PRE + 1 + 4096];
++  unsigned char *message = xmalloc(LWS_PRE + 1 + 4096);
+   unsigned char *p = &message[LWS_PRE];
+   char buffer[128];
+   int n = 0;
+@@ -32,7 +38,9 @@
+       break;
+   }
+ 
+-  return lws_write(wsi, p, (size_t)n, LWS_WRITE_BINARY);
++  int written = lws_write(wsi, p, (size_t)n, LWS_WRITE_BINARY);
++  output_keep((struct pss_tty *)lws_wsi_user(wsi), (char *)message);
++  return written;
+ }
+ 
+ static json_object *parse_window_size(const char *buf, size_t len, uint16_t *cols, uint16_t *rows) {
+@@ -180,7 +188,7 @@
+     lwsl_err("write OUTPUT to WS\n");
+   }
+ 
+-  free(message);
++  output_keep((struct pss_tty *)lws_wsi_user(wsi), message);
+ }
+ 
+ static bool check_auth(struct lws *wsi, struct pss_tty *pss) {
+@@ -369,6 +377,8 @@
+       lwsl_notice("WS closed from %s, clients: %d\n", pss->address, server->client_count);
+       if (pss->buffer != NULL) free(pss->buffer);
+       if (pss->pty_buf != NULL) pty_buf_free(pss->pty_buf);
++      free(pss->output);
++      pss->output = NULL;
+       for (int i = 0; i < pss->argc; i++) {
+         free(pss->args[i]);
+       }
+diff --git a/src/server.h b/src/server.h
+--- a/src/server.h
++++ b/src/server.h
+@@ -52,6 +52,7 @@
+ 
+   pty_process *process;
+   pty_buf_t *pty_buf;
++  char *output;
+ 
+   int lws_close_status;
+ };

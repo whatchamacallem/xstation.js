@@ -3,7 +3,7 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests reformat's check and formatting with the real formatters of
-# reformat_table.json, a later suite that waits on ruff, shfmt and prettier.
+# reformat_table.json, ruff, shfmt and prettier.
 # Each check or formatting runs in a forked child whose stdout and stderr go
 # to a scratch file under build/, so that no formatter writes to the stream.
 # A file its formatter would change is refused by its row's checker and left

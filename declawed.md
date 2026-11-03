@@ -30,8 +30,6 @@ context so that no further lookup is required. The task logs are not checked
 for column width. Do not add simple questions to the log. Use the `date`
 command only to name the log.
 
-- Provide links to screenshots showing changes in all postmortems.
-
 ### Messages and Questions to the Maintainer
 
 - Do not use the AskUserQuestion tool and use numbered number sub-lists per ISO
@@ -157,6 +155,8 @@ command only to name the log.
 
 - The source formatters may need to run twice to be stable. Alert the user
   if they are not.
+- The formatters do not have to run except before a commit, and that run
+  can be done manually.
 - If a source reformatting tool can be used to fix an error then stage the
   file to be modified in git and run the tool. Then check the diff and if
   you believe there was an error the change can be reverted and applied

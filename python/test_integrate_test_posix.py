@@ -3,12 +3,13 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests test_posix.py with its project callees, category.py and reformat.py,
-# whose suites have passed: its formatter step in each category, given
+# whose suites have passed: its formatter step in each category, so that no
+# formatter starts. The step runs in a forked child whose stdout and stderr
+# go to a scratch file under build/, so that nothing it prints reaches the
+# stream. A smoke-test run, given a Python file that ruff would change,
+# prints its advisory and leaves the file as it is; a normal-test run, given
 # PowerShell files, which the Linux rows of reformat_table.json leave to
-# Windows, so that no formatter starts. The step runs in a forked child
-# whose stdout and stderr go to a scratch file under build/, so that nothing
-# it prints reaches the stream. A smoke-test run prints its advisory and
-# checks, and a normal-test run prints nothing and formats.
+# Windows, prints nothing and formats.
 
 import functools, harness, os, signal, sys, tempfile, test_posix, traceback
 import unittest
@@ -23,10 +24,10 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 # The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_integrate_test_posix"
 
-# The advisory a `smoke-test` run prints before it checks.
-_ADVISORY: str = harness.gold_get(f"{_GOLD_ID}.check_advisory")
+# The advisory a `smoke-test` run prints in place of the formatting.
+_ADVISORY: str = harness.gold_get(f"{_GOLD_ID}.format_advisory")
 
-# The category that only checks the formatting.
+# The category that runs no formatter.
 _SMOKE_TEST = "smoke-test"
 
 # The category that does the reformatting.
@@ -34,6 +35,9 @@ _NORMAL_TEST = "normal-test"
 
 # The PowerShell files the step is given, which no Linux row formats.
 _WINDOWS_NAMES = ["a.ps1", "a.psd1"]
+
+# Python that ruff would change, which a `smoke-test` run leaves as it is.
+_PYTHON_RAW = "x=1\n"
 
 # How the work of a child ended when it returned.
 _ENDING_RETURNED = "returned"
@@ -102,20 +106,22 @@ class ChildCase(unittest.TestCase):
 
 # The formatter step of each category, on the real category and reformat.
 class TestFormatterStep(ChildCase):
-    # Runs the step of the category on empty PowerShell files in a child.
-    def step_run(self, chosen: str) -> tuple[str, str]:
-        paths = [self.file_write(name, "") for name in _WINDOWS_NAMES]
+    # Runs the step of the category on the files in a child.
+    def step_run(self, chosen: str, paths: list[str]) -> tuple[str, str]:
         work = functools.partial(test_posix.formatter_run, paths, chosen)
         return self.child_run(work)
 
-    # A `smoke-test` run prints the advisory, then checks with no command.
-    def test_smoke_checked(self) -> None:
-        ending, output = self.step_run(_SMOKE_TEST)
+    # A `smoke-test` run prints the advisory and leaves the files alone.
+    def test_smoke_advised(self) -> None:
+        path = self.file_write("b.py", _PYTHON_RAW)
+        ending, output = self.step_run(_SMOKE_TEST, [path])
         self.assertEqual(ending, _ENDING_RETURNED)
         self.assertEqual(output, _ADVISORY + "\n")
+        self.assertEqual(text_read(path), _PYTHON_RAW)
 
     # A `normal-test` run formats with no command and prints nothing.
     def test_normal_formatted(self) -> None:
-        ending, output = self.step_run(_NORMAL_TEST)
+        paths = [self.file_write(name, "") for name in _WINDOWS_NAMES]
+        ending, output = self.step_run(_NORMAL_TEST, paths)
         self.assertEqual(ending, _ENDING_RETURNED)
         self.assertEqual(output, "")

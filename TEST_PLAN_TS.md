@@ -783,6 +783,104 @@ suites' files into each root. It is removed:
    `test_bootstrap` that read a root's gold go, with their strings; the
    wire and browser tests write each root's page.
 
+3.25 The formatter suites in the run, by the maintainer's message of
+2026-11-03, task 9 of `tmp/tasks_30_2127.md`: "now start iterating on
+getting all the tests to pass. do what you can in py and ts."
+`python/test_reformat_formatters.py` and
+`python/test_test_posix_formatters.py` were later suites, in no phase,
+waiting on ruff, shfmt and prettier. `test_posix.py`'s checks run those
+same programs through `reformat.py` in every official run, and all three
+are on the run's PATH, so both suites join the Python unit phase:
+`test_reformat_formatters` after `test_reformat`, and
+`test_test_posix_formatters` after `test_test_posix`, each alphabetical
+in its layer, their labels by their measured seconds against the smoke
+deadline of 3.21. `test_devtools_powershell` stays a later suite, its
+PowerShell unrun by the maintainer's answer to Question T24.
+Measured on 2026-11-03: 0.378 s and 0.028 s in the smoke run, so both
+are labelled `smoke-test`; the smoke target then took 117.391 s. Their
+labels are overturned by 3.27: both are `normal-test`.
+
+3.26 ttyd keeps each frame until libwebsockets is done with it, by the
+same message of 2026-11-03. The normal run of task 9 failed in
+`test_browser.py`'s rung "stage 5: wire drain poll": ttyd 1.7.7 ended
+with SIGSEGV after the 80 echo requests of 131072 bytes posted while it
+was stopped. Repeating the rung alone failed within 21 passes, with an
+echo whose blob had 9 bytes overwritten by a malloc chunk header, and
+AddressSanitizer on a ttyd built from the same source named a
+heap-use-after-free: `wsi_output` in `src/protocol.c` frees each OUTPUT
+frame as soon as `lws_write` returns, while the permessage-deflate
+extension that Chrome negotiates keeps zlib's input on that frame and
+goes on compressing it on later writeable events. The fix is a patch of
+ttyd's source beside those of 3.15 and Question T10,
+`third_party/ttyd/patches/03_output_kept.patch`, which keeps
+compression:
+
+1. `struct pss_tty` holds `output`, the frame `lws_write` last took.
+2. `wsi_output` and `send_initial_message` give their frame, from the
+   heap, to `output_keep`, which frees the frame held before and holds
+   the new one. libwebsockets calls the protocol's writeable callback
+   only once a frame's draining is over, so the frame freed there is
+   done with.
+3. `LWS_CALLBACK_CLOSED` frees the frame held.
+4. Tests: the rung itself, which fails without the patch; repeated
+   alone on the release build and on an AddressSanitizer build of the
+   patched source, every pass passes and AddressSanitizer reports
+   nothing.
+
+Measured on 2026-11-03: without the patch, four repeats of the rung on
+the release build failed at passes 1, 1, 2 and 22, and the
+AddressSanitizer build reported the use-after-free at pass 2; with it,
+40 of 40 passes on the AddressSanitizer build with no report, 60 of 60
+on the release build, and the normal target passed in 643.952 s.
+
+3.27 No formatter in a smoke-test run, by the maintainer's message of
+2026-11-03, task 10 of `tmp/tasks_30_2127.md`: "remove the formatter runs
+from the "smoketest" series of tests and update declawed to say they don't
+have to run except before a commit and that can be done manually." The
+project rules now say the formatters do not have to run except before a
+commit, and that run can be done manually. A smoke-test run starts no
+formatter and no checker of `python/reformat_table.json`:
+
+1. `test_posix.py`'s formatter step formats the whitelisted files in a
+   normal-test run, as before, and in a smoke-test run only prints its
+   advisory, now "test_posix.py: this smoke-test run leaves the
+   formatting alone; wait for a normal-test run, which does the
+   reformatting.", the gold `format_advisory` of
+   `test_integrate_test_posix`. It no longer calls
+   `reformat.format_check`, which ran ruff format --check, shfmt --diff
+   and prettier --check. The rows' linters, today ruff check alone, run
+   in both categories, being linters and not formatters.
+2. `test_reformat_formatters` and `test_test_posix_formatters`, which
+   start the real formatters, are labelled `normal-test`, in their
+   places of 3.25 in the Python unit phase.
+3. `test_integrate_test_posix`'s smoke case gives the step a Python file
+   that ruff would change, and checks that the step returns, prints the
+   advisory alone and leaves the file as it is, starting no command.
+   `test_test_posix_formatters` keeps its normal case, which starts
+   ruff; its smoke case, which started ruff's checker, goes, the
+   integration suite now holding the smoke case.
+4. `reformat.format_check`, the checkers of the table and their tests in
+   `test_reformat` and `test_reformat_formatters` stay, though no
+   official run calls `format_check` any longer; `test_reformat`'s case
+   on PowerShell files starts no command.
+5. A normal-test run still formats, since the message names the smoke
+   series alone; the formatter run before a commit is `reformat.py`, run
+   by hand.
+6. The Windows target, offline since 2026-10-30, runs
+   `powershell/test_lint.ps1`, which formats the PowerShell files, in
+   both categories. When it is brought back, `test_powershell.ps1` gives
+   `test_lint.ps1` the category, and `test_lint.ps1` formats in a
+   normal-test run only, checking line endings and linting in both.
+   Nothing of it changes now, the PowerShell left unrun by Question
+   T24's answer.
+7. ttyd's compression, by the same message: "disable ttyd compression if
+   there is a blocking problem using it and continue, it is only being
+   used for bring up and may be replaced." permessage-deflate stays, with
+   the patch of 3.26, while it causes no blocking problem. On one, a
+   patch of ttyd's `src/server.c` sets `info.extensions` to NULL, so that
+   ttyd offers no extension and sends every frame uncompressed, and the
+   runs go on.
+
 ## 4 The rules every task follows
 
 4.1 The order. `PY_GOALPOSTS.md` 4.1 items 1 to 5, over the TS modules: M
@@ -3555,6 +3653,14 @@ Answered A on 2026-11-03 by the maintainer's message "update declawed,
 make the commit, push it": the rules' Testing section says "fit in 3
 minutes".
 
+Question T23, asked on 2026-11-03 in the conversation of
+`tmp/tasks_30_2127.md`, after task 8: do the decisions of 11.2 items 45
+to 47 stand? Answered "[A] A. Confirm all three." on 2026-11-03.
+
+Question T24, asked the same day: how are the PowerShell changes of
+tasks 5 to 7 tested, with no `pwsh` in the container? Answered
+"Ignore." on 2026-11-03: they stay unrun.
+
 ## 10 Outside this plan
 
 10.1 Group C was outside this plan until 2026-10-30, when section 7 planned
@@ -3877,6 +3983,19 @@ wanting confirmation. Every item here was confirmed on 2026-11-02
     `tap_tty`'s roots running Python suites only; `test_browser`'s first
     rung checking the page's `test_gold` by `script_evaluate`; and
     `xsjs_start.ps1`'s copy of `root_files` back to a plain copy.
+48. Task 9's decision of 3.25: the two later formatter suites run in
+    every category, on the approval of the programs that
+    `test_posix.py` already runs, with no new question.
+49. Task 9's decision of 3.26: ttyd patched to keep each frame alive,
+    keeping permessage-deflate, rather than turned to send
+    uncompressed by leaving out its extensions, which would also end
+    the fault.
+50. Task 10's decisions of 3.27: the smoke-test run's advisory kept,
+    reworded, rather than removed; the rows' linters left in both
+    categories; `reformat.format_check` and the table's checkers kept
+    with no caller in an official run; the normal-test run still
+    formatting; the Windows target's formatting in a smoke run left as
+    it is, its design written in item 6, while it is offline.
 
 11.3 Class C, confirmed by the answers and acceptances of 2026-10-30 and
 2026-11-01:
@@ -4025,6 +4144,15 @@ wanting confirmation. Every item here was confirmed on 2026-11-02
     project rules, of the maintainer's message of 2026-11-02.
 29. Question T22 A, "update declawed, make the commit, push it", the
     maintainer's message of 2026-11-03 (3.21).
+30. Items 45 to 47 of 11.2, Question T23 A, "[A] A. Confirm all
+    three.", the maintainer's message of 2026-11-03.
+31. Item 48 of 11.2, its smoke part overturned by the maintainer's
+    message of task 10, "remove the formatter runs from the "smoketest"
+    series of tests": both formatter suites are `normal-test` (3.27).
+32. Item 49 of 11.2, settled by the same message, "disable ttyd
+    compression if there is a blocking problem using it and continue, it
+    is only being used for bring up and may be replaced": compression
+    stays while it causes no blocking problem (3.27 item 7).
 
 11.4 Class D:
 
@@ -4060,7 +4188,15 @@ wanting confirmation. Every item here was confirmed on 2026-11-02
 15. "try bwrap ... /bin/dash" (item 39): the command is the console's shell,
     exactly as given, its verbose form adding `-v` (7.4, task 7.8.1).
 
-11.5 Unresolved on 2026-11-03, after task 8 of `tmp/tasks_30_2127.md`:
+11.5 Unresolved on 2026-11-03, at the end of task 10 of
+`tmp/tasks_30_2127.md`: item 50 of 11.2, the decisions of task 10, which
+stand unless the maintainer overturns one. Earlier record, after the
+message of task 10: none of 11.2, items 48 and 49 of which 11.3 items 31
+and 32 settled. Earlier record, at the end of task 9: items 48 and 49 of
+11.2, the decisions of task 9, which stand unless the maintainer
+overturns one. Earlier record,
+after the answers of task 9: none of 11.2, items 45 to 47 of which
+11.3 item 30 settled. Earlier record, on 2026-11-03, after task 8:
 items 45 to 47 of 11.2, the decisions of tasks 6 and 7, which stand
 unless the maintainer overturns one. Earlier record, on 2026-11-02,
 after task 6, Question T22 of which 11.3 item 29 settled:

@@ -549,6 +549,11 @@ for the record:
    past and consider them actionable."
 8. Question C3 A, marked by the maintainer, and Question C4, answered in
    the maintainer's words (3.8), on 2026-11-02.
+9. 8.2 item 18, by Question C5, "[A] A. Confirm all three.", and
+   Question C6, "[A] A. Accept it, since one cell's underline style
+   and colour are the only loss.", the maintainer's message of
+   2026-11-03: the edge erase does not restore the underline's style
+   and colour.
 
 8.4 Class D, satisfied by the design once built: 1.1 by 3.1; 1.3 by 3.2,
 which keeps the relay of today; 1.5 by building on ttyd's own pty and

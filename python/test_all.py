@@ -196,6 +196,7 @@ _MODULES: list[tuple[str, str]] = [
     ("test_tap_producer", "smoke-test"),
     ("test_internationalization", "smoke-test"),
     ("test_reformat", "smoke-test"),
+    ("test_reformat_formatters", "normal-test"),
     ("test_test", "smoke-test"),
     ("test_jslb", "smoke-test"),
     ("test_switches", "smoke-test"),
@@ -206,6 +207,7 @@ _MODULES: list[tuple[str, str]] = [
     ("test_substrate", "smoke-test"),
     ("test_substrate_limit", "smoke-test"),
     ("test_test_posix", "smoke-test"),
+    ("test_test_posix_formatters", "normal-test"),
     ("test_verbose", "smoke-test"),
     ("test_devtools_chrome", "smoke-test"),
     ("test_dispatch", "smoke-test"),
@@ -468,8 +470,6 @@ _LATER: list[tuple[str, str]] = [
         "offline since 2026-10-30, kept, run by nothing, and to be brought"
         " back later; then powershell.exe, and Chrome or Edge",
     ),
-    ("test_reformat_formatters", "ruff, shfmt and prettier"),
-    ("test_test_posix_formatters", "ruff"),
 ]
 
 # A suite's `--coverage` modules past its namesake, none for stdio, pair tests.
