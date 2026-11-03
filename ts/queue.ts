@@ -40,7 +40,6 @@ namespace queue {
     reply_field: "reply",
     id_short: "i",
     full_marker: "type",
-    debug_setting: "debug",
     line_setting: "line_max",
     limit_setting: "blob_max",
   });
@@ -325,16 +324,22 @@ namespace queue {
   export class VerboseBatch {
     private readonly thread: "ui" | "ai";
     private readonly settings_get: (id: string) => unknown;
+    private readonly debug_on: () => boolean;
     private kept: lines.VerboseLine[] = [];
     private sending = false;
 
-    // Takes the thread, `ui` or `ai`, and the reader of the settings.
-    constructor(thread: ThreadName, settings_get: (id: string) => unknown) {
+    // Takes the thread, `ui` or `ai`, and the readers of settings and mode.
+    constructor(
+      thread: ThreadName,
+      settings_get: (id: string) => unknown,
+      debug_on: () => boolean,
+    ) {
       if (thread !== "ui" && thread !== "ai") {
         throw new Error(i18n("queue.sink_thread", thread));
       }
       this.thread = thread;
       this.settings_get = settings_get;
+      this.debug_on = debug_on;
     }
 
     // Keeps a line while forwarding is on and no batch is going out.
@@ -358,9 +363,9 @@ namespace queue {
       this.sending = false;
     }
 
-    // Whether the setting `debug` is true, which alone turns forwarding on.
+    // Whether debug mode is on, which alone turns forwarding on.
     private forward_on(): boolean {
-      return this.settings_get(constants.debug_setting) === true;
+      return this.debug_on();
     }
 
     // Splits the kept lines into groups whose `verbose.put` fits `line_max`.
@@ -409,6 +414,7 @@ namespace queue {
     private current: HandlerRun | undefined;
     private batch: VerboseBatch | undefined;
     private settings_get: ((id: string) => unknown) | undefined;
+    private debug_on: (() => boolean) | undefined;
     private fault: Error | undefined;
 
     // Takes the thread, its owner table and the mode, and adds its own port.
@@ -499,10 +505,11 @@ namespace queue {
       return this.local.length + this.inbox.length + running + this.sleeping;
     }
 
-    // Installs the verbose sink and the settings that bound and trace it.
+    // Installs the verbose sink, its settings and the reader of debug mode.
     sink_attach(
       sink_set: (fn: (line: lines.VerboseLine) => void) => void,
       settings_get: (id: string) => unknown,
+      debug_on: () => boolean,
     ): void {
       if (this.batch !== undefined) {
         throw new Error(i18n("queue.sink_twice", this.thread));
@@ -510,12 +517,13 @@ namespace queue {
       if (this.owner_find(constants.verbose_type) === this.thread) {
         throw new Error(i18n("queue.sink_owner", this.thread));
       }
-      const batch = new VerboseBatch(this.thread, settings_get);
+      const batch = new VerboseBatch(this.thread, settings_get, debug_on);
       sink_set((line: lines.VerboseLine) => {
         batch.line_add(line);
       });
       this.batch = batch;
       this.settings_get = settings_get;
+      this.debug_on = debug_on;
     }
 
     // The owner of a type: the thread of its longest matching prefix.
@@ -926,13 +934,10 @@ namespace queue {
       }
     }
 
-    // Writes one line of the thread's timeline once the settings say debug.
+    // Writes one line of the thread's timeline once the sink is in, in debug.
     private log_write(text: string): void {
-      const settings_get = this.settings_get;
-      if (
-        settings_get !== undefined &&
-        settings_get(constants.debug_setting) === true
-      ) {
+      const debug_on = this.debug_on;
+      if (debug_on !== undefined && debug_on()) {
         verbose.log(text);
       }
     }

@@ -4,7 +4,7 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # The one runner of every test suite, by category. A smoke-test run runs the
-# suites labelled smoke-test, the important ones that fit in 2 minutes; a
+# suites labelled smoke-test, the important ones that fit in 3 minutes; a
 # normal-test run runs the suites of both labels. Each suite's label is
 # written beside it, and category.py holds the labels, the options and their
 # checks. It runs the Python test suites and the TypeScript blocks in the
@@ -18,7 +18,8 @@
 # follows a failing point. When the stream passes so it runs, in this
 # process and given the category, the checks of test_posix.py, the wire test
 # and the browser test, and ends at the first that fails, with its exit
-# code. Every suite and block has a timer, the gold record's module_seconds.
+# code. Every suite and block has a timer, the driver's gold
+# python.test_all.module_seconds.
 # Before the first block, in this process and outside every timer, the run
 # has third_party_fetch.py fetch each pinned third party file that is not in
 # place with its pinned digest, then has ttyd_build.py build ttyd where
@@ -61,8 +62,9 @@
 # builds the Node bundle, build/ts/node.js, with page_build.node_build, and a
 # build that fails fails the run. Each realm runs node build/ts/node.js
 # BLOCK, with --failfast when the run's first failing test ends the stream.
-# It is sent tap.start, with the id 101, the settings and the gold record,
-# built as the engine's start builds it, and answers with an Empty reply.
+# It is sent tap.start, with the id 101, the settings and the run's switches
+# with debug on, built as a debug root's engine builds it, and answers with
+# an Empty reply; its gold is the bundle's own.
 # The text of each tap.line it pushes then goes to the relay of the TAP
 # producer, which writes the block's indented lines to the stream and its
 # parent line, under the block's timer. The realm must exit 0, and is killed
@@ -98,38 +100,37 @@
 # connections.
 #
 # A block of group C runs as a block of B does, on the headless page that a
-# ttyd of its own serves as its index, so that the block's ports to tty 0
-# and tty 1 reach that ttyd and the server it runs. Before the block,
-# outside its timer and inside the deadline, the run makes the block's
-# root in build/ as the start script makes the server's: the modules of
+# ttyd of its own serves as its index, so that the block's ports to tty 0 and
+# tty 1 reach that ttyd and the server it runs. Before the block, outside its
+# timer and inside the deadline, the run makes the block's root in build/ as
+# the start script makes the server's: the modules of
 # powershell.runtime_modules and the seed in its python/, i18n/en-US.json,
-# settings.json with debug true, the gold record as test_settings.json,
-# and in its main_loop/ the main loop file of python/ that the gold's
-# typescript.BLOCK.root names under main_loop, if it names one. It starts
-# the ttyd that ttyd_build.py built, in a session of its own, with the
-# start script's options, --port 0, --interface the bind address,
-# --writable, --check-origin, --terminal-type, --url-arg and
+# settings.json, parameters.json of the run's switches with debug true, and
+# in its main_loop/ the main loop file of python/ that the gold's
+# typescript.BLOCK.root names under main_loop, if it names one; the page
+# carries the gold. It starts the ttyd that ttyd_build.py built, in a session of
+# its own, with the start script's options, --port 0, --interface the bind
+# address, --writable, --check-origin, --terminal-type, --url-arg and
 # --srv-buf-size, and --index build/headless.html, to run python3
-# ROOT/python/bootstrap.py --root ROOT, with --main-loop and the file's
-# name when the gold names one. ttyd writes its log to a file of its own,
-# from which the run reads its version and its port, and a ttyd that
-# ends first fails the run, its log in the cause. The block loads
-# http://ADDRESS:PORT/. After the block's about:blank, outside its timer
-# and inside the deadline, the run stops ttyd's process group by SIGTERM,
-# kills it when it still runs after the gold's
-# typescript.test_headless.stop_seconds, copies ttyd's log to the block's
-# log, removes the root, then fails the run if ttyd was killed or had
-# ended before its stop; the block's relay ends after. A root made for a
-# block that did not run stops before the browser, its log to stderr.
+# ROOT/python/bootstrap.py --root ROOT, with --main-loop and the file's name
+# when the gold names one. ttyd writes its log to a file of its own, from which
+# the run reads its version and its port, and a ttyd that ends first fails the
+# run, its log in the cause. The block loads http://ADDRESS:PORT/. After the
+# block's about:blank, outside its timer and inside the deadline, the run stops
+# ttyd's process group by SIGTERM, kills it when it still runs after the gold's
+# typescript.test_headless.stop_seconds, copies ttyd's log to the block's log,
+# removes the root, then fails the run if ttyd was killed or had ended before
+# its stop; the block's relay ends after. A root made for a block that did not
+# run stops before the browser, its log to stderr.
 #
 # After each module it writes "<module>: <label>, <s> s" to stderr, so that
 # stdout stays the TAP stream. After the checks of test_posix.py it prints
 # "test_posix.py: smoke-test, <s> s", and a passing run ends with "the
-# <category> run took <s> s". A smoke-test run has the gold record's
-# smoke_seconds in all from its start: each alarm ends at that deadline at
-# the latest, a deadline passed before a suite starts raises at once, and
-# passing it fails naming the suite it stopped. A normal-test run has no
-# limit of its own. Standard library only:
+# <category> run took <s> s". A smoke-test run has the driver's gold
+# python.test_all.smoke_seconds in all from its start: each alarm ends at that
+# deadline at the latest, a deadline passed before a suite starts raises at
+# once, and passing it fails naming the suite it stopped. A normal-test run has
+# no limit of its own. Standard library only:
 #
 #     python3 python/test_all.py [--smoke-test | --normal-test] [--failfast]
 #         [--stream] [--module NAME]... [--failures N] [--tty] [--coverage]
@@ -186,8 +187,8 @@ _ROOT_UID = 0
 # What a signal's number is added to for the exit code, as a shell does.
 _SIGNAL_BASE = 128
 
-# The gold record that `tap.start` carries to a realm as its test settings.
-_TESTS_PATH = os.path.join(_ROOT_PATH, "test_settings.json")
+# The driver's gold of the seconds each suite and block may take.
+_MODULE_ID = "python.test_all.module_seconds"
 
 # The suites and their labels, in the three Python phases of the order above.
 _MODULES: list[tuple[str, str]] = [
@@ -196,13 +197,14 @@ _MODULES: list[tuple[str, str]] = [
     ("test_internationalization", "smoke-test"),
     ("test_reformat", "smoke-test"),
     ("test_test", "smoke-test"),
+    ("test_jslb", "smoke-test"),
     ("test_switches", "smoke-test"),
     ("test_third_party_fetch", "smoke-test"),
     ("test_devtools", "smoke-test"),
-    ("test_jslb", "smoke-test"),
     ("test_local_http", "smoke-test"),
     ("test_stall_loop", "smoke-test"),
     ("test_substrate", "smoke-test"),
+    ("test_substrate_limit", "smoke-test"),
     ("test_test_posix", "smoke-test"),
     ("test_verbose", "smoke-test"),
     ("test_devtools_chrome", "smoke-test"),
@@ -297,6 +299,7 @@ _B_UNIT: list[tuple[str, str]] = [
     ("test_error_overlay_worker.ts", "smoke-test"),
     ("test_overlay.ts", "smoke-test"),
     ("test_substrate_store.ts", "smoke-test"),
+    ("test_substrate_limit.ts", "smoke-test"),
     ("test_jslb_decode.ts", "smoke-test"),
     ("test_console_view.ts", "smoke-test"),
     ("test_media_cache.ts", "smoke-test"),
@@ -607,20 +610,17 @@ def sink_refuse(header: jslb.Object) -> NoReturn:
     raise RuntimeError(f"a realm sent a blob of {size} bytes")
 
 
-# Builds `tap.start` as the engine's start builds it, and returns its settings.
+# Builds `tap.start` as a debug root's engine builds it, returns its settings.
 def start_encode() -> tuple[bytes, dict[str, Any]]:
     import jslb, settings, switches
 
     loaded = settings.settings_load(_SETTINGS_PATH)
-    with open(_TESTS_PATH, encoding="utf-8") as file:
-        tests: object = jslb.json_decode(file.read())
-    header = jslb.header_make(_FIRST_TYPE, id=_FIRST_ID, full=loaded["debug"])
+    header = jslb.header_make(_FIRST_TYPE, id=_FIRST_ID, full=True)
     line = jslb.line_make(
         header,
         [],
         settings=loaded,
-        switches=switches.switches_get(),
-        test_settings=tests,
+        switches={**switches.switches_get(), "debug": True},
     )
     # The JSON text bytes, the one piece the encoder yields with no blob.
     (piece,) = jslb.line_encode(line)
@@ -909,6 +909,8 @@ class RootServer:
     def root_make(
         self, gold: dict[str, Any], loaded: dict[str, Any]
     ) -> list[str]:
+        import switches
+
         powershell: dict[str, Any] = loaded["powershell"]
         python_path = os.path.join(self.root, _ROOT_PYTHON)
         os.makedirs(python_path)
@@ -932,11 +934,9 @@ class RootServer:
         with open(
             os.path.join(self.root, settings_path), "w", encoding="utf-8"
         ) as file:
-            values = {**loaded, "debug": True}
-            file.write(json.dumps(values, ensure_ascii=False, indent=2) + "\n")
-        shutil.copyfile(
-            _TESTS_PATH, os.path.join(self.root, os.path.basename(_TESTS_PATH))
-        )
+            file.write(json.dumps(loaded, ensure_ascii=False, indent=2) + "\n")
+        parameters = {**switches.switches_get(), "debug": True}
+        switches.parameters_write(self.root, parameters)
         bootstrap = os.path.join(python_path, powershell["bootstrap_script"])
         command = [_PYTHON_PROGRAM, bootstrap, "--root", self.root]
         if _LOOP_KEY in gold:
@@ -1206,7 +1206,7 @@ def stream_run(
 ) -> None:
     import category, harness, tap_producer
 
-    module_seconds = float(harness.gold_get("module_seconds"))
+    module_seconds = float(harness.gold_get(_MODULE_ID))
     runner = tap_producer.TAPTestRunner(failfast or limit is not None)
     runner.set_stream(stream.line_write)
     loader = unittest.TestLoader()

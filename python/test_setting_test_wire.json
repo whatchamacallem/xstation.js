@@ -1,0 +1,120 @@
+{
+  "poll_seconds": 0.05,
+  "read_bytes": 1048576,
+  "root_verbose": false,
+  "rung_seconds": 120,
+  "rungs": {
+    "commits": [
+      {
+        "payload": {
+          "db": "wire_commits"
+        },
+        "type": "db.create"
+      },
+      {
+        "key": "/wire_commits/kept",
+        "text": "kept value",
+        "type": "kv.put"
+      },
+      {
+        "key": "/wire_commits/gone",
+        "text": "gone value",
+        "type": "kv.put"
+      },
+      {
+        "key": "/wire_commits/gone",
+        "type": "kv.delete"
+      },
+      {
+        "payload": {
+          "body": {
+            "0": {
+              "t": "note"
+            },
+            "text": "a note"
+          },
+          "db": "wire_commits",
+          "id": "note"
+        },
+        "type": "doc.put"
+      },
+      {
+        "payload": {
+          "content": {
+            "content": "a turn",
+            "role": "user"
+          },
+          "role": "user",
+          "scene": "/wire_commits/note/1"
+        },
+        "type": "turn.append"
+      },
+      {
+        "payload": {
+          "db": "wire_commits",
+          "statements": [
+            {
+              "params": [],
+              "sql": "CREATE TABLE t (x INTEGER) STRICT"
+            },
+            {
+              "params": [7],
+              "sql": "INSERT INTO t VALUES (?)"
+            }
+          ]
+        },
+        "type": "sql.run"
+      },
+      {
+        "payload": {
+          "db": "wire_dropped"
+        },
+        "type": "db.create"
+      },
+      {
+        "payload": {
+          "db": "wire_dropped"
+        },
+        "type": "db.drop"
+      }
+    ],
+    "console_last": "exit\r\n",
+    "console_prompt": "$ ",
+    "console_size": {
+      "columns": 80,
+      "rows": 24
+    },
+    "console_typed": "exit\n",
+    "control_bytes": 1048576,
+    "echo_payload": {
+      "count": -3,
+      "nested": {
+        "list": [1, "two", null, true]
+      },
+      "text": "na\u00efve \u65e5\u672c \ud83d\ude00"
+    },
+    "held_rungs": ["restart"],
+    "lines_command": "( i=1; while [ \"$i\" -le 100000 ]; do echo \"$i\"; i=$((i + 1)); done )",
+    "lines_count": 100000,
+    "mcp_call": {
+      "arguments": {
+        "name": "wire_tool.py",
+        "text": "pass\n"
+      },
+      "name": "source_put"
+    },
+    "release_channel": "test_wire_rungs",
+    "restart_after": "# posted after system.restart, which the port holds",
+    "restart_name": "echo_loop.py",
+    "unknown_type": "wire.unknown",
+    "verbose_count": 10
+  },
+  "stop_seconds": 5,
+  "texts": {
+    "bootstrap_reply_unexpected": "The reply to tap.start 101 is not an empty tap.start reply: {0}",
+    "dispatch_handler_unknown": "No handler is registered for type wire.unknown version 0.",
+    "wire_start_twice": "The server sent tap.start a second time, as a restart does; only a reload of the page takes a new first line."
+  },
+  "window_height": 720,
+  "window_width": 1280
+}

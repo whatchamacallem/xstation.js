@@ -15,6 +15,17 @@
 # The schema's triggers raise the name of a string of the strings table, as
 # `agent.content_ambiguous`: a statement that fails with such a message
 # raises that string, the `sqlite3` error as its `__cause__`.
+#
+# Every connection the store opens holds its database to `blob_max` bytes:
+# `PRAGMA max_page_count` is `blob_max` over the database's `page_size`, set
+# before any statement of the store's own. A write that needs a page past it
+# fails with SQLite's `SQLITE_FULL`, "database or disk is full", an
+# `sqlite3.OperationalError` that the store raises and never catches. The
+# connection then sets SQLite's authorizer, which denies a `PRAGMA
+# max_page_count` that has a value, so that SQLite refuses the statement when
+# it is prepared with `SQLITE_AUTH`, "not authorized", a
+# `sqlite3.DatabaseError` that the store raises and never catches. A read of
+# the pragma, with no value, is allowed, as every other statement.
 
 import sqlite3
 from collections.abc import Callable
@@ -75,7 +86,9 @@ def doc_decode(encoded: dict[int | str, Any]) -> dict[int | str, Any]: ...
 
 # One owner's databases under one root. Methods run inside `transaction_run`.
 class Store:
-    def __init__(self, root: str, overflow_bytes: int) -> None: ...
+    def __init__(
+        self, root: str, overflow_bytes: int, blob_max: int
+    ) -> None: ...
     # Opens `<root>/<name>.sqlite`, applying the schema.
     def db_open(self, name: str) -> None: ...
     def db_close(self, name: str) -> None: ...

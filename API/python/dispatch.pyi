@@ -8,8 +8,8 @@
 # `cause` its `__cause__`, or else its `__context__` unless
 # `__suppress_context__` is set, and so on, the first failure innermost.
 # The line takes the name form of the line it answers. With no line to
-# answer, `full` picks it: the caller's setting `debug`, or True before the
-# settings exist, so that in debug mode every line uses the full names.
+# answer, `full` picks it: the caller's parameter `debug`, or True before
+# the settings exist, so that in debug mode every line uses the full names.
 
 from collections.abc import Callable
 from typing import Any, NamedTuple, TypeAlias

@@ -20,7 +20,7 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_integrate_test_posix"
 
 # The advisory a `smoke-test` run prints before it checks.

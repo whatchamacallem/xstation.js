@@ -637,13 +637,13 @@ namespace page {
     worker.postMessage({ port, base_url: location.href }, [port]);
   }
 
-  // Sets the settings and switches, then the queue, its sink, AI port, sender.
+  // Sets the switches and settings, then the queue, its sink, AI port, sender.
   function thread_open(
     port: MessagePort,
     set: lines.SettingsSet,
   ): queue.TaskQueue {
-    settings.settings_set(set.settings);
     switches.switches_set(set.switches);
+    settings.settings_set(set.settings);
     const synchronous = settings.settings_get(
       constants.synchronous_setting,
     ) as boolean;
@@ -652,7 +652,11 @@ namespace page {
       owners_make(),
       synchronous,
     );
-    tasks.sink_attach(verbose.sink_set, settings.settings_get);
+    tasks.sink_attach(
+      verbose.sink_set,
+      settings.settings_get,
+      switches.debug_on,
+    );
     tasks.port_add(constants.ai_owner, new queue.ThreadPort(port));
     settings.sender_register((put: lines.SettingsPut) => {
       const line = line_build(constants.put_type, { settings: put.settings });
@@ -672,8 +676,8 @@ namespace page {
     channel.port1.onmessage = (event: MessageEvent<unknown>) => {
       const set = settings_take(event.data);
       const tasks = thread_open(channel.port1, set);
-      if (set.test_settings !== undefined) {
-        harness.values_set(set.settings, set.test_settings);
+      if (switches.debug_on()) {
+        harness.values_set(set.settings);
       }
       dispatch.handler_register(
         constants.tests_type,

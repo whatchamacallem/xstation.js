@@ -3,16 +3,17 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the runner of the stdio transport, `stdio_serve`, which reads the
-# root's settings and serves the tools of `engine_system` on a real
-# `mcp.Server`, in forked children whose stdin is a pipe and stdout a file, on
-# roots in build/ that hold the checkout's settings with `debug` set: a
+# root's settings and parameters and serves the tools of `engine_system` on a
+# real `mcp.Server`, in forked children whose stdin is a pipe and stdout a
+# file, on roots in build/ that hold the checkout's settings and the run's
+# parameters with `debug` set: a
 # session answered against the tools of API/mcp/tools.json, `source_put`
 # writing a main loop file into the root in debug mode, and refused with
 # debug false, its exception raised once its answer is out. Each child
 # writes how it ended to a file, then kills itself. The texts are the gold's.
 
-import harness, hashlib, json, mcp_stdio, os, signal, sys, tempfile, traceback
-import unittest
+import harness, hashlib, json, mcp_stdio, os, signal, switches, sys, tempfile
+import traceback, unittest
 from collections.abc import Callable
 from typing import Any
 
@@ -25,7 +26,7 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 # The API file that holds the tools as `tools/list` returns them.
 _TOOLS_PATH = os.path.join(_ROOT_PATH, "API", "mcp", "tools.json")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_integrate_mcp_stdio"
 
 # The file in its scratch directory a child writes how it ended to.
@@ -125,13 +126,14 @@ class ScratchCase(unittest.TestCase):
         self.root = os.path.join(scratch.name, "root")
         os.mkdir(self.root)
 
-    # Writes the checkout's settings, with `debug` as given, as the root's.
+    # Writes the checkout's settings, and parameters with `debug` as given.
     def settings_write(self, debug: bool) -> None:
         values = harness.settings_copy()
-        values["debug"] = debug
         path = os.path.join(self.root, "settings.json")
         with open(path, "w", encoding="utf-8") as file:
             json.dump(values, file)
+        parameters = {**switches.switches_get(), "debug": debug}
+        switches.parameters_write(self.root, parameters)
 
     # Serves the text on the root in a child, returns its ending and replies.
     def stdio_run(self, text: str) -> tuple[str, list[dict[str, Any]]]:

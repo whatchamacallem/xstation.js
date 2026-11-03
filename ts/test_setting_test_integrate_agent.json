@@ -1,0 +1,162 @@
+{
+  "analyst": "You are a very bored British psychoanalyst. You hold the hyperposition, a dark place of fog and a few inexplicable lights. Find the right universe for the player and act on requests without judgement. Your scripts are the database administrator of every universe you create: typed tables, indexes, views, no JSON columns unless a document is what fits.",
+  "bootstrap_script": "// Makes a universe: its databases, its row and its world the current one.\nconst store = engine.store;\nstore.db_create(args.universe);\nstore.db_create(args.world);\nstore.db_create(args.region);\nstore.sql_run(\"metaverse\", [\n  {sql: \"INSERT INTO universe VALUES (?, ?, ?, ?)\",\n    params: [args.universe, args.title, \"player\", args.world]},\n]);\nstore.kv_put(\"/metaverse/world\", new TextEncoder().encode(args.world));\nreturn {universe: args.universe, world: args.world, region: args.region};\n",
+  "cases": [
+    {
+      "expect": ["castle_answer"],
+      "name": "castle_built",
+      "seconds": 10,
+      "send": ["castle_ask"]
+    },
+    {
+      "expect": ["next_answer"],
+      "name": "next_answered",
+      "seconds": 10,
+      "send": ["next_ask"]
+    }
+  ],
+  "lines": {
+    "castle_answer": {
+      "0": {
+        "r": 1,
+        "t": "test_integrate_agent_ui.ask"
+      },
+      "answer": {
+        "0": {
+          "r": 1,
+          "t": "ai.say"
+        },
+        "scene": "/castle_gatehouse/scene/arrival/1",
+        "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.",
+        "turn": 10
+      }
+    },
+    "castle_ask": {
+      "0": {
+        "i": 1,
+        "t": "test_integrate_agent_ui.ask"
+      },
+      "request": {
+        "0": {
+          "t": "ai.say"
+        },
+        "text": "1"
+      }
+    },
+    "next_answer": {
+      "0": {
+        "r": 2,
+        "t": "test_integrate_agent_ui.ask"
+      },
+      "answer": {
+        "0": {
+          "r": 2,
+          "t": "ai.say"
+        },
+        "scene": "/castle_gatehouse/scene/arrival/1",
+        "subtitle": "Still the moat.",
+        "turn": 2
+      }
+    },
+    "next_ask": {
+      "0": {
+        "i": 2,
+        "t": "test_integrate_agent_ui.ask"
+      },
+      "request": {
+        "0": {
+          "t": "ai.say"
+        },
+        "text": "0"
+      }
+    }
+  },
+  "script": {
+    "nodes": {
+      "castle": {
+        "after_tools": {
+          "content": null,
+          "next": "imaged",
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": "{\"prompt\":\"A rain dark castle gatehouse at dusk seen from the far side of a moat, one lantern lit, painted, wide still frame, no people\",\"key\":\"gatehouse/arrival.png\"}",
+                "name": "browser.image_make"
+              },
+              "id": "call_2",
+              "type": "function"
+            }
+          ]
+        },
+        "replies": {}
+      },
+      "entered": {
+        "after_tools": {
+          "content": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.",
+          "next": "gatehouse"
+        },
+        "replies": {}
+      },
+      "gatehouse": {
+        "replies": {
+          "0": {
+            "content": "Still the moat.",
+            "next": "gatehouse"
+          }
+        }
+      },
+      "hyperposition": {
+        "replies": {
+          "1": {
+            "content": null,
+            "next": "castle",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"name\":\"bootstrap\",\"args\":{\"universe\":\"castle\",\"title\":\"The castle\",\"world\":\"castle_world\",\"region\":\"castle_gatehouse\"}}",
+                  "name": "browser.script_run"
+                },
+                "id": "call_1",
+                "type": "function"
+              }
+            ]
+          }
+        }
+      },
+      "imaged": {
+        "after_tools": {
+          "content": null,
+          "next": "entered",
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": "{\"db\":\"castle_gatehouse\",\"id\":\"scene/arrival\",\"body\":{\"0\":{\"t\":\"scene\"},\"1\":\"/_files/gatehouse/arrival.png\",\"subtitle\":\"Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.\",\"image\":{\"$ref\":1}}}",
+                "name": "browser.doc_put"
+              },
+              "id": "call_3",
+              "type": "function"
+            },
+            {
+              "function": {
+                "arguments": "{\"ref\":\"/castle_world/scene\",\"text\":\"/castle_gatehouse/scene/arrival/1\"}",
+                "name": "browser.kv_put"
+              },
+              "id": "call_4",
+              "type": "function"
+            },
+            {
+              "function": {
+                "arguments": "{\"image\":\"/_files/gatehouse/arrival.png\",\"subtitle\":\"Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.\"}",
+                "name": "browser.render"
+              },
+              "id": "call_5",
+              "type": "function"
+            }
+          ]
+        },
+        "replies": {}
+      }
+    },
+    "start": "hyperposition"
+  }
+}

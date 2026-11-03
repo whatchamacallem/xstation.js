@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the shared routines in `utility.ts`. Every one is synchronous.
-// The digest vectors of build/vectors, inputs at the edges of the padding of
+// Tests of the shared routines in `utility.ts`. Every one is synchronous. The
+// digest vectors of build/vectors, inputs at the edges of the padding of
 // `SHA-256`, which the test page carries in test_vectors as sha256.json, are
 // checked by `sha256_hex` and by `HashStream` fed whole and in pieces. The
-// texts of the refusals are compared to the gold record, test_settings.json.
+// texts of the refusals are compared to the gold record,
+// `ts/test_setting_test_utility.json`.
 namespace test_utility {
   // The vector files by name, as base64 text, a global the test page sets.
   declare const test_vectors: { readonly [name: string]: string };

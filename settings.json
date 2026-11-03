@@ -1,7 +1,5 @@
 {
-  "debug": true,
   "queue_synchronous": false,
-  "verbose_level": 1,
   "verbose_ring": 1000,
   "line_max": 1048576,
   "blob_max": 10485760,
@@ -34,11 +32,12 @@
     "key_file": "_cached_key.pem",
     "certificate_days": 825,
     "runner_file": "serve.ps1",
+    "parameters_file": "parameters.json",
     "ttyd_log_file": "ttyd.log",
     "poll_tries": 30,
     "poll_milliseconds": 500,
     "output_width": 200,
-    "root_files": ["settings.json", "test_settings.json", "provider.json"],
+    "root_files": ["settings.json", "provider.json"],
     "runtime_modules": [
       "internationalization",
       "jslb",

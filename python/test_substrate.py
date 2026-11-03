@@ -20,11 +20,14 @@ _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
 )
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_substrate"
 
 # The `overflow_bytes` of the settings.
 _OVERFLOW_BYTES: int = harness.setting_get("overflow_bytes")
+
+# The largest database file the store lets grow, the checkout's setting.
+_BLOB_MAX: int = harness.setting_get("blob_max")
 
 # The hyperposition scene, whose conversation the turn tests append to.
 _SCENE = "/metaverse/hyperposition/1"
@@ -115,7 +118,7 @@ def _root_make(case: unittest.TestCase) -> str:
 
 # Makes a store on a root whose databases close when the test ends.
 def _store_make(case: unittest.TestCase, root: str) -> substrate.Store:
-    store = substrate.Store(root, _OVERFLOW_BYTES)
+    store = substrate.Store(root, _OVERFLOW_BYTES, _BLOB_MAX)
     case.addCleanup(_store_close, store)
     return store
 
@@ -240,7 +243,7 @@ def _database_dump(path: str) -> list[str]:
 # Child: puts over `overflow_bytes`, file whole, size limit kills on the row.
 def _child_put(root: str) -> NoReturn:
     try:
-        store = substrate.Store(root, _OVERFLOW_BYTES)
+        store = substrate.Store(root, _OVERFLOW_BYTES, _BLOB_MAX)
         store.db_open("alpha")
         # Its row ends the write ahead log past the size of that cache file.
         store.kv_put("/alpha/fill", _VALUE_EXACT)
@@ -257,7 +260,7 @@ def _child_put(root: str) -> NoReturn:
 
 # A create one descriptor short, returning the error and databases left open.
 def _create_limited(root: str, write_fd: int) -> str:
-    store = substrate.Store(root, _OVERFLOW_BYTES)
+    store = substrate.Store(root, _OVERFLOW_BYTES, _BLOB_MAX)
     free = os.dup(write_fd)
     os.close(free)
     files = resource.getrlimit(resource.RLIMIT_NOFILE)[1]

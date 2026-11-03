@@ -6,8 +6,8 @@
 # engine, in process: each run of `bootstrap_run` is a forked child whose
 # controlling tty, stdin, stdout and stderr are a new pty of `pty.openpty`,
 # as ttyd runs it, on a debug root in build/ whose settings are the
-# checkout's and whose test settings are the checkout's gold, and the test
-# plays the page on the other side of the pty. Bootstrap's trace of
+# checkout's and whose parameters are the run's with debug true, and the
+# test plays the page on the other side of the pty. Bootstrap's trace of
 # `tap.start` and the main loop's trace of a line share the one ring that
 # `verbose.tail` reads; a failure of the main loop is logged once and
 # writes its one error line, with nothing from bootstrap after it; and the
@@ -16,7 +16,7 @@
 # ended to a file, then kills itself. The lines and texts are the gold's.
 
 import bootstrap, contextlib, errno, harness, json, os, pty, signal, sqlite3
-import sys, tempfile, traceback, unittest
+import switches, sys, tempfile, traceback, unittest
 from typing import Any, NamedTuple
 
 # The checkout's top directory, above this file's `python/`.
@@ -25,7 +25,7 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_integrate_bootstrap"
 
 # The most bytes a read of the pty takes at once.
@@ -100,7 +100,7 @@ def _log_read(root: str) -> list[tuple[str, str]]:
     return rows
 
 
-# Makes a debug scratch root: the checkout's settings and its gold.
+# Makes a debug scratch root: the checkout's settings, the run's parameters.
 def _root_make(case: unittest.TestCase) -> ScratchRoot:
     os.makedirs(_BUILD_PATH, exist_ok=True)
     scratch = tempfile.TemporaryDirectory(dir=_BUILD_PATH)
@@ -108,11 +108,9 @@ def _root_make(case: unittest.TestCase) -> ScratchRoot:
     root = os.path.join(scratch.name, "root")
     os.mkdir(root)
     loaded = harness.settings_copy()
-    loaded["debug"] = True
     with open(os.path.join(root, "settings.json"), "w") as file:
         json.dump(loaded, file)
-    with open(os.path.join(root, "test_settings.json"), "w") as file:
-        json.dump(harness.gold_copy(), file)
+    switches.parameters_write(root, {**switches.switches_get(), "debug": True})
     return ScratchRoot(scratch.name, root)
 
 

@@ -1,0 +1,90 @@
+{
+  "lines": {
+    "create": {
+      "0": {
+        "t": "db.create"
+      },
+      "db": "castle"
+    },
+    "create_full": {
+      "0": {
+        "type": "db.create"
+      },
+      "db": "castle"
+    },
+    "create_request": {
+      "0": {
+        "i": 7,
+        "t": "db.create"
+      },
+      "db": "castle"
+    },
+    "drop": {
+      "0": {
+        "t": "db.drop"
+      },
+      "db": "castle"
+    },
+    "drop_full": {
+      "0": {
+        "type": "db.drop"
+      },
+      "db": "castle"
+    },
+    "drop_request": {
+      "0": {
+        "i": 7,
+        "t": "db.drop"
+      },
+      "db": "castle"
+    },
+    "file": {
+      "0": {
+        "b": 1,
+        "t": "db.file"
+      },
+      "1": {},
+      "db": "castle"
+    },
+    "file_full": {
+      "0": {
+        "blobs": 1,
+        "type": "db.file"
+      },
+      "1": {},
+      "db": "castle"
+    },
+    "restore": {
+      "0": {
+        "b": 1,
+        "t": "db.restore"
+      },
+      "1": {},
+      "db": "castle",
+      "files": 2
+    },
+    "restore_empty": {
+      "0": {
+        "b": 1,
+        "t": "db.restore"
+      },
+      "1": {},
+      "db": "castle",
+      "files": 0
+    },
+    "restore_full": {
+      "0": {
+        "blobs": 1,
+        "type": "db.restore"
+      },
+      "1": {},
+      "db": "castle",
+      "files": 2
+    }
+  },
+  "texts": {
+    "dispatch_handler_twice_create": "A handler is already registered for type db.create version 0.",
+    "dispatch_handler_twice_drop": "A handler is already registered for type db.drop version 0.",
+    "engine_db_not_registered": "The db handlers were called before they were registered."
+  }
+}

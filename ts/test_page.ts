@@ -29,9 +29,7 @@ namespace test_page {
     band_height: 50,
     // The members of `settings.json`, each read by the harness.
     settings_names: Object.freeze([
-      "debug",
       "queue_synchronous",
-      "verbose_level",
       "verbose_ring",
       "line_max",
       "blob_max",
@@ -166,18 +164,6 @@ namespace test_page {
       const other = gold_line("ui_tests");
       const error = thrown_get(() => page.settings_take(other));
       this.assertEqual(error.message, gold_text("page_settings_missing"));
-    }
-
-    // The gold record that comes with the settings is taken with them.
-    test_test_settings(): void {
-      const value = settings_copy();
-      const set = gold_line("settings_set_gold");
-      const gold = structuredClone(set.test_settings);
-      set.settings = value;
-      this.assertEqual(page.settings_take(set), {
-        settings: value,
-        test_settings: gold,
-      });
     }
 
     // A message of the worker must be a fault line.

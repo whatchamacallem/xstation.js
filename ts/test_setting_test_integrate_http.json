@@ -1,0 +1,371 @@
+{
+  "cases": [
+    {
+      "expect": ["json_reply"],
+      "name": "json_answered",
+      "seconds": 10,
+      "send": ["json_request"]
+    },
+    {
+      "expect": ["charset_reply"],
+      "name": "json_parameters",
+      "seconds": 10,
+      "send": ["charset_request"]
+    },
+    {
+      "expect": ["text_reply"],
+      "name": "text_answered",
+      "seconds": 10,
+      "send": ["text_request"]
+    },
+    {
+      "expect": ["empty_reply"],
+      "name": "empty_answered",
+      "seconds": 10,
+      "send": ["empty_request"]
+    },
+    {
+      "expect": ["missing_error"],
+      "name": "status_failed",
+      "seconds": 10,
+      "send": ["missing_request"]
+    },
+    {
+      "expect": ["malformed_error"],
+      "name": "json_malformed",
+      "seconds": 10,
+      "send": ["malformed_request"]
+    },
+    {
+      "expect": ["overflow_error"],
+      "name": "json_overflow",
+      "seconds": 10,
+      "send": ["overflow_request"]
+    },
+    {
+      "expect": ["full_reply"],
+      "name": "full_names",
+      "seconds": 10,
+      "send": ["full_request"]
+    },
+    {
+      "expect": ["full_missing_error"],
+      "name": "full_error",
+      "seconds": 10,
+      "send": ["full_missing_request"]
+    },
+    {
+      "expect": ["closed_error"],
+      "name": "fetch_refused",
+      "seconds": 10,
+      "send": ["closed_request"]
+    },
+    {
+      "expect": ["slow_error"],
+      "name": "timeout_expired",
+      "seconds": 10,
+      "send": ["slow_request"]
+    }
+  ],
+  "lines": {
+    "charset_reply": {
+      "0": {
+        "r": 2,
+        "t": "http.request"
+      },
+      "headers": {
+        "content-length": "3",
+        "content-type": "application/json; charset=utf-8"
+      },
+      "json": [1],
+      "status": 200
+    },
+    "charset_request": {
+      "0": {
+        "i": 2,
+        "t": "http.request"
+      },
+      "headers": {},
+      "method": "GET",
+      "url": "http://127.0.0.1:28741/json_charset"
+    },
+    "closed_error": {
+      "0": {
+        "r": 10,
+        "t": "error"
+      },
+      "message": "The request to http://127.0.0.1:28742/closed failed: TypeError: fetch failed",
+      "stack": "Error: The request to http://127.0.0.1:28742/closed failed: TypeError: fetch failed"
+    },
+    "closed_request": {
+      "0": {
+        "i": 10,
+        "t": "http.request"
+      },
+      "headers": {},
+      "method": "GET",
+      "url": "http://127.0.0.1:28742/closed"
+    },
+    "empty_reply": {
+      "0": {
+        "r": 4,
+        "t": "http.request"
+      },
+      "headers": {},
+      "status": 204,
+      "text": ""
+    },
+    "empty_request": {
+      "0": {
+        "i": 4,
+        "t": "http.request"
+      },
+      "headers": {},
+      "method": "GET",
+      "url": "http://127.0.0.1:28741/empty"
+    },
+    "full_missing_error": {
+      "0": {
+        "reply": 9,
+        "type": "error"
+      },
+      "message": "The request to http://127.0.0.1:28741/missing answered with status 404: no such model",
+      "stack": "Error: The request to http://127.0.0.1:28741/missing answered with status 404: no such model"
+    },
+    "full_missing_request": {
+      "0": {
+        "id": 9,
+        "type": "http.request"
+      },
+      "headers": {},
+      "method": "GET",
+      "url": "http://127.0.0.1:28741/missing"
+    },
+    "full_reply": {
+      "0": {
+        "reply": 8,
+        "type": "http.request"
+      },
+      "headers": {
+        "content-length": "21",
+        "content-type": "application/json"
+      },
+      "json": {
+        "id": "c1",
+        "n": [1, 2]
+      },
+      "status": 200
+    },
+    "full_request": {
+      "0": {
+        "id": 8,
+        "type": "http.request"
+      },
+      "headers": {
+        "authorization": "Bearer test-key",
+        "content-type": "application/json"
+      },
+      "json": {
+        "model": "grok-4"
+      },
+      "method": "POST",
+      "url": "http://127.0.0.1:28741/json"
+    },
+    "json_reply": {
+      "0": {
+        "r": 1,
+        "t": "http.request"
+      },
+      "headers": {
+        "content-length": "21",
+        "content-type": "application/json"
+      },
+      "json": {
+        "id": "c1",
+        "n": [1, 2]
+      },
+      "status": 200
+    },
+    "json_request": {
+      "0": {
+        "i": 1,
+        "t": "http.request"
+      },
+      "headers": {
+        "authorization": "Bearer test-key",
+        "content-type": "application/json"
+      },
+      "json": {
+        "model": "grok-4"
+      },
+      "method": "POST",
+      "url": "http://127.0.0.1:28741/json"
+    },
+    "malformed_error": {
+      "0": {
+        "r": 6,
+        "t": "error"
+      },
+      "message": "The response from http://127.0.0.1:28741/malformed has a JSON content type but its body is not JSON: WireError: The text is not JSON: SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2).",
+      "stack": "Error: The response from http://127.0.0.1:28741/malformed has a JSON content type but its body is not JSON: WireError: The text is not JSON: SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)."
+    },
+    "malformed_request": {
+      "0": {
+        "i": 6,
+        "t": "http.request"
+      },
+      "headers": {},
+      "method": "GET",
+      "url": "http://127.0.0.1:28741/malformed"
+    },
+    "missing_error": {
+      "0": {
+        "r": 5,
+        "t": "error"
+      },
+      "message": "The request to http://127.0.0.1:28741/missing answered with status 404: no such model",
+      "stack": "Error: The request to http://127.0.0.1:28741/missing answered with status 404: no such model"
+    },
+    "missing_request": {
+      "0": {
+        "i": 5,
+        "t": "http.request"
+      },
+      "headers": {},
+      "method": "GET",
+      "url": "http://127.0.0.1:28741/missing"
+    },
+    "overflow_error": {
+      "0": {
+        "r": 7,
+        "t": "error"
+      },
+      "message": "The response from http://127.0.0.1:28741/overflow has a JSON content type but its body is not JSON: WireError: The number 1e400 overflows a double.",
+      "stack": "Error: The response from http://127.0.0.1:28741/overflow has a JSON content type but its body is not JSON: WireError: The number 1e400 overflows a double."
+    },
+    "overflow_request": {
+      "0": {
+        "i": 7,
+        "t": "http.request"
+      },
+      "headers": {},
+      "method": "GET",
+      "url": "http://127.0.0.1:28741/overflow"
+    },
+    "slow_error": {
+      "0": {
+        "r": 11,
+        "t": "error"
+      },
+      "message": "The request to http://127.0.0.1:28741/slow did not finish within 2 seconds.",
+      "stack": "Error: The request to http://127.0.0.1:28741/slow did not finish within 2 seconds."
+    },
+    "slow_request": {
+      "0": {
+        "i": 11,
+        "t": "http.request"
+      },
+      "headers": {},
+      "method": "GET",
+      "url": "http://127.0.0.1:28741/slow"
+    },
+    "text_reply": {
+      "0": {
+        "r": 3,
+        "t": "http.request"
+      },
+      "headers": {
+        "content-length": "14",
+        "content-type": "text/plain; charset=utf-8"
+      },
+      "status": 200,
+      "text": "Mind the moat."
+    },
+    "text_request": {
+      "0": {
+        "i": 3,
+        "t": "http.request"
+      },
+      "headers": {},
+      "method": "GET",
+      "url": "http://127.0.0.1:28741/text"
+    }
+  },
+  "server": {
+    "closed_port": 28742,
+    "host": "127.0.0.1",
+    "paths": {
+      "/empty": {
+        "body": "",
+        "delay": 0,
+        "headers": {},
+        "status": 204
+      },
+      "/json": {
+        "body": "{\"id\":\"c1\",\"n\":[1,2]}",
+        "delay": 0,
+        "headers": {
+          "content-length": "21",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "/json_charset": {
+        "body": "[1]",
+        "delay": 0,
+        "headers": {
+          "content-length": "3",
+          "content-type": "application/json; charset=utf-8"
+        },
+        "status": 200
+      },
+      "/malformed": {
+        "body": "{",
+        "delay": 0,
+        "headers": {
+          "content-length": "1",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "/missing": {
+        "body": "no such model",
+        "delay": 0,
+        "headers": {
+          "content-length": "13",
+          "content-type": "text/plain"
+        },
+        "status": 404
+      },
+      "/overflow": {
+        "body": "{\"a\":1e400}",
+        "delay": 0,
+        "headers": {
+          "content-length": "11",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "/slow": {
+        "body": "late",
+        "delay": 4,
+        "headers": {
+          "content-length": "4",
+          "content-type": "text/plain"
+        },
+        "status": 200
+      },
+      "/text": {
+        "body": "Mind the moat.",
+        "delay": 0,
+        "headers": {
+          "content-length": "14",
+          "content-type": "text/plain; charset=utf-8"
+        },
+        "status": 200
+      }
+    },
+    "port": 28741
+  },
+  "timeout_seconds": 2
+}

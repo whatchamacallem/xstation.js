@@ -37,6 +37,7 @@ namespace test_substrate_crash {
   const constants = Object.freeze({
     root_id: "typescript.test_substrate_crash.root",
     overflow_setting: "overflow_bytes",
+    blob_setting: "blob_max",
     compact_setting: "turn_compact_turns",
     paused_type: "test_substrate_crash.paused",
     checked_type: "test_substrate_crash.checked",
@@ -63,6 +64,7 @@ namespace test_substrate_crash {
       new substrate.CacheFiles([...test_slots]),
       harness.gold_get(constants.root_id) as string,
       harness.setting_get(constants.overflow_setting) as number,
+      harness.setting_get(constants.blob_setting) as number,
       harness.setting_get(constants.compact_setting) as number,
       tasks,
     );

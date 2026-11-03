@@ -1,0 +1,97 @@
+{
+  "lines": {
+    "error_reply": {
+      "0": {
+        "r": 1,
+        "t": "error"
+      },
+      "message": "kv_get: /metaverse/nothing: no such key",
+      "stack": "Traceback (most recent call last):"
+    },
+    "first": {
+      "0": {
+        "i": 101,
+        "t": "tap.start"
+      },
+      "settings": {
+        "root": "/home/t/.cache/xsjs"
+      }
+    },
+    "first_blob": {
+      "0": {
+        "b": 1,
+        "i": 101,
+        "t": "tap.start"
+      }
+    },
+    "first_reply": {
+      "0": {
+        "r": 101,
+        "t": "tap.start"
+      }
+    },
+    "notice_a": {
+      "0": {
+        "t": "a"
+      }
+    },
+    "notice_mcp": {
+      "0": {
+        "t": "mcp"
+      }
+    },
+    "notice_verbose_put": {
+      "0": {
+        "t": "verbose.put"
+      }
+    },
+    "put": {
+      "0": {
+        "b": 1,
+        "i": 1,
+        "k": "/m/big",
+        "t": "kv.put"
+      }
+    },
+    "refusal": {
+      "0": {
+        "t": "error"
+      },
+      "message": "The engine lock /home/t/.cache/xsjs/engine.lock is held.",
+      "stack": "Traceback (most recent call last):"
+    },
+    "restart": {
+      "0": {
+        "t": "system.restart"
+      },
+      "main_loop": "b.py"
+    }
+  },
+  "texts": {
+    "jslb_blobs_over": "The blobs of the message come to 1 bytes, over blob_max of 0 bytes.",
+    "jslb_line_over_max": "The line is longer than line_max of 64 bytes.",
+    "jslb_no_header_zero": "The line has no header 0.",
+    "jslb_number_overflow": "The number 1e400 overflows a double.",
+    "wire_blobs_over_posted": "The blobs of the kv.put line come to 100 bytes, over the blob_max of 64.",
+    "wire_close_partial": "connection closed with code 1006 in the middle of a message and no error line",
+    "wire_close_silent_abnormal": "connection closed with code 1006 and no error line",
+    "wire_close_silent_normal": "connection closed with code 1000 and no error line",
+    "wire_error_first": "The server sent an error before tap.start: The engine lock /home/t/.cache/xsjs/engine.lock is held.\nTraceback (most recent call last):",
+    "wire_kind_unknown_brace": "ttyd sent a message of unknown kind 123.",
+    "wire_kind_unknown_digit": "ttyd sent a message of unknown kind 51.",
+    "wire_line_over_posted": "The mcp line of {1} bytes is over the line_max of 64.",
+    "wire_message_empty": "ttyd sent an empty message.",
+    "wire_open_twice": "The socket ws://127.0.0.1:7681/ws is open or opening already.",
+    "wire_post_early": "Cannot post verbose.put before tap.start has arrived.",
+    "wire_receiver_missing_start": "A tap.start line arrived with no receiver set.",
+    "wire_receiver_twice_close": "close_receive was called twice.",
+    "wire_receiver_twice_first": "first_receive was called twice.",
+    "wire_receiver_twice_line": "line_receive was called twice.",
+    "wire_scheme_unknown_file": "The page address file:///tmp/ is neither http nor https.",
+    "wire_scheme_unknown_ftp": "The page address ftp://127.0.0.1/ is neither http nor https.",
+    "wire_socket_missing_wire": "No socket ws://127.0.0.1:7681/ws exists: it was never opened, or it has closed.",
+    "wire_start_missing": "The server sent mcp before tap.start.",
+    "wire_start_trailing": "The server sent more output after tap.start before its reply.",
+    "wire_start_twice": "The server sent tap.start a second time, as a restart does; only a reload of the page takes a new first line."
+  }
+}

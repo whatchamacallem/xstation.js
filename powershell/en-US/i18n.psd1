@@ -67,6 +67,7 @@
         '{0} is missing. In WSL, in the checkout, run ' +
         '`python3 python/page_build.py test {1}`.'
     )
+    parameters_written      = 'Wrote the parameters into `{0}`: {1}'
     port_free               = 'Port {0} is free.'
     port_in_use             = (
         'Port {0} is used by {1} (PID {2}). Stop it and retry.'
@@ -110,7 +111,9 @@
     setting_missing         = '`{0}` has no value with id `{1}`.'
     soft_stop_mode          = 'Stopping ttyd until next sign-in (--softly).'
     start_server            = 'Starting ttyd on port {0}'
-    start_usage             = 'Usage: {0} [username:password]'
+    start_usage             = (
+        'Usage: {0} [--debug] [--verbose] [username:password]'
+    )
     started                 = 'Started {0} on {1}, PowerShell {2}'
     started_ok              = 'OK: {0} (stop: xsjs_stop.ps1)'
     status_certificate      = (

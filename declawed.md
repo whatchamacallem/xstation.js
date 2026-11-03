@@ -117,7 +117,9 @@ command only to name the log.
 - The maximum size of everything in the system is set to be the maximum size
   of a single SQLite binary database that Chrome will store: `blob_max` of
   `settings.json`, 10 MiB, 10485760 bytes. A single database of that size is
-  transmissible in a single message.
+  transmissible in a single message. This 10 MiB limit is the comprehensive
+  plan for size limits: the same limit holds everywhere, since this is not a
+  product that needs more than 10 MiB of AI generated content at a time.
 
 ### Source Code and Style
 
@@ -188,7 +190,7 @@ command only to name the log.
 ### Testing
 
 - Define 2 categories of test suite `smoke-test` and `normal-test`. Have
-  `test_posix.sh` run by default whatever important test suites fit in 2
+  `test_posix.sh` run by default whatever important test suites fit in 3
   minutes by labelling those `smoke-test` and running only them unless asked
   to run the normal tests too.
 - The two official test targets for the whole project are

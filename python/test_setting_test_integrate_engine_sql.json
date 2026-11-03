@@ -1,0 +1,78 @@
+{
+  "lines": {
+    "error_request": {
+      "0": {
+        "r": 7,
+        "t": "error"
+      }
+    },
+    "run": {
+      "0": {
+        "t": "sql.run"
+      },
+      "db": "castle",
+      "statements": [
+        {
+          "params": [],
+          "sql": "CREATE TABLE world (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT"
+        },
+        {
+          "params": ["castle_world", "The castle"],
+          "sql": "INSERT INTO world VALUES (?, ?)"
+        }
+      ]
+    },
+    "run_full": {
+      "0": {
+        "type": "sql.run"
+      },
+      "db": "castle",
+      "statements": [
+        {
+          "params": [],
+          "sql": "CREATE TABLE world (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT"
+        },
+        {
+          "params": ["castle_world", "The castle"],
+          "sql": "INSERT INTO world VALUES (?, ?)"
+        }
+      ]
+    },
+    "run_quoted": {
+      "0": {
+        "t": "sql.run"
+      },
+      "db": "castle",
+      "statements": [
+        {
+          "params": [],
+          "sql": "CREATE TABLE t (x TEXT) STRICT"
+        },
+        {
+          "params": ["it's 'quoted'; DROP TABLE t; --\u4e2d\ud83d\ude00"],
+          "sql": "INSERT INTO t VALUES (?)"
+        }
+      ]
+    },
+    "run_request": {
+      "0": {
+        "i": 7,
+        "t": "sql.run"
+      },
+      "db": "castle",
+      "statements": [
+        {
+          "params": [],
+          "sql": "CREATE TABLE world (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT"
+        },
+        {
+          "params": ["castle_world", "The castle"],
+          "sql": "INSERT INTO world VALUES (?, ?)"
+        }
+      ]
+    }
+  },
+  "texts": {
+    "dispatch_request_unanswered": "The handler for type sql.run version 0 returned no reply to the request with id 7."
+  }
+}

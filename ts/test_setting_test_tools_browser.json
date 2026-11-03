@@ -1,0 +1,167 @@
+{
+  "lines": {
+    "image_answer": {
+      "0": {
+        "t": "http.request"
+      },
+      "headers": {
+        "content-type": "application/json"
+      },
+      "json": {
+        "data": [
+          {}
+        ]
+      },
+      "status": 200
+    },
+    "image_answer_url": {
+      "0": {
+        "t": "http.request"
+      },
+      "headers": {
+        "content-type": "application/json"
+      },
+      "json": {
+        "data": [
+          {
+            "url": "https://images.invalid/gatehouse/arrival.png"
+          }
+        ]
+      },
+      "status": 200
+    },
+    "image_request": {
+      "0": {
+        "type": "http.request"
+      },
+      "headers": {
+        "Authorization": "Bearer xai-SYNTHETIC-KEY",
+        "Content-Type": "application/json"
+      },
+      "json": {
+        "model": "grok-2-image",
+        "n": 1,
+        "prompt": "A rain dark castle gatehouse at dusk seen from the far side of a moat, one lantern lit, painted, wide still frame, no people",
+        "response_format": "b64_json"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/images/generations"
+    },
+    "media_fetch": {
+      "0": {
+        "type": "media.fetch"
+      },
+      "k": "/_files/gatehouse/arrival.png",
+      "url": "https://images.invalid/gatehouse/arrival.png"
+    },
+    "media_fetch_reply": {
+      "0": {
+        "b": 1,
+        "t": "media.fetch"
+      },
+      "k": "/_files/gatehouse/arrival.png"
+    },
+    "media_store": {
+      "0": {
+        "blobs": 1,
+        "type": "media.store"
+      },
+      "k": "/_files/gatehouse/arrival.png"
+    },
+    "media_store_reply": {
+      "0": {
+        "t": "media.store"
+      },
+      "k": "/_files/gatehouse/arrival.png"
+    },
+    "permit_ask": {
+      "0": {
+        "type": "permit.ask"
+      },
+      "input": {
+        "text": "echo hi",
+        "timeout_seconds": 5
+      },
+      "permit": 1,
+      "tool": "browser.console_run"
+    },
+    "permit_ask_read": {
+      "0": {
+        "type": "permit.ask"
+      },
+      "input": {
+        "timeout_seconds": 5,
+        "until": "$ "
+      },
+      "permit": 3,
+      "tool": "browser.console_read"
+    },
+    "permit_ask_write": {
+      "0": {
+        "type": "permit.ask"
+      },
+      "input": {
+        "text": "echo hi"
+      },
+      "permit": 2,
+      "tool": "browser.console_write"
+    },
+    "permit_deny": {
+      "0": {
+        "t": "permit.ask"
+      },
+      "choice": "deny"
+    },
+    "render_arrival": {
+      "0": {
+        "type": "render"
+      },
+      "image": "/_files/gatehouse/arrival.png",
+      "scene": "/castle_gatehouse/scene/arrival/1",
+      "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+    },
+    "render_black": {
+      "0": {
+        "type": "render"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "How can I help you?"
+    },
+    "render_reply": {
+      "0": {
+        "t": "render"
+      }
+    },
+    "tail_reply": {
+      "0": {
+        "t": "verbose.tail"
+      },
+      "lines": [
+        {
+          "at": 1760800000000,
+          "text": "tide advanced by 1"
+        }
+      ]
+    },
+    "verbose_tail": {
+      "0": {
+        "type": "verbose.tail"
+      },
+      "count": 5,
+      "thread": "server"
+    }
+  },
+  "texts": {
+    "mcp_tool_unknown": "There is no tool named verbose_level.",
+    "script_trace_call": "substrate sql_run [\"castle_world\",[{\"sql\":\"UPDATE region SET tide = tide + ? WHERE name = ?\",\"params\":[1,\"castle_gatehouse\"]}]]",
+    "substrate_file_lost_document": "The value /alpha/note/1 names the cache file {1}, which this store does not hold.",
+    "substrate_file_lost_value": "The value /alpha/big names the cache file {1}, which this store does not hold.",
+    "tools_browser_debug_off": "browser.console_run needs debug mode, and the parameter debug is false.",
+    "tools_browser_debug_off_read": "browser.console_read needs debug mode, and the parameter debug is false.",
+    "tools_browser_debug_off_write": "browser.console_write needs debug mode, and the parameter debug is false.",
+    "tools_browser_permit_denied": "The player denied the tool browser.console_run.",
+    "tools_browser_permit_denied_read": "The player denied the tool browser.console_read.",
+    "tools_browser_permit_denied_write": "The player denied the tool browser.console_write.",
+    "utility_bytes_refused": "The bytes are not valid UTF-8."
+  }
+}

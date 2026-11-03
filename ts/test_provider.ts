@@ -8,7 +8,7 @@
 // whose fresh realm has none set.
 // The request lines it expects, in the full names of debug mode, the reply
 // lines it reads and the texts of its refusals are its gold in
-// `test_settings.json`, read through the harness.
+// `ts/test_setting_test_provider.json`, read through the harness.
 
 namespace test_provider {
   // A provider's address, key and models, and values of the castle turn.

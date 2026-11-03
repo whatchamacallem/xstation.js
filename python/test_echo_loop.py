@@ -3,8 +3,9 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the echo main loop in forked children over pipes, with roots in
-# `build/` whose settings are the checkout's with the gold's sizes and debug
-# true, and its error texts against the gold. Each child writes how its work
+# `build/` whose settings are the checkout's with the gold's sizes and whose
+# parameters are the run's with debug true, which a serving child sets as
+# `bootstrap.py` does, and its error texts against the gold. Each child writes how its work
 # ended to a file, or to stderr with the failure when that write fails, then
 # kills itself whatever happened, so the handlers it registers never reach
 # another test. The browser's `error` line goes to the real `engine_tap`, which
@@ -14,7 +15,7 @@
 # real `engine_verbose`, which writes its lines to that same log.
 
 import contextlib, echo_loop, functools, harness, json, os, signal, sqlite3
-import sys, tempfile, traceback, unittest
+import switches, sys, tempfile, traceback, unittest
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
@@ -24,7 +25,7 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_echo_loop"
 
 # A size chosen by its writer, small: a blob over it streams to the cache.
@@ -180,8 +181,9 @@ def _prepare_once(root: str, read_fd: int, write_fd: int) -> str:
     return json.dumps(echo_loop.loop_prepare(root))
 
 
-# The work of a child that prepares the root and echoes the pipes to the end.
+# Child: the root's parameters set, as `bootstrap.py` sets them, then echoes.
 def _echo_serve(root: str, read_fd: int, write_fd: int) -> str:
+    switches.switches_apply(switches.parameters_load(root))
     echo_loop.loop_prepare(root)
     echo_loop.loop_run(read_fd, write_fd, root)
     return _ENDING_RETURNED
@@ -192,7 +194,9 @@ def _logged_serve(root: str, read_fd: int, write_fd: int) -> str:
     path = os.path.join(root, "settings.json")
     with open(path, encoding="utf-8") as file:
         values: dict[str, Any] = json.load(file)
-    echo_loop.engine_tap.verbose.log_open(root, values["verbose_ring"])
+    echo_loop.engine_tap.verbose.log_open(
+        root, values["verbose_ring"], values["blob_max"]
+    )
     return _echo_serve(root, read_fd, write_fd)
 
 
@@ -216,13 +220,14 @@ class ScratchCase(unittest.TestCase):
         self.root = os.path.join(scratch.name, "root")
         os.mkdir(self.root)
         values = harness.settings_copy()
-        # The echo loop serves only a root in debug mode, whatever the file's.
-        values["debug"] = True
         values["overflow_bytes"] = _OVERFLOW_BYTES
         values["chunk_bytes"] = _CHUNK_BYTES
         path = os.path.join(self.root, "settings.json")
         with open(path, "w", encoding="utf-8") as file:
             json.dump(values, file)
+        # The echo loop serves only a root in debug mode, whatever the run's.
+        parameters = {**switches.switches_get(), "debug": True}
+        switches.parameters_write(self.root, parameters)
 
     # Runs the work in a child fed the data, returns its ending and output.
     def child_run(
@@ -260,7 +265,7 @@ class TestPrepare(ScratchCase):
         self.assertEqual(output, b"")
         self.assertIsNone(json.loads(ending))
         names = sorted(os.listdir(self.root))
-        self.assertEqual(names, ["cache", "settings.json"])
+        self.assertEqual(names, ["cache", "parameters.json", "settings.json"])
         self.assertEqual(os.listdir(os.path.join(self.root, "cache")), [])
 
 

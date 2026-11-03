@@ -1,0 +1,5 @@
+{
+  "poll_seconds": 0.1,
+  "quiet_seconds": 0.5,
+  "wait_seconds": 60
+}

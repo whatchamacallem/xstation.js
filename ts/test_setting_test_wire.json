@@ -1,0 +1,167 @@
+{
+  "lines": {
+    "input": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      }
+    },
+    "notice_a": {
+      "0": {
+        "t": "a"
+      }
+    },
+    "notice_b": {
+      "0": {
+        "t": "b"
+      }
+    },
+    "notice_console_output": {
+      "0": {
+        "t": "console.output"
+      }
+    },
+    "notice_mcp": {
+      "0": {
+        "t": "mcp"
+      }
+    },
+    "open_unnumbered": {
+      "0": {
+        "type": "console.open"
+      }
+    },
+    "output": {
+      "0": {
+        "blobs": 1,
+        "type": "console.output"
+      }
+    },
+    "put": {
+      "0": {
+        "b": 1,
+        "i": 1,
+        "k": "/m/big",
+        "t": "kv.put"
+      }
+    },
+    "read_reply_expired": {
+      "0": {
+        "reply": 1,
+        "type": "console.read"
+      },
+      "text": "",
+      "timed_out": true
+    },
+    "read_reply_found": {
+      "0": {
+        "reply": 1,
+        "type": "console.read"
+      },
+      "text": "hi\r\n$ ",
+      "timed_out": false
+    },
+    "read_reply_partial": {
+      "0": {
+        "reply": 1,
+        "type": "console.read"
+      },
+      "text": "partial",
+      "timed_out": true
+    },
+    "read_reply_second": {
+      "0": {
+        "reply": 2,
+        "type": "console.read"
+      },
+      "text": "$ ",
+      "timed_out": false
+    },
+    "read_request_1": {
+      "0": {
+        "id": 1,
+        "type": "console.read"
+      },
+      "timeout_seconds": 60,
+      "until": "$ "
+    },
+    "read_request_2": {
+      "0": {
+        "id": 2,
+        "type": "console.read"
+      },
+      "timeout_seconds": 60,
+      "until": "$ "
+    },
+    "read_seconds_long": {
+      "0": {
+        "id": 1,
+        "type": "console.read"
+      },
+      "timeout_seconds": 2147484,
+      "until": "$ "
+    },
+    "read_seconds_negative": {
+      "0": {
+        "id": 1,
+        "type": "console.read"
+      },
+      "timeout_seconds": -1,
+      "until": "$ "
+    },
+    "read_seconds_text": {
+      "0": {
+        "id": 1,
+        "type": "console.read"
+      },
+      "timeout_seconds": "5",
+      "until": "$ "
+    },
+    "read_unnumbered": {
+      "0": {
+        "type": "console.read"
+      },
+      "timeout_seconds": 5,
+      "until": "$ "
+    },
+    "read_until_number": {
+      "0": {
+        "id": 1,
+        "type": "console.read"
+      },
+      "timeout_seconds": 5,
+      "until": 5
+    }
+  },
+  "texts": {
+    "wire_blobs_over_frames": "The blobs of the kv.put line come to 100 bytes, over the blob_max of 99.",
+    "wire_chunk_invalid_fraction": "The chunk size 1.5 is not a whole number of bytes from 2 up.",
+    "wire_chunk_invalid_infinity": "The chunk size Infinity is not a whole number of bytes from 2 up.",
+    "wire_chunk_invalid_nan": "The chunk size NaN is not a whole number of bytes from 2 up.",
+    "wire_chunk_invalid_negative": "The chunk size -4 is not a whole number of bytes from 2 up.",
+    "wire_chunk_invalid_one": "The chunk size 1 is not a whole number of bytes from 2 up.",
+    "wire_chunk_invalid_zero": "The chunk size 0 is not a whole number of bytes from 2 up.",
+    "wire_console_type": "The console port takes no line of type console.output.",
+    "wire_frames_none": "No input frame is waiting to be sent.",
+    "wire_handle_unsent": "The wire port sends blob bytes held in memory, never the cache handle cache/0001.",
+    "wire_id_missing_open": "A console.open line posted to the console port needs an id.",
+    "wire_id_missing_read": "A console.read line posted to the console port needs an id.",
+    "wire_keep_none": "No turn of the AI's keeps the console output.",
+    "wire_keep_twice": "A turn of the AI's keeps the console output already.",
+    "wire_kept_invalid": "The console output kept for the AI's turn is not valid UTF-8.",
+    "wire_kind_unknown_digit": "ttyd sent a message of unknown kind 51.",
+    "wire_line_over_frames": "The mcp line of {1} bytes is over the line_max of {2}.",
+    "wire_message_empty": "ttyd sent an empty message.",
+    "wire_output_invalid_prompt": "The console output read until $  is not valid UTF-8.",
+    "wire_output_invalid_slash": "The console output read until / is not valid UTF-8.",
+    "wire_queue_over": "The 6 blob bytes of the kv.put line on top of the 10 blob bytes held would pass the blob_max of 15 in the wire frame queue.",
+    "wire_read_none": "No console read is waiting.",
+    "wire_read_seconds_long": "The timeout_seconds of console.read is 2147484, not a number of seconds from 0 that a timer can hold.",
+    "wire_read_seconds_negative": "The timeout_seconds of console.read is -1, not a number of seconds from 0 that a timer can hold.",
+    "wire_read_seconds_text": "The timeout_seconds of console.read is 5, not a number of seconds from 0 that a timer can hold.",
+    "wire_read_twice": "A console read waits for $  already.",
+    "wire_read_until": "The until of console.read must be text.",
+    "wire_receiver_missing_close": "A close line arrived with no receiver set.",
+    "wire_socket_missing_console": "No socket ws://127.0.0.1:7681/ws?arg=console exists: it was never opened, or it has closed."
+  }
+}

@@ -2,22 +2,23 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests of the infrastructure for testing. The harness, on the checkout's
-# own settings.json and test_settings.json, each also read with `json` as
-# the oracle, and the gold under this suite's own id: a value of either file
-# by a top or nested id, the refusal of an unknown id, each file read once,
-# and the deep copies of both whole files. Category: the options
-# --smoke-test and --normal-test on a parser, which suites a run of each
-# category runs, the seconds a run may take, the gold's smoke_seconds, the
-# alarm of a suite, its own seconds or the deadline of a smoke-test run,
-# whichever comes first, own seconds winning a tie, or a refusal once the
-# deadline has passed, and the checks LabelBook makes of the labels of the
-# roots and rungs a runner reaches, each refusal compared with its message.
-# No real alarm is armed, since the runner's alarm of this module is
-# running. Line coverage: sample modules written to a scratch directory in
+# Tests of the infrastructure for testing. The harness, on the checkout's own
+# settings.json and every suite's gold file, test_setting_<suite>.json beside
+# its module, each also read with `json` as the oracle, and the gold under this
+# suite's own id: a value of the settings or the gold by a top or nested id,
+# the refusal of an unknown id naming the file or the gold, each file read
+# once, and the deep copies of the whole settings and the whole gold.
+# Category: the options --smoke-test and --normal-test on a parser, which
+# suites a run of each category runs, the seconds a run may take, the gold's
+# smoke_seconds, the alarm of a suite, its own seconds or the deadline of a
+# smoke-test run, whichever comes first, own seconds winning a tie, or a
+# refusal once the deadline has passed, and the checks LabelBook makes of the
+# labels of the roots and rungs a runner reaches, each refusal compared with
+# its message. No real alarm is armed, since the runner's alarm of this module
+# is running. Line coverage: sample modules written to a scratch directory in
 # build/ and run with `runpy` while a count runs, their functions called in
-# this process or in a forked child ended by SIGKILL, the first line the
-# count finds never run compared with the line each refusal names.
+# this process or in a forked child ended by SIGKILL, the first line the count
+# finds never run compared with the line each refusal names.
 
 import argparse, category, contextlib, harness, io, json, line_coverage, os
 import runpy, signal, tempfile, unittest
@@ -29,17 +30,33 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
-# The two files the harness reads, at the checkout's top.
+# The settings file the harness reads, at the checkout's top.
 _SETTINGS_NAME = "settings.json"
-_TESTS_NAME = "test_settings.json"
 
-# The id of this module's gold in `test_settings.json`.
+# The directory of each language's suites, which holds their gold files.
+_LANGUAGE_DIRECTORIES = {
+    "python": "python",
+    "typescript": "ts",
+    "powershell": "powershell",
+}
+
+# The start and the end of a suite's gold file name, around the suite.
+_GOLD_PREFIX = "test_setting_"
+_GOLD_SUFFIX = ".json"
+
+# The id of this module's gold, its file `python/test_setting_test_test.json`.
 _GOLD_ID = "python.test_test"
+
+# This module's gold file, as the harness's refusals name it.
+_GOLD_FILE = "python/test_setting_test_test.json"
+
+# The driver's gold file, which holds the run's `smoke_seconds`.
+_DRIVER_FILE = "python/test_setting_test_all.json"
 
 # The list this module's gold holds under `limits`.
 _LIMITS = [1, 2]
 
-# The label and category of the important suites that fit in 2 minutes.
+# The label and category of the important suites that fit in 3 minutes.
 _SMOKE_TEST = "smoke-test"
 
 # The label and category of every other suite.
@@ -112,11 +129,24 @@ def parser_make() -> argparse.ArgumentParser:
     return parser
 
 
-# The object of a file at the checkout's top, read with `json`.
+# The object of a file under the checkout's top, read with `json`.
 def file_load(name: str) -> dict[str, Any]:
     with open(os.path.join(_ROOT_PATH, name), encoding="utf-8") as file:
         data: dict[str, Any] = json.load(file)
     return data
+
+
+# Every suite's gold file read with `json`, `{language: {suite: gold}}`.
+def gold_load() -> dict[str, Any]:
+    gold: dict[str, Any] = {}
+    for language, directory in _LANGUAGE_DIRECTORIES.items():
+        suites: dict[str, Any] = {}
+        for name in sorted(os.listdir(os.path.join(_ROOT_PATH, directory))):
+            if name.startswith(_GOLD_PREFIX) and name.endswith(_GOLD_SUFFIX):
+                suite = name[len(_GOLD_PREFIX) : -len(_GOLD_SUFFIX)]
+                suites[suite] = file_load(os.path.join(directory, name))
+        gold[language] = suites
+    return gold
 
 
 # The keys of the object whose values are objects in turn.
@@ -131,19 +161,26 @@ def shapes_call(shapes: dict[str, Any]) -> None:
     shapes["parity"](2)
 
 
-# The values of both files by id, the refusals, the one read and the copies.
+# The values by id, the refusals, the one read, and the copies.
 class TestHarness(unittest.TestCase):
-    # Reads both files with `json`, the oracle of the harness.
+    # Reads the settings and every gold file with `json`, the oracle.
     def setUp(self) -> None:
         self.settings = file_load(_SETTINGS_NAME)
-        self.gold = file_load(_TESTS_NAME)
+        self.gold = gold_load()
 
-    # A top level id names its value in either file.
+    # A top level id names its value: a setting, a language's whole gold.
     def test_top_id(self) -> None:
         for key, value in self.settings.items():
             self.assertEqual(harness.setting_get(key), value, key)
         for key, value in self.gold.items():
             self.assertEqual(harness.gold_get(key), value, key)
+
+    # A language and a suite name that suite's whole gold file.
+    def test_suite_id(self) -> None:
+        for language, suites in self.gold.items():
+            for suite, value in suites.items():
+                id = f"{language}.{suite}"
+                self.assertEqual(harness.gold_get(id), value, id)
 
     # A nested id names the value of its keys joined by `.`.
     def test_nested_id(self) -> None:
@@ -166,9 +203,25 @@ class TestHarness(unittest.TestCase):
         with self.assertRaises(KeyError) as caught:
             harness.gold_get(id)
         expected = (
-            "test_settings.json has no value with id"
-            " 'python.test_test.no_such'"
+            f"{_GOLD_FILE} has no value with id 'python.test_test.no_such'"
         )
+        self.assertEqual(caught.exception.args, (expected,))
+
+    # An id of a suite with no gold file raises, naming the file it sought.
+    def test_suite_unknown(self) -> None:
+        with self.assertRaises(KeyError) as caught:
+            harness.gold_get("python.no_such.limits")
+        expected = (
+            "python/test_setting_no_such.json has no value with id"
+            " 'python.no_such.limits'"
+        )
+        self.assertEqual(caught.exception.args, (expected,))
+
+    # An id of no language raises, naming the gold.
+    def test_language_unknown(self) -> None:
+        with self.assertRaises(KeyError) as caught:
+            harness.gold_get("no_such.test_test")
+        expected = "the gold has no value with id 'no_such.test_test'"
         self.assertEqual(caught.exception.args, (expected,))
 
     # An id that goes on past a value that is not an object raises.
@@ -183,8 +236,7 @@ class TestHarness(unittest.TestCase):
         with self.assertRaises(KeyError) as caught:
             harness.gold_get(f"{_GOLD_ID}.limits.0")
         expected = (
-            "test_settings.json has no value with id"
-            " 'python.test_test.limits.0'"
+            f"{_GOLD_FILE} has no value with id 'python.test_test.limits.0'"
         )
         self.assertEqual(caught.exception.args, (expected,))
 
@@ -276,7 +328,7 @@ class TestLimit(unittest.TestCase):
     # A `smoke-test` run has the gold's `smoke_seconds`, as a float.
     def test_smoke_limit(self) -> None:
         limit = category.limit_seconds(_SMOKE_TEST)
-        expected = float(file_load(_TESTS_NAME)["smoke_seconds"])
+        expected = float(file_load(_DRIVER_FILE)["smoke_seconds"])
         self.assertEqual(limit, expected)
         self.assertIs(type(limit), float)
 

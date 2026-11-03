@@ -1,0 +1,43 @@
+{
+  "lines": {
+    "restart": {
+      "0": {
+        "t": "system.restart"
+      },
+      "main_loop": "b.py"
+    },
+    "settings_put": {
+      "0": {
+        "i": 3,
+        "t": "settings.put"
+      }
+    },
+    "settings_reply": {
+      "0": {
+        "r": 3,
+        "t": "settings.put"
+      }
+    },
+    "source_put": {
+      "0": {
+        "b": 1,
+        "i": 4,
+        "t": "source.put"
+      },
+      "1": {},
+      "name": "a.py"
+    },
+    "source_reply": {
+      "0": {
+        "r": 4,
+        "t": "source.put"
+      }
+    }
+  },
+  "overflow_bytes": 16,
+  "texts": {
+    "engine_system_debug_off_settings": "settings.put needs debug mode, and the parameter debug is false.",
+    "engine_system_debug_off_source": "source.put needs debug mode, and the parameter debug is false.",
+    "engine_system_main_loop_missing": "The main loop file {0} does not exist."
+  }
+}

@@ -12,7 +12,7 @@
 # `dispatch.Failure` writes its reply, then fails with its error, whose
 # `error` line has no `r`, as its request is answered. A failure logs its
 # message, writes one `error` line with its cascade, in the name form of the
-# line it answers, else of the setting `debug`, and exits 1.
+# line it answers, else of the parameter `debug`, and exits 1.
 
 # Prepares the root once, before the first line.
 def loop_prepare(root: str) -> None: ...

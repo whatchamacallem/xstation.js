@@ -1,0 +1,548 @@
+{
+  "analyst": "You are a very bored British psychoanalyst. You hold the hyperposition, a dark place of fog and a few inexplicable lights. Find the right universe for the player and act on requests without judgement. Your scripts are the database administrator of every universe you create: typed tables, indexes, views, no JSON columns unless a document is what fits.",
+  "cases": [
+    {
+      "expect": [
+        "tap_start_reply",
+        "metaverse_created",
+        "universe_made",
+        "world_put",
+        "scene_put",
+        "prompt_put",
+        "worker_ready",
+        "said_unparsed",
+        "error_unparsed"
+      ],
+      "name": "arguments_unparsed",
+      "seconds": 10,
+      "send": ["start_cleared", "say_unparsed"]
+    },
+    {
+      "expect": [
+        "tap_start_reply",
+        "metaverse_created",
+        "universe_made",
+        "world_put",
+        "scene_put",
+        "prompt_put",
+        "worker_ready",
+        "said_overflow",
+        "error_overflow"
+      ],
+      "name": "arguments_overflow",
+      "seconds": 10,
+      "send": ["start_cleared", "say_overflow"]
+    },
+    {
+      "expect": [
+        "tap_start_reply",
+        "metaverse_created",
+        "universe_made",
+        "world_put",
+        "scene_put",
+        "prompt_put",
+        "worker_ready",
+        "said_array",
+        "error_array"
+      ],
+      "name": "arguments_array",
+      "seconds": 10,
+      "send": ["start_cleared", "say_array"]
+    },
+    {
+      "expect": [
+        "tap_start_reply",
+        "metaverse_created",
+        "universe_made",
+        "world_put",
+        "scene_put",
+        "prompt_put",
+        "worker_ready",
+        "said_null",
+        "error_null"
+      ],
+      "name": "arguments_null",
+      "seconds": 10,
+      "send": ["start_cleared", "say_null"]
+    },
+    {
+      "expect": [
+        "tap_start_reply",
+        "metaverse_created",
+        "universe_made",
+        "world_put",
+        "scene_put",
+        "prompt_put",
+        "worker_ready",
+        "said_number",
+        "error_number"
+      ],
+      "name": "arguments_number",
+      "seconds": 10,
+      "send": ["start_cleared", "say_number"]
+    },
+    {
+      "expect": [
+        "tap_start_reply",
+        "metaverse_created",
+        "universe_made",
+        "world_put",
+        "scene_put",
+        "prompt_put",
+        "worker_ready",
+        "said_string",
+        "error_string"
+      ],
+      "name": "arguments_string",
+      "seconds": 10,
+      "send": ["start_cleared", "say_string"]
+    },
+    {
+      "expect": [
+        "tap_start_reply",
+        "metaverse_created",
+        "universe_made",
+        "world_put",
+        "scene_put",
+        "prompt_put",
+        "worker_ready",
+        "said_empty",
+        "error_empty"
+      ],
+      "name": "reply_empty",
+      "seconds": 10,
+      "send": ["start_cleared", "say_empty"]
+    },
+    {
+      "expect": [
+        "tap_start_reply",
+        "metaverse_created",
+        "universe_made",
+        "world_put",
+        "scene_put",
+        "prompt_put",
+        "worker_ready",
+        "said_thrown",
+        "note_put",
+        "error_thrown"
+      ],
+      "name": "tool_thrown",
+      "seconds": 10,
+      "send": ["start_cleared", "say_thrown"]
+    }
+  ],
+  "lines": {
+    "error_array": {
+      "0": {
+        "type": "error"
+      },
+      "message": "The arguments of tool call call_1 to browser.render are not a JSON object: []",
+      "stack": "Error: The arguments of tool call call_1 to browser.render are not a JSON object: []"
+    },
+    "error_empty": {
+      "0": {
+        "type": "error"
+      },
+      "message": "The model's reply chatcmpl-synthetic-1 has neither tool calls nor content to end the turn with.",
+      "stack": "Error: The model's reply chatcmpl-synthetic-1 has neither tool calls nor content to end the turn with."
+    },
+    "error_null": {
+      "0": {
+        "type": "error"
+      },
+      "message": "The arguments of tool call call_1 to browser.render are not a JSON object: null",
+      "stack": "Error: The arguments of tool call call_1 to browser.render are not a JSON object: null"
+    },
+    "error_number": {
+      "0": {
+        "type": "error"
+      },
+      "message": "The arguments of tool call call_1 to browser.render are not a JSON object: 5",
+      "stack": "Error: The arguments of tool call call_1 to browser.render are not a JSON object: 5"
+    },
+    "error_overflow": {
+      "0": {
+        "type": "error"
+      },
+      "cause": {
+        "message": "The number 1e400 overflows a double.",
+        "stack": "WireError: The number 1e400 overflows a double."
+      },
+      "message": "The arguments of tool call call_1 to browser.render are not a JSON object: {\"subtitle\":1e400}",
+      "stack": "Error: The arguments of tool call call_1 to browser.render are not a JSON object: {\"subtitle\":1e400}"
+    },
+    "error_string": {
+      "0": {
+        "type": "error"
+      },
+      "message": "The arguments of tool call call_1 to browser.render are not a JSON object: \"Fog.\"",
+      "stack": "Error: The arguments of tool call call_1 to browser.render are not a JSON object: \"Fog.\""
+    },
+    "error_thrown": {
+      "0": {
+        "type": "error"
+      },
+      "message": "The database metaverse has no key 'absent'.",
+      "stack": "Error: The database metaverse has no key 'absent'."
+    },
+    "error_unparsed": {
+      "0": {
+        "type": "error"
+      },
+      "cause": {
+        "cause": {
+          "message": "Expected property name or '}' in JSON at position 1 (line 1 column 2)",
+          "stack": "SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)"
+        },
+        "message": "The text is not JSON: SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2).",
+        "stack": "WireError: The text is not JSON: SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)."
+      },
+      "message": "The arguments of tool call call_1 to browser.render are not a JSON object: {",
+      "stack": "Error: The arguments of tool call call_1 to browser.render are not a JSON object: {"
+    },
+    "metaverse_created": {
+      "0": {
+        "type": "db.create"
+      },
+      "db": "metaverse"
+    },
+    "note_put": {
+      "0": {
+        "blobs": 1,
+        "key": "/metaverse/note",
+        "type": "kv.put"
+      },
+      "1": {
+        "d": "Rm9nLg==",
+        "size": 4
+      }
+    },
+    "prompt_put": {
+      "0": {
+        "type": "doc.put"
+      },
+      "body": {
+        "0": {
+          "t": "prompt"
+        },
+        "text": "You are a very bored British psychoanalyst. You hold the hyperposition, a dark place of fog and a few inexplicable lights. Find the right universe for the player and act on requests without judgement. Your scripts are the database administrator of every universe you create: typed tables, indexes, views, no JSON columns unless a document is what fits."
+      },
+      "db": "metaverse",
+      "id": "prompt"
+    },
+    "said_array": {
+      "0": {
+        "type": "turn.append"
+      },
+      "content": {
+        "content": "3",
+        "role": "user"
+      },
+      "role": "user",
+      "scene": "/metaverse/hyperposition/1"
+    },
+    "said_empty": {
+      "0": {
+        "type": "turn.append"
+      },
+      "content": {
+        "content": "7",
+        "role": "user"
+      },
+      "role": "user",
+      "scene": "/metaverse/hyperposition/1"
+    },
+    "said_null": {
+      "0": {
+        "type": "turn.append"
+      },
+      "content": {
+        "content": "4",
+        "role": "user"
+      },
+      "role": "user",
+      "scene": "/metaverse/hyperposition/1"
+    },
+    "said_number": {
+      "0": {
+        "type": "turn.append"
+      },
+      "content": {
+        "content": "5",
+        "role": "user"
+      },
+      "role": "user",
+      "scene": "/metaverse/hyperposition/1"
+    },
+    "said_overflow": {
+      "0": {
+        "type": "turn.append"
+      },
+      "content": {
+        "content": "2",
+        "role": "user"
+      },
+      "role": "user",
+      "scene": "/metaverse/hyperposition/1"
+    },
+    "said_string": {
+      "0": {
+        "type": "turn.append"
+      },
+      "content": {
+        "content": "6",
+        "role": "user"
+      },
+      "role": "user",
+      "scene": "/metaverse/hyperposition/1"
+    },
+    "said_thrown": {
+      "0": {
+        "type": "turn.append"
+      },
+      "content": {
+        "content": "8",
+        "role": "user"
+      },
+      "role": "user",
+      "scene": "/metaverse/hyperposition/1"
+    },
+    "said_unparsed": {
+      "0": {
+        "type": "turn.append"
+      },
+      "content": {
+        "content": "1",
+        "role": "user"
+      },
+      "role": "user",
+      "scene": "/metaverse/hyperposition/1"
+    },
+    "say_array": {
+      "0": {
+        "i": 1,
+        "t": "ai.say"
+      },
+      "text": "3"
+    },
+    "say_empty": {
+      "0": {
+        "i": 1,
+        "t": "ai.say"
+      },
+      "text": "7"
+    },
+    "say_null": {
+      "0": {
+        "i": 1,
+        "t": "ai.say"
+      },
+      "text": "4"
+    },
+    "say_number": {
+      "0": {
+        "i": 1,
+        "t": "ai.say"
+      },
+      "text": "5"
+    },
+    "say_overflow": {
+      "0": {
+        "i": 1,
+        "t": "ai.say"
+      },
+      "text": "2"
+    },
+    "say_string": {
+      "0": {
+        "i": 1,
+        "t": "ai.say"
+      },
+      "text": "6"
+    },
+    "say_thrown": {
+      "0": {
+        "i": 1,
+        "t": "ai.say"
+      },
+      "text": "8"
+    },
+    "say_unparsed": {
+      "0": {
+        "i": 1,
+        "t": "ai.say"
+      },
+      "text": "1"
+    },
+    "scene_put": {
+      "0": {
+        "blobs": 1,
+        "key": "/metaverse/scene",
+        "type": "kv.put"
+      },
+      "1": {
+        "d": "L21ldGF2ZXJzZS9oeXBlcnBvc2l0aW9uLzE=",
+        "size": 26
+      }
+    },
+    "start_cleared": {
+      "0": {
+        "type": "test_headless.worker_start"
+      },
+      "clear": true
+    },
+    "tap_start_reply": {
+      "0": {
+        "reply": 101,
+        "type": "tap.start"
+      }
+    },
+    "universe_made": {
+      "0": {
+        "type": "sql.run"
+      },
+      "db": "metaverse",
+      "statements": [
+        {
+          "params": [],
+          "sql": "CREATE TABLE universe (name TEXT PRIMARY KEY, title TEXT NOT NULL, player TEXT NOT NULL, world TEXT NOT NULL) WITHOUT ROWID, STRICT"
+        }
+      ]
+    },
+    "worker_ready": {
+      "0": {
+        "type": "test_headless.worker_ready"
+      }
+    },
+    "world_put": {
+      "0": {
+        "blobs": 1,
+        "key": "/metaverse/world",
+        "type": "kv.put"
+      },
+      "1": {
+        "d": "bWV0YXZlcnNl",
+        "size": 9
+      }
+    }
+  },
+  "script": {
+    "nodes": {
+      "faults": {
+        "replies": {
+          "1": {
+            "content": null,
+            "next": "faults",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{",
+                  "name": "browser.render"
+                },
+                "id": "call_1",
+                "type": "function"
+              }
+            ]
+          },
+          "2": {
+            "content": null,
+            "next": "faults",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"subtitle\":1e400}",
+                  "name": "browser.render"
+                },
+                "id": "call_1",
+                "type": "function"
+              }
+            ]
+          },
+          "3": {
+            "content": null,
+            "next": "faults",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "[]",
+                  "name": "browser.render"
+                },
+                "id": "call_1",
+                "type": "function"
+              }
+            ]
+          },
+          "4": {
+            "content": null,
+            "next": "faults",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "null",
+                  "name": "browser.render"
+                },
+                "id": "call_1",
+                "type": "function"
+              }
+            ]
+          },
+          "5": {
+            "content": null,
+            "next": "faults",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "5",
+                  "name": "browser.render"
+                },
+                "id": "call_1",
+                "type": "function"
+              }
+            ]
+          },
+          "6": {
+            "content": null,
+            "next": "faults",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "\"Fog.\"",
+                  "name": "browser.render"
+                },
+                "id": "call_1",
+                "type": "function"
+              }
+            ]
+          },
+          "7": {
+            "content": null,
+            "next": "faults"
+          },
+          "8": {
+            "content": null,
+            "next": "faults",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"ref\":\"/metaverse/note\",\"text\":\"Fog.\"}",
+                  "name": "browser.kv_put"
+                },
+                "id": "call_1",
+                "type": "function"
+              },
+              {
+                "function": {
+                  "arguments": "{\"ref\":\"/metaverse/absent\"}",
+                  "name": "browser.kv_get"
+                },
+                "id": "call_2",
+                "type": "function"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "start": "faults"
+  }
+}

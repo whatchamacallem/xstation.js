@@ -8,7 +8,7 @@
 // checkerboard in 88 bytes with other compressed data. The port is driven
 // directly by `line_post` and `line_receive`. The request lines it posts, the
 // reply lines it expects and the texts of the refusals are its gold in
-// `test_settings.json`, read through the harness.
+// `ts/test_setting_test_provider_script.json`, read through the harness.
 
 namespace test_provider_script {
   // A model, the castle turn's values, the PNG's.

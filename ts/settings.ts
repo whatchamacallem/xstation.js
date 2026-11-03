@@ -5,9 +5,12 @@
 // The settings the server sent in `tap.start`, set once per thread, read by
 // id and, in debug mode, changed by id. The file also holds the constants of
 // the PowerShell scripts, under `powershell`, which the browser receives and
-// does not read. `names_full()` is the one choice of the name form of the
-// lines a thread builds: full names until the settings are set, then full
-// names when `debug` is true and short names otherwise.
+// does not read. Debug mode is not a setting: a store reads it from the
+// reader it was made with, this module's own store from
+// `switches.debug_on()`, which each thread sets before its settings.
+// `names_full()` is the one choice of the name form of the lines a thread
+// builds: full names until the settings are set, then full names in debug
+// mode and short names otherwise.
 
 namespace settings {
   // The constants of this module.
@@ -17,9 +20,7 @@ namespace settings {
 
   // The shape of settings.json, sent in `tap.start` unmodified.
   export interface Settings {
-    debug: boolean;
     queue_synchronous: boolean;
-    verbose_level: number;
     verbose_ring: number;
     line_max: number;
     blob_max: number;
@@ -53,6 +54,7 @@ namespace settings {
       key_file: string;
       certificate_days: number;
       runner_file: string;
+      parameters_file: string;
       ttyd_log_file: string;
       poll_tries: number;
       poll_milliseconds: number;
@@ -114,13 +116,19 @@ namespace settings {
   export class ValueStore {
     private value: Settings | undefined;
     private sender: Sender | undefined;
+    private readonly debug_on: () => boolean;
 
-    // Stores the settings once, deep frozen unless `debug` is true.
+    // Takes the reader of debug mode, read at each set, put and name form.
+    constructor(debug_on: () => boolean) {
+      this.debug_on = debug_on;
+    }
+
+    // Stores the settings once, deep frozen outside debug mode.
     value_set(value: Settings): void {
       if (this.value !== undefined) {
         throw new Error(i18n("settings.already_set"));
       }
-      if (value.debug !== true) {
+      if (!this.debug_on()) {
         value_freeze(value);
       }
       this.value = value;
@@ -136,7 +144,7 @@ namespace settings {
     value_put(id: Id, value: unknown): void {
       const live = this.value_live();
       const sender = this.sender;
-      if (live.debug !== true) {
+      if (!this.debug_on()) {
         throw new Error(i18n("settings.put_denied"));
       }
       if (sender === undefined) {
@@ -156,12 +164,12 @@ namespace settings {
       this.sender = sender;
     }
 
-    // Full names while the value is unset, then whether `debug` is true.
+    // Full names while the value is unset, then whether debug mode is on.
     names_full(): boolean {
       if (this.value === undefined) {
         return true;
       }
-      return this.value.debug === true;
+      return this.debug_on();
     }
 
     // The settings, throwing when they were not yet set.
@@ -174,9 +182,9 @@ namespace settings {
   }
 
   // The settings of this thread, behind the functions below.
-  const store = new ValueStore();
+  const store = new ValueStore(() => switches.debug_on());
 
-  // Stores the settings `tap.start` carried, once per thread.
+  // Stores the settings `tap.start` carried, once per thread, after switches.
   export function settings_set(value: Settings): void {
     store.value_set(value);
   }

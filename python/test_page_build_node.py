@@ -7,8 +7,8 @@
 # no archive. One bundle is built into a scratch directory under build/ and
 # read by each test: the path returned, the strict line first, then
 # test_vectors defined as the page defines it, from the vectors written anew
-# into the scratch directory, then the bundle with the strings table in
-# place once. node runs it on stdio: the first line, tap.start with i 101
+# into the scratch directory, then test_gold, the TypeScript suites' gold,
+# then the bundle with the strings table in place once. node runs it on stdio: the first line, tap.start with i 101
 # built as bootstrap.py builds it, is answered with an Empty reply, then the
 # TAP stream of the block named comes in tap.line pushes, read by the TAP
 # consumer, and node exits 0; a first line of another type exits 1, with
@@ -40,8 +40,11 @@ _STRICT_LINE = '"use strict";'
 # The start of the second line, which defines the vectors.
 _VECTORS_START = "var test_vectors = "
 
-# The end of the second line.
+# The end of the second line and of the third.
 _VECTORS_END = ";"
+
+# The start of the third line, which defines the gold.
+_GOLD_START = "var test_gold = "
 
 # The block the realm runs, whose tests read `test_vectors`.
 _BLOCK = "test_utility"
@@ -96,13 +99,11 @@ def sink_refuse(header: jslb.Object) -> NoReturn:
 # Returns the bytes of a first line as `bootstrap.py` writes it in debug mode.
 def start_bytes(line_type: str) -> bytes:
     header = jslb.header_make(line_type, id=_FIRST_ID, full=True)
-    tests = jslb.json_decode(json.dumps(harness.gold_copy()))
     line = jslb.line_make(
         header,
         [],
         settings=harness.settings_copy(),
-        switches=switches.switches_get(),
-        test_settings=tests,
+        switches={**switches.switches_get(), "debug": True},
     )
     (piece,) = jslb.line_encode(line)
     return cast(bytes, piece)
@@ -161,9 +162,18 @@ class TestBundle(unittest.TestCase):
             decoded = base64.b64decode(encoded, validate=True)
             self.assertEqual(decoded, data, name)
 
-    # The bundle after the two lines holds the table once, its identifier gone.
+    # The third line defines the gold of every TypeScript suite's file.
+    def test_gold_defined(self) -> None:
+        line = self.text.split("\n", 3)[2]
+        self.assertTrue(line.startswith(_GOLD_START), line[:80])
+        self.assertTrue(line.endswith(_VECTORS_END), line[-80:])
+        text = line.removeprefix(_GOLD_START).removesuffix(_VECTORS_END)
+        gold = {"typescript": harness.gold_copy()["typescript"]}
+        self.assertTrue(json.loads(text) == gold, line[:80])
+
+    # The bundle after the three lines holds the table once, its name gone.
     def test_table_once(self) -> None:
-        bundle = self.text.split("\n", 2)[2]
+        bundle = self.text.split("\n", 3)[3]
         table = page_build.text_read(_TABLE_PATH)
         self.assertEqual(bundle.count(table), 1)
         self.assertNotIn("I18N_TABLE_JSON", bundle)

@@ -1,0 +1,22 @@
+{
+  "texts": {
+    "settings_already_set": "The settings were already set on this thread.",
+    "settings_no_sender": "No sender is registered to submit settings.put.",
+    "settings_not_set": "The settings were used before they were set.",
+    "settings_put_denied": "Settings can only be changed in debug mode.",
+    "settings_sender_twice": "A sender is already registered for settings.put.",
+    "settings_unknown_id_base_url": "The settings have no value with id provider.base_url.",
+    "settings_unknown_id_chat_model": "The settings have no value with id provider.chat_model.",
+    "settings_unknown_id_debug": "The settings have no value with id debug.",
+    "settings_unknown_id_empty": "The settings have no value with id .",
+    "settings_unknown_id_image_model": "The settings have no value with id provider.image_model.",
+    "settings_unknown_id_leading": "The settings have no value with id .provider.",
+    "settings_unknown_id_leaf": "The settings have no value with id queue_synchronous.no_such_id.",
+    "settings_unknown_id_message_max": "The settings have no value with id message_max.",
+    "settings_unknown_id_provider": "The settings have no value with id provider.no_such_id.",
+    "settings_unknown_id_queue_max": "The settings have no value with id queue_max.",
+    "settings_unknown_id_test": "The settings have no value with id test.no_such_id.",
+    "settings_unknown_id_trailing": "The settings have no value with id provider..",
+    "settings_unknown_id_verbose_level": "The settings have no value with id verbose_level."
+  }
+}

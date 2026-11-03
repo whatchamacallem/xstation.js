@@ -5,7 +5,7 @@
 # Tests the handlers of `verbose.put` and `verbose.tail` in forked children,
 # each on the real log of a scratch root in `build/`, opened through
 # `engine_verbose.verbose` as `bootstrap.py` opens it, and registered with
-# the real dispatcher, so the debug setting, the handlers and the log never
+# the real dispatcher, so debug mode, the handlers and the log never
 # reach another test. Each handler is called as the dispatcher calls it on
 # lines of the gold: the page lines a put writes under their thread, read
 # back from `_verbose`; the tail of the server from its ring, the lines it
@@ -27,7 +27,7 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_engine_verbose"
 
 # A key of the decimal digits of a non negative integer, as JSLB reads it.
@@ -35,6 +35,9 @@ _NUMBER_KEY = re.compile(r"0|[1-9][0-9]*")
 
 # The lines the ring of a child's log holds, as the checkout sets it.
 _RING: int = harness.setting_get("verbose_ring")
+
+# The `blob_max` of the settings, the largest log file.
+_BLOB_MAX: int = harness.setting_get("blob_max")
 
 # The file of the root's log.
 _LOG_FILE = "_verbose.sqlite"
@@ -126,7 +129,7 @@ def _server_lines(
 
 # Opens the root's log through `engine_verbose`, then registers the handlers.
 def _log_register(root: str, debug: bool) -> None:
-    engine_verbose.verbose.log_open(root, _RING)
+    engine_verbose.verbose.log_open(root, _RING, _BLOB_MAX)
     engine_verbose.handlers_register(debug)
 
 

@@ -1,0 +1,204 @@
+{
+  "chunk_bytes": 1000,
+  "lines": {
+    "browser_error": {
+      "0": {
+        "t": "error"
+      },
+      "cause": {
+        "message": "first",
+        "stack": "Error: first"
+      },
+      "message": "boom",
+      "stack": "Error: boom\n    at a"
+    },
+    "call_debug_off": {
+      "0": {
+        "i": 1,
+        "t": "mcp"
+      },
+      "id": 3,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "name": "a.py",
+          "text": "x"
+        },
+        "name": "source_put"
+      }
+    },
+    "call_name_invalid": {
+      "0": {
+        "i": 1,
+        "t": "mcp"
+      },
+      "id": 3,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "name": "../a.py",
+          "text": "x"
+        },
+        "name": "source_put"
+      }
+    },
+    "call_reply": {
+      "0": {
+        "r": 1,
+        "t": "mcp"
+      }
+    },
+    "create_castle": {
+      "0": {
+        "t": "db.create"
+      },
+      "db": "castle"
+    },
+    "error": {
+      "0": {
+        "t": "error"
+      }
+    },
+    "error_full": {
+      "0": {
+        "type": "error"
+      }
+    },
+    "error_reply": {
+      "0": {
+        "r": 1,
+        "t": "error"
+      }
+    },
+    "initialize": {
+      "0": {
+        "i": 1,
+        "t": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "initialize",
+      "params": {
+        "capabilities": {},
+        "clientInfo": {
+          "name": "hyperposition-engine",
+          "version": "0"
+        },
+        "protocolVersion": "2025-06-18"
+      }
+    },
+    "initialize_reply": {
+      "0": {
+        "r": 1,
+        "t": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "result": {
+        "capabilities": {
+          "tools": {}
+        },
+        "protocolVersion": "2025-06-18",
+        "serverInfo": {
+          "name": "xsjs-server",
+          "version": "0"
+        }
+      }
+    },
+    "put_cut": {
+      "0": {
+        "b": 1,
+        "k": "/_files/test/cut",
+        "t": "kv.put"
+      },
+      "1": {}
+    },
+    "put_gate": {
+      "0": {
+        "b": 1,
+        "k": "/castle/gate",
+        "t": "kv.put"
+      },
+      "1": {}
+    },
+    "put_later": {
+      "0": {
+        "b": 1,
+        "k": "/metaverse/later",
+        "t": "kv.put"
+      },
+      "1": {}
+    },
+    "put_streamed": {
+      "0": {
+        "b": 1,
+        "k": "/_files/test/streamed",
+        "t": "kv.put"
+      },
+      "1": {}
+    },
+    "put_title": {
+      "0": {
+        "b": 1,
+        "k": "/castle/title",
+        "t": "kv.put"
+      },
+      "1": {}
+    },
+    "put_value": {
+      "0": {
+        "b": 1,
+        "k": "/_files/test/value",
+        "t": "kv.put"
+      },
+      "1": {}
+    },
+    "stray_101": {
+      "0": {
+        "r": 101,
+        "t": "tap.start"
+      }
+    },
+    "stray_102": {
+      "0": {
+        "r": 102,
+        "t": "mcp"
+      }
+    },
+    "stray_2": {
+      "0": {
+        "r": 2,
+        "t": "tap.start"
+      }
+    },
+    "unknown_request": {
+      "0": {
+        "i": 1,
+        "t": "no.such"
+      }
+    }
+  },
+  "overflow_bytes": 4096,
+  "read_bytes": 65536,
+  "texts": {
+    "dispatch_handler_unknown": "No handler is registered for type no.such version 0.",
+    "engine_system_debug_off_tool": "source_put needs debug mode, and the parameter debug is false.",
+    "engine_system_name_invalid": "The name ../a.py is not a plain file name that ends in .py and does not start with a dot.",
+    "engine_tap_browser_cause": "caused by: first",
+    "engine_tap_browser_failed": "The browser failed: boom",
+    "jslb_no_type": "The line header has no type string.",
+    "main_loop_input_partial": "The engine input ended inside a message.",
+    "main_loop_line_dispatch_mcp": "server dispatches from ai: {\"i\":1,\"t\":\"mcp\"}",
+    "main_loop_line_dispatch_unknown": "server dispatches from ai: {\"i\":1,\"t\":\"no.such\"}",
+    "main_loop_line_reply_mcp": "server replies to ai: {\"t\":\"mcp\",\"r\":1}",
+    "main_loop_not_prepared": "loop_run ran before loop_prepare prepared the root.",
+    "main_loop_reply_unknown_101": "The line {\"0\":{\"r\":101,\"t\":\"tap.start\"}} replies to no request the server sent.",
+    "main_loop_reply_unknown_102": "The line {\"0\":{\"r\":102,\"t\":\"mcp\"}} replies to no request the server sent.",
+    "main_loop_reply_unknown_2": "The line {\"0\":{\"r\":2,\"t\":\"tap.start\"}} replies to no request the server sent.",
+    "main_loop_serve_failed_debug": "The server failed while serving the engine tty: source_put needs debug mode, and the parameter debug is false.",
+    "main_loop_serve_failed_type": "The server failed while serving the engine tty: The line header has no type string.",
+    "main_loop_serve_failed_unknown": "The server failed while serving the engine tty: No handler is registered for type no.such version 0."
+  }
+}

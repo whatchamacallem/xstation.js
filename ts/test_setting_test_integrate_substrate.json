@@ -1,0 +1,478 @@
+{
+  "cases": [
+    {
+      "expect": ["create_alpha_push", "create_alpha_reply"],
+      "name": "db_created",
+      "seconds": 10,
+      "send": ["create_alpha"]
+    },
+    {
+      "expect": ["put_moat_push", "put_moat_reply"],
+      "name": "row_put",
+      "seconds": 10,
+      "send": ["put_moat"]
+    },
+    {
+      "expect": ["get_moat_reply"],
+      "name": "row_got",
+      "seconds": 10,
+      "send": ["get_moat"]
+    },
+    {
+      "expect": ["put_bridge_push", "put_bridge_reply"],
+      "name": "file_put",
+      "seconds": 10,
+      "send": ["put_bridge"]
+    },
+    {
+      "expect": ["get_bridge_reply"],
+      "name": "file_got",
+      "seconds": 10,
+      "send": ["get_bridge"]
+    },
+    {
+      "expect": ["put_moat_again_reply"],
+      "name": "put_unchanged",
+      "seconds": 10,
+      "send": ["put_moat_again"]
+    },
+    {
+      "expect": ["list_alpha_reply"],
+      "name": "keys_listed",
+      "seconds": 10,
+      "send": ["list_alpha"]
+    },
+    {
+      "expect": ["put_scroll_push", "put_scroll_reply"],
+      "name": "document_put",
+      "seconds": 10,
+      "send": ["put_scroll"]
+    },
+    {
+      "expect": ["head_scroll_reply"],
+      "name": "head_read",
+      "seconds": 10,
+      "send": ["head_scroll"]
+    },
+    {
+      "expect": ["append_gate_push", "append_gate_reply"],
+      "name": "turn_appended",
+      "seconds": 10,
+      "send": ["append_gate"]
+    },
+    {
+      "expect": ["run_gate_push", "run_gate_reply"],
+      "name": "rows_changed",
+      "seconds": 10,
+      "send": ["run_gate"]
+    },
+    {
+      "expect": ["read_gate_reply"],
+      "name": "rows_read",
+      "seconds": 10,
+      "send": ["read_gate"]
+    },
+    {
+      "expect": ["delete_moat_push", "delete_moat_reply"],
+      "name": "value_deleted",
+      "seconds": 10,
+      "send": ["delete_moat"]
+    },
+    {
+      "expect": ["delete_absent_reply"],
+      "name": "absent_deleted",
+      "seconds": 10,
+      "send": ["delete_absent"]
+    },
+    {
+      "expect": ["drop_alpha_push", "drop_alpha_reply"],
+      "name": "db_dropped",
+      "seconds": 10,
+      "send": ["drop_alpha"]
+    }
+  ],
+  "lines": {
+    "append_gate": {
+      "0": {
+        "i": 10,
+        "t": "turn.append"
+      },
+      "content": {
+        "content": "Open the gate.",
+        "role": "user"
+      },
+      "role": "user",
+      "scene": "/alpha/scene/1"
+    },
+    "append_gate_push": {
+      "0": {
+        "type": "turn.append"
+      },
+      "content": {
+        "content": "Open the gate.",
+        "role": "user"
+      },
+      "role": "user",
+      "scene": "/alpha/scene/1"
+    },
+    "append_gate_reply": {
+      "0": {
+        "r": 10,
+        "t": "turn.append"
+      },
+      "n": 1
+    },
+    "create_alpha": {
+      "0": {
+        "i": 1,
+        "t": "db.create"
+      },
+      "db": "alpha"
+    },
+    "create_alpha_push": {
+      "0": {
+        "type": "db.create"
+      },
+      "db": "alpha"
+    },
+    "create_alpha_reply": {
+      "0": {
+        "r": 1,
+        "t": "db.create"
+      }
+    },
+    "delete_absent": {
+      "0": {
+        "i": 14,
+        "k": "/alpha/moat",
+        "t": "kv.delete"
+      }
+    },
+    "delete_absent_reply": {
+      "0": {
+        "r": 14,
+        "t": "kv.delete"
+      }
+    },
+    "delete_moat": {
+      "0": {
+        "i": 13,
+        "k": "/alpha/moat",
+        "t": "kv.delete"
+      }
+    },
+    "delete_moat_push": {
+      "0": {
+        "key": "/alpha/moat",
+        "type": "kv.delete"
+      }
+    },
+    "delete_moat_reply": {
+      "0": {
+        "r": 13,
+        "t": "kv.delete"
+      }
+    },
+    "drop_alpha": {
+      "0": {
+        "i": 15,
+        "t": "db.drop"
+      },
+      "db": "alpha"
+    },
+    "drop_alpha_push": {
+      "0": {
+        "type": "db.drop"
+      },
+      "db": "alpha"
+    },
+    "drop_alpha_reply": {
+      "0": {
+        "r": 15,
+        "t": "db.drop"
+      }
+    },
+    "get_bridge": {
+      "0": {
+        "i": 5,
+        "k": "/alpha/bridge",
+        "t": "kv.get"
+      }
+    },
+    "get_bridge_reply": {
+      "0": {
+        "b": 1,
+        "r": 5,
+        "t": "kv.get"
+      },
+      "1": {
+        "d": "ZHJhd2JyaWRnZQ==",
+        "s": 10
+      },
+      "sha256": "e366011a831f16161f9f19a14fe405e9afa14d51861713bedcab09721850dc4d",
+      "size": 10
+    },
+    "get_moat": {
+      "0": {
+        "i": 3,
+        "k": "/alpha/moat",
+        "t": "kv.get"
+      }
+    },
+    "get_moat_reply": {
+      "0": {
+        "b": 1,
+        "r": 3,
+        "t": "kv.get"
+      },
+      "1": {
+        "d": "bW9hdA==",
+        "s": 4
+      },
+      "sha256": "edf1eb932299d2c1e3c973f57e454fbdf5aceeed86bae113708c69d9adc737f4",
+      "size": 4
+    },
+    "head_scroll": {
+      "0": {
+        "i": 9,
+        "t": "doc.head"
+      },
+      "db": "alpha",
+      "id": "scroll"
+    },
+    "head_scroll_reply": {
+      "0": {
+        "r": 9,
+        "t": "doc.head"
+      },
+      "ref": "/alpha/scroll/1"
+    },
+    "list_alpha": {
+      "0": {
+        "i": 7,
+        "t": "kv.list"
+      },
+      "db": "alpha",
+      "prefix": ""
+    },
+    "list_alpha_reply": {
+      "0": {
+        "r": 7,
+        "t": "kv.list"
+      },
+      "keys": [
+        {
+          "k": "bridge",
+          "sha256": "e366011a831f16161f9f19a14fe405e9afa14d51861713bedcab09721850dc4d",
+          "size": 10
+        },
+        {
+          "k": "moat",
+          "sha256": "edf1eb932299d2c1e3c973f57e454fbdf5aceeed86bae113708c69d9adc737f4",
+          "size": 4
+        }
+      ]
+    },
+    "put_bridge": {
+      "0": {
+        "b": 1,
+        "i": 4,
+        "k": "/alpha/bridge",
+        "t": "kv.put"
+      },
+      "1": {
+        "d": "ZHJhd2JyaWRnZQ==",
+        "s": 10
+      }
+    },
+    "put_bridge_push": {
+      "0": {
+        "blobs": 1,
+        "key": "/alpha/bridge",
+        "type": "kv.put"
+      },
+      "1": {
+        "d": "ZHJhd2JyaWRnZQ==",
+        "size": 10
+      }
+    },
+    "put_bridge_reply": {
+      "0": {
+        "r": 4,
+        "t": "kv.put"
+      },
+      "sha256": "e366011a831f16161f9f19a14fe405e9afa14d51861713bedcab09721850dc4d"
+    },
+    "put_moat": {
+      "0": {
+        "b": 1,
+        "i": 2,
+        "k": "/alpha/moat",
+        "t": "kv.put"
+      },
+      "1": {
+        "d": "bW9hdA==",
+        "s": 4
+      }
+    },
+    "put_moat_again": {
+      "0": {
+        "b": 1,
+        "i": 6,
+        "k": "/alpha/moat",
+        "t": "kv.put"
+      },
+      "1": {
+        "d": "bW9hdA==",
+        "s": 4
+      }
+    },
+    "put_moat_again_reply": {
+      "0": {
+        "r": 6,
+        "t": "kv.put"
+      },
+      "sha256": "edf1eb932299d2c1e3c973f57e454fbdf5aceeed86bae113708c69d9adc737f4"
+    },
+    "put_moat_push": {
+      "0": {
+        "blobs": 1,
+        "key": "/alpha/moat",
+        "type": "kv.put"
+      },
+      "1": {
+        "d": "bW9hdA==",
+        "size": 4
+      }
+    },
+    "put_moat_reply": {
+      "0": {
+        "r": 2,
+        "t": "kv.put"
+      },
+      "sha256": "edf1eb932299d2c1e3c973f57e454fbdf5aceeed86bae113708c69d9adc737f4"
+    },
+    "put_scroll": {
+      "0": {
+        "i": 8,
+        "t": "doc.put"
+      },
+      "body": {
+        "0": {
+          "t": "note"
+        },
+        "text": "The keeper waves."
+      },
+      "db": "alpha",
+      "id": "scroll"
+    },
+    "put_scroll_push": {
+      "0": {
+        "type": "doc.put"
+      },
+      "body": {
+        "0": {
+          "t": "note"
+        },
+        "text": "The keeper waves."
+      },
+      "db": "alpha",
+      "id": "scroll"
+    },
+    "put_scroll_reply": {
+      "0": {
+        "r": 8,
+        "t": "doc.put"
+      },
+      "ref": "/alpha/scroll/1"
+    },
+    "read_gate": {
+      "0": {
+        "i": 12,
+        "t": "sql.run"
+      },
+      "db": "alpha",
+      "statements": [
+        {
+          "params": [],
+          "sql": "SELECT state FROM gate"
+        }
+      ]
+    },
+    "read_gate_reply": {
+      "0": {
+        "r": 12,
+        "t": "sql.run"
+      },
+      "results": [
+        {
+          "changes": 0,
+          "columns": ["state"],
+          "rows": [
+            ["open"]
+          ]
+        }
+      ]
+    },
+    "run_gate": {
+      "0": {
+        "i": 11,
+        "t": "sql.run"
+      },
+      "db": "alpha",
+      "statements": [
+        {
+          "params": [],
+          "sql": "CREATE TABLE gate (state TEXT)"
+        },
+        {
+          "params": ["open"],
+          "sql": "INSERT INTO gate VALUES (?)"
+        }
+      ]
+    },
+    "run_gate_push": {
+      "0": {
+        "type": "sql.run"
+      },
+      "db": "alpha",
+      "statements": [
+        {
+          "params": [],
+          "sql": "CREATE TABLE gate (state TEXT)"
+        },
+        {
+          "params": ["open"],
+          "sql": "INSERT INTO gate VALUES (?)"
+        }
+      ]
+    },
+    "run_gate_reply": {
+      "0": {
+        "r": 11,
+        "t": "sql.run"
+      },
+      "results": [
+        {
+          "changes": 0,
+          "columns": [],
+          "rows": []
+        },
+        {
+          "changes": 1,
+          "columns": [],
+          "rows": []
+        }
+      ]
+    }
+  },
+  "overflow_bytes": 8,
+  "owners": {
+    "db.": "ai",
+    "doc.": "ai",
+    "kv.": "ai",
+    "sql.": "ai",
+    "turn.": "ai"
+  },
+  "slot_count": 2
+}

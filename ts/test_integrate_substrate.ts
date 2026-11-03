@@ -41,6 +41,7 @@ namespace test_integrate_substrate {
     server_thread: "server" as const,
     root: "/test_integrate_substrate",
     synchronous_setting: "queue_synchronous",
+    blob_setting: "blob_max",
     compact_setting: "turn_compact_turns",
   });
 
@@ -82,6 +83,7 @@ namespace test_integrate_substrate {
       new substrate.CacheFiles(slots_get()),
       constants.root,
       gold_value("overflow_bytes") as number,
+      harness.setting_get(constants.blob_setting) as number,
       harness.setting_get(constants.compact_setting) as number,
       tasks,
     );

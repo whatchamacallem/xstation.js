@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the media cache and port that need no image decoder and no
-// network. No test here posts a request that passes the checks, so no test
-// starts a decode or a `fetch`. The request lines, the expected replies and
-// every thrown or carried text are entries of the gold record,
-// test_settings.json; the image's bytes and their SHA-256 are one entry of
-// the digest vector test_digests.json.
+// Tests of the media cache and port that need no image decoder and no network.
+// No test here posts a request that passes the checks, so no test starts a
+// decode or a `fetch`. The request lines, the expected replies and every
+// thrown or carried text are entries of the gold record,
+// `ts/test_setting_test_media.json`; the image's bytes and their SHA-256 are
+// one entry of the digest vector test_digests.json.
 
 namespace test_media {
   // The vector files of the test page, each base64.

@@ -7,14 +7,15 @@
 # written and read back, and the three levels of the shell's runner. The only
 # program a test starts is the interpreter that runs it. The scratch
 # directories go under `build/`. The texts expected, the ring the tests open
-# and the count of a whole history are the gold's.
+# and the count of a whole history are the gold's. A log is held to the
+# settings' `blob_max`, and one filled to it refuses the next line full.
 
 import contextlib, harness, os, shlex, sqlite3, subprocess, sys, tempfile, time
 import unittest, verbose
 from collections.abc import Callable
 from typing import Any, cast
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_verbose"
 
 # The checkout's top directory, above this file's `python/`.
@@ -38,11 +39,23 @@ _RING_LINES: int = harness.gold_get(f"{_GOLD_ID}.ring_lines")
 # A count of lines greater than any ring a test makes.
 _HISTORY_ALL: int = harness.gold_get(f"{_GOLD_ID}.history_all")
 
+# The `blob_max` of the settings, the largest log file.
+_BLOB_MAX: int = harness.setting_get("blob_max")
+
+# The characters of a line of the fill, which its page chain holds.
+_FILL_CHARS: int = harness.gold_get(f"{_GOLD_ID}.fill_chars")
+
+# One line more of the fill than `blob_max` holds without overhead.
+_FILL_LINES = _BLOB_MAX // _FILL_CHARS + 1
+
 # The threads other than ui and ai the tests give, by the case of their text.
 _THREADS_UNKNOWN = {"server": "server", "console": "console", "empty": ""}
 
 # Reads every row of the table, in the order they were written.
 _SELECT_ROWS = "SELECT seq, at, thread, text FROM line ORDER BY seq"
+
+# Reads the first three characters of every line, in order.
+_SELECT_FIRSTS = "SELECT substr(text, 1, 3) FROM line ORDER BY seq"
 
 # The columns the table has: id, name, type, not null, default and key.
 _COLUMNS = [
@@ -78,7 +91,7 @@ _HARD_PROGRAM = (
     "sys.pycache_prefix = sys.argv[3]\n"
     "sys.path.insert(0, sys.argv[1])\n"
     "import verbose\n"
-    "verbose.log_open(sys.argv[2], 5)\n"
+    "verbose.log_open(sys.argv[2], 5, " + str(_BLOB_MAX) + ")\n"
     "verbose.log('first')\n"
     "verbose.log('second')\n"
     "os._exit(7)\n"
@@ -90,7 +103,7 @@ _HELD_PROGRAM = (
     "sys.pycache_prefix = sys.argv[3]\n"
     "sys.path.insert(0, sys.argv[1])\n"
     "import verbose\n"
-    "verbose.log_open(sys.argv[2], 5)\n"
+    "verbose.log_open(sys.argv[2], 5, " + str(_BLOB_MAX) + ")\n"
     "for stream in (sys.stdout, sys.stderr):\n"
     "    stream.reconfigure(line_buffering=False, write_through=False)\n"
     "    stream.write('before ')\n"
@@ -115,7 +128,7 @@ def _scratch_make(case: unittest.TestCase) -> str:
 
 # Opens the log in a directory, then has it closed when the test ends.
 def _log_open(case: unittest.TestCase, path: str, ring: int) -> None:
-    verbose.log_open(path, ring)
+    verbose.log_open(path, ring, _BLOB_MAX)
     case.addCleanup(verbose.log_close)
 
 
@@ -255,7 +268,7 @@ class TestLogAll(unittest.TestCase):
     def test_log_closed(self) -> None:
         path = _log_ready(self, _RING_LINES)
         verbose.log_close()
-        self.addCleanup(verbose.log_open, path, _RING_LINES)
+        self.addCleanup(verbose.log_open, path, _RING_LINES, _BLOB_MAX)
         message = _text_get("verbose_not_open")
         uses: list[Callable[[], object]] = [
             lambda: verbose.log("closed"),
@@ -270,7 +283,7 @@ class TestLogAll(unittest.TestCase):
         path = _log_ready(self, _RING_LINES)
         verbose.log("before")
         verbose.log_close()
-        verbose.log_open(path, _RING_LINES)
+        verbose.log_open(path, _RING_LINES, _BLOB_MAX)
         self.assertEqual(_ring_texts(), [])
         verbose.log("after")
         self.assertEqual(_ring_texts(), ["after"])
@@ -367,7 +380,7 @@ class TestDatabase(unittest.TestCase):
             self,
             RuntimeError,
             _text_get("verbose_open_twice"),
-            lambda: verbose.log_open(path, _RING_LINES),
+            lambda: verbose.log_open(path, _RING_LINES, _BLOB_MAX),
         )
         verbose.log("still open")
         self.assertEqual(_ring_texts(), ["still open"])
@@ -377,7 +390,7 @@ class TestDatabase(unittest.TestCase):
         path = _log_ready(self, _RING_LINES)
         verbose.log("first")
         verbose.log_close()
-        verbose.log_open(path, _RING_LINES)
+        verbose.log_open(path, _RING_LINES, _BLOB_MAX)
         self.assertEqual(_ring_texts(), [])
         verbose.log("second")
         rows = _rows_read(path)
@@ -402,6 +415,39 @@ class TestDatabase(unittest.TestCase):
             [(row[2], row[3]) for row in rows],
             [("server", "first"), ("server", "second")],
         )
+
+    # Logs lines until the line past `blob_max` fails full, giving the count.
+    def fill_full(self) -> int:
+        count = 0
+        with self.assertRaises(sqlite3.OperationalError) as caught:
+            for index in range(_FILL_LINES):
+                verbose.log(f"{index:03d}".ljust(_FILL_CHARS, "x"))
+                count = index + 1
+        self.assertEqual(
+            caught.exception.sqlite_errorcode, sqlite3.SQLITE_FULL
+        )
+        self.assertEqual(str(caught.exception), _text_get("full"))
+        return count
+
+    # The line past `blob_max` fails full, and the file, rows and limit hold.
+    def test_log_full(self) -> None:
+        path = _log_ready(self, _RING_LINES)
+        count = self.fill_full()
+        ring = [line.text[:3] for line in verbose.history_get(_RING_LINES)]
+        firsts = [f"{index:03d}" for index in range(count)]
+        self.assertEqual(ring, firsts[-_RING_LINES:])
+        verbose.log_close()
+        file = os.path.join(path, _FILE_NAME)
+        self.assertLessEqual(os.path.getsize(file), _BLOB_MAX)
+        rows = _query_read(path, _SELECT_FIRSTS)
+        self.assertEqual([row[0] for row in rows], firsts)
+        verbose.log_open(path, _RING_LINES, _BLOB_MAX)
+        with self.assertRaises(sqlite3.OperationalError) as caught:
+            verbose.log("past the limit".ljust(_FILL_CHARS, "x"))
+        self.assertEqual(
+            caught.exception.sqlite_errorcode, sqlite3.SQLITE_FULL
+        )
+        self.assertEqual(len(_query_read(path, _SELECT_FIRSTS)), count)
 
 
 # Tests the lines of the page threads, written to the database and read back.
@@ -479,7 +525,7 @@ class TestPage(unittest.TestCase):
         line = verbose.LogLine(10, "a")
         verbose.lines_put("ui", [line])
         verbose.log_close()
-        verbose.log_open(path, _RING_LINES)
+        verbose.log_open(path, _RING_LINES, _BLOB_MAX)
         self.assertEqual(verbose.tail_get("ui", 1), [line])
 
     # A thread other than ui or ai and a negative count raise.

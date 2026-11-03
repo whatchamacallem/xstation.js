@@ -1,0 +1,5 @@
+{
+  "texts": {
+    "dispatch_id_refused_float": "The line of type kv.get has the id 7.0, which is not an integer of at least 1."
+  }
+}

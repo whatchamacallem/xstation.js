@@ -4,7 +4,9 @@
 #
 # Tests the TAP suite server, tap_loop.py, in forked children over pipes,
 # with roots in `build/` whose settings are the checkout's with the gold's
-# overflow_bytes, and its error texts against the gold. The driver it runs
+# overflow_bytes and whose parameters are the run's with debug as each test
+# sets it, which a serving child sets as `bootstrap.py` does, and its error
+# texts against the gold. The driver it runs
 # is the real test_all.py, on a small suite and on failing_suite, the suite
 # that fails by design: the pushes and the reply are compared with what the
 # test reads from the same driver, run by the test with the command line the
@@ -13,8 +15,8 @@
 # write fails, then kills itself whatever happened, so the handler it
 # registers never reaches another test.
 
-import functools, harness, json, os, re, signal, subprocess, sys, tap_loop
-import tempfile, traceback, unittest
+import functools, harness, json, os, re, signal, subprocess, switches, sys
+import tap_loop, tempfile, traceback, unittest
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
@@ -27,7 +29,7 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 # The driver the server runs, which the test runs too.
 _DRIVER_PATH = os.path.join(_ROOT_PATH, "python", "test_all.py")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_tap_loop"
 
 # A size chosen by its writer, small: a blob over it would stream.
@@ -208,8 +210,9 @@ def _prepare_once(root: str, read_fd: int, write_fd: int) -> str:
     return json.dumps(tap_loop.loop_prepare(root))
 
 
-# The work of a child that prepares the root and serves the pipes to the end.
+# Child: the root's parameters set, as `bootstrap.py` sets them, then serves.
 def _suites_serve(root: str, read_fd: int, write_fd: int) -> str:
+    switches.switches_apply(switches.parameters_load(root))
     tap_loop.loop_prepare(root)
     tap_loop.loop_run(read_fd, write_fd, root)
     return _ENDING_RETURNED
@@ -227,14 +230,15 @@ class ScratchCase(unittest.TestCase):
         os.mkdir(self.root)
         self.settings_write(False)
 
-    # Writes the root's settings, the setting `debug` as given.
+    # Writes the root's settings, and its parameters with `debug` as given.
     def settings_write(self, debug: bool) -> None:
         values = harness.settings_copy()
         values["overflow_bytes"] = _OVERFLOW_BYTES
-        values["debug"] = debug
         path = os.path.join(self.root, "settings.json")
         with open(path, "w", encoding="utf-8") as file:
             json.dump(values, file)
+        parameters = {**switches.switches_get(), "debug": debug}
+        switches.parameters_write(self.root, parameters)
 
     # Runs the work in a child fed the data, returns its ending and output.
     def child_run(
@@ -303,7 +307,9 @@ class TestPrepare(ScratchCase):
         ending, output = self.child_run(work, b"")
         self.assertEqual(output, b"")
         self.assertIsNone(json.loads(ending))
-        self.assertEqual(os.listdir(self.root), ["settings.json"])
+        self.assertEqual(
+            sorted(os.listdir(self.root)), ["parameters.json", "settings.json"]
+        )
 
 
 # `loop_run` over pipes: the runs served, the lines pushed, the refusals.

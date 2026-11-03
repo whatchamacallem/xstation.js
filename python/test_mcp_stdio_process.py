@@ -4,12 +4,13 @@
 #
 # Tests mcp_stdio.py as a process, started on pipes the way an external
 # agent starts it, on a root in build/ that holds a copy of the checkout's
-# settings.json: a session answered against the tools of API/mcp/tools.json,
+# settings.json and the run's parameters with debug true: a session answered against the tools of API/mcp/tools.json,
 # text outside ASCII in and out as `utf-8` whatever the locale, and a line
 # that is not JSON ending the process with exit code 1 and a traceback on
 # stderr, its texts against the gold.
 
-import harness, json, os, select, shutil, subprocess, sys, tempfile, unittest
+import harness, json, os, select, shutil, subprocess, switches, sys, tempfile
+import unittest
 from typing import Any, IO, cast
 
 # The root of the checkout.
@@ -33,7 +34,7 @@ _STDIO_PATH = os.path.join(_ROOT_PATH, "python", "mcp_stdio.py")
 # The API file that holds the tools as `tools/list` returns them.
 _TOOLS_PATH = os.path.join(_ROOT_PATH, "API", "mcp", "tools.json")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_mcp_stdio_process"
 
 # The most seconds a wait on the child takes, a default chosen by its writer.
@@ -164,7 +165,7 @@ def _line_read(process: subprocess.Popen[bytes]) -> str:
 
 # Tests the script as a process, on pipes, as an external agent runs it.
 class TestProcess(unittest.TestCase):
-    # Makes a root in `build/` that holds a copy of the checkout's settings.
+    # Makes a root in `build/`: the checkout's settings, debug parameters.
     def setUp(self) -> None:
         os.makedirs(_BUILD_PATH, exist_ok=True)
         scratch = tempfile.TemporaryDirectory(dir=_BUILD_PATH)
@@ -172,6 +173,8 @@ class TestProcess(unittest.TestCase):
         self.root = scratch.name
         path = os.path.join(self.root, _SETTINGS_NAME)
         shutil.copyfile(_SETTINGS_PATH, path)
+        parameters = {**switches.switches_get(), "debug": True}
+        switches.parameters_write(self.root, parameters)
 
     # Starts the script on the root and stops it when the test ends.
     def child_start(self) -> subprocess.Popen[bytes]:

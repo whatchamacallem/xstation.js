@@ -1,5 +1,8 @@
-# Serves the server's MCP tools as newline delimited JSON-RPC on stdio. Each
-# input line is parsed by `jslb.json_decode`, the decoders' door for bad
+# Serves the server's MCP tools as newline delimited JSON-RPC on stdio, with
+# the root's switches: `stdio_serve` reads the root's settings, then its
+# parameters by `switches.parameters_load`, and sets them by
+# `switches.switches_apply`, so that debug mode is the root's. Each input
+# line is parsed by `jslb.json_decode`, the decoders' door for bad
 # numbers. After a request answered with an exception it writes the answer,
 # then raises the exception, so the process exits 1: fail loud.
 

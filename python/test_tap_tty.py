@@ -4,8 +4,9 @@
 #
 # Tests bootstrap.py run whole on a pty as ttyd runs it, unpatched, through
 # tap_tty's EngineTty, with roots in build/ whose settings are the
-# checkout's and whose test settings are the checkout's gold. On the stock
-# main loop: the first line in either name form and its payload, the empty
+# checkout's, whose parameters are the run's with debug as each test sets it
+# and which hold no gold. On the stock main loop: the first line in either
+# name form and its payload, which carries no gold in either, the empty
 # reply, a wrong reply to tap.start refused, each line type the stock main
 # loop registers sent once with its reply and the databases checked, the
 # restart that system.restart starts going on over the same tty after
@@ -41,7 +42,7 @@ _PYTHON_PATH = os.path.join(_ROOT_PATH, "python")
 # The MCP server on stdio, run beside the engine.
 _STDIO_PATH = os.path.join(_PYTHON_PATH, "mcp_stdio.py")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_tap_tty"
 
 # The most seconds a child of a test, or a wait on the engine, may take.
@@ -193,13 +194,13 @@ class ScratchCase(unittest.TestCase):
         )
         self.root = os.path.join(self.scratch, "root")
 
-    # Makes the root with the settings, the gold and the main loop file.
+    # Makes the root with the settings, the parameters and the main loop.
     def root_make(self, debug: bool, loop: str | None) -> dict[str, Any]:
         values = harness.settings_copy()
-        values["debug"] = debug
         os.makedirs(self.root)
         _json_write(self.root, "settings.json", values)
-        _json_write(self.root, "test_settings.json", harness.gold_copy())
+        self.parameters = {**switches.switches_get(), "debug": debug}
+        switches.parameters_write(self.root, self.parameters)
         if loop is not None:
             directory = os.path.join(self.root, _LOOP_DIRECTORY)
             os.makedirs(directory)
@@ -263,14 +264,14 @@ class ScratchCase(unittest.TestCase):
 
 # Tests the stock main loop on the tty: the start, the lines, the hangup.
 class TestStock(ScratchCase):
-    # In debug mode the first line has full names and carries the gold.
+    # In debug mode the first line has full names and carries no gold.
     def test_start_full(self) -> None:
         values = self.root_make(True, None)
         engine = self.engine_run(values, None)
         first = self.start_answer(engine, True)
         self.assertEqual(first["settings"], values)
-        self.assertEqual(first["switches"], switches.switches_get())
-        self.assertEqual(first["test_settings"], harness.gold_copy())
+        self.assertEqual(first["switches"], self.parameters)
+        self.assertEqual(sorted(first), ["0", "settings", "switches"])
         engine.bytes_write(_line_bytes("tail_ui"))
         reply = _plain(engine.line_read())
         self.assertEqual(reply, {**_line_get("tail_ui_reply"), "lines": []})
@@ -289,7 +290,7 @@ class TestStock(ScratchCase):
             {
                 "0": first["0"],
                 "settings": values,
-                "switches": switches.switches_get(),
+                "switches": self.parameters,
             },
         )
         engine.bytes_write(_line_bytes("tail_short"))
@@ -376,7 +377,7 @@ class TestStock(ScratchCase):
         engine.bytes_write(_line_bytes("restart"))
         first = self.start_answer(engine, True)
         self.assertEqual(first["settings"], changed)
-        self.assertEqual(first["test_settings"], harness.gold_copy())
+        self.assertEqual(sorted(first), ["0", "settings", "switches"])
         engine.bytes_write(_line_bytes("echo"))
         reply = _plain(engine.line_read())
         self.assertEqual(reply, _line_get("echo_reply"))

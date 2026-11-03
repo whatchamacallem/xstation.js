@@ -1,0 +1,57 @@
+{
+  "echo_seconds": 600,
+  "hold_seconds": 120,
+  "http_seconds": 2,
+  "lines": {
+    "console_open_reply": {
+      "0": {
+        "t": "console.open"
+      }
+    },
+    "console_open_reply_full": {
+      "0": {
+        "type": "console.open"
+      }
+    },
+    "first": {
+      "0": {
+        "id": 101,
+        "type": "tap.start"
+      }
+    }
+  },
+  "long_task_ms": 5,
+  "order_count": 3,
+  "order_seconds": 30,
+  "poll_seconds": 0.1,
+  "probe_columns": 80,
+  "probe_rows": 24,
+  "quiet_seconds": 5,
+  "read_bytes": 1048576,
+  "root_debug": true,
+  "root_scripted": true,
+  "root_verbose": false,
+  "rung_seconds": 120,
+  "stall_seconds": 5,
+  "stop_seconds": 5,
+  "suites_seconds": 600,
+  "texts": {
+    "bootstrap_lock_held": "Another engine holds the lock {0}.",
+    "dispatch_handler_unknown": "No handler is registered for type rung.unknown version 0.",
+    "engine_tap_browser_failed": "The browser failed: {0}",
+    "http_fetch_failed": "The request to {0} failed: {1}",
+    "http_timeout_expired": "The request to {0} did not finish within 2 seconds.",
+    "verbose_sink_twice": "A sink is already set for the verbose lines of this thread.",
+    "wire_blobs_over": "The blobs of the kv.put line come to {1} bytes, over the blob_max of {2}.",
+    "wire_close_silent": "connection closed with code 1006 and no error line",
+    "wire_error_first": "The server sent an error before tap.start: Another engine holds the lock {0}.\n{1}",
+    "wire_open_closed": "The socket {0} closed with code 1006 before it opened.",
+    "wire_wait_expired_drain": "Gave up after 120 s waiting for the socket {0} to send its buffered bytes.",
+    "wire_wait_expired_first": "Gave up after 120 s waiting for tap.start from the server.",
+    "wire_wait_expired_open": "Gave up after 120 s waiting for the socket {0} to open.",
+    "wire_wait_expired_token": "Gave up after 120 s waiting for the token from {0}."
+  },
+  "window_height": 720,
+  "window_seconds": 600,
+  "window_width": 1280
+}

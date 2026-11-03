@@ -1,0 +1,97 @@
+{
+  "lines": {
+    "run": {
+      "0": {
+        "t": "sql.run"
+      },
+      "db": "castle",
+      "statements": [
+        {
+          "params": [],
+          "sql": "CREATE TABLE world (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT"
+        },
+        {
+          "params": ["castle_world", "The castle"],
+          "sql": "INSERT INTO world VALUES (?, ?)"
+        }
+      ]
+    },
+    "run_extra": {
+      "0": {
+        "t": "sql.run"
+      },
+      "db": "castle",
+      "statements": [
+        {
+          "extra": 1,
+          "params": [],
+          "sql": "SELECT 1"
+        }
+      ]
+    },
+    "run_full": {
+      "0": {
+        "type": "sql.run"
+      },
+      "db": "castle",
+      "statements": [
+        {
+          "params": [],
+          "sql": "CREATE TABLE world (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT"
+        },
+        {
+          "params": ["castle_world", "The castle"],
+          "sql": "INSERT INTO world VALUES (?, ?)"
+        }
+      ]
+    },
+    "run_paramless": {
+      "0": {
+        "t": "sql.run"
+      },
+      "db": "castle",
+      "statements": [
+        {
+          "sql": "SELECT 1"
+        }
+      ]
+    },
+    "run_quoted": {
+      "0": {
+        "t": "sql.run"
+      },
+      "db": "castle",
+      "statements": [
+        {
+          "params": [],
+          "sql": "CREATE TABLE t (x TEXT) STRICT"
+        },
+        {
+          "params": ["it's 'quoted'; DROP TABLE t; --\u4e2d\ud83d\ude00"],
+          "sql": "INSERT INTO t VALUES (?)"
+        }
+      ]
+    },
+    "run_request": {
+      "0": {
+        "i": 7,
+        "t": "sql.run"
+      },
+      "db": "castle",
+      "statements": [
+        {
+          "params": [],
+          "sql": "CREATE TABLE world (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT"
+        },
+        {
+          "params": ["castle_world", "The castle"],
+          "sql": "INSERT INTO world VALUES (?, ?)"
+        }
+      ]
+    }
+  },
+  "texts": {
+    "dispatch_handler_twice_run": "A handler is already registered for type sql.run version 0.",
+    "engine_sql_not_registered": "The sql handler was called before it was registered."
+  }
+}

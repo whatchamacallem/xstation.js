@@ -63,6 +63,7 @@ namespace test_integrate_agent {
       "sql.run",
     ]),
     overflow_setting: "overflow_bytes",
+    blob_setting: "blob_max",
     compact_setting: "turn_compact_turns",
     root: "/test_integrate_agent",
     server_name: "xsjs-browser",
@@ -216,6 +217,7 @@ namespace test_integrate_agent {
       new substrate.CacheFiles([...test_slots]),
       constants.root,
       harness.setting_get(constants.overflow_setting) as number,
+      harness.setting_get(constants.blob_setting) as number,
       harness.setting_get(constants.compact_setting) as number,
       tasks,
     );
@@ -228,6 +230,7 @@ namespace test_integrate_agent {
       constants.http_thread,
       constants.info,
       harness.setting_get,
+      switches.debug_on,
     );
     dispatch.handler_register(
       constants.line_type,

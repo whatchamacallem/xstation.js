@@ -61,6 +61,7 @@
     "test_integrate_media.ts",
     "test_substrate.ts",
     "test_substrate_store.ts",
+    "test_substrate_limit.ts",
     "test_integrate_substrate.ts",
     "test_substrate_crash.ts",
     "test_provider.ts",

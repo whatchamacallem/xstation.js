@@ -19,11 +19,12 @@
 # writes its reply, then fails with its error, whose `error` line has no
 # `r`, as its request is answered. A failure always logs its message, then
 # writes one `error` line with its cascade, in the name form of the line it
-# answers, else of the setting `debug`, and exits 1.
+# answers, else of the parameter `debug`, and exits 1.
 
 import dispatch, engine_db, engine_doc, engine_kv, engine_mcp, engine_sql
 import engine_system, engine_tap, engine_turn, engine_verbose, functools, jslb
-import json, mcp, os, re, select, settings, substrate, uuid, verbose
+import json, mcp, os, re, select, settings, substrate, switches, uuid
+import verbose
 from internationalization import i18n
 from typing import Any, NamedTuple, NoReturn, cast
 
@@ -247,7 +248,7 @@ def _provider_seed(store: substrate.Store) -> None:
 # Loads the settings and opens every database, seeding what is new.
 def _prepare_run(root: str) -> _PreparedRoot:
     values = settings.settings_load(os.path.join(root, _SETTINGS_NAME))
-    store = substrate.Store(root, values["overflow_bytes"])
+    store = substrate.Store(root, values["overflow_bytes"], values["blob_max"])
     for name in _DATABASES:
         if os.path.exists(_database_path(root, name)):
             store.db_open(name)
@@ -389,7 +390,7 @@ def loop_run(read_fd: int, write_fd: int, root: str) -> None:
     if prepared is None:
         raise RuntimeError(i18n("main_loop.not_prepared"))
     values = prepared.values
-    debug: bool = values["debug"]
+    debug = switches.debug
     _handlers_register(prepared.store, root, debug)
     decoder = jslb.LineDecoder(
         values["line_max"],

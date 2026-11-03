@@ -8,8 +8,13 @@
 # refused. No switch turns one off. The realms of TypeScript take them in
 # `tap.start` (`lines.TapStart.switches`). `anthropic` has the run take the
 # parts of Anthropic's cloud container: Playwright's headless shell and
-# ttyd's source from the package manager. `debug` and `verbose` are carried
-# and read, and nothing changes by them yet.
+# ttyd's source from the package manager. `debug` is debug mode and
+# `verbose` the console's verbose level, 2 when on and 1 otherwise.
+#
+# A server takes its root's instead: `<root>/parameters.json`, the
+# parameters of its run, `{"anthropic": bool, "debug": bool, "verbose":
+# bool}`, each key required and nothing else, which `parameters_load` reads
+# by `jslb.json_decode` and `switches_apply` sets, here and in its children.
 
 import argparse
 
@@ -25,3 +30,12 @@ def switches_set(parsed: argparse.Namespace) -> None: ...
 
 # The three switches by name, as `tap.start` carries them.
 def switches_get() -> dict[str, bool]: ...
+
+# Reads `<root>/parameters.json`, refusing a missing or extra key, a non bool.
+def parameters_load(root: str) -> dict[str, bool]: ...
+
+# Writes the three by name as `<root>/parameters.json`.
+def parameters_write(root: str, parameters: dict[str, bool]) -> None: ...
+
+# Sets each switch to its parameter, its variable `1` when true, else unset.
+def switches_apply(parameters: dict[str, bool]) -> None: ...

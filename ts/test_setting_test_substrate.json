@@ -1,0 +1,24 @@
+{
+  "texts": {
+    "substrate_header_bad_field": "The document header 0 is not a type with an optional version other than 0: {\"t\":\"scene\",\"x\":1}",
+    "substrate_header_bad_text": "The document header 0 is not a type with an optional version other than 0: scene",
+    "substrate_header_bad_type": "The document header 0 is not a type with an optional version other than 0: {\"v\":2}",
+    "substrate_header_bad_version": "The document header 0 is not a type with an optional version other than 0: {\"t\":\"scene\",\"v\":0}",
+    "substrate_header_gap": "The document header 2 follows a gap.",
+    "substrate_header_missing": "The document has no header 0.",
+    "substrate_header_normal": "A document in its normal form has a header 1 besides 0.",
+    "substrate_header_ref": "The document header 1 is not a reference string.",
+    "substrate_key_digits": "The document key '07' is decimal digits, which read as a header.",
+    "substrate_ref_bad_db_dash": "The ref '/d-b/key' is not a Key-Value-Ref.",
+    "substrate_ref_bad_db_digit": "The ref '/1db/key' is not a Key-Value-Ref.",
+    "substrate_ref_bad_db_empty": "The ref '//key' is not a Key-Value-Ref.",
+    "substrate_ref_bad_db_wide": "The ref '/caf\u00e9/key' is not a Key-Value-Ref.",
+    "substrate_ref_bad_empty": "The ref '' is not a Key-Value-Ref.",
+    "substrate_ref_bad_key_empty": "The ref '/metaverse/' is not a Key-Value-Ref.",
+    "substrate_ref_bad_key_none": "The ref '/metaverse' is not a Key-Value-Ref.",
+    "substrate_ref_bad_slash": "The ref '/' is not a Key-Value-Ref.",
+    "substrate_ref_index_true": "The header reference true names no header of the document.",
+    "substrate_ref_index_two": "The header reference 2 names no header of the document.",
+    "substrate_ref_shape": "The document body holds {\"$ref\":1}, which has the shape of a header reference."
+  }
+}

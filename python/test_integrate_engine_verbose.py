@@ -25,7 +25,7 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_integrate_engine_verbose"
 
 # The limits of the decoder, as the checkout sets them.
@@ -122,7 +122,7 @@ def _page_rows(root: str) -> list[tuple[int, str, str]]:
 
 # Child: opens the log, registers, logs server texts, returns lines' replies.
 def _lines_serve(root: str, debug: bool, data: bytes) -> list[object]:
-    engine_verbose.verbose.log_open(root, _RING)
+    engine_verbose.verbose.log_open(root, _RING, _BLOB_MAX)
     engine_verbose.handlers_register(debug)
     for text in _SERVER_TEXTS:
         engine_verbose.verbose.log(text)

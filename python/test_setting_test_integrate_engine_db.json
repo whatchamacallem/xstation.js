@@ -1,0 +1,78 @@
+{
+  "lines": {
+    "create": {
+      "0": {
+        "t": "db.create"
+      },
+      "db": "castle"
+    },
+    "create_full": {
+      "0": {
+        "type": "db.create"
+      },
+      "db": "castle"
+    },
+    "create_request": {
+      "0": {
+        "i": 7,
+        "t": "db.create"
+      },
+      "db": "castle"
+    },
+    "drop": {
+      "0": {
+        "t": "db.drop"
+      },
+      "db": "castle"
+    },
+    "drop_full": {
+      "0": {
+        "type": "db.drop"
+      },
+      "db": "castle"
+    },
+    "error_request": {
+      "0": {
+        "r": 7,
+        "t": "error"
+      }
+    },
+    "file": {
+      "0": {
+        "b": 1,
+        "t": "db.file"
+      },
+      "1": {},
+      "db": "castle"
+    },
+    "file_full": {
+      "0": {
+        "blobs": 1,
+        "type": "db.file"
+      },
+      "1": {},
+      "db": "castle"
+    },
+    "restore": {
+      "0": {
+        "b": 1,
+        "t": "db.restore"
+      },
+      "1": {},
+      "db": "castle",
+      "files": 2
+    },
+    "restore_full": {
+      "0": {
+        "blobs": 1,
+        "type": "db.restore"
+      },
+      "1": {},
+      "db": "castle",
+      "files": 2
+    }
+  },
+  "texts": {
+    "dispatch_request_unanswered": "The handler for type db.create version 0 returned no reply to the request with id 7."
+  }
+}

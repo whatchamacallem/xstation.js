@@ -20,7 +20,7 @@
 # own writes one error line and exits 1, as the stock main loop does.
 
 import dispatch, engine_tap, engine_verbose, functools, jslb, os, select
-import settings, uuid
+import settings, switches, uuid
 from internationalization import i18n
 from typing import Any, NoReturn, cast
 
@@ -146,7 +146,7 @@ def loop_run(read_fd: int, write_fd: int, root: str) -> None:
     values = cast(dict[str, Any], _STATE.values)
     dispatch.handler_register(_ECHO_TYPE, _ECHO_VERSION, echo_reply)
     engine_tap.handlers_register(root)
-    engine_verbose.handlers_register(values["debug"])
+    engine_verbose.handlers_register(switches.debug)
     decoder = jslb.LineDecoder(
         values["line_max"],
         values["blob_max"],
@@ -154,7 +154,7 @@ def loop_run(read_fd: int, write_fd: int, root: str) -> None:
         functools.partial(_sink_make, os.path.join(root, _CACHE_DIRECTORY)),
     )
     chunk: int = values["chunk_bytes"]
-    full: bool = values["debug"]
+    full = switches.debug
     while True:
         select.select([read_fd], [], [])
         data = os.read(read_fd, chunk)

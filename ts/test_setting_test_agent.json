@@ -1,0 +1,534 @@
+{
+  "bootstrap_script": "// Makes a universe: its databases, its row and its world the current one.\nconst store = engine.store;\nstore.db_create(args.universe);\nstore.db_create(args.world);\nstore.db_create(args.region);\nstore.sql_run(\"metaverse\", [\n  {sql: \"INSERT INTO universe VALUES (?, ?, ?, ?)\",\n    params: [args.universe, args.title, \"player\", args.world]},\n]);\nstore.kv_put(\"/metaverse/world\", new TextEncoder().encode(args.world));\nreturn {universe: args.universe, world: args.world, region: args.region};\n",
+  "document_lore": {
+    "0": {
+      "t": "prompt"
+    },
+    "1": "/castle/lore",
+    "text": {
+      "$ref": 1
+    }
+  },
+  "image_base64": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAH0lEQVR42mP4jwQYkAAucYZBqGGQO48oDaPxMCg0AADZV36QzYI8swAAAABJRU5ErkJggg==",
+  "image_sha256": "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0",
+  "lines": {
+    "click": {
+      "0": {
+        "i": 1,
+        "t": "ai.click"
+      },
+      "x": 10,
+      "y": 20
+    },
+    "image_answer": {
+      "0": {
+        "t": "http.request"
+      },
+      "headers": {
+        "content-type": "application/json"
+      },
+      "json": {
+        "data": [
+          {}
+        ]
+      },
+      "status": 200
+    },
+    "image_request": {
+      "0": {
+        "type": "http.request"
+      },
+      "headers": {
+        "Authorization": "Bearer xai-SYNTHETIC-KEY",
+        "Content-Type": "application/json"
+      },
+      "json": {
+        "model": "grok-2-image",
+        "n": 1,
+        "prompt": "A rain dark castle gatehouse at dusk seen from the far side of a moat, one lantern lit, painted, wide still frame, no people",
+        "response_format": "b64_json"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/images/generations"
+    },
+    "media_store": {
+      "0": {
+        "blobs": 1,
+        "type": "media.store"
+      },
+      "k": "/_files/gatehouse/arrival.png"
+    },
+    "media_store_reply": {
+      "0": {
+        "t": "media.store"
+      },
+      "k": "/_files/gatehouse/arrival.png",
+      "sha256": "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0",
+      "size": 88
+    },
+    "render_arrival": {
+      "0": {
+        "type": "render"
+      },
+      "image": "/_files/gatehouse/arrival.png",
+      "scene": "/castle_gatehouse/scene/arrival/1",
+      "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+    },
+    "render_reply": {
+      "0": {
+        "t": "render"
+      }
+    },
+    "reply_castle": {
+      "0": {
+        "r": 1,
+        "t": "ai.say"
+      },
+      "scene": "/castle_gatehouse/scene/arrival/1",
+      "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.",
+      "turn": 10
+    },
+    "reply_chat": {
+      "0": {
+        "t": "http.request"
+      },
+      "headers": {
+        "content-type": "application/json"
+      },
+      "status": 200
+    },
+    "reply_click": {
+      "0": {
+        "r": 1,
+        "t": "ai.click"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "The lights flicker.",
+      "turn": 2
+    },
+    "reply_full": {
+      "0": {
+        "reply": 7,
+        "type": "ai.say"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "Nothing happens.",
+      "turn": 2
+    },
+    "reply_next": {
+      "0": {
+        "r": 2,
+        "t": "ai.say"
+      },
+      "scene": "/castle_gatehouse/scene/arrival/1",
+      "subtitle": "Still the moat.",
+      "turn": 2
+    },
+    "request_chat": {
+      "0": {
+        "type": "http.request"
+      },
+      "headers": {
+        "Authorization": "Bearer xai-SYNTHETIC-KEY",
+        "Content-Type": "application/json"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "say_again": {
+      "0": {
+        "i": 2,
+        "t": "ai.say"
+      },
+      "text": "2"
+    },
+    "say_castle": {
+      "0": {
+        "i": 1,
+        "t": "ai.say"
+      },
+      "text": "1"
+    },
+    "say_full": {
+      "0": {
+        "id": 7,
+        "type": "ai.say"
+      },
+      "text": "2"
+    },
+    "say_next": {
+      "0": {
+        "i": 2,
+        "t": "ai.say"
+      },
+      "text": "0"
+    },
+    "say_nothing": {
+      "0": {
+        "i": 1,
+        "t": "ai.say"
+      },
+      "text": "2"
+    }
+  },
+  "texts": {
+    "agent_click_text": "The player clicked at x 10, y 20.",
+    "agent_prompt_invalid_analyst": "The document /metaverse/prompt/2 is not a prompt: it needs its text as a string in the member text.",
+    "agent_prompt_invalid_universe": "The document /castle/prompt/1 is not a prompt: it needs its text as a string in the member text.",
+    "substrate_id_missing": "The database metaverse has no document 'prompt'.",
+    "substrate_turns_compacted": "Turns 1 to 2 of this conversation were compacted when it held 2 turns. Their text is no longer in the conversation; the databases hold the state."
+  },
+  "tools": [
+    {
+      "description": "Run SQL statements in one transaction on a database. DDL is allowed: your scripts are the database administrator.",
+      "inputSchema": {
+        "properties": {
+          "db": {
+            "type": "string"
+          },
+          "statements": {
+            "items": {
+              "properties": {
+                "params": {
+                  "type": "array"
+                },
+                "sql": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "sql",
+                "params"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "db",
+          "statements"
+        ],
+        "type": "object"
+      },
+      "name": "sql_run"
+    },
+    {
+      "description": "Create an empty database. The name is a C identifier.",
+      "inputSchema": {
+        "properties": {
+          "db": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "db"
+        ],
+        "type": "object"
+      },
+      "name": "db_create"
+    },
+    {
+      "description": "Delete a database and everything in it.",
+      "inputSchema": {
+        "properties": {
+          "db": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "db"
+        ],
+        "type": "object"
+      },
+      "name": "db_drop"
+    },
+    {
+      "description": "Read the value a Key-Value-Ref names, /$db/$key, as text.",
+      "inputSchema": {
+        "properties": {
+          "ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref"
+        ],
+        "type": "object"
+      },
+      "name": "kv_get"
+    },
+    {
+      "description": "Write text under a Key-Value-Ref, /$db/$key, and return its sha256. A script is the row /_files/script/<name>.js.",
+      "inputSchema": {
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "text"
+        ],
+        "type": "object"
+      },
+      "name": "kv_put"
+    },
+    {
+      "description": "Delete the row a Key-Value-Ref names.",
+      "inputSchema": {
+        "properties": {
+          "ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref"
+        ],
+        "type": "object"
+      },
+      "name": "kv_delete"
+    },
+    {
+      "description": "List the keys of a database under a prefix with sizes and hashes.",
+      "inputSchema": {
+        "properties": {
+          "db": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "db",
+          "prefix"
+        ],
+        "type": "object"
+      },
+      "name": "kv_list"
+    },
+    {
+      "description": "Read a document by Document-Ref, /$db/$id/$version, in its encoded form: header 0, references at 1 on, {\"$ref\": n} in the body.",
+      "inputSchema": {
+        "properties": {
+          "ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref"
+        ],
+        "type": "object"
+      },
+      "name": "doc_get"
+    },
+    {
+      "description": "Write a new version of document $id in database $db and move its head. Returns the new Document-Ref.",
+      "inputSchema": {
+        "properties": {
+          "body": {
+            "type": "object"
+          },
+          "db": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "db",
+          "id",
+          "body"
+        ],
+        "type": "object"
+      },
+      "name": "doc_put"
+    },
+    {
+      "description": "The current Document-Ref of document $id in database $db.",
+      "inputSchema": {
+        "properties": {
+          "db": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "db",
+          "id"
+        ],
+        "type": "object"
+      },
+      "name": "doc_head"
+    },
+    {
+      "description": "Run the script /_files/script/<name>.js with args as a task in this worker. Returns its value or exception and the verbose lines it wrote.",
+      "inputSchema": {
+        "properties": {
+          "args": {
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "args"
+        ],
+        "type": "object"
+      },
+      "name": "script_run"
+    },
+    {
+      "description": "Run the script as script_run does, tracing every substrate call it makes first.",
+      "inputSchema": {
+        "properties": {
+          "args": {
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "args"
+        ],
+        "type": "object"
+      },
+      "name": "script_debug"
+    },
+    {
+      "description": "Generate an image from a prompt and keep it under /_files/<key>. Returns the key, size and sha256.",
+      "inputSchema": {
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt",
+          "key"
+        ],
+        "type": "object"
+      },
+      "name": "image_make"
+    },
+    {
+      "description": "Show an image by its Key-Value-Ref with a subtitle. No image means black.",
+      "inputSchema": {
+        "properties": {
+          "image": {
+            "type": "string"
+          },
+          "subtitle": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "subtitle"
+        ],
+        "type": "object"
+      },
+      "name": "render"
+    },
+    {
+      "_meta": {
+        "xsjs": {
+          "permit": true
+        }
+      },
+      "description": "Show the debug console as ctrl-0 does, run one command line in its dash and return its output until the next prompt or the timeout. Debug mode.",
+      "inputSchema": {
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "text",
+          "timeout_seconds"
+        ],
+        "type": "object"
+      },
+      "name": "console_run"
+    },
+    {
+      "_meta": {
+        "xsjs": {
+          "permit": true
+        }
+      },
+      "description": "Show the debug console as ctrl-0 does and type text into its dash, returning at once. A line goes when a newline ends it, and the text after the last newline waits for a later write. The console is yours from the first write until console_read sees the prompt. Debug mode.",
+      "inputSchema": {
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "name": "console_write"
+    },
+    {
+      "_meta": {
+        "xsjs": {
+          "permit": true
+        }
+      },
+      "description": "Show the debug console as ctrl-0 does and read its output from where the last read ended until the text until shows or the timeout, and whether it timed out. A read whose output ends with the prompt ends your turn at the console. Debug mode.",
+      "inputSchema": {
+        "properties": {
+          "timeout_seconds": {
+            "type": "number"
+          },
+          "until": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "until",
+          "timeout_seconds"
+        ],
+        "type": "object"
+      },
+      "name": "console_read"
+    },
+    {
+      "description": "The last lines of a thread's verbose ring: ui, ai or server.",
+      "inputSchema": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "thread": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread",
+          "count"
+        ],
+        "type": "object"
+      },
+      "name": "verbose_tail"
+    }
+  ]
+}

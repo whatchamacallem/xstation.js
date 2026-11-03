@@ -1,0 +1,4 @@
+{
+  "failfast": false,
+  "run": "unit"
+}

@@ -1,0 +1,107 @@
+{
+  "lines": {
+    "console_close_answer": {
+      "0": {
+        "reply": 8,
+        "type": "console.close"
+      }
+    },
+    "console_close_request": {
+      "0": {
+        "id": 8,
+        "type": "console.close"
+      }
+    },
+    "error_full": {
+      "0": {
+        "type": "error"
+      }
+    },
+    "fault_ui": {
+      "0": {
+        "t": "fault"
+      },
+      "thread": "ui"
+    },
+    "kv_list_first": {
+      "0": {
+        "i": 1,
+        "t": "kv.list"
+      },
+      "db": "castle",
+      "prefix": ""
+    },
+    "kv_list_reply": {
+      "0": {
+        "r": 1,
+        "t": "kv.list"
+      },
+      "keys": []
+    },
+    "kv_list_second": {
+      "0": {
+        "i": 2,
+        "t": "kv.list"
+      },
+      "db": "castle",
+      "prefix": ""
+    },
+    "kv_put_sized": {
+      "0": {
+        "b": 1,
+        "k": "/a/b",
+        "t": "kv.put"
+      },
+      "1": {
+        "s": 3
+      }
+    },
+    "overlay_line": {
+      "0": {
+        "type": "overlay.line"
+      },
+      "tty": 1
+    },
+    "settings_put_copy": {
+      "0": {
+        "id": 1,
+        "type": "settings.put"
+      }
+    },
+    "settings_put_notice": {
+      "0": {
+        "t": "settings.put"
+      }
+    },
+    "settings_put_reply": {
+      "0": {
+        "type": "settings.put"
+      }
+    },
+    "verbose_put": {
+      "0": {
+        "t": "verbose.put"
+      },
+      "lines": [],
+      "thread": "ui"
+    },
+    "verbose_put_full": {
+      "0": {
+        "type": "verbose.put"
+      },
+      "lines": [],
+      "thread": "ui"
+    }
+  },
+  "texts": {
+    "worker_ai_busy_twice": "console.busy came while the AI's turn holds tty 0 already.",
+    "worker_ai_idle_unheld": "console.idle came while no turn of the AI's holds tty 0.",
+    "worker_ai_overlay_received": "< {\"0\":{\"r\":1,\"t\":\"kv.list\"},\"keys\":[]}",
+    "worker_ai_overlay_received_sized": "< {\"b\":1,\"k\":\"/a/b\",\"t\":\"kv.put\"} with a payload of {1} bytes and blobs of [3] bytes",
+    "worker_ai_overlay_sent_empty": "> {}",
+    "worker_ai_overlay_sent_first": "> {\"0\":{\"i\":1,\"t\":\"kv.list\"},\"db\":\"castle\",\"prefix\":\"\"}",
+    "worker_ai_overlay_sent_second": "> {\"0\":{\"i\":2,\"t\":\"kv.list\"},\"db\":\"castle\",\"prefix\":\"\"}",
+    "worker_ai_overlay_sent_sized": "> {\"b\":1,\"k\":\"/a/b\",\"t\":\"kv.put\"} with a payload of {1} bytes and blobs of [3] bytes",
+    "worker_ai_synchronous_release": "The setting queue_synchronous is true while the parameter debug is false; synchronous mode is debug only."
+  }
+}

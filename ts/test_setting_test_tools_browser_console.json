@@ -1,0 +1,1071 @@
+{
+  "cases": [
+    {
+      "expect": [
+        "open_reply"
+      ],
+      "name": "opened",
+      "seconds": 10,
+      "send": [
+        "open_request"
+      ]
+    },
+    {
+      "expect": [
+        "recorded_ask",
+        "recorded_show",
+        "console_busy",
+        "console_idle",
+        "recorded_reply"
+      ],
+      "name": "recorded",
+      "seconds": 10,
+      "send": [
+        "first_input",
+        "recorded_request"
+      ]
+    },
+    {
+      "expect": [
+        "counted_ask",
+        "counted_show",
+        "console_busy",
+        "console_idle",
+        "counted_reply"
+      ],
+      "name": "counted",
+      "seconds": 10,
+      "send": [
+        "counted_request"
+      ]
+    },
+    {
+      "expect": [
+        "always_ask",
+        "always_show",
+        "console_busy",
+        "console_idle",
+        "always_reply"
+      ],
+      "name": "always",
+      "seconds": 10,
+      "send": [
+        "always_request"
+      ]
+    },
+    {
+      "expect": [
+        "allowed_show",
+        "console_busy",
+        "console_idle",
+        "allowed_reply"
+      ],
+      "name": "allowed",
+      "seconds": 10,
+      "send": [
+        "allowed_request"
+      ]
+    },
+    {
+      "expect": [
+        "prompted_write_ask",
+        "prompted_write_show",
+        "console_busy",
+        "prompted_write_reply"
+      ],
+      "name": "prompted_write",
+      "seconds": 10,
+      "send": [
+        "prompted_write_request"
+      ]
+    },
+    {
+      "expect": [
+        "prompted_wait_ask",
+        "prompted_wait_show",
+        "prompted_wait_reply"
+      ],
+      "name": "prompted_wait",
+      "seconds": 10,
+      "send": [
+        "prompted_wait_request"
+      ]
+    },
+    {
+      "expect": [
+        "prompted_answer_show",
+        "prompted_answer_reply"
+      ],
+      "name": "prompted_answer",
+      "seconds": 10,
+      "send": [
+        "prompted_answer_request"
+      ]
+    },
+    {
+      "expect": [
+        "prompted_done_show",
+        "console_idle",
+        "prompted_done_reply"
+      ],
+      "name": "prompted_done",
+      "seconds": 10,
+      "send": [
+        "prompted_done_request"
+      ]
+    },
+    {
+      "expect": [
+        "partial_first_show",
+        "console_busy",
+        "partial_first_reply"
+      ],
+      "name": "partial_first",
+      "seconds": 10,
+      "send": [
+        "partial_first_request"
+      ]
+    },
+    {
+      "expect": [
+        "partial_held_show",
+        "partial_held_reply"
+      ],
+      "name": "partial_held",
+      "seconds": 10,
+      "send": [
+        "partial_held_request"
+      ]
+    },
+    {
+      "expect": [
+        "partial_rest_show",
+        "partial_rest_reply"
+      ],
+      "name": "partial_rest",
+      "seconds": 10,
+      "send": [
+        "partial_rest_request"
+      ]
+    },
+    {
+      "expect": [
+        "partial_done_show",
+        "console_idle",
+        "partial_done_reply"
+      ],
+      "name": "partial_done",
+      "seconds": 10,
+      "send": [
+        "partial_done_request"
+      ]
+    },
+    {
+      "expect": [
+        "view_write_show",
+        "console_busy",
+        "view_write_reply"
+      ],
+      "name": "view_write",
+      "seconds": 10,
+      "send": [
+        "view_write_request"
+      ]
+    },
+    {
+      "expect": [
+        "view_answer_show",
+        "view_answer_reply"
+      ],
+      "name": "view_answer",
+      "seconds": 10,
+      "send": [
+        "view_input",
+        "view_answer_request"
+      ]
+    },
+    {
+      "expect": [
+        "view_done_show",
+        "console_idle",
+        "view_done_reply",
+        "view_released"
+      ],
+      "name": "view_done",
+      "seconds": 10,
+      "send": [
+        "view_done_request"
+      ]
+    },
+    {
+      "expect": [
+        "sleep_wait_show",
+        "console_busy",
+        "console_idle",
+        "sleep_wait_reply"
+      ],
+      "name": "sleep_wait",
+      "seconds": 10,
+      "send": [
+        "sleep_input",
+        "sleep_wait_request"
+      ]
+    },
+    {
+      "expect": [
+        "expired_show",
+        "console_busy",
+        "console_idle",
+        "expired_reply"
+      ],
+      "name": "expired",
+      "seconds": 10,
+      "send": [
+        "expired_request"
+      ]
+    },
+    {
+      "expect": [
+        "wait_expired_show",
+        "wait_expired_reply"
+      ],
+      "name": "wait_expired",
+      "seconds": 10,
+      "send": [
+        "wait_expired_request"
+      ]
+    }
+  ],
+  "far": {
+    "choices": {
+      "1": "permit_accept",
+      "2": "permit_accept",
+      "3": "permit_always",
+      "4": "permit_always",
+      "5": "permit_always"
+    },
+    "permit_accept": {
+      "0": {
+        "t": "permit.ask"
+      },
+      "choice": "accept"
+    },
+    "permit_always": {
+      "0": {
+        "t": "permit.ask"
+      },
+      "choice": "always"
+    },
+    "show_reply": {
+      "0": {
+        "t": "console.show"
+      }
+    }
+  },
+  "info": {
+    "base_url": "https://api.x.ai/v1",
+    "chat_model": "grok-4",
+    "image_model": "grok-2-image"
+  },
+  "lines": {
+    "allowed_reply": {
+      "0": {
+        "r": 106,
+        "t": "mcp"
+      },
+      "id": 4,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{\"output\":\"/tmp\\n\",\"timed_out\":false}",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "allowed_request": {
+      "0": {
+        "i": 106,
+        "t": "mcp"
+      },
+      "id": 4,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "text": "pwd",
+          "timeout_seconds": 5
+        },
+        "name": "console_run"
+      }
+    },
+    "allowed_show": {
+      "0": {
+        "id": 11,
+        "type": "console.show"
+      }
+    },
+    "always_ask": {
+      "0": {
+        "id": 8,
+        "type": "permit.ask"
+      },
+      "input": {
+        "text": "echo 3",
+        "timeout_seconds": 5
+      },
+      "permit": 3,
+      "tool": "browser.console_run"
+    },
+    "always_reply": {
+      "0": {
+        "r": 105,
+        "t": "mcp"
+      },
+      "id": 3,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{\"output\":\"3\\n\",\"timed_out\":false}",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "always_request": {
+      "0": {
+        "i": 105,
+        "t": "mcp"
+      },
+      "id": 3,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "text": "echo 3",
+          "timeout_seconds": 5
+        },
+        "name": "console_run"
+      }
+    },
+    "always_show": {
+      "0": {
+        "id": 9,
+        "type": "console.show"
+      }
+    },
+    "console_busy": {
+      "0": {
+        "type": "console.busy"
+      }
+    },
+    "console_idle": {
+      "0": {
+        "type": "console.idle"
+      }
+    },
+    "counted_ask": {
+      "0": {
+        "id": 5,
+        "type": "permit.ask"
+      },
+      "input": {
+        "text": "echo 2",
+        "timeout_seconds": 5
+      },
+      "permit": 2,
+      "tool": "browser.console_run"
+    },
+    "counted_reply": {
+      "0": {
+        "r": 104,
+        "t": "mcp"
+      },
+      "id": 2,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{\"output\":\"2\\n\",\"timed_out\":false}",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "counted_request": {
+      "0": {
+        "i": 104,
+        "t": "mcp"
+      },
+      "id": 2,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "text": "echo 2",
+          "timeout_seconds": 5
+        },
+        "name": "console_run"
+      }
+    },
+    "counted_show": {
+      "0": {
+        "id": 6,
+        "type": "console.show"
+      }
+    },
+    "expired_reply": {
+      "0": {
+        "r": 118,
+        "t": "mcp"
+      },
+      "id": 16,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{\"output\":\"\",\"timed_out\":true}",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "expired_request": {
+      "0": {
+        "i": 118,
+        "t": "mcp"
+      },
+      "id": 16,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "text": "sleep 600",
+          "timeout_seconds": 2
+        },
+        "name": "console_run"
+      }
+    },
+    "expired_show": {
+      "0": {
+        "id": 33,
+        "type": "console.show"
+      }
+    },
+    "first_input": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "eyJBdXRoVG9rZW4iOiIiLCJjb2x1bW5zIjoxMjAsInJvd3MiOjQwfQ==",
+        "size": 40
+      }
+    },
+    "open_reply": {
+      "0": {
+        "reply": 102,
+        "type": "console.open"
+      },
+      "token": ""
+    },
+    "open_request": {
+      "0": {
+        "id": 102,
+        "type": "console.open"
+      }
+    },
+    "partial_done_reply": {
+      "0": {
+        "r": 114,
+        "t": "mcp"
+      },
+      "id": 12,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{\"output\":\"echo partial\\npartial\\n$ \",\"timed_out\":false}",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "partial_done_request": {
+      "0": {
+        "i": 114,
+        "t": "mcp"
+      },
+      "id": 12,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "timeout_seconds": 5,
+          "until": "$ "
+        },
+        "name": "console_read"
+      }
+    },
+    "partial_done_show": {
+      "0": {
+        "id": 25,
+        "type": "console.show"
+      }
+    },
+    "partial_first_reply": {
+      "0": {
+        "r": 111,
+        "t": "mcp"
+      },
+      "id": 9,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{}",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "partial_first_request": {
+      "0": {
+        "i": 111,
+        "t": "mcp"
+      },
+      "id": 9,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "text": "echo par"
+        },
+        "name": "console_write"
+      }
+    },
+    "partial_first_show": {
+      "0": {
+        "id": 21,
+        "type": "console.show"
+      }
+    },
+    "partial_held_reply": {
+      "0": {
+        "r": 112,
+        "t": "mcp"
+      },
+      "id": 10,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{\"output\":\"\",\"timed_out\":true}",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "partial_held_request": {
+      "0": {
+        "i": 112,
+        "t": "mcp"
+      },
+      "id": 10,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "timeout_seconds": 0.5,
+          "until": "$ "
+        },
+        "name": "console_read"
+      }
+    },
+    "partial_held_show": {
+      "0": {
+        "id": 22,
+        "type": "console.show"
+      }
+    },
+    "partial_rest_reply": {
+      "0": {
+        "r": 113,
+        "t": "mcp"
+      },
+      "id": 11,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{}",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "partial_rest_request": {
+      "0": {
+        "i": 113,
+        "t": "mcp"
+      },
+      "id": 11,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "text": "tial\n"
+        },
+        "name": "console_write"
+      }
+    },
+    "partial_rest_show": {
+      "0": {
+        "id": 24,
+        "type": "console.show"
+      }
+    },
+    "prompted_answer_reply": {
+      "0": {
+        "r": 109,
+        "t": "mcp"
+      },
+      "id": 7,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{}",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "prompted_answer_request": {
+      "0": {
+        "i": 109,
+        "t": "mcp"
+      },
+      "id": 7,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "text": "yes\n"
+        },
+        "name": "console_write"
+      }
+    },
+    "prompted_answer_show": {
+      "0": {
+        "id": 18,
+        "type": "console.show"
+      }
+    },
+    "prompted_done_reply": {
+      "0": {
+        "r": 110,
+        "t": "mcp"
+      },
+      "id": 8,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{\"output\":\"yes\\ngot yes\\n$ \",\"timed_out\":false}",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "prompted_done_request": {
+      "0": {
+        "i": 110,
+        "t": "mcp"
+      },
+      "id": 8,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "timeout_seconds": 5,
+          "until": "$ "
+        },
+        "name": "console_read"
+      }
+    },
+    "prompted_done_show": {
+      "0": {
+        "id": 19,
+        "type": "console.show"
+      }
+    },
+    "prompted_wait_ask": {
+      "0": {
+        "id": 15,
+        "type": "permit.ask"
+      },
+      "input": {
+        "timeout_seconds": 0.5,
+        "until": "$ "
+      },
+      "permit": 5,
+      "tool": "browser.console_read"
+    },
+    "prompted_wait_reply": {
+      "0": {
+        "r": 108,
+        "t": "mcp"
+      },
+      "id": 6,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{\"output\":\"read answer && echo got $answer\\n\",\"timed_out\":true}",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "prompted_wait_request": {
+      "0": {
+        "i": 108,
+        "t": "mcp"
+      },
+      "id": 6,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "timeout_seconds": 0.5,
+          "until": "$ "
+        },
+        "name": "console_read"
+      }
+    },
+    "prompted_wait_show": {
+      "0": {
+        "id": 16,
+        "type": "console.show"
+      }
+    },
+    "prompted_write_ask": {
+      "0": {
+        "id": 13,
+        "type": "permit.ask"
+      },
+      "input": {
+        "text": "read answer && echo got $answer\n"
+      },
+      "permit": 4,
+      "tool": "browser.console_write"
+    },
+    "prompted_write_reply": {
+      "0": {
+        "r": 107,
+        "t": "mcp"
+      },
+      "id": 5,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{}",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "prompted_write_request": {
+      "0": {
+        "i": 107,
+        "t": "mcp"
+      },
+      "id": 5,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "text": "read answer && echo got $answer\n"
+        },
+        "name": "console_write"
+      }
+    },
+    "prompted_write_show": {
+      "0": {
+        "id": 14,
+        "type": "console.show"
+      }
+    },
+    "recorded_ask": {
+      "0": {
+        "id": 2,
+        "type": "permit.ask"
+      },
+      "input": {
+        "text": "echo hi",
+        "timeout_seconds": 5
+      },
+      "permit": 1,
+      "tool": "browser.console_run"
+    },
+    "recorded_reply": {
+      "0": {
+        "r": 103,
+        "t": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{\"output\":\"hi\\n\",\"timed_out\":false}",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "recorded_request": {
+      "0": {
+        "i": 103,
+        "t": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "text": "echo hi",
+          "timeout_seconds": 5
+        },
+        "name": "console_run"
+      }
+    },
+    "recorded_show": {
+      "0": {
+        "id": 3,
+        "type": "console.show"
+      }
+    },
+    "sleep_input": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MHNsZWVwIDIN",
+        "size": 9
+      }
+    },
+    "sleep_wait_reply": {
+      "0": {
+        "r": 119,
+        "t": "mcp"
+      },
+      "id": 17,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{\"output\":\"after\\n\",\"timed_out\":false}",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "sleep_wait_request": {
+      "0": {
+        "i": 119,
+        "t": "mcp"
+      },
+      "id": 17,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "text": "echo after",
+          "timeout_seconds": 10
+        },
+        "name": "console_run"
+      }
+    },
+    "sleep_wait_show": {
+      "0": {
+        "id": 31,
+        "type": "console.show"
+      }
+    },
+    "view_answer_reply": {
+      "0": {
+        "r": 116,
+        "t": "mcp"
+      },
+      "id": 14,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{}",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "view_answer_request": {
+      "0": {
+        "i": 116,
+        "t": "mcp"
+      },
+      "id": 14,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "text": "yes\n"
+        },
+        "name": "console_write"
+      }
+    },
+    "view_answer_show": {
+      "0": {
+        "id": 28,
+        "type": "console.show"
+      }
+    },
+    "view_done_reply": {
+      "0": {
+        "r": 117,
+        "t": "mcp"
+      },
+      "id": 15,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{\"output\":\"read answer && echo got $answer\\nyes\\ngot yes\\n$ \",\"timed_out\":false}",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "view_done_request": {
+      "0": {
+        "i": 117,
+        "t": "mcp"
+      },
+      "id": 15,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "timeout_seconds": 5,
+          "until": "$ "
+        },
+        "name": "console_read"
+      }
+    },
+    "view_done_show": {
+      "0": {
+        "id": 29,
+        "type": "console.show"
+      }
+    },
+    "view_input": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MGVjaG8gdmlldw0=",
+        "size": 11
+      }
+    },
+    "view_released": {
+      "0": {
+        "type": "console_test.released"
+      }
+    },
+    "view_write_reply": {
+      "0": {
+        "r": 115,
+        "t": "mcp"
+      },
+      "id": 13,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{}",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "view_write_request": {
+      "0": {
+        "i": 115,
+        "t": "mcp"
+      },
+      "id": 13,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "text": "read answer && echo got $answer\n"
+        },
+        "name": "console_write"
+      }
+    },
+    "view_write_show": {
+      "0": {
+        "id": 27,
+        "type": "console.show"
+      }
+    },
+    "wait_expired_reply": {
+      "0": {
+        "r": 120,
+        "t": "mcp"
+      },
+      "id": 18,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{\"output\":\"\",\"timed_out\":true}",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "wait_expired_request": {
+      "0": {
+        "i": 120,
+        "t": "mcp"
+      },
+      "id": 18,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "text": "echo never",
+          "timeout_seconds": 1
+        },
+        "name": "console_run"
+      }
+    },
+    "wait_expired_show": {
+      "0": {
+        "id": 35,
+        "type": "console.show"
+      }
+    }
+  },
+  "output_kind": "0",
+  "prompt": "$ ",
+  "released": "\r\nview\r\n$ ",
+  "root": {}
+}

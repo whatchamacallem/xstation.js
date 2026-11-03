@@ -1,0 +1,13 @@
+{
+  "texts": {
+    "switches_already_set": "The switches were already set on this thread.",
+    "switches_malformed_array": "The switches [true,false,true] are not exactly anthropic, debug and verbose, each true or false.",
+    "switches_malformed_extra": "The switches {\"anthropic\":false,\"debug\":false,\"verbose\":false,\"other\":false} are not exactly anthropic, debug and verbose, each true or false.",
+    "switches_malformed_missing": "The switches {\"anthropic\":false,\"debug\":false} are not exactly anthropic, debug and verbose, each true or false.",
+    "switches_malformed_null": "The switches null are not exactly anthropic, debug and verbose, each true or false.",
+    "switches_malformed_number": "The switches 1 are not exactly anthropic, debug and verbose, each true or false.",
+    "switches_malformed_string": "The switches {\"anthropic\":\"1\",\"debug\":false,\"verbose\":false} are not exactly anthropic, debug and verbose, each true or false.",
+    "switches_malformed_undefined": "The switches undefined are not exactly anthropic, debug and verbose, each true or false.",
+    "switches_not_set": "The switches were used before they were set."
+  }
+}

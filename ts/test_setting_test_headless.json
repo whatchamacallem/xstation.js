@@ -1,0 +1,11 @@
+{
+  "server": {
+    "closed_port": 28746,
+    "host": "127.0.0.1",
+    "paths": {},
+    "port": 28745
+  },
+  "stop_seconds": 5,
+  "window_height": 720,
+  "window_width": 1280
+}

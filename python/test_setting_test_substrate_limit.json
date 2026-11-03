@@ -1,0 +1,11 @@
+{
+  "limit_setters": [
+    "PRAGMA max_page_count = 5120",
+    "PRAGMA main.MAX_PAGE_COUNT = 5120",
+    "pragma max_page_count(5120)"
+  ],
+  "texts": {
+    "denied": "not authorized",
+    "full": "database or disk is full"
+  }
+}

@@ -1,0 +1,197 @@
+{
+  "lines": {
+    "echo_reply": {
+      "0": {
+        "b": 2,
+        "r": 3,
+        "t": "echo"
+      },
+      "1": {},
+      "2": {},
+      "n": 4
+    },
+    "echo_request": {
+      "0": {
+        "i": 3,
+        "t": "echo"
+      }
+    },
+    "error": {
+      "0": {
+        "t": "error"
+      }
+    },
+    "error_full": {
+      "0": {
+        "type": "error"
+      }
+    },
+    "error_reply": {
+      "0": {
+        "r": 7,
+        "t": "error"
+      }
+    },
+    "error_reply_full": {
+      "0": {
+        "reply": 7,
+        "type": "error"
+      }
+    },
+    "get": {
+      "0": {
+        "t": "kv.get"
+      }
+    },
+    "get_answered": {
+      "0": {
+        "r": 7,
+        "t": "kv.get"
+      }
+    },
+    "get_reply": {
+      "0": {
+        "r": 7,
+        "t": "kv.get"
+      },
+      "n": 1
+    },
+    "get_request": {
+      "0": {
+        "i": 7,
+        "t": "kv.get"
+      }
+    },
+    "get_request_full": {
+      "0": {
+        "id": 7,
+        "type": "kv.get"
+      }
+    },
+    "get_v1": {
+      "0": {
+        "t": "kv.get",
+        "v": 1
+      }
+    },
+    "keyed": {
+      "0": {
+        "i": 7,
+        "k": "/a/b",
+        "t": "kv.get",
+        "v": 1
+      },
+      "n": 1
+    },
+    "keyed_full": {
+      "0": {
+        "id": 7,
+        "key": "/a/b",
+        "type": "kv.get",
+        "version": 1
+      },
+      "n": 1
+    },
+    "keyed_reply": {
+      "0": {
+        "r": 7,
+        "t": "kv.get"
+      },
+      "found": true,
+      "size": 3
+    },
+    "keyed_reply_full": {
+      "0": {
+        "reply": 7,
+        "type": "kv.get"
+      },
+      "found": true,
+      "size": 3
+    },
+    "mcp": {
+      "0": {
+        "t": "mcp"
+      }
+    },
+    "mcp_reply": {
+      "0": {
+        "r": 7,
+        "t": "mcp"
+      }
+    },
+    "mcp_request": {
+      "0": {
+        "i": 7,
+        "t": "mcp"
+      }
+    },
+    "put": {
+      "0": {
+        "t": "kv.put"
+      }
+    },
+    "put_blob": {
+      "0": {
+        "b": 1,
+        "t": "kv.put"
+      },
+      "1": {},
+      "n": 1
+    },
+    "put_full": {
+      "0": {
+        "type": "kv.put"
+      }
+    },
+    "put_full_answered": {
+      "0": {
+        "reply": 8,
+        "type": "kv.put"
+      }
+    },
+    "put_request": {
+      "0": {
+        "i": 8,
+        "t": "kv.put"
+      }
+    },
+    "put_v1": {
+      "0": {
+        "t": "kv.put",
+        "v": 1
+      },
+      "n": 2,
+      "text": "x"
+    },
+    "verbose_put": {
+      "0": {
+        "t": "verbose.put"
+      }
+    },
+    "verbose_put_text": {
+      "0": {
+        "t": "verbose.put"
+      },
+      "text": "x"
+    }
+  },
+  "texts": {
+    "dispatch_handler_twice": "A handler is already registered for type kv.get version 0.",
+    "dispatch_handler_unknown_get": "No handler is registered for type kv.get version 1.",
+    "dispatch_handler_unknown_put": "No handler is registered for type kv.put version 0.",
+    "dispatch_id_refused_bool": "The line of type kv.get has the id True, which is not an integer of at least 1.",
+    "dispatch_id_refused_float": "The line of type kv.get has the id 1.0, which is not an integer of at least 1.",
+    "dispatch_id_refused_list": "The line of type kv.get has the id [1], which is not an integer of at least 1.",
+    "dispatch_id_refused_negative": "The line of type kv.get has the id -1, which is not an integer of at least 1.",
+    "dispatch_id_refused_text": "The line of type kv.get has the id '1', which is not an integer of at least 1.",
+    "dispatch_id_refused_zero": "The line of type kv.get has the id 0, which is not an integer of at least 1.",
+    "dispatch_notification_replied_mcp": "The handler for type mcp version 0 returned a reply to a line with no id.",
+    "dispatch_notification_replied_verbose": "The handler for type verbose.put version 0 returned a reply to a line with no id.",
+    "dispatch_request_unanswered": "The handler for type kv.get version 0 returned no reply to the request with id 7.",
+    "dispatch_version_refused_bool": "The line of type kv.get has the version True, which is not an integer.",
+    "dispatch_version_refused_float": "The line of type kv.get has the version 1.0, which is not an integer.",
+    "dispatch_version_refused_list": "The line of type kv.get has the version [1], which is not an integer.",
+    "dispatch_version_refused_null": "The line of type kv.get has the version None, which is not an integer.",
+    "dispatch_version_refused_text": "The line of type kv.get has the version '1', which is not an integer."
+  }
+}

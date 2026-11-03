@@ -14,7 +14,7 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # The root the functions are given, which neither of them reads.
 _ROOT_GIVEN = os.path.join(_ROOT_PATH, "build", "stall_root")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_stall_loop"
 
 

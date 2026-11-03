@@ -22,7 +22,7 @@ _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
 )
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_integrate_engine_doc"
 
 # The database the gold's lines name.
@@ -140,7 +140,7 @@ class ScratchCase(unittest.TestCase):
 
     # In the child: a store on the root with the database, the handler in it.
     def store_register(self) -> substrate.Store:
-        store = substrate.Store(self.root, _OVERFLOW_BYTES)
+        store = substrate.Store(self.root, _OVERFLOW_BYTES, _BLOB_MAX)
         store.db_create(_DATABASE)
         engine_doc.handlers_register(store)
         return store

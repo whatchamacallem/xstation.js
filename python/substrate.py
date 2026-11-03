@@ -20,6 +20,13 @@
 # The schema's triggers raise the name of a string of the strings table, as
 # `agent.content_ambiguous`: a statement that fails with such a message
 # raises that string, the `sqlite3` error as its `__cause__`.
+#
+# Every connection it opens holds its database to `blob_max` bytes, `PRAGMA
+# max_page_count` over the database's `page_size`, set before any statement
+# of its own: a write that needs a page past it fails with SQLite's
+# `SQLITE_FULL`, which it raises and never catches. The connection then sets
+# SQLite's authorizer, which denies a `PRAGMA max_page_count` that has a
+# value, so that SQLite refuses it with `SQLITE_AUTH` when it is prepared.
 
 import hashlib, json, os, re, sqlite3, tempfile, urllib.parse
 from collections.abc import Callable, Iterable
@@ -77,6 +84,9 @@ _CACHE_DIRECTORY = "cache"
 
 # A locked database's wait: 5000 ms, a default chosen by its writer.
 _BUSY_TIMEOUT_MS = 5000
+
+# The pragma of the page limit, which only the store sets.
+_LIMIT_PRAGMA = "max_page_count"
 
 # A database name, a C identifier.
 _C_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -288,6 +298,31 @@ def _uri_make(path: str, query: str) -> str:
     return "file:" + urllib.parse.quote(path) + "?" + query
 
 
+# Denies a `PRAGMA max_page_count` with a value, allowing every other action.
+def _pragma_authorize(
+    action: int,
+    name: str | None,
+    value: str | None,
+    _schema: str | None,
+    _trigger: str | None,
+) -> int:
+    if (
+        action == sqlite3.SQLITE_PRAGMA
+        and name is not None
+        and name.lower() == _LIMIT_PRAGMA
+        and value is not None
+    ):
+        return sqlite3.SQLITE_DENY
+    return sqlite3.SQLITE_OK
+
+
+# Holds a new connection's database to `blob_max` bytes, its first statement.
+def _limit_set(connection: sqlite3.Connection, blob_max: int) -> None:
+    page_size = connection.execute("PRAGMA page_size").fetchone()[0]
+    connection.execute(f"PRAGMA {_LIMIT_PRAGMA} = {blob_max // page_size}")
+    connection.set_authorizer(_pragma_authorize)
+
+
 # Sets the pragmas of a new connection and checks the journal mode took.
 def _pragmas_set(connection: sqlite3.Connection) -> None:
     connection.execute("PRAGMA foreign_keys = ON")
@@ -331,11 +366,12 @@ def _schema_check(connection: sqlite3.Connection, found: set[str]) -> None:
 
 
 # Raises unless a database file holds the substrate's tables, writing nothing.
-def _schema_verify(path: str) -> None:
+def _schema_verify(path: str, blob_max: int) -> None:
     connection = sqlite3.connect(
         _uri_make(path, _QUERY_READ), uri=True, isolation_level=None
     )
     try:
+        _limit_set(connection, blob_max)
         _schema_check(connection, _tables_found(connection))
     finally:
         connection.close()
@@ -415,11 +451,12 @@ def doc_decode(encoded: dict[int | str, Any]) -> dict[int | str, Any]:
 
 # One owner's databases under one root. Methods run inside `transaction_run`.
 class Store:
-    # Keeps the root and the overflow limit and makes the cache directory.
-    def __init__(self, root: str, overflow_bytes: int) -> None:
+    # Keeps the root and the two limits and makes the cache directory.
+    def __init__(self, root: str, overflow_bytes: int, blob_max: int) -> None:
         self._root = os.path.abspath(root)
         self._cache = os.path.join(self._root, _CACHE_DIRECTORY)
         self._overflow_bytes = overflow_bytes
+        self._blob_max = blob_max
         self._connections: dict[str, sqlite3.Connection] = {}
         self._joined: list[sqlite3.Connection] | None = None
         self._unlinks: set[str] = set()
@@ -436,6 +473,7 @@ class Store:
             isolation_level=None,
         )
         try:
+            _limit_set(connection, self._blob_max)
             _pragmas_set(connection)
             schema_apply(connection)
         except BaseException:
@@ -671,7 +709,7 @@ class Store:
 
     # Checks a file's tables, then closes the database and renames it over.
     def _file_replace(self, db: str, source: str) -> None:
-        _schema_verify(source)
+        _schema_verify(source, self._blob_max)
         if db in self._connections:
             self.db_close(db)
         self._wal_check(db)
@@ -708,6 +746,7 @@ class Store:
                 isolation_level=None,
             )
             try:
+                _limit_set(connection, self._blob_max)
                 named |= _hashes_read(connection)
             finally:
                 connection.close()

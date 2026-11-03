@@ -1,0 +1,8 @@
+{
+  "texts": {
+    "jslb_number_overflow": "The number 1e400 overflows a double.",
+    "jslb_text_not_json": "The text is not JSON: {0}.",
+    "settings_type_wrong_root_files": "The setting powershell.root_files must be of type list of str but is of type list.",
+    "settings_type_wrong_synchronous": "The setting queue_synchronous must be of type bool but is of type int."
+  }
+}

@@ -60,7 +60,7 @@
 // permit.ask        ui-ai    AI -> UI        0      PermitAnswer
 // console.show      ui-ai    AI -> UI        0      Empty, once tty 0 is open
 // console.open      ui-ai    UI -> AI        0      ConsoleOpenReply
-// console.input     ui-ai    UI -> AI        1      push, to the port
+// console.input     ui-ai    UI -> AI        1      push, to the writer
 // console.output    ui-ai    AI -> UI        1      push
 // console.close     ui-ai    UI -> AI        0      Empty
 // console.exit      ui-ai    AI -> UI        0      push
@@ -83,6 +83,9 @@
 // console.input     console  AI -> CONSOLE   1      push: one message
 // console.open      console  AI -> CONSOLE   0      ConsoleOpenReply
 // console.read      console  AI -> CONSOLE   0      ConsoleReadReply
+// console.write     console  AI -> CONSOLE   0      push: the AI's text
+// console.busy      console  AI -> CONSOLE   0      push, output kept
+// console.idle      console  AI -> CONSOLE   0      push, the turn ended
 // dom.choice        dom      UI -> DOM       0      DomChoiceReply
 // ui.input          ui       DOM -> UI       0      push, from a listener
 // ui.control_key    ui       DOM -> UI       0      push, from a listener
@@ -177,11 +180,10 @@ declare namespace lines {
     image_model: string;
   }
 
-  // tap.start: the first line: settings, switches and, in debug mode, gold.
+  // tap.start: the first line: settings and switches, no gold.
   interface TapStart {
     settings: settings.Settings;
     switches: switches.Switches;
-    test_settings?: harness.Gold;
   }
 
   // kv.get: the ref is the header's `k`. The reply carries the value as 1.
@@ -364,7 +366,6 @@ declare namespace lines {
   interface SettingsSet {
     settings: settings.Settings;
     switches: switches.Switches;
-    test_settings?: harness.Gold;
   }
 
   // ui.tests: the worker's suites ended, so the UI thread runs its own.
@@ -467,6 +468,11 @@ declare namespace lines {
 
   interface ConsoleExit {
     code: number;
+  }
+
+  // console.write: the AI's text, which tty 0's writer types line by line.
+  interface ConsoleWrite {
+    text: string;
   }
 
   // console.busy and console.idle: the view takes no keys between the two.

@@ -24,7 +24,7 @@ _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
 )
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_integrate_engine_db"
 
 # The database the gold's lines name.
@@ -172,7 +172,7 @@ class ScratchCase(unittest.TestCase):
 
     # In the child: a store on the root, the handlers in the dispatcher.
     def store_register(self) -> substrate.Store:
-        store = substrate.Store(self.root, _OVERFLOW_BYTES)
+        store = substrate.Store(self.root, _OVERFLOW_BYTES, _BLOB_MAX)
         engine_db.handlers_register(store)
         return store
 
@@ -243,7 +243,7 @@ class TestRestore(ScratchCase):
         data, *files = self.lines_carry(False)
         cached: list[bytes | str] = [*files]
         copied = os.path.join(self.scratch, "copy")
-        restored = substrate.Store(copied, _OVERFLOW_BYTES)
+        restored = substrate.Store(copied, _OVERFLOW_BYTES, _BLOB_MAX)
         restored.db_restore(_DATABASE, data, cached)
         for ref, value in _VALUES.items():
             self.assertEqual(_value_bytes(restored.kv_get(ref).data), value)

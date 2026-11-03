@@ -10,13 +10,20 @@
 #
 #     .\xsjs_start.ps1                    http://localhost:5768/
 #     .\xsjs_start.ps1 username:password  https://<this PC>:5768/
+#     .\xsjs_start.ps1 [--debug] [--verbose] [username:password]
 #
 # Each run copies the ttyd that xsjs_install.ps1 built, the engine's modules
-# and seeds from python\, i18n\en-US.json, settings.json, test_settings.json,
-# provider.json and the page into ~/.cache/xsjs in Linux, and ttyd runs that
-# copy on port 5769 of WSL's 127.0.0.1. A Windows port proxy forwards port
-# 5768 to it. The environment variable XSJS_PROVIDER_KEY of your user
-# account, when set, is passed on to ttyd.
+# and seeds from python\, i18n\en-US.json, settings.json, provider.json and
+# the page, which carries the TypeScript suites' gold, into ~/.cache/xsjs in
+# Linux, and ttyd runs that copy on port 5769 of WSL's 127.0.0.1. A Windows
+# port proxy forwards port 5768 to it. The environment variable
+# XSJS_PROVIDER_KEY of your user account, when set, is passed on to ttyd.
+#
+# The root's parameters.json holds the parameters of the server's run:
+# --debug runs the page in debug mode, which the console role needs, and
+# --verbose the console's shell at verbose level 2 rather than 1; each is
+# false unless given, and anthropic is always false. The file is written in
+# the state folder and copied into the root.
 #
 # With a username and password, ttyd serves HTTPS and asks for them, the
 # port proxy listens on every network interface, and a Windows Firewall
@@ -46,6 +53,37 @@ $runtime_modules_ = (
 $provider_key_name_ = xsjs_util_get_setting $settings_json_ 'provider.variable'
 # The checkout's files that every root holds, beside ttyd and the page.
 $root_files_ = xsjs_util_get_setting $settings_json_ 'powershell.root_files'
+# The file of the root that holds the parameters of the server's run.
+$parameters_file_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.parameters_file')
+# The switches that set a parameter, each given at most once.
+$switch_names_ = 'debug', 'verbose'
+
+# Returns the server's parameters, a switch given true, `anthropic` false.
+function _xsjs_start_get_parameters ([object[]]$arguments_) {
+    $parameters_ = [ordered]@{
+        anthropic = $false
+        debug     = $false
+        verbose   = $false
+    }
+    foreach ($argument_ in $arguments_) {
+        foreach ($name_ in $switch_names_) {
+            if ("$argument_" -ceq "--$name_") {
+                if ($parameters_[$name_]) {
+                    throw ($i18n_.start_usage -f $script_name_)
+                }
+                $parameters_[$name_] = $true
+            }
+        }
+    }
+    return $parameters_
+}
+
+# Returns the arguments that are no switch, the credential's if given.
+function _xsjs_start_get_rest ([object[]]$arguments_) {
+    $switches_ = @($switch_names_ | ForEach-Object { "--$_" })
+    $arguments_ | Where-Object { "$_" -cnotin $switches_ }
+}
 
 # Throws unless the files, ttyd, Python 3 and, for HTTPS, OpenSSL are present.
 function _xsjs_start_step_check_installed {
@@ -124,6 +162,19 @@ function _xsjs_start_step_install_server {
     _xsjs_start_copy_files ($modules_ + 'python/seed') "$linux_path_/python"
     _xsjs_start_copy_files 'i18n/en-US.json' "$linux_path_/i18n"
     xsjs_util_write_log ($i18n_.server_installed -f $linux_path_)
+    _xsjs_start_write_parameters
+}
+
+# Writes the parameters in the state folder and copies them into the root.
+function _xsjs_start_write_parameters {
+    $null = New-Item -ItemType Directory -Force $state_path_
+    $path_ = Join-Path $state_path_ $parameters_file_
+    $text_ = ($parameters_ | ConvertTo-Json) + "`n"
+    [IO.File]::WriteAllText($path_, $text_, [Text.UTF8Encoding]::new($false))
+    $source_ = xsjs_util_get_wsl 0 '-e', 'wslpath', '-u', $path_
+    _xsjs_start_copy_files @($source_) $linux_path_
+    $shown_ = ($parameters_ | ConvertTo-Json -Compress)
+    xsjs_util_write_log ($i18n_.parameters_written -f $linux_path_, $shown_)
 }
 
 # Keeps or makes the TLS certificate and returns its fingerprint.
@@ -380,7 +431,9 @@ function _xsjs_start_main {
 
     $script_name_ = Split-Path -Leaf $PSCommandPath
     $log_path_ = xsjs_util_open_log $PSCommandPath
-    $credential_ = xsjs_util_get_credential $arguments_
+    $parameters_ = _xsjs_start_get_parameters $arguments_
+    $rest_ = @(_xsjs_start_get_rest $arguments_)
+    $credential_ = xsjs_util_get_credential $rest_
     if ($credential_) {
         xsjs_util_write_log ($i18n_.https_mode -f ($credential_ -split ':')[0])
     } else {

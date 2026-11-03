@@ -5,6 +5,7 @@
 # Tests the parts of page_build.py that call into no project module and
 # start no program but python3: the strings table substitution, the archive
 # member lookup by path suffix, the base64 of the vectors and the wasm, the
+# gold's one line and its copy at another path with other gold, the
 # markers of the two templates, html/test.html and html/headless.html, and
 # the check of each piece, the headless template holding the head and the
 # scripts of the test template in their order, its own entry last, and no
@@ -36,6 +37,7 @@ _PAGE_MARKERS = [
     "XSJS_BUILD_ENGINE_CSS",
     "XSJS_BUILD_SQLITE3_JS",
     "XSJS_BUILD_SQLITE3_WASM",
+    "XSJS_BUILD_TEST_GOLD",
     "XSJS_BUILD_XTERM_CSS",
     "XSJS_BUILD_XTERM_JS",
 ]
@@ -324,6 +326,71 @@ class TestVectors(unittest.TestCase):
     def test_vectors_empty(self) -> None:
         with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
             self.assertEqual(page_build.vectors_json(scratch), "{}")
+
+
+# The gold as one line of JSON, and a built page copied with other gold.
+class TestGold(unittest.TestCase):
+    # Makes the checkout's `build/` for the pages.
+    def setUp(self) -> None:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+
+    # Writes a page into `build/` and returns its name, removed after.
+    def page_make(self, page: str) -> str:
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=_PAGE_EXTENSION, dir=_BUILD_PATH, delete=False
+        ) as file:
+            file.write(page)
+        self.addCleanup(os.remove, file.name)
+        return os.path.basename(file.name).removesuffix(_PAGE_EXTENSION)
+
+    # The gold is one line of JSON with no space between its tokens.
+    def test_gold_line(self) -> None:
+        gold = {"typescript": {"test_a": {"text": "a\nb", "n": [1, 2]}}}
+        text = page_build.gold_json(gold)
+        self.assertNotIn("\n", text)
+        self.assertEqual(json.loads(text), gold)
+        self.assertEqual(text, json.dumps(gold, separators=(",", ":")))
+
+    # Gold with a key but the TypeScript language's is refused.
+    def test_gold_refused(self) -> None:
+        with self.assertRaises(ValueError) as caught:
+            page_build.gold_json({"typescript": {}, "python": {}})
+        self.assertEqual(
+            str(caught.exception),
+            "the gold's keys ['typescript', 'python'], not typescript",
+        )
+
+    # The copy is the page with the other gold on its one gold line.
+    def test_page_copied(self) -> None:
+        head = "<script data-worker>\n"
+        tail = "\n</script>\n<script>var other = {};</script>\n"
+        name = self.page_make(
+            head + '  var test_gold = {"typescript":{}};' + tail
+        )
+        gold = {"typescript": {"test_a": {"k": 1}}}
+        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
+            path = os.path.join(scratch, "copy.html")
+            digest = page_build.page_copy(name, path, gold)
+            with open(path, "rb") as file:
+                data = file.read()
+        line = "  var test_gold = " + page_build.gold_json(gold) + ";"
+        self.assertEqual(data.decode("utf-8"), head + line + tail)
+        self.assertEqual(digest, hashlib.sha256(data).hexdigest())
+
+    # A page with no gold line, or with two, is refused, and nothing written.
+    def test_copy_refused(self) -> None:
+        line = "var test_gold = {};\n"
+        for count in (0, 2):
+            name = self.page_make(line * count)
+            with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
+                path = os.path.join(scratch, "copy.html")
+                with self.assertRaises(ValueError) as caught:
+                    page_build.page_copy(name, path, {"typescript": {}})
+                self.assertFalse(os.path.exists(path))
+            self.assertEqual(
+                str(caught.exception),
+                f"{name}: {count} lines define test_gold, not one",
+            )
 
 
 # The build markers of the templates, each replaced once in one pass.

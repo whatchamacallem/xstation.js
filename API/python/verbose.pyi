@@ -5,13 +5,13 @@ class LogLine(NamedTuple):
     at: int
     text: str
 
-# Opens `_verbose.sqlite` in the root, with an empty ring of that many lines.
-def log_open(root: str, ring: int) -> None: ...
+# Opens the root's `_verbose.sqlite`, held to `blob_max` bytes, an empty ring.
+def log_open(root: str, ring: int, blob_max: int) -> None: ...
 
 # Closes the file and returns the log to its state before it was opened.
 def log_close() -> None: ...
 
-# Writes one line to `_verbose`, unbuffered, and to the ring of `verbose_ring`.
+# Writes a line to `_verbose` and the ring, `SQLITE_FULL` past `blob_max`.
 def log(text: str) -> None: ...
 
 # The last `count` lines of the ring, oldest first.

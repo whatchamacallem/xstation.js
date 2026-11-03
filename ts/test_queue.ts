@@ -2,19 +2,19 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the task manager on real ports and a real far queue: routing,
-// ids, replies, sleeps and wakes, the name form of a wake, faults, a
-// handler's failure, an error line's cascade, depth, blob moves, the bound on
-// the blob bytes it holds and `line_bytes`, the trace in debug mode, the
-// verbose sink and its batches with a real `verbose.LineRing`, `entry_fits`,
-// and linked local ports. The queue under test runs on thread `ai`. Its lane
-// to `ui` is a pair of linked local ports whose far end is the test's: the
-// test posts lines into the queue there and reads what the queue posts back,
-// and never answers a request. Its lane to `server` reaches a second real
-// queue in synchronous mode, whose handlers are the test's own functions,
-// which answers the requests the queue submits. The lines and sleeps the
-// tests build and the texts they expect are the gold of test_settings.json,
-// the parts known only at run time, as a fresh type, an id the queue gave, a
+// Tests of the task manager on real ports and a real far queue: routing, ids,
+// replies, sleeps and wakes, the name form of a wake, faults, a handler's
+// failure, an error line's cascade, depth, blob moves, the bound on the blob
+// bytes it holds and `line_bytes`, the trace in debug mode, the verbose sink
+// and its batches with a real `verbose.LineRing`, `entry_fits`, and linked
+// local ports. The queue under test runs on thread `ai`. Its lane to `ui` is a
+// pair of linked local ports whose far end is the test's: the test posts lines
+// into the queue there and reads what the queue posts back, and never answers
+// a request. Its lane to `server` reaches a second real queue in synchronous
+// mode, whose handlers are the test's own functions, which answers the
+// requests the queue submits. The lines and sleeps the tests build and the
+// texts they expect are the gold of `ts/test_setting_test_queue.json`, the
+// parts known only at run time, as a fresh type, an id the queue gave, a
 // blob's bytes or an error's stack, set by the test on its copy. What only a
 // thread port shows, the transfer list of a post, is in the line cases of
 // `test_integrate_queue`.
@@ -230,8 +230,12 @@ namespace test_queue {
   // A bench whose queue holds blobs of at most the bytes given, `blob_max`.
   function bench_bounded(far: queue.OwnerTable, limit: number): QueueBench {
     const bench = bench_make(owners_make({ "verbose.": "server", ...far }));
-    const reader = reader_make({ debug: false, blob_max: limit });
-    bench.tasks.sink_attach(() => {}, reader);
+    const reader = reader_make({ blob_max: limit });
+    bench.tasks.sink_attach(
+      () => {},
+      reader,
+      () => false,
+    );
     return bench;
   }
 
@@ -779,7 +783,7 @@ namespace test_queue {
       const start = handler_fresh(() => sleep_build("sleep_empty", wake));
       ui_send(bench, line_build(start));
       this.assertEqual(woken.length, 1);
-      const full = harness.setting_get("debug") === true;
+      const full = switches.debug_on();
       this.assertEqual(Object.hasOwn(woken[0][0], "type"), full);
       this.assertEqual(Object.hasOwn(woken[0][0], "t"), !full);
     }
@@ -908,7 +912,11 @@ namespace test_queue {
       for (let index = 0; index < 2; index += 1) {
         bench = bench_make(owners);
         trace = [];
-        bench.tasks.sink_attach(() => {}, reader_make({ debug: true }));
+        bench.tasks.sink_attach(
+          () => {},
+          reader_make({}),
+          () => true,
+        );
         const mark = mark_take();
         ui_send(bench, line_build(say, "say_1"));
         const handlers = trace.filter((entry) => entry.startsWith("run "));
@@ -1251,12 +1259,16 @@ namespace test_queue {
 
   // The trace of the thread's timeline, which only debug mode writes.
   export class TestTraceDebug extends unittest.TestCase {
-    // With `debug` true a dispatch and its reply are traced, else nothing.
+    // In debug mode a dispatch and its reply are traced, else nothing.
     test_trace_gated(): void {
       const echo = handler_fresh((line) => dispatch.reply_make(line, {}));
       for (const debug of [false, true]) {
         const bench = bench_make(owners_make({ "verbose.": "server" }));
-        bench.tasks.sink_attach(() => {}, reader_make({ debug }));
+        bench.tasks.sink_attach(
+          () => {},
+          reader_make({}),
+          () => debug,
+        );
         const request = line_build(echo, "request_1");
         const mark = mark_take();
         ui_send(bench, request);
@@ -1285,17 +1297,17 @@ namespace test_queue {
 
   // The batch of verbose lines a thread forwards.
   export class TestVerboseBatch extends unittest.TestCase {
-    // Nothing is kept unless `debug` is true.
+    // Nothing is kept outside debug mode.
     test_forward_off(): void {
-      const reader = reader_make({ debug: false });
-      const batch = new queue.VerboseBatch("ui", reader);
+      const reader = reader_make({});
+      const batch = new queue.VerboseBatch("ui", reader, () => false);
       ring_make(batch).log("dropped");
       this.assertEqual(batch_take(batch).length, 0);
     }
 
     // The kept lines go out as one `verbose.put` of the thread, then none.
     test_batch_sent(): void {
-      const batch = new queue.VerboseBatch("ai", reader_make({ debug: true }));
+      const batch = new queue.VerboseBatch("ai", reader_make({}), () => true);
       const ring = ring_make(batch);
       ring.log("a");
       ring.log("b");
@@ -1317,7 +1329,7 @@ namespace test_queue {
 
     // Lines logged while a batch goes out stay out of every batch.
     test_sending_excluded(): void {
-      const batch = new queue.VerboseBatch("ui", reader_make({ debug: true }));
+      const batch = new queue.VerboseBatch("ui", reader_make({}), () => true);
       const ring = ring_make(batch);
       ring.log("before");
       const posted: lines.Line[] = [];
@@ -1334,8 +1346,12 @@ namespace test_queue {
 
     // The kept lines go out in order as `verbose.put` lines below `line_max`.
     test_batch_split(): void {
-      const value: { [id: string]: unknown } = { debug: true };
-      const batch = new queue.VerboseBatch("ai", reader_make(value));
+      const value: { [id: string]: unknown } = {};
+      const batch = new queue.VerboseBatch(
+        "ai",
+        reader_make(value),
+        () => true,
+      );
       const ring = ring_make(batch);
       for (const text of ["a", "b", "c", "d", "e"]) {
         ring.log(text);
@@ -1356,8 +1372,12 @@ namespace test_queue {
 
     // A line too long for a `verbose.put` of its own throws, and nothing goes.
     test_entry_over(): void {
-      const value: { [id: string]: unknown } = { debug: true };
-      const batch = new queue.VerboseBatch("ui", reader_make(value));
+      const value: { [id: string]: unknown } = {};
+      const batch = new queue.VerboseBatch(
+        "ui",
+        reader_make(value),
+        () => true,
+      );
       const ring = ring_make(batch);
       ring.log("a");
       ring.log("a longer line");
@@ -1381,8 +1401,12 @@ namespace test_queue {
     test_entry_fits(): void {
       const text = "a longer line";
       for (const thread of ["ui", "ai"] as const) {
-        const value: { [id: string]: unknown } = { debug: true };
-        const batch = new queue.VerboseBatch(thread, reader_make(value));
+        const value: { [id: string]: unknown } = {};
+        const batch = new queue.VerboseBatch(
+          thread,
+          reader_make(value),
+          () => true,
+        );
         const ring = ring_make(batch);
         ring.log(text);
         const entry = ring.history_get(1)[0];
@@ -1397,8 +1421,8 @@ namespace test_queue {
         );
         this.assertFalse(queue.entry_fits(thread, text, bytes), thread);
         this.assertTrue(queue.entry_fits(thread, text, bytes + 1), thread);
-        const fitting = reader_make({ debug: true, line_max: bytes + 1 });
-        const sent = new queue.VerboseBatch(thread, fitting);
+        const fitting = reader_make({ line_max: bytes + 1 });
+        const sent = new queue.VerboseBatch(thread, fitting, () => true);
         ring_make(sent).log(text);
         this.assertEqual(batch_take(sent).length, 1, thread);
       }
@@ -1407,7 +1431,7 @@ namespace test_queue {
     // Only the threads `ui` and `ai` forward verbose lines.
     test_thread_refused(): void {
       const error = thrown_get(
-        () => new queue.VerboseBatch("server", reader_make({ debug: true })),
+        () => new queue.VerboseBatch("server", reader_make({}), () => true),
       );
       this.assertEqual(error.message, gold_text("queue_sink_thread"));
     }
@@ -1428,7 +1452,8 @@ namespace test_queue {
         (fn) => {
           ring.sink_set(fn);
         },
-        reader_make({ debug: true }),
+        reader_make({}),
+        () => true,
       );
       ring.log("before");
       this.assertEqual(ai.came.length, 0);
@@ -1458,7 +1483,8 @@ namespace test_queue {
         (fn) => {
           ring.sink_set(fn);
         },
-        reader_make({ debug: true }),
+        reader_make({}),
+        () => true,
       );
       const failure = new Error("The handler failed.");
       const boom = handler_fresh(() => {
@@ -1473,15 +1499,24 @@ namespace test_queue {
     // A second sink, or a sink where the thread owns `verbose.put`, throws.
     test_attach_refused(): void {
       const ring = ring_new();
-      const reader = reader_make({ debug: true });
+      const reader = reader_make({});
+      const debug_on = (): boolean => true;
       const tasks = new queue.TaskQueue("ui", { "verbose.": "ai" }, true);
-      tasks.sink_attach((fn) => {
-        ring.sink_set(fn);
-      }, reader);
-      const twice = thrown_get(() => tasks.sink_attach(() => {}, reader));
+      tasks.sink_attach(
+        (fn) => {
+          ring.sink_set(fn);
+        },
+        reader,
+        debug_on,
+      );
+      const twice = thrown_get(() =>
+        tasks.sink_attach(() => {}, reader, debug_on),
+      );
       this.assertEqual(twice.message, gold_text("queue_sink_twice"));
       const own = new queue.TaskQueue("ai", { "verbose.": "ai" }, true);
-      const looped = thrown_get(() => own.sink_attach(() => {}, reader));
+      const looped = thrown_get(() =>
+        own.sink_attach(() => {}, reader, debug_on),
+      );
       this.assertEqual(looped.message, gold_text("queue_sink_owner"));
     }
   }

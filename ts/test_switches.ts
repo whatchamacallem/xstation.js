@@ -3,9 +3,9 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // Tests of the switches module: a store's set once and its reads, the values
-// of another shape refused, each thrown text compared to its entry in the
-// gold record, test_settings.json, and this realm's switches, which its
-// `tap.start` carried, read alike by the module's four readers.
+// of another shape refused, each thrown text compared to its entry in the gold
+// record, `ts/test_setting_test_switches.json`, and this realm's switches,
+// which its `tap.start` carried, read alike by the module's four readers.
 
 namespace test_switches {
   // The values a store is given, each its writer's choice.

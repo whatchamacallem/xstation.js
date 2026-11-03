@@ -20,7 +20,7 @@ from typing import Any, NoReturn, TypeAlias, cast
 # How a child ends when its test passed: any other ending is a traceback.
 _ENDING_PASSED = "passed"
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_integrate_dispatch"
 
 # A request in short names, with a payload.

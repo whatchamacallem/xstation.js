@@ -14,7 +14,18 @@
 // and act as the player does, a key with control, typed text, and the close
 // that only a handler asks for. Output reaches the rows after the call that
 // feeds it, so a case that feeds output waits its seconds for the terminal
-// to draw.
+// to draw. The last cases type a line and read its echo: after the output
+// that follows it, gone at `console.busy`, back at `console.idle`, edited
+// by Backspace, and erased once Enter submits it; typed on the bottom row,
+// wrapping and scrolling the screen, and erased whole from its start; and
+// drawn and erased between a program's saved cursor, ESC 7, and its
+// restore, ESC 8, which puts the program's next output at its own place;
+// and drawn at a program's pending wrap, a row filled to its last column,
+// red, then green, and a row ending in a wide character, whose erase
+// leaves the wrap pending, so that the program's carriage return goes back
+// to the filled row, which keeps its last cell and its colour, and the echo
+// is drawn there in the program's colour. A probe reads a row's runs of
+// text with their colour classes, the runs of one colour joined.
 namespace test_integrate_console_view {
   // The threads, the types of the topology's own and the page's elements.
   const constants = Object.freeze({
@@ -22,6 +33,7 @@ namespace test_integrate_console_view {
     owner: "ai" as const,
     probe_prefix: "console_probe.",
     rows_type: "console_probe.rows",
+    spans_type: "console_probe.spans",
     shown_type: "console_probe.shown",
     key_type: "console_probe.key",
     text_type: "console_probe.type",
@@ -33,6 +45,8 @@ namespace test_integrate_console_view {
     image_id: "image",
     input_id: "input",
     permit_id: "permit",
+    // The class prefixes of the colours of xterm.js's rows.
+    colour_prefixes: ["xterm-fg-", "xterm-bg-"],
     // The elements xterm.js makes: the rows' holder, its rows, its input.
     screen_selector: ".xterm-screen",
     rows_selector: ".xterm-rows",
@@ -141,12 +155,55 @@ namespace test_integrate_console_view {
     return texts;
   }
 
+  // The colour classes of a node of a row, none for text outside a span.
+  function colour_read(node: Node): string {
+    if (!(node instanceof Element)) {
+      return "";
+    }
+    return Array.from(node.classList)
+      .filter((name) =>
+        constants.colour_prefixes.some((prefix) => name.startsWith(prefix)),
+      )
+      .join(" ");
+  }
+
+  // The runs of text and colour of each row given, its end's blanks out.
+  function spans_read(area: HTMLElement, indexes: number[]): string[][][] {
+    const rows = part_find(area, constants.rows_selector);
+    return indexes.map((index) => {
+      const runs: string[][] = [];
+      for (const node of Array.from(rows.children[index].childNodes)) {
+        const colour = colour_read(node);
+        const text = node.textContent as string;
+        const previous = runs[runs.length - 1];
+        if (previous !== undefined && previous[1] === colour) {
+          previous[0] += text;
+        } else {
+          runs.push([text, colour]);
+        }
+      }
+      while (runs.length > 0 && runs[runs.length - 1][0].trimEnd() === "") {
+        runs.pop();
+      }
+      if (runs.length > 0) {
+        const last = runs[runs.length - 1];
+        last[0] = last[0].trimEnd();
+      }
+      return runs;
+    });
+  }
+
   // Registers the handlers of the topology's own types.
   function probes_register(parts: ProbeParts): void {
     const version = constants.handler_version;
     dispatch.handler_register(constants.rows_type, version, (line) =>
       dispatch.reply_make(line, { rows: rows_read(parts.console_area) }),
     );
+    dispatch.handler_register(constants.spans_type, version, (line) => {
+      const indexes = jslb.payload_of(line).rows as number[];
+      const spans = spans_read(parts.console_area, indexes);
+      return dispatch.reply_make(line, { spans });
+    });
     dispatch.handler_register(constants.shown_type, version, (line) => {
       const child = parts.console_area.firstElementChild as HTMLElement;
       return dispatch.reply_make(line, { shown: !child.hidden });
@@ -216,7 +273,7 @@ namespace test_integrate_console_view {
           container.lastElementChild as HTMLElement,
           constants.ring_lines,
         ),
-        debug: harness.setting_get("debug") as boolean,
+        debug: switches.debug_on(),
       },
       dispatch.handler_register,
     );

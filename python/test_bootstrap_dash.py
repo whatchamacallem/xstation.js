@@ -11,8 +11,8 @@
 # on the pty, from its first prompt on, and finds a command's output between
 # two markers that `printf` escapes make, so that no echo of the input holds
 # them. Dash starts in the sandbox's /tmp with only the variables the
-# console keeps, at the shell's verbose level of the settings, its code
-# given back; SIGTERM sent from outside to the sandbox the console role
+# console keeps, at the shell's verbose level of the root's parameter
+# verbose, its code given back; SIGTERM sent from outside to the sandbox the console role
 # forked, found by its parent pid in /proc, gives 128 plus the signal; and a
 # heredoc of binary bytes typed to `cat` comes back as the pty's output
 # processing changes it, so that a connection that is not binary fails. The
@@ -21,8 +21,8 @@
 # gold's. The scratch directories go under build/.
 
 import base64, bootstrap, contextlib, errno, harness, json, os, pty, select
-import shlex, signal, sqlite3, sys, tempfile, termios, time, traceback
-import unittest
+import shlex, signal, sqlite3, switches, sys, tempfile, termios, time
+import traceback, unittest
 from typing import NamedTuple
 
 # The checkout's top directory, above this file's `python/`.
@@ -31,7 +31,7 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_bootstrap_dash"
 
 # The most bytes a read of the pty takes at once.
@@ -126,8 +126,8 @@ _TERMINATED_CODE: int = harness.gold_get(f"{_GOLD_ID}.terminated.code")
 # The code `verbose.exec` logs for that sandbox, minus the signal.
 _TERMINATED_EXEC: int = harness.gold_get(f"{_GOLD_ID}.terminated.exec_code")
 
-# The verbose level that logs the shell's start and exit, not verbose.
-_LOGGED_LEVEL = 1
+# The parameter verbose whose level logs the shell's start and exit only.
+_LOGGED_VERBOSE = False
 
 # The directory of the processes, each under its pid.
 _PROC_PATH = "/proc"
@@ -219,19 +219,19 @@ def _log_read(root: str) -> list[tuple[str, str]]:
     return rows
 
 
-# Makes a debug scratch root with the checkout's settings at the level.
-def _root_make(case: unittest.TestCase, level: int) -> ScratchRoot:
+# Makes a debug scratch root with the checkout's settings, `verbose` given.
+def _root_make(case: unittest.TestCase, verbose: bool) -> ScratchRoot:
     os.makedirs(_BUILD_PATH, exist_ok=True)
     scratch = tempfile.TemporaryDirectory(dir=_BUILD_PATH)
     case.addCleanup(scratch.cleanup)
     root = os.path.join(scratch.name, "root")
     os.mkdir(root)
     loaded = harness.settings_copy()
-    loaded["debug"] = True
-    loaded["verbose_level"] = level
     path = os.path.join(root, "settings.json")
     with open(path, "w", encoding="utf-8") as file:
         json.dump(loaded, file)
+    parameters = {**switches.switches_get(), "debug": True}
+    switches.parameters_write(root, {**parameters, "verbose": verbose})
     return ScratchRoot(scratch.name, root)
 
 
@@ -372,7 +372,7 @@ class ConsoleChild:
 class TestConsole(unittest.TestCase):
     # Dash starts in its own /tmp with only the kept variables, its code back.
     def test_console_scrubbed(self) -> None:
-        made = _root_make(self, harness.setting_get("verbose_level"))
+        made = _root_make(self, switches.verbose)
         child = ConsoleChild(self, made)
         child.prompt_wait()
         child.bytes_write(_found_command())
@@ -381,15 +381,14 @@ class TestConsole(unittest.TestCase):
         lines = child.marked_get().decode("utf-8").splitlines()
         self.assertEqual(lines, [*_FOUND_VALUES, _START_DIRECTORY])
 
-    # Dash runs at the verbose level of the settings, and its verbose form.
+    # Dash runs at the level of the parameter verbose, and its verbose form.
     def test_console_level(self) -> None:
-        logged: list[list[tuple[str, str]]] = [
-            [],
-            _exec_lines(_DASH_ARGV, 0),
-            _exec_lines(_DASH_VERBOSE, 0),
+        logged: list[tuple[bool, list[tuple[str, str]]]] = [
+            (False, _exec_lines(_DASH_ARGV, 0)),
+            (True, _exec_lines(_DASH_VERBOSE, 0)),
         ]
-        for level, expected in enumerate(logged):
-            made = _root_make(self, level)
+        for verbose, expected in logged:
+            made = _root_make(self, verbose)
             child = ConsoleChild(self, made)
             child.prompt_wait()
             child.bytes_write(_EXIT_COMMAND)
@@ -398,7 +397,7 @@ class TestConsole(unittest.TestCase):
 
     # A dash a signal ended gives its sandbox's code, 128 plus the signal.
     def test_console_signal(self) -> None:
-        made = _root_make(self, harness.setting_get("verbose_level"))
+        made = _root_make(self, switches.verbose)
         child = ConsoleChild(self, made)
         child.prompt_wait()
         child.bytes_write(_KILL_COMMAND)
@@ -407,7 +406,7 @@ class TestConsole(unittest.TestCase):
 
     # SIGTERM from outside to the sandbox gives 128 plus it, and is logged.
     def test_console_terminated(self) -> None:
-        made = _root_make(self, _LOGGED_LEVEL)
+        made = _root_make(self, _LOGGED_VERBOSE)
         child = ConsoleChild(self, made)
         child.prompt_wait()
         os.kill(child.sandbox_find(), signal.SIGTERM)
@@ -417,7 +416,7 @@ class TestConsole(unittest.TestCase):
 
     # A heredoc of binary bytes to `cat` comes back as the pty prints them.
     def test_console_binary(self) -> None:
-        made = _root_make(self, harness.setting_get("verbose_level"))
+        made = _root_make(self, switches.verbose)
         child = ConsoleChild(self, made)
         child.prompt_wait()
         child.bytes_write(_heredoc_typed(_PAYLOAD))

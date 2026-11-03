@@ -17,7 +17,7 @@ import devtools, errno, fcntl, functools, harness, json, os, time, unittest
 from collections.abc import Callable
 from typing import Any, BinaryIO
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_devtools"
 
 # A wait no test reaches the end of, for the replies the bytes hold.

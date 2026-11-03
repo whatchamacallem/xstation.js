@@ -7,34 +7,39 @@
 #
 #     python3 python/bootstrap.py --root ROOT [console] [--main-loop NAME]
 #
-# With no role it is the engine: it puts its pty in raw mode, takes the
-# engine.lock file of the root, reads the settings and opens the root's log,
-# loads the main loop file and has it prepare the root, then writes the
-# first line, tap.start with the fixed id 101, which carries the settings,
-# the run's switches of switches.py, read from the environment ttyd passes
-# on, and, in debug mode, the root's test_settings.json as test_settings, read
-# by jslb.json_decode, in full names in debug mode. It reads the Empty reply
-# to 101 a byte at a time, then runs the main loop, whose own requests take
-# their ids from dispatch.id_next, from 102. It reads no provider key and no
-# provider file: no program but the test suites runs. --main-loop is served
-# only to the engine role with the setting debug true, and neither option
-# may be given twice. With the role console, when the setting debug is true,
+# Each role reads the root's settings, then its parameters, parameters.json,
+# by switches.parameters_load, and sets its switches from them by
+# switches.switches_apply, so that every module it runs and every child it
+# starts reads the root's: debug mode is switches.debug. With no role it is
+# the engine: it puts its pty in raw mode, takes the engine.lock file of the
+# root, reads the settings and the parameters and opens the root's log, loads
+# the main loop file and has it prepare the root, then writes the first line,
+# tap.start with the fixed id 101, which carries the settings and the
+# root's switches and no gold, which the page carries itself; the line
+# goes in full names in debug mode. It reads the Empty reply to 101 a byte at a time, then runs the main
+# loop, whose own requests take their ids from dispatch.id_next, from 102. It
+# reads no provider key and no provider file: no program but the test suites
+# runs. --main-loop is served only to the engine role in debug mode, and
+# neither option may be given twice. With the role console, in debug mode,
 # it opens the root's log and runs the console's shell, dash in the
 # bubblewrap sandbox of the argv below, with a scrubbed environment through
-# verbose.exec at the setting verbose_level, the shell's level, and it exits
-# 1 otherwise. The sandbox binds / read only, gives dash empty /tmp, /home,
-# /mnt and /root, unshares every namespace, gives it a session of its own,
-# ends it with the console role and starts it in its own /tmp; the console
-# role first refuses a root that is not under /home/, so dash never sees the
-# root and nothing it writes outlives it. Any exception writes one
-# error line, its cascade under cause, in full names since it may come
-# before the settings, and exits 1; once the log is open the exception's
-# message is logged before its error line is written. In debug mode the log
+# verbose.exec at the shell's level, 2 when the parameter verbose is true and
+# 1 otherwise, and it exits 1 outside debug mode. The sandbox binds / read
+# only, gives dash empty /tmp, /home, /mnt and /root, unshares every
+# namespace, gives it a session of its own, ends it with the console role and
+# starts it in its own /tmp; the console role first refuses a root that is
+# not under /home/, so dash never sees the root and nothing it writes
+# outlives it. Any exception writes one error line, its cascade under cause,
+# in full names since it may come before the settings, and exits 1; once the
+# log is open the exception's message is logged before its error line is
+# written. Immediately before it writes that line it ignores SIGHUP, so that
+# ttyd's hangup after the page's close cannot end it in the write: it exits 1
+# itself, by its return or by the write's own failure. In debug mode the log
 # traces tap.start. The modules beside this file are imported inside the
 # functions that use them, after their bytecode has been sent to build/.
 
-import argparse, fcntl, importlib.machinery, importlib.util, json, os, sys
-import termios, traceback, tty, types
+import argparse, fcntl, importlib.machinery, importlib.util, json, os, signal
+import sys, termios, traceback, tty, types
 from collections.abc import Callable, Iterator
 from typing import Any, NamedTuple, NoReturn, cast
 
@@ -64,9 +69,6 @@ _LOOP_OPTION = "--main-loop"
 
 # The file in the root that holds the settings.
 _SETTINGS_NAME = "settings.json"
-
-# The file in the root that holds the test settings, read in debug mode.
-_TESTS_NAME = "test_settings.json"
 
 # The file in the root whose lock one engine at a time holds.
 _LOCK_NAME = "engine.lock"
@@ -105,6 +107,12 @@ _DASH_ARGV = (
 
 # Its verbose form, with dash's option that prints its input as it reads it.
 _DASH_VERBOSE = (*_DASH_ARGV, "-v")
+
+# The shell's verbose level when the parameter verbose is false.
+_LEVEL_PLAIN = 1
+
+# The shell's verbose level when the parameter verbose is true.
+_LEVEL_VERBOSE = 2
 
 # The directory a console's root must be under, an empty tmpfs to dash.
 _CONSOLE_HOME = "/home/"
@@ -198,6 +206,13 @@ def _settings_read(root: str) -> dict[str, Any]:
     return settings.settings_load(os.path.join(root, _SETTINGS_NAME))
 
 
+# Reads the root's parameters and sets the switches from them.
+def _parameters_apply(root: str) -> None:
+    import switches
+
+    switches.switches_apply(switches.parameters_load(root))
+
+
 # Takes the engine lock of the root until exit or `exec`, which closes it.
 def _lock_take(root: str) -> None:
     from internationalization import i18n
@@ -209,19 +224,6 @@ def _lock_take(root: str) -> None:
     except BlockingIOError as error:
         os.close(descriptor)
         raise RuntimeError(i18n("bootstrap.lock_held", path)) from error
-
-
-# Reads the test settings of the root by the decoders, refusing a non object.
-def _tests_read(root: str) -> dict[str, Any]:
-    import jslb
-    from internationalization import i18n
-
-    path = os.path.join(root, _TESTS_NAME)
-    with open(path, encoding="utf-8") as file:
-        data: object = jslb.json_decode(file.read())
-    if not isinstance(data, dict):
-        raise ValueError(i18n("bootstrap.tests_not_object", path))
-    return cast(dict[str, Any], data)
 
 
 # Returns the main loop file: the stock one, or in debug mode a named one.
@@ -274,9 +276,7 @@ def _bytes_write(data: bytes) -> None:
 
 
 # Traces `tap.start` in debug mode, then writes it in `full` names.
-def _first_write(
-    loaded: dict[str, Any], tests: dict[str, Any] | None, full: bool
-) -> None:
+def _first_write(loaded: dict[str, Any], full: bool) -> None:
     import jslb, switches, verbose
     from internationalization import i18n
 
@@ -285,10 +285,8 @@ def _first_write(
         "settings": loaded,
         "switches": switches.switches_get(),
     }
-    if tests is not None:
-        payload["test_settings"] = tests
     line = jslb.line_make(header, [], **payload)
-    if loaded["debug"]:
+    if switches.debug:
         text = json.dumps(line[0], ensure_ascii=False, separators=(",", ":"))
         verbose.log(i18n("bootstrap.start_submit", text))
     _bytes_write(_text_bytes(jslb.line_encode(line)))
@@ -341,7 +339,7 @@ def _logged_run(
     import verbose
     from internationalization import i18n
 
-    verbose.log_open(root, loaded["verbose_ring"])
+    verbose.log_open(root, loaded["verbose_ring"], loaded["blob_max"])
     try:
         return serve()
     except Exception as error:
@@ -353,11 +351,12 @@ def _logged_run(
 def _engine_serve(
     root: str, main_loop: str | None, loaded: dict[str, Any]
 ) -> int:
-    debug: bool = loaded["debug"]
+    import switches
+
+    debug = switches.debug
     module = _loop_load(_loop_path(root, main_loop, debug))
     module.loop_prepare(root)
-    tests = _tests_read(root) if debug else None
-    _first_write(loaded, tests, debug)
+    _first_write(loaded, debug)
     _reply_read(loaded)
     module.loop_run(_READ_FD, _WRITE_FD, root)
     return 0
@@ -368,6 +367,7 @@ def _engine_run(root: str, main_loop: str | None) -> int:
     tty.setraw(_READ_FD, termios.TCSANOW)
     _lock_take(root)
     loaded = _settings_read(root)
+    _parameters_apply(root)
     return _logged_run(
         root, loaded, lambda: _engine_serve(root, main_loop, loaded)
     )
@@ -400,9 +400,11 @@ def _home_check(root: str) -> None:
 
 # Runs the sandboxed dash with a scrubbed environment, in debug mode only.
 def _console_run(root: str, loaded: dict[str, Any]) -> int:
-    if not loaded["debug"]:
+    import switches
+
+    if not switches.debug:
         return _EXIT_FAILURE
-    level: int = loaded["verbose_level"]
+    level = _LEVEL_VERBOSE if switches.verbose else _LEVEL_PLAIN
     return _logged_run(root, loaded, lambda: _dash_run(level))
 
 
@@ -427,7 +429,10 @@ def _error_write(error: Exception) -> None:
 
     header = jslb.header_make(_ERROR_TYPE, full=True)
     line = jslb.line_make(header, [], **_cause_make(error))
-    _bytes_write(_text_bytes(jslb.line_encode(line)))
+    data = _text_bytes(jslb.line_encode(line))
+    # A hangup from here on cannot end the run, which exits 1 itself.
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    _bytes_write(data)
 
 
 # Runs the role the arguments name and returns the exit code.
@@ -443,6 +448,7 @@ def bootstrap_run(argv: list[str]) -> int:
         if arguments.role == _CONSOLE_ROLE:
             _home_check(arguments.root)
             loaded = _settings_read(arguments.root)
+            _parameters_apply(arguments.root)
             return _console_run(arguments.root, loaded)
         return _engine_run(arguments.root, arguments.main_loop)
     except Exception as error:

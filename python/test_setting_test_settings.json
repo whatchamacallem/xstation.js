@@ -1,0 +1,11 @@
+{
+  "texts": {
+    "settings_key_extra": "The settings have the unexpected key {0}.",
+    "settings_key_extra_extra": "The settings have the unexpected key extra.",
+    "settings_key_missing": "The settings lack the key {0}.",
+    "settings_key_missing_timeout": "The settings lack the key provider.timeout_seconds.",
+    "settings_not_object": "The settings file {0} does not hold a JSON object.",
+    "settings_type_wrong": "The setting {0} must be of type {1} but is of type {2}.",
+    "settings_type_wrong_synchronous": "The setting queue_synchronous must be of type bool but is of type int."
+  }
+}

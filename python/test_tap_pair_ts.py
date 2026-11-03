@@ -23,7 +23,7 @@
 # outcomes in one test. A bail out counts for nothing, since the producer
 # writes one only after a failed point, where the consumer counts none.
 
-import harness, jslb, json, os, page_build, shutil, subprocess, switches
+import harness, jslb, os, page_build, shutil, subprocess, switches
 import tap_consumer, tempfile, unittest
 from typing import Any, NamedTuple, NoReturn, cast
 
@@ -81,13 +81,11 @@ def sink_refuse(header: jslb.Object) -> NoReturn:
 # The bytes of the first line, as `bootstrap.py` writes it in debug mode.
 def start_bytes() -> bytes:
     header = jslb.header_make(_FIRST_TYPE, id=_FIRST_ID, full=True)
-    tests = jslb.json_decode(json.dumps(harness.gold_copy()))
     line = jslb.line_make(
         header,
         [],
         settings=harness.settings_copy(),
-        switches=switches.switches_get(),
-        test_settings=tests,
+        switches={**switches.switches_get(), "debug": True},
     )
     (piece,) = jslb.line_encode(line)
     return cast(bytes, piece)

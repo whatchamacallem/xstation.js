@@ -1,0 +1,75 @@
+{
+  "cases": [
+    {
+      "expect": ["tap_start_reply"],
+      "name": "started",
+      "seconds": 10,
+      "send": []
+    },
+    {
+      "expect": ["settings_put_request"],
+      "name": "settings_relayed",
+      "seconds": 10,
+      "send": ["settings_put_notice"]
+    },
+    {
+      "expect": ["error_relayed"],
+      "name": "fault_relayed",
+      "seconds": 10,
+      "send": ["fault_ui"]
+    }
+  ],
+  "lines": {
+    "error_relayed": {
+      "0": {
+        "type": "error"
+      },
+      "cause": {
+        "message": "The file is gone.",
+        "stack": ""
+      },
+      "message": "The read failed.",
+      "stack": "Error: The read failed.\n    at read"
+    },
+    "fault_ui": {
+      "0": {
+        "type": "fault"
+      },
+      "cause": {
+        "message": "The file is gone.",
+        "stack": ""
+      },
+      "message": "The read failed.",
+      "stack": "Error: The read failed.\n    at read",
+      "thread": "ui"
+    },
+    "settings_put_notice": {
+      "0": {
+        "type": "settings.put"
+      },
+      "settings": {
+        "turn_compact_turns": 32
+      }
+    },
+    "settings_put_reply": {
+      "0": {
+        "type": "settings.put"
+      }
+    },
+    "settings_put_request": {
+      "0": {
+        "id": 1,
+        "type": "settings.put"
+      },
+      "settings": {
+        "turn_compact_turns": 32
+      }
+    },
+    "tap_start_reply": {
+      "0": {
+        "reply": 101,
+        "type": "tap.start"
+      }
+    }
+  }
+}

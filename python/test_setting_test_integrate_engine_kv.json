@@ -1,0 +1,58 @@
+{
+  "lines": {
+    "delete": {
+      "0": {
+        "k": "/_files/a",
+        "t": "kv.delete"
+      }
+    },
+    "delete_full": {
+      "0": {
+        "key": "/_files/a",
+        "type": "kv.delete"
+      }
+    },
+    "error_request": {
+      "0": {
+        "r": 7,
+        "t": "error"
+      }
+    },
+    "put": {
+      "0": {
+        "b": 1,
+        "k": "/_files/a",
+        "t": "kv.put"
+      },
+      "1": {}
+    },
+    "put_full": {
+      "0": {
+        "blobs": 1,
+        "key": "/_files/a",
+        "type": "kv.put"
+      },
+      "1": {}
+    },
+    "put_image": {
+      "0": {
+        "b": 1,
+        "k": "/_files/gatehouse/arrival.png",
+        "t": "kv.put"
+      },
+      "1": {}
+    },
+    "put_request": {
+      "0": {
+        "b": 1,
+        "i": 7,
+        "k": "/_files/a",
+        "t": "kv.put"
+      },
+      "1": {}
+    }
+  },
+  "texts": {
+    "dispatch_request_unanswered": "The handler for type kv.put version 0 returned no reply to the request with id 7."
+  }
+}

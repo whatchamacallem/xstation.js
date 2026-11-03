@@ -1,0 +1,82 @@
+{
+  "lines": {
+    "delete": {
+      "0": {
+        "k": "/_files/a",
+        "t": "kv.delete"
+      }
+    },
+    "delete_full": {
+      "0": {
+        "key": "/_files/a",
+        "type": "kv.delete"
+      }
+    },
+    "delete_keyless": {
+      "0": {
+        "t": "kv.delete"
+      }
+    },
+    "delete_request": {
+      "0": {
+        "i": 7,
+        "k": "/_files/a",
+        "t": "kv.delete"
+      }
+    },
+    "put": {
+      "0": {
+        "b": 1,
+        "k": "/_files/a",
+        "t": "kv.put"
+      },
+      "1": {}
+    },
+    "put_blobless": {
+      "0": {
+        "k": "/_files/a",
+        "t": "kv.put"
+      }
+    },
+    "put_full": {
+      "0": {
+        "blobs": 1,
+        "key": "/_files/a",
+        "type": "kv.put"
+      },
+      "1": {}
+    },
+    "put_image": {
+      "0": {
+        "b": 1,
+        "k": "/_files/gatehouse/arrival.png",
+        "t": "kv.put"
+      },
+      "1": {}
+    },
+    "put_keyless": {
+      "0": {
+        "b": 1,
+        "t": "kv.put"
+      },
+      "1": {}
+    },
+    "put_request": {
+      "0": {
+        "b": 1,
+        "i": 7,
+        "k": "/_files/a",
+        "t": "kv.put"
+      },
+      "1": {}
+    }
+  },
+  "texts": {
+    "dispatch_handler_twice_delete": "A handler is already registered for type kv.delete version 0.",
+    "dispatch_handler_twice_put": "A handler is already registered for type kv.put version 0.",
+    "engine_kv_blob_missing": "The kv.put line carries no blob 1, the value it puts.",
+    "engine_kv_key_missing_delete": "The kv.delete line has no header key k, the ref it is about.",
+    "engine_kv_key_missing_put": "The kv.put line has no header key k, the ref it is about.",
+    "engine_kv_not_registered": "The kv handlers were called before they were registered."
+  }
+}

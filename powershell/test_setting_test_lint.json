@@ -1,0 +1,6 @@
+{
+  "lint_extensions": [".ps1", ".psd1"],
+  "lint_line_length": 79,
+  "lint_module": "PSScriptAnalyzer",
+  "lint_preset": "CodeFormattingOTBS"
+}

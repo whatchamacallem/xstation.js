@@ -1,0 +1,11 @@
+{
+  "child_seconds": 30,
+  "overflow_bytes": 64,
+  "read_bytes": 65536,
+  "texts": {
+    "dispatch_handler_unknown": "No handler is registered for type no.such version 0.",
+    "tap_loop_blob_refused": "The TAP suite server takes no blob, but a line carries one of 129 bytes.",
+    "tap_loop_input_partial": "The engine input ended inside a message.",
+    "tap_loop_reply_unknown": "The line {\"0\":{\"t\":\"tap.run\",\"r\":1}} replies to no request the server sent."
+  }
+}

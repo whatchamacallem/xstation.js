@@ -19,7 +19,7 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # The checkout's build directory, where each test makes its scratch directory.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_integrate_settings"
 
 # The type of the line that carries the settings.
@@ -81,10 +81,10 @@ class TestCarried(unittest.TestCase):
         self.assertEqual(carried, values)
 
     # A value of the wrong type at the top level is refused.
-    def test_debug_damaged(self) -> None:
+    def test_synchronous_damaged(self) -> None:
         values = harness.settings_copy()
-        values["debug"] = 1
-        expected = _text_fill("settings_type_wrong_debug")
+        values["queue_synchronous"] = 1
+        expected = _text_fill("settings_type_wrong_synchronous")
         self.check_fails(_settings_carried(values), expected)
 
     # A list with an item of the wrong type in a nested object is refused.

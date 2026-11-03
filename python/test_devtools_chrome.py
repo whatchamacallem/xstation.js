@@ -59,7 +59,7 @@ _CACHE_VARIABLE = "XDG_CACHE_HOME"
 # The flag that names the browser's profile on its command line.
 _PROFILE_FLAG = b"--user-data-dir="
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_devtools_chrome"
 
 # How often a polling wait looks again.

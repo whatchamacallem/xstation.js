@@ -23,7 +23,7 @@ _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
 )
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_engine_kv"
 
 # A key of the decimal digits of a non negative integer, as JSLB reads it.
@@ -34,6 +34,9 @@ _FILES_DB = "_files"
 
 # The size over which the store keeps a value in a cache file.
 _OVERFLOW_BYTES: int = harness.setting_get("overflow_bytes")
+
+# The largest database file the store lets grow, the checkout's setting.
+_BLOB_MAX: int = harness.setting_get("blob_max")
 
 # Every byte value once, the control bytes of a terminal included.
 _VALUE_BYTES = bytes(range(256))
@@ -152,7 +155,7 @@ class ScratchCase(unittest.TestCase):
 
     # In the child: a store on the root with `_files`, the handlers on it.
     def store_register(self) -> substrate.Store:
-        store = substrate.Store(self.root, _OVERFLOW_BYTES)
+        store = substrate.Store(self.root, _OVERFLOW_BYTES, _BLOB_MAX)
         store.db_create(_FILES_DB)
         engine_kv.handlers_register(store)
         return store

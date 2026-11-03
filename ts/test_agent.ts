@@ -41,7 +41,7 @@ namespace test_agent {
 
   // The values of the provider, the castle turn and the bench.
   const constants = Object.freeze({
-    // The id of this module's gold in `test_settings.json`.
+    // The id of this module's gold, in its own `test_setting_` file.
     gold_id: "typescript.test_agent",
     // A synthetic provider key, which every chat request carries.
     key: "xai-SYNTHETIC-KEY",
@@ -55,6 +55,7 @@ namespace test_agent {
     root: "/test_agent",
     // The settings of the store's sizes.
     overflow_setting: "overflow_bytes",
+    blob_setting: "blob_max",
     compact_setting: "turn_compact_turns",
     // The threads of the bench: the agent's, the provider's, the UI, server.
     thread: "ai" as const,
@@ -342,6 +343,7 @@ namespace test_agent {
       new substrate.CacheFiles([...test_slots]),
       constants.root,
       harness.setting_get(constants.overflow_setting) as number,
+      harness.setting_get(constants.blob_setting) as number,
       harness.setting_get(constants.compact_setting) as number,
       tasks,
     );
@@ -353,6 +355,7 @@ namespace test_agent {
       constants.http_thread,
       constants.info,
       harness.setting_get,
+      switches.debug_on,
     );
     dispatch.handler_register(
       constants.line_type,

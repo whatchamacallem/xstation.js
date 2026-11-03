@@ -4,8 +4,9 @@
 //
 // Tests of the settings module: the value store's reads, the name form, the
 // freezing outside debug mode and the puts, each thrown text compared to its
-// entry in the gold record, test_settings.json. Each store is given its own
-// copy of the real settings.json, read through the harness.
+// entry in the gold record, `ts/test_setting_test_settings.json`. Each store
+// is given its own copy of the real settings.json, read through the harness,
+// and a reader of debug mode that gives the mode its test asks.
 
 namespace test_settings {
   // The values the tests put.
@@ -21,12 +22,10 @@ namespace test_settings {
     return structuredClone(harness.setting_get(id));
   }
 
-  // A copy of `settings.json` through the harness, with `debug` as given.
-  function settings_copy(debug: boolean): settings.Settings {
+  // A copy of `settings.json` through the harness.
+  function settings_copy(): settings.Settings {
     return {
-      debug,
       queue_synchronous: setting_copy("queue_synchronous") as boolean,
-      verbose_level: setting_copy("verbose_level") as number,
       verbose_ring: setting_copy("verbose_ring") as number,
       line_max: setting_copy("line_max") as number,
       blob_max: setting_copy("blob_max") as number,
@@ -40,6 +39,11 @@ namespace test_settings {
         "powershell",
       ) as settings.Settings["powershell"],
     };
+  }
+
+  // A store whose reader of debug mode gives the mode asked.
+  function store_make(debug: boolean): settings.ValueStore {
+    return new settings.ValueStore(() => debug);
   }
 
   // A text of this module's gold, a run time `{n}` left for the test to fill.
@@ -63,15 +67,15 @@ namespace test_settings {
   export class TestValueStore extends unittest.TestCase {
     // Reading an id before the settings are set throws.
     test_get_unset(): void {
-      const store = new settings.ValueStore();
-      const message = message_thrown(this, () => store.value_get("debug"));
+      const store = store_make(true);
+      const message = message_thrown(this, () => store.value_get("line_max"));
       this.assertEqual(message, gold_text("settings_not_set"));
     }
 
     // An id that names no key throws, at any depth.
     test_unknown_id(): void {
-      const store = new settings.ValueStore();
-      store.value_set(settings_copy(false));
+      const store = store_make(false);
+      store.value_set(settings_copy());
       // Each id and the name of its text in the gold.
       const cases: [string, string][] = [
         ["test.no_such_id", "settings_unknown_id_test"],
@@ -81,7 +85,9 @@ namespace test_settings {
         ["provider.image_model", "settings_unknown_id_image_model"],
         ["message_max", "settings_unknown_id_message_max"],
         ["queue_max", "settings_unknown_id_queue_max"],
-        ["debug.no_such_id", "settings_unknown_id_debug"],
+        ["queue_synchronous.no_such_id", "settings_unknown_id_leaf"],
+        ["debug", "settings_unknown_id_debug"],
+        ["verbose_level", "settings_unknown_id_verbose_level"],
         ["provider.", "settings_unknown_id_trailing"],
         [".provider", "settings_unknown_id_leading"],
         ["", "settings_unknown_id_empty"],
@@ -94,10 +100,10 @@ namespace test_settings {
 
     // Top level and nested ids return their values.
     test_nested_ids(): void {
-      const store = new settings.ValueStore();
-      store.value_set(settings_copy(false));
-      this.assertEqual(store.value_get("debug"), false);
+      const store = store_make(false);
+      store.value_set(settings_copy());
       const ids = [
+        "queue_synchronous",
         "line_max",
         "provider.scripted",
         "provider.timeout_seconds",
@@ -110,48 +116,55 @@ namespace test_settings {
       }
     }
 
-    // Full names before the settings are set, then as `debug` says.
+    // Full names before the settings are set, then as debug mode says.
     test_names_full(): void {
-      const unset = new settings.ValueStore();
+      const unset = store_make(false);
       this.assertTrue(unset.names_full());
-      const debug = new settings.ValueStore();
-      debug.value_set(settings_copy(true));
+      const debug = store_make(true);
+      debug.value_set(settings_copy());
       this.assertTrue(debug.names_full());
-      const release = new settings.ValueStore();
-      release.value_set(settings_copy(false));
+      const release = store_make(false);
+      release.value_set(settings_copy());
       this.assertFalse(release.names_full());
     }
 
     // Outside debug mode the whole object is frozen and refuses a write.
     test_frozen_write(): void {
-      const store = new settings.ValueStore();
-      const value = settings_copy(false);
+      const store = store_make(false);
+      const value = settings_copy();
       store.value_set(value);
       this.assertTrue(Object.isFrozen(value));
       this.assertTrue(Object.isFrozen(value.provider));
       this.assertRaises(TypeError, () => {
-        value.debug = true;
+        value.line_max = constants.line_changed;
       });
       this.assertRaises(TypeError, () => {
         value.provider.timeout_seconds = constants.timeout_changed;
       });
-      this.assertEqual(store.value_get("debug"), false);
+      this.assertEqual(
+        store.value_get("line_max"),
+        harness.setting_get("line_max"),
+      );
     }
 
     // A second set throws and leaves the first settings in place.
     test_set_twice(): void {
-      const store = new settings.ValueStore();
-      store.value_set(settings_copy(false));
-      const second = settings_copy(true);
+      const store = store_make(false);
+      store.value_set(settings_copy());
+      const second = settings_copy();
+      second.line_max = constants.line_changed;
       const message = message_thrown(this, () => store.value_set(second));
       this.assertEqual(message, gold_text("settings_already_set"));
-      this.assertEqual(store.value_get("debug"), false);
+      this.assertEqual(
+        store.value_get("line_max"),
+        harness.setting_get("line_max"),
+      );
     }
 
     // In debug mode the object is not frozen and shows a change at once.
     test_debug_mutable(): void {
-      const store = new settings.ValueStore();
-      const value = settings_copy(true);
+      const store = store_make(true);
+      const value = settings_copy();
       store.value_set(value);
       this.assertFalse(Object.isFrozen(value));
       this.assertFalse(Object.isFrozen(value.provider));
@@ -165,8 +178,8 @@ namespace test_settings {
     // A put outside debug mode throws, sends nothing and changes nothing.
     test_put_denied(): void {
       const sent: lines.SettingsPut[] = [];
-      const store = new settings.ValueStore();
-      store.value_set(settings_copy(false));
+      const store = store_make(false);
+      store.value_set(settings_copy());
       store.sender_register((payload) => {
         sent.push(payload);
       });
@@ -183,7 +196,7 @@ namespace test_settings {
 
     // A put before the settings are set throws.
     test_put_unset(): void {
-      const store = new settings.ValueStore();
+      const store = store_make(true);
       store.sender_register(() => {});
       const message = message_thrown(this, () => {
         store.value_put("line_max", constants.line_changed);
@@ -194,8 +207,8 @@ namespace test_settings {
     // A put in debug mode changes the live value and sends all settings.
     test_put_sent(): void {
       const sent: lines.SettingsPut[] = [];
-      const store = new settings.ValueStore();
-      store.value_set(settings_copy(true));
+      const store = store_make(true);
+      store.value_set(settings_copy());
       store.sender_register((payload) => {
         sent.push(payload);
       });
@@ -216,7 +229,7 @@ namespace test_settings {
         harness.setting_get("line_max"),
       );
       this.assertEqual(sent[1].settings.line_max, constants.line_changed);
-      this.assertEqual(sent[1].settings.debug, true);
+      this.assertFalse(Object.hasOwn(sent[1].settings, "debug"));
       this.assertEqual(
         sent[1].settings.provider.scripted,
         harness.setting_get("provider.scripted"),
@@ -226,8 +239,8 @@ namespace test_settings {
     // A put of an unknown id throws and sends nothing.
     test_put_unknown(): void {
       const sent: lines.SettingsPut[] = [];
-      const store = new settings.ValueStore();
-      store.value_set(settings_copy(true));
+      const store = store_make(true);
+      store.value_set(settings_copy());
       store.sender_register((payload) => {
         sent.push(payload);
       });
@@ -239,8 +252,8 @@ namespace test_settings {
 
     // A put with no sender registered throws and changes nothing.
     test_sender_missing(): void {
-      const store = new settings.ValueStore();
-      store.value_set(settings_copy(true));
+      const store = store_make(true);
+      store.value_set(settings_copy());
       const message = message_thrown(this, () => {
         store.value_put("line_max", constants.line_changed);
       });
@@ -253,7 +266,7 @@ namespace test_settings {
 
     // A second sender registration throws.
     test_sender_twice(): void {
-      const store = new settings.ValueStore();
+      const store = store_make(true);
       store.sender_register(() => {});
       const message = message_thrown(this, () => {
         store.sender_register(() => {});

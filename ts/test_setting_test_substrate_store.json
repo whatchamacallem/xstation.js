@@ -1,0 +1,334 @@
+{
+  "files": {
+    "alpha": "alpha.sqlite",
+    "alpha_restore": "alpha.sqlite-restore",
+    "beta": "beta.sqlite"
+  },
+  "lines": {
+    "file_alpha": {
+      "0": {
+        "b": 1,
+        "t": "db.file"
+      },
+      "db": "alpha"
+    },
+    "file_beta": {
+      "0": {
+        "b": 1,
+        "t": "db.file"
+      },
+      "db": "beta"
+    },
+    "push_db_create": {
+      "0": {
+        "type": "db.create"
+      },
+      "db": "alpha"
+    },
+    "push_db_drop": {
+      "0": {
+        "type": "db.drop"
+      },
+      "db": "alpha"
+    },
+    "push_doc_put": {
+      "0": {
+        "type": "doc.put"
+      },
+      "body": {
+        "0": {
+          "t": "note"
+        }
+      },
+      "db": "alpha",
+      "id": "note"
+    },
+    "push_kv_delete_a": {
+      "0": {
+        "key": "/alpha/a",
+        "type": "kv.delete"
+      }
+    },
+    "push_kv_put_a": {
+      "0": {
+        "blobs": 1,
+        "key": "/alpha/a",
+        "type": "kv.put"
+      }
+    },
+    "push_kv_put_big": {
+      "0": {
+        "blobs": 1,
+        "key": "/alpha/big",
+        "type": "kv.put"
+      }
+    },
+    "push_kv_put_streamed": {
+      "0": {
+        "blobs": 1,
+        "key": "/alpha/streamed",
+        "type": "kv.put"
+      }
+    },
+    "push_sql_run_create": {
+      "0": {
+        "type": "sql.run"
+      },
+      "db": "alpha",
+      "statements": [
+        {
+          "params": [],
+          "sql": "CREATE TABLE t (x TEXT)"
+        }
+      ]
+    },
+    "push_sql_run_insert": {
+      "0": {
+        "type": "sql.run"
+      },
+      "db": "alpha",
+      "statements": [
+        {
+          "params": ["a"],
+          "sql": "INSERT INTO t VALUES (?)"
+        }
+      ]
+    },
+    "push_turn_append_four": {
+      "0": {
+        "type": "turn.append"
+      },
+      "content": {
+        "content": "4",
+        "role": "user"
+      },
+      "role": "user",
+      "scene": "/alpha/scene/1"
+    },
+    "push_turn_append_hi": {
+      "0": {
+        "type": "turn.append"
+      },
+      "content": {
+        "content": "hi",
+        "role": "user"
+      },
+      "role": "user",
+      "scene": "/alpha/scene/1"
+    },
+    "request_db_create": {
+      "0": {
+        "i": 17,
+        "t": "db.create"
+      },
+      "db": "alpha"
+    },
+    "request_db_drop": {
+      "0": {
+        "i": 21,
+        "t": "db.drop"
+      },
+      "db": "alpha"
+    },
+    "request_doc_head": {
+      "0": {
+        "i": 14,
+        "t": "doc.head"
+      },
+      "db": "castle_gatehouse",
+      "id": "scene/arrival"
+    },
+    "request_doc_put": {
+      "0": {
+        "i": 13,
+        "t": "doc.put"
+      },
+      "body": {
+        "0": {
+          "t": "scene"
+        },
+        "1": "/_files/gatehouse/arrival.png",
+        "image": {
+          "$ref": 1
+        },
+        "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+      },
+      "db": "castle_gatehouse",
+      "id": "scene/arrival"
+    },
+    "request_kv_delete": {
+      "0": {
+        "i": 6,
+        "k": "/castle/world",
+        "t": "kv.delete"
+      }
+    },
+    "request_kv_get_big": {
+      "0": {
+        "i": 10,
+        "k": "/metaverse/big",
+        "t": "kv.get"
+      }
+    },
+    "request_kv_get_world": {
+      "0": {
+        "i": 8,
+        "k": "/metaverse/world",
+        "t": "kv.get"
+      }
+    },
+    "request_kv_list": {
+      "0": {
+        "i": 5,
+        "t": "kv.list"
+      },
+      "db": "castle",
+      "prefix": "wor"
+    },
+    "request_kv_put_big": {
+      "0": {
+        "b": 1,
+        "i": 9,
+        "k": "/metaverse/big",
+        "t": "kv.put"
+      }
+    },
+    "request_kv_put_world": {
+      "0": {
+        "b": 1,
+        "i": 7,
+        "k": "/metaverse/world",
+        "t": "kv.put"
+      }
+    },
+    "request_sql_run": {
+      "0": {
+        "i": 4,
+        "t": "sql.run"
+      },
+      "db": "castle",
+      "statements": [
+        {
+          "params": [],
+          "sql": "CREATE TABLE world (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT"
+        },
+        {
+          "params": ["castle_world", "The castle"],
+          "sql": "INSERT INTO world VALUES (?, ?)"
+        }
+      ]
+    },
+    "request_turn_append": {
+      "0": {
+        "i": 15,
+        "t": "turn.append"
+      },
+      "content": {
+        "content": "1",
+        "role": "user"
+      },
+      "role": "user",
+      "scene": "/metaverse/hyperposition/1"
+    },
+    "restore_alpha": {
+      "0": {
+        "b": 1,
+        "t": "db.restore"
+      },
+      "db": "alpha",
+      "files": 2
+    },
+    "restore_beta_none": {
+      "0": {
+        "b": 1,
+        "t": "db.restore"
+      },
+      "db": "beta",
+      "files": 0
+    },
+    "restore_beta_one": {
+      "0": {
+        "b": 1,
+        "t": "db.restore"
+      },
+      "db": "beta",
+      "files": 1
+    }
+  },
+  "meta_rows": [["schema", "1"]],
+  "meta_table": "_meta",
+  "piece_bytes": 4096,
+  "schema_other": "2",
+  "schema_tables": ["_head", "_kv", "_meta", "_turn"],
+  "slot_count": 4,
+  "texts": {
+    "agent_content_ambiguous": "The write would make two rows of the universe table name one world, so the current universe would be ambiguous; nothing was written.",
+    "nested_stored": "{\"0\":{\"t\":\"nest\"},\"1\":\"/_files/fog.png\",\"inner\":{\"1\":{\"$ref\":1},\"2\":\"\u4e2d\u6587\ud83d\ude00\",\"b\":1,\"a\":[{\"0\":0.5,\"z\":null}]},\"count\":-3}",
+    "pool_full": "SQLITE_CANTOPEN",
+    "reply_db_create": "{\"0\":{\"t\":\"db.create\",\"r\":17}}",
+    "reply_db_drop": "{\"0\":{\"t\":\"db.drop\",\"r\":21}}",
+    "reply_doc_head": "{\"0\":{\"t\":\"doc.head\",\"r\":14},\"ref\":\"/castle_gatehouse/scene/arrival/1\"}",
+    "reply_doc_put": "{\"0\":{\"t\":\"doc.put\",\"r\":13},\"ref\":\"/castle_gatehouse/scene/arrival/1\"}",
+    "reply_kv_delete": "{\"0\":{\"t\":\"kv.delete\",\"r\":6}}",
+    "reply_kv_get": "{\"0\":{\"t\":\"kv.get\",\"r\":8,\"b\":1},\"1\":{\"s\":12},\"size\":12,\"sha256\":\"{0}\"}",
+    "reply_kv_list": "{\"0\":{\"t\":\"kv.list\",\"r\":5},\"keys\":[{\"k\":\"world\",\"size\":12,\"sha256\":\"{0}\"}]}",
+    "reply_kv_put": "{\"0\":{\"t\":\"kv.put\",\"r\":7},\"sha256\":\"{0}\"}",
+    "reply_sql_run": "{\"0\":{\"t\":\"sql.run\",\"r\":4},\"results\":[{\"columns\":[],\"rows\":[],\"changes\":0},{\"columns\":[],\"rows\":[],\"changes\":1}]}",
+    "reply_turn_append": "{\"0\":{\"t\":\"turn.append\",\"r\":15},\"n\":1}",
+    "substrate_cache_full_none": "The cache has no free file among its 0 files.",
+    "substrate_cache_full_one": "The cache has no free file among its 1 files.",
+    "substrate_cache_header": "The cache file 0 begins with {1}, which names no SHA-256.",
+    "substrate_cache_twice": "Two cache files are named {0}.",
+    "substrate_cache_unknown": "The cache has no file {0}.",
+    "substrate_db_absent": "The database gamma has no file under the root.",
+    "substrate_db_busy": "The database alpha is inside a transaction.",
+    "substrate_db_closed_beta": "The database beta is not open.",
+    "substrate_db_closed_gamma": "The database gamma is not open.",
+    "substrate_db_exists": "The database alpha already exists.",
+    "substrate_db_open": "The database alpha is already open.",
+    "substrate_document_ref_key": "The ref '/alpha/world' is not a Document-Ref.",
+    "substrate_document_ref_scene": "The ref '/castle_gatehouse/scene/arrival' is not a Document-Ref.",
+    "substrate_file_lost": "The value {0} names the cache file {1}, which this store does not hold.",
+    "substrate_file_lost_big": "The value /alpha/big names the cache file {1}, which this store does not hold.",
+    "substrate_file_small": "The file {0} holds {1} bytes, not over overflow_bytes {2}.",
+    "substrate_file_unexpected_alpha": "A db.file of alpha came with no restore of it waiting.",
+    "substrate_file_unexpected_beta": "A db.file of beta came with no restore of it waiting.",
+    "substrate_header_gap": "The document header 2 follows a gap.",
+    "substrate_id_empty": "A document id is empty.",
+    "substrate_id_missing_absent": "The database castle_gatehouse has no document 'scene/absent'.",
+    "substrate_id_missing_note": "The database alpha has no document 'note'.",
+    "substrate_key_missing_a": "The database alpha has no key 'a'.",
+    "substrate_key_missing_b": "The database alpha has no key 'b'.",
+    "substrate_key_missing_d": "The database alpha has no key 'd'.",
+    "substrate_key_missing_version": "The database castle_gatehouse has no key 'scene/arrival/3'.",
+    "substrate_key_missing_wide": "The database alpha has no key 'greeting/\u4e2d\u6587\ud83d\ude00'.",
+    "substrate_name_bad_dash": "The database name 'a-b' is not a C identifier.",
+    "substrate_name_bad_digit": "The database name '1abc' is not a C identifier.",
+    "substrate_name_bad_dot": "The database name 'a.b' is not a C identifier.",
+    "substrate_name_bad_empty": "The database name '' is not a C identifier.",
+    "substrate_name_bad_slash": "The database name 'a/b' is not a C identifier.",
+    "substrate_name_bad_space": "The database name 'a b' is not a C identifier.",
+    "substrate_name_bad_wide": "The database name 'caf\u00e9' is not a C identifier.",
+    "substrate_params_count_extra": "The statement takes 0 parameters and 1 were given: SELECT 1",
+    "substrate_params_count_missing": "The statement takes 1 parameters and 0 were given: SELECT ?",
+    "substrate_read_short": "The cache file 0 gave 0 of 10 bytes.",
+    "substrate_ref_both": "The external ref '/alpha/world' names its database, and alpha was given too.",
+    "substrate_ref_internal": "The internal ref 'world' needs a database.",
+    "substrate_restore_left": "The restore file {0} is left from an earlier restore.",
+    "substrate_restore_pending": "A db.restore of beta came while the restore of alpha waits for 2 more cache files.",
+    "substrate_scene_bad_internal": "The scene 'hyperposition/1' is not an external Document-Ref.",
+    "substrate_scene_bad_key": "The scene '/metaverse/world' is not an external Document-Ref.",
+    "substrate_schema_partial_meta": "The database has only the substrate tables [\"_meta\"].",
+    "substrate_schema_partial_none": "The database has only the substrate tables [].",
+    "substrate_schema_version": "The substrate schema row is 2, not 1.",
+    "substrate_statement_many": "The SQL holds 2 statements, where one is allowed: SELECT 1; SELECT 2",
+    "substrate_text_refused": "The text holds a lone surrogate, which UTF-8 cannot encode.",
+    "substrate_through_bad": "Compaction through turn 0 is below 1.",
+    "substrate_turns_compacted_four": "Turns 1 to 4 of this conversation were compacted when it held 4 turns. Their text is no longer in the conversation; the databases hold the state.",
+    "substrate_turns_compacted_three": "Turns 1 to 3 of this conversation were compacted when it held 3 turns. Their text is no longer in the conversation; the databases hold the state.",
+    "substrate_turns_none": "The scene '/metaverse/elsewhere/1' has no turns 1 to 2.",
+    "substrate_value_refused_bytes": "The value [object Uint8Array] cannot be written as JSON.",
+    "substrate_value_refused_undefined": "The value [object Undefined] cannot be written as JSON.",
+    "substrate_version_exists": "The document version 'note/1' already exists in alpha."
+  }
+}

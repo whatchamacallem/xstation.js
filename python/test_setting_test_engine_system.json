@@ -1,0 +1,75 @@
+{
+  "lines": {
+    "restart": {
+      "0": {
+        "t": "system.restart"
+      },
+      "main_loop": "b.py"
+    },
+    "settings_put": {
+      "0": {
+        "i": 3,
+        "t": "settings.put"
+      }
+    },
+    "settings_reply": {
+      "0": {
+        "r": 3,
+        "t": "settings.put"
+      }
+    },
+    "source_blobless": {
+      "0": {
+        "i": 4,
+        "t": "source.put"
+      },
+      "name": "a.py"
+    },
+    "source_put": {
+      "0": {
+        "b": 1,
+        "i": 4,
+        "t": "source.put"
+      },
+      "1": {},
+      "name": "a.py"
+    },
+    "source_reply": {
+      "0": {
+        "r": 4,
+        "t": "source.put"
+      }
+    }
+  },
+  "texts": {
+    "dispatch_handler_twice_restart": "A handler is already registered for type system.restart version 0.",
+    "dispatch_handler_twice_settings": "A handler is already registered for type settings.put version 0.",
+    "dispatch_handler_twice_source": "A handler is already registered for type source.put version 0.",
+    "engine_system_argument_invalid_main_loop": "The argument main_loop of the tool system_restart is missing or is not text.",
+    "engine_system_argument_invalid_name": "The argument name of the tool source_put is missing or is not text.",
+    "engine_system_argument_invalid_text": "The argument text of the tool source_put is missing or is not text.",
+    "engine_system_blob_missing": "The source.put line carries no blob 1, the main loop file it writes.",
+    "engine_system_debug_off_restart": "system.restart needs debug mode, and the parameter debug is false.",
+    "engine_system_debug_off_restart_tool": "system_restart needs debug mode, and the parameter debug is false.",
+    "engine_system_debug_off_settings": "settings.put needs debug mode, and the parameter debug is false.",
+    "engine_system_debug_off_source": "source.put needs debug mode, and the parameter debug is false.",
+    "engine_system_debug_off_source_tool": "source_put needs debug mode, and the parameter debug is false.",
+    "engine_system_main_loop_missing": "The main loop file {0} does not exist.",
+    "engine_system_name_invalid_b": "The name b is not a plain file name that ends in .py and does not start with a dot.",
+    "engine_system_name_invalid_bare": "The name .py is not a plain file name that ends in .py and does not start with a dot.",
+    "engine_system_name_invalid_empty": "The name  is not a plain file name that ends in .py and does not start with a dot.",
+    "engine_system_name_invalid_hidden": "The name .b.py is not a plain file name that ends in .py and does not start with a dot.",
+    "engine_system_name_invalid_nested": "The name d/b.py is not a plain file name that ends in .py and does not start with a dot.",
+    "engine_system_name_invalid_parent": "The name ../b.py is not a plain file name that ends in .py and does not start with a dot.",
+    "engine_system_name_invalid_parent_a": "The name ../a.py is not a plain file name that ends in .py and does not start with a dot.",
+    "engine_system_name_invalid_txt": "The name b.txt is not a plain file name that ends in .py and does not start with a dot.",
+    "engine_system_not_registered": "The system handlers were used before they were registered.",
+    "settings_key_extra": "The settings have the unexpected key other.",
+    "settings_key_missing_line_max": "The settings lack the key line_max.",
+    "settings_key_missing_linux_port": "The settings lack the key powershell.linux_port.",
+    "settings_type_wrong_build_tools": "The setting powershell.build_tools must be of type dict of str to str but is of type dict.",
+    "settings_type_wrong_root_files": "The setting powershell.root_files must be of type list of str but is of type list.",
+    "settings_type_wrong_timeout": "The setting provider.timeout_seconds must be of type int but is of type str.",
+    "settings_type_wrong_variable": "The setting provider.variable must be of type str but is of type int."
+  }
+}

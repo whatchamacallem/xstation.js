@@ -182,6 +182,29 @@
           "_meta": {"xsjs": {"permit": true}}
         },
         {
+          "name": "console_write",
+          "description": "Show the debug console as ctrl-0 does and type text into its dash, returning at once. A line goes when a newline ends it, and the text after the last newline waits for a later write. The console is yours from the first write until console_read sees the prompt. Debug mode.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"]
+          },
+          "_meta": {"xsjs": {"permit": true}}
+        },
+        {
+          "name": "console_read",
+          "description": "Show the debug console as ctrl-0 does and read its output from where the last read ended until the text until shows or the timeout, and whether it timed out. A read whose output ends with the prompt ends your turn at the console. Debug mode.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "until": {"type": "string"},
+              "timeout_seconds": {"type": "number"}
+            },
+            "required": ["until", "timeout_seconds"]
+          },
+          "_meta": {"xsjs": {"permit": true}}
+        },
+        {
           "name": "verbose_tail",
           "description": "The last lines of a thread's verbose ring: ui, ai or server.",
           "inputSchema": {

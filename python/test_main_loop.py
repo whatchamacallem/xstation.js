@@ -13,10 +13,12 @@
 # browser's commits are pushes the loop applies and answers with nothing.
 # The browser's `error` line is taken by `engine_tap` and the loop exits 1
 # writing nothing, and a handler's `Failure` writes its reply, then the
-# server's own `error` line, in the name form of the setting `debug`.
+# server's own `error` line, in the name form of the parameter `debug`,
+# which each serving child sets from the root's parameters as `bootstrap.py`
+# does.
 
 import contextlib, copy, functools, harness, hashlib, json, main_loop, os, re
-import signal, sqlite3, tempfile, traceback, unittest
+import signal, sqlite3, switches, tempfile, traceback, unittest
 from collections.abc import Callable
 from typing import Any
 
@@ -29,7 +31,7 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 # The seed files that the main loop reads for a new metaverse.
 _SEED_PATH = os.path.join(_ROOT_PATH, "python", "seed")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_main_loop"
 
 # A key of the decimal digits of a non negative integer, as JSLB reads it.
@@ -242,7 +244,9 @@ def _log_open(root: str) -> None:
     path = os.path.join(root, "settings.json")
     with open(path, encoding="utf-8") as file:
         values: dict[str, Any] = json.load(file)
-    main_loop.verbose.log_open(root, values["verbose_ring"])
+    main_loop.verbose.log_open(
+        root, values["verbose_ring"], values["blob_max"]
+    )
 
 
 # The thread and text of each line of the root's log, in order.
@@ -259,6 +263,7 @@ def _prepare_once(root: str, read_fd: int, write_fd: int) -> str:
 
 # The work of a child that prepares the root and serves the pipes to the end.
 def _loop_serve(root: str, read_fd: int, write_fd: int) -> str:
+    switches.switches_apply(switches.parameters_load(root))
     _log_open(root)
     prepared = repr(main_loop.loop_prepare(root))
     main_loop.loop_run(read_fd, write_fd, root)
@@ -473,20 +478,24 @@ class TestLoop(ScratchCase):
         self.values = self.settings_write(
             overflow_bytes=_OVERFLOW_BYTES, chunk_bytes=_CHUNK_BYTES
         )
+        self.debug_write(True)
         self.work = functools.partial(_loop_serve, self.root)
 
-    # Writes the settings of the test with `debug` as given.
-    def debug_write(self, debug: bool, **changes: Any) -> None:
-        self.values = self.settings_write(
-            debug=debug,
-            overflow_bytes=_OVERFLOW_BYTES,
-            chunk_bytes=_CHUNK_BYTES,
-            **changes,
+    # Writes the root's parameters, the run's with `debug` and `verbose` set.
+    def parameters_set(self, debug: bool, verbose: bool) -> None:
+        parameters = {**switches.switches_get(), "debug": debug}
+        switches.parameters_write(
+            self.root, {**parameters, "verbose": verbose}
         )
+        self.debug_mode = debug
+
+    # Writes the root's parameters, the run's with `debug` set.
+    def debug_write(self, debug: bool) -> None:
+        self.parameters_set(debug, switches.verbose)
 
     # The gold line of an `error` that answers no line, in the debug form.
     def error_name(self) -> str:
-        return "error_full" if self.values["debug"] else "error"
+        return "error_full" if self.debug_mode else "error"
 
     # Checks that a line read back has the header of a gold line.
     def header_check(self, line: dict[str, Any], name: str) -> None:
@@ -601,9 +610,9 @@ class TestLoop(ScratchCase):
                 (error,) = self.failure_read(_BAD_LINE)
                 self.header_check(error, name)
 
-    # In debug mode the log traces each line and reply, at the shell's level 0.
+    # In debug mode the log traces each line and reply, at the shell's level 1.
     def test_trace_logged(self) -> None:
-        self.debug_write(True, verbose_level=0)
+        self.parameters_set(True, False)
         replies = self.served_read(_line_bytes("initialize"))
         self.assertEqual(len(replies), 1)
         texts = [
@@ -615,7 +624,7 @@ class TestLoop(ScratchCase):
 
     # Outside debug mode nothing is traced, whatever the shell's level.
     def test_trace_quiet(self) -> None:
-        self.debug_write(False, verbose_level=2)
+        self.parameters_set(False, True)
         replies = self.served_read(_line_bytes("initialize"))
         self.assertEqual(len(replies), 1)
         self.assertEqual(_log_read(self.root), [])

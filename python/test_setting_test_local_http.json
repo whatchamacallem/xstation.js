@@ -1,0 +1,42 @@
+{
+  "server": {
+    "closed_port": 28744,
+    "host": "127.0.0.1",
+    "paths": {
+      "/empty": {
+        "body": "",
+        "delay": 0,
+        "headers": {},
+        "status": 204
+      },
+      "/json": {
+        "body": "{\"a\":[1,2]}",
+        "delay": 0,
+        "headers": {
+          "content-length": "11",
+          "content-type": "application/json"
+        },
+        "status": 200
+      },
+      "/missing": {
+        "body": "no such page",
+        "delay": 0,
+        "headers": {
+          "content-length": "12",
+          "content-type": "text/plain"
+        },
+        "status": 404
+      },
+      "/slow": {
+        "body": "late",
+        "delay": 0.5,
+        "headers": {
+          "content-length": "4",
+          "content-type": "text/plain"
+        },
+        "status": 200
+      }
+    },
+    "port": 28743
+  }
+}

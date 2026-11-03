@@ -13,9 +13,9 @@
 // goes out as a `tap.line` the moment it is made, and the stream stops after
 // the first module that fails.
 // The UI thread also shows its own stream with the failed lines marked. The
-// gold's `typescript.run` picks the run: "unit" runs both streams, "wire"
-// runs the wire rungs only, on the worker, and the UI thread runs nothing.
-// Whether a failing test ends a stream is the gold's
+// gold's `typescript.test_all.run` picks the run: "unit" runs both streams,
+// "wire" runs the wire rungs only, on the worker, and the UI thread runs
+// nothing. Whether a failing test ends a stream is the gold's
 // `typescript.test_all.failfast`, a test suite setting.
 
 namespace test_all {
@@ -32,7 +32,7 @@ namespace test_all {
     // The owner of that line, the UI thread.
     tests_owner: "ui" as const,
     // The gold's choice of the run and its two values.
-    run_id: "typescript.run",
+    run_id: "typescript.test_all.run",
     run_unit: "unit",
     run_wire: "wire",
   });

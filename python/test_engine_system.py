@@ -5,8 +5,8 @@
 # Tests the handlers of `settings.put`, `source.put` and `system.restart`
 # and the two tools of the same names, each in a forked child: the handlers
 # registered with the real dispatcher on a scratch root in `build/`, and the
-# tools on a real MCP server and called through it, so the root, the debug
-# setting and the handlers never reach another test. Each handler is called
+# tools on a real MCP server and called through it, so the root, debug
+# mode and the handlers never reach another test. Each handler is called
 # as the dispatcher calls it on lines of the gold, a blob's `d` the bytes or
 # the path of a file the decoder would have streamed. The settings file is
 # rewritten whole, a main loop file is written from bytes or moved from the
@@ -34,7 +34,7 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 # The API file that holds the tools as `tools/list` returns them.
 _TOOLS_PATH = os.path.join(_ROOT_PATH, "API", "mcp", "tools.json")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_engine_system"
 
 # A key of the decimal digits of a non negative integer, as JSLB reads it.
@@ -183,7 +183,7 @@ def _failure_read(failure: BaseException | None) -> object:
     return read
 
 
-# A new server with the tools registered for the root and the debug setting.
+# A new server with the tools registered for the root and debug mode.
 def _tools_server(root: str, debug: bool) -> engine_system.mcp.Server:
     server = engine_system.mcp.Server(_SERVER_NAME, _SERVER_VERSION)
     engine_system.tools_register(server, root, debug)
@@ -342,7 +342,7 @@ class TestSettings(ScratchCase):
         with open(self.settings_path, "w", encoding="utf-8") as file:
             file.write("old\n")
         changed = harness.settings_copy()
-        changed["debug"] = False
+        changed["queue_synchronous"] = not changed["queue_synchronous"]
         changed["provider"]["scripted"] = False
         line = _line_set("settings_put", "settings", changed)
         self.handler_value(engine_system.settings_put, True, line)

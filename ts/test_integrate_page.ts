@@ -232,7 +232,7 @@ namespace test_integrate_page {
         images,
         view: new console_view.ConsoleView(console_area, tasks),
         overlays: new overlay.Overlay(elements.overlays, constants.ring_lines),
-        debug: harness.setting_get("debug") as boolean,
+        debug: switches.debug_on(),
       },
       dispatch.handler_register,
     );

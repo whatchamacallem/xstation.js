@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the wire module with no socket and no cache: the input frames
-// and their limits, the console port's relay, reads and close, the console
-// reads in strict text, and the module's surface. The lines the tests send
-// and expect and the texts of the faults are the gold of test_settings.json;
-// the bytes the server sends are a line's JSON text, its CR, then its blobs.
+// Tests of the wire module with no socket and no cache: the input frames and
+// their limits, the console port's relay, reads and close, the console reads
+// in strict text, the reads' keep mode for the AI's turn, and the module's
+// surface. The lines the tests send and
+// expect and the texts of the faults are the gold of
+// `ts/test_setting_test_wire.json`; the bytes the server sends are a line's
+// JSON text, its CR, then its blobs.
 
 namespace test_wire {
   // An address, ttyd's message kinds, a handle.
@@ -356,7 +358,7 @@ namespace test_wire {
       });
       port.line_post(gold_line("read_request_1"), []);
       port.message_take(output_text("$ "));
-      const full = harness.setting_get("debug") === true;
+      const full = switches.debug_on();
       this.assertEqual(received.length, 2);
       for (const line of received) {
         this.assertEqual(Object.hasOwn(line[0], "type"), full);
@@ -602,6 +604,101 @@ namespace test_wire {
           reader.message_take(message_text(0x33, "x")),
         ),
         gold_text("wire_kind_unknown_digit"),
+      );
+    }
+  }
+
+  // The keep mode of a turn: output kept, each read to its first match.
+  export class TestConsoleKeep extends unittest.TestCase {
+    // A read ends at its first match, and the rest is kept for the next.
+    test_first_match(): void {
+      const reader = new wire.ConsoleReader();
+      reader.keep_start();
+      this.assertEqual(reader.read_start("$ "), undefined);
+      this.assertEqual(reader.message_take(output_text("a$ b$ c")), {
+        text: "a$ ",
+        timed_out: false,
+      });
+      this.assertEqual(reader.read_start("$ "), {
+        text: "b$ ",
+        timed_out: false,
+      });
+      this.assertEqual(reader.read_start("$ "), undefined);
+      this.assertEqual(reader.message_take(output_text("d$ ")), {
+        text: "cd$ ",
+        timed_out: false,
+      });
+    }
+
+    // Kept output that already matches answers the read as it starts.
+    test_answered_start(): void {
+      const reader = new wire.ConsoleReader();
+      reader.keep_start();
+      this.assertEqual(reader.message_take(output_text("x$ ")), undefined);
+      this.assertEqual(reader.read_start("$ "), {
+        text: "x$ ",
+        timed_out: false,
+      });
+    }
+
+    // The timer ends a kept read with the kept text, which then is gone.
+    test_kept_expiry(): void {
+      const reader = new wire.ConsoleReader();
+      reader.keep_start();
+      reader.read_start("$ ");
+      this.assertEqual(reader.message_take(output_text("partial")), undefined);
+      this.assertEqual(reader.read_expire(), {
+        text: "partial",
+        timed_out: true,
+      });
+      reader.read_start("$ ");
+      this.assertEqual(reader.read_expire(), { text: "", timed_out: true });
+    }
+
+    // The stop drops the kept text, and a read then reads from its start.
+    test_stop_dropped(): void {
+      const reader = new wire.ConsoleReader();
+      reader.keep_start();
+      this.assertEqual(reader.message_take(output_text("old$ ")), undefined);
+      reader.keep_stop();
+      this.assertEqual(reader.read_start("$ "), undefined);
+      this.assertEqual(reader.message_take(output_text("new$ ")), {
+        text: "new$ ",
+        timed_out: false,
+      });
+      reader.keep_start();
+      this.assertEqual(reader.message_take(output_text("next$ ")), undefined);
+      this.assertEqual(reader.read_start("$ "), {
+        text: "next$ ",
+        timed_out: false,
+      });
+    }
+
+    // A stop with no keeping, and a second start, are faults.
+    test_keep_refused(): void {
+      const reader = new wire.ConsoleReader();
+      this.assertEqual(
+        message_thrown(this, () => reader.keep_stop()),
+        gold_text("wire_keep_none"),
+      );
+      reader.keep_start();
+      this.assertEqual(
+        message_thrown(this, () => reader.keep_start()),
+        gold_text("wire_keep_twice"),
+      );
+    }
+
+    // Kept output is strict `UTF-8` though no read waits for it.
+    test_kept_invalid(): void {
+      const reader = new wire.ConsoleReader();
+      reader.keep_start();
+      const invalid = message_make(
+        constants.output_kind,
+        Uint8Array.of(0xc3, 0x28),
+      );
+      this.assertEqual(
+        message_thrown(this, () => reader.message_take(invalid)),
+        gold_text("wire_kept_invalid"),
       );
     }
   }

@@ -10,17 +10,17 @@
 # decoder of jslb.py, writes the lines or bytes it is given, and hangs up by
 # closing its side, as ttyd's close does, which ends the engine with SIGHUP,
 # and returns the engine's exit code. suites_relay runs Python test suites
-# over the tty: it makes a debug root from the checkout's settings and gold
-# with the TAP suite server, tap_loop.py, in its main_loop directory, runs
-# the engine there with --main-loop tap_loop.py, answers tap.start, sends
-# one tap.run, with the failing tests the run expects, and hands the text of
-# each tap.line of the language python the server pushes to its writer as it
-# comes. It returns the exit code and the stderr text the reply carries,
+# over the tty: it makes a debug root from the checkout's settings,
+# with the run's parameters in debug mode, and with the TAP suite server,
+# tap_loop.py, in its main_loop directory, runs the engine there with
+# --main-loop tap_loop.py, answers tap.start, sends one tap.run, with the
+# failing tests the run expects, and hands the text of each tap.line of the
+# language python the server pushes to its writer as it comes. It returns the exit code and the stderr text the reply carries,
 # after hanging up. Anything else the engine writes fails the relay, naming
 # it. Its texts are plain English, as the infrastructure for testing's are.
 
-import errno, harness, jslb, json, os, pty, shutil, signal, sys, traceback
-import types
+import errno, harness, jslb, json, os, pty, shutil, signal, switches, sys
+import traceback, types
 from collections.abc import Callable
 from typing import Any, NoReturn, Self
 
@@ -44,9 +44,6 @@ _LOOP_NAME = "tap_loop.py"
 
 # The settings file of a root.
 _SETTINGS_NAME = "settings.json"
-
-# The test settings file of a root, which a debug root needs.
-_TESTS_NAME = "test_settings.json"
 
 # The type of the engine's first line and of the page's reply to it.
 _FIRST_TYPE = "tap.start"
@@ -188,11 +185,10 @@ def _json_write(root: str, name: str, value: object) -> None:
 # Makes a debug root that serves the TAP suite server and returns its settings.
 def _root_make(root: str) -> dict[str, Any]:
     values = harness.settings_copy()
-    values["debug"] = True
     directory = os.path.join(root, _LOOP_DIRECTORY)
     os.makedirs(directory)
     _json_write(root, _SETTINGS_NAME, values)
-    _json_write(root, _TESTS_NAME, harness.gold_copy())
+    switches.parameters_write(root, {**switches.switches_get(), "debug": True})
     shutil.copyfile(
         os.path.join(_PYTHON_PATH, _LOOP_NAME),
         os.path.join(directory, _LOOP_NAME),

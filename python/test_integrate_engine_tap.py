@@ -26,7 +26,7 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_integrate_engine_tap"
 
 # The limits of the decoder, as the checkout sets them.
@@ -132,7 +132,7 @@ def _lines_serve(root: str, data: bytes) -> list[object]:
 
 # Child: opens the log, registers, hands `error_take` an `error`'s cascade.
 def _failure_serve(root: str, data: bytes) -> None:
-    engine_tap.verbose.log_open(root, _RING)
+    engine_tap.verbose.log_open(root, _RING, _BLOB_MAX)
     engine_tap.handlers_register(root)
     (line,) = _lines_decode(data)
     payload = engine_tap.jslb.payload_of(line)

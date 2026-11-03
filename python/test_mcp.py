@@ -14,7 +14,7 @@ from typing import Any
 # The root of the checkout.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_mcp"
 
 # The API file that holds the tools as `tools/list` returns them.

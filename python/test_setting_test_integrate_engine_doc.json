@@ -1,0 +1,65 @@
+{
+  "lines": {
+    "error_request": {
+      "0": {
+        "r": 7,
+        "t": "error"
+      }
+    },
+    "put": {
+      "0": {
+        "t": "doc.put"
+      },
+      "body": {
+        "0": {
+          "t": "scene"
+        },
+        "1": "/_files/gatehouse/arrival.png",
+        "image": {
+          "$ref": 1
+        },
+        "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+      },
+      "db": "castle_gatehouse",
+      "id": "scene/arrival"
+    },
+    "put_full": {
+      "0": {
+        "type": "doc.put"
+      },
+      "body": {
+        "0": {
+          "t": "scene"
+        },
+        "1": "/_files/gatehouse/arrival.png",
+        "image": {
+          "$ref": 1
+        },
+        "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+      },
+      "db": "castle_gatehouse",
+      "id": "scene/arrival"
+    },
+    "put_request": {
+      "0": {
+        "i": 7,
+        "t": "doc.put"
+      },
+      "body": {
+        "0": {
+          "t": "scene"
+        },
+        "1": "/_files/gatehouse/arrival.png",
+        "image": {
+          "$ref": 1
+        },
+        "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+      },
+      "db": "castle_gatehouse",
+      "id": "scene/arrival"
+    }
+  },
+  "texts": {
+    "dispatch_request_unanswered": "The handler for type doc.put version 0 returned no reply to the request with id 7."
+  }
+}

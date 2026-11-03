@@ -1,0 +1,57 @@
+{
+  "lines": {
+    "browser_error": {
+      "0": {
+        "t": "error"
+      },
+      "cause": {
+        "cause": {
+          "message": "second fault",
+          "stack": "at second"
+        },
+        "message": "first fault",
+        "stack": "at first"
+      },
+      "message": "page fault",
+      "stack": "at page"
+    },
+    "tap_line": {
+      "0": {
+        "t": "tap.line"
+      },
+      "language": "typescript"
+    },
+    "tap_python": {
+      "0": {
+        "t": "tap.line"
+      },
+      "language": "python",
+      "text": "ok 1 - x"
+    },
+    "tap_request": {
+      "0": {
+        "i": 5,
+        "t": "tap.line"
+      },
+      "language": "typescript",
+      "text": "ok 1 - x"
+    },
+    "tap_version": {
+      "0": {
+        "t": "tap.line",
+        "v": 1
+      },
+      "language": "typescript",
+      "text": "ok 1 - x"
+    }
+  },
+  "texts": {
+    "bail_out": "Bail out! page fault",
+    "dispatch_handler_unknown": "No handler is registered for type tap.line version 1.",
+    "dispatch_request_unanswered": "The handler for type tap.line version 0 returned no reply to the request with id 5.",
+    "engine_tap_browser_cause_first": "caused by: first fault",
+    "engine_tap_browser_cause_second": "caused by: second fault",
+    "engine_tap_browser_failed": "The browser failed: page fault",
+    "engine_tap_language_unknown": "The TAP language python is not typescript, the one stream that crosses the wire."
+  }
+}

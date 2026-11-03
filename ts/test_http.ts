@@ -3,10 +3,10 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // Tests of the HTTP port that need no network. No test here posts a request
-// that passes the checks, so no test starts a `fetch`. The request lines,
-// the expected replies and every thrown or carried text are entries of the
-// gold record, test_settings.json; a text that holds a platform's message
-// keeps a placeholder that the test fills.
+// that passes the checks, so no test starts a `fetch`. The request lines, the
+// expected replies and every thrown or carried text are entries of the gold
+// record, `ts/test_setting_test_http.json`; a text that holds a platform's
+// message keeps a placeholder that the test fills.
 
 namespace test_http {
   // The values the tests share.

@@ -586,9 +586,202 @@ reads the three at import, an unset variable false and a value but 1
 refused. The TypeScript threads take them from `tap.start` and
 `settings.set`, which carry `switches` as `switches.switches_get()` gives
 it, and read them through `API/ts/switches.d.ts`. `anthropic` picks the
-container's browser and ttyd's source (3.12); `debug` and `verbose` change
-nothing yet (Question T15). Dash keeps its scrubbed environment, which
+container's browser and ttyd's source (3.12); `debug` and `verbose` are
+debug mode and the console's verbose level since the answer to Question
+T15 (3.18). Dash keeps its scrubbed environment, which
 carries none of the three, since the sandbox's shell is the person's.
+
+3.18 The parameters and the gold of each suite, by the maintainer's answer
+of 2026-11-01 to Question T15, an option D of their own: "Split the
+settings json so that there are separate files for every test suite. have
+settings.json just be the settings that were not for a test suite. prefix
+all the test settings test_setting_<suite_name>.json add paramters.json
+which has the command line parameters for the run. that way settings.json
+is not re-written to inject vars." The design:
+
+1. The gold of each suite. `test_settings.json` goes. What it held under
+   `python.<suite>` or `typescript.<suite>` is the file
+   `test_setting_<suite>.json` beside the suite's module, a suite's name
+   being its module's, as the gold keyed it:
+   `python/test_setting_test_jslb.json` beside `python/test_jslb.py`,
+   `ts/test_setting_test_queue.json` beside `ts/test_queue.ts`. The directory keeps apart the Python and TypeScript
+   suites of one name: `test_all`, `test_dispatch`, `test_jslb`,
+   `test_mcp`, `test_settings`, `test_substrate`, `test_verbose` and
+   `test_wire`. The top keys go to the suites that read them:
+   `smoke_seconds` and `module_seconds` to the driver's
+   `python/test_setting_test_all.json`, `long_task_ms` to
+   `python/test_setting_test_browser.json`, `typescript.run`, which
+   `ts/test_all.ts` reads, to `ts/test_setting_test_all.json`,
+   `powershell.lint_*` to `powershell/test_setting_test_lint.json` and
+   `powershell.test_user` to `powershell/test_setting_test_powershell.json`.
+2. Ids. An id stays `<language>.<suite>.<key>`, as
+   `python.test_jslb.limits`: `harness.gold_get` reads the suite's file at
+   the first call that needs it, and `harness.gold_copy` assembles the files
+   into one object of that shape. The four top keys' ids become
+   `python.test_all.smoke_seconds`, `python.test_all.module_seconds`,
+   `python.test_browser.long_task_ms` and `typescript.test_all.run`.
+3. Roots. A root holds the gold that its server carries: the files of the
+   TypeScript suites, the only gold a page reads, flat in the root as
+   `<root>/test_setting_<suite>.json`, which `harness.gold_write` writes.
+   `bootstrap.py` in debug mode reads every `test_setting_*.json` of its
+   root by `jslb.json_decode` into `{"typescript": {suite: gold}}`, which
+   `tap.start` carries as `test_settings`, the line's field keeping its
+   name. A test that changes a root's gold, as `test_wire.py`'s
+   `typescript.test_all.run`, writes that suite's file in the root.
+4. `parameters.json`, the parameters of one server's run:
+   `{"anthropic": bool, "debug": bool, "verbose": bool}`, the three switches
+   of 3.17 and nothing else, each key required. `switches.parameters_load`
+   reads it by `jslb.json_decode` and refuses a missing or extra key or a
+   value that is not a bool; `switches.parameters_write` writes it. A root
+   holds one: a test writes the run's, `switches.switches_get()`, or, for
+   a root whose test needs its own debug mode or level, its own.
+5. Debug mode and the level. `debug` and `verbose_level` leave
+   `settings.json`, its stub, `settings.py`'s table and `settings.Settings`.
+   A server reads `<root>/parameters.json` beside its settings and sets its
+   switches from it by `switches.switches_apply`, its variables too, so
+   that every module of the server and every child it starts reads the
+   root's parameters: debug mode is `switches.debug` wherever it was the
+   setting `debug`, and `tap.start` carries the root's as `switches`. The
+   console's verbose level, `verbose_level` until now, is 2 when `verbose`
+   is true and 1 otherwise; level 0, which `verbose.exec` keeps and
+   `test_verbose` tests, is chosen by no server. The TypeScript threads
+   read debug mode as `switches.debug_on()` where they read the setting
+   `debug`: `settings.ts`'s freeze, `settings.put` and `names_full`, and the
+   `debug_setting` readers of `queue.ts`, `tools_browser.ts` and
+   `worker_ai.ts`; each thread sets its switches before its settings.
+6. The tests. No test writes a root's `settings.json` to set `debug` or
+   `verbose_level`: a root's `settings.json` is the checkout's copy, and a
+   test sets the root's `parameters.json`. A test that gives a root other
+   settings, as `overflow_bytes`, `chunk_bytes`, `provider.scripted` or a
+   wrong value the checker refuses, still writes that root's
+   `settings.json` (Question T18). The golds that list the settings' keys
+   lose `debug` and `verbose_level`, and the strings that named those
+   settings name the parameters.
+7. The start script. `root_files` names `settings.json`, `provider.json`
+   and `ts/test_setting_*.json`, which `xsjs_start.ps1` copies flat into
+   its root; it writes the root's `parameters.json` from its own
+   arguments, `.\xsjs_start.ps1 [--debug] [--verbose] [username:password]`,
+   `anthropic` false, so that without `--debug` the page runs in normal
+   mode and the console role refuses. `test_lint.ps1` and
+   `test_powershell.ps1` read their own gold files. None of it runs here,
+   since no test starts a Windows program (3.16).
+
+3.19 The largest database enforced, by the maintainer's answer of
+2026-11-01 to Question T14: "[x] A. 10 MiB, enforced: both stores set
+SQLite's max_page_count, and a write past it fails loud. This is a refusal
+you would be requiring. this needs tests." The design:
+
+1. Each store, `python/substrate.py` and `ts/substrate.ts`, sets
+   `PRAGMA max_page_count` to `blob_max` over the database's `page_size`
+   on every connection it opens, before any statement of its own, so that
+   no database file of the stores grows past `blob_max`. SQLite refuses a
+   write that needs a page past it with `SQLITE_FULL`, "database or disk is
+   full", which the store raises and never catches: a refusal the
+   maintainer requires (the project rules' Databases section).
+2. The limit belongs to a connection, not to the file, so every open sets
+   it: the Python store's three `sqlite3.connect` calls and the TypeScript
+   store's three `OpfsSAHPoolDb` opens.
+3. A database that `db.restore` brings is at most `blob_max` already, the
+   wire's bound of its one blob.
+4. Not a store: the verbose log `_verbose.sqlite` of `python/verbose.py`
+   (Question T19).
+5. Tests: the Python store's suite and the TypeScript store's block each
+   fill a database through the store's own API until the write past the
+   limit fails with SQLite's full error, then check that the file is at
+   most `blob_max`, that the database still reads, and that a database
+   opened again has the limit again. 10 MiB of rows, no buffer larger;
+   labelled smoke or normal by the measured time, the smoke target staying
+   within its 120 s.
+
+3.20 The restart's hold, by the maintainer's message of 2026-11-02 on
+Question T13: "fix the T13 race. just pick a solution." Option B is taken:
+
+1. `wire.WirePort.line_post` holds every line posted after a line of type
+   `system.restart`, unsent; the restart line itself goes. So nothing the
+   page posts after the restart's request, as a push of the page's log
+   by `verbose.put`, can reach the restarted server, which reads from the
+   same pipe that the server before it left.
+2. `wire_end`'s `error` line is never held. The restarted server's
+   `tap.start` is refused by `wire.start_twice`, which faults the port, and
+   the worker's report sends that refusal, the restarted server's first
+   line from the page, which it logs before it exits 1.
+3. The held lines are never sent: only a reload of the page takes a new
+   first line, so no server is left to take them. They are the posts of
+   the session that the restart ended.
+4. Tests. `test_wire_port`'s `test_restart_held`, with no socket: after the
+   first line, a posted `system.restart` is sent, so refused for the
+   missing socket, and a line posted after it is held, returning with no
+   fault. `test_wire_rungs`'s restart rung posts a TAP diagnostic push
+   right after `system.restart`, which, unheld, the restarted server would
+   read before the refusal; `test_wire.py`'s restart root takes the page's
+   refusal alone, and a push named there fails it. Each case is run once
+   with the hold taken out, and must fail.
+
+3.21 The smoke deadline, by the maintainer's message of 2026-11-02:
+"extend the smoke test timeout to 3 min." `python.test_all.smoke_seconds`
+is 180. By 5.11 item 4, every block is `smoke-test` unless the deadline is
+broken, so the blocks labelled `normal-test` for the 120 s alone go back
+to `smoke-test`: `test_jslb_decode.ts` (7.11 item 7.7) and the two suites
+`test_substrate_limit` (7.11 item 7.3). The comments that said 2 minutes
+say 3. The project rules' "fit in 2 minutes" is the maintainer's text,
+left as it is (Question T22). On 2026-11-03 the maintainer had the
+rules say "fit in 3 minutes" (Question T22 A).
+
+3.22 The limit everywhere, by the maintainer's answer of 2026-11-02 to
+Question T19: "[x] B. Yes: verbose.py sets the same limit, and a log line
+past 10 MiB fails loud. this is a clear reading of my request to have the
+same 10 MiB limit everywhere." `python/verbose.py` sets
+`PRAGMA max_page_count` to `blob_max` over the log's `page_size` on every
+connection it opens to `_verbose.sqlite`, before its own statements, as the
+stores do (3.19); a line that needs a page past it fails with SQLite's
+`SQLITE_FULL`, raised, never caught. `blob_max` reaches it as the stores
+take it. The TypeScript threads keep no SQLite log: their lines go to the
+server's. `test_verbose` fills a log to full through `verbose`'s own API and
+checks the error, the file at most `blob_max`, and the log still read; its
+label by its measured time. `declawed.md` now says the 10 MiB limit is the
+comprehensive plan for size limits.
+
+3.23 The page limit refused, by the maintainer's answer of 2026-11-02 to
+Question T21: "[x] B. No: the stores refuse any statement that sets the
+page limit." Each store, on every connection it opens, after its own
+`max_page_count` (3.19), sets SQLite's authorizer, which denies a
+`PRAGMA max_page_count` that has a value, so that SQLite refuses the
+statement when it is prepared with `SQLITE_AUTH`, "not authorized", which
+the store raises and never catches. Python by `Connection.set_authorizer`,
+TypeScript by `sqlite3.capi.sqlite3_set_authorizer` of sqlite-wasm 3.46.1.
+A `PRAGMA max_page_count` with no value, a read, stays allowed, as every
+other statement. `page_size` cannot change a database that holds a page,
+and `VACUUM` and `ATTACH` cannot run inside `sql.run`'s one transaction, so
+neither is refused. Tests in `test_substrate_limit`, Python and TypeScript:
+`sql_run` of the setting refused, and the limit still read back as it was.
+
+3.24 No gold in a root, by the maintainer's answer of 2026-11-02 to
+Question T20: "I didn't design the "expected-values file" and was
+expecting html test code, a tty and dash to be served instead. Explain why
+this should exist or remove it." It existed because the TypeScript blocks
+on the ttyd page need their gold, and the page's only input from its root
+was the server's first line: a session's design, never the maintainer's,
+carried the gold in `tap.start` in debug mode, and 3.18 item 3 copied the
+suites' files into each root. It is removed:
+
+1. The test page carries its gold, as it carries the strings of
+   `i18n/en-US.json`: `page_build` writes the TypeScript suites' gold,
+   `{"typescript": {suite: gold}}` from `ts/test_setting_*.json`, into the
+   test page it builds, and `ts/harness.ts` reads its gold from the page.
+   Every realm that runs TypeScript blocks, A's Node realm, B's headless
+   pages and C's ttyd pages, reads it there.
+2. A root whose test gives its page other gold, as `test_wire.py`'s rungs
+   or `typescript.test_all.run`, gets a page of its own: the test page,
+   built once, written again into the root with that gold, and served by
+   ttyd's `--index`. A debug root then serves the test page, a tty and
+   dash, and holds no `test_setting_*.json`.
+3. `bootstrap.py` reads no gold, and `tap.start` carries no
+   `test_settings`; `harness.gold_write` and the roots' gold files go;
+   `root_files` names `settings.json` and `provider.json`; `xsjs_start.ps1`
+   copies no gold; Question T20 goes with the files it asked about.
+4. Tests: the page build's suites check the gold in the page; the cases of
+   `test_bootstrap` that read a root's gold go, with their strings; the
+   wire and browser tests write each root's page.
 
 ## 4 The rules every task follows
 
@@ -2636,6 +2829,157 @@ first, and ends with the report of 4.9 item 4.
    may not, and the image needs `bubblewrap`, `chrome-headless-shell` and
    ttyd's build tools; measured when the run moves there.
 
+7.11 Wave 4, by the maintainer's answers of 2026-11-01
+(`tmp/tasks_30_2127.md` task 5), each task an agent's, on the files it
+owns. A shared file (`i18n/en-US.json`, `settings.json`,
+`API/settings.json`, `python/test_all.py`, `API/ts/lines.d.ts`, this plan)
+is edited while holding the run lock, renamed with the suffix `.5` for the
+edit. Every run is made as `xsjs` with `--anthropic`, under the run lock.
+
+1. 7.11.1, the gold of each suite (3.18 items 1 to 3), alone in the tree
+   before the rest, since it moves every gold. Owns `test_settings.json`,
+   which it removes, and the new `test_setting_*.json`; `python/harness.py`,
+   `ts/harness.ts` and their stubs; the gold's readers and the roots'
+   writers: `_tests_read` of `python/bootstrap.py` and its stub,
+   `python/test_all.py`, `python/category.py`, `python/test_test.py`,
+   `python/tap_tty.py`, every suite that writes a root's gold,
+   `powershell/test_lint.ps1`, `powershell/test_powershell.ps1`, the copy of
+   `xsjs_start.ps1`, `root_files` and the documents that name
+   `test_settings.json`. Done when the smoke target passes, no file named
+   `test_settings.json` is left, and every id reads as before but the four
+   of 3.18 item 2.
+2. 7.11.2, the parameters (3.18 items 4 to 7) and the hangup ignored
+   (item 6 of this list). Owns `python/switches.py`, its stub and
+   `python/test_switches.py`; `debug` and `verbose_level` in
+   `settings.json`, `API/settings.json`, `python/settings.py`,
+   `ts/settings.ts` and `API/ts/settings.d.ts`; `python/bootstrap.py`, its
+   stub and `python/test_bootstrap.py`; every server module and suite that
+   reads `debug` or `verbose_level`; `ts/queue.ts` and the `debug_setting`
+   lines of `ts/tools_browser.ts` and `ts/worker_ai.ts`, shared line by line
+   with 7.11.5; `xsjs_start.ps1`'s parameters; their golds. Done when the
+   smoke and normal targets pass, no test writes a root's `settings.json`
+   to set `debug` or `verbose_level`, and `test_bootstrap`'s hangup case
+   passes.
+3. 7.11.3, the largest database (3.19). Owns `python/substrate.py`,
+   `ts/substrate.ts`, their stubs, their suites and golds. Done when both
+   cases pass and the smoke target stays within its 120 s.
+4. 7.11.4, the restart hold and the reaping, by the answer to Question
+   T16, "[x] B. The page's restart step waits until the test has read the
+   first check. unreaped processes are reaped before continuing." The
+   restart root's page holds its restart rung until a push of the driver,
+   which the driver sends once it has read the root's first point, so that
+   the first point reads the server before it execs. Before the driver
+   goes on past a point at which a server ended, it waits, within the
+   point's deadline, until ttyd has reaped that server, its `/proc/PID`
+   gone, and fails loud on a server still unreaped at the deadline; and it
+   reaps each child of its own, ttyd and the browser, by `waitpid` once
+   that child ends, before the next root starts. Owns `python/test_wire.py`,
+   `ts/test_wire_rungs.ts`, `ts/test_wire.ts` if the hold needs it, and the
+   golds `python.test_wire` and `typescript.test_wire_rungs`. Done when two
+   normal runs of `test_wire.py` pass.
+5. 7.11.5, the console's tools and lines, `PLAN_AI_CONSOLE.md` 3.6 and 3.7,
+   on the files of that plan's section 4.
+6. The hangup ignored, by the answer to Question T17, "[x] A. bootstrap.py
+   ignores the hangup once it writes an error line, so it always exits 1
+   itself; a product change with a test." `bootstrap.py`'s failure path
+   sets SIGHUP to be ignored immediately before it writes its error line,
+   so that ttyd's hangup after the page's close cannot end the server,
+   which exits 1 by itself, and ttyd logs `exited with code 1` in either
+   order by patch 02 (7.7). `test_bootstrap` gains a case: a failure whose
+   error line is longer than its pipe holds keeps the server blocked in its
+   write, the test sends SIGHUP, reads the line whole, and the server exits
+   1, not killed by signal 1. The browser test's rung `stage 5: error
+   before the first line` keeps `exited with code 1`.
+
+7. Status, 2026-11-01, task 5 of `tmp/tasks_30_2127.md`: items 1 to 6
+   built, stubs first, each by an agent on the files it owned, and run in
+   the container as `xsjs` with `--anthropic`.
+   1. Item 1: 99 gold files, 51 in `python/`, 46 in `ts/` and 2 in
+      `powershell/`; `test_settings.json` removed, every value of it read
+      back from the new files but the four ids of 3.18 item 2; the PowerShell
+      not run (3.16).
+   2. Item 2: `switches.parameters_load`, `parameters_write` and
+      `switches_apply`, refusing by `switches.parameters_not_object`,
+      `parameter_missing`, `parameter_extra` and `parameter_type`; `debug`
+      and `verbose_level` refused as unexpected keys of `settings.json`;
+      the TypeScript threads reading debug mode through a `debug_on` reader
+      given to `settings.ValueStore`, `queue.VerboseBatch`,
+      `queue.sink_attach`, `worker_ai.synchronous_read` and
+      `tools_browser.tools_register`; `xsjs_start.ps1` edited, not run.
+   3. Item 3: `_limit_set` of `python/substrate.py` and `limit_set` of
+      `ts/substrate.ts` on each of the three opens, `blob_max` a constructor
+      argument of each store, and the new suites `test_substrate_limit`,
+      `normal-test`, Python 0.133 s and TypeScript 1.247 s.
+      `test_engine_db.test_lines_large` fills its database to full in place
+      of padding it past 10 MiB, which the limit now refuses.
+   4. Item 4: the restart rung held until the driver's release, posted on a
+      `BroadcastChannel` of the page's origin; `reaped_wait` after each
+      ended server, ttyd's servers reaped at once and the echo server, which
+      PID 1 adopts, 1.266 s and 1.871 s after ttyd's kill; two normal runs
+      of `test_wire.py` passed, 9.3 s and 10.0 s. The restart root's first
+      point reads "ok 1 - first; the server is pid N, ttyd's child running
+      its command".
+   5. Item 5: `PLAN_AI_CONSOLE.md` 6.
+   6. Item 6: `test_bootstrap`'s `test_hangup_ignored`, an error line of
+      1 MiB, passes, and failed with a cut line when the ignore was taken
+      out.
+   7. The smoke target, with all of them in, passed its 120 s in
+      `test_wire.py`; `test_jslb_decode.ts`, the slowest smoke part at
+      11.646 s, became `normal-test` by 5.11 item 4, and the smoke target
+      then passed in 114.312 s, in 117.005 s after the console's erase by
+      the buffer, and in 112.097 s at the end. The normal target passed in 648.071 s, and in
+      648.368 s after that erase.
+
+7.12 Task 6 of `tmp/tasks_30_2127.md`, by the maintainer's message of
+2026-11-02, built by the session itself:
+
+1. The restart's hold, 3.20: `API/ts/wire.d.ts` first, then `ts/wire.ts`,
+   `ts/test_wire_port.ts`, `ts/test_wire_rungs.ts` and `python/test_wire.py`.
+   Done when `test_wire_port` and two normal runs of `test_wire.py` pass,
+   and each new check fails with the hold taken out.
+2. The smoke deadline, 3.21: `python/test_setting_test_all.json`, the
+   labels of `python/test_all.py`, and the comments that state the
+   deadline. Done when the smoke and normal targets pass.
+3. Status, 2026-11-02: both done, run as `xsjs` with `--anthropic`.
+   `test_wire_port`'s `test_restart_held` passes, and failed with the hold
+   taken out; the restart root failed with the hold taken out, the
+   restarted server naming a `verbose.put` push, the race of Question
+   T13, and two normal runs of `test_wire.py` passed, 10.9 s and 10.4 s,
+   the restart root naming the page's refusal. The smoke target passed in
+   126.537 s of its 180 s with `test_jslb_decode.ts` and both
+   `test_substrate_limit` suites back in it.
+
+7.13 Task 7 of `tmp/tasks_30_2127.md`, by the maintainer's message of
+2026-11-02, each by an agent, stubs first:
+
+1. The limits, 3.22 and 3.23: `python/verbose.py`, `python/substrate.py`,
+   `ts/substrate.ts`, their stubs and suites. Done when the new cases pass
+   and each fails with its limit or refusal taken out.
+2. The console's lines, `PLAN_AI_CONSOLE.md` 3.8: `ts/console_view.ts`,
+   `ts/worker_ai.ts`, `ts/tools_browser.ts`, their stubs and blocks. Done
+   when the new cases pass and each fails against the code before it.
+3. No gold in a root, 3.24, alone after items 1 and 2, since it moves how
+   every TypeScript block reads its gold. Done when the smoke and normal
+   targets pass and no root holds a `test_setting_*.json`.
+4. Status, 2026-11-02: items 1 to 3 done, run as `xsjs` with
+   `--anthropic`, each new case failing with its change taken out.
+   1. Item 1: `verbose.log_open(root, ring, blob_max)` sets the limit,
+      `test_verbose.test_log_full` filling a log to full; each store's
+      authorizer denies `max_page_count` with a value, the plain form,
+      a schema's and the call form, by `test_limit_refused` of both
+      `test_substrate_limit` suites. The largest verbose log of the wire
+      and browser normal runs was 28672 bytes, its WAL 251352.
+   2. Item 2: `PLAN_AI_CONSOLE.md` 6.
+   3. Item 3: `page_build.page_copy` and the line
+      `var test_gold = ...;` of every page and of `build/ts/node.js`;
+      `bootstrap.py` reads no gold, `tap.start` carries none, and
+      `root_files` is `settings.json` and `provider.json`; each wire root
+      serves its own copy of the page, and a plain copy in its place
+      failed the wire test. No root held a `test_setting_*.json` in any
+      run, by a watcher polling every 0.2 s.
+   4. The smoke target passed in 125.899 s, 122.246 s and, at the end,
+      119.958 s of its 180 s; the normal target passed in 642.244 s.
+
 ## 8 Order and sharing
 
 8.1 Done. On 2026-10-29, while the agents of `PY_GOALPOSTS.md` ran its
@@ -3011,6 +3355,9 @@ and the check takes the refusal alone.
 Not answered on 2026-11-01, so A is taken, the default of a question with
 none marked: the check stays, class B (11.2 item 30).
 
+Answered again on 2026-11-02 by the maintainer, "fix the T13 race. just
+pick a solution.": option B, built by 3.20 and 7.12 item 1.
+
 Questions T14 to T17 were asked on 2026-11-01 by the session of
 `tmp/tasks_30_2127.md`, task 3. Option A is taken when none is marked.
 
@@ -3098,6 +3445,116 @@ end of a server whose failure its log records, and reads that log.
 [ ] C. The page keeps tty 1 open after an error before the first line
 until ttyd's close, a product change of `wire.WirePort`.
 
+Questions T14 to T17 were answered by the maintainer on 2026-11-01
+(`tmp/tasks_30_2127.md` task 5): T14 A, "This is a refusal you would be
+requiring. this needs tests" (3.19); T15 by an option D of their own (3.18);
+T16 B, "unreaped processes are reaped before continuing" (7.11 item 4); and
+T17 A, "a product change with a test" (7.11 item 6).
+
+Questions T18 and T19 were asked on 2026-11-01 by the session of
+`tmp/tasks_30_2127.md`, task 5. Option A is taken when none is marked.
+
+Question T18: may a test still write a root's `settings.json` for settings
+other than the parameters? Since the answer to Question T15, a root's
+`debug` and verbose level are its `parameters.json`. Other tests give a
+root other settings by writing its `settings.json`: `test_echo_loop`,
+`test_integrate_echo_loop`, `test_integrate_main_loop` and `test_tap_loop`
+make `overflow_bytes` and `chunk_bytes` small, so that a blob streams to a
+cache file within a short test; `test_browser` sets `provider.scripted`;
+and `test_engine_system`, `test_integrate_settings` and `test_settings`
+write wrong settings to see them refused.
+
+[ ] A. Yes: those are the settings under test, not parameters of the run,
+and stay in the root's `settings.json`. (Recommended: each test still shows
+the settings it tests, and `parameters.json` holds the run's command line
+alone.)
+
+[ ] B. No: a root's `settings.json` is always the checkout's copy, and a
+test that needs other values puts them in its suite's `test_setting` file,
+which the server reads in debug mode over `settings.json`, a product change
+planned before any code.
+
+Question T19: does the 10 MiB limit hold the verbose log too? The log
+`_verbose.sqlite` of a root, which `python/verbose.py` writes every line to
+the moment it is logged, is an SQLite database outside the two stores, and
+a long run grows it past 10 MiB. It is read, never moved as one database.
+
+[ ] A. No: the limit holds the stores' databases, the ones that move as one
+blob, and the log grows as the run logs. (Recommended: a log at its limit
+would end a long run with an error, and no message carries the log.)
+
+[ ] B. Yes: `verbose.py` sets `max_page_count` as the stores do, and a
+line past 10 MiB fails loud.
+
+Question T20, asked on 2026-11-01 by the session of `tmp/tasks_30_2127.md`,
+task 5: may a root in debug mode hold no gold? Since 3.18 item 3,
+`bootstrap.py` reads every `test_setting_*.json` its root holds, so a root
+holding none carries `{"typescript": {}}`, and a page's read of an id then
+fails at that read, naming the suite's file. Before, a root without
+`test_settings.json` failed at the server's start with `FileNotFoundError`;
+`test_bootstrap`'s `test_tests_none` now checks the empty gold in place of
+`test_tests_missing`.
+
+[ ] A. Yes, as built: a root's gold is the files it holds, and an id that
+none holds fails loud where it is read. (Recommended: the failure is still
+loud, at the read that needs the value, and a root whose test reads no
+gold needs no file.)
+
+[ ] B. No: `bootstrap.py` in debug mode refuses a root holding no
+`test_setting_*.json`, and every test writes one into each debug root.
+
+Question T21, asked on 2026-11-01 by the session of `tmp/tasks_30_2127.md`,
+task 5: may the AI lift the database limit? The limit is a pragma of a
+connection (3.19 item 2), so the AI's `sql.run` can set
+`PRAGMA max_page_count` higher and grow that database past `blob_max`
+until the store opens it again. Opened again, a file already past the
+limit keeps its larger page count: it reads, and it cannot grow. Nothing
+refuses either, and a database past `blob_max` then fails when it moves as
+one blob, at the wire's bound.
+
+[ ] A. Yes, as built: nothing refuses the AI access that the maintainer
+did not require (the Databases rule), and the wire's bound fails loud on
+a database past `blob_max`. (Recommended: the required refusal is the write
+past the limit, which holds for every statement but one that sets the
+limit.)
+
+[ ] B. No: the stores refuse a statement that sets `max_page_count`, a
+refusal the maintainer would be requiring.
+
+[ ] C. As B, and a store refuses to open a database already past
+`blob_max`.
+
+Questions T18 to T21 were answered on 2026-11-02 by the maintainer's
+message, "you are asking me about default choices that i made by not explicitly
+selecting them. if you keep asking then they are not choices, they are
+simply remaining unresolved. please accept my default choices in the
+past and consider them actionable." Each takes its option A, the default: T18 A,
+tests still write a root's `settings.json` for the settings under test;
+T19 A, the verbose log is not held by the limit; T20 A, a debug root may
+hold no gold; T21 A, nothing refuses the AI's `PRAGMA max_page_count`.
+Each A is the code as built.
+
+Corrected on 2026-11-02, the same day, by the maintainer's marks: T19 B
+(3.22), T21 B (3.23), and T20 answered by removing the roots' gold
+(3.24); T18 A stands.
+
+Question T22, asked on 2026-11-02 by the session of `tmp/tasks_30_2127.md`,
+task 6: does the project rules' smoke budget say 3 minutes? The rules'
+Testing section says the smoke suites are those that "fit in 2 minutes";
+the deadline is now 180 s by the maintainer's message (3.21). The rules
+are the maintainer's text, which no session edits unasked.
+
+[ ] A. Yes: the session changes "fit in 2 minutes" to "fit in 3 minutes"
+in the rules' Testing section. (Recommended: the rule and the deadline
+then agree.)
+
+[ ] B. No: the rule keeps 2 minutes as the aim, and 180 s is the
+deadline's slack.
+
+Answered A on 2026-11-03 by the maintainer's message "update declawed,
+make the commit, push it": the rules' Testing section says "fit in 3
+minutes".
+
 ## 10 Outside this plan
 
 10.1 Group C was outside this plan until 2026-10-30, when section 7 planned
@@ -3158,7 +3615,9 @@ runs (item 39), with the coordinator's decisions after it (item 40); and the
 maintainer's request that the console's binary connection carry a binary
 heredoc (item 44), with the coordinator's decisions after it (item 45);
 and the maintainer's answers and requests of 2026-11-01
-(`tmp/tasks_30_2127.md` task 3), with the session's decisions after them. A:
+(`tmp/tasks_30_2127.md` task 3), with the session's decisions after them;
+and the maintainer's answers and confirmations of 2026-11-01
+(`tmp/tasks_30_2127.md` task 5), with the session's decisions after them. A:
 unsatisfied
 or modified without cause. B: unsatisfied or modified with cause but
 without confirmation. C: confirmed withdrawn or modified. D: satisfied
@@ -3167,7 +3626,8 @@ without modification or withdrawal.
 11.1 Class A: none.
 
 11.2 Class B, each satisfied in this plan with the stated cause, and
-wanting confirmation:
+wanting confirmation. Every item here was confirmed on 2026-11-02
+(11.3 item 26); the text stays for the record:
 
 1. Integration suites only for modules that serve lines, against
    `PY_GOALPOSTS.md` 2.5 (3.5).
@@ -3310,43 +3770,113 @@ wanting confirmation:
     and `opened` beside the four of 7.5 item 6 (7.5 item 6.1 to 6.4),
     written by task 7.8.4.
 29. Moved to 11.3 item 14 on 2026-11-01, modified by the maintainer.
-30. The session's decisions of 2026-10-30 after the review of commit
-    2cab3f3, unconfirmed: C's order (7.9.2 item 1); the worker hang rung
-    removed with its measured cause (7.8.6 item 1); `test_fault_open`
-    recorded as removed (7.8.3 item 1); `test_all.py` stopping ttyd and
-    its root on SIGHUP and SIGTERM from the first ttyd root on, not from
-    its start, since the Python suites fork children that take a handler
-    with them; the ids of `test_worker_ai_console`'s UI requests 102 and
-    103, apart from the queue's own; and `test_integrate_wire`'s output
-    kind from its gold.
-31. The session's decisions of 2026-11-01 for Question T7's answer: the
-    largest database is 10 MiB, `blob_max` 10485760, by the maintainer's
-    estimate, which is no limit of Chrome's (Question T14); `media_db_bytes`,
-    read by no code, lowered from 256 MiB to the same 10 MiB; one message's
-    room for its overhead is `line_max`, 1 MiB, unchanged; the rung `large`
-    removed and ttyd's resident size read after `fit`; the drain rungs'
-    burst made of `blob_max` over `overflow_bytes` echoes; and the rule's
-    sentence placed under the project rules' Databases section.
-32. Question T8's refusal raised in `test_all.py`'s `main` after its
-    arguments are parsed, so that `--help` still answers as root; and the
-    root check of the console role alone, before it reads the settings,
-    since only the console runs dash; the engine role keeps any root.
-33. The switches' design (3.17): environment variables set to 1, read at
-    import, the options on the four command lines that a person runs and
-    not on `bootstrap.py` or `mcp_stdio.py`, which their parent starts with
-    the environment; dash's environment kept scrubbed; the TypeScript
-    threads reading them from `tap.start` and `settings.set`; and
-    `test_switches.py`'s forked children.
-34. Question T11's source: Ubuntu resolute's `1.7.7-4build1`, of the same
-    upstream release as the pin, in place of noble's 1.7.4, the one the
-    container's own release has, since the plan, the patches and the
-    stubs are of ttyd 1.7.7; the archive placed by the container's setup,
-    never by Python; and a second pin list in the gold of
-    `test_third_party_fetch`, `pins_anthropic`.
-35. `test_cache_profile`'s pid from DevTools' `SystemInfo.getProcessInfo`,
-    where the question named `/proc/PID/environ` only.
-36. The AI console's design and its class B items, `PLAN_AI_CONSOLE.md`
-    7.2, and its Questions C1 and C2.
+30. Moved to 11.3 item 19 on 2026-11-01, confirmed by the maintainer.
+31. Moved to 11.3 item 20 on 2026-11-01, confirmed by the maintainer, as
+    are items 32 to 36.
+32. Moved to 11.3 item 20.
+33. Moved to 11.3 item 20.
+34. Moved to 11.3 item 20.
+35. Moved to 11.3 item 20.
+36. Moved to 11.3 item 20.
+37. The session's decisions of 2026-11-01 for Question T15's answer
+    (3.18): each suite's gold beside its module, a suite's name being its
+    module's, so that the directory keeps the Python and TypeScript suites
+    of one name apart; the four top keys given to the suites that read
+    them; the ids kept but those four; a root holding the TypeScript
+    suites' gold alone, the only gold a page reads; the name
+    `parameters.json` for the answer's "paramters.json"; its keys the
+    three switches; a server's switches set from its root's file; the
+    console's level 2 by `verbose` and 1 otherwise, level 0 chosen by no
+    server; and the start script's parameters from its own arguments, debug
+    mode off without `--debug`.
+38. Question T14's answer applied to the two stores' connections only, the
+    verbose log left out (Question T19).
+39. Question T16's "unreaped processes are reaped before continuing" read
+    as the driver waiting for ttyd to reap an ended server, which only ttyd
+    can, and reaping its own children itself (7.11 item 4).
+40. Question T17's test made by an error line longer than the pipe holds,
+    which keeps the server alive in its write for the hangup (7.11 item 6).
+41. Task 7.11.1's decisions beyond 3.18: a refused id names its suite's
+    file, `python/test_setting_<suite>.json` or
+    `ts/test_setting_<suite>.json`, and an id of no language, or of no
+    TypeScript suite in the browser, names the gold; `gold_get` of a
+    language alone, as `python`, gives that language's gold assembled;
+    `test_bootstrap`'s refused case writes its bad text into an extra root
+    file, `test_setting_refused.json`, and `test_first_short` proves the
+    gold unread by a garbled gold file; the gold files left out of the
+    formatter's whitelist, which names no JSON file; and a root in debug
+    mode holding no gold carrying an empty one (Question T20).
+42. Task 7.11.2's decisions beyond 3.18: `parameters_load` and
+    `parameters_write` take the root, the file's name kept in
+    `switches.py`; `switches_apply` sets a true switch's variable to 1 and
+    removes a false one's; `test_jslb` before `test_switches` in the order,
+    since `switches.py` imports `jslb`; debug mode given to the TypeScript
+    modules as a `debug_on` reader (7.11 item 7.2), so that a block tests
+    both modes on one thread; each root or realm whose test needs debug
+    mode given the run's switches with `debug` true, as the checked-in
+    `debug: true` was, so that `--debug` changes only the roots that take
+    the run's switches as they are; the main loops' unit suites, which run
+    the loop in a forked child with no `bootstrap.py`, applying the root's
+    parameters in that child; the level-0 cases of `test_bootstrap` gone,
+    `test_console_failed` at level 1; the new setting
+    `powershell.parameters_file`, by the rule that PowerShell's constants
+    are in `settings.json`; `xsjs_start.ps1` taking `--debug` and
+    `--verbose` anywhere, each once, and writing the file in its state
+    folder, copied into the root by `wslpath` and `cp`; the wrong-type case
+    of `test_settings` moved to `queue_synchronous`; the settings overrides
+    that set only debug mode replaced by parameters, `root_verbose` false in
+    the golds of `test_browser` and `test_wire`; `mcp_stdio.py` checking
+    `settings.json` and reading debug mode from `parameters.json`; and the
+    hangup case's error line, an invalid role of 1 MiB, the gold's
+    `hangup_bytes`, with the server seen sleeping in its write by
+    `/proc/PID/stat` before the hangup.
+43. Task 7.11.3's decisions beyond 3.19: `blob_max` a constructor argument
+    of each store, as `overflow_bytes` is; the cases in the new suites
+    `test_substrate_limit`, `normal-test`, since the smoke target had no
+    time to spare; `test_engine_db.test_lines_large`, which padded a
+    database past the old 10 MiB window, made to fill one to full and to
+    check its restore lines sent whole as blob 1, the scenario of a
+    database past 10 MiB no longer reachable through the store; the value
+    that `PRAGMA max_page_count` answers not checked, so that a file past
+    the limit opens (Question T21); and the AI's pragma left unrefused
+    (Question T21).
+44. Task 7.11.4's decisions beyond its text: the release of the held rung
+    posted by the driver on a `BroadcastChannel` of the page's origin,
+    through `script_evaluate` on the page, since `python/devtools.py` gives
+    the driver no evaluate in the AI worker; `server_find` taking ttyd's
+    own command alone, the exec before the first point no longer possible;
+    the echo root too waiting for its server's reap, by PID 1, about 1 to
+    2 s of the smoke target; no new reaping of ttyd and the browser, which
+    `process_stop`, `kill_check` and devtools' `exit_wait` already reap by
+    `waitpid`; and the restart root's ending that names a push of
+    `verbose.put` read as the race of Question T13, not the restart step.
+45. Task 6's decisions beyond 3.20 and 3.21: the held lines kept by the
+    port, `posts_held`, never sent; the restart rung's post after
+    `system.restart`, the gold's `restart_after`, a TAP comment; the hold
+    seen by `test_restart_held` as the missing socket's refusal that a
+    held line no longer meets; the three blocks back in smoke by 5.11
+    item 4 once the deadline was 180 s.
+46. Task 7.13 item 1's decisions beyond 3.22 and 3.23: `blob_max` the third
+    argument of `verbose.log_open`; `test_log_full` filling the log through
+    `verbose.log` with lines of the gold's `fill_chars`, reading its rows
+    back by their first characters only; the refused statements of the
+    gold's `limit_setters`; the TypeScript case checking that a refused
+    statement pushes nothing; a code but OK from
+    `sqlite3_set_authorizer` thrown as "internal error"; the cases in the
+    smoke suites `test_verbose` and `test_substrate_limit`.
+47. Task 7.13 item 3's decisions beyond 3.24: the gold a line of its own,
+    `var test_gold = <JSON>;`, in each page and in `build/ts/node.js`, so
+    that `page_copy` replaces one line and compiles nothing;
+    `page_copy` refusing a page with no gold line or two, and gold whose
+    keys are not `typescript` alone; `gold_read` refusing a gold file that
+    is not an object in plain English, as `page_build`'s other errors;
+    the harness's values set in debug mode only, the headless and Node
+    realms refusing a `tap.start` outside it; the wire roots alone given
+    their own page, since the browser test's per-root gold equalled the
+    checked-in gold, the group C roots serving `build/headless.html`, and
+    `tap_tty`'s roots running Python suites only; `test_browser`'s first
+    rung checking the page's `test_gold` by `script_evaluate`; and
+    `xsjs_start.ps1`'s copy of `root_files` back to a plain copy.
 
 11.3 Class C, confirmed by the answers and acceptances of 2026-10-30 and
 2026-11-01:
@@ -3430,6 +3960,72 @@ wanting confirmation:
 18. Question T11, answered in place of the options: the package manager's
     source (3.12, 11.2 item 34).
 
+19. The session's decisions of 2026-10-30 after the review of commit
+    2cab3f3, confirmed by the maintainer on 2026-11-01, "[x] A. Confirm all
+    six", once 11.2 item 30: C's order (7.9.2 item 1); the worker hang rung
+    removed with its measured cause (7.8.6 item 1); `test_fault_open`
+    recorded as removed (7.8.3 item 1); `test_all.py` stopping ttyd and
+    its root on SIGHUP and SIGTERM from the first ttyd root on, not from
+    its start, since the Python suites fork children that take a handler
+    with them; the ids of `test_worker_ai_console`'s UI requests 102 and
+    103, apart from the queue's own; and `test_integrate_wire`'s output
+    kind from its gold.
+20. The session's decisions of 2026-11-01, confirmed by the maintainer on
+    2026-11-01, "[x] A. Confirm all six", once 11.2 items 31 to 36:
+    1. The session's decisions of 2026-11-01 for Question T7's answer: the
+       largest database is 10 MiB, `blob_max` 10485760, by the maintainer's
+       estimate, which is no limit of Chrome's (Question T14); `media_db_bytes`,
+       read by no code, lowered from 256 MiB to the same 10 MiB; one message's
+       room for its overhead is `line_max`, 1 MiB, unchanged; the rung `large`
+       removed and ttyd's resident size read after `fit`; the drain rungs'
+       burst made of `blob_max` over `overflow_bytes` echoes; and the rule's
+       sentence placed under the project rules' Databases section.
+    2. Question T8's refusal raised in `test_all.py`'s `main` after its
+       arguments are parsed, so that `--help` still answers as root; and the
+       root check of the console role alone, before it reads the settings,
+       since only the console runs dash; the engine role keeps any root.
+    3. The switches' design (3.17): environment variables set to 1, read at
+       import, the options on the four command lines that a person runs and
+       not on `bootstrap.py` or `mcp_stdio.py`, which their parent starts with
+       the environment; dash's environment kept scrubbed; the TypeScript
+       threads reading them from `tap.start` and `settings.set`; and
+       `test_switches.py`'s forked children.
+    4. Question T11's source: Ubuntu resolute's `1.7.7-4build1`, of the same
+       upstream release as the pin, in place of noble's 1.7.4, the one the
+       container's own release has, since the plan, the patches and the
+       stubs are of ttyd 1.7.7; the archive placed by the container's setup,
+       never by Python; and a second pin list in the gold of
+       `test_third_party_fetch`, `pins_anthropic`.
+    5. `test_cache_profile`'s pid from DevTools' `SystemInfo.getProcessInfo`,
+       where the question named `/proc/PID/environ` only.
+    6. The AI console's design and its class B items, `PLAN_AI_CONSOLE.md`
+       7.2, and its Questions C1 and C2.
+21. Question T14 A, "This is a refusal you would be requiring. this needs
+    tests" (3.19).
+22. Question T15, answered by an option D of the maintainer's own: the gold
+    of each suite and `parameters.json` (3.18, 11.2 item 37).
+23. Question T16 B, "unreaped processes are reaped before continuing"
+    (7.11 item 4, 11.2 item 39).
+24. Question T17 A (7.11 item 6, 11.2 item 40).
+25. `PLAN_AI_CONSOLE.md`'s Questions C1 B and C2, answered in the
+    maintainer's words, recorded in that plan's 7 and 8.
+26. 11.2 items 1 to 28 and 37 to 44, and Questions T18 to T21 at their
+    option A, confirmed by the maintainer's message of 2026-11-02, an
+    unmarked default being the maintainer's choice:
+    "you are asking me about default choices that i made by not explicitly
+    selecting them. if you keep asking then they are not choices, they are
+    simply remaining unresolved. please accept my default choices in the
+    past and consider them actionable."
+27. Question T13 B, "fix the T13 race. just pick a solution." (3.20),
+    and the smoke deadline, "extend the smoke test timeout to 3 min."
+    (3.21), of the same message.
+28. Questions T19 B and T21 B, marked by the maintainer, and T20's
+    answer, which removes the roots' gold (3.22 to 3.24), and the
+    10 MiB limit as the comprehensive plan for size limits, now in the
+    project rules, of the maintainer's message of 2026-11-02.
+29. Question T22 A, "update declawed, make the commit, push it", the
+    maintainer's message of 2026-11-03 (3.21).
+
 11.4 Class D:
 
 1. "other agents are running, make a plan only": no source, test, settings
@@ -3464,9 +4060,19 @@ wanting confirmation:
 15. "try bwrap ... /bin/dash" (item 39): the command is the console's shell,
     exactly as given, its verbose form adding `-v` (7.4, task 7.8.1).
 
-11.5 Unresolved on 2026-11-01: the confirmations of 11.2, items 1 to 28,
-30 and 31 to 36; Questions T14 to T17; and `PLAN_AI_CONSOLE.md`'s
-Questions C1 and C2. Earlier record: Each is
+11.5 Unresolved on 2026-11-03, after task 8 of `tmp/tasks_30_2127.md`:
+items 45 to 47 of 11.2, the decisions of tasks 6 and 7, which stand
+unless the maintainer overturns one. Earlier record, on 2026-11-02,
+after task 6, Question T22 of which 11.3 item 29 settled:
+Question T22, which waits on the maintainer, and items 45 to 47 of 11.2,
+the decisions of tasks 6 and 7, which stand unless the maintainer
+overturns one. Earlier record, on
+2026-11-01, after task 5, every item of which 11.3 items 26 and 27
+settled: the
+confirmations of 11.2, items 1 to 28 and 37 to 44; Questions T18 to
+T21; and `PLAN_AI_CONSOLE.md`'s Questions C3 and C4 and its class B
+items 1 to 17.
+Earlier record: Each is
 satisfied in this plan with its cause, or planned in 7.8 and 7.9 and
 satisfied once they pass, and none needs a question of the maintainer: no
 requirement of items 35, 39 or 44 is left unmet, and no two rules were found

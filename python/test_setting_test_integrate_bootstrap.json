@@ -1,0 +1,57 @@
+{
+  "lines": {
+    "browser_error": {
+      "0": {
+        "t": "error"
+      },
+      "cause": {
+        "message": "first",
+        "stack": "Error: first"
+      },
+      "message": "boom",
+      "stack": "Error: boom\n    at a"
+    },
+    "error_reply": {
+      "0": {
+        "r": 1,
+        "t": "error"
+      }
+    },
+    "first_full": {
+      "0": {
+        "id": 101,
+        "type": "tap.start"
+      }
+    },
+    "tail_server": {
+      "0": {
+        "i": 1,
+        "t": "verbose.tail"
+      },
+      "count": 10,
+      "thread": "server"
+    },
+    "tail_server_reply": {
+      "0": {
+        "r": 1,
+        "t": "verbose.tail"
+      }
+    },
+    "unknown_request": {
+      "0": {
+        "i": 1,
+        "t": "no.such"
+      }
+    }
+  },
+  "read_bytes": 65536,
+  "texts": {
+    "bootstrap_start_submit": "server submits to ai: {\"type\":\"tap.start\",\"id\":101}",
+    "dispatch_handler_unknown": "No handler is registered for type no.such version 0.",
+    "engine_tap_browser_cause": "caused by: first",
+    "engine_tap_browser_failed": "The browser failed: boom",
+    "main_loop_line_dispatch_tail": "server dispatches from ai: {\"i\":1,\"t\":\"verbose.tail\"}",
+    "main_loop_line_dispatch_unknown": "server dispatches from ai: {\"i\":1,\"t\":\"no.such\"}",
+    "main_loop_serve_failed_unknown": "The server failed while serving the engine tty: No handler is registered for type no.such version 0."
+  }
+}

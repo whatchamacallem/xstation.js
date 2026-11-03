@@ -15,7 +15,12 @@
 // throws the string whose name the trigger raises. The handlers answer the
 // UI thread's requests and take the server's restores. It is given an
 // initialized module, an installed pool and open cache files, and waits on
-// nothing.
+// nothing. Every connection it opens holds its database to `blob_max` bytes,
+// `PRAGMA max_page_count` over the database's `page_size`, set before any
+// statement of its own: a write that needs a page past it fails with
+// SQLite's `SQLITE_FULL`, which it throws and never catches. The connection
+// then sets SQLite's authorizer, which denies a `PRAGMA max_page_count` that
+// has a value, so that SQLite refuses it with `SQLITE_AUTH` when prepared.
 namespace substrate {
   // The schema, names, patterns and sizes the store uses.
   const constants = Object.freeze({
@@ -48,6 +53,8 @@ namespace substrate {
     db_extension: ".sqlite",
     // The suffix of the file a restore checks before it replaces a database.
     restore_suffix: "-restore",
+    // The pragma of the page limit, which only the store sets.
+    limit_pragma: "max_page_count",
     // The flags that open an existing database to read and write.
     open_write: "w",
     // The flags that create a database file and open it.
@@ -151,6 +158,21 @@ namespace substrate {
     capi: {
       sqlite3_js_db_export(pointer: number): Uint8Array;
       sqlite3_get_autocommit(pointer: number): number;
+      sqlite3_set_authorizer(
+        pointer: number,
+        authorize: (
+          data: number,
+          action: number,
+          name: string | 0,
+          value: string | 0,
+          schema: string | 0,
+          trigger: string | 0,
+        ) => number,
+        data: number,
+      ): number;
+      readonly SQLITE_OK: number;
+      readonly SQLITE_DENY: number;
+      readonly SQLITE_PRAGMA: number;
     };
   }
 
@@ -554,6 +576,33 @@ namespace substrate {
   // The number the first column of the first row of the SQL holds.
   function select_number(database: SqliteDatabase, sql: string): number {
     return database.selectValue(sql) as number;
+  }
+
+  // Holds a new connection's database to `blob_max` bytes, its first statement.
+  function limit_set(
+    sqlite: SqliteModule,
+    database: SqliteDatabase,
+    blob_max: number,
+  ): void {
+    const page_size = select_number(database, "PRAGMA page_size");
+    database.exec({
+      sql: `PRAGMA ${constants.limit_pragma} = ${Math.floor(blob_max / page_size)}`,
+    });
+    const capi = sqlite.capi;
+    const code = capi.sqlite3_set_authorizer(
+      database.pointer,
+      (_data, action, name, value) =>
+        action === capi.SQLITE_PRAGMA &&
+        name !== 0 &&
+        name.toLowerCase() === constants.limit_pragma &&
+        value !== 0
+          ? capi.SQLITE_DENY
+          : capi.SQLITE_OK,
+      0,
+    );
+    if (code !== capi.SQLITE_OK) {
+      throw new Error("internal error");
+    }
   }
 
   // The `schema_version` pragma, which every change of the schema moves.
@@ -981,6 +1030,8 @@ namespace substrate {
     readonly #root: string;
     // The largest value kept in its row.
     readonly #overflow_bytes: number;
+    // The largest database file the store lets grow.
+    readonly #blob_max: number;
     // The count of a scene's turns at which a `user` turn compacts them.
     readonly #compact_turns: number;
     // What takes the push of each committed operation.
@@ -1003,6 +1054,7 @@ namespace substrate {
       cache: CacheFiles,
       root: string,
       overflow_bytes: number,
+      blob_max: number,
       compact_turns: number,
       tasks: Notifier,
     ) {
@@ -1012,6 +1064,7 @@ namespace substrate {
       this.#slots = pool_of(cache);
       this.#root = root;
       this.#overflow_bytes = overflow_bytes;
+      this.#blob_max = blob_max;
       this.#compact_turns = compact_turns;
       this.#tasks = tasks;
     }
@@ -1291,6 +1344,7 @@ namespace substrate {
         flags,
       });
       try {
+        limit_set(this.#sqlite, database, this.#blob_max);
         database.exec({ sql: "PRAGMA foreign_keys = ON" });
         this.#schema_apply(database);
         this.#connections.set(name, database);
@@ -1402,6 +1456,7 @@ namespace substrate {
         flags: constants.open_read,
       });
       try {
+        limit_set(this.#sqlite, database, this.#blob_max);
         schema_check(database, tables_found(database));
       } finally {
         database.close();
@@ -1689,6 +1744,7 @@ namespace substrate {
           flags: constants.open_read,
         });
         try {
+          limit_set(this.#sqlite, database, this.#blob_max);
           for (const hash of hashes_read(database)) {
             named.add(hash);
           }

@@ -12,12 +12,13 @@
 # answers `initialize`, and `tools/list` with the tools of
 # API/mcp/tools.json; `verbose.tail` gives the server's ring and the page's
 # lines; and `settings.put` and `source.put` write the root's files in debug
-# mode and are refused with debug false. The lines fed to the loop are the
+# mode and are refused with the parameter debug false, which each child sets
+# from the root's parameters as `bootstrap.py` does. The lines fed to the loop are the
 # gold's, each its JSON text, a CR and its blobs' bytes, and the lines it
 # writes are read back the same way and checked against the gold.
 
 import contextlib, copy, functools, harness, hashlib, json, main_loop, os, re
-import signal, sqlite3, tempfile, traceback, unittest
+import signal, sqlite3, switches, tempfile, traceback, unittest
 from collections.abc import Callable
 from typing import Any
 
@@ -30,7 +31,7 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 # The API file that holds the tools as `tools/list` returns them.
 _TOOLS_PATH = os.path.join(_ROOT_PATH, "API", "mcp", "tools.json")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_integrate_main_loop"
 
 # A key of the decimal digits of a non negative integer, as JSLB reads it.
@@ -200,11 +201,14 @@ def _log_open(root: str) -> None:
     path = os.path.join(root, "settings.json")
     with open(path, encoding="utf-8") as file:
         values: dict[str, Any] = json.load(file)
-    main_loop.verbose.log_open(root, values["verbose_ring"])
+    main_loop.verbose.log_open(
+        root, values["verbose_ring"], values["blob_max"]
+    )
 
 
-# The work of a child that prepares the root and serves the pipes to the end.
+# Child: the root's parameters set, as `bootstrap.py` sets them, then serves.
 def _loop_serve(root: str, read_fd: int, write_fd: int) -> str:
+    switches.switches_apply(switches.parameters_load(root))
     _log_open(root)
     prepared = repr(main_loop.loop_prepare(root))
     main_loop.loop_run(read_fd, write_fd, root)
@@ -221,19 +225,20 @@ class ScratchCase(unittest.TestCase):
         self.scratch = scratch.name
         self.root = os.path.join(scratch.name, "root")
         os.mkdir(self.root)
-        self.debug_write(harness.setting_get("debug"))
+        self.debug_write(True)
         self.work = functools.partial(_loop_serve, self.root)
 
-    # Writes the checkout's settings with `debug` and the gold's sizes.
+    # Writes the checkout's settings with the gold's sizes, `debug` set.
     def debug_write(self, debug: bool) -> None:
         values = harness.settings_copy()
-        values["debug"] = debug
         values["overflow_bytes"] = _OVERFLOW_BYTES
         values["chunk_bytes"] = _CHUNK_BYTES
         path = os.path.join(self.root, "settings.json")
         with open(path, "w", encoding="utf-8") as file:
             json.dump(values, file)
         self.values = values
+        parameters = {**switches.switches_get(), "debug": debug}
+        switches.parameters_write(self.root, parameters)
 
     # Runs the loop in a child fed the data, returns its ending and output.
     def child_run(self, data: bytes) -> tuple[str, bytes]:

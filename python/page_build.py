@@ -10,26 +10,32 @@
 # the test bundle by ts/tsconfig.test.json, the text of i18n/en-US.json
 # takes the place of the bundle's strings table identifier, and the template
 # receives html/engine.css, the bundle, every file of build/vectors/ as
-# base64, written anew by vectors_make.py first, SQLite's JavaScript glue,
+# base64, written anew by vectors_make.py first, the gold of the TypeScript
+# suites, every ts/test_setting_<suite>.json read by jslb.json_decode as
+# {"typescript": {suite: gold}} on the one line that defines test_gold,
+# SQLite's JavaScript glue,
 # its wasm as base64, and xterm.js and its css, read from the archives
 # third_party_fetch.py places in third_party/. Each template takes the same
 # pieces: html/test.html, the ttyd page, which the start script serves as
 # hyperposition-engine.html, and html/headless.html, the headless page of
-# group B, which the driver's HTTP server serves.
+# group B, which the driver's HTTP server serves. page_copy writes a built
+# page at another path with other gold on that line, for a root whose test
+# gives its page its own gold.
 #
 # node_build builds the Node bundle of group A in the build directory it is
 # given: the vectors written anew into its vectors/ first, then tsc compiling
 # ts/tsconfig.node.json into its ts/node.js, the place the config's outFile
 # names in build/, which is rewritten as the strict line, then test_vectors
-# defined as the page defines it, then the bundle with the strings table in
-# place, and its path returned. tsc's output never reaches stdout: a failed
+# and test_gold defined as the page defines them, then the bundle with the
+# strings table in place, and its path returned. tsc's output never reaches stdout: a failed
 # compile raises, tsc's output in its cause.
 
 import argparse, base64, hashlib, json, os, re, shutil, subprocess, sys
 import tarfile, zipfile
+from typing import Any
 
 # The public name of this module, as its stub declares it.
-__all__ = ["node_build", "page_build"]
+__all__ = ["node_build", "page_build", "page_copy"]
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -61,8 +67,8 @@ _CONFIG_NAME = "tsconfig.test.json"
 # The `tsc` configuration of the Node bundle, rewritten where its `outFile` is.
 _NODE_CONFIG_NAME = "tsconfig.node.json"
 
-# The start of the Node bundle: the strict line, then `test_vectors` defined.
-_NODE_HEAD = '"use strict";\nvar test_vectors = {};\n'
+# The start of the Node bundle: the strict line, `test_vectors`, `test_gold`.
+_NODE_HEAD = '"use strict";\nvar test_vectors = {};\nvar test_gold = {};\n'
 
 # The folder of a build directory that the vectors are written into.
 _VECTORS_NAME = "vectors"
@@ -97,10 +103,21 @@ _MARKER_ELEMENTS = {
     "XSJS_BUILD_ENGINE_CSS": "style",
     "XSJS_BUILD_SQLITE3_JS": "script",
     "XSJS_BUILD_SQLITE3_WASM": "script",
+    "XSJS_BUILD_TEST_GOLD": "script",
     "XSJS_BUILD_TEST_VECTORS": "script",
     "XSJS_BUILD_XTERM_CSS": "style",
     "XSJS_BUILD_XTERM_JS": "script",
 }
+
+# The language whose suites' gold the page carries, its one key.
+_GOLD_LANGUAGE = "typescript"
+
+# The start and the end of a suite's gold file name, around the suite.
+_GOLD_PREFIX = "test_setting_"
+_GOLD_SUFFIX = ".json"
+
+# The one line of a built page that defines the gold, its JSON the group.
+_GOLD_LINE = re.compile(r"^([ \t]*var test_gold = )(.*)(;)$", re.MULTILINE)
 
 # The identifier the strings table stands for in the compiled bundle.
 _TABLE_TOKEN = re.compile(r"(?<![\w$])I18N_TABLE_JSON(?![\w$])")
@@ -158,6 +175,29 @@ def file_hash(path: str) -> str:
         return hashlib.sha256(file.read()).hexdigest()
 
 
+# Returns the gold as one line of JSON, refusing a key but the language's.
+def gold_json(gold: dict[str, Any]) -> str:
+    if list(gold) != [_GOLD_LANGUAGE]:
+        raise ValueError(f"the gold's keys {list(gold)}, not {_GOLD_LANGUAGE}")
+    return json.dumps(gold, ensure_ascii=False, separators=(",", ":"))
+
+
+# Reads every TypeScript suite's gold file by the decoders, an object each.
+def gold_read() -> dict[str, Any]:
+    # Imported here so its bytecode goes under the prefix set above.
+    import jslb
+
+    suites: dict[str, Any] = {}
+    for name in sorted(os.listdir(_TS_PATH)):
+        if name.startswith(_GOLD_PREFIX) and name.endswith(_GOLD_SUFFIX):
+            path = os.path.join(_TS_PATH, name)
+            suite: object = jslb.json_decode(text_read(path))
+            if not isinstance(suite, dict):
+                raise ValueError(f"{path}: holds no JSON object")
+            suites[name[len(_GOLD_PREFIX) : -len(_GOLD_SUFFIX)]] = suite
+    return {_GOLD_LANGUAGE: suites}
+
+
 # Returns the template with each marker, found once, replaced in one pass.
 def markers_fill(template: str, pieces: dict[str, str]) -> str:
     found = sorted(_MARKER.findall(template))
@@ -182,7 +222,8 @@ def node_build(build_path: str) -> str:
     config_path = os.path.join(_TS_PATH, _NODE_CONFIG_NAME)
     path = bundle_path(config_path, build_path)
     bundle = bundle_compile(config_path, path)
-    text = _NODE_HEAD.format(vectors) + table_substitute(
+    gold = gold_json(gold_read())
+    text = _NODE_HEAD.format(vectors, gold) + table_substitute(
         bundle, text_read(_TABLE_PATH)
     )
     with open(path, "wb") as file:
@@ -210,12 +251,27 @@ def page_build(template: str, name: str) -> str:
         "XSJS_BUILD_ENGINE_CSS": text_read(_ENGINE_CSS_PATH),
         "XSJS_BUILD_SQLITE3_JS": sqlite_js.decode("utf-8"),
         "XSJS_BUILD_SQLITE3_WASM": base64.b64encode(sqlite_wasm).decode(),
+        "XSJS_BUILD_TEST_GOLD": gold_json(gold_read()),
         "XSJS_BUILD_TEST_VECTORS": vectors_build(_VECTORS_PATH),
         "XSJS_BUILD_XTERM_CSS": xterm_css.decode("utf-8"),
         "XSJS_BUILD_XTERM_JS": xterm_js.decode("utf-8"),
     }
     page = page_merge(shell, pieces)
     return page_write(os.path.join(_BUILD_PATH, name + _PAGE_EXTENSION), page)
+
+
+# Writes the built page of the name at the path with the gold in its own place.
+def page_copy(name: str, path: str, gold: dict[str, Any]) -> str:
+    page = text_read(os.path.join(_BUILD_PATH, name + _PAGE_EXTENSION))
+    found = len(_GOLD_LINE.findall(page))
+    if found != 1:
+        raise ValueError(f"{name}: {found} lines define test_gold, not one")
+    text = gold_json(gold)
+    embed_check("test_gold", text, "script")
+    copied = _GOLD_LINE.sub(
+        lambda match: match.group(1) + text + match.group(3), page
+    )
+    return page_write(path, copied)
 
 
 # Returns the template with its markers replaced by the pieces, each checked.

@@ -23,16 +23,14 @@ param()
 
 # The project's top directory, which holds the files to check.
 $root_path_ = Split-Path -Parent $PSScriptRoot
-$test_settings_json_ = xsjs_util_read_json (
-    Join-Path $root_path_ 'test_settings.json')
-$lint_module_ = (
-    xsjs_util_get_setting $test_settings_json_ 'powershell.lint_module')
-$preset_ = xsjs_util_get_setting $test_settings_json_ 'powershell.lint_preset'
+# This script's gold, its own file beside it.
+$gold_json_ = xsjs_util_read_json (
+    Join-Path $PSScriptRoot 'test_setting_test_lint.json')
+$lint_module_ = xsjs_util_get_setting $gold_json_ 'lint_module'
+$preset_ = xsjs_util_get_setting $gold_json_ 'lint_preset'
 # The extensions of the `windows` rows of `reformat_table.json`.
-$extensions_ = (
-    xsjs_util_get_setting $test_settings_json_ 'powershell.lint_extensions')
-$line_length_ = (
-    xsjs_util_get_setting $test_settings_json_ 'powershell.lint_line_length')
+$extensions_ = xsjs_util_get_setting $gold_json_ 'lint_extensions'
+$line_length_ = xsjs_util_get_setting $gold_json_ 'lint_line_length'
 # The whitelist that `reformat.py` reads too.
 $whitelist_path_ = Join-Path $root_path_ 'python\reformat_whitelist.txt'
 # A whitelist line: a path from the top, with `*` or `?` in its last part only.

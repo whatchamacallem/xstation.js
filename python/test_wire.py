@@ -7,10 +7,11 @@
 # ts/test_wire_rungs.ts, which runs the rungs on the page's own wire, and this
 # file is the consumer. It builds the one page with page_build.py, makes three
 # roots under build/ as the start script makes the server root, echo, stock and
-# restart, each with its settings.json and its test_settings.json, whose
-# typescript.run is "wire" and whose typescript.test_wire_rungs names the rungs
-# the root runs and their gold. That gold is the rungs' fixed parameters,
-# python.test_wire.rungs of the checkout's test_settings.json, with the parts
+# restart, each with its settings.json and its own copy of the page, whose
+# gold, written into the copy by page_build.page_copy, has
+# typescript.test_all.run "wire" and typescript.test_wire_rungs naming the
+# rungs the root runs and their gold. That gold is the rungs' fixed
+# parameters, python.test_wire.rungs of the checkout's gold, with the parts
 # known at run time added: the root, its rungs, the digest of the tool's text,
 # and the text and digest of the restart's main loop file. The texts this file
 # finds in the server's log, its timers and its sizes are python.test_wire too.
@@ -31,12 +32,19 @@
 # makes the checks only this process can make: ttyd's resident size after the
 # fit rung, the largest blob, and its end when killed after the echo stream;
 # the stock server's database files, its log and its exit after the unknown
-# rung; and on the restart root a stream that ended passing, then the server's
-# exit and its pid kept by the exec, its log of the reply it did not expect to
-# its second first line, which names the page's refusal or, by a race of the
-# design, a verbose.put push of the page's log in flight across the exec, and
-# the page's fault screen holding its refusal, where it always shows. Each root
-# and rung is labelled smoke-test or normal-test: a smoke-test run, the
+# rung; and on the restart root the server found at the first point, before
+# the page runs the restart rung, which the page holds until this file,
+# having read that point, releases it by posting the rung's name on a
+# BroadcastChannel of the page's origin, then a stream that ended passing, the
+# server's exit and its pid kept by the exec, its log of the reply it did not
+# expect to its second first line, which names the page's refusal alone, since
+# the page holds what it posts after system.restart, and the page's fault
+# screen holding its refusal.
+# After each server's end it waits within the rung's time until the server is
+# reaped, its /proc entry gone: by ttyd after its logged exit, and on the echo
+# root by the process that adopted it once ttyd was killed; ttyd itself is
+# reaped by its wait before the next root starts, the browser at its end. Each
+# root and rung is labelled smoke-test or normal-test: a smoke-test run, the
 # default, leaves the normal-test rungs out of the gold, and a mislabel fails
 # the run. It exits 0, or 1 at the first failed check, naming its rung. ttyd's
 # log and the page's console are copied to stderr. ttyd, the browser and tsc
@@ -59,7 +67,7 @@ _CHECKOUT_PATH = os.path.dirname(_PYTHON_PATH)
 # The build directory: each run's roots, and the bytecode of what is imported.
 _BUILD_PATH = os.path.join(_CHECKOUT_PATH, "build")
 
-# The id of this driver's gold in `test_settings.json`.
+# The id of this driver's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_wire"
 
 # The module that builds ttyd, which a missing ttyd names.
@@ -74,7 +82,7 @@ _PAGE_TEMPLATE = "test"
 # The name the page is built under, apart from the browser test's page.
 _PAGE_NAME = "test_wire"
 
-# The page `page_build.py` writes under that name, which each root copies.
+# The page `page_build.py` writes, which each root copies with its own gold.
 _PAGE_PATH = os.path.join(_BUILD_PATH, f"{_PAGE_NAME}.html")
 
 # The strings file, which the start script copies into the root.
@@ -101,7 +109,7 @@ _ECHO_ARGS = (_LOOP_OPTION, _ECHO_NAME)
 # The arguments of the stock main loop: none.
 _STOCK_ARGS: tuple[str, ...] = ()
 
-# The label of the important rungs that fit in 2 minutes.
+# The label of the important rungs that fit in 3 minutes.
 _SMOKE_TEST = "smoke-test"
 
 # The label of every other rung.
@@ -166,11 +174,14 @@ _FAULT_SCRIPT = (
     " pre.textContent; })()"
 )
 
+# The page's post of a held rung's name on the channel, which releases it.
+_RELEASE_SCRIPT = (
+    "(() => {{ new BroadcastChannel({channel}).postMessage({rung});"
+    " return null; }})()"
+)
+
 # The type of the page's refusal of the restarted server's first line.
 _REFUSAL_TYPE = "error"
-
-# The type of a push of the page's log, which may be in flight at the exec.
-_PUSH_TYPE = "verbose.put"
 
 # The code a failed program exits with.
 _PROGRAM_FAILED = 1
@@ -603,8 +614,8 @@ def program_check(
     return dues.index(cmdline)
 
 
-# The pid of the one program ttyd runs and which command: ttyd's, or an exec's.
-def server_find(ttyd: TtydServer, execed: list[list[str]]) -> tuple[int, int]:
+# The pid of the one program ttyd runs, which runs ttyd's command.
+def server_find(ttyd: TtydServer) -> int:
     pid = ttyd.process.pid
     # The kernel's list of the children of ttyd's main thread.
     with open(f"/proc/{pid}/task/{pid}/children", encoding="ascii") as file:
@@ -613,8 +624,8 @@ def server_find(ttyd: TtydServer, execed: list[list[str]]) -> tuple[int, int]:
         raise CheckFailed(
             f"{ttyd.version} runs the programs {children}, where one was due"
         )
-    found = program_check(ttyd, children[0], [ttyd.command, *execed])
-    return children[0], found
+    program_check(ttyd, children[0], [ttyd.command])
+    return children[0]
 
 
 # Reads a process's resident size and its peak, in KiB, from its status file.
@@ -636,6 +647,31 @@ def exit_check(ttyd: TtydServer, pid: int, what: str) -> None:
             f"{ttyd.version} logged that the process of pid {pid} {how}"
             f" {number}, where it exited with code {_PROGRAM_FAILED}"
         )
+
+
+# Waits until the ended program of the pid is reaped, returning the seconds.
+def reaped_wait(ttyd: TtydServer, pid: int) -> float:
+    started = time.monotonic()
+    what = f"pid {pid} to be reaped, its /proc entry gone"
+    while os.path.exists(f"/proc/{pid}"):
+        left = ttyd.log.timer.seconds_left(what)
+        seconds = min(float(gold_value("poll_seconds")), left)
+        # A killed ttyd's log has ended, so the wait sleeps instead of reading.
+        if ttyd.log_ended:
+            time.sleep(seconds)
+        else:
+            ttyd.log_poll(seconds)
+    return time.monotonic() - started
+
+
+# Releases the held rung by posting its name on the page's channel.
+def release_send(browser: BrowserDriver, rung: str) -> None:
+    channel: str = gold_value("rungs.release_channel")
+    browser.script_evaluate(
+        _RELEASE_SCRIPT.format(
+            channel=json.dumps(channel), rung=json.dumps(rung)
+        )
+    )
 
 
 # Opens a database file of the root read only.
@@ -746,13 +782,15 @@ def kill_check(ttyd: TtydServer, pid: int) -> str:
             left = ttyd.log.timer.seconds_left(f"pid {pid} to end")
             readable, _, _ = select.select([descriptor], [], [], left)
         gone_seconds = time.monotonic() - killed_at
+        reaped_wait(ttyd, pid)
+        reaped_seconds = time.monotonic() - killed_at
     finally:
         os.close(descriptor)
     return (
         f"SIGKILL to {ttyd.version} with the echo main loop running as pid"
         f" {pid}: ttyd's log ended {ended_seconds:.4f} s after the kill;"
         f" ttyd exited with {status}; pid {pid} was gone {gone_seconds:.3f} s"
-        " after the kill"
+        f" after the kill and reaped {reaped_seconds:.3f} s after it"
     )
 
 
@@ -784,14 +822,12 @@ def json_write(root: str, name: str, value: object) -> None:
 def root_make(
     work: str, name: str, rungs: list[str]
 ) -> tuple[str, dict[str, Any]]:
-    import harness
+    import harness, page_build, switches
 
     root = os.path.join(work, name)
     python_path = os.path.join(root, "python")
     os.makedirs(python_path)
     values = harness.settings_copy()
-    values["debug"] = True
-    values["verbose_level"] = gold_value("root_level")
     for module in values["powershell"]["runtime_modules"]:
         file_name = module + ".py"
         shutil.copyfile(
@@ -803,12 +839,17 @@ def root_make(
     os.makedirs(strings_path)
     shutil.copyfile(_STRINGS_PATH, os.path.join(strings_path, "en-US.json"))
     json_write(root, "settings.json", values)
-    tests = harness.gold_copy()
-    tests["typescript"]["run"] = _TYPESCRIPT_RUN
+    parameters = {
+        **switches.switches_get(),
+        "debug": True,
+        "verbose": gold_value("root_verbose"),
+    }
+    switches.parameters_write(root, parameters)
+    tests = {"typescript": harness.gold_copy()["typescript"]}
+    tests["typescript"]["test_all"]["run"] = _TYPESCRIPT_RUN
     tests["typescript"]["test_wire_rungs"] = gold_make(name, rungs)
-    json_write(root, "test_settings.json", tests)
     page = os.path.join(root, values["powershell"]["engine_page"])
-    shutil.copyfile(_PAGE_PATH, page)
+    page_build.page_copy(_PAGE_NAME, page, tests)
     return root, values
 
 
@@ -828,7 +869,6 @@ def stream_run(
     ttyd: TtydServer,
     root: str,
     rungs: list[tuple[str, str]],
-    execed: list[list[str]],
 ) -> int:
     import tap_consumer
 
@@ -840,21 +880,21 @@ def stream_run(
     (first, first_label), *rest = rungs
     log.rung_enter(f"{root}: {first}", first_label)
     line = stream.point_next(first)
-    # The page runs on past its first point, so a later rung may have execed.
-    pid, found = server_find(ttyd, execed)
-    running = (
-        "its command"
-        if found == 0
-        else f"its command execed in place as {execed[found - 1]}"
-    )
+    pid = server_find(ttyd)
     log.rung_print(
-        f"{line.strip()}; the server is pid {pid}, ttyd's child running"
-        f" {running}",
+        f"{line.strip()}; the server is pid {pid}, ttyd's child running its"
+        " command",
         first_label,
     )
+    held: list[str] = gold_value("rungs.held_rungs")
     for rung, label in rest:
         log.rung_enter(f"{root}: {rung}", label)
+        if rung in held:
+            release_send(browser, rung)
         summary = stream.point_next(rung).strip()
+        if rung in held:
+            summary += "; released by this driver once the point before it"
+            summary += " was read"
         if rung == "fit":
             use = memory_read(ttyd.process.pid)
             summary += (
@@ -881,7 +921,7 @@ def root_echo(
     shutil.copyfile(_ECHO_PATH, os.path.join(directory, _ECHO_NAME))
     log.rung_start("echo: ttyd")
     with TtydServer(root, values, _ECHO_ARGS, log) as ttyd:
-        pid = stream_run(log, browser, ttyd, "echo", rungs, [])
+        pid = stream_run(log, browser, ttyd, "echo", rungs)
         log.rung_start("echo: ttyd killed")
         log.step_print(kill_check(ttyd, pid))
     log.book.root_leave()
@@ -897,15 +937,17 @@ def root_stock(
     root, values = root_make(work, "stock", [rung for rung, _ in rungs])
     log.rung_start("stock: ttyd")
     with TtydServer(root, values, _STOCK_ARGS, log) as ttyd:
-        pid = stream_run(log, browser, ttyd, "stock", rungs, [])
+        pid = stream_run(log, browser, ttyd, "stock", rungs)
         log.rung_start("stock: server end")
         exit_check(ttyd, pid, "ttyd's log of the server's end")
+        reaped = reaped_wait(ttyd, pid)
         message: str = gold_value("texts.dispatch_handler_unknown")
         log_find(root, [message], "the server's log of the unknown push")
         applied = commits_check(root)
         log.step_print(
             f"pid {pid} logged {message!r} and exited with code"
-            f" {_PROGRAM_FAILED} as ttyd logged; {applied}"
+            f" {_PROGRAM_FAILED} as ttyd logged, reaped {reaped:.3f} s after"
+            f" the log; {applied}"
         )
     log.book.root_leave()
 
@@ -920,35 +962,30 @@ def root_restart(
     root, values = root_make(work, "restart", [rung for rung, _ in rungs])
     log.rung_start("restart: ttyd")
     with TtydServer(root, values, _STOCK_ARGS, log) as ttyd:
-        # The command `system.restart` execs the server into, in place.
-        main_loop: str = gold_value("rungs.restart_name")
-        restarted = [*ttyd.command, _LOOP_OPTION, main_loop]
-        pid = stream_run(log, browser, ttyd, "restart", rungs, [restarted])
+        pid = stream_run(log, browser, ttyd, "restart", rungs)
         log.rung_start("restart: server end")
         exit_check(ttyd, pid, "ttyd's log of the restarted server's end")
+        reaped = reaped_wait(ttyd, pid)
         unexpected: str = gold_value("texts.bootstrap_reply_unexpected")
         twice: str = gold_value("texts.wire_start_twice")
         what = "the server's log of the reply to its second first line"
         line = line_named(root, unexpected, what)
         kind = line["0"]["type"]
-        refusal = kind == _REFUSAL_TYPE and line["message"] == twice
-        # A push sent before the exec may reach the restarted server first.
-        if not refusal and kind != _PUSH_TYPE:
+        if kind != _REFUSAL_TYPE or line["message"] != twice:
             raise CheckFailed(
-                f"{what}: it names {line}, neither the page's refusal nor a"
-                f" {_PUSH_TYPE} push"
+                f"{what}: it names {line}, not the page's refusal"
             )
         fault = fault_wait(browser, ttyd, "the page's fault screen")
         if fault.split("\n", 1)[0] != twice:
             raise CheckFailed(
                 f"the page's fault screen shows {fault!r}, not {twice!r}"
             )
-        named = "the page's refusal" if refusal else f"a {_PUSH_TYPE} push"
         log.step_print(
             f"the server execed in place as pid {pid}, then logged"
-            f" {unexpected.replace('{0}', '')!r} naming {named} and exited"
-            f" with code {_PROGRAM_FAILED} as ttyd logged; the page's fault"
-            f" screen shows {twice!r}"
+            f" {unexpected.replace('{0}', '')!r} naming the page's refusal and"
+            f" exited with code {_PROGRAM_FAILED} as ttyd logged, reaped"
+            f" {reaped:.3f} s after the log; the page's fault screen shows"
+            f" {twice!r}"
         )
     log.book.root_leave()
 

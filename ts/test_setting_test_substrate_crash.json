@@ -1,0 +1,56 @@
+{
+  "cases": [
+    {
+      "expect": ["tap_start_reply", "alpha_created", "put_paused"],
+      "name": "put_held",
+      "seconds": 10,
+      "send": ["start_cleared"]
+    },
+    {
+      "expect": ["tap_start_reply", "orphan_checked"],
+      "name": "orphan_removed",
+      "seconds": 10,
+      "send": ["start_kept"]
+    }
+  ],
+  "lines": {
+    "alpha_created": {
+      "0": {
+        "type": "db.create"
+      },
+      "db": "alpha"
+    },
+    "orphan_checked": {
+      "0": {
+        "type": "test_substrate_crash.checked"
+      },
+      "removed": 1,
+      "rows": 0
+    },
+    "put_paused": {
+      "0": {
+        "type": "test_substrate_crash.paused"
+      }
+    },
+    "start_cleared": {
+      "0": {
+        "type": "test_headless.worker_start"
+      },
+      "clear": true
+    },
+    "start_kept": {
+      "0": {
+        "type": "test_headless.worker_start"
+      },
+      "clear": false,
+      "wait_seconds": 5
+    },
+    "tap_start_reply": {
+      "0": {
+        "reply": 101,
+        "type": "tap.start"
+      }
+    }
+  },
+  "root": "/test_substrate_crash"
+}

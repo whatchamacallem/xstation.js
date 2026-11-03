@@ -3,20 +3,20 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # The two categories of test suite that the runners share: smoke-test, the
-# important suites that fit in 2 minutes in all, and normal-test, the others.
+# important suites that fit in 3 minutes in all, and normal-test, the others.
 # It holds the options --smoke-test and --normal-test that choose the category
 # of a run, smoke-test when neither is given; whether a suite of a label runs
-# in a run of a category, a smoke-test suite in both and a normal-test suite
-# in a normal-test run only; the seconds a run may take, the gold record's
-# smoke_seconds for a smoke-test run; the alarm of a suite, its own seconds
-# or the run's deadline, whichever comes first; and LabelBook, which checks
-# as a runner reaches them that a root labelled smoke-test holds a rung
-# labelled smoke-test and that a root labelled normal-test holds none. A
+# in a run of a category, a smoke-test suite in both and a normal-test suite in
+# a normal-test run only; the seconds a run may take, the driver's gold
+# python.test_all.smoke_seconds for a smoke-test run; the alarm of a suite, its
+# own seconds or the run's deadline, whichever comes first; and LabelBook,
+# which checks as a runner reaches them that a root labelled smoke-test holds a
+# rung labelled smoke-test and that a root labelled normal-test holds none. A
 # label or category other than the two strings raises.
 
 import argparse, harness
 
-# The label of the important suites that fit in 2 minutes, and its category.
+# The label of the important suites that fit in 3 minutes, and its category.
 _SMOKE_TEST = "smoke-test"
 
 # The label of every other suite, and the category that runs both labels.
@@ -24,6 +24,9 @@ _NORMAL_TEST = "normal-test"
 
 # The two labels, which are also the two categories.
 _LABELS = (_SMOKE_TEST, _NORMAL_TEST)
+
+# The driver's gold of the seconds a `smoke-test` run may take in all.
+_SMOKE_ID = "python.test_all.smoke_seconds"
 
 
 # Adds `--smoke-test` or `--normal-test` as `category`, `smoke-test` if none.
@@ -56,12 +59,12 @@ def suite_runs(label: str, category: str) -> bool:
     return label == _SMOKE_TEST or category == _NORMAL_TEST
 
 
-# A run's seconds: the gold `smoke_seconds` for `smoke-test`, else None.
+# A run's seconds: the driver's `smoke_seconds` for `smoke-test`, else None.
 def limit_seconds(category: str) -> float | None:
     _category_check(category)
     if category != _SMOKE_TEST:
         return None
-    return float(harness.gold_get("smoke_seconds"))
+    return float(harness.gold_get(_SMOKE_ID))
 
 
 # The alarm of a suite, the sooner of its own seconds and the run's deadline.

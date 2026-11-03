@@ -1,0 +1,220 @@
+{
+  "budget_bytes": 1048576,
+  "cases": [
+    {
+      "expect": ["store_reply"],
+      "name": "store_kept",
+      "seconds": 10,
+      "send": ["store_request"]
+    },
+    {
+      "expect": ["broken_error"],
+      "name": "store_undecodable",
+      "seconds": 10,
+      "send": ["broken_request"]
+    },
+    {
+      "expect": ["fetch_reply"],
+      "name": "fetch_kept",
+      "seconds": 10,
+      "send": ["fetch_request"]
+    },
+    {
+      "expect": ["missing_error"],
+      "name": "status_failed",
+      "seconds": 10,
+      "send": ["missing_request"]
+    },
+    {
+      "expect": ["closed_error"],
+      "name": "fetch_refused",
+      "seconds": 10,
+      "send": ["closed_request"]
+    },
+    {
+      "expect": ["slow_error"],
+      "name": "timeout_expired",
+      "seconds": 10,
+      "send": ["slow_request"]
+    },
+    {
+      "expect": ["text_error"],
+      "name": "fetch_undecodable",
+      "seconds": 10,
+      "send": ["text_request"]
+    }
+  ],
+  "lines": {
+    "broken_error": {
+      "0": {
+        "r": 2,
+        "t": "error"
+      },
+      "message": "The image for /_files/broken.png could not be decoded: InvalidStateError: The source image could not be decoded.",
+      "stack": "Error: The image for /_files/broken.png could not be decoded: InvalidStateError: The source image could not be decoded."
+    },
+    "broken_request": {
+      "0": {
+        "b": 1,
+        "i": 2,
+        "t": "media.store"
+      },
+      "1": {
+        "d": "bm90IGFuIGltYWdl",
+        "s": 12
+      },
+      "k": "/_files/broken.png"
+    },
+    "closed_error": {
+      "0": {
+        "r": 5,
+        "t": "error"
+      },
+      "message": "The download of http://127.0.0.1:28748/closed for /_files/closed.png failed: TypeError: Failed to fetch",
+      "stack": "Error: The download of http://127.0.0.1:28748/closed for /_files/closed.png failed: TypeError: Failed to fetch"
+    },
+    "closed_request": {
+      "0": {
+        "i": 5,
+        "t": "media.fetch"
+      },
+      "k": "/_files/closed.png",
+      "url": "http://127.0.0.1:28748/closed"
+    },
+    "fetch_reply": {
+      "0": {
+        "b": 1,
+        "r": 3,
+        "t": "media.fetch"
+      },
+      "1": {
+        "d": "Qk1GAAAAAAAAADYAAAAoAAAAAgAAAAIAAAABABgAAAAAABAAAAATCwAAEwsAAAAAAAAAAAAAECB/f0AAAAAQIH9/QAAAAA==",
+        "s": 70
+      },
+      "k": "/_files/bitmap.bmp",
+      "sha256": "e7ac5cbb3dbf5ceeffc7564bd9bcc99413857df2ee6d23dc3cbff9a8d8f092a0",
+      "size": 70
+    },
+    "fetch_request": {
+      "0": {
+        "i": 3,
+        "t": "media.fetch"
+      },
+      "k": "/_files/bitmap.bmp",
+      "url": "http://127.0.0.1:28747/bitmap"
+    },
+    "missing_error": {
+      "0": {
+        "r": 4,
+        "t": "error"
+      },
+      "message": "The download of http://127.0.0.1:28747/missing for /_files/missing.png failed: Error: The download of http://127.0.0.1:28747/missing answered with status 404.",
+      "stack": "Error: The download of http://127.0.0.1:28747/missing for /_files/missing.png failed: Error: The download of http://127.0.0.1:28747/missing answered with status 404."
+    },
+    "missing_request": {
+      "0": {
+        "i": 4,
+        "t": "media.fetch"
+      },
+      "k": "/_files/missing.png",
+      "url": "http://127.0.0.1:28747/missing"
+    },
+    "slow_error": {
+      "0": {
+        "r": 6,
+        "t": "error"
+      },
+      "message": "The download of http://127.0.0.1:28747/slow for /_files/slow.png did not finish within 1 seconds.",
+      "stack": "Error: The download of http://127.0.0.1:28747/slow for /_files/slow.png did not finish within 1 seconds."
+    },
+    "slow_request": {
+      "0": {
+        "i": 6,
+        "t": "media.fetch"
+      },
+      "k": "/_files/slow.png",
+      "url": "http://127.0.0.1:28747/slow"
+    },
+    "store_reply": {
+      "0": {
+        "r": 1,
+        "t": "media.store"
+      },
+      "k": "/_files/gatehouse/arrival.png",
+      "sha256": "90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0",
+      "size": 88
+    },
+    "store_request": {
+      "0": {
+        "b": 1,
+        "i": 1,
+        "t": "media.store"
+      },
+      "1": {
+        "d": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAH0lEQVR42mP4jwQYkAAucYZBqGGQO48oDaPxMCg0AADZV36QzYI8swAAAABJRU5ErkJggg==",
+        "s": 88
+      },
+      "k": "/_files/gatehouse/arrival.png"
+    },
+    "text_error": {
+      "0": {
+        "r": 7,
+        "t": "error"
+      },
+      "message": "The image for /_files/text.png could not be decoded: InvalidStateError: The source image could not be decoded.",
+      "stack": "Error: The image for /_files/text.png could not be decoded: InvalidStateError: The source image could not be decoded."
+    },
+    "text_request": {
+      "0": {
+        "i": 7,
+        "t": "media.fetch"
+      },
+      "k": "/_files/text.png",
+      "url": "http://127.0.0.1:28747/text"
+    }
+  },
+  "server": {
+    "closed_port": 28748,
+    "host": "127.0.0.1",
+    "paths": {
+      "/bitmap": {
+        "body": "BMF\u0000\u0000\u0000\u0000\u0000\u0000\u00006\u0000\u0000\u0000(\u0000\u0000\u0000\u0002\u0000\u0000\u0000\u0002\u0000\u0000\u0000\u0001\u0000\u0018\u0000\u0000\u0000\u0000\u0000\u0010\u0000\u0000\u0000\u0013\u000b\u0000\u0000\u0013\u000b\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0010 @\u0000\u0000\u0000\u0010 @\u0000\u0000\u0000",
+        "delay": 0,
+        "headers": {
+          "content-length": "70",
+          "content-type": "image/bmp"
+        },
+        "status": 200
+      },
+      "/missing": {
+        "body": "no such image",
+        "delay": 0,
+        "headers": {
+          "content-length": "13",
+          "content-type": "text/plain"
+        },
+        "status": 404
+      },
+      "/slow": {
+        "body": "late",
+        "delay": 2,
+        "headers": {
+          "content-length": "4",
+          "content-type": "text/plain"
+        },
+        "status": 200
+      },
+      "/text": {
+        "body": "not an image",
+        "delay": 0,
+        "headers": {
+          "content-length": "12",
+          "content-type": "text/plain"
+        },
+        "status": 200
+      }
+    },
+    "port": 28747
+  },
+  "timeout_seconds": 1
+}

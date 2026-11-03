@@ -68,8 +68,13 @@ declare namespace queue {
 
   // The verbose lines of a thread waiting to go out as `verbose.put` lines.
   class VerboseBatch {
-    constructor(thread: ThreadName, settings_get: (id: string) => unknown);
-    // Keeps a line while `debug` is true and no batch is going out.
+    // Takes the thread, the reader of the settings and that of debug mode.
+    constructor(
+      thread: ThreadName,
+      settings_get: (id: string) => unknown,
+      debug_on: () => boolean,
+    );
+    // Keeps a line in debug mode while no batch is going out.
     line_add(line: lines.VerboseLine): void;
     // Posts the kept lines in order as `verbose.put` lines below `line_max`.
     batch_send(post: (line: lines.Line) => void): void;
@@ -88,10 +93,11 @@ declare namespace queue {
     line_forward(line: lines.Line): void;
     // The number of tasks waiting, running and sleeping.
     depth(): number;
-    // Installs the verbose sink and the settings that bound and trace it.
+    // Installs the verbose sink, its settings and the reader of debug mode.
     sink_attach(
       sink_set: (fn: (line: lines.VerboseLine) => void) => void,
       settings_get: (id: string) => unknown,
+      debug_on: () => boolean,
     ): void;
   }
 }

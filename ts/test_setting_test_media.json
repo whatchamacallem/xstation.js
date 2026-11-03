@@ -1,0 +1,245 @@
+{
+  "lines": {
+    "fetch": {
+      "0": {
+        "i": 7,
+        "t": "media.fetch"
+      },
+      "k": "/_files/gatehouse/arrival.png",
+      "url": "https://images.example.test/arrival.png"
+    },
+    "fetch_blob": {
+      "0": {
+        "b": 1,
+        "i": 7,
+        "t": "media.fetch"
+      },
+      "1": {
+        "s": 3
+      },
+      "k": "/_files/gatehouse/arrival.png",
+      "url": "https://images.example.test/arrival.png"
+    },
+    "fetch_full": {
+      "0": {
+        "id": 7,
+        "type": "media.fetch"
+      },
+      "k": "/_files/gatehouse/arrival.png",
+      "url": "https://images.example.test/arrival.png"
+    },
+    "fetch_id_1": {
+      "0": {
+        "i": 1,
+        "t": "media.fetch"
+      },
+      "k": "/_files/gatehouse/arrival.png",
+      "url": "https://images.example.test/arrival.png"
+    },
+    "fetch_id_2": {
+      "0": {
+        "i": 2,
+        "t": "media.fetch"
+      },
+      "k": "/_files/gatehouse/arrival.png",
+      "url": "https://images.example.test/arrival.png"
+    },
+    "fetch_id_41": {
+      "0": {
+        "i": 41,
+        "t": "media.fetch"
+      },
+      "k": "/_files/gatehouse/arrival.png",
+      "url": "https://images.example.test/arrival.png"
+    },
+    "fetch_keyless": {
+      "0": {
+        "i": 7,
+        "t": "media.fetch"
+      },
+      "url": "https://images.example.test/arrival.png"
+    },
+    "fetch_unnumbered": {
+      "0": {
+        "t": "media.fetch"
+      },
+      "k": "/_files/gatehouse/arrival.png",
+      "url": "https://images.example.test/arrival.png"
+    },
+    "fetch_urlless": {
+      "0": {
+        "i": 7,
+        "t": "media.fetch"
+      },
+      "k": "/_files/gatehouse/arrival.png"
+    },
+    "header_error": {
+      "r": 7,
+      "t": "error"
+    },
+    "header_error_full": {
+      "reply": 7,
+      "type": "error"
+    },
+    "header_fetch_full": {
+      "blobs": 1,
+      "reply": 7,
+      "type": "media.fetch"
+    },
+    "header_store_full": {
+      "reply": 7,
+      "type": "media.store"
+    },
+    "kv_get": {
+      "0": {
+        "i": 7,
+        "t": "kv.get"
+      },
+      "k": "/_files/gatehouse/arrival.png",
+      "url": "https://images.example.test/arrival.png"
+    },
+    "kv_get_key": {
+      "0": {
+        "i": 7,
+        "t": "kv.get"
+      },
+      "k": "/_files/gatehouse/arrival.png"
+    },
+    "reply_fetch": {
+      "0": {
+        "b": 1,
+        "r": 7,
+        "t": "media.fetch"
+      },
+      "1": {
+        "s": 3
+      },
+      "k": "/_files/gatehouse/arrival.png",
+      "size": 3
+    },
+    "reply_store": {
+      "0": {
+        "r": 7,
+        "t": "media.store"
+      },
+      "k": "/_files/gatehouse/arrival.png",
+      "size": 3
+    },
+    "store": {
+      "0": {
+        "b": 1,
+        "i": 7,
+        "t": "media.store"
+      },
+      "1": {
+        "s": 3
+      },
+      "k": "/_files/gatehouse/arrival.png"
+    },
+    "store_full": {
+      "0": {
+        "blobs": 1,
+        "id": 7,
+        "type": "media.store"
+      },
+      "1": {
+        "size": 3
+      },
+      "k": "/_files/gatehouse/arrival.png"
+    },
+    "store_id_1": {
+      "0": {
+        "b": 1,
+        "i": 1,
+        "t": "media.store"
+      },
+      "1": {
+        "s": 3
+      },
+      "k": "/_files/gatehouse/arrival.png"
+    },
+    "store_id_2": {
+      "0": {
+        "b": 1,
+        "i": 2,
+        "t": "media.store"
+      },
+      "1": {
+        "s": 3
+      },
+      "k": "/_files/gatehouse/arrival.png"
+    },
+    "store_id_41": {
+      "0": {
+        "b": 1,
+        "i": 41,
+        "t": "media.store"
+      },
+      "1": {
+        "s": 3
+      },
+      "k": "/_files/gatehouse/arrival.png"
+    },
+    "store_keyless": {
+      "0": {
+        "b": 1,
+        "i": 7,
+        "t": "media.store"
+      },
+      "1": {
+        "s": 3
+      }
+    },
+    "store_two": {
+      "0": {
+        "b": 2,
+        "i": 7,
+        "t": "media.store"
+      },
+      "1": {
+        "s": 3
+      },
+      "2": {
+        "s": 3
+      },
+      "k": "/_files/gatehouse/arrival.png"
+    },
+    "store_unblobbed": {
+      "0": {
+        "i": 7,
+        "t": "media.store"
+      },
+      "k": "/_files/gatehouse/arrival.png"
+    },
+    "store_unnumbered": {
+      "0": {
+        "b": 1,
+        "t": "media.store"
+      },
+      "1": {
+        "s": 3
+      },
+      "k": "/_files/gatehouse/arrival.png"
+    }
+  },
+  "texts": {
+    "media_blob_bytes": "The media.store line has a blob that is not in memory, so it cannot be decoded.",
+    "media_blobs_invalid_fetch": "The media.fetch line carries 1 blobs but must carry 0.",
+    "media_blobs_invalid_none": "The media.store line carries 0 blobs but must carry 1.",
+    "media_blobs_invalid_two": "The media.store line carries 2 blobs but must carry 1.",
+    "media_budget_invalid_negative": "The media budget -1 is not a number of bytes above 0.",
+    "media_budget_invalid_zero": "The media budget 0 is not a number of bytes above 0.",
+    "media_download_expired_fraction": "The download of https://images.example.test/arrival.png for /_files/gatehouse/arrival.png did not finish within 0.5 seconds.",
+    "media_download_expired_whole": "The download of https://images.example.test/arrival.png for /_files/gatehouse/arrival.png did not finish within 5 seconds.",
+    "media_field_invalid_k": "The media field k is missing or is not valid.",
+    "media_field_invalid_url": "The media field url is missing or is not valid.",
+    "media_id_missing_fetch": "The media.fetch line has no id, so nothing could answer it.",
+    "media_id_missing_store": "The media.store line has no id, so nothing could answer it.",
+    "media_receiver_missing": "The media port got a request before a receiver was set.",
+    "media_receiver_twice": "The media port already has a receiver.",
+    "media_timeout_invalid_long": "The media timeout 2147484 is not a number of seconds above 0 that a timer can hold.",
+    "media_timeout_invalid_negative": "The media timeout -1 is not a number of seconds above 0 that a timer can hold.",
+    "media_timeout_invalid_zero": "The media timeout 0 is not a number of seconds above 0 that a timer can hold.",
+    "media_type_invalid": "The media port got a line of type kv.get instead of media.store or media.fetch."
+  }
+}

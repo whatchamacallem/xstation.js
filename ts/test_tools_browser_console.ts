@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// The line cases of the browser's tool `console_run`, group C, in a fresh
+// The line cases of the browser's console tools, group C, in a fresh
 // worker of the headless page that the block's own ttyd serves: `mcp` lines
 // through a real queue of thread `ai`, whose `mcp` handler hands each one to
 // a real `mcp.Server` that holds the tools of `tools_browser` over a real
@@ -27,11 +27,23 @@
 // so that each command's read starts after it. `console_attach` pushes the
 // end of tty 0 to the UI as `console.exit`, though no case closes it. Each
 // command's `console.busy` before its typing and `console.idle` once its read
-// ends come on the `ui` lane between the show and the tool's reply. The cases, the gold of the block's id: tty 0
-// opened and ttyd's token back; ttyd's first message sent with the gold's
-// size, then `echo hi` asked, accepted, shown, typed and read back to the
-// prompt; `echo 2` asked again with the next number; `echo 3` allowed always;
-// `pwd` with no ask; and `sleep 600` read until the tool's timeout.
+// ends come on the `ui` lane between the show and the tool's reply. Once
+// dash's first prompt has shown, the junction watches the output for the
+// gold's `released`, the output of the view's line, and then sends the
+// test's end the gold's `view_released`. The cases, the gold of the
+// block's id: tty 0 opened and ttyd's token back; ttyd's first message sent
+// with the gold's size, then `echo hi` asked, accepted, shown, typed and
+// read back to the prompt; `echo 2` asked again with the next number;
+// `echo 3` allowed always; `pwd` with no ask; `console_write` of a command
+// that prompts, a `console_read` timed out on its `read`, the answer
+// written and a read to the prompt that ends the turn; a write with no
+// newline, a read that finds nothing typed, the rest of the line and its
+// read; the prompting command again with the view's line sent inside the
+// turn, which waits until the turn's end, so that the program reads the
+// AI's answer and the view's line runs after; the view's `sleep 2`, then
+// `echo after` run, whose turn waits for the prompt after the sleep;
+// `sleep 600` read until the tool's timeout; and `echo never` run while
+// it sleeps, whose wait passes its timeout with no turn and nothing typed.
 
 namespace test_tools_browser_console {
   // The initialized sqlite3.wasm module, a global the test page sets.
@@ -57,6 +69,7 @@ namespace test_tools_browser_console {
     handler_version: 0,
     synchronous_setting: "queue_synchronous",
     overflow_setting: "overflow_bytes",
+    blob_setting: "blob_max",
     compact_setting: "turn_compact_turns",
     root: "/test_tools_browser_console",
     server_name: "xsjs-browser",
@@ -112,24 +125,29 @@ namespace test_tools_browser_console {
   ): void {
     const kind = gold_value("output_kind") as string;
     const prompt = gold_value("prompt") as string;
+    const released = gold_value("released") as string;
     // tty 0's output until dash's first prompt has shown in it, then nothing.
     let output: string | undefined = "";
+    // The output after that prompt until the view's line released shows.
+    let watched: string | undefined = "";
     // The cases' `mcp` lines that wait for that prompt, in order.
     const held: lines.Line[] = [];
     // Keeps the output of a message of tty 0, then posts the held lines.
     const output_scan = (line: lines.Line): void => {
-      if (output === undefined) {
-        return;
-      }
       const blob = line[1] as lines.BlobHeader;
       const data = jslb.field_get(blob, "data") as Uint8Array;
       if (String.fromCharCode(data[0]) !== kind) {
         return;
       }
-      let text = output;
+      let added = "";
       for (const byte of data.subarray(1)) {
-        text += String.fromCharCode(byte);
+        added += String.fromCharCode(byte);
       }
+      if (output === undefined) {
+        watch_scan(added);
+        return;
+      }
+      const text = output + added;
       if (!text.includes(prompt)) {
         output = text;
         return;
@@ -137,6 +155,17 @@ namespace test_tools_browser_console {
       output = undefined;
       for (const waiting of held.splice(0)) {
         server.line_post(waiting, []);
+      }
+    };
+    // Tells the test's end once the view's held line has run in tty 0.
+    const watch_scan = (added: string): void => {
+      if (watched === undefined) {
+        return;
+      }
+      watched += added;
+      if (watched.includes(released)) {
+        watched = undefined;
+        end.line_post(gold_value("lines.view_released") as lines.Line, []);
       }
     };
     // A case's `mcp` line goes on the server lane once the prompt showed.
@@ -184,6 +213,7 @@ namespace test_tools_browser_console {
       new substrate.CacheFiles([...test_slots]),
       constants.root,
       harness.setting_get(constants.overflow_setting) as number,
+      harness.setting_get(constants.blob_setting) as number,
       harness.setting_get(constants.compact_setting) as number,
       tasks,
     );
@@ -195,6 +225,7 @@ namespace test_tools_browser_console {
       constants.provider_thread,
       gold_value("info") as lines.ProviderInfo,
       harness.setting_get,
+      switches.debug_on,
     );
     dispatch.handler_register(
       constants.line_type,

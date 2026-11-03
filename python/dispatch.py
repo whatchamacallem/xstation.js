@@ -8,7 +8,7 @@
 # fails with the failure's error, so an answer is never lost to the fault
 # after it. An error line holds the cascade as nested `cause` entries, the
 # first failure innermost. A line takes the name form of the line it
-# answers; with none, `full`, the caller's setting `debug`, picks it.
+# answers; with none, `full`, the caller's parameter `debug`, picks it.
 
 import jslb, traceback
 from collections.abc import Callable

@@ -1,0 +1,245 @@
+{
+  "chunk_bytes": 1000,
+  "lines": {
+    "create_castle": {
+      "0": {
+        "t": "db.create"
+      },
+      "db": "castle"
+    },
+    "create_dropped": {
+      "0": {
+        "t": "db.create"
+      },
+      "db": "dropped"
+    },
+    "delete_gone": {
+      "0": {
+        "k": "/castle/gone",
+        "t": "kv.delete"
+      }
+    },
+    "doc_note": {
+      "0": {
+        "t": "doc.put"
+      },
+      "body": {
+        "0": {
+          "t": "note"
+        },
+        "text": "A note."
+      },
+      "db": "castle",
+      "id": "note"
+    },
+    "drop_dropped": {
+      "0": {
+        "t": "db.drop"
+      },
+      "db": "dropped"
+    },
+    "error_reply": {
+      "0": {
+        "r": 1,
+        "t": "error"
+      }
+    },
+    "initialize": {
+      "0": {
+        "i": 1,
+        "t": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "initialize",
+      "params": {
+        "capabilities": {},
+        "clientInfo": {
+          "name": "hyperposition-engine",
+          "version": "0"
+        },
+        "protocolVersion": "2025-06-18"
+      }
+    },
+    "initialize_reply": {
+      "0": {
+        "r": 1,
+        "t": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "result": {
+        "capabilities": {
+          "tools": {}
+        },
+        "protocolVersion": "2025-06-18",
+        "serverInfo": {
+          "name": "xsjs-server",
+          "version": "0"
+        }
+      }
+    },
+    "initialized": {
+      "0": {
+        "t": "mcp"
+      },
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+    },
+    "put_gone": {
+      "0": {
+        "b": 1,
+        "k": "/castle/gone",
+        "t": "kv.put"
+      },
+      "1": {}
+    },
+    "put_kept": {
+      "0": {
+        "b": 1,
+        "k": "/castle/kept",
+        "t": "kv.put"
+      },
+      "1": {}
+    },
+    "settings_put": {
+      "0": {
+        "i": 2,
+        "t": "settings.put"
+      }
+    },
+    "settings_reply": {
+      "0": {
+        "r": 2,
+        "t": "settings.put"
+      }
+    },
+    "source_put": {
+      "0": {
+        "b": 1,
+        "i": 1,
+        "t": "source.put"
+      },
+      "1": {},
+      "name": "loop_test.py"
+    },
+    "source_reply": {
+      "0": {
+        "r": 1,
+        "t": "source.put"
+      }
+    },
+    "sql_castle": {
+      "0": {
+        "t": "sql.run"
+      },
+      "db": "castle",
+      "statements": [
+        {
+          "params": [],
+          "sql": "CREATE TABLE t (x INTEGER) STRICT"
+        },
+        {
+          "params": [7],
+          "sql": "INSERT INTO t VALUES (?)"
+        }
+      ]
+    },
+    "tail_server": {
+      "0": {
+        "i": 1,
+        "t": "verbose.tail"
+      },
+      "count": 10,
+      "thread": "server"
+    },
+    "tail_server_reply": {
+      "0": {
+        "r": 1,
+        "t": "verbose.tail"
+      }
+    },
+    "tail_ui": {
+      "0": {
+        "i": 2,
+        "t": "verbose.tail"
+      },
+      "count": 10,
+      "thread": "ui"
+    },
+    "tail_ui_reply": {
+      "0": {
+        "r": 2,
+        "t": "verbose.tail"
+      },
+      "lines": [
+        {
+          "at": 1,
+          "text": "first"
+        },
+        {
+          "at": 2,
+          "text": "second"
+        }
+      ]
+    },
+    "tap_line": {
+      "0": {
+        "t": "tap.line"
+      },
+      "language": "typescript",
+      "text": "ok 1 - test_page"
+    },
+    "tools_list": {
+      "0": {
+        "i": 2,
+        "t": "mcp"
+      },
+      "id": 2,
+      "jsonrpc": "2.0",
+      "method": "tools/list"
+    },
+    "tools_list_reply": {
+      "0": {
+        "r": 2,
+        "t": "mcp"
+      },
+      "id": 2,
+      "jsonrpc": "2.0"
+    },
+    "turn_note": {
+      "0": {
+        "t": "turn.append"
+      },
+      "content": {
+        "content": "A turn.",
+        "role": "user"
+      },
+      "role": "user",
+      "scene": "/castle/note/1"
+    },
+    "verbose_put": {
+      "0": {
+        "t": "verbose.put"
+      },
+      "lines": [
+        {
+          "at": 1,
+          "text": "first"
+        },
+        {
+          "at": 2,
+          "text": "second"
+        }
+      ],
+      "thread": "ui"
+    }
+  },
+  "overflow_bytes": 4096,
+  "read_bytes": 65536,
+  "ring": 999,
+  "texts": {
+    "engine_system_debug_off_line": "source.put needs debug mode, and the parameter debug is false.",
+    "main_loop_line_dispatch_tail": "server dispatches from ai: {\"i\":1,\"t\":\"verbose.tail\"}"
+  }
+}

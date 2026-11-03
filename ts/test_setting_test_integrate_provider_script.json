@@ -1,0 +1,856 @@
+{
+  "cases": [
+    {
+      "expect": ["turn_answer"],
+      "name": "turn_tools",
+      "seconds": 10,
+      "send": ["turn_ask"]
+    },
+    {
+      "expect": ["castle_answer"],
+      "name": "tools_image",
+      "seconds": 10,
+      "send": ["castle_ask"]
+    },
+    {
+      "expect": ["image_answer"],
+      "name": "image_answered",
+      "seconds": 10,
+      "send": ["image_ask"]
+    },
+    {
+      "expect": ["imaged_answer"],
+      "name": "tools_scene",
+      "seconds": 10,
+      "send": ["imaged_ask"]
+    },
+    {
+      "expect": ["entered_answer"],
+      "name": "turn_subtitle",
+      "seconds": 10,
+      "send": ["entered_ask"]
+    },
+    {
+      "expect": ["gatehouse_answer"],
+      "name": "turn_next",
+      "seconds": 10,
+      "send": ["gatehouse_ask"]
+    },
+    {
+      "expect": ["images_answer"],
+      "name": "images_two",
+      "seconds": 10,
+      "send": ["images_ask"]
+    },
+    {
+      "expect": ["short_answer"],
+      "name": "names_short",
+      "seconds": 10,
+      "send": ["short_ask"]
+    }
+  ],
+  "lines": {
+    "castle_answer": {
+      "0": {
+        "reply": 2,
+        "type": "provider_script_test.ask"
+      },
+      "answer": {
+        "0": {
+          "reply": 2,
+          "type": "http.request"
+        },
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": null,
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"prompt\":\"A rain dark castle gatehouse at dusk\",\"key\":\"/_files/gatehouse/arrival.png\"}",
+                      "name": "browser.image_make"
+                    },
+                    "id": "call_2",
+                    "type": "function"
+                  }
+                ]
+              }
+            }
+          ],
+          "id": "chatcmpl-synthetic-2",
+          "model": "grok-4"
+        },
+        "status": 200
+      }
+    },
+    "castle_ask": {
+      "0": {
+        "id": 2,
+        "type": "provider_script_test.ask"
+      },
+      "request": {
+        "0": {
+          "type": "http.request"
+        },
+        "headers": {
+          "Authorization": "Bearer xai-SYNTHETIC-KEY",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "messages": [
+            {
+              "content": "1",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"name\":\"bootstrap\",\"args\":{\"universe\":\"castle\",\"world\":\"castle_world\"}}",
+                    "name": "browser.script_run"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{}",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            }
+          ],
+          "model": "grok-4",
+          "tool_choice": "auto"
+        },
+        "method": "POST",
+        "url": "https://api.x.ai/v1/chat/completions"
+      }
+    },
+    "entered_answer": {
+      "0": {
+        "reply": 5,
+        "type": "provider_script_test.ask"
+      },
+      "answer": {
+        "0": {
+          "reply": 5,
+          "type": "http.request"
+        },
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.",
+                "role": "assistant"
+              }
+            }
+          ],
+          "id": "chatcmpl-synthetic-4",
+          "model": "grok-4"
+        },
+        "status": 200
+      }
+    },
+    "entered_ask": {
+      "0": {
+        "id": 5,
+        "type": "provider_script_test.ask"
+      },
+      "request": {
+        "0": {
+          "type": "http.request"
+        },
+        "headers": {
+          "Authorization": "Bearer xai-SYNTHETIC-KEY",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "messages": [
+            {
+              "content": "1",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"name\":\"bootstrap\",\"args\":{\"universe\":\"castle\",\"world\":\"castle_world\"}}",
+                    "name": "browser.script_run"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{}",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"prompt\":\"A rain dark castle gatehouse at dusk\",\"key\":\"/_files/gatehouse/arrival.png\"}",
+                    "name": "browser.image_make"
+                  },
+                  "id": "call_2",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{}",
+              "role": "tool",
+              "tool_call_id": "call_2"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"db\":\"castle_gatehouse\",\"id\":\"scene/arrival\",\"body\":{\"0\":{\"t\":\"scene\"},\"subtitle\":\"Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.\"}}",
+                    "name": "browser.doc_put"
+                  },
+                  "id": "call_3",
+                  "type": "function"
+                },
+                {
+                  "function": {
+                    "arguments": "{\"ref\":\"/castle_world/scene\",\"text\":\"/castle_gatehouse/scene/arrival/1\"}",
+                    "name": "browser.kv_put"
+                  },
+                  "id": "call_4",
+                  "type": "function"
+                },
+                {
+                  "function": {
+                    "arguments": "{\"image\":\"/_files/gatehouse/arrival.png\",\"subtitle\":\"Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.\"}",
+                    "name": "browser.render"
+                  },
+                  "id": "call_5",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{}",
+              "role": "tool",
+              "tool_call_id": "call_3"
+            },
+            {
+              "content": "{}",
+              "role": "tool",
+              "tool_call_id": "call_4"
+            },
+            {
+              "content": "{}",
+              "role": "tool",
+              "tool_call_id": "call_5"
+            }
+          ],
+          "model": "grok-4",
+          "tool_choice": "auto"
+        },
+        "method": "POST",
+        "url": "https://api.x.ai/v1/chat/completions"
+      }
+    },
+    "gatehouse_answer": {
+      "0": {
+        "reply": 6,
+        "type": "provider_script_test.ask"
+      },
+      "answer": {
+        "0": {
+          "reply": 6,
+          "type": "http.request"
+        },
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "Still the moat.",
+                "role": "assistant"
+              }
+            }
+          ],
+          "id": "chatcmpl-synthetic-5",
+          "model": "grok-4"
+        },
+        "status": 200
+      }
+    },
+    "gatehouse_ask": {
+      "0": {
+        "id": 6,
+        "type": "provider_script_test.ask"
+      },
+      "request": {
+        "0": {
+          "type": "http.request"
+        },
+        "headers": {
+          "Authorization": "Bearer xai-SYNTHETIC-KEY",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "messages": [
+            {
+              "content": "1",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"name\":\"bootstrap\",\"args\":{\"universe\":\"castle\",\"world\":\"castle_world\"}}",
+                    "name": "browser.script_run"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{}",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"prompt\":\"A rain dark castle gatehouse at dusk\",\"key\":\"/_files/gatehouse/arrival.png\"}",
+                    "name": "browser.image_make"
+                  },
+                  "id": "call_2",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{}",
+              "role": "tool",
+              "tool_call_id": "call_2"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"db\":\"castle_gatehouse\",\"id\":\"scene/arrival\",\"body\":{\"0\":{\"t\":\"scene\"},\"subtitle\":\"Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.\"}}",
+                    "name": "browser.doc_put"
+                  },
+                  "id": "call_3",
+                  "type": "function"
+                },
+                {
+                  "function": {
+                    "arguments": "{\"ref\":\"/castle_world/scene\",\"text\":\"/castle_gatehouse/scene/arrival/1\"}",
+                    "name": "browser.kv_put"
+                  },
+                  "id": "call_4",
+                  "type": "function"
+                },
+                {
+                  "function": {
+                    "arguments": "{\"image\":\"/_files/gatehouse/arrival.png\",\"subtitle\":\"Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.\"}",
+                    "name": "browser.render"
+                  },
+                  "id": "call_5",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{}",
+              "role": "tool",
+              "tool_call_id": "call_3"
+            },
+            {
+              "content": "{}",
+              "role": "tool",
+              "tool_call_id": "call_4"
+            },
+            {
+              "content": "{}",
+              "role": "tool",
+              "tool_call_id": "call_5"
+            },
+            {
+              "content": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.",
+              "role": "assistant"
+            },
+            {
+              "content": "0",
+              "role": "user"
+            }
+          ],
+          "model": "grok-4",
+          "tool_choice": "auto"
+        },
+        "method": "POST",
+        "url": "https://api.x.ai/v1/chat/completions"
+      }
+    },
+    "image_answer": {
+      "0": {
+        "reply": 3,
+        "type": "provider_script_test.ask"
+      },
+      "answer": {
+        "0": {
+          "reply": 3,
+          "type": "http.request"
+        },
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "data": [
+            {
+              "b64_json": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAADG0lEQVR4AQEQA+/8AP///////////////wAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAD///////////////8A////////////////AAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAP///////////////9lXfpBoL1TRAAAAAElFTkSuQmCC"
+            }
+          ]
+        },
+        "status": 200
+      }
+    },
+    "image_ask": {
+      "0": {
+        "id": 3,
+        "type": "provider_script_test.ask"
+      },
+      "request": {
+        "0": {
+          "type": "http.request"
+        },
+        "headers": {
+          "Authorization": "Bearer xai-SYNTHETIC-KEY",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "model": "grok-2-image",
+          "n": 1,
+          "prompt": "A rain dark castle gatehouse at dusk",
+          "response_format": "b64_json"
+        },
+        "method": "POST",
+        "url": "https://api.x.ai/v1/images/generations"
+      }
+    },
+    "imaged_answer": {
+      "0": {
+        "reply": 4,
+        "type": "provider_script_test.ask"
+      },
+      "answer": {
+        "0": {
+          "reply": 4,
+          "type": "http.request"
+        },
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": null,
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"db\":\"castle_gatehouse\",\"id\":\"scene/arrival\",\"body\":{\"0\":{\"t\":\"scene\"},\"subtitle\":\"Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.\"}}",
+                      "name": "browser.doc_put"
+                    },
+                    "id": "call_3",
+                    "type": "function"
+                  },
+                  {
+                    "function": {
+                      "arguments": "{\"ref\":\"/castle_world/scene\",\"text\":\"/castle_gatehouse/scene/arrival/1\"}",
+                      "name": "browser.kv_put"
+                    },
+                    "id": "call_4",
+                    "type": "function"
+                  },
+                  {
+                    "function": {
+                      "arguments": "{\"image\":\"/_files/gatehouse/arrival.png\",\"subtitle\":\"Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.\"}",
+                      "name": "browser.render"
+                    },
+                    "id": "call_5",
+                    "type": "function"
+                  }
+                ]
+              }
+            }
+          ],
+          "id": "chatcmpl-synthetic-3",
+          "model": "grok-4"
+        },
+        "status": 200
+      }
+    },
+    "imaged_ask": {
+      "0": {
+        "id": 4,
+        "type": "provider_script_test.ask"
+      },
+      "request": {
+        "0": {
+          "type": "http.request"
+        },
+        "headers": {
+          "Authorization": "Bearer xai-SYNTHETIC-KEY",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "messages": [
+            {
+              "content": "1",
+              "role": "user"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"name\":\"bootstrap\",\"args\":{\"universe\":\"castle\",\"world\":\"castle_world\"}}",
+                    "name": "browser.script_run"
+                  },
+                  "id": "call_1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{}",
+              "role": "tool",
+              "tool_call_id": "call_1"
+            },
+            {
+              "content": null,
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"prompt\":\"A rain dark castle gatehouse at dusk\",\"key\":\"/_files/gatehouse/arrival.png\"}",
+                    "name": "browser.image_make"
+                  },
+                  "id": "call_2",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{}",
+              "role": "tool",
+              "tool_call_id": "call_2"
+            }
+          ],
+          "model": "grok-4",
+          "tool_choice": "auto"
+        },
+        "method": "POST",
+        "url": "https://api.x.ai/v1/chat/completions"
+      }
+    },
+    "images_answer": {
+      "0": {
+        "reply": 7,
+        "type": "provider_script_test.ask"
+      },
+      "answer": {
+        "0": {
+          "reply": 7,
+          "type": "http.request"
+        },
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "data": [
+            {
+              "b64_json": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAADG0lEQVR4AQEQA+/8AP///////////////wAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAD///////////////8A////////////////AAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAP///////////////9lXfpBoL1TRAAAAAElFTkSuQmCC"
+            },
+            {
+              "b64_json": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAADG0lEQVR4AQEQA+/8AP///////////////wAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAD///////////////8A////////////////AAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAD///////////////8AAAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAA////////////////AAAAAAAAAAAAAAAAAP///////////////wAAAAAAAAAAAAAAAP///////////////9lXfpBoL1TRAAAAAElFTkSuQmCC"
+            }
+          ]
+        },
+        "status": 200
+      }
+    },
+    "images_ask": {
+      "0": {
+        "id": 7,
+        "type": "provider_script_test.ask"
+      },
+      "request": {
+        "0": {
+          "type": "http.request"
+        },
+        "headers": {
+          "Authorization": "Bearer xai-SYNTHETIC-KEY",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "model": "grok-2-image",
+          "n": 2,
+          "prompt": "Two gatehouses.",
+          "response_format": "b64_json"
+        },
+        "method": "POST",
+        "url": "https://api.x.ai/v1/images/generations"
+      }
+    },
+    "short_answer": {
+      "0": {
+        "r": 8,
+        "t": "provider_script_test.ask"
+      },
+      "answer": {
+        "0": {
+          "r": 8,
+          "t": "http.request"
+        },
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "choices": [
+            {
+              "finish_reason": "stop",
+              "index": 0,
+              "message": {
+                "content": "Still the moat.",
+                "role": "assistant"
+              }
+            }
+          ],
+          "id": "chatcmpl-synthetic-6",
+          "model": "grok-4"
+        },
+        "status": 200
+      }
+    },
+    "short_ask": {
+      "0": {
+        "i": 8,
+        "t": "provider_script_test.ask"
+      },
+      "request": {
+        "0": {
+          "t": "http.request"
+        },
+        "headers": {
+          "Authorization": "Bearer xai-SYNTHETIC-KEY",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "messages": [
+            {
+              "content": "0",
+              "role": "user"
+            }
+          ],
+          "model": "grok-4",
+          "tool_choice": "auto"
+        },
+        "method": "POST",
+        "url": "https://api.x.ai/v1/chat/completions"
+      }
+    },
+    "turn_answer": {
+      "0": {
+        "reply": 1,
+        "type": "provider_script_test.ask"
+      },
+      "answer": {
+        "0": {
+          "reply": 1,
+          "type": "http.request"
+        },
+        "headers": {
+          "content-type": "application/json"
+        },
+        "json": {
+          "choices": [
+            {
+              "finish_reason": "tool_calls",
+              "index": 0,
+              "message": {
+                "content": null,
+                "role": "assistant",
+                "tool_calls": [
+                  {
+                    "function": {
+                      "arguments": "{\"name\":\"bootstrap\",\"args\":{\"universe\":\"castle\",\"world\":\"castle_world\"}}",
+                      "name": "browser.script_run"
+                    },
+                    "id": "call_1",
+                    "type": "function"
+                  }
+                ]
+              }
+            }
+          ],
+          "id": "chatcmpl-synthetic-1",
+          "model": "grok-4"
+        },
+        "status": 200
+      }
+    },
+    "turn_ask": {
+      "0": {
+        "id": 1,
+        "type": "provider_script_test.ask"
+      },
+      "request": {
+        "0": {
+          "type": "http.request"
+        },
+        "headers": {
+          "Authorization": "Bearer xai-SYNTHETIC-KEY",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "messages": [
+            {
+              "content": "1",
+              "role": "user"
+            }
+          ],
+          "model": "grok-4",
+          "tool_choice": "auto"
+        },
+        "method": "POST",
+        "url": "https://api.x.ai/v1/chat/completions"
+      }
+    }
+  },
+  "script": {
+    "nodes": {
+      "castle": {
+        "after_tools": {
+          "content": null,
+          "next": "imaged",
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": "{\"prompt\":\"A rain dark castle gatehouse at dusk\",\"key\":\"/_files/gatehouse/arrival.png\"}",
+                "name": "browser.image_make"
+              },
+              "id": "call_2",
+              "type": "function"
+            }
+          ]
+        },
+        "replies": {}
+      },
+      "entered": {
+        "after_tools": {
+          "content": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.",
+          "next": "gatehouse"
+        },
+        "replies": {}
+      },
+      "gatehouse": {
+        "replies": {
+          "0": {
+            "content": "Still the moat.",
+            "next": "gatehouse"
+          }
+        }
+      },
+      "hyperposition": {
+        "replies": {
+          "1": {
+            "content": null,
+            "next": "castle",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"name\":\"bootstrap\",\"args\":{\"universe\":\"castle\",\"world\":\"castle_world\"}}",
+                  "name": "browser.script_run"
+                },
+                "id": "call_1",
+                "type": "function"
+              }
+            ]
+          }
+        }
+      },
+      "imaged": {
+        "after_tools": {
+          "content": null,
+          "next": "entered",
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": "{\"db\":\"castle_gatehouse\",\"id\":\"scene/arrival\",\"body\":{\"0\":{\"t\":\"scene\"},\"subtitle\":\"Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.\"}}",
+                "name": "browser.doc_put"
+              },
+              "id": "call_3",
+              "type": "function"
+            },
+            {
+              "function": {
+                "arguments": "{\"ref\":\"/castle_world/scene\",\"text\":\"/castle_gatehouse/scene/arrival/1\"}",
+                "name": "browser.kv_put"
+              },
+              "id": "call_4",
+              "type": "function"
+            },
+            {
+              "function": {
+                "arguments": "{\"image\":\"/_files/gatehouse/arrival.png\",\"subtitle\":\"Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.\"}",
+                "name": "browser.render"
+              },
+              "id": "call_5",
+              "type": "function"
+            }
+          ]
+        },
+        "replies": {}
+      }
+    },
+    "start": "hyperposition"
+  }
+}

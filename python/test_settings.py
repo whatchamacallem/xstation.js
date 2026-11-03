@@ -22,9 +22,7 @@ _SETTINGS_PATH = os.path.join(_ROOT_PATH, "settings.json")
 
 # A good settings object, which each test copies before it damages the copy.
 _GOOD_SETTINGS: dict[str, Any] = {
-    "debug": True,
     "queue_synchronous": False,
-    "verbose_level": 1,
     "verbose_ring": 1000,
     "line_max": 1048576,
     "blob_max": 10485760,
@@ -57,11 +55,12 @@ _GOOD_SETTINGS: dict[str, Any] = {
         "key_file": "_cached_key.pem",
         "certificate_days": 825,
         "runner_file": "serve.ps1",
+        "parameters_file": "parameters.json",
         "ttyd_log_file": "ttyd.log",
         "poll_tries": 30,
         "poll_milliseconds": 500,
         "output_width": 200,
-        "root_files": ["settings.json", "test_settings.json", "provider.json"],
+        "root_files": ["settings.json", "provider.json"],
         "runtime_modules": [
             "internationalization",
             "jslb",
@@ -75,14 +74,12 @@ _GOOD_SETTINGS: dict[str, Any] = {
 
 # The paths of the values that are bools, nested names joined by `.`.
 _BOOL_PATHS = (
-    "debug",
     "queue_synchronous",
     "provider.scripted",
 )
 
 # The paths of the values that are ints.
 _INT_PATHS = (
-    "verbose_level",
     "verbose_ring",
     "line_max",
     "blob_max",
@@ -118,6 +115,7 @@ _STR_PATHS = (
     "powershell.certificate_file",
     "powershell.key_file",
     "powershell.runner_file",
+    "powershell.parameters_file",
     "powershell.ttyd_log_file",
 )
 
@@ -136,6 +134,9 @@ _MOVED_PATHS = (
 
 # The paths of the windows that `blob_max` replaced, refused as extra keys.
 _WINDOW_PATHS = ("message_max", "queue_max")
+
+# The paths of debug mode and the level, a root's parameters, refused too.
+_PARAMETER_PATHS = ("debug", "verbose_level")
 
 # The paths of the values that are objects checked by their own tables.
 _OBJECT_PATHS = ("provider", "powershell")
@@ -162,7 +163,7 @@ _NOT_TABLE: tuple[Any, ...] = (None, "text", 0, ["a"], {"a": 1}, {1: "a"})
 # Values that are not an object.
 _NOT_OBJECT: tuple[Any, ...] = (None, False, 0, 1.5, "text", [])
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_settings"
 
 
@@ -271,7 +272,7 @@ class TestCheck(unittest.TestCase):
     # An extra key, the provider file's and the old windows' among them, fails.
     def test_key_extra(self) -> None:
         paths = ("extra", "provider.extra", "powershell.extra")
-        for path in paths + _MOVED_PATHS + _WINDOW_PATHS:
+        for path in paths + _MOVED_PATHS + _WINDOW_PATHS + _PARAMETER_PATHS:
             bad = _wire_make()
             holder, name = _holder_find(bad, path)
             holder[name] = 0
@@ -375,7 +376,7 @@ class TestLoad(unittest.TestCase):
     # A file with a value of the wrong type is refused.
     def test_load_type(self) -> None:
         bad = _good_make()
-        bad["debug"] = 1
+        bad["queue_synchronous"] = 1
         self.text_write(json.dumps(bad))
-        expected = _text_fill("settings_type_wrong_debug")
-        self.load_fails(expected, "debug")
+        expected = _text_fill("settings_type_wrong_synchronous")
+        self.load_fails(expected, "queue_synchronous")

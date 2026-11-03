@@ -26,6 +26,17 @@
 // a blob its sink finished: `db_snapshot` gives names, and `db_restore` takes
 // either, or the bytes, keeping each file under the digest of its bytes.
 //
+// Every connection the store opens holds its database to `blob_max` bytes:
+// `PRAGMA max_page_count` is `blob_max` over the database's `page_size`, set
+// before any statement of the store's own. A write that needs a page past it
+// fails with SQLite's `SQLITE_FULL`, "database or disk is full", an
+// `sqlite3.SQLite3Error` that the store throws and never catches. The
+// connection then sets SQLite's authorizer, `sqlite3_set_authorizer`, which
+// denies a `PRAGMA max_page_count` that has a value, so that SQLite refuses
+// the statement when it is prepared with `SQLITE_AUTH`, "not authorized", an
+// `sqlite3.SQLite3Error` that the store throws and never catches. A read of
+// the pragma, with no value, is allowed, as every other statement.
+//
 // The handlers of the store's lines: the ui-ai requests of `lines.d.ts`,
 // answered with their replies, and the server's pushes `db.restore` and
 // `db.file`. A `db.restore` waits for its `files` lines of `db.file`, then
@@ -172,6 +183,7 @@ declare namespace substrate {
       cache: CacheFiles,
       root: string,
       overflow_bytes: number,
+      blob_max: number,
       compact_turns: number,
       tasks: Notifier,
     );

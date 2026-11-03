@@ -1,0 +1,130 @@
+{
+  "lines": {
+    "blob_line": {
+      "0": {
+        "b": 1
+      },
+      "1": {
+        "s": 3
+      },
+      "n": 1
+    },
+    "blob_three": {
+      "s": 3
+    },
+    "blob_two": {
+      "s": 2
+    },
+    "error_request_5": {
+      "0": {
+        "r": 5,
+        "t": "error"
+      }
+    },
+    "error_value": {
+      "0": {
+        "type": "error"
+      },
+      "message": "boom",
+      "stack": ""
+    },
+    "notification": {
+      "0": {}
+    },
+    "notification_n": {
+      "0": {},
+      "n": 1
+    },
+    "notification_text": {
+      "0": {},
+      "text": "x"
+    },
+    "reply_found": {
+      "0": {
+        "r": 7
+      },
+      "found": true,
+      "size": 3
+    },
+    "reply_found_full": {
+      "0": {
+        "reply": 7
+      },
+      "found": true,
+      "size": 3
+    },
+    "request_3": {
+      "0": {
+        "i": 3
+      }
+    },
+    "request_5": {
+      "0": {
+        "i": 5
+      }
+    },
+    "request_7": {
+      "0": {
+        "i": 7
+      }
+    },
+    "request_8": {
+      "0": {
+        "i": 8
+      }
+    },
+    "request_full_5": {
+      "0": {
+        "id": 5
+      }
+    },
+    "request_full_9": {
+      "0": {
+        "id": 9
+      }
+    },
+    "request_keyed": {
+      "0": {
+        "i": 7,
+        "k": "/a/b",
+        "v": 1
+      },
+      "n": 1
+    },
+    "request_keyed_full": {
+      "0": {
+        "id": 7,
+        "key": "/a/b",
+        "version": 1
+      },
+      "n": 1
+    },
+    "versioned": {
+      "0": {
+        "v": 1
+      }
+    },
+    "versioned_text": {
+      "0": {
+        "v": 1
+      },
+      "text": "x"
+    },
+    "wake": {
+      "0": {},
+      "replies": []
+    }
+  },
+  "texts": {
+    "dispatch_handler_twice": "A handler is already registered for type {0} version 0.",
+    "dispatch_handler_unknown_type": "No handler is registered for type {0} version 0.",
+    "dispatch_handler_unknown_version": "No handler is registered for type {0} version 1.",
+    "dispatch_id_invalid": "The line of type {0} has the id 7, which is not a number.",
+    "dispatch_notification_replied": "The handler for type {0} version 0 returned a reply to a line with no id.",
+    "dispatch_reply_headerless": "The handler for type {0} version 0 returned a reply with no header.",
+    "dispatch_request_unanswered": "The handler for type {0} version 0 returned no reply to the request with id 7.",
+    "dispatch_stack_missing_line": "The error with the message boom has no stack.",
+    "dispatch_stack_missing_nested": "The error with the message inner has no stack.",
+    "dispatch_type_invalid": "A line has the type 5, which is not text."
+  }
+}

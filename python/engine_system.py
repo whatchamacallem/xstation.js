@@ -70,7 +70,7 @@ _RESTART_SCHEMA: dict[str, Any] = {
 
 # The state the registration sets, which is empty until then.
 class _SystemState:
-    # Starts with no root and no debug setting.
+    # Starts with no root and no debug mode.
     def __init__(self) -> None:
         self.root: str | None = None
         self.debug: bool | None = None
@@ -80,7 +80,7 @@ class _SystemState:
 _STATE = _SystemState()
 
 
-# Returns the root and the debug setting, raising before the registration.
+# Returns the root and debug mode, raising before the registration.
 def _registered_get() -> tuple[str, bool]:
     if _STATE.root is None or _STATE.debug is None:
         raise RuntimeError(i18n("engine_system.not_registered"))

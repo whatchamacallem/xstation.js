@@ -182,6 +182,10 @@ namespace test_headless {
       side: "worker",
       module: () => test_substrate_store,
     },
+    test_substrate_limit: {
+      side: "worker",
+      module: () => test_substrate_limit,
+    },
     test_integrate_substrate: {
       side: "worker",
       topology: test_integrate_substrate.topology_build,
@@ -325,21 +329,18 @@ namespace test_headless {
       );
     }
     const payload = jslb.payload_of(first) as unknown as lines.TapStart;
-    if (payload.test_settings === undefined) {
-      throw new Error("tap.start carries no test_settings: not debug mode");
+    if (!payload.switches.debug) {
+      throw new Error("tap.start is not in debug mode");
     }
     return first;
   }
 
-  // Sets the settings, switches and harness's values, and answers `tap.start`.
+  // Sets the switches, settings and harness's values, and answers `tap.start`.
   function start_answer(start: boot.HeadlessStart): void {
     const payload = jslb.payload_of(start.first) as unknown as lines.TapStart;
-    settings.settings_set(payload.settings);
     switches.switches_set(payload.switches);
-    harness.values_set(
-      payload.settings,
-      payload.test_settings as harness.Gold,
-    );
+    settings.settings_set(payload.settings);
+    harness.values_set(payload.settings);
     line_write(dispatch.reply_make(start.first, {}));
   }
 

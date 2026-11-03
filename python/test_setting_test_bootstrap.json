@@ -1,0 +1,69 @@
+{
+  "lines": {
+    "error": {
+      "0": {
+        "type": "error"
+      }
+    },
+    "first_full": {
+      "0": {
+        "id": 101,
+        "type": "tap.start"
+      }
+    },
+    "first_short": {
+      "0": {
+        "i": 101,
+        "t": "tap.start"
+      }
+    },
+    "tail_short": {
+      "0": {
+        "i": 102,
+        "t": "verbose.tail"
+      },
+      "count": 10,
+      "thread": "ui"
+    },
+    "tail_short_reply": {
+      "0": {
+        "r": 102,
+        "t": "verbose.tail"
+      },
+      "lines": []
+    }
+  },
+  "read_bytes": 65536,
+  "hangup_bytes": 1048576,
+  "blocked_seconds": 10,
+  "poll_seconds": 0.01,
+  "texts": {
+    "bootstrap_lock_held": "Another engine holds the lock {0}.",
+    "bootstrap_loop_missing": "The main loop file {0} does not define loop_run.",
+    "bootstrap_main_loop_name_dotted": "The main loop file name .test_loop.py is not a plain file name ending in .py.",
+    "bootstrap_main_loop_name_empty": "The main loop file name  is not a plain file name ending in .py.",
+    "bootstrap_main_loop_name_nested": "The main loop file name main_loop/test_loop.py is not a plain file name ending in .py.",
+    "bootstrap_main_loop_name_parent": "The main loop file name ../test_loop.py is not a plain file name ending in .py.",
+    "bootstrap_main_loop_name_suffix": "The main loop file name test_loop.txt is not a plain file name ending in .py.",
+    "bootstrap_main_loop_refused": "The main loop file test_loop.py is refused: --main-loop is served only to the engine role with the parameter debug true.",
+    "bootstrap_option_repeated_loop": "The option --main-loop is given more than once.",
+    "bootstrap_option_repeated_root": "The option --root is given more than once.",
+    "bootstrap_reply_blob": "The reply to tap.start carries a blob of {0} bytes.",
+    "bootstrap_reply_unexpected_blob_carried": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"tap.start\",\"r\":101,\"b\":1},\"1\":{\"s\":3}}<blob \"n\"=1>",
+    "bootstrap_reply_unexpected_blobs_zero": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"tap.start\",\"r\":101,\"b\":0}}",
+    "bootstrap_reply_unexpected_error_pushed": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"error\"},\"message\":\"m\",\"stack\":\"s\"}",
+    "bootstrap_reply_unexpected_error_replied": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"error\",\"r\":101},\"message\":\"m\",\"stack\":\"s\"}",
+    "bootstrap_reply_unexpected_hello": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"hello\",\"r\":101}}",
+    "bootstrap_reply_unexpected_id_given": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"tap.start\",\"i\":101,\"r\":101}}",
+    "bootstrap_reply_unexpected_payload_extra": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"tap.start\",\"r\":101},\"extra\":1}",
+    "bootstrap_reply_unexpected_reply_one": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"tap.start\",\"r\":1}}",
+    "bootstrap_reply_unexpected_reply_true": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"tap.start\",\"r\":true}}",
+    "bootstrap_root_outside": "The console's root /usr is not under /home/, which the sandbox hides from dash.",
+    "bootstrap_run_failed": "The server failed: {0}",
+    "bootstrap_start_submit": "server submits to ai: {\"type\":\"tap.start\",\"id\":101}",
+    "jslb_line_not_json": "The line is not JSON: Expecting value.",
+    "jslb_text_not_json": "The text is not JSON: Expecting value.",
+    "switches_parameter_extra": "The parameters file {0} has the parameter verbose_level, which is none of anthropic, debug and verbose.",
+    "verbose_exec_run": "Running `bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp --tmpfs /home --tmpfs /mnt --tmpfs /root --unshare-all --new-session --die-with-parent --chdir /tmp /bin/dash`."
+  }
+}

@@ -6,7 +6,7 @@
 // starts with no key set: nothing sets it at bring up, and no other test of
 // the block sets one. On the shared realm of the ttyd page this block runs
 // before any suite that sets a key. The text of the refusal is its gold in
-// `test_settings.json`, read through the harness.
+// `ts/test_setting_test_provider_key_unset.json`, read through the harness.
 
 namespace test_provider_key_unset {
   // The error the function throws, and an error of its own when it doesn't.

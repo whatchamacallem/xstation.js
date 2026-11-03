@@ -49,6 +49,7 @@ namespace test_agent_faults {
     initialized_type: "test_agent_faults.initialized",
     listed_type: "test_agent_faults.listed",
     overflow_setting: "overflow_bytes",
+    blob_setting: "blob_max",
     compact_setting: "turn_compact_turns",
     root: "/test_agent_faults",
     server_name: "xsjs-browser",
@@ -135,6 +136,7 @@ namespace test_agent_faults {
       new substrate.CacheFiles([...test_slots]),
       constants.root,
       harness.setting_get(constants.overflow_setting) as number,
+      harness.setting_get(constants.blob_setting) as number,
       harness.setting_get(constants.compact_setting) as number,
       tasks,
     );
@@ -147,6 +149,7 @@ namespace test_agent_faults {
       constants.http_thread,
       constants.info,
       harness.setting_get,
+      switches.debug_on,
     );
     dispatch.handler_register(
       constants.line_type,

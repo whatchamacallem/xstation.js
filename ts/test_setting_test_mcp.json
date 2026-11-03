@@ -1,0 +1,148 @@
+{
+  "lines": {
+    "call_console_full": {
+      "0": {
+        "id": 1,
+        "type": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "text": "echo hi",
+          "timeout_seconds": 5
+        },
+        "name": "console_run"
+      }
+    },
+    "call_image_make": {
+      "0": {
+        "i": 3,
+        "t": "mcp"
+      },
+      "id": 3,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {},
+        "name": "image_make"
+      }
+    },
+    "call_kv_get": {
+      "0": {
+        "i": 10,
+        "t": "mcp"
+      },
+      "id": 10,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {},
+        "name": "kv_get"
+      }
+    },
+    "call_kv_put": {
+      "0": {
+        "i": 1,
+        "t": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "ref": "/_files/script/step_tide.js"
+        },
+        "name": "kv_put"
+      }
+    },
+    "call_render": {
+      "0": {
+        "i": 4,
+        "t": "mcp"
+      },
+      "id": 4,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {},
+        "name": "render"
+      }
+    },
+    "mcp_request": {
+      "0": {
+        "i": 1,
+        "t": "mcp"
+      }
+    },
+    "sleep_call": {
+      "state": {
+        "call": 1
+      }
+    },
+    "sleep_empty": {
+      "state": null,
+      "wait_ids": []
+    },
+    "sleep_first": {
+      "state": {
+        "step": 1
+      }
+    },
+    "sleep_one": {
+      "state": {
+        "n": 1
+      },
+      "wait_ids": []
+    },
+    "sleep_second": {
+      "state": {
+        "step": 2
+      }
+    },
+    "sleep_waiting": {
+      "state": null
+    }
+  },
+  "results": {
+    "content_text": {
+      "content": "{}"
+    },
+    "flag_text": {
+      "content": [],
+      "isError": "no"
+    }
+  },
+  "texts": {
+    "arguments_absent_answer": "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"content\":[]}}",
+    "mcp_call_params": "The params of tools/call need a name and an object of arguments.",
+    "mcp_method_unknown": "The method resources/list is not served.",
+    "mcp_prefix_refused_dotted": "The client prefix browser.tools is refused: a prefix is new, not empty, and holds no dot.",
+    "mcp_prefix_refused_empty": "The client prefix  is refused: a prefix is new, not empty, and holds no dot.",
+    "mcp_prefix_refused_taken": "The client prefix server is refused: a prefix is new, not empty, and holds no dot.",
+    "mcp_prefix_unknown_bare": "The tool name kv_get does not start with the prefix of a client and a dot.",
+    "mcp_prefix_unknown_browser": "The tool name browser.kv_get does not start with the prefix of a client and a dot.",
+    "mcp_reply_method": "The reply to request 1 answers tools/list, not tools/call.",
+    "mcp_reply_unknown_again": "The reply to request 1 is not one the client awaits.",
+    "mcp_reply_unknown_stray": "The reply to request 1 is not one the client awaits.",
+    "mcp_result_invalid_content": "The tools/call result of the reply to request 1 is not valid: {\"content\":\"{}\"}",
+    "mcp_result_invalid_entry": "The tools/list result of the reply to request 1 is not valid: {\"tools\":[{\"inputSchema\":{\"type\":\"object\"},\"name\":\"kv_get\"}]}",
+    "mcp_result_invalid_flag": "The tools/call result of the reply to request 2 is not valid: {\"content\":[],\"isError\":\"no\"}",
+    "mcp_tool_twice": "A tool named kv_get is already registered.",
+    "mcp_tool_unknown": "There is no tool named kv_get.",
+    "mcp_tools_unread": "The tools of the server of server have not been read.",
+    "mcp_wake_unknown": "A tool slept with the wake type {0}, which was not registered with the MCP server.",
+    "queue_wait_missing_mcp": "The handler of mcp on thread ai submitted the request 1 and does not sleep on it.",
+    "request_invalid_five": "{\"jsonrpc\":\"2.0\",\"id\":5,\"error\":{\"code\":-32600,\"message\":\"The message is not a valid JSON-RPC 2.0 request.\"}}",
+    "request_invalid_null": "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32600,\"message\":\"The message is not a valid JSON-RPC 2.0 request.\"}}"
+  },
+  "tools": {
+    "undescribed": {
+      "inputSchema": {
+        "type": "object"
+      },
+      "name": "kv_get"
+    }
+  }
+}

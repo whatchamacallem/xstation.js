@@ -4,10 +4,12 @@
 #
 # The server's verbose log: a ring of the latest lines and the `_verbose`
 # database in the root that holds every line the moment it is logged, with no
-# level; and the shell's runner, the one place the engine starts an external
-# program, whose levels are the only verbose levels the server has and whose
-# input and output it passes through at every level. It depends on no other
-# engine module but the strings.
+# level, held to `blob_max` bytes by `PRAGMA max_page_count` over its
+# `page_size`, so that a line that needs a page past it fails with SQLite's
+# `SQLITE_FULL`, raised and never caught; and the shell's runner, the one
+# place the engine starts an external program, whose levels are the only
+# verbose levels the server has and whose input and output it passes through
+# at every level. It depends on no other engine module but the strings.
 
 import collections, os, shlex, sqlite3, subprocess, sys, time
 from internationalization import i18n
@@ -86,12 +88,14 @@ def _open_get() -> tuple[sqlite3.Connection, collections.deque[LogLine]]:
     return _STATE.connection, _STATE.ring
 
 
-# Opens `_verbose.sqlite` in the root, with an empty ring of that many lines.
-def log_open(root: str, ring: int) -> None:
+# Opens the root's `_verbose.sqlite`, held to `blob_max` bytes, an empty ring.
+def log_open(root: str, ring: int, blob_max: int) -> None:
     if _STATE.connection is not None:
         raise RuntimeError(i18n("verbose.open_twice"))
     lines = collections.deque[LogLine](maxlen=ring)
     connection = sqlite3.connect(os.path.join(root, _FILE_NAME))
+    page_size = connection.execute("PRAGMA page_size").fetchone()[0]
+    connection.execute(f"PRAGMA max_page_count = {blob_max // page_size}")
     for pragma in _PRAGMAS:
         connection.execute(pragma)
     if connection.execute(_TABLE_FIND).fetchone() is None:
@@ -108,7 +112,7 @@ def log_close() -> None:
     _STATE.connection = None
 
 
-# Writes one line to `_verbose`, unbuffered, and to the ring of `verbose_ring`.
+# Writes a line to `_verbose` and the ring, `SQLITE_FULL` past `blob_max`.
 def log(text: str) -> None:
     connection, ring = _open_get()
     at = time.time_ns() // _NANOSECONDS_PER_MILLISECOND

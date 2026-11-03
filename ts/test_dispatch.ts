@@ -3,10 +3,10 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // Tests of the dispatcher: registration, dispatch by type and version, the
-// rules for replies, sleeps and failures, the reply and error lines it
-// builds, the cascades it writes and the ids it counts from 102. The lines
-// the tests send and expect and the texts of the throws are those of the
-// gold record, test_settings.json, each fresh type set on the copy.
+// rules for replies, sleeps and failures, the reply and error lines it builds,
+// the cascades it writes and the ids it counts from 102. The lines the tests
+// send and expect and the texts of the throws are those of the gold record,
+// `ts/test_setting_test_dispatch.json`, each fresh type set on the copy.
 
 namespace test_dispatch {
   // The prefixes of the types and ports the tests make, which are their own.
@@ -497,7 +497,7 @@ namespace test_dispatch {
     // The error line of no line has no `r`, in the form the settings pick.
     test_no_line(): void {
       const line = dispatch.error_make(undefined, new Error("boom"));
-      if (harness.setting_get("debug") === true) {
+      if (switches.debug_on()) {
         this.assertEqual(line[0], { type: "error" });
       } else {
         this.assertEqual(line[0], { t: "error" });

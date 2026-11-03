@@ -1,0 +1,17 @@
+{
+  "texts": {
+    "mcp_call_params": "The params of tools/call need a name and an object of arguments.",
+    "mcp_message_unexpected_notification": "The client was sent notifications/tools/list_changed, which is not a reply.",
+    "mcp_message_unexpected_ping": "The client was sent ping, which is not a reply.",
+    "mcp_method_unknown": "The method foo/bar is not served.",
+    "mcp_reply_id_refused_bool": "The reply id True is not an integer.",
+    "mcp_reply_id_refused_float": "The reply id 1.0 is not an integer.",
+    "mcp_reply_id_refused_null": "The reply id None is not an integer.",
+    "mcp_reply_id_refused_text": "The reply id '1' is not an integer.",
+    "mcp_reply_unknown_again": "The reply to request 1 is not one the client awaits.",
+    "mcp_reply_unknown_unasked": "The reply to request 99 is not one the client awaits.",
+    "mcp_request_invalid": "The message is not a valid JSON-RPC 2.0 request.",
+    "mcp_tool_twice": "A tool named {0} is already registered.",
+    "mcp_tool_unknown": "There is no tool named nothing."
+  }
+}

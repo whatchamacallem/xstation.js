@@ -19,17 +19,17 @@
 // one read of the server. `srv_buf_size` is ttyd's receive chunk, for the
 // start script's ttyd and the tests' alike. The first line is read before
 // the settings exist, under the fixed bound `first_line_max` of the wire,
-// 10 MiB, which `settings.json` and `test_settings.json` together fit.
+// 10 MiB, which `settings.json` fits.
 //
-// `names_full()` is the one choice of the name form of the lines a thread
-// builds: full names until the settings are set, then full names when
-// `debug` is true and short names otherwise.
+// Debug mode is not a setting: a store reads it from the reader it was
+// made with, the module's own store from `switches.debug_on()`, which each
+// thread sets before its settings. `names_full()` is the one choice of the
+// name form of the lines a thread builds: full names until the settings are
+// set, then full names in debug mode and short names otherwise.
 
 declare namespace settings {
   interface Settings {
-    debug: boolean;
     queue_synchronous: boolean;
-    verbose_level: number;
     verbose_ring: number;
     line_max: number;
     blob_max: number;
@@ -62,6 +62,7 @@ declare namespace settings {
       key_file: string;
       certificate_days: number;
       runner_file: string;
+      parameters_file: string;
       ttyd_log_file: string;
       poll_tries: number;
       poll_milliseconds: number;
@@ -81,7 +82,9 @@ declare namespace settings {
 
   // The settings of one thread, set once, read and changed by id.
   class ValueStore {
-    // Stores the settings once, deep frozen unless `debug` is true.
+    // Takes the reader of debug mode, read at each set, put and name form.
+    constructor(debug_on: () => boolean);
+    // Stores the settings once, deep frozen outside debug mode.
     value_set(value: Settings): void;
     // Returns the value of an id, throwing if unset or unknown.
     value_get(id: Id): unknown;
@@ -89,11 +92,11 @@ declare namespace settings {
     value_put(id: Id, value: unknown): void;
     // Registers the function that sends `settings.put`, once.
     sender_register(sender: Sender): void;
-    // Full names while the value is unset, then whether `debug` is true.
+    // Full names while the value is unset, then whether debug mode is on.
     names_full(): boolean;
   }
 
-  // Stores the settings `tap.start` carried, once per thread.
+  // Stores the settings `tap.start` carried, once per thread, after switches.
   function settings_set(value: Settings): void;
 
   // Throws before `settings_set` and on an unknown id.

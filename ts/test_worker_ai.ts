@@ -3,24 +3,27 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // Tests of the AI worker on the UI side, in a page load of its own, where no
-// bring up has registered the types its relays register: the owner table,
-// the synchronous mode, the wire's tap in its full and sized forms, the note
-// of tty 1, the relays of the console's close and of the settings, and the
+// bring up has registered the types its relays register: the owner table, the
+// synchronous mode, the wire's tap in its full and sized forms, the note of
+// tty 1, the relays of the console's close and of the settings, and the
 // cascade of a fault sent as an `error` line by the end function `tap_start`
-// takes, the worker's own and the UI's. A relay runs on a real queue of
-// thread `ai` in synchronous mode, its handlers registered through the real
-// dispatch, its lanes linked local ports whose far ends are the test's, so
-// the whole exchange runs within the test's call: the test posts the UI's
-// lines at the far end of `ui` and reads what comes back there, and the far
-// end of `server` keeps each line and answers a request with the gold's
-// reply, as the server does, since the AI side handles `settings.put` too.
-// The tap's inner port is one of a linked pair, and the end function is the
-// test's own. The lines the tests send and expect and the texts of the notes
-// and throws are those of the gold record, test_settings.json. `tap_start`
-// runs once per worker, at bring up, whose line cases are
-// `test_integrate_worker_ai`, so no test here calls it. The relay of the
-// console's opening, which needs the console on tty 0, is the module
-// `test_worker_ai_console`, of group C.
+// takes, the worker's own and the UI's. A relay runs on a real queue of thread
+// `ai` in synchronous mode, its handlers registered through the real dispatch,
+// its lanes linked local ports whose far ends are the test's, so the whole
+// exchange runs within the test's call: the test posts the UI's lines at the
+// far end of `ui` and reads what comes back there, and the far end of `server`
+// keeps each line and answers a request with the gold's reply, as the server
+// does, since the AI side handles `settings.put` too. The tap's inner port is
+// one of a linked pair, and the end function is the test's own. The lines the
+// tests send and expect and the texts of the notes and throws are those of the
+// gold record, `ts/test_setting_test_worker_ai.json`. `tap_start` runs once
+// per worker, at bring up, whose line cases are `test_integrate_worker_ai`, so
+// no test here calls it. The relay of the console's opening, which needs the
+// console on tty 0, is the module `test_worker_ai_console`, of group C. The
+// console's writer writes to one of a linked pair of local ports, whose far
+// end keeps what came and sends tty 0's output back, the writer's posts to
+// the UI and what it passes back are kept, and the writer's lines are built
+// here.
 
 namespace test_worker_ai {
   // The values the tests use.
@@ -118,6 +121,54 @@ namespace test_worker_ai {
     return live as unknown as settings.Settings;
   }
 
+  // A line of the console lane with its payload and, given text, one blob.
+  function console_line(
+    type: string,
+    payload: FieldTable,
+    text?: string,
+  ): lines.Line {
+    const header = jslb.header_make(type, { full: settings.names_full() });
+    const blobs =
+      text === undefined ? [] : [jslb.blob_make(utility.utf8_encode(text))];
+    return jslb.line_make(header, blobs, payload);
+  }
+
+  // The type of a line, then the text of its blob when it has one.
+  function line_texts(line: lines.Line): string[] {
+    const type = jslb.field_get(line[0], "type") as string;
+    const blob = line[1] as lines.BlobHeader | undefined;
+    if (blob === undefined) {
+      return [type];
+    }
+    const data = jslb.field_get(blob, "data") as Uint8Array;
+    return [type, utility.utf8_decode(data)];
+  }
+
+  // A writer, its port linked to the test's end, its UI and what it passes.
+  function writer_make(): {
+    writer: worker_ai.ConsoleWriter;
+    end: LaneEnd;
+    ui: lines.Line[];
+    back: lines.Line[];
+  } {
+    const near = new queue.LocalPort();
+    const end = end_link(near);
+    const ui: lines.Line[] = [];
+    const back: lines.Line[] = [];
+    const writer = new worker_ai.ConsoleWriter(near, (line) => {
+      ui.push(line);
+    });
+    writer.line_receive((line) => {
+      back.push(line);
+    });
+    return { writer, end, ui, back };
+  }
+
+  // Sends tty 0's output of the text from the test's end to the writer.
+  function output_send(end: LaneEnd, text: string): void {
+    end.port.line_post(console_line("console.output", {}, "0" + text), []);
+  }
+
   // A cascade of two failures, the first innermost.
   function cascade_make(): lines.ErrorCause {
     return {
@@ -158,11 +209,13 @@ namespace test_worker_ai {
     // Read in debug mode, it is refused outside it.
     test_debug_only(): void {
       const synchronous = reader_from({ queue_synchronous: true });
-      this.assertTrue(worker_ai.synchronous_read(synchronous));
+      const debug = (): boolean => true;
+      this.assertTrue(worker_ai.synchronous_read(synchronous, debug));
       const plain = reader_from({ queue_synchronous: false });
-      this.assertFalse(worker_ai.synchronous_read(plain));
-      const release = reader_from({ debug: false, queue_synchronous: true });
-      const error = thrown_get(() => worker_ai.synchronous_read(release));
+      this.assertFalse(worker_ai.synchronous_read(plain, debug));
+      const error = thrown_get(() =>
+        worker_ai.synchronous_read(synchronous, () => false),
+      );
       this.assertEqual(
         error.message,
         gold_text("worker_ai_synchronous_release"),
@@ -266,7 +319,7 @@ namespace test_worker_ai {
       const expected = gold_line("overlay_line");
       expected.text = text;
       this.assertEqual(shown, expected);
-      this.assertEqual(full_of(shown), harness.setting_get("debug"));
+      this.assertEqual(full_of(shown), switches.debug_on());
       this.assertEqual(logged, [text]);
     }
   }
@@ -315,7 +368,7 @@ namespace test_worker_ai {
       const expected = gold_line("settings_put_copy");
       expected.settings = value;
       this.assertEqual(kept, [expected]);
-      this.assertEqual(full_of(kept[0]), harness.setting_get("debug"));
+      this.assertEqual(full_of(kept[0]), switches.debug_on());
       this.assertEqual(ui.came, []);
       this.assertEqual(tasks.depth(), 0);
     }
@@ -338,7 +391,7 @@ namespace test_worker_ai {
       });
       this.assertEqual(ended.length, 1);
       const [line] = ended;
-      this.assertEqual(full_of(line), harness.setting_get("debug"));
+      this.assertEqual(full_of(line), switches.debug_on());
       for (const name of ["i", "id", "r", "reply"]) {
         this.assertFalse(Object.hasOwn(line[0], name), name);
       }
@@ -380,12 +433,199 @@ namespace test_worker_ai {
     }
   }
 
+  // tty 0's one writer: the AI's lines and the view's held through a turn.
+  export class TestWriter extends unittest.TestCase {
+    // The AI's text goes one message per line a newline ends, in order.
+    test_lines_cut(): void {
+      const { writer, end } = writer_make();
+      writer.line_post(console_line("console.write", { text: "a\nb" }), []);
+      writer.line_post(console_line("console.write", { text: "c\nd\n" }), []);
+      this.assertEqual(end.came.map(line_texts), [
+        ["console.input", "0a\n"],
+        ["console.input", "0bc\n"],
+        ["console.input", "0d\n"],
+      ]);
+    }
+
+    // The text after the last newline waits for the write that ends it.
+    test_rest_held(): void {
+      const { writer, end } = writer_make();
+      writer.line_post(
+        console_line("console.write", { text: "echo par" }),
+        [],
+      );
+      this.assertEqual(end.came, []);
+      writer.line_post(console_line("console.write", { text: "tial\n" }), []);
+      this.assertEqual(end.came.map(line_texts), [
+        ["console.input", "0echo partial\n"],
+      ]);
+    }
+
+    // Outside a turn the view's line goes as it came.
+    test_view_passed(): void {
+      const { writer, end } = writer_make();
+      writer.line_post(console_line("console.input", {}, "0ls\r"), []);
+      this.assertEqual(end.came.map(line_texts), [["console.input", "0ls\r"]]);
+    }
+
+    // A view's line inside the AI's turn waits until its idle, then goes.
+    test_view_held(): void {
+      const { writer, end, ui } = writer_make();
+      output_send(end, "$ ");
+      writer.line_post(console_line("console.busy", {}), []);
+      writer.line_post(console_line("console.input", {}, "0echo view\r"), []);
+      writer.line_post(console_line("console.write", { text: "yes\n" }), []);
+      this.assertEqual(end.came.map(line_texts), [
+        ["console.busy"],
+        ["console.input", "0yes\n"],
+      ]);
+      writer.line_post(console_line("console.idle", {}), []);
+      this.assertEqual(end.came.map(line_texts), [
+        ["console.busy"],
+        ["console.input", "0yes\n"],
+        ["console.idle"],
+        ["console.input", "0echo view\r"],
+      ]);
+      this.assertEqual(ui.map(line_texts), [
+        ["console.busy"],
+        ["console.idle"],
+      ]);
+    }
+
+    // The AI's turn waits while the person's command runs, until the prompt.
+    test_turn_waits(): void {
+      const { writer, end, ui } = writer_make();
+      output_send(end, "$ ");
+      writer.line_post(console_line("console.input", {}, "0sleep 1\r"), []);
+      writer.line_post(console_line("console.busy", {}), []);
+      writer.line_post(
+        console_line("console.write", { text: "echo hi\n" }),
+        [],
+      );
+      output_send(end, "sleep 1\r\n");
+      this.assertEqual(end.came.map(line_texts), [
+        ["console.input", "0sleep 1\r"],
+      ]);
+      this.assertEqual(ui, []);
+      output_send(end, "$ ");
+      this.assertEqual(end.came.map(line_texts), [
+        ["console.input", "0sleep 1\r"],
+        ["console.busy"],
+        ["console.input", "0echo hi\n"],
+      ]);
+      this.assertEqual(ui.map(line_texts), [["console.busy"]]);
+    }
+
+    // The person's line inside their own command goes while the AI waits.
+    test_view_own(): void {
+      const { writer, end, ui } = writer_make();
+      output_send(end, "$ ");
+      writer.line_post(console_line("console.input", {}, "0read x\r"), []);
+      writer.line_post(console_line("console.busy", {}), []);
+      writer.line_post(console_line("console.input", {}, "0yes\r"), []);
+      this.assertEqual(end.came.map(line_texts), [
+        ["console.input", "0read x\r"],
+        ["console.input", "0yes\r"],
+      ]);
+      this.assertEqual(ui, []);
+    }
+
+    // A prompt split across two messages of output still concludes tty 0.
+    test_prompt_split(): void {
+      const { writer, end, ui } = writer_make();
+      writer.line_post(console_line("console.busy", {}), []);
+      output_send(end, "$");
+      this.assertEqual(ui, []);
+      output_send(end, " ");
+      this.assertEqual(ui.map(line_texts), [["console.busy"]]);
+    }
+
+    // A tty 0 opened anew has shown no prompt, so the AI's turn waits.
+    test_open_unconcluded(): void {
+      const { writer, end, ui } = writer_make();
+      output_send(end, "$ ");
+      writer.line_post(console_line("console.open", {}), []);
+      writer.line_post(console_line("console.busy", {}), []);
+      this.assertEqual(end.came.map(line_texts), [["console.open"]]);
+      this.assertEqual(ui, []);
+    }
+
+    // A read in a waiting turn goes after the busy with the time it has left.
+    test_read_waits(): void {
+      const { writer, end } = writer_make();
+      const seconds = 5;
+      writer.line_post(console_line("console.busy", {}), []);
+      writer.line_post(
+        console_line("console.read", {
+          until: "$ ",
+          timeout_seconds: seconds,
+        }),
+        [],
+      );
+      this.assertEqual(end.came, []);
+      output_send(end, "$ ");
+      this.assertEqual(end.came.map(line_texts), [
+        ["console.busy"],
+        ["console.read"],
+      ]);
+      const payload = jslb.payload_of(end.came[1]);
+      this.assertEqual(payload.until, "$ ");
+      const left = payload.timeout_seconds as number;
+      this.assertTrue(left > 0 && left <= seconds);
+    }
+
+    // A turn the AI ends before it started sends nothing, then or later.
+    test_waiting_ended(): void {
+      const { writer, end, ui } = writer_make();
+      writer.line_post(console_line("console.busy", {}), []);
+      writer.line_post(
+        console_line("console.write", { text: "echo no\n" }),
+        [],
+      );
+      writer.line_post(console_line("console.idle", {}), []);
+      output_send(end, "$ ");
+      this.assertEqual(end.came, []);
+      this.assertEqual(ui, []);
+    }
+
+    // Reads and openings pass on as they came.
+    test_others_passed(): void {
+      const { writer, end } = writer_make();
+      const read = console_line("console.read", {
+        until: "$ ",
+        timeout_seconds: 1,
+      });
+      writer.line_post(read, []);
+      writer.line_post(console_line("console.open", {}), []);
+      this.assertEqual(end.came.map(line_texts), [
+        ["console.read"],
+        ["console.open"],
+      ]);
+      this.assertEqual(end.came[0], read);
+    }
+
+    // A second busy within a turn, or an idle outside one, throws.
+    test_turn_refused(): void {
+      const { writer } = writer_make();
+      const idle = thrown_get(() =>
+        writer.line_post(console_line("console.idle", {}), []),
+      );
+      this.assertEqual(idle.message, gold_text("worker_ai_idle_unheld"));
+      writer.line_post(console_line("console.busy", {}), []);
+      const busy = thrown_get(() =>
+        writer.line_post(console_line("console.busy", {}), []),
+      );
+      this.assertEqual(busy.message, gold_text("worker_ai_busy_twice"));
+    }
+  }
+
   // The shape of the module object.
   export class TestSurface extends unittest.TestCase {
     // The module is frozen and holds the names of its surface.
     test_frozen_names(): void {
       this.assertTrue(Object.isFrozen(worker_ai));
       this.assertEqual(Object.keys(worker_ai).sort(), [
+        "ConsoleWriter",
         "WireTap",
         "console_attach",
         "console_register",

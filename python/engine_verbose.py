@@ -19,7 +19,7 @@ _LINE_FIELDS = {"at", "text"}
 
 # The state the registration sets, which is empty until then.
 class _VerboseState:
-    # Starts with no debug setting.
+    # Starts with no debug mode.
     def __init__(self) -> None:
         self.debug: bool | None = None
 

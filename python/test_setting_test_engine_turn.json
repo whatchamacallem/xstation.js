@@ -1,0 +1,85 @@
+{
+  "lines": {
+    "append_answer": {
+      "0": {
+        "t": "turn.append"
+      },
+      "content": {
+        "content": "Mind the moat.",
+        "role": "assistant"
+      },
+      "role": "assistant",
+      "scene": "/metaverse/hyperposition/1"
+    },
+    "append_call": {
+      "0": {
+        "t": "turn.append"
+      },
+      "content": {
+        "content": null,
+        "role": "assistant",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"name\":\"bootstrap\",\"args\":{\"universe\":\"castle\",\"title\":\"The castle\",\"world\":\"castle_world\",\"region\":\"castle_gatehouse\"}}",
+              "name": "browser.script_run"
+            },
+            "id": "call_1",
+            "type": "function"
+          }
+        ]
+      },
+      "role": "assistant",
+      "scene": "/metaverse/hyperposition/1"
+    },
+    "append_full": {
+      "0": {
+        "type": "turn.append"
+      },
+      "content": {
+        "content": "1",
+        "role": "user"
+      },
+      "role": "user",
+      "scene": "/metaverse/hyperposition/1"
+    },
+    "append_request": {
+      "0": {
+        "i": 7,
+        "t": "turn.append"
+      },
+      "content": {
+        "content": "1",
+        "role": "user"
+      },
+      "role": "user",
+      "scene": "/metaverse/hyperposition/1"
+    },
+    "append_user": {
+      "0": {
+        "t": "turn.append"
+      },
+      "content": {
+        "content": "1",
+        "role": "user"
+      },
+      "role": "user",
+      "scene": "/metaverse/hyperposition/1"
+    },
+    "append_wide": {
+      "0": {
+        "t": "turn.append"
+      },
+      "content": {
+        "content": "\u4e2d\u6587\ud83d\ude00",
+        "role": "user"
+      },
+      "role": "user",
+      "scene": "/metaverse/hyperposition/1"
+    }
+  },
+  "texts": {
+    "dispatch_handler_twice_append": "A handler is already registered for type turn.append version 0.",
+    "engine_turn_not_registered": "The turn handler was called before it was registered."
+  }
+}

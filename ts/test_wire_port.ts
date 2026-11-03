@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the wire port with no socket, on a real cache with no file:
-// what it does with ttyd's messages before and after the first line, the
-// first line's sizes and the settings that size the port after it, and the
-// close of the wire and the fault it is without an error line. The lines
-// the tests send and expect and the texts of the faults are the gold of
-// test_settings.json; the bytes the server sends are a line's JSON text, its
-// CR, then its blobs. The port reads the settings through the harness, a
-// few replaced by the test's own values, or a reader that answers none.
+// Tests of the wire port with no socket, on a real cache with no file: what it
+// does with ttyd's messages before and after the first line, the first line's
+// sizes and the settings that size the port after it, and the close of the
+// wire and the fault it is without an error line. The lines the tests send and
+// expect and the texts of the faults are the gold of
+// `ts/test_setting_test_wire_port.json`; the bytes the server sends are a
+// line's JSON text, its CR, then its blobs. The port reads the settings
+// through the harness, a few replaced by the test's own values, or a reader
+// that answers none.
 
 namespace test_wire_port {
   // An address, ttyd's message kinds, the text of a reader that answers none.
@@ -476,6 +477,18 @@ namespace test_wire_port {
         port.line_post(gold_line("first_reply"), []),
       );
       this.assertEqual(message, gold_text("wire_socket_missing_wire"));
+    }
+
+    // A `system.restart` is sent, and a line posted after it is held.
+    test_restart_held(): void {
+      const port = port_make();
+      port.first_receive(() => {});
+      port.message_take(output_lines(gold_line("first")));
+      const message = message_thrown(this, () =>
+        port.line_post(gold_line("restart"), []),
+      );
+      this.assertEqual(message, gold_text("wire_socket_missing_wire"));
+      port.line_post(gold_line("notice_verbose_put"), []);
     }
   }
 

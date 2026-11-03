@@ -1,0 +1,90 @@
+{
+  "lines": {
+    "doc_put": {
+      "0": {
+        "t": "doc.put"
+      },
+      "body": {
+        "0": {
+          "t": "nest"
+        },
+        "1": "/_files/fog.png",
+        "count": -3,
+        "inner": {
+          "1": {
+            "$ref": 1
+          },
+          "2": "\u4e2d\u6587\ud83d\ude00",
+          "a": [
+            {
+              "0": 0.5,
+              "z": null
+            }
+          ],
+          "b": 1
+        }
+      },
+      "db": "alpha",
+      "id": "nest"
+    }
+  },
+  "texts": {
+    "agent_content_ambiguous": "The write would make two rows of the universe table name one world, so the current universe would be ambiguous; nothing was written.",
+    "substrate_db_busy": "The database alpha is inside a transaction.",
+    "substrate_db_closed_close": "The database gamma is not open.",
+    "substrate_db_closed_put": "The database beta is not open.",
+    "substrate_db_open": "The database alpha is already open.",
+    "substrate_document_ref_head": "The ref '/castle_gatehouse/scene/arrival' is not a Document-Ref.",
+    "substrate_document_ref_value": "The ref '/alpha/world' is not a Document-Ref.",
+    "substrate_file_lost_removed": "The value /alpha/big names the cache file {1}, which this store does not hold.",
+    "substrate_file_lost_restored": "The value {0} names the cache file {1}, which this store does not hold.",
+    "substrate_file_small": "The file {0} holds {1} bytes, not over overflow_bytes {2}.",
+    "substrate_header_bad_field": "The document header 0 is not a type with an optional version other than 0: {'t': 'scene', 'x': 1}",
+    "substrate_header_bad_text": "The document header 0 is not a type with an optional version other than 0: scene",
+    "substrate_header_bad_typeless": "The document header 0 is not a type with an optional version other than 0: {'v': 2}",
+    "substrate_header_bad_version": "The document header 0 is not a type with an optional version other than 0: {'t': 'scene', 'v': 0}",
+    "substrate_header_gap": "The document header 2 follows a gap.",
+    "substrate_header_missing": "The document has no header 0.",
+    "substrate_header_normal": "A document in its normal form has a header 1 besides 0.",
+    "substrate_header_ref": "The document header 1 is not a reference string.",
+    "substrate_id_empty": "A document id is empty.",
+    "substrate_id_missing_absent": "The database castle_gatehouse has no document 'scene/absent'.",
+    "substrate_id_missing_note": "The database alpha has no document 'note'.",
+    "substrate_key_digits_decode": "The document key '07' is decimal digits, which read as a header.",
+    "substrate_key_digits_encode": "The document key '12' is decimal digits, which read as a header.",
+    "substrate_key_missing_deleted": "The database alpha has no key 'greeting/\u4e2d\u6587\ud83d\ude00'.",
+    "substrate_key_missing_killed": "The database alpha has no key 'big'.",
+    "substrate_key_missing_restored": "The database alpha has no key 'b'.",
+    "substrate_key_missing_rolled": "The database alpha has no key 'd'.",
+    "substrate_key_missing_split": "The database alpha has no key 'a'.",
+    "substrate_key_missing_version": "The database castle_gatehouse has no key 'scene/arrival/3'.",
+    "substrate_key_refused": "The key '12' cannot be written as a JSON object key.",
+    "substrate_name_bad_accent": "The database name 'caf\u00e9' is not a C identifier.",
+    "substrate_name_bad_dash": "The database name 'a-b' is not a C identifier.",
+    "substrate_name_bad_digit": "The database name '1abc' is not a C identifier.",
+    "substrate_name_bad_dot": "The database name 'a.b' is not a C identifier.",
+    "substrate_name_bad_empty": "The database name '' is not a C identifier.",
+    "substrate_name_bad_slash": "The database name 'a/b' is not a C identifier.",
+    "substrate_name_bad_space": "The database name 'a b' is not a C identifier.",
+    "substrate_ref_bad_accent": "The ref '/caf\u00e9/key' is not a Key-Value-Ref.",
+    "substrate_ref_bad_dash": "The ref '/d-b/key' is not a Key-Value-Ref.",
+    "substrate_ref_bad_database_empty": "The ref '//key' is not a Key-Value-Ref.",
+    "substrate_ref_bad_digit": "The ref '/1db/key' is not a Key-Value-Ref.",
+    "substrate_ref_bad_empty": "The ref '' is not a Key-Value-Ref.",
+    "substrate_ref_bad_key_empty": "The ref '/metaverse/' is not a Key-Value-Ref.",
+    "substrate_ref_bad_key_missing": "The ref '/metaverse' is not a Key-Value-Ref.",
+    "substrate_ref_bad_slash": "The ref '/' is not a Key-Value-Ref.",
+    "substrate_ref_both": "The external ref '/alpha/world' names its database, and alpha was given too.",
+    "substrate_ref_index_true": "The header reference True names no header of the document.",
+    "substrate_ref_index_two": "The header reference 2 names no header of the document.",
+    "substrate_ref_internal": "The internal ref 'world' needs a database.",
+    "substrate_ref_shape": "The document body holds {'$ref': 1}, which has the shape of a header reference.",
+    "substrate_scene_bad_internal": "The scene 'hyperposition/1' is not an external Document-Ref.",
+    "substrate_scene_bad_value": "The scene '/metaverse/world' is not an external Document-Ref.",
+    "substrate_schema_partial_meta": "The database has only the substrate tables ['_meta'].",
+    "substrate_schema_partial_none": "The database has only the substrate tables [].",
+    "substrate_schema_version": "The substrate schema row is ('2',), not 1.",
+    "substrate_version_exists": "The document version 'note/1' already exists in alpha.",
+    "substrate_wal_left": "The database alpha still has a write ahead log after closing."
+  }
+}

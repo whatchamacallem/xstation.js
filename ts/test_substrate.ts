@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of substrate.ts that need no store and no cache: refs split into
-// their parts and bad refs refused, documents encoded and decoded with their
-// refs in shared headers and malformed ones refused, and the module's
-// surface. The texts it expects are its gold in `test_settings.json`, read
+// Tests of substrate.ts that need no store and no cache: refs split into their
+// parts and bad refs refused, documents encoded and decoded with their refs in
+// shared headers and malformed ones refused, and the module's surface. The
+// texts it expects are its gold in `ts/test_setting_test_substrate.json`, read
 // through the harness.
 namespace test_substrate {
   // The refs and texts the tests use.

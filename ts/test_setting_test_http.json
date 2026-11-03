@@ -1,0 +1,158 @@
+{
+  "lines": {
+    "answer_empty": {
+      "0": {
+        "r": 7,
+        "t": "http.request"
+      },
+      "headers": {},
+      "status": 204,
+      "text": ""
+    },
+    "answer_json": {
+      "0": {
+        "r": 7,
+        "t": "http.request"
+      },
+      "headers": {
+        "content-type": "application/json"
+      },
+      "json": {
+        "id": "c1",
+        "n": [1, 2]
+      },
+      "status": 200
+    },
+    "header_error": {
+      "r": 7,
+      "t": "error"
+    },
+    "header_error_full": {
+      "reply": 7,
+      "type": "error"
+    },
+    "header_full": {
+      "reply": 7,
+      "type": "http.request"
+    },
+    "request": {
+      "0": {
+        "i": 7,
+        "t": "http.request"
+      },
+      "headers": {
+        "authorization": "Bearer test-key",
+        "content-type": "application/json"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "request_blob": {
+      "0": {
+        "b": 1,
+        "i": 7,
+        "t": "http.request"
+      },
+      "1": {
+        "s": 1
+      },
+      "headers": {
+        "authorization": "Bearer test-key",
+        "content-type": "application/json"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "request_full": {
+      "0": {
+        "id": 7,
+        "type": "http.request"
+      },
+      "headers": {
+        "authorization": "Bearer test-key",
+        "content-type": "application/json"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "request_id_1": {
+      "0": {
+        "i": 1,
+        "t": "http.request"
+      },
+      "headers": {
+        "authorization": "Bearer test-key",
+        "content-type": "application/json"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "request_id_2": {
+      "0": {
+        "i": 2,
+        "t": "http.request"
+      },
+      "headers": {
+        "authorization": "Bearer test-key",
+        "content-type": "application/json"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "request_id_41": {
+      "0": {
+        "i": 41,
+        "t": "http.request"
+      },
+      "headers": {
+        "authorization": "Bearer test-key",
+        "content-type": "application/json"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "request_kv_get": {
+      "0": {
+        "i": 7,
+        "t": "kv.get"
+      },
+      "headers": {
+        "authorization": "Bearer test-key",
+        "content-type": "application/json"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "request_unnumbered": {
+      "0": {
+        "t": "http.request"
+      },
+      "headers": {
+        "authorization": "Bearer test-key",
+        "content-type": "application/json"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    }
+  },
+  "texts": {
+    "http_blobs_refused": "The http.request line carries blobs, which the HTTP port does not send.",
+    "http_field_invalid_body": "The request field body is missing or is not valid.",
+    "http_field_invalid_headers": "The request field headers is missing or is not valid.",
+    "http_field_invalid_method": "The request field method is missing or is not valid.",
+    "http_field_invalid_url": "The request field url is missing or is not valid.",
+    "http_id_missing": "The http.request line has no id, so nothing could answer it.",
+    "http_json_invalid_malformed": "The response from https://api.x.ai/v1/chat/completions has a JSON content type but its body is not JSON: WireError: The text is not JSON: {0}.",
+    "http_json_invalid_overflow": "The response from https://api.x.ai/v1/chat/completions has a JSON content type but its body is not JSON: WireError: The number 1e400 overflows a double.",
+    "http_receiver_missing": "The HTTP port got a request before a receiver was set.",
+    "http_receiver_twice": "The HTTP port already has a receiver.",
+    "http_status_failed": "The request to https://api.x.ai/v1/chat/completions answered with status 404: no such model",
+    "http_timeout_expired_fraction": "The request to https://api.x.ai/v1/chat/completions did not finish within 0.5 seconds.",
+    "http_timeout_expired_whole": "The request to https://api.x.ai/v1/chat/completions did not finish within 5 seconds.",
+    "http_timeout_invalid_long": "The HTTP timeout 2147484 is not a number of seconds above 0 that a timer can hold.",
+    "http_timeout_invalid_negative": "The HTTP timeout -1 is not a number of seconds above 0 that a timer can hold.",
+    "http_timeout_invalid_zero": "The HTTP timeout 0 is not a number of seconds above 0 that a timer can hold.",
+    "http_type_invalid": "The HTTP port got a line of type kv.get instead of http.request.",
+    "utility_value_refused": "JSON has no text for the value."
+  }
+}

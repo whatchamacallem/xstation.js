@@ -1,0 +1,447 @@
+{
+  "cases": [
+    {
+      "expect": ["render_1_reply"],
+      "name": "black",
+      "seconds": 10,
+      "send": ["render_1"]
+    },
+    {
+      "expect": ["image_10_reply", "band_11_reply"],
+      "name": "black_read",
+      "seconds": 10,
+      "send": ["image_10", "band_11"]
+    },
+    {
+      "expect": ["store_2_reply"],
+      "name": "stored",
+      "seconds": 10,
+      "send": ["store_2"]
+    },
+    {
+      "expect": ["render_3_reply"],
+      "name": "painted",
+      "seconds": 10,
+      "send": ["render_3"]
+    },
+    {
+      "expect": ["image_12_reply", "band_13_reply"],
+      "name": "painted_read",
+      "seconds": 10,
+      "send": ["image_12", "band_13"]
+    },
+    {
+      "expect": [],
+      "name": "permit_asked",
+      "seconds": 0.2,
+      "send": ["permit_4"]
+    },
+    {
+      "expect": ["permit_14_reply"],
+      "name": "permit_shown",
+      "seconds": 10,
+      "send": ["permit_14"]
+    },
+    {
+      "expect": ["permit_4_reply"],
+      "name": "permit_chosen",
+      "seconds": 10,
+      "send": ["choose_always"]
+    },
+    {
+      "expect": ["permit_15_reply"],
+      "name": "permit_cleared",
+      "seconds": 10,
+      "send": ["permit_15"]
+    },
+    {
+      "expect": ["say_3"],
+      "name": "said",
+      "seconds": 10,
+      "send": ["submit_said"]
+    },
+    {
+      "expect": ["band_16_reply"],
+      "name": "said_read",
+      "seconds": 10,
+      "send": ["band_16"]
+    },
+    {
+      "expect": [],
+      "name": "said_ended",
+      "seconds": 0.2,
+      "send": ["say_3_reply"]
+    },
+    {
+      "expect": ["band_17_reply"],
+      "name": "said_shown",
+      "seconds": 10,
+      "send": ["band_17"]
+    },
+    {
+      "expect": ["click_4"],
+      "name": "clicked",
+      "seconds": 10,
+      "send": ["click_pixel"]
+    },
+    {
+      "expect": [],
+      "name": "clicked_ended",
+      "seconds": 0.2,
+      "send": ["click_4_reply"]
+    },
+    {
+      "expect": ["band_18_reply"],
+      "name": "clicked_shown",
+      "seconds": 10,
+      "send": ["band_18"]
+    },
+    {
+      "expect": [],
+      "name": "overlay_keyed",
+      "seconds": 0.2,
+      "send": ["key_2"]
+    },
+    {
+      "expect": ["overlays_19_reply"],
+      "name": "overlay_lined",
+      "seconds": 10,
+      "send": ["overlay_line", "overlays_19"]
+    },
+    {
+      "expect": ["fetch_20_reply"],
+      "name": "fetched",
+      "seconds": 10,
+      "send": ["fetch_20"]
+    }
+  ],
+  "lines": {
+    "band_11": {
+      "0": {
+        "id": 11,
+        "type": "page_probe.band"
+      }
+    },
+    "band_11_reply": {
+      "0": {
+        "reply": 11,
+        "type": "page_probe.band"
+      },
+      "input_disabled": false,
+      "subtitle": "How can I help you?"
+    },
+    "band_13": {
+      "0": {
+        "id": 13,
+        "type": "page_probe.band"
+      }
+    },
+    "band_13_reply": {
+      "0": {
+        "reply": 13,
+        "type": "page_probe.band"
+      },
+      "input_disabled": false,
+      "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+    },
+    "band_16": {
+      "0": {
+        "id": 16,
+        "type": "page_probe.band"
+      }
+    },
+    "band_16_reply": {
+      "0": {
+        "reply": 16,
+        "type": "page_probe.band"
+      },
+      "input_disabled": true,
+      "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+    },
+    "band_17": {
+      "0": {
+        "id": 17,
+        "type": "page_probe.band"
+      }
+    },
+    "band_17_reply": {
+      "0": {
+        "reply": 17,
+        "type": "page_probe.band"
+      },
+      "input_disabled": false,
+      "subtitle": "Fog."
+    },
+    "band_18": {
+      "0": {
+        "id": 18,
+        "type": "page_probe.band"
+      }
+    },
+    "band_18_reply": {
+      "0": {
+        "reply": 18,
+        "type": "page_probe.band"
+      },
+      "input_disabled": false,
+      "subtitle": "Moat."
+    },
+    "choose_always": {
+      "0": {
+        "type": "page_probe.choose"
+      },
+      "button": 2
+    },
+    "click_4": {
+      "0": {
+        "id": 4,
+        "type": "ai.click"
+      },
+      "x": 1,
+      "y": 0
+    },
+    "click_4_reply": {
+      "0": {
+        "reply": 4,
+        "type": "ai.click"
+      },
+      "scene": "/castle_gatehouse/scene/arrival/1",
+      "subtitle": "Moat.",
+      "turn": 8
+    },
+    "click_pixel": {
+      "0": {
+        "type": "page_probe.click"
+      },
+      "x": 1,
+      "y": 0
+    },
+    "fetch_20": {
+      "0": {
+        "id": 20,
+        "type": "media.fetch"
+      },
+      "k": "/_files/bitmap.bmp",
+      "url": "http://127.0.0.1:28749/bitmap"
+    },
+    "fetch_20_reply": {
+      "0": {
+        "blobs": 1,
+        "reply": 20,
+        "type": "media.fetch"
+      },
+      "1": {
+        "d": "Qk1GAAAAAAAAADYAAAAoAAAAAgAAAAIAAAABABgAAAAAABAAAAATCwAAEwsAAAAAAAAAAAAAECB/f0AAAAAQIH9/QAAAAA==",
+        "size": 70
+      },
+      "k": "/_files/bitmap.bmp",
+      "sha256": "e7ac5cbb3dbf5ceeffc7564bd9bcc99413857df2ee6d23dc3cbff9a8d8f092a0",
+      "size": 70
+    },
+    "image_10": {
+      "0": {
+        "id": 10,
+        "type": "page_probe.image"
+      }
+    },
+    "image_10_reply": {
+      "0": {
+        "reply": 10,
+        "type": "page_probe.image"
+      },
+      "height": 150,
+      "hidden": true,
+      "pixels": "ec5a689d3fdf19351fc26dadaae55e6968fe42c9d18d760dd35f74981bd20115",
+      "width": 300
+    },
+    "image_12": {
+      "0": {
+        "id": 12,
+        "type": "page_probe.image"
+      }
+    },
+    "image_12_reply": {
+      "0": {
+        "reply": 12,
+        "type": "page_probe.image"
+      },
+      "height": 2,
+      "hidden": false,
+      "pixels": "c21b35e3f28e676cedf24c13575a7346682e101a2d26aad9598d0cdbcee9ee3b",
+      "width": 2
+    },
+    "key_2": {
+      "0": {
+        "type": "page_probe.key"
+      },
+      "digit": 2
+    },
+    "overlay_line": {
+      "0": {
+        "type": "overlay.line"
+      },
+      "text": "> x",
+      "tty": 1
+    },
+    "overlays_19": {
+      "0": {
+        "id": 19,
+        "type": "page_probe.overlays"
+      }
+    },
+    "overlays_19_reply": {
+      "0": {
+        "reply": 19,
+        "type": "page_probe.overlays"
+      },
+      "overlays": [
+        {
+          "hidden": false,
+          "text": ""
+        },
+        {
+          "hidden": true,
+          "text": "> x"
+        }
+      ]
+    },
+    "permit_14": {
+      "0": {
+        "id": 14,
+        "type": "page_probe.permit"
+      }
+    },
+    "permit_14_reply": {
+      "0": {
+        "reply": 14,
+        "type": "page_probe.permit"
+      },
+      "buttons": ["Accept", "Deny", "Always Allow"],
+      "texts": [
+        "browser.console_run asks to run with {\"text\":\"ls\",\"timeout_seconds\":5}."
+      ]
+    },
+    "permit_15": {
+      "0": {
+        "id": 15,
+        "type": "page_probe.permit"
+      }
+    },
+    "permit_15_reply": {
+      "0": {
+        "reply": 15,
+        "type": "page_probe.permit"
+      },
+      "buttons": [],
+      "texts": []
+    },
+    "permit_4": {
+      "0": {
+        "id": 4,
+        "type": "permit.ask"
+      },
+      "input": {
+        "text": "ls",
+        "timeout_seconds": 5
+      },
+      "permit": 1,
+      "tool": "browser.console_run"
+    },
+    "permit_4_reply": {
+      "0": {
+        "reply": 4,
+        "type": "permit.ask"
+      },
+      "choice": "always",
+      "permit": 1
+    },
+    "render_1": {
+      "0": {
+        "id": 1,
+        "type": "render"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "How can I help you?"
+    },
+    "render_1_reply": {
+      "0": {
+        "reply": 1,
+        "type": "render"
+      }
+    },
+    "render_3": {
+      "0": {
+        "id": 3,
+        "type": "render"
+      },
+      "image": "/_files/gatehouse/arrival.png",
+      "scene": "/castle_gatehouse/scene/arrival/1",
+      "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+    },
+    "render_3_reply": {
+      "0": {
+        "reply": 3,
+        "type": "render"
+      }
+    },
+    "say_3": {
+      "0": {
+        "id": 3,
+        "type": "ai.say"
+      },
+      "text": "1"
+    },
+    "say_3_reply": {
+      "0": {
+        "reply": 3,
+        "type": "ai.say"
+      },
+      "scene": "/castle_gatehouse/scene/arrival/1",
+      "subtitle": "Fog.",
+      "turn": 7
+    },
+    "store_2": {
+      "0": {
+        "blobs": 1,
+        "id": 2,
+        "type": "media.store"
+      },
+      "1": {
+        "d": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR42mP4z8DwHwyBNBgAAEnICfcD2WTxAAAAAElFTkSuQmCC",
+        "size": 75
+      },
+      "k": "/_files/gatehouse/arrival.png"
+    },
+    "store_2_reply": {
+      "0": {
+        "reply": 2,
+        "type": "media.store"
+      },
+      "k": "/_files/gatehouse/arrival.png",
+      "sha256": "9ccfc2abaa3984dc34c93aee16be0afa8a5e1395f25492b3df67897e6d00df10",
+      "size": 75
+    },
+    "submit_said": {
+      "0": {
+        "type": "page_probe.submit"
+      },
+      "text": "1"
+    }
+  },
+  "server": {
+    "closed_port": 28750,
+    "host": "127.0.0.1",
+    "paths": {
+      "/bitmap": {
+        "body": "BMF\u0000\u0000\u0000\u0000\u0000\u0000\u00006\u0000\u0000\u0000(\u0000\u0000\u0000\u0002\u0000\u0000\u0000\u0002\u0000\u0000\u0000\u0001\u0000\u0018\u0000\u0000\u0000\u0000\u0000\u0010\u0000\u0000\u0000\u0013\u000b\u0000\u0000\u0013\u000b\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0010 @\u0000\u0000\u0000\u0010 @\u0000\u0000\u0000",
+        "delay": 0,
+        "headers": {
+          "content-length": "70",
+          "content-type": "image/bmp"
+        },
+        "status": 200
+      }
+    },
+    "port": 28749
+  }
+}

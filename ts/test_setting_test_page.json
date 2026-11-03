@@ -1,0 +1,135 @@
+{
+  "lines": {
+    "console_open_request": {
+      "0": {
+        "id": 1,
+        "type": "console.open"
+      }
+    },
+    "console_show_6": {
+      "0": {
+        "i": 6,
+        "t": "console.show"
+      }
+    },
+    "console_show_7": {
+      "0": {
+        "i": 7,
+        "t": "console.show"
+      }
+    },
+    "control_key_0": {
+      "0": {
+        "t": "ui.control_key"
+      },
+      "digit": 0
+    },
+    "control_key_1": {
+      "0": {
+        "t": "ui.control_key"
+      },
+      "digit": 1
+    },
+    "dom_choice": {
+      "0": {
+        "i": 4,
+        "t": "dom.choice"
+      },
+      "choices": ["accept", "deny", "always"],
+      "permit": 1
+    },
+    "dom_choice_answer": {
+      "0": {
+        "r": 4,
+        "t": "dom.choice"
+      },
+      "choice": "deny"
+    },
+    "dom_choice_unasked": {
+      "0": {
+        "t": "dom.choice"
+      },
+      "choices": [],
+      "permit": 1
+    },
+    "dom_choice_unknown": {
+      "0": {
+        "i": 2,
+        "t": "dom.choice"
+      },
+      "choices": ["maybe"],
+      "permit": 1
+    },
+    "dom_other": {
+      "0": {
+        "i": 1,
+        "t": "dom.other"
+      }
+    },
+    "fault": {
+      "0": {
+        "t": "fault"
+      },
+      "message": "Broken.",
+      "stack": "at x",
+      "thread": "ai"
+    },
+    "render_bare": {
+      "0": {
+        "t": "render"
+      }
+    },
+    "render_image": {
+      "0": {
+        "i": 2,
+        "t": "render"
+      },
+      "image": "/_files/gatehouse/arrival.png",
+      "scene": "/castle_gatehouse/scene/arrival/1",
+      "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you."
+    },
+    "settings_set": {
+      "0": {
+        "t": "settings.set"
+      }
+    },
+    "ui_control_key_3": {
+      "0": {
+        "type": "ui.control_key"
+      },
+      "digit": 3
+    },
+    "ui_input_click": {
+      "0": {
+        "type": "ui.input"
+      },
+      "x": 1,
+      "y": 0
+    },
+    "ui_input_text": {
+      "0": {
+        "type": "ui.input"
+      },
+      "text": "1"
+    },
+    "ui_tests": {
+      "0": {
+        "t": "ui.tests"
+      }
+    }
+  },
+  "texts": {
+    "page_choice_accept": "Accept",
+    "page_choice_always": "Always Allow",
+    "page_choice_deny": "Deny",
+    "page_choice_unknown": "The DOM port has no button for the choice maybe.",
+    "page_console_busy": "console.show found the console view opening or closing, so it can neither answer at once nor ask for tty 0.",
+    "page_dom_type": "The DOM port answers dom.choice lines, not dom.other.",
+    "page_element_missing": "The page has no element with the id image.",
+    "page_id_missing": "The DOM port cannot answer dom.choice without an id.",
+    "page_image_missing": "The render of /castle_gatehouse/scene/arrival/1 names the image /_files/gatehouse/arrival.png, which the media cache does not hold.",
+    "page_message_unknown": "The AI worker posted a render line, which is not a fault.",
+    "page_receiver_twice": "The DOM port already has a receiver.",
+    "page_settings_missing": "The first line of the AI worker is ui.tests, not settings.set."
+  }
+}

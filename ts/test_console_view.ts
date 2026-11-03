@@ -507,7 +507,7 @@ namespace test_console_view {
       fit_assert(this, rig);
       rig.view.view_toggle();
       this.assertEqual(rig.came.length, 2);
-      text_type(rig, "a");
+      text_type(rig, "a\r");
       this.assertEqual(inputs_of(rig).length, 2);
     }
 
@@ -553,7 +553,7 @@ namespace test_console_view {
       rig.view.view_show();
       open_ask(rig);
       this.assertEqual(rig.came, [request_expected("open_request", 1)]);
-      text_type(rig, "x");
+      text_type(rig, "x\r");
       this.assertEqual(rig.came.length, 1);
     }
 
@@ -569,7 +569,7 @@ namespace test_console_view {
       const rig = rig_make();
       rig_start(rig);
       close_ask(rig);
-      const full = harness.setting_get("debug") === true;
+      const full = switches.debug_on();
       this.assertEqual(rig.came.length, 3);
       for (const line of rig.came) {
         this.assertEqual("type" in line[0], full);
@@ -605,7 +605,7 @@ namespace test_console_view {
       const message = new TextEncoder().encode(first_message("empty"));
       this.assertEqual(rig.came.slice(1), [input_expected(message)]);
       rig.view.view_show();
-      text_type(rig, "x");
+      text_type(rig, "x\r");
       this.assertEqual(inputs_of(rig).length, 2);
     }
 
@@ -646,7 +646,7 @@ namespace test_console_view {
         error.message,
         gold_text("console_view_reply_phase_idle"),
       );
-      text_type(rig, "x");
+      text_type(rig, "x\r");
       this.assertEqual(rig.came.length, 0);
     }
 
@@ -674,7 +674,7 @@ namespace test_console_view {
         error.message,
         gold_text("console_view_reply_type_close"),
       );
-      text_type(rig, "x");
+      text_type(rig, "x\r");
       this.assertEqual(inputs_of(rig).length, 0);
     }
 
@@ -700,12 +700,12 @@ namespace test_console_view {
       const wake = wake_make("open_wake_bare", id_last(rig));
       const error = thrown_get(() => rig.view.open_done(wake));
       this.assertEqual(error.message, gold_text("console_view_token_invalid"));
-      text_type(rig, "x");
+      text_type(rig, "x\r");
       this.assertEqual(inputs_of(rig).length, 0);
     }
   }
 
-  // The keystrokes and text the terminal emits, as ttyd's input messages.
+  // The person's line the terminal's keys and text edit, as ttyd's messages.
   export class TestInput extends ViewCase {
     // Shows the view of a new rig and opens tty 0, so that input is taken.
     rig_typing(): ViewRig {
@@ -725,55 +725,56 @@ namespace test_console_view {
       ]);
     }
 
-    // Each batch is its own line, in the order the terminal emitted them.
-    test_each_batch(): void {
+    // Typed text is held until Enter submits it whole as one line.
+    test_line_held(): void {
       const rig = this.rig_typing();
       text_type(rig, "a");
       text_type(rig, "b");
+      this.assertEqual(inputs_of(rig).length, 1);
+      text_type(rig, "\r");
       const inputs = inputs_of(rig);
-      this.assertEqual(inputs.length, 3);
-      this.assertEqual(blob_bytes(inputs[1]), message_bytes(0x30, "a"));
-      this.assertEqual(blob_bytes(inputs[2]), message_bytes(0x30, "b"));
+      this.assertEqual(inputs.length, 2);
+      this.assertEqual(blob_bytes(inputs[1]), message_bytes(0x30, "ab\r"));
     }
 
-    // Each key pressed is its own line, the key's text after the zero.
+    // A key pressed joins the line, and Enter pressed submits it.
     test_keys_pressed(): void {
       const rig = this.rig_typing();
       key_press(rig, "l", 0x4c, false);
+      this.assertEqual(inputs_of(rig).length, 1);
       key_press(rig, "Enter", 0x0d, false);
       const inputs = inputs_of(rig);
-      this.assertEqual(inputs.length, 3);
-      this.assertEqual(blob_bytes(inputs[1]), message_bytes(0x30, "l"));
-      this.assertEqual(blob_bytes(inputs[2]), Uint8Array.of(0x30, 0x0d));
+      this.assertEqual(inputs.length, 2);
+      this.assertEqual(blob_bytes(inputs[1]), message_bytes(0x30, "l\r"));
     }
 
     // A character of two bytes is sent as its two `UTF-8` bytes.
     test_two_bytes(): void {
       const rig = this.rig_typing();
-      text_type(rig, String.fromCodePoint(0xe9));
+      text_type(rig, String.fromCodePoint(0xe9) + "\r");
       this.assertEqual(
         blob_bytes(inputs_of(rig)[1]),
-        Uint8Array.of(0x30, 0xc3, 0xa9),
+        Uint8Array.of(0x30, 0xc3, 0xa9, 0x0d),
       );
     }
 
     // A character of three bytes is sent as its three `UTF-8` bytes.
     test_three_bytes(): void {
       const rig = this.rig_typing();
-      text_type(rig, String.fromCodePoint(0x4e2d));
+      text_type(rig, String.fromCodePoint(0x4e2d) + "\r");
       this.assertEqual(
         blob_bytes(inputs_of(rig)[1]),
-        Uint8Array.of(0x30, 0xe4, 0xb8, 0xad),
+        Uint8Array.of(0x30, 0xe4, 0xb8, 0xad, 0x0d),
       );
     }
 
     // A character of four bytes, two `UTF-16` units, is sent as four bytes.
     test_four_bytes(): void {
       const rig = this.rig_typing();
-      text_type(rig, String.fromCodePoint(0x1f600));
+      text_type(rig, String.fromCodePoint(0x1f600) + "\r");
       this.assertEqual(
         blob_bytes(inputs_of(rig)[1]),
-        Uint8Array.of(0x30, 0xf0, 0x9f, 0x98, 0x80),
+        Uint8Array.of(0x30, 0xf0, 0x9f, 0x98, 0x80, 0x0d),
       );
     }
 
@@ -784,7 +785,8 @@ namespace test_console_view {
         "a" +
         String.fromCodePoint(0xe9) +
         String.fromCodePoint(0x4e2d) +
-        String.fromCodePoint(0x1f600);
+        String.fromCodePoint(0x1f600) +
+        "\r";
       text_type(rig, text);
       const inputs = inputs_of(rig);
       this.assertEqual(inputs.length, 2);
@@ -802,25 +804,110 @@ namespace test_console_view {
           0x9f,
           0x98,
           0x80,
+          0x0d,
         ),
       );
     }
 
-    // Control with a letter is sent as its control byte after the zero.
-    test_control_byte(): void {
+    // Control with a letter is dropped, and the line goes on.
+    test_control_dropped(): void {
       const rig = this.rig_typing();
       key_press(rig, "c", 0x43, true);
+      this.assertEqual(inputs_of(rig).length, 1);
+      text_type(rig, "x\r");
       this.assertEqual(
         blob_bytes(inputs_of(rig)[1]),
-        Uint8Array.of(0x30, 0x03),
+        message_bytes(0x30, "x\r"),
       );
+    }
+
+    // Every C0 control but Tab, Backspace and Enter, and every C1, is dropped.
+    test_controls_dropped(): void {
+      const rig = this.rig_typing();
+      text_type(rig, "a\x01\x00\nb\x9b\x85c\r");
+      this.assertEqual(
+        blob_bytes(inputs_of(rig)[1]),
+        message_bytes(0x30, "abc\r"),
+      );
+    }
+
+    // Escape sequences, typed or of arrow keys, are dropped whole.
+    test_escapes_dropped(): void {
+      const rig = this.rig_typing();
+      text_type(rig, "a\x1b[Db\x1bOAc\x1bxd\x1b[1;5Ce");
+      key_press(rig, "ArrowLeft", 0x25, false);
+      text_type(rig, "\r");
+      const inputs = inputs_of(rig);
+      this.assertEqual(inputs.length, 2);
+      this.assertEqual(blob_bytes(inputs[1]), message_bytes(0x30, "abcde\r"));
+    }
+
+    // Tab joins the line as it is.
+    test_tab_kept(): void {
+      const rig = this.rig_typing();
+      text_type(rig, "a\tb\r");
+      this.assertEqual(
+        blob_bytes(inputs_of(rig)[1]),
+        message_bytes(0x30, "a\tb\r"),
+      );
+    }
+
+    // Backspace removes the last character, and on an empty line nothing.
+    test_backspace_edits(): void {
+      const rig = this.rig_typing();
+      text_type(rig, "a" + String.fromCodePoint(0x1f600));
+      text_type(rig, "\x7f\x7f\x7f");
+      key_press(rig, "x", 0x58, false);
+      key_press(rig, "y", 0x59, false);
+      key_press(rig, "Backspace", 0x08, false);
+      text_type(rig, "\r");
+      this.assertEqual(
+        blob_bytes(inputs_of(rig)[1]),
+        message_bytes(0x30, "x\r"),
+      );
+    }
+
+    // Enter on an empty line submits the carriage return alone.
+    test_enter_empty(): void {
+      const rig = this.rig_typing();
+      text_type(rig, "\r");
+      this.assertEqual(
+        blob_bytes(inputs_of(rig)[1]),
+        message_bytes(0x30, "\r"),
+      );
+    }
+
+    // A paste is cut at its carriage returns, its rest held.
+    test_paste_cut(): void {
+      const rig = this.rig_typing();
+      text_type(rig, "ls\rpwd\rec");
+      const pasted = inputs_of(rig);
+      this.assertEqual(pasted.length, 3);
+      this.assertEqual(blob_bytes(pasted[1]), message_bytes(0x30, "ls\r"));
+      this.assertEqual(blob_bytes(pasted[2]), message_bytes(0x30, "pwd\r"));
+      text_type(rig, "ho\r");
+      const inputs = inputs_of(rig);
+      this.assertEqual(inputs.length, 4);
+      this.assertEqual(blob_bytes(inputs[3]), message_bytes(0x30, "echo\r"));
+    }
+
+    // A line half typed before the AI's command is kept through it.
+    test_line_kept(): void {
+      const rig = this.rig_typing();
+      text_type(rig, "ab");
+      rig.view.input_hold();
+      rig.view.input_free();
+      text_type(rig, "c\r");
+      const inputs = inputs_of(rig);
+      this.assertEqual(inputs.length, 2);
+      this.assertEqual(blob_bytes(inputs[1]), message_bytes(0x30, "abc\r"));
     }
 
     // Before any request the terminal takes no input, so nothing is sent.
     test_input_idle(): void {
       const rig = rig_make();
       rig.view.view_show();
-      text_type(rig, "x");
+      text_type(rig, "x\r");
       key_press(rig, "c", 0x43, true);
       this.assertEqual(rig.came.length, 0);
     }
@@ -830,7 +917,7 @@ namespace test_console_view {
       const rig = rig_make();
       rig.view.view_show();
       open_ask(rig);
-      text_type(rig, "x");
+      text_type(rig, "x\r");
       this.assertEqual(rig.came.length, 1);
       this.assertEqual(inputs_of(rig).length, 0);
     }
@@ -839,7 +926,7 @@ namespace test_console_view {
     test_input_held(): void {
       const rig = this.rig_typing();
       rig.view.input_hold();
-      text_type(rig, "x");
+      text_type(rig, "x\r");
       key_press(rig, "c", 0x43, true);
       this.assertEqual(inputs_of(rig).length, 1);
     }
@@ -849,10 +936,10 @@ namespace test_console_view {
       const rig = this.rig_typing();
       rig.view.input_hold();
       rig.view.input_free();
-      text_type(rig, "a");
+      text_type(rig, "a\r");
       const inputs = inputs_of(rig);
       this.assertEqual(inputs.length, 2);
-      this.assertEqual(blob_bytes(inputs[1]), message_bytes(0x30, "a"));
+      this.assertEqual(blob_bytes(inputs[1]), message_bytes(0x30, "a\r"));
     }
 
     // Freed while tty 0 is idle, the terminal still takes no keys.
@@ -861,7 +948,7 @@ namespace test_console_view {
       rig.view.view_show();
       rig.view.input_hold();
       rig.view.input_free();
-      text_type(rig, "x");
+      text_type(rig, "x\r");
       this.assertEqual(rig.came.length, 0);
     }
 
@@ -871,7 +958,7 @@ namespace test_console_view {
       rig.view.view_show();
       rig.view.input_hold();
       rig_start(rig);
-      text_type(rig, "x");
+      text_type(rig, "x\r");
       this.assertEqual(inputs_of(rig).length, 1);
     }
   }
@@ -979,7 +1066,7 @@ namespace test_console_view {
       close_ask(rig);
       this.assertEqual(rig.came.length, 3);
       this.assertEqual(rig.came[2], request_expected("close_request", 2));
-      text_type(rig, "x");
+      text_type(rig, "x\r");
       this.assertEqual(rig.came.length, 3);
     }
 
@@ -999,7 +1086,7 @@ namespace test_console_view {
       rig_start(rig);
       close_ask(rig);
       request_answer(rig, "close_reply");
-      text_type(rig, "x");
+      text_type(rig, "x\r");
       const again = thrown_get(() => rig.view.open_request());
       this.assertEqual(
         again.message,
@@ -1083,7 +1170,7 @@ namespace test_console_view {
       ]);
       request_answer(rig, "open_reply");
       this.assertEqual(inputs_of(rig).length, 2);
-      text_type(rig, "a");
+      text_type(rig, "a\r");
       this.assertEqual(inputs_of(rig).length, 3);
     }
   }
@@ -1096,7 +1183,7 @@ namespace test_console_view {
       rig.view.view_show();
       rig_start(rig);
       rig.view.exit_done();
-      text_type(rig, "x");
+      text_type(rig, "x\r");
       this.assertEqual(inputs_of(rig).length, 1);
     }
 
@@ -1137,7 +1224,7 @@ namespace test_console_view {
       open_ask(rig);
       this.assertEqual(rig.came.length, 3);
       this.assertEqual(rig.came[2], request_expected("open_request", 2));
-      text_type(rig, "x");
+      text_type(rig, "x\r");
       this.assertEqual(rig.came.length, 3);
       request_answer(rig, "open_reply");
       const inputs = inputs_of(rig);
@@ -1146,7 +1233,7 @@ namespace test_console_view {
         text_decode(blob_bytes(inputs[1])),
         first_message("fitted", rows_count(rig)),
       );
-      text_type(rig, "x");
+      text_type(rig, "x\r");
       this.assertEqual(inputs_of(rig).length, 3);
     }
   }

@@ -1,0 +1,148 @@
+{
+  "lines": {
+    "call": {
+      "0": {
+        "i": 6,
+        "t": "mcp"
+      },
+      "id": 3,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "a": [2, "c"],
+          "b": 1
+        },
+        "name": "echo"
+      }
+    },
+    "call_fail": {
+      "0": {
+        "i": 9,
+        "t": "mcp"
+      },
+      "id": 4,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {},
+        "name": "fail"
+      }
+    },
+    "call_fail_reply": {
+      "0": {
+        "r": 9,
+        "t": "mcp"
+      },
+      "id": 4,
+      "jsonrpc": "2.0"
+    },
+    "call_reply": {
+      "0": {
+        "r": 6,
+        "t": "mcp"
+      },
+      "id": 3,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{\"a\":[2,\"c\"],\"b\":1}",
+            "type": "text"
+          }
+        ],
+        "isError": false
+      }
+    },
+    "initialize": {
+      "0": {
+        "i": 7,
+        "t": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "initialize",
+      "params": {
+        "capabilities": {},
+        "clientInfo": {
+          "name": "hyperposition-engine",
+          "version": "0"
+        },
+        "protocolVersion": "2025-06-18"
+      }
+    },
+    "initialize_reply": {
+      "0": {
+        "r": 7,
+        "t": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "result": {
+        "capabilities": {
+          "tools": {}
+        },
+        "protocolVersion": "2025-06-18",
+        "serverInfo": {
+          "name": "xsjs-server",
+          "version": "0"
+        }
+      }
+    },
+    "initialized": {
+      "0": {
+        "t": "mcp"
+      },
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+    },
+    "list": {
+      "0": {
+        "i": 8,
+        "t": "mcp"
+      },
+      "id": 2,
+      "jsonrpc": "2.0",
+      "method": "tools/list"
+    },
+    "list_reply": {
+      "0": {
+        "r": 8,
+        "t": "mcp"
+      },
+      "id": 2,
+      "jsonrpc": "2.0",
+      "result": {
+        "tools": [
+          {
+            "description": "Echo.",
+            "inputSchema": {
+              "properties": {},
+              "type": "object"
+            },
+            "name": "echo"
+          },
+          {
+            "description": "Fail.",
+            "inputSchema": {
+              "properties": {},
+              "type": "object"
+            },
+            "name": "fail"
+          }
+        ]
+      }
+    },
+    "ping_pushed": {
+      "0": {
+        "t": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "ping"
+    }
+  },
+  "texts": {
+    "dispatch_notification_replied": "The handler for type mcp version 0 returned a reply to a line with no id."
+  }
+}

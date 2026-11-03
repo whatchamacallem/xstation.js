@@ -1,0 +1,31 @@
+{
+  "lines": {
+    "push_kv_put_note": {
+      "0": {
+        "blobs": 1,
+        "key": "/_files/note",
+        "type": "kv.put"
+      }
+    },
+    "push_sql_run_tide": {
+      "0": {
+        "type": "sql.run"
+      },
+      "db": "castle_world",
+      "statements": [
+        {
+          "params": [1, "castle_gatehouse"],
+          "sql": "UPDATE region SET tide = tide + ? WHERE name = ?"
+        }
+      ]
+    }
+  },
+  "script_ref": "/_files/script/{0}.js",
+  "texts": {
+    "script_trace_call_db_list": "substrate db_list []",
+    "script_trace_call_kv_put": "substrate kv_put [\"/_files/note\",{\"bytes\":3}]",
+    "script_trace_call_sql_run": "substrate sql_run [\"castle_world\",[{\"sql\":\"UPDATE region SET tide = tide + ? WHERE name = ?\",\"params\":[1,\"castle_gatehouse\"]}]]",
+    "substrate_key_missing_absent": "The database _files has no key 'absent'.",
+    "substrate_key_missing_script": "The database _files has no key 'script/missing.js'."
+  }
+}

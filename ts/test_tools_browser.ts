@@ -70,7 +70,7 @@ namespace test_tools_browser {
 
   // The names, texts and data the tests use.
   const constants = Object.freeze({
-    // The id of this module's gold in `test_settings.json`.
+    // The id of this module's gold, in its own `test_setting_` file.
     gold_id: "typescript.test_tools_browser",
     // The file of the digest vectors and this module's object in it.
     digests_name: "test_digests.json",
@@ -79,6 +79,7 @@ namespace test_tools_browser {
     root: "/test_tools_browser",
     // The settings of the store's sizes.
     overflow_setting: "overflow_bytes",
+    blob_setting: "blob_max",
     compact_setting: "turn_compact_turns",
     // A synthetic provider key, which every image request carries.
     key: "xai-SYNTHETIC-KEY",
@@ -200,6 +201,22 @@ namespace test_tools_browser {
         '{"type":"object","properties":{"text":{"type":"string"},' +
         '"timeout_seconds":{"type":"number"}},"required":' +
         '["text","timeout_seconds"]},"_meta":{"xsjs":{"permit":true}}}',
+      '{"name":"console_write","description":"Show the debug consol' +
+        "e as ctrl-0 does and type text into its dash, returning at o" +
+        "nce. A line goes when a newline ends it, and the text after " +
+        "the last newline waits for a later write. The console is you" +
+        "rs from the first write until console_read sees the prompt. " +
+        'Debug mode.","inputSchema":{"type":"object","properties":{"t' +
+        'ext":{"type":"string"}},"required":["text"]},"_meta":{"xsjs"' +
+        ':{"permit":true}}}',
+      '{"name":"console_read","description":"Show the debug console' +
+        " as ctrl-0 does and read its output from where the last read" +
+        " ended until the text until shows or the timeout, and whethe" +
+        "r it timed out. A read whose output ends with the prompt end" +
+        's your turn at the console. Debug mode.","inputSchema":{"typ' +
+        'e":"object","properties":{"until":{"type":"string"},"timeout' +
+        '_seconds":{"type":"number"}},"required":["until","timeout_se' +
+        'conds"]},"_meta":{"xsjs":{"permit":true}}}',
       '{"name":"verbose_tail","description":"The last lines of a' +
         ' thread\'s verbose ring: ui, ai or server.","inputSchema":' +
         '{"type":"object","properties":{"thread":{"type":"string"},' +
@@ -265,8 +282,8 @@ namespace test_tools_browser {
   // What the far ends got and gave in the test that runs.
   let far: FarRecord = far_fresh();
 
-  // The settings the running test answers for itself, by id.
-  let overrides: { [id: string]: unknown } = {};
+  // The debug mode the running test answers for itself, if it sets one.
+  let debug_mode: boolean | undefined = undefined;
 
   // A record of the far ends with nothing scripted and nothing got.
   function far_fresh(): FarRecord {
@@ -363,11 +380,9 @@ namespace test_tools_browser {
     return jslb.line_make(header, [], payload);
   }
 
-  // The settings reader of the tools: the test's values first, else harness.
-  function setting_read(id: string): unknown {
-    return Object.hasOwn(overrides, id)
-      ? overrides[id]
-      : harness.setting_get(id);
+  // The debug reader of the tools: the test's mode first, else the thread's.
+  function debug_read(): boolean {
+    return debug_mode === undefined ? switches.debug_on() : debug_mode;
   }
 
   // A far end's answer to a request: the next reply the test scripted for it.
@@ -476,6 +491,7 @@ namespace test_tools_browser {
       new substrate.CacheFiles([...test_slots]),
       constants.root,
       harness.setting_get(constants.overflow_setting) as number,
+      harness.setting_get(constants.blob_setting) as number,
       harness.setting_get(constants.compact_setting) as number,
       tasks,
     );
@@ -486,7 +502,8 @@ namespace test_tools_browser {
       tasks,
       constants.http_thread,
       constants.info,
-      setting_read,
+      harness.setting_get,
+      debug_read,
     );
     const client = new mcp.Client(
       constants.client_name,
@@ -518,9 +535,9 @@ namespace test_tools_browser {
       far = far_fresh();
     }
 
-    // Ends the test's own settings and checks every scripted reply was given.
+    // Ends the test's own debug mode and checks every scripted reply was given.
     tearDown(): void {
-      overrides = {};
+      debug_mode = undefined;
       for (const [type, left] of far.replies) {
         this.assertEqual(left, [], `replies to ${type} were left`);
       }
@@ -625,7 +642,7 @@ namespace test_tools_browser {
       const recorded = constants.recorded_tools.map(
         (text) => JSON.parse(text) as mcp.Tool,
       );
-      this.assertEqual(recorded.length, 16);
+      this.assertEqual(recorded.length, 18);
       this.assertEqual(
         JSON.stringify(this.tools_listed()),
         JSON.stringify(recorded),
@@ -948,9 +965,9 @@ namespace test_tools_browser {
     }
   }
 
-  // The tool that runs a command line in the debug console, to its permit.
+  // The tools of the debug console, up to their permits.
   export class TestConsole extends ToolCase {
-    // A denial returns an error to the model and sends nothing on.
+    // A denial of each tool returns an error to the model, nothing sent on.
     test_permit_denied(): void {
       this.reply_script("permit.ask", gold_line("permit_deny"));
       const result = this.tool_call("console_run", {
@@ -963,16 +980,51 @@ namespace test_tools_browser {
         isError: true,
       });
       this.assertEqual(this.got_unmarked(), [gold_line("permit_ask")]);
+      this.reply_script("permit.ask", gold_line("permit_deny"));
+      const written = this.tool_call("console_write", { text: "echo hi" });
+      const write_text = gold_text("tools_browser_permit_denied_write");
+      this.assertEqual(written, {
+        content: [{ type: "text", text: write_text }],
+        isError: true,
+      });
+      this.reply_script("permit.ask", gold_line("permit_deny"));
+      const read = this.tool_call("console_read", {
+        until: "$ ",
+        timeout_seconds: 5,
+      });
+      const read_text = gold_text("tools_browser_permit_denied_read");
+      this.assertEqual(read, {
+        content: [{ type: "text", text: read_text }],
+        isError: true,
+      });
+      this.assertEqual(this.got_unmarked(), [
+        gold_line("permit_ask"),
+        gold_line("permit_ask_write"),
+        gold_line("permit_ask_read"),
+      ]);
     }
 
-    // Outside debug mode the tool throws and asks the player nothing.
+    // Outside debug mode each tool throws and asks the player nothing.
     test_debug_off(): void {
-      overrides = { debug: false };
+      debug_mode = false;
       const error = this.failure_of("console_run", {
         text: "echo hi",
         timeout_seconds: 5,
       });
       this.assertEqual(error.message, gold_text("tools_browser_debug_off"));
+      const written = this.failure_of("console_write", { text: "echo hi" });
+      this.assertEqual(
+        written.message,
+        gold_text("tools_browser_debug_off_write"),
+      );
+      const read = this.failure_of("console_read", {
+        until: "$ ",
+        timeout_seconds: 5,
+      });
+      this.assertEqual(
+        read.message,
+        gold_text("tools_browser_debug_off_read"),
+      );
       this.assertEqual(far.got, []);
     }
   }

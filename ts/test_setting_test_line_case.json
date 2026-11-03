@@ -1,0 +1,339 @@
+{
+  "graded": {
+    "cases": [
+      {
+        "expect": ["echo_one_reply"],
+        "name": "echo_answered",
+        "seconds": 10,
+        "send": ["echo_one"]
+      },
+      {
+        "expect": ["echo_one_other"],
+        "name": "payload_differs",
+        "seconds": 10,
+        "send": ["echo_one"]
+      },
+      {
+        "expect": ["echo_one_renumbered"],
+        "name": "header_differs",
+        "seconds": 10,
+        "send": ["echo_one"]
+      },
+      {
+        "expect": ["blob_abd_reply"],
+        "name": "bytes_differ",
+        "seconds": 10,
+        "send": ["blob_abc"]
+      },
+      {
+        "expect": ["blob_abc_keyed_reply"],
+        "name": "blob_header_differs",
+        "seconds": 10,
+        "send": ["blob_abc"]
+      },
+      {
+        "expect": ["handle_reply"],
+        "name": "bytes_missing",
+        "seconds": 10,
+        "send": ["handle_request"]
+      },
+      {
+        "expect": ["echo_one_reply"],
+        "name": "line_missing",
+        "seconds": 0.2,
+        "send": ["note"]
+      },
+      {
+        "expect": [],
+        "name": "line_unexpected",
+        "seconds": 0.2,
+        "send": ["echo_one"]
+      },
+      {
+        "expect": ["fail_reply_other"],
+        "name": "stack_differs",
+        "seconds": 10,
+        "send": ["fail_request"]
+      }
+    ],
+    "lines": {
+      "blob_abc": {
+        "0": {
+          "blobs": 1,
+          "id": 2,
+          "type": "line_case_test.echo"
+        },
+        "1": {
+          "d": "YWJj",
+          "size": 3
+        }
+      },
+      "blob_abc_keyed_reply": {
+        "0": {
+          "blobs": 1,
+          "reply": 2,
+          "type": "line_case_test.echo"
+        },
+        "1": {
+          "d": "YWJj",
+          "key": "x",
+          "size": 3
+        }
+      },
+      "blob_abd_reply": {
+        "0": {
+          "blobs": 1,
+          "reply": 2,
+          "type": "line_case_test.echo"
+        },
+        "1": {
+          "d": "YWJk",
+          "size": 3
+        }
+      },
+      "echo_one": {
+        "0": {
+          "id": 1,
+          "type": "line_case_test.echo"
+        },
+        "text": "one"
+      },
+      "echo_one_other": {
+        "0": {
+          "reply": 1,
+          "type": "line_case_test.echo"
+        },
+        "text": "two"
+      },
+      "echo_one_renumbered": {
+        "0": {
+          "reply": 9,
+          "type": "line_case_test.echo"
+        },
+        "text": "one"
+      },
+      "echo_one_reply": {
+        "0": {
+          "reply": 1,
+          "type": "line_case_test.echo"
+        },
+        "text": "one"
+      },
+      "fail_reply_other": {
+        "0": {
+          "reply": 6,
+          "type": "error"
+        },
+        "cause": {
+          "message": "inner failure",
+          "stack": "Error: other failure"
+        },
+        "message": "outer failure",
+        "stack": "Error: outer failure"
+      },
+      "fail_request": {
+        "0": {
+          "id": 6,
+          "type": "line_case_test.fail"
+        },
+        "cause": "inner failure",
+        "message": "outer failure"
+      },
+      "handle_reply": {
+        "0": {
+          "blobs": 1,
+          "reply": 5,
+          "type": "line_case_test.handle"
+        },
+        "1": {
+          "d": "YWJj",
+          "size": 3
+        }
+      },
+      "handle_request": {
+        "0": {
+          "id": 5,
+          "type": "line_case_test.handle"
+        },
+        "handle": "cache/0001",
+        "size": 3
+      },
+      "note": {
+        "0": {
+          "type": "line_case_test.note"
+        },
+        "text": "unanswered"
+      }
+    }
+  },
+  "passing": {
+    "cases": [
+      {
+        "expect": ["echo_one_reply"],
+        "name": "echo_answered",
+        "seconds": 10,
+        "send": ["echo_one"]
+      },
+      {
+        "expect": ["blob_abc_reply"],
+        "name": "blob_echoed",
+        "seconds": 10,
+        "send": ["blob_abc"]
+      },
+      {
+        "expect": ["echo_three_reply", "echo_four_reply"],
+        "name": "replies_ordered",
+        "seconds": 10,
+        "send": ["echo_three", "echo_four"]
+      },
+      {
+        "expect": [],
+        "name": "push_unanswered",
+        "seconds": 0.2,
+        "send": ["note"]
+      },
+      {
+        "expect": ["fail_reply"],
+        "name": "stacks_first",
+        "seconds": 10,
+        "send": ["fail_request"]
+      }
+    ],
+    "lines": {
+      "blob_abc": {
+        "0": {
+          "blobs": 1,
+          "id": 2,
+          "type": "line_case_test.echo"
+        },
+        "1": {
+          "d": "YWJj",
+          "size": 3
+        }
+      },
+      "blob_abc_reply": {
+        "0": {
+          "blobs": 1,
+          "reply": 2,
+          "type": "line_case_test.echo"
+        },
+        "1": {
+          "d": "YWJj",
+          "size": 3
+        }
+      },
+      "echo_four": {
+        "0": {
+          "id": 4,
+          "type": "line_case_test.echo"
+        },
+        "text": "four"
+      },
+      "echo_four_reply": {
+        "0": {
+          "reply": 4,
+          "type": "line_case_test.echo"
+        },
+        "text": "four"
+      },
+      "echo_one": {
+        "0": {
+          "id": 1,
+          "type": "line_case_test.echo"
+        },
+        "text": "one"
+      },
+      "echo_one_reply": {
+        "0": {
+          "reply": 1,
+          "type": "line_case_test.echo"
+        },
+        "text": "one"
+      },
+      "echo_three": {
+        "0": {
+          "id": 3,
+          "type": "line_case_test.echo"
+        },
+        "text": "three"
+      },
+      "echo_three_reply": {
+        "0": {
+          "reply": 3,
+          "type": "line_case_test.echo"
+        },
+        "text": "three"
+      },
+      "fail_reply": {
+        "0": {
+          "reply": 6,
+          "type": "error"
+        },
+        "cause": {
+          "message": "inner failure",
+          "stack": "Error: inner failure"
+        },
+        "message": "outer failure",
+        "stack": "Error: outer failure"
+      },
+      "fail_request": {
+        "0": {
+          "id": 6,
+          "type": "line_case_test.fail"
+        },
+        "cause": "inner failure",
+        "message": "outer failure"
+      },
+      "note": {
+        "0": {
+          "type": "line_case_test.note"
+        },
+        "text": "unanswered"
+      }
+    }
+  },
+  "streams": {
+    "failfast": [
+      "TAP version 14",
+      "    1..9",
+      "    ok 1 - echo_answered",
+      "    not ok 2 - payload_differs",
+      "    # Line 1 has the payload {\"text\":\"one\"}, expected {\"text\":\"two\"}.",
+      "Bail out! failfast"
+    ],
+    "graded": [
+      "TAP version 14",
+      "    1..9",
+      "    ok 1 - echo_answered",
+      "    not ok 2 - payload_differs",
+      "    # Line 1 has the payload {\"text\":\"one\"}, expected {\"text\":\"two\"}.",
+      "    not ok 3 - header_differs",
+      "    # Line 1 has the header {\"type\":\"line_case_test.echo\",\"reply\":1}, expected {\"reply\":9,\"type\":\"line_case_test.echo\"}.",
+      "    not ok 4 - bytes_differ",
+      "    # Line 1 has blob 1 of 3 bytes with SHA-256 ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad, expected 3 bytes with SHA-256 a52d159f262b2c6ddb724a61840befc36eb30c88877a4030b65cbe86298449c9.",
+      "    not ok 5 - blob_header_differs",
+      "    # Line 1 has blob 1 with the header {\"size\":3}, expected {\"key\":\"x\",\"size\":3}.",
+      "    not ok 6 - bytes_missing",
+      "    # Line 1 has blob 1 without its bytes in memory.",
+      "    not ok 7 - line_missing",
+      "    # Line 1 did not come in 0.2 s: {\"0\":{\"reply\":1,\"type\":\"line_case_test.echo\"},\"text\":\"one\"}",
+      "    not ok 8 - line_unexpected",
+      "    # Line 1 was not expected: {\"0\":{\"type\":\"line_case_test.echo\",\"reply\":1},\"text\":\"one\"}",
+      "    not ok 9 - stack_differs",
+      "    # Line 1 has the payload {\"message\":\"outer failure\",\"stack\":\"Error: outer failure\",\"cause\":{\"message\":\"inner failure\",\"stack\":\"Error: inner failure\"}}, expected {\"cause\":{\"message\":\"inner failure\",\"stack\":\"Error: other failure\"},\"message\":\"outer failure\",\"stack\":\"Error: outer failure\"}.",
+      "not ok 1 - test_line_case",
+      "1..1"
+    ],
+    "passing": [
+      "TAP version 14",
+      "    1..5",
+      "    ok 1 - echo_answered",
+      "    ok 2 - blob_echoed",
+      "    ok 3 - replies_ordered",
+      "    ok 4 - push_unanswered",
+      "    ok 5 - stacks_first",
+      "ok 1 - test_line_case",
+      "1..1"
+    ]
+  }
+}

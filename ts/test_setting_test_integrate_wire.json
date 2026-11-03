@@ -1,0 +1,288 @@
+{
+  "cases": [
+    {
+      "expect": ["console_open_reply"],
+      "name": "console_opened",
+      "seconds": 10,
+      "send": ["console_open"]
+    },
+    {
+      "expect": [],
+      "name": "first_sent",
+      "seconds": 1,
+      "send": ["first_message"]
+    },
+    {
+      "expect": ["heredoc_output"],
+      "name": "binary_echoed",
+      "seconds": 10,
+      "send": [
+        "heredoc_command",
+        "heredoc_row_01",
+        "heredoc_row_02",
+        "heredoc_row_03",
+        "heredoc_row_04",
+        "heredoc_row_05",
+        "heredoc_row_06",
+        "heredoc_row_07",
+        "heredoc_row_08",
+        "heredoc_row_09",
+        "heredoc_row_10",
+        "heredoc_row_11",
+        "heredoc_row_12",
+        "heredoc_row_13",
+        "heredoc_row_14",
+        "heredoc_row_15",
+        "heredoc_row_16",
+        "heredoc_row_17",
+        "heredoc_end"
+      ]
+    },
+    {
+      "expect": ["console_exit"],
+      "name": "console_closed",
+      "seconds": 10,
+      "send": ["console_close"]
+    }
+  ],
+  "lines": {
+    "console_close": {
+      "0": {
+        "type": "console.close"
+      }
+    },
+    "console_exit": {
+      "0": {
+        "type": "console.exit"
+      },
+      "code": 1000
+    },
+    "console_open": {
+      "0": {
+        "id": 1,
+        "type": "console.open"
+      }
+    },
+    "console_open_reply": {
+      "0": {
+        "reply": 1,
+        "type": "console.open"
+      },
+      "token": ""
+    },
+    "first_message": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "eyJBdXRoVG9rZW4iOiIiLCJjb2x1bW5zIjo4MCwicm93cyI6MjR9",
+        "size": 39
+      }
+    },
+    "heredoc_command": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MHByaW50ZiAnXDA3NFwwNzRcMTcwXDE2M1wxNTJcMTYzXDA1NVwxNDJcMTQ1XDE0N1wxNTFcMTU2XDA3NlwwNzYnOyBjYXQgPDwnRU5EJzsgcHJpbnRmICdcMDc0XDA3NFwxNzBcMTYzXDE1MlwxNjNcMDU1XDE0NVwxNTZcMTQ0XDA3NlwwNzYnCg==",
+        "size": 139
+      }
+    },
+    "heredoc_end": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MEVORAo=",
+        "size": 5
+      }
+    },
+    "heredoc_output": {
+      "0": {
+        "blobs": 1,
+        "type": "console.output"
+      },
+      "1": {
+        "d": "AQIDBAUGBwgJCwwNDg8NChAREhMUFRYXGBkaGxwdHh8NCiAhIiMkJSYnKCkqKywtLi8NCjAxMjM0NTY3ODk6Ozw9Pj8NCkBBQkNERUZHSElKS0xNTk8NClBRUlNUVVZXWFlaW1xdXl8NCmBhYmNkZWZnaGlqa2xtbm8NCnBxcnN0dXZ3eHl6e3x9fn8NCoCBgoOEhYaHiImKi4yNjo8NCpCRkpOUlZaXmJmam5ydnp8NCqChoqOkpaanqKmqq6ytrq8NCrCxsrO0tba3uLm6u7y9vr8NCsDBwsPExcbHyMnKy8zNzs8NCtDR0tPU1dbX2Nna29zd3t8NCuDh4uPk5ebn6Onq6+zt7u8NCvDx8vP09fb3+Pn6+/z9/v8NCoDAr+CAr+2ggP8NCg==",
+        "size": 298
+      }
+    },
+    "heredoc_row_01": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MAECFgMWBAUGBwgJCwwWDQ4PCg==",
+        "size": 19
+      }
+    },
+    "heredoc_row_02": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MBAWERYSFhMUFhUWFhYXGBkWGhsWHB0eHwo=",
+        "size": 26
+      }
+    },
+    "heredoc_row_03": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MCAhIiMkJSYnKCkqKywtLi8K",
+        "size": 18
+      }
+    },
+    "heredoc_row_04": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MDAxMjM0NTY3ODk6Ozw9Pj8K",
+        "size": 18
+      }
+    },
+    "heredoc_row_05": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MEBBQkNERUZHSElKS0xNTk8K",
+        "size": 18
+      }
+    },
+    "heredoc_row_06": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MFBRUlNUVVZXWFlaW1xdXl8K",
+        "size": 18
+      }
+    },
+    "heredoc_row_07": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MGBhYmNkZWZnaGlqa2xtbm8K",
+        "size": 18
+      }
+    },
+    "heredoc_row_08": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MHBxcnN0dXZ3eHl6e3x9fhZ/Cg==",
+        "size": 19
+      }
+    },
+    "heredoc_row_09": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MICBgoOEhYaHiImKi4yNjo8K",
+        "size": 18
+      }
+    },
+    "heredoc_row_10": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MJCRkpOUlZaXmJmam5ydnp8K",
+        "size": 18
+      }
+    },
+    "heredoc_row_11": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MKChoqOkpaanqKmqq6ytrq8K",
+        "size": 18
+      }
+    },
+    "heredoc_row_12": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MLCxsrO0tba3uLm6u7y9vr8K",
+        "size": 18
+      }
+    },
+    "heredoc_row_13": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MMDBwsPExcbHyMnKy8zNzs8K",
+        "size": 18
+      }
+    },
+    "heredoc_row_14": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MNDR0tPU1dbX2Nna29zd3t8K",
+        "size": 18
+      }
+    },
+    "heredoc_row_15": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MODh4uPk5ebn6Onq6+zt7u8K",
+        "size": 18
+      }
+    },
+    "heredoc_row_16": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MPDx8vP09fb3+Pn6+/z9/v8K",
+        "size": 18
+      }
+    },
+    "heredoc_row_17": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MIDAr+CAr+2ggP8K",
+        "size": 12
+      }
+    }
+  },
+  "marker_end": "<<xsjs-end>>",
+  "marker_start": "<<xsjs-begin>>",
+  "output_kind": "0",
+  "root": {}
+}

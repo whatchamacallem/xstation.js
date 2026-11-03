@@ -15,7 +15,7 @@
 # driver is the file beside the checkout's modules this file imports, as a
 # copy of this file runs from the root. Each line of the driver's stdout, a
 # line of its TAP stream, is pushed the moment it ends as a `tap.line` of
-# the language python, in the name form of the setting `debug`; what it
+# the language python, in the name form of the parameter `debug`; what it
 # writes to stderr is kept, and when it exits the reply carries its exit
 # code and that text. Its stdout ending inside a line is a fault. A line of
 # no other type has a handler, a blob is refused, and a failure writes one
@@ -23,7 +23,8 @@
 # ends the connection ends the loop, and a driver still running with it, as
 # both are in the tty's foreground group.
 
-import dispatch, functools, jslb, os, select, settings, subprocess, sys
+import dispatch, functools, jslb, os, select, settings, subprocess
+import switches, sys
 from internationalization import i18n
 from typing import Any, NoReturn, cast
 
@@ -199,7 +200,7 @@ def _bytes_serve(
 # The select loop: reads the pty, decodes, runs each `tap.run` in turn.
 def loop_run(read_fd: int, write_fd: int, root: str) -> None:
     values = cast(dict[str, Any], _STATE.values)
-    full: bool = values["debug"]
+    full = switches.debug
     run = functools.partial(suites_run, write_fd, full)
     dispatch.handler_register(_RUN_TYPE, _RUN_VERSION, run)
     decoder = jslb.LineDecoder(

@@ -187,13 +187,12 @@ namespace test_node {
       );
     }
     const payload = jslb.payload_of(first) as unknown as lines.TapStart;
-    const gold = payload.test_settings;
-    if (gold === undefined) {
-      throw new Error("tap.start carries no test_settings: not debug mode");
+    if (!payload.switches.debug) {
+      throw new Error("tap.start is not in debug mode");
     }
-    settings.settings_set(payload.settings);
     switches.switches_set(payload.switches);
-    harness.values_set(payload.settings, gold);
+    settings.settings_set(payload.settings);
+    harness.values_set(payload.settings);
     line_write(dispatch.reply_make(first, {}));
     const runner = new tap_producer.TAPTestRunner(start.failfast);
     runner.set_stream(text_send);

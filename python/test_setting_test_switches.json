@@ -1,0 +1,14 @@
+{
+  "texts": {
+    "jslb_number_overflow": "The number 1e400 overflows a double.",
+    "switches_parameter_extra_extra": "The parameters file {0} has the parameter extra, which is none of anthropic, debug and verbose.",
+    "switches_parameter_extra_verbose_level": "The parameters file {0} has the parameter verbose_level, which is none of anthropic, debug and verbose.",
+    "switches_parameter_missing_anthropic": "The parameters file {0} has no parameter anthropic.",
+    "switches_parameter_missing_debug": "The parameters file {0} has no parameter debug.",
+    "switches_parameter_missing_verbose": "The parameters file {0} has no parameter verbose.",
+    "switches_parameter_type_anthropic": "The parameter anthropic of {0} must be true or false but is 1.",
+    "switches_parameter_type_debug": "The parameter debug of {0} must be true or false but is \"true\".",
+    "switches_parameter_type_verbose": "The parameter verbose of {0} must be true or false but is null.",
+    "switches_parameters_not_object": "The parameters file {0} does not hold a JSON object."
+  }
+}

@@ -7,35 +7,35 @@
 # html/test.html, whose bring up runs through ttyd and the server, and the
 # headless page of html/headless.html, which starts no worker until a block
 # asks. It makes server roots under build/ as the start script makes them, each
-# with settings.json and test_settings.json, removing them once the run passes
-# and keeping them after a failure, serves each through a ttyd of its own,
-# build/ttyd/ttyd as ttyd_build.py builds it, and drives chrome-headless-shell
-# through devtools.LinuxPipe, rung by rung, each rung under a timer and named
-# by the stage of the plan it proves. The suites root runs the ttyd page's
-# bring up over TAP, each thread writing a document of no block, as every block
-# runs in group A or B, and checks the TAP file the server keeps with the TAP
-# consumer. The probe, credential and echo roots serve the headless page, whose
-# binding of the realm lane the browser adds before any page loads, and drive
-# its modules on the page's main thread through the probe kit, a stub HTTP
-# server of this process and the server; the other roots serve the ttyd page.
-# The rungs check what the page shows and what the server holds, and a fault
-# the headless page's realm reports that no rung waited for fails the run. Some
-# roots name a main loop file in ttyd's command, and one has ttyd ask a
-# credential. PNGs of the surveyed states go to build/test_browser/, each of
-# the gold's window size. Each root and each rung is labelled smoke-test or
-# normal-test: a smoke-test run, the default, runs the rungs labelled
-# smoke-test and starts no ttyd and no page for a root with none, a normal-test
-# run runs every rung, and a mislabel fails the run. It prints one line per
-# rung that runs, ending with its label and seconds, and one per request for
-# /favicon.ico, which the stub answers 404, and exits 0, or stops at the first
-# failed check, names its rung and exits 1. ttyd's log and the page's console
-# are copied to stderr. Its timers, sizes and the roots' pinned settings, the
-# texts it expects and the headers it checks come from its gold,
-# python.test_browser of test_settings.json, read through harness.py, and the
-# values of settings.json it repeats from that file; the server's databases are
-# read with sqlite3 by the substrate's tables. It imports the standard library
-# and the infrastructure for testing only, and ttyd, the browser and tsc
-# through page_build.py are the programs it starts:
+# with settings.json and the page, which carries the TypeScript suites' gold,
+# removing them once the run passes and keeping them after a failure, serves
+# each through a ttyd of its own, build/ttyd/ttyd as ttyd_build.py builds it,
+# and drives chrome-headless-shell through devtools.LinuxPipe, rung by rung,
+# each rung under a timer and named by the stage of the plan it proves. The
+# suites root runs the ttyd page's bring up over TAP, each thread writing a
+# document of no block, as every block runs in group A or B, and checks the TAP
+# file the server keeps with the TAP consumer. The probe, credential and echo
+# roots serve the headless page, whose binding of the realm lane the browser
+# adds before any page loads, and drive its modules on the page's main thread
+# through the probe kit, a stub HTTP server of this process and the server; the
+# other roots serve the ttyd page. The rungs check what the page shows and what
+# the server holds, and a fault the headless page's realm reports that no rung
+# waited for fails the run. Some roots name a main loop file in ttyd's command,
+# and one has ttyd ask a credential. PNGs of the surveyed states go to
+# build/test_browser/, each of the gold's window size. Each root and each rung
+# is labelled smoke-test or normal-test: a smoke-test run, the default, runs
+# the rungs labelled smoke-test and starts no ttyd and no page for a root with
+# none, a normal-test run runs every rung, and a mislabel fails the run. It
+# prints one line per rung that runs, ending with its label and seconds, and
+# one per request for /favicon.ico, which the stub answers 404, and exits 0, or
+# stops at the first failed check, names its rung and exits 1. ttyd's log and
+# the page's console are copied to stderr. Its timers, sizes and the roots'
+# pinned settings, the texts it expects and the headers it checks come from its
+# gold, python.test_browser, its own test_setting_ file, read through
+# harness.py, and the values of settings.json it repeats from that file; the
+# server's databases are read with sqlite3 by the substrate's tables. It
+# imports the standard library and the infrastructure for testing only, and
+# ttyd, the browser and tsc through page_build.py are the programs it starts:
 #
 #     python3 python/test_browser.py [--smoke-test | --normal-test]
 #         [--anthropic] [--debug] [--verbose]
@@ -55,7 +55,7 @@ _CHECKOUT_PATH = os.path.dirname(_PYTHON_PATH)
 # The build directory: the pages, each run's roots, the PNGs and bytecode.
 _BUILD_PATH = os.path.join(_CHECKOUT_PATH, "build")
 
-# The id of this driver's gold in `test_settings.json`.
+# The id of this driver's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_browser"
 
 # The module that builds ttyd, which a missing ttyd names.
@@ -66,12 +66,6 @@ _WORK_PREFIX = "test_browser-"
 
 # The directory the PNGs of the surveyed states go to, kept after the run.
 _PNG_PATH = os.path.join(_BUILD_PATH, "test_browser")
-
-# The name of the test settings, the gold record, in a root.
-_TEST_SETTINGS_NAME = "test_settings.json"
-
-# The TypeScript run of the ttyd page: the bring up of both threads.
-_RUN_UNIT = "unit"
 
 # The strings file, which the start script copies into the root.
 _STRINGS_PATH = os.path.join(_CHECKOUT_PATH, "i18n", "en-US.json")
@@ -1291,7 +1285,7 @@ class StubHandler(http.server.BaseHTTPRequestHandler):
 
 # One root's page in the browser: its address, its probes and its inputs.
 class PageSession:
-    # Takes the browser, the log, ttyd, the root's settings and the realm's.
+    # Takes the browser, the log, ttyd, the root's files and the realm's.
     def __init__(
         self,
         browser: BrowserDriver,
@@ -1299,6 +1293,7 @@ class PageSession:
         ttyd: TtydServer,
         values: dict[str, Any],
         gold: dict[str, Any],
+        parameters: dict[str, bool],
         realm_lines: list[str],
     ) -> None:
         self.browser = browser
@@ -1307,6 +1302,7 @@ class PageSession:
         self.root = ttyd.root
         self.values = values
         self.gold = gold
+        self.parameters = parameters
         self.realm_lines = realm_lines
         self.url = f"http://{bind_address()}:{ttyd.port}/"
         self.mark = len(ttyd.lines)
@@ -1592,11 +1588,11 @@ def server_wait[T](
         time.sleep(min(poll, session.log.timer.seconds_left(what)))
 
 
-# Makes a root as the start script does, debug, level, scripted and run pinned.
+# Makes a root as the start script does, its parameters, scripted.
 def root_make(
-    work: str, name: str, page: str, overrides: dict[str, Any]
-) -> tuple[str, str, dict[str, Any], dict[str, Any]]:
-    import harness
+    work: str, name: str, page: str, changed: dict[str, bool]
+) -> tuple[str, str, dict[str, Any], dict[str, Any], dict[str, bool]]:
+    import harness, switches
 
     root = os.path.join(work, name)
     python_path = os.path.join(root, "python")
@@ -1612,27 +1608,25 @@ def root_make(
     os.makedirs(strings_path)
     shutil.copyfile(_STRINGS_PATH, os.path.join(strings_path, "en-US.json"))
     values = harness.settings_copy()
-    values["debug"] = gold_value("root_debug")
-    values["verbose_level"] = gold_value("root_level")
     scripted = gold_value("root_scripted")
     values["provider"] = {**values["provider"], "scripted": scripted}
-    values.update(overrides)
     text = json.dumps(values, ensure_ascii=False, indent=2) + "\n"
     with open(
         os.path.join(root, "settings.json"), "w", encoding="utf-8"
     ) as file:
         file.write(text)
-    gold = harness.gold_copy()
-    gold["typescript"]["run"] = _RUN_UNIT
-    text = json.dumps(gold, ensure_ascii=False, indent=2) + "\n"
-    with open(
-        os.path.join(root, _TEST_SETTINGS_NAME), "w", encoding="utf-8"
-    ) as file:
-        file.write(text)
+    parameters = {
+        **switches.switches_get(),
+        "debug": gold_value("root_debug"),
+        "verbose": gold_value("root_verbose"),
+        **changed,
+    }
+    switches.parameters_write(root, parameters)
     built = page_path(page)
     index = os.path.join(root, os.path.basename(built))
     shutil.copyfile(built, index)
-    return root, index, values, gold
+    tests = {"typescript": harness.gold_copy()["typescript"]}
+    return root, index, values, tests, parameters
 
 
 # Copies a main loop file into the root's directory of main loop files.
@@ -2030,10 +2024,8 @@ def server_pid(session: PageSession) -> int:
     return int(found.group(1))
 
 
-# The wire port's first line: `tap.start`, the two settings files, switches.
+# The wire port's first line, `tap.start`, with no gold, and the page's gold.
 def rung_first_line(session: PageSession) -> str:
-    import switches
-
     session.page_open()
     session.probe_call("wire_open", "first", session.url)
     first = json_object(
@@ -2043,24 +2035,28 @@ def rung_first_line(session: PageSession) -> str:
     payload = json_object(first["payload"])
     if (
         first["header"] != header
-        or sorted(payload) != ["settings", "switches", "test_settings"]
+        or sorted(payload) != ["settings", "switches"]
         or payload["settings"] != session.values
-        or payload["switches"] != switches.switches_get()
-        or payload["test_settings"] != session.gold
+        or payload["switches"] != session.parameters
         or first["blobs"] != []
     ):
         raise CheckFailed(
             f"the first line is {json.dumps(first)}, where the header"
-            f" {json.dumps(header)}, the root's settings, the run's switches,"
-            " the root's test settings and no blob were due"
+            f" {json.dumps(header)}, the root's settings, the root's switches,"
+            " no gold and no blob were due"
+        )
+    if session.browser.script_evaluate("test_gold") != session.gold:
+        raise CheckFailed(
+            "the page's test_gold is not the TypeScript suites' gold"
         )
     pid = server_pid(session)
     program_check(session, pid)
     return (
         f"a WirePort on the page's main thread got {header['type']} with id"
         f" {header['id']} in full names from pid {pid}, ttyd's child, carrying"
-        " the root's settings.json, the run's switches and test_settings.json"
-        " and no blob, and answered it"
+        " the root's settings.json and the root's parameters, no gold and no"
+        " blob, and answered it, and the page carries the TypeScript suites'"
+        " gold as test_gold"
     )
 
 
@@ -2591,13 +2587,11 @@ def rung_sink(session: PageSession) -> str:
 
 # The long tasks the UI thread ran since the observer started.
 def rung_long(session: PageSession) -> str:
-    import harness
-
     durations = [
         cast(float, value)
         for value in json_list(session.probe_call("long_list"))
     ]
-    target = harness.gold_get("long_task_ms")
+    target = gold_value("long_task_ms")
     longest = f"{max(durations):.1f} ms" if durations else "none"
     return (
         f"the long task observer saw {len(durations)} tasks of 50 ms or more"
@@ -3185,7 +3179,7 @@ def session_run(
     name: str,
     label: str,
     page: str,
-    overrides: dict[str, Any],
+    changed: dict[str, bool],
     extras: ServerExtras,
     place: Callable[[str, dict[str, Any]], None],
     body: Callable[[PageSession], None],
@@ -3194,13 +3188,20 @@ def session_run(
     if not log.book.root_enter(name, label):
         return
     page_ready(context, page)
-    root, index, values, gold = root_make(context.work, name, page, overrides)
+    made = root_make(context.work, name, page, changed)
+    root, index, values, gold, parameters = made
     place(root, values)
     seconds: float = gold_value("rung_seconds")
     log.rung_start(f"ttyd for the root {name}", seconds)
     with TtydServer(root, index, values, extras, log) as ttyd:
         session = PageSession(
-            context.browser, log, ttyd, values, gold, context.realm_lines
+            context.browser,
+            log,
+            ttyd,
+            values,
+            gold,
+            parameters,
+            context.realm_lines,
         )
         body(session)
         log.rung_start(f"leaving the root {name}", seconds)

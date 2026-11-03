@@ -21,13 +21,16 @@ execution policy refuses the scripts from a `\\wsl.localhost` path.
 
 ## xsjs_start.ps1
 
-`.\xsjs_start.ps1 [username:password]` (admin)
+`.\xsjs_start.ps1 [--debug] [--verbose] [username:password]` (admin)
 
 - Copies the ttyd that `xsjs_install.ps1` built, the server's Python
-  modules and seeds, `i18n/en-US.json`, `settings.json`,
-  `test_settings.json`, `provider.json` and the page,
+  modules and seeds, `i18n/en-US.json`, `settings.json`, `provider.json`
+  and the page, which carries the TypeScript suites' gold,
   `build/hyperposition-engine.html`, to `~/.cache/xsjs/` in WSL on each
   run.
+- Writes the root's `parameters.json` from its switches: `--debug` runs
+  the page in debug mode, which the console needs, `--verbose` the
+  console's shell at verbose level 2; each is off unless given.
 - Serves them with ttyd in WSL on 127.0.0.1:5769, which a Windows port
   proxy forwards from port 5768.
 - Serves localhost over HTTP, or the network over HTTPS with a password.

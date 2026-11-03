@@ -31,7 +31,7 @@ _BUFFER_PAST = max(8 * 1024 * 1024, io.DEFAULT_BUFFER_SIZE) + 1
 # The ending a forked child sends when all its checks passed.
 _ENDING_CHECKED = "checked"
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_jslb"
 
 # The longest line the decoders here read with its CR, its writer's choice.

@@ -24,7 +24,7 @@ _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
 )
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_engine_doc"
 
 # A key of the decimal digits of a non negative integer, as JSLB reads it.
@@ -32,6 +32,9 @@ _NUMBER_KEY = re.compile(r"0|[1-9][0-9]*")
 
 # The size over which the store keeps a value in a cache file.
 _OVERFLOW_BYTES: int = harness.setting_get("overflow_bytes")
+
+# The largest database file the store lets grow, the checkout's setting.
+_BLOB_MAX: int = harness.setting_get("blob_max")
 
 # The ref of the scene's first version, which a put writes.
 _SCENE_REF = "/castle_gatehouse/scene/arrival/1"
@@ -115,7 +118,7 @@ class ScratchCase(unittest.TestCase):
 
     # In the child: a store on the root, the handler registered on it.
     def store_register(self) -> substrate.Store:
-        store = substrate.Store(self.root, _OVERFLOW_BYTES)
+        store = substrate.Store(self.root, _OVERFLOW_BYTES, _BLOB_MAX)
         engine_doc.handlers_register(store)
         return store
 

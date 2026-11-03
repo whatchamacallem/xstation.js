@@ -1,0 +1,13 @@
+{
+  "patch_code": 1,
+  "patch_lines": [
+    "patching file CMakeLists.txt",
+    "Hunk #1 FAILED at 1.",
+    "1 out of 1 hunk FAILED -- saving rejects to file CMakeLists.txt.rej"
+  ],
+  "refused_code": 255,
+  "refused_size": -1,
+  "refused_text": "ttyd: invalid srv-buf-size: -1\n",
+  "unrecognized_text": "{0}: unrecognized option '{1}'\n",
+  "version_text": "ttyd version 1.7.7\n"
+}

@@ -23,8 +23,11 @@ A file here changes before the code it describes.
 - `settings.json`: kept equal to the top-level `settings.json`, which the
   server reads and sends in `tap.start` unmodified. It also holds the
   constants of the PowerShell scripts, under `powershell`. The test suite
-  settings and the gold record of expected test results are the top-level
-  `test_settings.json`, sent after the settings in debug mode.
+  settings and the gold record of expected test results are one file per
+  suite, `test_setting_<suite>.json` beside the suite's module; the
+  TypeScript suites' gold is built into the test page. Debug
+  mode and the console's verbose level are not settings but the parameters
+  of a root, `<root>/parameters.json`, by `python/switches.pyi`.
 
 Lanes, as `lines.d.ts` names them:
 
@@ -52,10 +55,10 @@ program but the test suites runs: the bring up is a TAP run.
 
 A header field has a short name, `t`, and a full name, `type`. One
 function chooses the form of every line a thread builds:
-`settings.names_full()`, true until the settings are set, then the setting
-`debug`. Code that can run before the settings exist, such as the error
-overlay's `fault` line, always uses the full names. A reply takes the form
-of the line it answers. Payload keys are always full English words; only
+`settings.names_full()`, true until the settings are set, then the
+parameter `debug`, the thread's `switches.debug_on()`. Code that can run
+before the settings exist, such as the error overlay's `fault` line, always
+uses the full names. A reply takes the form of the line it answers. Payload keys are always full English words; only
 the header fields have single letter names.
 
 ## The store protocol

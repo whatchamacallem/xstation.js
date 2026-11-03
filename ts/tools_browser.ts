@@ -14,13 +14,27 @@
 //
 // console_run, in debug mode, asks the player's permit unless it was always
 // allowed, then submits `console.show` to the UI and sleeps on
-// `tools.show_reply`, then notifies the UI `console.busy`, types the command
-// into tty 0 and sleeps on its output, and notifies `console.idle` when the
-// read ends, so that the player watches the command and types once it is
-// over. Outside debug mode it throws `tools_browser.debug_off`. Every line
-// a tool builds takes the form `settings.names_full()` picks. A tool that
-// throws, before or after it submitted a request, fails the server as
-// `mcp.d.ts` says, its own message kept.
+// `tools.show_reply`, then notifies tty 0's writer `console.busy`, types the
+// command into tty 0 and sleeps on its output, and notifies `console.idle`
+// when the read ends, so that the player watches the command and types once it
+// is over. console_write and console_read ask their own permits and show the
+// console as console_run does. console_write notifies `console.busy` to tty
+// 0's writer at the first write of a turn, sends its text as one
+// `console.write` to the writer, which types each line a newline ends and
+// holds the rest, and returns `{}` at once. The writer starts the turn, its
+// busy to the UI, once tty 0's last command has concluded, the AI's lines and
+// reads waiting until then. console_read reads to its text or its timeout,
+// from where the last read of the turn ended, or from the turn's start in a
+// turn that waits, and returns the output with LF line ends and whether it
+// timed out; a read whose output ends with the prompt ends the turn with
+// `console.idle` to the writer, which posts it to the UI. console_run starts a
+// turn when none is on, types its command line within it, and ends the turn
+// when its read ends; its wait for the turn counts against its timeout, past
+// which it returns timed out with no output and nothing typed. Outside debug
+// mode each of the three throws `tools_browser.debug_off`. Every line a tool
+// builds takes the form `settings.names_full()` picks. A tool that throws,
+// before or after it submitted a request, fails the server as `mcp.d.ts` says,
+// its own message kept.
 
 namespace tools_browser {
   // Finishes a tool's result from the state and replies of its wake.
@@ -34,8 +48,9 @@ namespace tools_browser {
     key: string;
   }
 
-  // The state of a wake that shows the console, runs or ends a command.
+  // The state of a wake of a console tool: its name, its text and timeout.
   interface ConsoleState {
+    tool: string;
     text: string;
     timeout_seconds: number;
   }
@@ -44,8 +59,10 @@ namespace tools_browser {
   const constants = Object.freeze({
     // The prefix the agent lists this server's tools under.
     tool_prefix: "browser.",
-    // The tool that runs only with the player's permit.
-    permit_tool: "console_run",
+    // The console's tools, each run only with the player's permit.
+    run_tool: "console_run",
+    write_tool: "console_write",
+    read_tool: "console_read",
     // The start of the ref of an image, its key in `_files`.
     files_prefix: "/_files/",
     // The ref that names the database of the current world.
@@ -54,8 +71,6 @@ namespace tools_browser {
     scene_key: "scene",
     // The prompt of the console's dash, which ends a command's output.
     prompt_text: "$ ",
-    // The command byte that starts each input message of ttyd's protocol.
-    input_command: "0",
     // The end of a command line, and of a line of output once trimmed.
     line_end: "\n",
     // The end of a line as the console's pty writes it.
@@ -64,8 +79,6 @@ namespace tools_browser {
     image_count: 1,
     // The form an image request asks the images in.
     image_format: "b64_json" as const,
-    // The setting of debug mode, which the debug tool needs.
-    debug_setting: "debug",
     // The choices of a permit that do not simply accept.
     deny_choice: "deny",
     always_choice: "always",
@@ -78,7 +91,7 @@ namespace tools_browser {
     store_type: "media.store",
     fetch_type: "media.fetch",
     permit_type: "permit.ask",
-    input_type: "console.input",
+    write_type: "console.write",
     read_type: "console.read",
     tail_type: "verbose.tail",
     show_type: "console.show",
@@ -244,6 +257,38 @@ namespace tools_browser {
         _meta: { xsjs: { permit: true } },
       },
       {
+        name: "console_write",
+        description:
+          "Show the debug console as ctrl-0 does and type text into its" +
+          " dash, returning at once. A line goes when a newline ends it, and" +
+          " the text after the last newline waits for a later write. The" +
+          " console is yours from the first write until console_read sees" +
+          " the prompt. Debug mode.",
+        inputSchema: {
+          type: "object",
+          properties: { text: { type: "string" } },
+          required: ["text"],
+        },
+        _meta: { xsjs: { permit: true } },
+      },
+      {
+        name: "console_read",
+        description:
+          "Show the debug console as ctrl-0 does and read its output from" +
+          " where the last read ended until the text until shows or the" +
+          " timeout, and whether it timed out. A read whose output ends with" +
+          " the prompt ends your turn at the console. Debug mode.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            until: { type: "string" },
+            timeout_seconds: { type: "number" },
+          },
+          required: ["until", "timeout_seconds"],
+        },
+        _meta: { xsjs: { permit: true } },
+      },
+      {
         name: "verbose_tail",
         description:
           "The last lines of a thread's verbose ring: ui, ai or server.",
@@ -336,12 +381,14 @@ namespace tools_browser {
     // The provider's address and the model every image request names.
     readonly info: lines.ProviderInfo;
     readonly settings_get: (id: string) => unknown;
-    // The name the permit request shows for the permit tool.
-    readonly permit_name: string;
+    // The reader of debug mode, which the debug tools need.
+    readonly debug_on: () => boolean;
     // The tools the player allowed always, for the life of the tab.
     readonly allowed = new Set<string>();
     // The number of the last permit asked.
     permit_count = 0;
+    // Whether the AI's turn holds the console, from its first write.
+    turn_on = false;
 
     // Keeps what the tools use, one context per server.
     constructor(
@@ -350,13 +397,14 @@ namespace tools_browser {
       provider_owner: queue.ThreadName,
       info: lines.ProviderInfo,
       settings_get: (id: string) => unknown,
+      debug_on: () => boolean,
     ) {
       this.store = store;
       this.tasks = tasks;
       this.provider_owner = provider_owner;
       this.info = info;
       this.settings_get = settings_get;
-      this.permit_name = constants.tool_prefix + constants.permit_tool;
+      this.debug_on = debug_on;
     }
 
     // The text of a KV value, read from the cache when it is held there.
@@ -381,9 +429,31 @@ namespace tools_browser {
       return dispatch.task_sleep(state, [id], then_type);
     }
 
+    // In debug mode asks the tool's permit unless always allowed, then shows.
+    console_ask(state: ConsoleState, args: unknown): dispatch.Sleep {
+      const name = constants.tool_prefix + state.tool;
+      if (!this.debug_on()) {
+        throw new Error(i18n("tools_browser.debug_off", name));
+      }
+      if (this.allowed.has(name)) {
+        return this.console_show(state);
+      }
+      this.permit_count += 1;
+      const ask = line_build(constants.permit_type, {
+        permit: this.permit_count,
+        tool: name,
+        input: args,
+      });
+      return this.request_sleep(
+        ask,
+        constants.ui_owner,
+        state,
+        constants.permit_wake,
+      );
+    }
+
     // Asks the UI to show the console as ctrl 0 does and sleeps until open.
-    console_show(text: string, timeout_seconds: number): dispatch.Sleep {
-      const state: ConsoleState = { text, timeout_seconds };
+    console_show(state: ConsoleState): dispatch.Sleep {
       return this.request_sleep(
         line_build(constants.show_type, {}),
         constants.ui_owner,
@@ -392,23 +462,40 @@ namespace tools_browser {
       );
     }
 
-    // Holds the player's keys, types a command line and sleeps on its output.
-    console_send(text: string, timeout_seconds: number): dispatch.Sleep {
+    // Starts the AI's turn unless one is on: the keys held, the output kept.
+    turn_start(): void {
+      if (this.turn_on) {
+        return;
+      }
+      this.turn_on = true;
+      this.turn_notify(constants.busy_type);
+    }
+
+    // Ends the AI's turn: the view's keys and held lines freed.
+    turn_end(): void {
+      this.turn_on = false;
+      this.turn_notify(constants.idle_type);
+    }
+
+    // Notifies the turn's start or end to tty 0's writer, which tells the UI.
+    turn_notify(type: string): void {
+      this.tasks.line_notify(line_build(type, {}), constants.console_owner);
+    }
+
+    // Gives the AI's text to tty 0's writer, which types it line by line.
+    text_write(text: string): void {
       this.tasks.line_notify(
-        line_build(constants.busy_type, {}),
-        constants.ui_owner,
-      );
-      const typed = constants.input_command + text + constants.line_end;
-      const blob = jslb.blob_make(utility.utf8_encode(typed));
-      this.tasks.line_notify(
-        line_build(constants.input_type, {}, [blob]),
+        line_build(constants.write_type, { text }),
         constants.console_owner,
       );
+    }
+
+    // Reads tty 0's output until a text or the timeout, asleep till then.
+    output_read(state: ConsoleState, until: string): dispatch.Sleep {
       const read = line_build(constants.read_type, {
-        until: constants.prompt_text,
-        timeout_seconds,
+        until,
+        timeout_seconds: state.timeout_seconds,
       });
-      const state: ConsoleState = { text, timeout_seconds };
       return this.request_sleep(
         read,
         constants.console_owner,
@@ -519,32 +606,36 @@ namespace tools_browser {
           constants.render_wake,
         );
       },
-      // In debug mode asks the permit unless always allowed, then shows.
-      console_run: (args) => {
-        const debug = context.settings_get(constants.debug_setting) as boolean;
-        if (!debug) {
-          const name = context.permit_name;
-          throw new Error(i18n("tools_browser.debug_off", name));
-        }
-        const text = args.text as string;
-        const timeout_seconds = args.timeout_seconds as number;
-        if (context.allowed.has(context.permit_name)) {
-          return context.console_show(text, timeout_seconds);
-        }
-        context.permit_count += 1;
-        const ask = line_build(constants.permit_type, {
-          permit: context.permit_count,
-          tool: context.permit_name,
-          input: args,
-        });
-        const state: ConsoleState = { text, timeout_seconds };
-        return context.request_sleep(
-          ask,
-          constants.ui_owner,
-          state,
-          constants.permit_wake,
-        );
-      },
+      // Runs one command line to the next prompt, behind the permit.
+      console_run: (args) =>
+        context.console_ask(
+          {
+            tool: constants.run_tool,
+            text: args.text as string,
+            timeout_seconds: args.timeout_seconds as number,
+          },
+          args,
+        ),
+      // Types text into the console, behind the permit, returning at once.
+      console_write: (args) =>
+        context.console_ask(
+          {
+            tool: constants.write_tool,
+            text: args.text as string,
+            timeout_seconds: 0,
+          },
+          args,
+        ),
+      // Reads the console's output to a text, behind the permit.
+      console_read: (args) =>
+        context.console_ask(
+          {
+            tool: constants.read_tool,
+            text: args.until as string,
+            timeout_seconds: args.timeout_seconds as number,
+          },
+          args,
+        ),
       // Asks the server for the last lines of a thread and sleeps on them.
       verbose_tail: (args) => {
         const tail = line_build(constants.tail_type, {
@@ -609,33 +700,49 @@ namespace tools_browser {
       [constants.render_wake]: () => result_json({}),
       // Answers a denial with an error, else shows the console.
       [constants.permit_wake]: (state, replies) => {
-        const { text, timeout_seconds } = state as ConsoleState;
+        const asked = state as ConsoleState;
+        const name = constants.tool_prefix + asked.tool;
         const choice = reply_payload(replies).choice;
         if (choice === constants.deny_choice) {
-          const name = context.permit_name;
           const denied = i18n("tools_browser.permit_denied", name);
           return { ...result_text(denied), isError: true };
         }
         if (choice === constants.always_choice) {
-          context.allowed.add(context.permit_name);
+          context.allowed.add(name);
         }
-        return context.console_show(text, timeout_seconds);
+        return context.console_show(asked);
       },
-      // Runs the command line once tty 0 is open.
+      // Once tty 0 is open: types and reads, types alone, or reads alone.
       [constants.show_wake]: (state) => {
-        const { text, timeout_seconds } = state as ConsoleState;
-        return context.console_send(text, timeout_seconds);
+        const shown = state as ConsoleState;
+        if (shown.tool === constants.read_tool) {
+          return context.output_read(shown, shown.text);
+        }
+        context.turn_start();
+        if (shown.tool === constants.write_tool) {
+          context.text_write(shown.text);
+          return result_json({});
+        }
+        context.text_write(shown.text + constants.line_end);
+        return context.output_read(shown, constants.prompt_text);
       },
-      // Frees the player's keys, returns the output and whether it timed out.
+      // Ends the turn as the read says, returns its output and its timeout.
       [constants.console_wake]: (state, replies) => {
-        context.tasks.line_notify(
-          line_build(constants.idle_type, {}),
-          constants.ui_owner,
-        );
-        const { text } = state as ConsoleState;
+        const { tool, text } = state as ConsoleState;
         const reply = reply_payload(replies);
         const timed_out = reply.timed_out as boolean;
-        const output = output_trim(reply.text as string, text, timed_out);
+        const received = reply.text as string;
+        if (tool === constants.run_tool) {
+          context.turn_end();
+          const output = output_trim(received, text, timed_out);
+          return result_json({ output, timed_out });
+        }
+        const output = received
+          .split(constants.pty_end)
+          .join(constants.line_end);
+        if (context.turn_on && output.endsWith(constants.prompt_text)) {
+          context.turn_end();
+        }
         return result_json({ output, timed_out });
       },
       // Returns the lines the server sent.
@@ -652,6 +759,7 @@ namespace tools_browser {
     provider_owner: queue.ThreadName,
     info: lines.ProviderInfo,
     settings_get: (id: string) => unknown,
+    debug_on: () => boolean,
   ): void {
     const context = new ToolContext(
       store,
@@ -659,6 +767,7 @@ namespace tools_browser {
       provider_owner,
       info,
       settings_get,
+      debug_on,
     );
     const runs = runs_make(context);
     for (const tool of constants.tools) {

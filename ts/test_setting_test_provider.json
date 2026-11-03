@@ -1,0 +1,85 @@
+{
+  "lines": {
+    "chat_request": {
+      "0": {
+        "type": "http.request"
+      },
+      "headers": {
+        "authorization": "Bearer xai-SYNTHETIC-KEY",
+        "content-type": "application/json"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "image_request": {
+      "0": {
+        "type": "http.request"
+      },
+      "headers": {
+        "authorization": "Bearer xai-SYNTHETIC-KEY",
+        "content-type": "application/json"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/images/generations"
+    },
+    "refused_error": {
+      "0": {
+        "r": 1,
+        "t": "error"
+      },
+      "message": "It failed.",
+      "stack": "Error: It failed."
+    },
+    "refused_kv_get": {
+      "0": {
+        "r": 1,
+        "t": "kv.get"
+      },
+      "message": "It failed.",
+      "stack": "Error: It failed."
+    },
+    "reply": {
+      "0": {
+        "r": 1,
+        "t": "http.request"
+      },
+      "headers": {
+        "content-type": "application/json"
+      },
+      "status": 200
+    },
+    "reply_full": {
+      "0": {
+        "reply": 4,
+        "type": "http.request"
+      }
+    }
+  },
+  "texts": {
+    "provider_field_invalid_call": "The provider reply field json.choices[0].message.tool_calls[0] is missing or is not valid.",
+    "provider_field_invalid_call_arguments": "The provider reply field json.choices[0].message.tool_calls[0].function.arguments is missing or is not valid.",
+    "provider_field_invalid_call_function": "The provider reply field json.choices[0].message.tool_calls[0].function is missing or is not valid.",
+    "provider_field_invalid_call_id": "The provider reply field json.choices[0].message.tool_calls[0].id is missing or is not valid.",
+    "provider_field_invalid_call_name": "The provider reply field json.choices[0].message.tool_calls[0].function.name is missing or is not valid.",
+    "provider_field_invalid_call_type": "The provider reply field json.choices[0].message.tool_calls[0].type is missing or is not valid.",
+    "provider_field_invalid_calls": "The provider reply field json.choices[0].message.tool_calls is missing or is not valid.",
+    "provider_field_invalid_choice": "The provider reply field json.choices[0] is missing or is not valid.",
+    "provider_field_invalid_choice_index": "The provider reply field json.choices[0].index is missing or is not valid.",
+    "provider_field_invalid_choices": "The provider reply field json.choices is missing or is not valid.",
+    "provider_field_invalid_data": "The provider reply field json.data is missing or is not valid.",
+    "provider_field_invalid_finish_reason": "The provider reply field json.choices[0].finish_reason is missing or is not valid.",
+    "provider_field_invalid_id": "The provider reply field json.id is missing or is not valid.",
+    "provider_field_invalid_image": "The provider reply field json.data[0] is missing or is not valid.",
+    "provider_field_invalid_image_base64": "The provider reply field json.data[0].b64_json is missing or is not valid.",
+    "provider_field_invalid_image_prompt": "The provider reply field json.data[0].revised_prompt is missing or is not valid.",
+    "provider_field_invalid_json": "The provider reply field json is missing or is not valid.",
+    "provider_field_invalid_message": "The provider reply field json.choices[0].message is missing or is not valid.",
+    "provider_field_invalid_message_call_id": "The provider reply field json.choices[0].message.tool_call_id is missing or is not valid.",
+    "provider_field_invalid_message_content": "The provider reply field json.choices[0].message.content is missing or is not valid.",
+    "provider_field_invalid_message_role": "The provider reply field json.choices[0].message.role is missing or is not valid.",
+    "provider_field_invalid_model": "The provider reply field json.model is missing or is not valid.",
+    "provider_field_invalid_second_url": "The provider reply field json.data[1].url is missing or is not valid.",
+    "provider_reply_type_error": "The provider reply is a line of type error instead of http.request.",
+    "provider_reply_type_kv_get": "The provider reply is a line of type kv.get instead of http.request."
+  }
+}

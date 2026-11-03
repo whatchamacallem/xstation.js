@@ -10,13 +10,13 @@
 # calls it on lines of the gold, lines in full names and a line with `i` the
 # handler leaves unanswered among them, and its effect is read from the
 # store. The `db.restore` and `db.file` lines are checked in both name forms
-# against the gold and the store's own snapshot, one past the old 10 MiB
-# window among them. The dispatcher refuses a second registration of each
+# against the gold and the store's own snapshot, one filled to its limit,
+# `blob_max`, among them. The dispatcher refuses a second registration of each
 # type at version 0. Making, dropping, snapshotting and restoring a database
 # are the store's own, `test_substrate.py`'s.
 
-import dispatch, engine_db, harness, os, re, signal, substrate, sys, tempfile
-import traceback, unittest
+import dispatch, engine_db, harness, os, re, signal, sqlite3, substrate
+import sys, tempfile, traceback, unittest
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -25,7 +25,7 @@ _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
 )
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_engine_db"
 
 # A key of the decimal digits of a non negative integer, as JSLB reads it.
@@ -39,6 +39,9 @@ _DB_EXTENSION = ".sqlite"
 
 # The size over which the store keeps a value in a cache file.
 _OVERFLOW_BYTES: int = harness.setting_get("overflow_bytes")
+
+# The largest database file the store lets grow, the checkout's setting.
+_BLOB_MAX: int = harness.setting_get("blob_max")
 
 # A value over `overflow_bytes`, as the store keeps in a cache file.
 _VALUE_OVER = bytes(range(256)) * (_OVERFLOW_BYTES // 256 + 1)
@@ -149,7 +152,7 @@ class ScratchCase(unittest.TestCase):
 
     # In the child: a store on the root, the handlers registered on it.
     def store_register(self) -> substrate.Store:
-        store = substrate.Store(self.root, _OVERFLOW_BYTES)
+        store = substrate.Store(self.root, _OVERFLOW_BYTES, _BLOB_MAX)
         engine_db.handlers_register(store)
         return store
 
@@ -260,22 +263,24 @@ class TestRestoreLines(ScratchCase):
     def test_lines_empty(self) -> None:
         self.child_run(self.empty_check)
 
-    # In the child: the database padded past the old window, its files too.
+    # In the child: the database padded until full, its files too.
     def large_check(self) -> None:
-        window: int = harness.gold_get(f"{_GOLD_ID}.old_window")
         store = self.store_register()
         self.values_write(store)
         create, insert = _PADDING_SQL
-        statements = [
-            substrate.SqlStatement(create, []),
-            substrate.SqlStatement(insert, [window + 1]),
-        ]
-        store.sql_run(_DATABASE, statements)
+        store.sql_run(_DATABASE, [substrate.SqlStatement(create, [])])
+        padding = [substrate.SqlStatement(insert, [_OVERFLOW_BYTES])]
+        with self.assertRaises(sqlite3.OperationalError) as caught:
+            for _ in range(_BLOB_MAX // _OVERFLOW_BYTES + 1):
+                store.sql_run(_DATABASE, padding)
+        code = caught.exception.sqlite_errorcode
+        self.assertEqual(code, sqlite3.SQLITE_FULL)
         lines = list(engine_db.restore_lines(_DATABASE, False))
         self.assertEqual(lines, self.lines_expected(store, "restore", "file"))
-        self.assertGreater(lines[0][1]["s"], window)
+        self.assertGreater(lines[0][1]["s"], _BLOB_MAX - 2 * _OVERFLOW_BYTES)
+        self.assertLessEqual(lines[0][1]["s"], _BLOB_MAX)
 
-    # A database past the old 10 MiB window goes whole as blob 1.
+    # A database filled to `blob_max` goes whole as blob 1.
     def test_lines_large(self) -> None:
         self.child_run(self.large_check)
 

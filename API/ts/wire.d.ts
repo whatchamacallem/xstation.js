@@ -22,7 +22,10 @@
 // decoder. A second `tap.start`, as `system.restart` makes, throws
 // `wire.start_twice`: only a reload of the page takes a new first line. The
 // JSON of ttyd's token answer and of its preferences is read by
-// `jslb.json_decode`.
+// `jslb.json_decode`. Every line posted after a `system.restart` is held,
+// never sent, since the restarted server reads the pipe the one before it
+// left: its first line from the page is then the `error` line of
+// `wire_end`, which is never held, refusing its `tap.start`.
 //
 // A fault while the port takes a message stops it taking more but leaves the
 // socket open, so that the worker's report can still send the `error` line
@@ -43,14 +46,18 @@ declare namespace wire {
     frame_next(): ArrayBuffer;
   }
 
-  // The reads of the console output, each decoded from its own start.
+  // The reads of the console output, from their start or the kept text.
   class ConsoleReader {
     // Takes a message of ttyd's, ignored unless a read waits that it may end.
     message_take(message: Uint8Array): lines.ConsoleReadReply | undefined;
-    // Starts a read of the output from now on, until `until` shows in it.
-    read_start(until: string): void;
+    // Starts a read until `until` shows, answered at once if kept text has it.
+    read_start(until: string): lines.ConsoleReadReply | undefined;
     // Ends the waiting read when its timer expires or its socket closes.
     read_expire(): lines.ConsoleReadReply;
+    // Keeps the output for the turn's reads, each to its first match.
+    keep_start(): void;
+    // Ends the keeping and drops what was kept.
+    keep_stop(): void;
   }
 
   // The port to the server on tty 1.
@@ -66,6 +73,7 @@ declare namespace wire {
     wire_close(): void;
     // Sends the line, awaits the server's end of the socket, calls `fn`.
     wire_end(line: lines.Line, fn: () => void): void;
+    // Sends the line, or holds it once a `system.restart` was posted.
     line_post(line: lines.Line, transfer: ArrayBuffer[]): void;
     line_receive(fn: (line: lines.Line) => void): void;
     // Called once when the socket ends but by `wire_close` or `wire_end`.
@@ -86,6 +94,7 @@ declare namespace wire {
     constructor(base_url: string);
     // Ends tty 0, whose end the close function hears.
     console_close(): void;
+    // `console.busy` starts the keeping of the reader, `console.idle` ends it.
     line_post(line: lines.Line, transfer: ArrayBuffer[]): void;
     line_receive(fn: (line: lines.Line) => void): void;
     // Called once with the close code. The AI worker pushes `console.exit`.

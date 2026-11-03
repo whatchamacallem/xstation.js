@@ -3,23 +3,32 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // The producer of the wire test, run on the AI worker when the gold's
-// `typescript.run` is "wire": one TAP stream of one block, `test_wire_rungs`,
-// one point per rung the gold names, in its order, then the parent point and
-// the parent plan `1..1`. Python's consumer is `python/test_wire.py`, which
-// writes the gold `typescript.test_wire_rungs` of each root. TypeScript's
-// `unittest` is synchronous and a rung waits on the network, so a rung is a
-// task chain on the worker's queue: `rungs.next`, a push of the worker to
-// itself, runs the next rung, which checks what it has and writes its point,
-// or submits its requests to the server and sleeps with `rungs.reply`, whose
-// handler checks the replies against the gold. The console and lines rungs
-// drive their own `wire.ConsolePort` and write their points from its
-// callbacks, since the worker's owner table routes `console.output` to the UI
-// thread, which runs nothing in a wire run. Every TAP line goes out at once
-// as a `tap.line` push. The first failed check writes its `not ok` point
-// with the reason, its message and stack, then `Bail out!` and the rung's
-// name, and the chain stops: the failure is reported in the stream, not
-// thrown on. A rung that ends the session, `unknown` or `restart`, writes its
-// point and the parent lines before its last push. Errors are plain English.
+// `typescript.test_all.run` is "wire": one TAP stream of one block,
+// `test_wire_rungs`, one point per rung the gold names, in its order, then the
+// parent point and the parent plan `1..1`. Python's consumer is
+// `python/test_wire.py`, which writes the gold `typescript.test_wire_rungs` of
+// each root into the root's copy of the page. TypeScript's `unittest` is
+// synchronous and a rung waits on the network, so a rung is a task chain on
+// the worker's queue: `rungs.next`, a
+// push of the worker to itself, runs the next rung, which checks what it has
+// and writes its point, or submits its requests to the server and sleeps with
+// `rungs.reply`, whose handler checks the replies against the gold. The
+// console and lines rungs drive their own `wire.ConsolePort` and write their
+// points from its callbacks, since the worker's owner table routes
+// `console.output` to the UI thread, which runs nothing in a wire run. Every
+// TAP line goes out at once as a `tap.line` push. The first failed check
+// writes its `not ok` point with the reason, its message and stack, then `Bail
+// out!` and the rung's name, and the chain stops: the failure is reported in
+// the stream, not thrown on. A rung that ends the session, `unknown` or
+// `restart`, writes its point and the parent lines before its last push.
+// The restart rung then posts the gold's `restart_after`, a TAP comment
+// that the port holds, so that a post the port let through would reach the
+// restarted server before the page's refusal of its `tap.start`. A
+// rung the gold's `held_rungs` names, `restart`, is held once the rung before
+// it has passed, until the driver, having read that point, releases it by
+// posting the rung's name on the gold's `release_channel`, a
+// `BroadcastChannel` of the page's origin, so that the driver reads the
+// server before it execs. Errors are plain English.
 //
 // ttyd's protocol where the wire meets ttyd: the token from `/token`; `/ws`
 // and `/ws?arg=console` with the subprotocol `tty`; the first message, JSON
@@ -48,7 +57,7 @@ namespace test_wire_rungs {
     server_owner: "server" as const,
     first_type: "tap.start",
     first_id: 101,
-    first_keys: Object.freeze(["settings", "switches", "test_settings"]),
+    first_keys: Object.freeze(["settings", "switches"]),
     echo_type: "echo",
     tail_type: "verbose.tail",
     tail_thread: "server",
@@ -270,6 +279,8 @@ namespace test_wire_rungs {
     #index = 0;
     // Set by the first failed check, after which nothing more is written.
     #stopped = false;
+    // The rung held until the driver releases it, if any.
+    #held: string | undefined = undefined;
     // The size and digest of the blob the last blob echo sent.
     #sent_size = 0;
     #sent_sha256 = "";
@@ -324,6 +335,32 @@ namespace test_wire_rungs {
     next_notify(): void {
       const line = line_build(constants.next_type, [], {});
       this.#tasks.line_notify(line, constants.self_owner);
+    }
+
+    // Runs the next rung, or holds it when the gold names it held.
+    rung_follow(): void {
+      const rung = this.#names[this.#index];
+      const held = gold_value("held_rungs") as string[];
+      if (held.includes(rung)) {
+        this.#held = rung;
+        return;
+      }
+      this.next_notify();
+    }
+
+    // The driver's release of the held rung, which then runs.
+    release_take(data: unknown): void {
+      const rung = this.#held ?? this.#names[this.#index];
+      this.#guard(rung, () => {
+        check(
+          this.#held !== undefined && data === this.#held,
+          `the driver released ${String(data)} while ${String(this.#held)}` +
+            " was held",
+        );
+        this.#held = undefined;
+        this.next_notify();
+        return undefined;
+      });
     }
 
     // The handler of `rungs.next`: runs the next rung.
@@ -397,7 +434,7 @@ namespace test_wire_rungs {
       this.#block.add_ok(rung, rung, "", diagnostics);
       this.#index += 1;
       if (this.#index < this.#names.length) {
-        this.next_notify();
+        this.rung_follow();
         return undefined;
       }
       this.#parent.add_ok(constants.module_name, constants.module_name);
@@ -704,6 +741,7 @@ namespace test_wire_rungs {
         main_loop: gold_value("restart_name"),
       });
       this.#tasks.line_notify(line, constants.server_owner);
+      line_send(this.#tasks, gold_value("restart_after") as string);
       return undefined;
     }
   }
@@ -714,6 +752,11 @@ namespace test_wire_rungs {
     start: boot.TestStart,
   ): void {
     const chain = new RungChain(tasks, start, gold_value("rungs"));
+    const releases = new BroadcastChannel(
+      gold_value("release_channel") as string,
+    );
+    releases.onmessage = (event: MessageEvent<unknown>) =>
+      chain.release_take(event.data);
     line_send(tasks, constants.version_line);
     chain.plan_write();
     dispatch.handler_register(
@@ -726,7 +769,7 @@ namespace test_wire_rungs {
       constants.handler_version,
       (wake) => chain.reply_take(wake),
     );
-    chain.next_notify();
+    chain.rung_follow();
   }
 }
 

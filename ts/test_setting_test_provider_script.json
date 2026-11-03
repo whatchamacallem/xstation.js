@@ -1,0 +1,322 @@
+{
+  "lines": {
+    "chat_full": {
+      "0": {
+        "id": 7,
+        "type": "http.request"
+      },
+      "headers": {
+        "Authorization": "Bearer xai-SYNTHETIC-KEY",
+        "Content-Type": "application/json"
+      },
+      "json": {
+        "messages": [
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ],
+        "model": "grok-4",
+        "tool_choice": "auto"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "chat_other": {
+      "0": {
+        "i": 2,
+        "t": "http.request"
+      },
+      "headers": {
+        "Authorization": "Bearer xai-SYNTHETIC-KEY",
+        "Content-Type": "application/json"
+      },
+      "json": {
+        "messages": [
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ],
+        "model": "grok-x"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "chat_request": {
+      "0": {
+        "t": "http.request"
+      },
+      "headers": {
+        "Authorization": "Bearer xai-SYNTHETIC-KEY",
+        "Content-Type": "application/json"
+      },
+      "json": {
+        "model": "grok-4",
+        "tool_choice": "auto"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "image_post": {
+      "0": {
+        "i": 1,
+        "t": "http.request"
+      },
+      "headers": {},
+      "method": "POST",
+      "url": "https://api.x.ai/v1/images/generations"
+    },
+    "image_request": {
+      "0": {
+        "i": 3,
+        "t": "http.request"
+      },
+      "headers": {
+        "Authorization": "Bearer xai-SYNTHETIC-KEY",
+        "Content-Type": "application/json"
+      },
+      "json": {
+        "model": "grok-2-image",
+        "n": 1,
+        "prompt": "A rain dark castle gatehouse at dusk",
+        "response_format": "b64_json"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/images/generations"
+    },
+    "refused_blobs": {
+      "0": {
+        "b": 1,
+        "i": 1,
+        "t": "http.request"
+      },
+      "1": {
+        "s": 1
+      },
+      "headers": {},
+      "json": {
+        "messages": [
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ],
+        "model": "grok-4"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "refused_id": {
+      "0": {
+        "t": "http.request"
+      },
+      "headers": {},
+      "json": {
+        "messages": [
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ],
+        "model": "grok-4"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "refused_json": {
+      "0": {
+        "i": 1,
+        "t": "http.request"
+      },
+      "headers": {},
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "refused_message": {
+      "0": {
+        "i": 1,
+        "t": "http.request"
+      },
+      "headers": {},
+      "json": {
+        "messages": [5],
+        "model": "m"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "refused_messages": {
+      "0": {
+        "i": 1,
+        "t": "http.request"
+      },
+      "headers": {},
+      "json": {
+        "model": "m"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "refused_method": {
+      "0": {
+        "i": 1,
+        "t": "http.request"
+      },
+      "headers": {},
+      "json": {
+        "messages": [
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ],
+        "model": "grok-4"
+      },
+      "method": "GET",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "refused_model": {
+      "0": {
+        "i": 1,
+        "t": "http.request"
+      },
+      "headers": {},
+      "json": {
+        "messages": []
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "refused_type": {
+      "0": {
+        "i": 1,
+        "t": "kv.get"
+      },
+      "headers": {},
+      "json": {
+        "messages": [
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ],
+        "model": "grok-4"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/chat/completions"
+    },
+    "refused_unknown": {
+      "0": {
+        "i": 1,
+        "t": "http.request"
+      },
+      "headers": {},
+      "json": {
+        "messages": [
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ],
+        "model": "grok-4"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/models"
+    },
+    "refused_url": {
+      "0": {
+        "i": 1,
+        "t": "http.request"
+      },
+      "headers": {},
+      "json": {
+        "messages": [
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ],
+        "model": "grok-4"
+      },
+      "method": "POST",
+      "url": 5
+    },
+    "reply_full": {
+      "0": {
+        "reply": 7,
+        "type": "http.request"
+      }
+    },
+    "reply_image": {
+      "0": {
+        "r": 3,
+        "t": "http.request"
+      },
+      "headers": {
+        "content-type": "application/json"
+      },
+      "status": 200
+    },
+    "reply_nothing": {
+      "0": {
+        "r": 7,
+        "t": "http.request"
+      },
+      "headers": {
+        "content-type": "application/json"
+      },
+      "json": {
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "content": "Nothing happens.",
+              "role": "assistant"
+            }
+          }
+        ],
+        "model": "grok-4"
+      },
+      "status": 200
+    }
+  },
+  "texts": {
+    "provider_script_after_missing": "The script node bare has no reply after tool results.",
+    "provider_script_blobs_refused": "The http.request line carries blobs, which the scripted provider refuses.",
+    "provider_script_field_invalid_json": "The request field json is missing or is not valid for the scripted provider.",
+    "provider_script_field_invalid_message": "The request field json.messages[0] is missing or is not valid for the scripted provider.",
+    "provider_script_field_invalid_messages": "The request field json.messages is missing or is not valid for the scripted provider.",
+    "provider_script_field_invalid_method": "The request field method is missing or is not valid for the scripted provider.",
+    "provider_script_field_invalid_model": "The request field json.model is missing or is not valid for the scripted provider.",
+    "provider_script_field_invalid_n": "The request field json.n is missing or is not valid for the scripted provider.",
+    "provider_script_field_invalid_url": "The request field url is missing or is not valid for the scripted provider.",
+    "provider_script_format_unsupported_undefined": "The scripted provider answers images only as b64_json, not undefined.",
+    "provider_script_format_unsupported_url": "The scripted provider answers images only as b64_json, not url.",
+    "provider_script_id_missing": "The http.request line has no id, so the scripted provider could not answer it.",
+    "provider_script_input_invalid_empty": "The scripted provider takes the decimal text of one integer as the user message, not .",
+    "provider_script_input_invalid_fraction": "The scripted provider takes the decimal text of one integer as the user message, not 1.0.",
+    "provider_script_input_invalid_minus_zero": "The scripted provider takes the decimal text of one integer as the user message, not -0.",
+    "provider_script_input_invalid_null": "The scripted provider takes the decimal text of one integer as the user message, not null.",
+    "provider_script_input_invalid_plus": "The scripted provider takes the decimal text of one integer as the user message, not +1.",
+    "provider_script_input_invalid_space_after": "The scripted provider takes the decimal text of one integer as the user message, not 1 .",
+    "provider_script_input_invalid_space_before": "The scripted provider takes the decimal text of one integer as the user message, not  1.",
+    "provider_script_input_invalid_word": "The scripted provider takes the decimal text of one integer as the user message, not one.",
+    "provider_script_input_invalid_zero_led": "The scripted provider takes the decimal text of one integer as the user message, not 01.",
+    "provider_script_input_unknown_minus_five": "The script node hyperposition has no reply for the input -5.",
+    "provider_script_input_unknown_nine": "The script node hyperposition has no reply for the input 9.",
+    "provider_script_input_unknown_zero": "The script node hyperposition has no reply for the input 0.",
+    "provider_script_node_unknown": "The script has no node nowhere.",
+    "provider_script_receiver_missing": "The scripted provider got a request before a receiver was set.",
+    "provider_script_receiver_twice": "The scripted provider already has a receiver.",
+    "provider_script_results_pending": "The scripted provider got a user message in node hyperposition while the tool results that lead to node castle were pending.",
+    "provider_script_results_unasked": "The scripted provider got tool results in node hyperposition, but its last reply called no tools.",
+    "provider_script_results_unmatched_other": "In node hyperposition the scripted provider got tool results for the calls [\"call_9\"], not for the calls [\"call_1\"] its last reply made.",
+    "provider_script_results_unmatched_twice": "In node hyperposition the scripted provider got tool results for the calls [\"call_1\",\"call_1\"], not for the calls [\"call_1\"] its last reply made.",
+    "provider_script_role_unexpected_assistant": "The scripted provider answers a user message or tool results, not a last message of role assistant.",
+    "provider_script_role_unexpected_system": "The scripted provider answers a user message or tool results, not a last message of role system.",
+    "provider_script_type_invalid": "The scripted provider got a line of type kv.get instead of http.request.",
+    "provider_script_url_unknown": "The scripted provider has no answer for the url https://api.x.ai/v1/models."
+  }
+}

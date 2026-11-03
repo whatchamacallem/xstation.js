@@ -4,7 +4,8 @@
 #
 # Tests the TAP suite server joined to everything it calls into, in a forked
 # child over pipes, with a root in `build/` whose settings are the
-# checkout's in short names. One input holds two `tap.run` requests, served
+# checkout's and whose parameters are the run's with debug false, short
+# names, which the child sets as `bootstrap.py` does. One input holds two `tap.run` requests, served
 # in turn by the handler the server registers in the real `dispatch`, read
 # and answered by the real codec of `jslb` with the limits the real
 # `settings` reads, each running the real driver, test_all.py, as a
@@ -17,8 +18,8 @@
 # that write fails, then kills itself whatever happened, so the handler it
 # registers never reaches another test.
 
-import functools, harness, json, os, signal, sys, tap_consumer, tap_loop
-import tempfile, traceback, unittest
+import functools, harness, json, os, signal, switches, sys, tap_consumer
+import tap_loop, tempfile, traceback, unittest
 from collections.abc import Callable
 from typing import Any
 
@@ -28,7 +29,7 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_integrate_tap_loop"
 
 # A size chosen by its writer: the most the test reads from the pipe.
@@ -102,8 +103,9 @@ def _child_end(
         os.kill(os.getpid(), signal.SIGKILL)
 
 
-# The work of a child that prepares the root and serves the pipes to the end.
+# Child: the root's parameters set, as `bootstrap.py` sets them, then serves.
 def _suites_serve(root: str, read_fd: int, write_fd: int) -> str:
+    switches.switches_apply(switches.parameters_load(root))
     tap_loop.loop_prepare(root)
     tap_loop.loop_run(read_fd, write_fd, root)
     return _ENDING_RETURNED
@@ -120,10 +122,11 @@ class TestRuns(unittest.TestCase):
         self.root = os.path.join(scratch.name, "root")
         os.mkdir(self.root)
         values = harness.settings_copy()
-        values["debug"] = False
         path = os.path.join(self.root, "settings.json")
         with open(path, "w", encoding="utf-8") as file:
             json.dump(values, file)
+        parameters = {**switches.switches_get(), "debug": False}
+        switches.parameters_write(self.root, parameters)
 
     # Serves the data in a child, returns its ending and the lines written.
     def serve_read(self, data: bytes) -> tuple[str, list[dict[str, Any]]]:

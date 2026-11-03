@@ -1,0 +1,1218 @@
+{
+  "cases": [
+    {
+      "expect": [
+        "open_1"
+      ],
+      "name": "shown_idle",
+      "seconds": 10,
+      "send": [
+        "show_6"
+      ]
+    },
+    {
+      "expect": [
+        "input_first",
+        "show_6_reply"
+      ],
+      "name": "opened",
+      "seconds": 10,
+      "send": [
+        "open_1_reply"
+      ]
+    },
+    {
+      "expect": [
+        "show_7_reply"
+      ],
+      "name": "shown_open",
+      "seconds": 10,
+      "send": [
+        "show_7"
+      ]
+    },
+    {
+      "expect": [
+        "input_typed"
+      ],
+      "name": "typed",
+      "seconds": 10,
+      "send": [
+        "type_ls"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "output_fed",
+      "seconds": 0.5,
+      "send": [
+        "output_prompt",
+        "output_hi"
+      ]
+    },
+    {
+      "expect": [
+        "rows_20_reply"
+      ],
+      "name": "output_read",
+      "seconds": 10,
+      "send": [
+        "rows_20"
+      ]
+    },
+    {
+      "expect": [
+        "rows_21_reply"
+      ],
+      "name": "ignored",
+      "seconds": 10,
+      "send": [
+        "title",
+        "preferences",
+        "rows_21"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "split_fed",
+      "seconds": 0.5,
+      "send": [
+        "split_head",
+        "split_tail"
+      ]
+    },
+    {
+      "expect": [
+        "rows_22_reply"
+      ],
+      "name": "split_read",
+      "seconds": 10,
+      "send": [
+        "rows_22"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "invalid_fed",
+      "seconds": 0.5,
+      "send": [
+        "invalid"
+      ]
+    },
+    {
+      "expect": [
+        "rows_23_reply"
+      ],
+      "name": "invalid_read",
+      "seconds": 10,
+      "send": [
+        "rows_23"
+      ]
+    },
+    {
+      "expect": [
+        "rows_24_reply"
+      ],
+      "name": "bare_read",
+      "seconds": 10,
+      "send": [
+        "bare",
+        "rows_24"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "key_hidden",
+      "seconds": 0.2,
+      "send": [
+        "key_0"
+      ]
+    },
+    {
+      "expect": [
+        "shown_25_reply"
+      ],
+      "name": "hidden_read",
+      "seconds": 10,
+      "send": [
+        "shown_25"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "hidden_fed",
+      "seconds": 0.2,
+      "send": [
+        "output_kept"
+      ]
+    },
+    {
+      "expect": [
+        "show_8_reply"
+      ],
+      "name": "shown_again",
+      "seconds": 10,
+      "send": [
+        "show_8"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "shown_drawn",
+      "seconds": 0.5,
+      "send": []
+    },
+    {
+      "expect": [
+        "rows_26_reply"
+      ],
+      "name": "kept_read",
+      "seconds": 10,
+      "send": [
+        "rows_26"
+      ]
+    },
+    {
+      "expect": [
+        "close_2"
+      ],
+      "name": "close_asked",
+      "seconds": 10,
+      "send": [
+        "close_ask"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "close_answered",
+      "seconds": 0.2,
+      "send": [
+        "close_2_reply"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "exited",
+      "seconds": 0.2,
+      "send": [
+        "exit"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "key_idle",
+      "seconds": 0.2,
+      "send": [
+        "key_0"
+      ]
+    },
+    {
+      "expect": [
+        "shown_27_reply"
+      ],
+      "name": "idle_read",
+      "seconds": 10,
+      "send": [
+        "shown_27"
+      ]
+    },
+    {
+      "expect": [
+        "open_3"
+      ],
+      "name": "key_reopen",
+      "seconds": 10,
+      "send": [
+        "key_0"
+      ]
+    },
+    {
+      "expect": [
+        "input_first"
+      ],
+      "name": "key_opened",
+      "seconds": 10,
+      "send": [
+        "open_3_reply"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "echo_typed",
+      "seconds": 0.2,
+      "send": [
+        "type_ab"
+      ]
+    },
+    {
+      "expect": [
+        "rows_28_reply"
+      ],
+      "name": "echo_read",
+      "seconds": 10,
+      "send": [
+        "rows_28"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "echo_output_fed",
+      "seconds": 0.2,
+      "send": [
+        "output_after"
+      ]
+    },
+    {
+      "expect": [
+        "rows_29_reply"
+      ],
+      "name": "echo_output_read",
+      "seconds": 10,
+      "send": [
+        "rows_29"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "echo_busy",
+      "seconds": 0.2,
+      "send": [
+        "busy"
+      ]
+    },
+    {
+      "expect": [
+        "rows_30_reply"
+      ],
+      "name": "echo_busy_read",
+      "seconds": 10,
+      "send": [
+        "rows_30"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "echo_idle",
+      "seconds": 0.2,
+      "send": [
+        "idle"
+      ]
+    },
+    {
+      "expect": [
+        "rows_31_reply"
+      ],
+      "name": "echo_idle_read",
+      "seconds": 10,
+      "send": [
+        "rows_31"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "echo_backspace",
+      "seconds": 0.2,
+      "send": [
+        "type_backspace"
+      ]
+    },
+    {
+      "expect": [
+        "rows_32_reply"
+      ],
+      "name": "echo_backspace_read",
+      "seconds": 10,
+      "send": [
+        "rows_32"
+      ]
+    },
+    {
+      "expect": [
+        "input_ac"
+      ],
+      "name": "echo_submitted",
+      "seconds": 10,
+      "send": [
+        "type_c_enter"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "echo_submitted_drawn",
+      "seconds": 0.2,
+      "send": []
+    },
+    {
+      "expect": [
+        "rows_33_reply"
+      ],
+      "name": "echo_erased_read",
+      "seconds": 10,
+      "send": [
+        "rows_33"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "wrap_filled",
+      "seconds": 0.2,
+      "send": [
+        "output_fill"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "wrap_typed",
+      "seconds": 0.2,
+      "send": [
+        "type_wide"
+      ]
+    },
+    {
+      "expect": [
+        "rows_34_reply"
+      ],
+      "name": "wrap_read",
+      "seconds": 10,
+      "send": [
+        "rows_34"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "wrap_busy",
+      "seconds": 0.2,
+      "send": [
+        "busy"
+      ]
+    },
+    {
+      "expect": [
+        "rows_35_reply"
+      ],
+      "name": "wrap_busy_read",
+      "seconds": 10,
+      "send": [
+        "rows_35"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "wrap_idle",
+      "seconds": 0.2,
+      "send": [
+        "idle"
+      ]
+    },
+    {
+      "expect": [
+        "input_wide"
+      ],
+      "name": "wrap_submitted",
+      "seconds": 10,
+      "send": [
+        "type_enter"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "saved_fed",
+      "seconds": 0.2,
+      "send": [
+        "output_saved"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "saved_typed",
+      "seconds": 0.2,
+      "send": [
+        "type_cd"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "saved_restored",
+      "seconds": 0.2,
+      "send": [
+        "output_restored"
+      ]
+    },
+    {
+      "expect": [
+        "rows_36_reply"
+      ],
+      "name": "saved_read",
+      "seconds": 10,
+      "send": [
+        "rows_36"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "pending_fed",
+      "seconds": 0.2,
+      "send": [
+        "output_pending"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "pending_returned",
+      "seconds": 0.2,
+      "send": [
+        "output_return"
+      ]
+    },
+    {
+      "expect": [
+        "spans_37_reply"
+      ],
+      "name": "pending_read",
+      "seconds": 10,
+      "send": [
+        "spans_37"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "wide_fed",
+      "seconds": 0.2,
+      "send": [
+        "output_wide"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "wide_returned",
+      "seconds": 0.2,
+      "send": [
+        "output_return"
+      ]
+    },
+    {
+      "expect": [
+        "rows_38_reply"
+      ],
+      "name": "wide_read",
+      "seconds": 10,
+      "send": [
+        "rows_38"
+      ]
+    }
+  ],
+  "lines": {
+    "bare": {
+      "0": {
+        "blobs": 1,
+        "type": "console.output"
+      },
+      "1": {
+        "d": "MA==",
+        "size": 1
+      }
+    },
+    "busy": {
+      "0": {
+        "type": "console.busy"
+      }
+    },
+    "close_2": {
+      "0": {
+        "id": 2,
+        "type": "console.close"
+      }
+    },
+    "close_2_reply": {
+      "0": {
+        "reply": 2,
+        "type": "console.close"
+      }
+    },
+    "close_ask": {
+      "0": {
+        "type": "console_probe.close"
+      }
+    },
+    "exit": {
+      "0": {
+        "type": "console.exit"
+      },
+      "code": 0
+    },
+    "idle": {
+      "0": {
+        "type": "console.idle"
+      }
+    },
+    "input_ac": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MGFjDQ==",
+        "size": 4
+      }
+    },
+    "input_first": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "eyJBdXRoVG9rZW4iOiJkWE5sY2pwd1lYTnoiLCJjb2x1bW5zIjoxMjAsInJvd3MiOjIwfQ==",
+        "size": 52
+      }
+    },
+    "input_typed": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MGxzDQ==",
+        "size": 4
+      }
+    },
+    "input_wide": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      },
+      "1": {
+        "d": "MHd3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3dw0=",
+        "size": 122
+      }
+    },
+    "invalid": {
+      "0": {
+        "blobs": 1,
+        "type": "console.output"
+      },
+      "1": {
+        "d": "MA0K//5B",
+        "size": 6
+      }
+    },
+    "key_0": {
+      "0": {
+        "type": "console_probe.key"
+      },
+      "digit": 0
+    },
+    "open_1": {
+      "0": {
+        "id": 1,
+        "type": "console.open"
+      }
+    },
+    "open_1_reply": {
+      "0": {
+        "reply": 1,
+        "type": "console.open"
+      },
+      "token": "dXNlcjpwYXNz"
+    },
+    "open_3": {
+      "0": {
+        "id": 3,
+        "type": "console.open"
+      }
+    },
+    "open_3_reply": {
+      "0": {
+        "reply": 3,
+        "type": "console.open"
+      },
+      "token": "dXNlcjpwYXNz"
+    },
+    "output_after": {
+      "0": {
+        "blobs": 1,
+        "type": "console.output"
+      },
+      "1": {
+        "d": "MA0KJCA=",
+        "size": 5
+      }
+    },
+    "output_fill": {
+      "0": {
+        "blobs": 1,
+        "type": "console.output"
+      },
+      "1": {
+        "d": "MA0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCg0KDQoNCiQg",
+        "size": 2043
+      }
+    },
+    "output_hi": {
+      "0": {
+        "blobs": 1,
+        "type": "console.output"
+      },
+      "1": {
+        "d": "MGhpDQo=",
+        "size": 5
+      }
+    },
+    "output_kept": {
+      "0": {
+        "blobs": 1,
+        "type": "console.output"
+      },
+      "1": {
+        "d": "MA0Ka2VwdA==",
+        "size": 7
+      }
+    },
+    "output_pending": {
+      "0": {
+        "blobs": 1,
+        "type": "console.output"
+      },
+      "1": {
+        "d": "MBtbSBtbMkphYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYRtbMzFtWhtbMzJt",
+        "size": 138
+      }
+    },
+    "output_prompt": {
+      "0": {
+        "blobs": 1,
+        "type": "console.output"
+      },
+      "1": {
+        "d": "MCQg",
+        "size": 3
+      }
+    },
+    "output_restored": {
+      "0": {
+        "blobs": 1,
+        "type": "console.output"
+      },
+      "1": {
+        "d": "MBs4WhtbMjszSA==",
+        "size": 10
+      }
+    },
+    "output_return": {
+      "0": {
+        "blobs": 1,
+        "type": "console.output"
+      },
+      "1": {
+        "d": "MA0=",
+        "size": 2
+      }
+    },
+    "output_saved": {
+      "0": {
+        "blobs": 1,
+        "type": "console.output"
+      },
+      "1": {
+        "d": "MBtbSBtbMkphYhs3DQokIA==",
+        "size": 16
+      }
+    },
+    "output_wide": {
+      "0": {
+        "blobs": 1,
+        "type": "console.output"
+      },
+      "1": {
+        "d": "MBtbMG0bW0gbWzJKYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYuS4rQ==",
+        "size": 133
+      }
+    },
+    "preferences": {
+      "0": {
+        "blobs": 1,
+        "type": "console.output"
+      },
+      "1": {
+        "d": "Mnt9",
+        "size": 3
+      }
+    },
+    "rows_20": {
+      "0": {
+        "id": 20,
+        "type": "console_probe.rows"
+      }
+    },
+    "rows_20_reply": {
+      "0": {
+        "reply": 20,
+        "type": "console_probe.rows"
+      },
+      "rows": [
+        "$ hi"
+      ]
+    },
+    "rows_21": {
+      "0": {
+        "id": 21,
+        "type": "console_probe.rows"
+      }
+    },
+    "rows_21_reply": {
+      "0": {
+        "reply": 21,
+        "type": "console_probe.rows"
+      },
+      "rows": [
+        "$ hi"
+      ]
+    },
+    "rows_22": {
+      "0": {
+        "id": 22,
+        "type": "console_probe.rows"
+      }
+    },
+    "rows_22_reply": {
+      "0": {
+        "reply": 22,
+        "type": "console_probe.rows"
+      },
+      "rows": [
+        "$ hi",
+        "中"
+      ]
+    },
+    "rows_23": {
+      "0": {
+        "id": 23,
+        "type": "console_probe.rows"
+      }
+    },
+    "rows_23_reply": {
+      "0": {
+        "reply": 23,
+        "type": "console_probe.rows"
+      },
+      "rows": [
+        "$ hi",
+        "中",
+        "A"
+      ]
+    },
+    "rows_24": {
+      "0": {
+        "id": 24,
+        "type": "console_probe.rows"
+      }
+    },
+    "rows_24_reply": {
+      "0": {
+        "reply": 24,
+        "type": "console_probe.rows"
+      },
+      "rows": [
+        "$ hi",
+        "中",
+        "A"
+      ]
+    },
+    "rows_26": {
+      "0": {
+        "id": 26,
+        "type": "console_probe.rows"
+      }
+    },
+    "rows_26_reply": {
+      "0": {
+        "reply": 26,
+        "type": "console_probe.rows"
+      },
+      "rows": [
+        "$ hi",
+        "中",
+        "A",
+        "kept"
+      ]
+    },
+    "rows_28": {
+      "0": {
+        "id": 28,
+        "type": "console_probe.rows"
+      }
+    },
+    "rows_28_reply": {
+      "0": {
+        "reply": 28,
+        "type": "console_probe.rows"
+      },
+      "rows": [
+        "$ hi",
+        "中",
+        "A",
+        "keptab"
+      ]
+    },
+    "rows_29": {
+      "0": {
+        "id": 29,
+        "type": "console_probe.rows"
+      }
+    },
+    "rows_29_reply": {
+      "0": {
+        "reply": 29,
+        "type": "console_probe.rows"
+      },
+      "rows": [
+        "$ hi",
+        "中",
+        "A",
+        "kept",
+        "$ ab"
+      ]
+    },
+    "rows_30": {
+      "0": {
+        "id": 30,
+        "type": "console_probe.rows"
+      }
+    },
+    "rows_30_reply": {
+      "0": {
+        "reply": 30,
+        "type": "console_probe.rows"
+      },
+      "rows": [
+        "$ hi",
+        "中",
+        "A",
+        "kept",
+        "$"
+      ]
+    },
+    "rows_31": {
+      "0": {
+        "id": 31,
+        "type": "console_probe.rows"
+      }
+    },
+    "rows_31_reply": {
+      "0": {
+        "reply": 31,
+        "type": "console_probe.rows"
+      },
+      "rows": [
+        "$ hi",
+        "中",
+        "A",
+        "kept",
+        "$ ab"
+      ]
+    },
+    "rows_32": {
+      "0": {
+        "id": 32,
+        "type": "console_probe.rows"
+      }
+    },
+    "rows_32_reply": {
+      "0": {
+        "reply": 32,
+        "type": "console_probe.rows"
+      },
+      "rows": [
+        "$ hi",
+        "中",
+        "A",
+        "kept",
+        "$ a"
+      ]
+    },
+    "rows_33": {
+      "0": {
+        "id": 33,
+        "type": "console_probe.rows"
+      }
+    },
+    "rows_33_reply": {
+      "0": {
+        "reply": 33,
+        "type": "console_probe.rows"
+      },
+      "rows": [
+        "$ hi",
+        "中",
+        "A",
+        "kept",
+        "$"
+      ]
+    },
+    "rows_34": {
+      "0": {
+        "id": 34,
+        "type": "console_probe.rows"
+      }
+    },
+    "rows_34_reply": {
+      "0": {
+        "reply": 34,
+        "type": "console_probe.rows"
+      },
+      "rows": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "$ wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww",
+        "ww"
+      ]
+    },
+    "rows_35": {
+      "0": {
+        "id": 35,
+        "type": "console_probe.rows"
+      }
+    },
+    "rows_35_reply": {
+      "0": {
+        "reply": 35,
+        "type": "console_probe.rows"
+      },
+      "rows": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "$"
+      ]
+    },
+    "rows_36": {
+      "0": {
+        "id": 36,
+        "type": "console_probe.rows"
+      }
+    },
+    "rows_36_reply": {
+      "0": {
+        "reply": 36,
+        "type": "console_probe.rows"
+      },
+      "rows": [
+        "abZ",
+        "$ cd"
+      ]
+    },
+    "rows_38": {
+      "0": {
+        "id": 38,
+        "type": "console_probe.rows"
+      }
+    },
+    "rows_38_reply": {
+      "0": {
+        "reply": 38,
+        "type": "console_probe.rows"
+      },
+      "rows": [
+        "cdbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb中"
+      ]
+    },
+    "show_6": {
+      "0": {
+        "id": 6,
+        "type": "console.show"
+      }
+    },
+    "show_6_reply": {
+      "0": {
+        "reply": 6,
+        "type": "console.show"
+      }
+    },
+    "show_7": {
+      "0": {
+        "id": 7,
+        "type": "console.show"
+      }
+    },
+    "show_7_reply": {
+      "0": {
+        "reply": 7,
+        "type": "console.show"
+      }
+    },
+    "show_8": {
+      "0": {
+        "id": 8,
+        "type": "console.show"
+      }
+    },
+    "show_8_reply": {
+      "0": {
+        "reply": 8,
+        "type": "console.show"
+      }
+    },
+    "shown_25": {
+      "0": {
+        "id": 25,
+        "type": "console_probe.shown"
+      }
+    },
+    "shown_25_reply": {
+      "0": {
+        "reply": 25,
+        "type": "console_probe.shown"
+      },
+      "shown": false
+    },
+    "shown_27": {
+      "0": {
+        "id": 27,
+        "type": "console_probe.shown"
+      }
+    },
+    "shown_27_reply": {
+      "0": {
+        "reply": 27,
+        "type": "console_probe.shown"
+      },
+      "shown": false
+    },
+    "spans_37": {
+      "0": {
+        "id": 37,
+        "type": "console_probe.spans"
+      },
+      "rows": [
+        0,
+        1
+      ]
+    },
+    "spans_37_reply": {
+      "0": {
+        "reply": 37,
+        "type": "console_probe.spans"
+      },
+      "spans": [
+        [
+          [
+            "cd",
+            "xterm-fg-2"
+          ],
+          [
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ""
+          ],
+          [
+            "Z",
+            "xterm-fg-1"
+          ]
+        ],
+        []
+      ]
+    },
+    "split_head": {
+      "0": {
+        "blobs": 1,
+        "type": "console.output"
+      },
+      "1": {
+        "d": "MOS4",
+        "size": 3
+      }
+    },
+    "split_tail": {
+      "0": {
+        "blobs": 1,
+        "type": "console.output"
+      },
+      "1": {
+        "d": "MK0=",
+        "size": 2
+      }
+    },
+    "title": {
+      "0": {
+        "blobs": 1,
+        "type": "console.output"
+      },
+      "1": {
+        "d": "MXB5dGhvbjMgYm9vdHN0cmFwLnB5",
+        "size": 21
+      }
+    },
+    "type_ab": {
+      "0": {
+        "type": "console_probe.type"
+      },
+      "text": "ab"
+    },
+    "type_backspace": {
+      "0": {
+        "type": "console_probe.type"
+      },
+      "text": ""
+    },
+    "type_c_enter": {
+      "0": {
+        "type": "console_probe.type"
+      },
+      "text": "c\r"
+    },
+    "type_cd": {
+      "0": {
+        "type": "console_probe.type"
+      },
+      "text": "cd"
+    },
+    "type_enter": {
+      "0": {
+        "type": "console_probe.type"
+      },
+      "text": "\r"
+    },
+    "type_ls": {
+      "0": {
+        "type": "console_probe.type"
+      },
+      "text": "ls\r"
+    },
+    "type_wide": {
+      "0": {
+        "type": "console_probe.type"
+      },
+      "text": "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww"
+    }
+  },
+  "rows": 20
+}

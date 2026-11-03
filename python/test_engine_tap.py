@@ -29,7 +29,7 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_engine_tap"
 
 # A key of the decimal digits of a non negative integer, as JSLB reads it.
@@ -87,6 +87,9 @@ _BAIL_LINE = "Bail out! boom next  last"
 
 # The lines the ring of a child's log holds, as the checkout sets it.
 _RING: int = harness.setting_get("verbose_ring")
+
+# The `blob_max` of the settings, the largest log file.
+_BLOB_MAX: int = harness.setting_get("blob_max")
 
 # The file of the root's log.
 _LOG_FILE = "_verbose.sqlite"
@@ -202,7 +205,7 @@ def _failure_take(
     message: str,
     cause: dict[str, object] | None,
 ) -> None:
-    engine_tap.verbose.log_open(root, _RING)
+    engine_tap.verbose.log_open(root, _RING, _BLOB_MAX)
     engine_tap.handlers_register(root)
     for text in texts:
         _handler_call(engine_tap.tap_line, _tap_line(text))
@@ -211,7 +214,7 @@ def _failure_take(
 
 # In a child: opens the root's log, then takes a failure before registering.
 def _failure_early(root: str) -> None:
-    engine_tap.verbose.log_open(root, _RING)
+    engine_tap.verbose.log_open(root, _RING, _BLOB_MAX)
     engine_tap.error_take("boom", _STACK, None)
 
 

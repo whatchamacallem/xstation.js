@@ -16,7 +16,7 @@
 // UI with the close code, as `worker_ai.console_attach` does for the ttyd
 // page's port. No case sends ttyd a first message on
 // tty 0, so ttyd starts no process. The lines the cases send and expect are
-// the gold of test_settings.json.
+// the gold of `ts/test_setting_test_worker_ai_console.json`.
 
 namespace test_worker_ai_console {
   // The thread, the owners of its lanes, the type of the console's end.

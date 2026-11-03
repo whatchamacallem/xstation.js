@@ -7,11 +7,13 @@
 # `pty.openpty`, as ttyd runs it, with its environment set in the child, and
 # the test plays the page on the other side of the pty. It tests the arguments,
 # the engine lock, the raw mode of the pty, the first line, `tap.start` with
-# the fixed id 101, its settings, the run's switches and, in debug mode only,
-# its test settings, and no provider field, the reply, the choice and loading
-# of the main loop file, the console role where it runs no shell, the error
-# line in full names with its cascade, and the lines bootstrap writes to the
-# root's log. The test main loop files, named by `--main-loop` in debug mode,
+# the fixed id 101, its settings, the root's switches, read from the root's
+# parameters and set in the process and its environment, and no gold and
+# no provider field, the reply, the choice and
+# loading of the main loop file, the console role where it runs no shell, the
+# error line in full names with its cascade, the hangup that cannot end a run
+# while it writes that line, and the lines bootstrap writes to the root's
+# log. The test main loop files, named by `--main-loop` in debug mode,
 # write their calls to files in the root; with no `--main-loop` the stock
 # main_loop.py answers a request. Each child writes how its run ended to a
 # file, then kills itself, so that the lock, the log and the loaded main loop
@@ -19,7 +21,7 @@
 # scratch directories go under build/.
 
 import bootstrap, contextlib, errno, fcntl, harness, json, os, pty, resource
-import signal, sqlite3, switches, sys, tempfile, termios, traceback
+import signal, sqlite3, switches, sys, tempfile, termios, time, traceback
 import unittest
 from typing import Any, NamedTuple
 
@@ -29,11 +31,30 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_bootstrap"
 
 # The most bytes a read of the pty, a probe or a test main loop takes at once.
 _READ_BYTES: int = harness.gold_get(f"{_GOLD_ID}.read_bytes")
+
+# The bytes of a role refused, so that its error line outgrows the pty.
+_HANGUP_BYTES: int = harness.gold_get(f"{_GOLD_ID}.hangup_bytes")
+
+# The seconds a run may take to block in the write of its error line.
+_BLOCKED_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.blocked_seconds")
+
+# The seconds between two looks at whether the run is blocked.
+_POLL_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.poll_seconds")
+
+# The state `/proc/PID/stat` gives a process that sleeps, as in a write.
+_SLEEPING_STATE = "S"
+
+# The variables of the three switches, by the name of each.
+_SWITCH_VARIABLES = {
+    "anthropic": "XSJS_ANTHROPIC",
+    "debug": "XSJS_DEBUG",
+    "verbose": "XSJS_VERBOSE",
+}
 
 # The environment variable that once held the provider key, a setting.
 _PROVIDER_VARIABLE: str = harness.setting_get("provider.variable")
@@ -56,14 +77,8 @@ _CONSOLE_ENVIRONMENT = {
 # A console root that is not under `/home/`, which the console refuses.
 _OUTSIDE_ROOT = "/usr"
 
-# The keys of `tap.start` outside debug mode, in written order.
+# The keys of `tap.start` in either mode, in written order.
 _FIRST_KEYS = ["0", "settings", "switches"]
-
-# The keys of `tap.start` in debug mode, the test settings last.
-_FIRST_KEYS_DEBUG = ["0", "settings", "switches", "test_settings"]
-
-# The file in the root that holds the test settings.
-_TESTS_NAME = "test_settings.json"
 
 # The file in the root that holds the log.
 _LOG_NAME = "_verbose.sqlite"
@@ -106,6 +121,23 @@ _LOOP_TEXT = (
     "    text = rest.decode('utf-8')\n"
     f"    with open(os.path.join(root, {_RUN_NAME!r}), 'w') as file:\n"
     "        json.dump([read_fd, write_fd, root, text], file)\n"
+)
+
+# A main loop filing the switches and their variables at its prepare.
+_LOOP_SWITCHES = (
+    "import json, os, switches\n"
+    "\n"
+    "\n"
+    "def loop_prepare(root):\n"
+    f"    names = {_SWITCH_VARIABLES!r}\n"
+    "    variables = {name: os.environ.get(variable)"
+    " for name, variable in names.items()}\n"
+    f"    with open(os.path.join(root, {_PREPARE_NAME!r}), 'w') as file:\n"
+    "        json.dump([switches.switches_get(), variables], file)\n"
+    "\n"
+    "\n"
+    "def loop_run(read_fd, write_fd, root):\n"
+    "    pass\n"
 )
 
 # A main loop file that defines `loop_prepare` and not `loop_run`.
@@ -193,12 +225,12 @@ _HUNG_UP = -signal.SIGHUP
 _SPAWN_REFUSED = f"[Errno {errno.EAGAIN}] {os.strerror(errno.EAGAIN)}"
 
 
-# A scratch directory and its root, with the settings and the test settings.
+# A scratch directory and its root, its settings and its parameters.
 class ScratchRoot(NamedTuple):
     scratch: str
     root: str
     settings: dict[str, Any]
-    tests: dict[str, Any]
+    parameters: dict[str, bool]
 
 
 # A text of this module's gold, each `{n}` replaced by the value at `n`.
@@ -248,13 +280,7 @@ def _log_absent(case: unittest.TestCase, root: str) -> None:
     case.assertFalse(os.path.exists(os.path.join(root, _LOG_NAME)))
 
 
-# Writes the text as the test settings file of the root.
-def _tests_write(root: str, text: str) -> None:
-    with open(os.path.join(root, _TESTS_NAME), "w", encoding="utf-8") as file:
-        file.write(text)
-
-
-# Makes a scratch root: the checkout's settings and test settings, `debug` set.
+# Makes a scratch root: the checkout's settings, `debug` set.
 def _root_make(case: unittest.TestCase, debug: bool) -> ScratchRoot:
     os.makedirs(_BUILD_PATH, exist_ok=True)
     scratch = tempfile.TemporaryDirectory(dir=_BUILD_PATH)
@@ -262,22 +288,19 @@ def _root_make(case: unittest.TestCase, debug: bool) -> ScratchRoot:
     root = os.path.join(scratch.name, "root")
     os.mkdir(root)
     loaded = harness.settings_copy()
-    loaded["debug"] = debug
     path = os.path.join(root, "settings.json")
     with open(path, "w", encoding="utf-8") as file:
         json.dump(loaded, file)
-    tests = harness.gold_copy()
-    _tests_write(root, json.dumps(tests))
-    return ScratchRoot(scratch.name, root, loaded, tests)
+    parameters = {**switches.switches_get(), "debug": debug}
+    switches.parameters_write(root, parameters)
+    return ScratchRoot(scratch.name, root, loaded, parameters)
 
 
-# Rewrites the settings of a scratch root with the shell's verbose level set.
-def _level_write(made: ScratchRoot, level: int) -> ScratchRoot:
-    loaded = {**made.settings, "verbose_level": level}
-    path = os.path.join(made.root, "settings.json")
-    with open(path, "w", encoding="utf-8") as file:
-        json.dump(loaded, file)
-    return ScratchRoot(made.scratch, made.root, loaded, made.tests)
+# Rewrites the parameters of a scratch root with the parameter `verbose` set.
+def _verbose_write(made: ScratchRoot, verbose: bool) -> ScratchRoot:
+    parameters = {**made.parameters, "verbose": verbose}
+    switches.parameters_write(made.root, parameters)
+    return made._replace(parameters=parameters)
 
 
 # Writes a main loop file into the root's `main_loop` directory.
@@ -606,43 +629,23 @@ class TestLock(unittest.TestCase):
         self.assertEqual(child.rest_read(), (0, b"taken"))
 
 
-# Tests the first line, its settings, switches, test settings, loop calls.
+# Tests the first line, its settings and switches, and the loop's calls.
 class TestFirst(unittest.TestCase):
-    # Checks `tap.start`'s payload, no provider field, and the loop's calls.
-    def first_check(
-        self, made: ScratchRoot, first: dict[str, Any], debug: bool
-    ) -> None:
-        keys = _FIRST_KEYS_DEBUG if debug else _FIRST_KEYS
-        self.assertEqual(list(first), keys)
+    # Checks `tap.start`'s payload, no gold or provider, and the loop's calls.
+    def first_check(self, made: ScratchRoot, first: dict[str, Any]) -> None:
+        self.assertEqual(list(first), _FIRST_KEYS)
         self.assertEqual(first["settings"], made.settings)
         self.assertEqual(list(first["settings"]), list(made.settings))
-        self.assertEqual(first["switches"], switches.switches_get())
-        if debug:
-            self.assertEqual(first["test_settings"], made.tests)
+        self.assertEqual(first["switches"], made.parameters)
         self.assertEqual(_marker_read(made.root, _PREPARE_NAME), [made.root])
         self.assertEqual(
             _marker_read(made.root, _RUN_NAME),
             [0, 1, made.root, _AFTER_REPLY.decode("utf-8")],
         )
 
-    # Runs a debug root whose test settings are refused, after the prepare.
-    def refused_check(
-        self, made: ScratchRoot, kind: str, expected: str
-    ) -> None:
-        _loop_write(made.root, _LOOP_TEXT)
-        argv = _engine_argv(made.root)
-        child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
-        line = child.line_read()
-        self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
-        self.assertEqual(_raised_check(self, line, kind), expected)
-        self.assertEqual(_marker_read(made.root, _PREPARE_NAME), [made.root])
-        self.assertFalse(os.path.exists(os.path.join(made.root, _RUN_NAME)))
-        self.assertEqual(_log_read(made.root), [_failure_line(expected)])
-
-    # No debug: short `tap.start`, test settings unread, stock loop answers.
+    # No debug: short `tap.start`, and the stock loop answers.
     def test_first_short(self) -> None:
         made = _root_make(self, False)
-        os.remove(os.path.join(made.root, _TESTS_NAME))
         argv = ["--root", made.root]
         child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
         first = child.line_read()
@@ -651,12 +654,12 @@ class TestFirst(unittest.TestCase):
         self.assertEqual(list(first), _FIRST_KEYS)
         self.assertEqual(first["settings"], made.settings)
         self.assertEqual(list(first["settings"]), list(made.settings))
-        self.assertEqual(first["switches"], switches.switches_get())
+        self.assertEqual(first["switches"], made.parameters)
         child.bytes_write(_REPLY_SHORT + _line_bytes("tail_short"))
         self.assertEqual(child.line_read(), _line_get("tail_short_reply"))
         self.assertEqual(child.hangup(), _HUNG_UP)
 
-    # In debug mode `tap.start` has full names and the test settings.
+    # In debug mode `tap.start` has full names and no gold.
     def test_first_full(self) -> None:
         made = _root_make(self, True)
         _loop_write(made.root, _LOOP_TEXT)
@@ -667,7 +670,7 @@ class TestFirst(unittest.TestCase):
         child.bytes_write(_REPLY_FULL + _AFTER_REPLY)
         self.assertEqual(child.run_end(), (_ENDING_SERVED, b""))
         self.assertEqual(first["0"], _line_get("first_full")["0"])
-        self.first_check(made, first, True)
+        self.first_check(made, first)
 
     # No provider is read: not scripted, no key and a garbled provider file.
     def test_provider_unread(self) -> None:
@@ -683,31 +686,7 @@ class TestFirst(unittest.TestCase):
         first = child.line_read()
         child.bytes_write(_REPLY_FULL + _AFTER_REPLY)
         self.assertEqual(child.run_end(), (_ENDING_SERVED, b""))
-        self.first_check(made, first, True)
-
-    # In debug mode a missing test settings file raises as `open` does.
-    def test_tests_missing(self) -> None:
-        made = _root_make(self, True)
-        path = os.path.join(made.root, _TESTS_NAME)
-        os.remove(path)
-        expected = str(FileNotFoundError(2, "No such file or directory", path))
-        self.refused_check(made, "FileNotFoundError", expected)
-
-    # A test settings file that is not an object is refused, naming it.
-    def test_tests_object(self) -> None:
-        for text in ("[]", '"text"', "null", "1"):
-            made = _root_make(self, True)
-            _tests_write(made.root, text)
-            path = os.path.join(made.root, _TESTS_NAME)
-            expected = _text_get("bootstrap_tests_not_object", path)
-            self.refused_check(made, "ValueError", expected)
-
-    # A test settings file that is not JSON is refused by the decoders.
-    def test_tests_garbled(self) -> None:
-        made = _root_make(self, True)
-        _tests_write(made.root, _GARBLED_TEXT)
-        expected = _text_get("jslb_text_not_json")
-        self.refused_check(made, "jslb.WireError", expected)
+        self.first_check(made, first)
 
 
 # Tests the reply to `tap.start`, which must be the empty reply in either form.
@@ -836,7 +815,7 @@ class TestConsole(unittest.TestCase):
 
     # A sandbox denied a process is logged, one error line, exit 1, never raw.
     def test_console_failed(self) -> None:
-        made = _level_write(_root_make(self, True), 0)
+        made = _verbose_write(_root_make(self, True), False)
         argv = ["--root", made.root, "console"]
         child = EngineChild(
             self, made, argv, _CONSOLE_ENVIRONMENT, spawn_refused=True
@@ -846,7 +825,10 @@ class TestConsole(unittest.TestCase):
         self.assertFalse(child.raw_get())
         message = _raised_check(self, line, "BlockingIOError")
         self.assertTrue(message.startswith(_SPAWN_REFUSED), message)
-        self.assertEqual(_log_read(made.root), [_failure_line(message)])
+        started = (_SERVER_THREAD, _text_get("verbose_exec_run"))
+        self.assertEqual(
+            _log_read(made.root), [started, _failure_line(message)]
+        )
 
     # A root outside `/home/`, which dash's sandbox hides, is refused first.
     def test_console_outside(self) -> None:
@@ -903,12 +885,101 @@ class TestError(unittest.TestCase):
         self.assertEqual(line["0"], _line_get("error")["0"])
 
 
+# Tests the root's parameters, which set the switches of the run.
+class TestParameters(unittest.TestCase):
+    # The parameters set the switches and their variables, not the parent's.
+    def test_parameters_applied(self) -> None:
+        made = _root_make(self, True)
+        parameters = {
+            "anthropic": not switches.anthropic,
+            "debug": True,
+            "verbose": not switches.verbose,
+        }
+        switches.parameters_write(made.root, parameters)
+        made = made._replace(parameters=parameters)
+        environment = {
+            **_ENGINE_ENVIRONMENT,
+            **{
+                _SWITCH_VARIABLES[name]: "1"
+                for name, on in parameters.items()
+                if not on
+            },
+        }
+        _loop_write(made.root, _LOOP_SWITCHES)
+        child = EngineChild(self, made, _engine_argv(made.root), environment)
+        first = child.line_read()
+        child.bytes_write(_REPLY_FULL)
+        self.assertEqual(child.run_end(), (_ENDING_SERVED, b""))
+        self.assertEqual(first["switches"], parameters)
+        variables = {
+            name: "1" if on else None for name, on in parameters.items()
+        }
+        self.assertEqual(
+            _marker_read(made.root, _PREPARE_NAME), [parameters, variables]
+        )
+
+    # A parameters file with a key that names no switch is refused, unlogged.
+    def test_parameters_refused(self) -> None:
+        made = _root_make(self, True)
+        path = os.path.join(made.root, "parameters.json")
+        with open(path, "w", encoding="utf-8") as file:
+            json.dump({**made.parameters, "verbose_level": 1}, file)
+        child = EngineChild(self, made, _engine_argv(made.root), {})
+        line = child.line_read()
+        self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
+        expected = _text_get("switches_parameter_extra", path)
+        self.assertEqual(_raised_check(self, line, "ValueError"), expected)
+        _log_absent(self, made.root)
+
+    # A root with no parameters file is refused, naming the file.
+    def test_parameters_missing(self) -> None:
+        made = _root_make(self, True)
+        path = os.path.join(made.root, "parameters.json")
+        os.remove(path)
+        child = EngineChild(self, made, ["--root", made.root, "console"], {})
+        line = child.line_read()
+        self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
+        message = _raised_check(self, line, "FileNotFoundError")
+        self.assertIn(path, message)
+        _log_absent(self, made.root)
+
+
+# Returns the state `/proc/PID/stat` gives the process, after its name.
+def _state_read(pid: int) -> str:
+    with open(f"/proc/{pid}/stat", encoding="utf-8") as file:
+        text = file.read()
+    return text[text.rindex(")") + 2]
+
+
+# Tests the hangup that comes while a run writes its error line.
+class TestHangup(unittest.TestCase):
+    # A hangup while the run is blocked in its error line's write ends nothing.
+    def test_hangup_ignored(self) -> None:
+        made = _root_make(self, True)
+        role = "x" * _HANGUP_BYTES
+        argv = ["--root", made.root, role]
+        child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+        child.buffer = child.bytes_read()
+        deadline = time.monotonic() + _BLOCKED_SECONDS
+        while _state_read(child.pid) != _SLEEPING_STATE:
+            if time.monotonic() > deadline:
+                raise AssertionError(
+                    f"the run {child.pid} never blocked in its write"
+                )
+            time.sleep(_POLL_SECONDS)
+        os.kill(child.pid, signal.SIGHUP)
+        line = child.line_read()
+        self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
+        message = _raised_check(self, line, "argparse.ArgumentError")
+        self.assertIn(repr(role), message)
+
+
 # Tests the lines the engine role writes to the root's log.
 class TestLog(unittest.TestCase):
     # In debug mode the log traces `tap.start`, whatever the shell's level.
     def test_first_traced(self) -> None:
-        for level in range(3):
-            made = _level_write(_root_make(self, True), level)
+        for verbose in (False, True):
+            made = _verbose_write(_root_make(self, True), verbose)
             _loop_write(made.root, _LOOP_TEXT)
             argv = _engine_argv(made.root)
             child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
@@ -919,8 +990,8 @@ class TestLog(unittest.TestCase):
 
     # Outside debug mode a run that does not fail logs nothing, at any level.
     def test_first_quiet(self) -> None:
-        for level in range(3):
-            made = _level_write(_root_make(self, False), level)
+        for verbose in (False, True):
+            made = _verbose_write(_root_make(self, False), verbose)
             argv = ["--root", made.root]
             child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
             child.line_read()

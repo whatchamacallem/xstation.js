@@ -1,0 +1,487 @@
+{
+  "arguments": {
+    "console_run": {
+      "text": "echo hi",
+      "timeout_seconds": 5
+    },
+    "kv_get": {
+      "ref": "/metaverse/nothing"
+    }
+  },
+  "cases": [
+    {
+      "expect": [
+        "seen_initialize",
+        "seen_initialized",
+        "seen_list",
+        "handshake_reply"
+      ],
+      "name": "handshake_read",
+      "seconds": 10,
+      "send": ["handshake"]
+    },
+    {
+      "expect": ["seen_source_put", "seen_render", "results_reply"],
+      "name": "results_read",
+      "seconds": 10,
+      "send": ["results"]
+    },
+    {
+      "expect": ["console_call"],
+      "name": "call_form",
+      "seconds": 10,
+      "send": ["form"]
+    },
+    {
+      "expect": ["seen_kv_get", "routed_reply"],
+      "name": "call_routed",
+      "seconds": 10,
+      "send": ["routed"]
+    },
+    {
+      "expect": ["browser_call"],
+      "name": "call_browser",
+      "seconds": 10,
+      "send": ["browser"]
+    },
+    {
+      "expect": ["seen_list_first", "seen_list_second", "prefixed_reply"],
+      "name": "tools_prefixed",
+      "seconds": 10,
+      "send": ["prefixed"]
+    }
+  ],
+  "lines": {
+    "browser": {
+      "0": {
+        "id": 5,
+        "type": "mcp_case.browser"
+      }
+    },
+    "browser_call": {
+      "0": {
+        "id": 7,
+        "type": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "ref": "/metaverse/nothing"
+        },
+        "name": "kv_get"
+      }
+    },
+    "console_call": {
+      "0": {
+        "id": 5,
+        "type": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "text": "echo hi",
+          "timeout_seconds": 5
+        },
+        "name": "console_run"
+      }
+    },
+    "form": {
+      "0": {
+        "id": 3,
+        "type": "mcp_case.form"
+      }
+    },
+    "handshake": {
+      "0": {
+        "id": 1,
+        "type": "mcp_case.handshake"
+      }
+    },
+    "handshake_reply": {
+      "0": {
+        "reply": 1,
+        "type": "mcp_case.handshake"
+      },
+      "tools": [
+        {
+          "description": "Read the value a Key-Value-Ref names, /$db/$key, as text.",
+          "inputSchema": {
+            "properties": {
+              "ref": {
+                "type": "string"
+              }
+            },
+            "required": ["ref"],
+            "type": "object"
+          },
+          "name": "kv_get"
+        },
+        {
+          "description": "Write a main loop file into the server's main_loop directory for system_restart to serve. Debug mode.",
+          "inputSchema": {
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": ["name", "text"],
+            "type": "object"
+          },
+          "name": "source_put"
+        },
+        {
+          "description": "A tool of the tests.",
+          "inputSchema": {
+            "properties": {},
+            "type": "object"
+          },
+          "name": "render"
+        }
+      ]
+    },
+    "prefixed": {
+      "0": {
+        "id": 6,
+        "type": "mcp_case.prefixed"
+      }
+    },
+    "prefixed_reply": {
+      "0": {
+        "reply": 6,
+        "type": "mcp_case.prefixed"
+      },
+      "tools": [
+        {
+          "description": "Read the value a Key-Value-Ref names, /$db/$key, as text.",
+          "inputSchema": {
+            "properties": {
+              "ref": {
+                "type": "string"
+              }
+            },
+            "required": ["ref"],
+            "type": "object"
+          },
+          "name": "browser.kv_get"
+        },
+        {
+          "description": "Write a main loop file into the server's main_loop directory for system_restart to serve. Debug mode.",
+          "inputSchema": {
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": ["name", "text"],
+            "type": "object"
+          },
+          "name": "browser.source_put"
+        },
+        {
+          "description": "A tool of the tests.",
+          "inputSchema": {
+            "properties": {},
+            "type": "object"
+          },
+          "name": "browser.render"
+        },
+        {
+          "description": "Read the value a Key-Value-Ref names, /$db/$key, as text.",
+          "inputSchema": {
+            "properties": {
+              "ref": {
+                "type": "string"
+              }
+            },
+            "required": ["ref"],
+            "type": "object"
+          },
+          "name": "server.kv_get"
+        },
+        {
+          "description": "Write a main loop file into the server's main_loop directory for system_restart to serve. Debug mode.",
+          "inputSchema": {
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": ["name", "text"],
+            "type": "object"
+          },
+          "name": "server.source_put"
+        },
+        {
+          "description": "A tool of the tests.",
+          "inputSchema": {
+            "properties": {},
+            "type": "object"
+          },
+          "name": "server.render"
+        }
+      ]
+    },
+    "results": {
+      "0": {
+        "id": 2,
+        "type": "mcp_case.results"
+      }
+    },
+    "results_reply": {
+      "0": {
+        "reply": 2,
+        "type": "mcp_case.results"
+      },
+      "results": [
+        {
+          "content": [
+            {
+              "text": "{}",
+              "type": "text"
+            }
+          ],
+          "isError": false
+        },
+        {
+          "content": [
+            {
+              "text": "{}",
+              "type": "text"
+            }
+          ]
+        }
+      ]
+    },
+    "routed": {
+      "0": {
+        "id": 4,
+        "type": "mcp_case.routed"
+      }
+    },
+    "routed_reply": {
+      "0": {
+        "reply": 4,
+        "type": "mcp_case.routed"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "{}",
+            "type": "text"
+          }
+        ]
+      }
+    },
+    "seen_initialize": {
+      "0": {
+        "type": "mcp_seen.line"
+      },
+      "header": {
+        "id": 1,
+        "type": "mcp"
+      },
+      "message": {
+        "id": 1,
+        "jsonrpc": "2.0",
+        "method": "initialize",
+        "params": {
+          "capabilities": {},
+          "clientInfo": {
+            "name": "hyperposition-engine",
+            "version": "0"
+          },
+          "protocolVersion": "2025-06-18"
+        }
+      }
+    },
+    "seen_initialized": {
+      "0": {
+        "type": "mcp_seen.line"
+      },
+      "header": {
+        "type": "mcp"
+      },
+      "message": {
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized"
+      }
+    },
+    "seen_kv_get": {
+      "0": {
+        "type": "mcp_seen.line"
+      },
+      "header": {
+        "id": 6,
+        "type": "mcp"
+      },
+      "message": {
+        "id": 1,
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": {
+          "arguments": {
+            "ref": "/metaverse/nothing"
+          },
+          "name": "kv_get"
+        }
+      }
+    },
+    "seen_list": {
+      "0": {
+        "type": "mcp_seen.line"
+      },
+      "header": {
+        "id": 2,
+        "type": "mcp"
+      },
+      "message": {
+        "id": 2,
+        "jsonrpc": "2.0",
+        "method": "tools/list"
+      }
+    },
+    "seen_list_first": {
+      "0": {
+        "type": "mcp_seen.line"
+      },
+      "header": {
+        "id": 8,
+        "type": "mcp"
+      },
+      "message": {
+        "id": 1,
+        "jsonrpc": "2.0",
+        "method": "tools/list"
+      }
+    },
+    "seen_list_second": {
+      "0": {
+        "type": "mcp_seen.line"
+      },
+      "header": {
+        "id": 9,
+        "type": "mcp"
+      },
+      "message": {
+        "id": 1,
+        "jsonrpc": "2.0",
+        "method": "tools/list"
+      }
+    },
+    "seen_render": {
+      "0": {
+        "type": "mcp_seen.line"
+      },
+      "header": {
+        "id": 4,
+        "type": "mcp"
+      },
+      "message": {
+        "id": 2,
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": {
+          "arguments": {},
+          "name": "render"
+        }
+      }
+    },
+    "seen_source_put": {
+      "0": {
+        "type": "mcp_seen.line"
+      },
+      "header": {
+        "id": 3,
+        "type": "mcp"
+      },
+      "message": {
+        "id": 1,
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": {
+          "arguments": {},
+          "name": "source_put"
+        }
+      }
+    }
+  },
+  "results": {
+    "kv_get": {
+      "content": [
+        {
+          "text": "{}",
+          "type": "text"
+        }
+      ]
+    },
+    "render": {
+      "content": [
+        {
+          "text": "{}",
+          "type": "text"
+        }
+      ]
+    },
+    "source_put": {
+      "content": [
+        {
+          "text": "{}",
+          "type": "text"
+        }
+      ],
+      "isError": false
+    }
+  },
+  "tools": [
+    {
+      "description": "Read the value a Key-Value-Ref names, /$db/$key, as text.",
+      "inputSchema": {
+        "properties": {
+          "ref": {
+            "type": "string"
+          }
+        },
+        "required": ["ref"],
+        "type": "object"
+      },
+      "name": "kv_get"
+    },
+    {
+      "description": "Write a main loop file into the server's main_loop directory for system_restart to serve. Debug mode.",
+      "inputSchema": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": ["name", "text"],
+        "type": "object"
+      },
+      "name": "source_put"
+    },
+    {
+      "description": "A tool of the tests.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "render"
+    }
+  ]
+}

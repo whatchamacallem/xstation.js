@@ -38,6 +38,7 @@ namespace test_integrate_tools_browser {
     handler_version: 0,
     synchronous_setting: "queue_synchronous",
     overflow_setting: "overflow_bytes",
+    blob_setting: "blob_max",
     compact_setting: "turn_compact_turns",
     root: "/test_integrate_tools_browser",
     server_name: "xsjs-browser",
@@ -109,6 +110,7 @@ namespace test_integrate_tools_browser {
       new substrate.CacheFiles([...test_slots]),
       constants.root,
       harness.setting_get(constants.overflow_setting) as number,
+      harness.setting_get(constants.blob_setting) as number,
       harness.setting_get(constants.compact_setting) as number,
       tasks,
     );
@@ -120,6 +122,7 @@ namespace test_integrate_tools_browser {
       constants.http_thread,
       constants.info,
       harness.setting_get,
+      switches.debug_on,
     );
     dispatch.handler_register(constants.line_type, version, (line) =>
       server.line_handle(line),

@@ -1,0 +1,36 @@
+{
+  "close_lost": 1006,
+  "lines": {
+    "first_reply": {
+      "0": {
+        "reply": 101,
+        "type": "tap.start"
+      }
+    },
+    "report": {
+      "0": {
+        "type": "error"
+      },
+      "message": "A fault the page reports by wire_end.",
+      "stack": "Error: A fault the page reports by wire_end."
+    },
+    "unserved": {
+      "0": {
+        "id": 7,
+        "type": "line.unserved"
+      }
+    },
+    "unserved_error": {
+      "0": {
+        "reply": 7,
+        "type": "error"
+      },
+      "message": "No handler is registered for type line.unserved version 0.",
+      "stack": "Traceback (most recent call last):"
+    }
+  },
+  "point_seconds": 10,
+  "root": {
+    "main_loop": "echo_loop.py"
+  }
+}

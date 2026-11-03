@@ -8,10 +8,16 @@
 # the module again so that it reads its environment as a new process does,
 # then writes what it read to a pipe as JSON and ends by os._exit. It tests
 # the reading of a variable, unset, on and refused; the bools read at
-# import; the three options; and switches_set, which turns on in the module
-# and in the environment the switches the options give and no other.
+# import; the three options; switches_set, which turns on in the module and
+# in the environment the switches the options give and no other; a root's
+# parameters file, written by parameters_write and read by parameters_load,
+# which refuses a file that is not an object, a missing or extra key and a
+# value that is not a bool, its numbers read by the decoders; and
+# switches_apply, which sets each switch and its variable on or off. The
+# expected texts are the gold's, python/test_setting_test_switches.json.
 
-import argparse, importlib, json, os, switches, unittest
+import argparse, harness, importlib, jslb, json, os, switches, tempfile
+import unittest
 from collections.abc import Callable
 from typing import Any
 
@@ -28,6 +34,17 @@ _VARIABLES = {
 # What a child's run of a function gave: its value, or its exception.
 _VALUE_KEY = "value"
 _ERROR_KEY = "error"
+
+# The checkout's build directory, where each test makes its scratch root.
+_BUILD_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
+)
+
+# The file of a root that holds its parameters, as the stub names it.
+_PARAMETERS_NAME = "parameters.json"
+
+# The id of this module's gold, in its own `test_setting_` file.
+_GOLD_ID = "python.test_switches"
 
 
 # Runs the function in a forked child with a fresh module, returning its JSON.
@@ -54,6 +71,14 @@ def child_run(fn: Callable[[], Any]) -> dict[str, Any]:
     if code != 0:
         raise RuntimeError(f"the child exited with {code}: {text!r}")
     return json.loads(text)
+
+
+# A text of this module's gold, each `{n}` replaced by the value `n`.
+def text_fill(name: str, *values: str) -> str:
+    text: str = harness.gold_get(f"{_GOLD_ID}.texts.{name}")
+    for index, value in enumerate(values):
+        text = text.replace("{" + str(index) + "}", value)
+    return text
 
 
 # Returns the switches and the three variables, after `switches_set`.
@@ -154,6 +179,133 @@ class TestOptions(unittest.TestCase):
             "variables": {name: "1" for name in _VARIABLES},
         }
         self.assertEqual(given, {_VALUE_KEY: expected})
+
+
+# Tests the parameters file of a root, written and read.
+class TestParameters(unittest.TestCase):
+    # Makes the scratch root under build/.
+    def setUp(self) -> None:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+        self.root = self.enterContext(
+            tempfile.TemporaryDirectory(dir=_BUILD_PATH)
+        )
+        self.path = os.path.join(self.root, _PARAMETERS_NAME)
+
+    # Writes the text as the root's parameters file.
+    def text_write(self, text: str) -> None:
+        with open(self.path, "w", encoding="utf-8") as file:
+            file.write(text)
+
+    # Asserts the load refuses the file with exactly the expected text.
+    def load_fails(self, expected: str, note: str) -> None:
+        with self.assertRaises(ValueError, msg=note) as context:
+            switches.parameters_load(self.root)
+        self.assertEqual(str(context.exception), expected, note)
+
+    # Each write is read back as written, the three by name.
+    def test_parameters_written(self) -> None:
+        for bits in range(1 << len(_VARIABLES)):
+            parameters = {
+                name: bool(bits >> index & 1)
+                for index, name in enumerate(_VARIABLES)
+            }
+            switches.parameters_write(self.root, parameters)
+            with open(self.path, encoding="utf-8") as file:
+                self.assertEqual(json.load(file), parameters)
+            loaded = switches.parameters_load(self.root)
+            self.assertEqual(loaded, parameters)
+            self.assertEqual(list(loaded), list(_VARIABLES))
+
+    # A file whose JSON is not an object is refused naming the file.
+    def test_parameters_object(self) -> None:
+        for text in ("[]", "true", "null", '"debug"'):
+            self.text_write(text)
+            expected = text_fill("switches_parameters_not_object", self.path)
+            self.load_fails(expected, text)
+
+    # Each missing key is refused, naming the file and the key.
+    def test_parameter_missing(self) -> None:
+        for name in _VARIABLES:
+            parameters = {other: False for other in _VARIABLES}
+            del parameters[name]
+            self.text_write(json.dumps(parameters))
+            expected = text_fill(
+                f"switches_parameter_missing_{name}", self.path
+            )
+            self.load_fails(expected, name)
+
+    # A key that names no switch, the old setting `verbose_level` among, fails.
+    def test_parameter_extra(self) -> None:
+        for name in ("extra", "verbose_level"):
+            parameters: dict[str, object] = {
+                other: False for other in _VARIABLES
+            }
+            parameters[name] = False
+            self.text_write(json.dumps(parameters))
+            expected = text_fill(f"switches_parameter_extra_{name}", self.path)
+            self.load_fails(expected, name)
+
+    # A value that is not a bool is refused, naming its key and the value.
+    def test_parameter_type(self) -> None:
+        cases = (("anthropic", 1), ("debug", "true"), ("verbose", None))
+        for name, value in cases:
+            parameters: dict[str, object] = {
+                other: False for other in _VARIABLES
+            }
+            parameters[name] = value
+            self.text_write(json.dumps(parameters))
+            expected = text_fill(f"switches_parameter_type_{name}", self.path)
+            self.load_fails(expected, name)
+
+    # The decoders read the file, refusing a number that overflows a double.
+    def test_parameters_door(self) -> None:
+        self.text_write(
+            '{"anthropic": false, "debug": 1e400, "verbose": false}'
+        )
+        with self.assertRaises(jslb.WireError) as context:
+            switches.parameters_load(self.root)
+        expected = text_fill("jslb_number_overflow")
+        self.assertEqual(str(context.exception), expected)
+
+
+# Returns the switches and the three variables, after `switches_apply`.
+def apply_run(parameters: dict[str, bool]) -> dict[str, Any]:
+    switches.switches_apply(parameters)
+    return {
+        "switches": switches.switches_get(),
+        "variables": {
+            name: os.environ.get(variable)
+            for name, variable in _VARIABLES.items()
+        },
+    }
+
+
+# Tests `switches_apply`, from every switch off and from every switch on.
+class TestApply(unittest.TestCase):
+    # Each switch takes its parameter, its variable `1` when on, else unset.
+    def test_apply_each(self) -> None:
+        for start in (False, True):
+            for bits in range(1 << len(_VARIABLES)):
+                parameters = {
+                    name: bool(bits >> index & 1)
+                    for index, name in enumerate(_VARIABLES)
+                }
+
+                def run() -> dict[str, Any]:
+                    if start:
+                        arguments = [f"--{name}" for name in _VARIABLES]
+                        options_run(arguments)
+                    return apply_run(parameters)
+
+                expected = {
+                    "switches": parameters,
+                    "variables": {
+                        name: "1" if on else None
+                        for name, on in parameters.items()
+                    },
+                }
+                note = f"from {start} to {parameters}"
+                self.assertEqual(child_run(run), {_VALUE_KEY: expected}, note)
 
 
 if __name__ == "__main__":

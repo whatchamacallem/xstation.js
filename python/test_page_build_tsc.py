@@ -13,8 +13,9 @@
 # the members it takes from the two archives the gold lists for the pins.
 # Each page is its template with each marker replaced by its piece, the same
 # pieces for both: that bundle, html/engine.css, the vectors written anew
-# into build/vectors/, SQLite's glue and its wasm as base64, and xterm.js and
-# its css.
+# into build/vectors/, the gold of every ts/test_setting_<suite>.json,
+# SQLite's glue and its wasm as base64, and xterm.js and its css. A copy of
+# a built page with other gold differs from it on the gold's line alone.
 
 import base64, harness, hashlib, json, os, page_build, subprocess, sys
 import unittest, uuid
@@ -87,6 +88,11 @@ def archives_named() -> tuple[str, str]:
     )
 
 
+# The TypeScript suites' gold as the harness reads it, the page's own.
+def gold_typescript() -> dict[str, Any]:
+    return {"typescript": harness.gold_copy()["typescript"]}
+
+
 # Returns each marker's piece, read from the files the builds read.
 def pieces_read() -> dict[str, str]:
     sqlite_path, xterm_path = archives_named()
@@ -99,6 +105,7 @@ def pieces_read() -> dict[str, str]:
         "XSJS_BUILD_ENGINE_CSS": page_build.text_read(_ENGINE_CSS_PATH),
         "XSJS_BUILD_SQLITE3_JS": glue.decode("utf-8"),
         "XSJS_BUILD_SQLITE3_WASM": base64.b64encode(wasm).decode(),
+        "XSJS_BUILD_TEST_GOLD": page_build.gold_json(gold_typescript()),
         "XSJS_BUILD_TEST_VECTORS": page_build.vectors_json(_VECTORS_PATH),
         "XSJS_BUILD_XTERM_CSS": style.decode("utf-8"),
         "XSJS_BUILD_XTERM_JS": script.decode("utf-8"),
@@ -173,5 +180,29 @@ class TestBuild(unittest.TestCase):
             shell = page_build.text_read(template_path)
             filled = page_build.markers_fill(shell, pieces)
             page = page_build.text_read(self.page_paths[template])
+            # Compared by `==`, so that a failure prints no page of megabytes.
+            self.assertTrue(page == filled, template_path)
+
+    # A copy with other gold is the page filled with that gold instead.
+    def test_page_copied(self) -> None:
+        gold = gold_typescript()
+        gold["typescript"]["test_all"]["run"] = "copied"
+        pieces = {
+            **pieces_read(),
+            "XSJS_BUILD_TEST_GOLD": page_build.gold_json(gold),
+        }
+        for template in _TEMPLATES:
+            name = os.path.basename(self.page_paths[template])
+            path = self.page_paths[template] + ".copy"
+            self.addCleanup(os.remove, path)
+            page_build.page_copy(
+                name.removesuffix(_PAGE_EXTENSION), path, gold
+            )
+            template_path = os.path.join(
+                _HTML_PATH, template + _PAGE_EXTENSION
+            )
+            shell = page_build.text_read(template_path)
+            filled = page_build.markers_fill(shell, pieces)
+            page = page_build.text_read(path)
             # Compared by `==`, so that a failure prints no page of megabytes.
             self.assertTrue(page == filled, template_path)

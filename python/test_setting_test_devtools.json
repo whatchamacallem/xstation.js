@@ -1,0 +1,5 @@
+{
+  "expiry_seconds": 0.05,
+  "pipe_bytes": 131072,
+  "wait_seconds": 60
+}

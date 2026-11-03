@@ -1,0 +1,50 @@
+{
+  "cases": [
+    {
+      "expect": ["open_reply"],
+      "name": "console_opened",
+      "seconds": 10,
+      "send": ["open_request"]
+    },
+    {
+      "expect": ["close_reply", "exit"],
+      "name": "console_closed",
+      "seconds": 10,
+      "send": ["close_request"]
+    }
+  ],
+  "lines": {
+    "close_reply": {
+      "0": {
+        "reply": 103,
+        "type": "console.close"
+      }
+    },
+    "close_request": {
+      "0": {
+        "id": 103,
+        "type": "console.close"
+      }
+    },
+    "exit": {
+      "0": {
+        "type": "console.exit"
+      },
+      "code": 1000
+    },
+    "open_reply": {
+      "0": {
+        "reply": 102,
+        "type": "console.open"
+      },
+      "token": ""
+    },
+    "open_request": {
+      "0": {
+        "id": 102,
+        "type": "console.open"
+      }
+    }
+  },
+  "root": {}
+}

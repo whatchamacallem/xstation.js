@@ -1,0 +1,8 @@
+{
+  "texts": {
+    "utility_base64_refused": "The text is not strict base64: it must use the standard alphabet, full padding, no white space and zero unused bits.",
+    "utility_bytes_refused": "The bytes are not valid UTF-8.",
+    "utility_text_refused": "The text holds a lone surrogate, which UTF-8 cannot encode.",
+    "utility_value_refused": "JSON has no text for the value."
+  }
+}

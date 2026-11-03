@@ -12,7 +12,7 @@
 // the cache, the engine object and its store of routine methods, the
 // exceptions a run returns and the errors it throws. The trace texts, the
 // store's refusals and the pushes the runs make are entries of the gold
-// record, test_settings.json.
+// record, `ts/test_setting_test_script.json`.
 
 namespace test_script {
   // The initialized sqlite3.wasm module, a global the bring up sets.
@@ -73,6 +73,7 @@ namespace test_script {
     // The settings of a store and of the mode of its queue.
     synchronous_setting: "queue_synchronous",
     overflow_setting: "overflow_bytes",
+    blob_setting: "blob_max",
     compact_setting: "turn_compact_turns",
   });
 
@@ -112,6 +113,11 @@ namespace test_script {
   // The `overflow_bytes` of `settings.json`, which the test stores take.
   function overflow_get(): number {
     return harness.setting_get(constants.overflow_setting) as number;
+  }
+
+  // The `blob_max` of `settings.json`, which the test stores take.
+  function blob_get(): number {
+    return harness.setting_get(constants.blob_setting) as number;
   }
 
   // The `UTF-8` bytes of text.
@@ -188,6 +194,7 @@ namespace test_script {
         new substrate.CacheFiles(slots),
         root,
         overflow_get(),
+        blob_get(),
         harness.setting_get(constants.compact_setting) as number,
         tasks,
       );

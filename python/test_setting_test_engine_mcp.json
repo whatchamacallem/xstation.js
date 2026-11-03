@@ -1,0 +1,288 @@
+{
+  "lines": {
+    "call": {
+      "0": {
+        "i": 6,
+        "t": "mcp"
+      },
+      "id": 2,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {},
+        "name": "fail"
+      }
+    },
+    "call_echo": {
+      "0": {
+        "i": 5,
+        "t": "mcp"
+      },
+      "id": 3,
+      "jsonrpc": "2.0",
+      "method": "tools/call",
+      "params": {
+        "arguments": {
+          "a": [2, "c"],
+          "b": 1
+        },
+        "name": "echo"
+      }
+    },
+    "call_echo_reply": {
+      "0": {
+        "r": 5,
+        "t": "mcp"
+      },
+      "id": 3,
+      "jsonrpc": "2.0",
+      "result": {
+        "content": [
+          {
+            "text": "{\"a\":[2,\"c\"],\"b\":1}",
+            "type": "text"
+          }
+        ],
+        "isError": false
+      }
+    },
+    "call_reply": {
+      "0": {
+        "r": 6,
+        "t": "mcp"
+      },
+      "id": 2,
+      "jsonrpc": "2.0"
+    },
+    "initialize": {
+      "0": {
+        "i": 7,
+        "t": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "initialize",
+      "params": {
+        "capabilities": {},
+        "clientInfo": {
+          "name": "hyperposition-engine",
+          "version": "0"
+        },
+        "protocolVersion": "2025-06-18"
+      }
+    },
+    "initialize_reply": {
+      "0": {
+        "r": 7,
+        "t": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "result": {
+        "capabilities": {
+          "tools": {}
+        },
+        "protocolVersion": "2025-06-18",
+        "serverInfo": {
+          "name": "xsjs-server",
+          "version": "0"
+        }
+      }
+    },
+    "initialized": {
+      "0": {
+        "t": "mcp"
+      },
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+    },
+    "list": {
+      "0": {
+        "i": 8,
+        "t": "mcp"
+      },
+      "id": 2,
+      "jsonrpc": "2.0",
+      "method": "tools/list"
+    },
+    "list_reply": {
+      "0": {
+        "r": 8,
+        "t": "mcp"
+      },
+      "id": 2,
+      "jsonrpc": "2.0",
+      "result": {
+        "tools": [
+          {
+            "description": "Echo.",
+            "inputSchema": {
+              "properties": {},
+              "type": "object"
+            },
+            "name": "echo"
+          },
+          {
+            "description": "Fail.",
+            "inputSchema": {
+              "properties": {},
+              "type": "object"
+            },
+            "name": "fail"
+          }
+        ]
+      }
+    },
+    "passed": [
+      {
+        "0": {
+          "t": "mcp"
+        },
+        "id": 1,
+        "jsonrpc": "2.0",
+        "method": "tools/list",
+        "params": {}
+      },
+      {
+        "0": {
+          "t": "mcp"
+        },
+        "id": 2,
+        "jsonrpc": "2.0",
+        "result": {
+          "tools": []
+        }
+      },
+      {
+        "0": {
+          "t": "mcp"
+        },
+        "error": {
+          "code": -32601,
+          "message": "m"
+        },
+        "id": 3,
+        "jsonrpc": "2.0"
+      },
+      {
+        "0": {
+          "t": "mcp"
+        },
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized"
+      }
+    ],
+    "passed_replies": [
+      {
+        "0": {
+          "t": "mcp"
+        },
+        "id": 1,
+        "jsonrpc": "2.0",
+        "result": {
+          "tools": [
+            {
+              "description": "Echo.",
+              "inputSchema": {
+                "properties": {},
+                "type": "object"
+              },
+              "name": "echo"
+            },
+            {
+              "description": "Fail.",
+              "inputSchema": {
+                "properties": {},
+                "type": "object"
+              },
+              "name": "fail"
+            }
+          ]
+        }
+      },
+      {
+        "0": {
+          "t": "mcp"
+        },
+        "error": {
+          "code": -32600,
+          "message": "The message is not a valid JSON-RPC 2.0 request."
+        },
+        "id": 2,
+        "jsonrpc": "2.0"
+      },
+      {
+        "0": {
+          "t": "mcp"
+        },
+        "error": {
+          "code": -32600,
+          "message": "The message is not a valid JSON-RPC 2.0 request."
+        },
+        "id": 3,
+        "jsonrpc": "2.0"
+      },
+      null
+    ],
+    "ping": {
+      "0": {
+        "i": 3,
+        "t": "mcp"
+      },
+      "id": 9,
+      "jsonrpc": "2.0",
+      "method": "ping"
+    },
+    "ping_pushed": {
+      "0": {
+        "t": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "ping"
+    },
+    "ping_pushed_reply": {
+      "0": {
+        "t": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "result": {}
+    },
+    "ping_reply": {
+      "0": {
+        "r": 3,
+        "t": "mcp"
+      },
+      "id": 9,
+      "jsonrpc": "2.0",
+      "result": {}
+    },
+    "unknown": {
+      "0": {
+        "i": 8,
+        "t": "mcp"
+      },
+      "id": 4,
+      "jsonrpc": "2.0",
+      "method": "nothing/here"
+    },
+    "unknown_reply": {
+      "0": {
+        "r": 8,
+        "t": "mcp"
+      },
+      "error": {
+        "code": -32601,
+        "message": "The method nothing/here is not served."
+      },
+      "id": 4,
+      "jsonrpc": "2.0"
+    }
+  },
+  "texts": {
+    "dispatch_handler_twice": "A handler is already registered for type mcp version 0.",
+    "engine_mcp_not_registered": "The MCP handler was used before it was registered.",
+    "mcp_method_unknown": "The method nothing/here is not served."
+  }
+}

@@ -1,0 +1,193 @@
+{
+  "cases": [
+    {
+      "expect": ["echo_one_reply"],
+      "name": "request_answered",
+      "seconds": 10,
+      "send": ["echo_one"]
+    },
+    {
+      "expect": ["relay_abc_reply"],
+      "name": "submit_blob",
+      "seconds": 10,
+      "send": ["relay_abc"]
+    },
+    {
+      "expect": ["pair_reply"],
+      "name": "replies_ordered",
+      "seconds": 10,
+      "send": ["pair_request"]
+    },
+    {
+      "expect": ["kept_abcd"],
+      "name": "forward_blob",
+      "seconds": 10,
+      "send": ["keep_abcd"]
+    },
+    {
+      "expect": ["halves_ab_cd"],
+      "name": "halves_moved",
+      "seconds": 10,
+      "send": ["halves_abcd"]
+    },
+    {
+      "expect": ["echo_four_reply", "echo_five_reply", "echo_six_reply"],
+      "name": "order_kept",
+      "seconds": 10,
+      "send": ["echo_four", "echo_five", "echo_six"]
+    },
+    {
+      "expect": [],
+      "name": "note_silent",
+      "seconds": 0.2,
+      "send": ["note"]
+    }
+  ],
+  "lines": {
+    "echo_five": {
+      "0": {
+        "id": 5,
+        "type": "queue_test.echo"
+      },
+      "text": "five"
+    },
+    "echo_five_reply": {
+      "0": {
+        "reply": 5,
+        "type": "queue_test.echo"
+      },
+      "text": "five"
+    },
+    "echo_four": {
+      "0": {
+        "id": 4,
+        "type": "queue_test.echo"
+      },
+      "text": "four"
+    },
+    "echo_four_reply": {
+      "0": {
+        "reply": 4,
+        "type": "queue_test.echo"
+      },
+      "text": "four"
+    },
+    "echo_one": {
+      "0": {
+        "id": 1,
+        "type": "queue_test.echo"
+      },
+      "text": "one"
+    },
+    "echo_one_reply": {
+      "0": {
+        "reply": 1,
+        "type": "queue_test.echo"
+      },
+      "text": "one"
+    },
+    "echo_six": {
+      "0": {
+        "id": 6,
+        "type": "queue_test.echo"
+      },
+      "text": "six"
+    },
+    "echo_six_reply": {
+      "0": {
+        "reply": 6,
+        "type": "queue_test.echo"
+      },
+      "text": "six"
+    },
+    "halves_ab_cd": {
+      "0": {
+        "blobs": 2,
+        "type": "queue_ui.halves"
+      },
+      "1": {
+        "d": "YWI=",
+        "size": 2
+      },
+      "2": {
+        "d": "Y2Q=",
+        "size": 2
+      }
+    },
+    "halves_abcd": {
+      "0": {
+        "blobs": 1,
+        "type": "queue_test.halves"
+      },
+      "1": {
+        "d": "YWJjZA==",
+        "size": 4
+      }
+    },
+    "keep_abcd": {
+      "0": {
+        "blobs": 1,
+        "type": "queue_far.keep"
+      },
+      "1": {
+        "d": "YWJjZA==",
+        "size": 4
+      },
+      "text": "abcd"
+    },
+    "kept_abcd": {
+      "0": {
+        "blobs": 1,
+        "type": "queue_ui.kept"
+      },
+      "1": {
+        "d": "YWJjZA==",
+        "size": 4
+      },
+      "text": "abcd"
+    },
+    "note": {
+      "0": {
+        "type": "queue_test.note"
+      },
+      "text": "unanswered"
+    },
+    "pair_reply": {
+      "0": {
+        "reply": 3,
+        "type": "queue_test.pair"
+      },
+      "texts": ["first", "second"]
+    },
+    "pair_request": {
+      "0": {
+        "id": 3,
+        "type": "queue_test.pair"
+      }
+    },
+    "relay_abc": {
+      "0": {
+        "blobs": 1,
+        "id": 2,
+        "type": "queue_test.relay"
+      },
+      "1": {
+        "d": "YWJj",
+        "size": 3
+      },
+      "text": "abc"
+    },
+    "relay_abc_reply": {
+      "0": {
+        "blobs": 1,
+        "reply": 2,
+        "type": "queue_test.relay"
+      },
+      "1": {
+        "d": "YWJj",
+        "size": 3
+      },
+      "text": "abc"
+    }
+  }
+}

@@ -1,0 +1,142 @@
+{
+  "first_messages": {
+    "empty": "{\"AuthToken\":\"\",\"columns\":120,\"rows\":40}",
+    "fitted": "{\"AuthToken\":\"dXNlcjpwYXNz\",\"columns\":120,\"rows\":{0}}",
+    "sized": "{\"AuthToken\":\"\",\"columns\":120,\"rows\":{0}}",
+    "token": "{\"AuthToken\":\"dXNlcjpwYXNz\",\"columns\":120,\"rows\":40}"
+  },
+  "lines": {
+    "close_reply": {
+      "0": {
+        "type": "console.close"
+      }
+    },
+    "close_request": {
+      "0": {
+        "type": "console.close"
+      }
+    },
+    "close_sleep": {
+      "state": null,
+      "then_type": "ui.console_closed"
+    },
+    "close_wake": {
+      "0": {
+        "type": "ui.console_closed"
+      },
+      "replies": [
+        {
+          "0": {
+            "type": "console.close"
+          }
+        }
+      ],
+      "state": null
+    },
+    "close_wake_open_reply": {
+      "0": {
+        "type": "ui.console_closed"
+      },
+      "replies": [
+        {
+          "0": {
+            "type": "console.open"
+          },
+          "token": "dXNlcjpwYXNz"
+        }
+      ],
+      "state": null
+    },
+    "input": {
+      "0": {
+        "blobs": 1,
+        "type": "console.input"
+      }
+    },
+    "open_reply": {
+      "0": {
+        "type": "console.open"
+      },
+      "token": "dXNlcjpwYXNz"
+    },
+    "open_reply_empty": {
+      "0": {
+        "type": "console.open"
+      },
+      "token": ""
+    },
+    "open_request": {
+      "0": {
+        "type": "console.open"
+      }
+    },
+    "open_sleep": {
+      "state": null,
+      "then_type": "ui.console_reply"
+    },
+    "open_wake": {
+      "0": {
+        "type": "ui.console_reply"
+      },
+      "replies": [
+        {
+          "0": {
+            "type": "console.open"
+          },
+          "token": "dXNlcjpwYXNz"
+        }
+      ],
+      "state": null
+    },
+    "open_wake_bare": {
+      "0": {
+        "type": "ui.console_reply"
+      },
+      "replies": [
+        {
+          "0": {
+            "type": "console.open"
+          }
+        }
+      ],
+      "state": null
+    },
+    "open_wake_close_reply": {
+      "0": {
+        "type": "ui.console_reply"
+      },
+      "replies": [
+        {
+          "0": {
+            "type": "console.close"
+          }
+        }
+      ],
+      "state": null
+    }
+  },
+  "texts": {
+    "console_view_close_phase_closing": "The console was asked to close while it was closing, not open.",
+    "console_view_close_phase_idle": "The console was asked to close while it was idle, not open.",
+    "console_view_close_phase_opening": "The console was asked to close while it was opening, not open.",
+    "console_view_closed_phase": "The console got the reply to console.close while it was open, not closing.",
+    "console_view_exit_phase_idle": "The console ended while it was idle, not open or closing.",
+    "console_view_exit_phase_opening": "The console ended while it was opening, not open or closing.",
+    "console_view_kind_unknown_0": "The console got a ttyd message of kind 0, which is not output, a title or preferences.",
+    "console_view_kind_unknown_123": "The console got a ttyd message of kind 123, which is not output, a title or preferences.",
+    "console_view_kind_unknown_255": "The console got a ttyd message of kind 255, which is not output, a title or preferences.",
+    "console_view_kind_unknown_47": "The console got a ttyd message of kind 47, which is not output, a title or preferences.",
+    "console_view_kind_unknown_51": "The console got a ttyd message of kind 51, which is not output, a title or preferences.",
+    "console_view_message_empty": "The console got a ttyd message with no bytes.",
+    "console_view_open_phase_closing": "The console was asked to open while it was closing, not idle.",
+    "console_view_open_phase_open": "The console was asked to open while it was open, not idle.",
+    "console_view_open_phase_opening": "The console was asked to open while it was opening, not idle.",
+    "console_view_reply_id": "The console got the reply to request {0} while it waits for request {1}.",
+    "console_view_reply_phase_idle": "The console got the reply to console.open while it was idle, not opening.",
+    "console_view_reply_phase_open": "The console got the reply to console.open while it was open, not opening.",
+    "console_view_reply_type_close": "The console got a reply of type console.close instead of console.open.",
+    "console_view_reply_type_open": "The console got a reply of type console.open instead of console.close.",
+    "console_view_rows_unfit": "The console has {0} px above the band for rows of {1} px, which is not room for one row.",
+    "console_view_token_invalid": "The reply to console.open carries a token of type undefined instead of text."
+  }
+}

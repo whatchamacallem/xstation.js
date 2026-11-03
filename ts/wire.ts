@@ -26,7 +26,10 @@
 // decoder. A second `tap.start`, as `system.restart` makes, throws
 // `wire.start_twice`: only a reload of the page takes a new first line. The
 // JSON of ttyd's token answer and of its preferences is read by
-// `jslb.json_decode`.
+// `jslb.json_decode`. Every line posted after a `system.restart` is held,
+// never sent, since the restarted server reads the pipe the one before it
+// left: its first line from the page is then the `error` line of
+// `wire_end`, which is never held, refusing its `tap.start`.
 //
 // A fault while the port takes a message stops it taking more but leaves the
 // socket open, so that the worker's report can still send the `error` line
@@ -71,11 +74,14 @@ namespace wire {
     // The first phase blob bytes held in memory: none.
     first_overflow_bytes: 0,
     first_type: "tap.start",
+    restart_type: "system.restart",
     error_type: "error",
     open_type: "console.open",
     input_type: "console.input",
     output_type: "console.output",
     read_type: "console.read",
+    busy_type: "console.busy",
+    idle_type: "console.idle",
     chunk_setting: "chunk_bytes",
     line_setting: "line_max",
     blob_setting: "blob_max",
@@ -392,14 +398,32 @@ namespace wire {
     }
   }
 
-  // The reads of the console output, each decoded from its own start.
+  // The output a turn of the AI's keeps for its reads, decoded as it comes.
+  interface KeepState {
+    decoder: TextDecoder;
+    text: string;
+  }
+
+  // The reads of the console output, from their start or the kept text.
   export class ConsoleReader {
     private read: ReadState | undefined = undefined;
+    private keep: KeepState | undefined = undefined;
 
     // Takes a message of ttyd's, ignored unless a read waits that it may end.
     message_take(message: Uint8Array): lines.ConsoleReadReply | undefined {
       const kind = message_kind(message);
       const read = this.read;
+      const keep = this.keep;
+      if (kind === constants.output_kind && keep !== undefined) {
+        try {
+          keep.text += keep.decoder.decode(message.subarray(1), {
+            stream: true,
+          });
+        } catch (error) {
+          throw utility.error_wrap(i18n("wire.kept_invalid"), error);
+        }
+        return read === undefined ? undefined : this.kept_match(read, keep);
+      }
       if (kind !== constants.output_kind || read === undefined) {
         return undefined;
       }
@@ -410,17 +434,20 @@ namespace wire {
       return this.read_end(read, false);
     }
 
-    // Starts a read of the output from now on, until `until` shows in it.
-    read_start(until: string): void {
+    // Starts a read until `until` shows, answered at once if kept text has it.
+    read_start(until: string): lines.ConsoleReadReply | undefined {
       const read = this.read;
       if (read !== undefined) {
         throw new Error(i18n("wire.read_twice", read.until));
       }
-      this.read = {
+      const started: ReadState = {
         until,
         decoder: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }),
         text: "",
       };
+      this.read = started;
+      const keep = this.keep;
+      return keep === undefined ? undefined : this.kept_match(started, keep);
     }
 
     // Ends the waiting read when its timer expires or its socket closes.
@@ -429,7 +456,46 @@ namespace wire {
       if (read === undefined) {
         throw new Error(i18n("wire.read_none"));
       }
+      const keep = this.keep;
+      if (keep !== undefined) {
+        read.text = keep.text;
+        keep.text = "";
+      }
       return this.read_end(read, true);
+    }
+
+    // Keeps the output for the turn's reads, each to its first match.
+    keep_start(): void {
+      if (this.keep !== undefined) {
+        throw new Error(i18n("wire.keep_twice"));
+      }
+      this.keep = {
+        decoder: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }),
+        text: "",
+      };
+    }
+
+    // Ends the keeping and drops what was kept.
+    keep_stop(): void {
+      if (this.keep === undefined) {
+        throw new Error(i18n("wire.keep_none"));
+      }
+      this.keep = undefined;
+    }
+
+    // Ends the read with the kept text to its first match, the rest kept.
+    private kept_match(
+      read: ReadState,
+      keep: KeepState,
+    ): lines.ConsoleReadReply | undefined {
+      const found = keep.text.indexOf(read.until);
+      if (found < 0) {
+        return undefined;
+      }
+      const end = found + read.until.length;
+      read.text = keep.text.slice(0, end);
+      keep.text = keep.text.slice(end);
+      return this.read_end(read, false);
     }
 
     // The reply of the waiting read, which ends it.
@@ -478,6 +544,10 @@ namespace wire {
     private shut = false;
     // Cleared by a fault in a message, after which no message is taken.
     private taking = true;
+    // Set by a posted `system.restart`, after which posts are held.
+    private restart_posted = false;
+    // The lines posted after the restart, never sent.
+    private readonly posts_held: lines.Line[] = [];
 
     // Takes the page's address, the sink of streamed blobs, the settings.
     constructor(
@@ -545,11 +615,23 @@ namespace wire {
         return;
       }
       // The drain timer starts once the last frame is sent, in `frames_send`.
-      this.line_post(line, []);
+      this.line_send(line);
+    }
+
+    // Sends the line, or holds it once a `system.restart` was posted.
+    line_post(line: lines.Line, _transfer: ArrayBuffer[]): void {
+      if (this.restart_posted) {
+        this.posts_held.push(line);
+        return;
+      }
+      if (jslb.field_get(line[0], "type") === constants.restart_type) {
+        this.restart_posted = true;
+      }
+      this.line_send(line);
     }
 
     // Encodes the line and sends it as input frames, once the first is in.
-    line_post(line: lines.Line, _transfer: ArrayBuffer[]): void {
+    private line_send(line: lines.Line): void {
       if (!this.first_seen) {
         throw new Error(
           i18n("wire.post_early", jslb.field_get(line[0], "type")),
@@ -813,7 +895,7 @@ namespace wire {
       socket_made(this.socket, this.socket_url).close(constants.close_normal);
     }
 
-    // Opens tty 0, sends one `console.input` message, or starts a read.
+    // Opens tty 0, sends a message, starts a read, or keeps a turn's output.
     line_post(line: lines.Line, _transfer: ArrayBuffer[]): void {
       const type = jslb.field_get(line[0], "type");
       if (type === constants.open_type) {
@@ -823,6 +905,10 @@ namespace wire {
         socket.send(buffer_copy(blob_bytes(line)));
       } else if (type === constants.read_type) {
         this.read_start(line);
+      } else if (type === constants.busy_type) {
+        this.reader.keep_start();
+      } else if (type === constants.idle_type) {
+        this.reader.keep_stop();
       } else {
         throw new Error(i18n("wire.console_type", type));
       }
@@ -921,8 +1007,13 @@ namespace wire {
       ) {
         throw new Error(i18n("wire.read_seconds", seconds));
       }
-      this.reader.read_start(until);
+      const kept = this.reader.read_start(until);
       this.read_id = id;
+      // Kept text that already holds `until` answers once the caller sleeps.
+      if (kept !== undefined) {
+        queueMicrotask(() => this.read_answer(kept));
+        return;
+      }
       this.read_timer = setTimeout(
         () => this.read_expire(),
         seconds * constants.second_ms,

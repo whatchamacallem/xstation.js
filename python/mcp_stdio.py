@@ -5,13 +5,15 @@
 #
 # The stdio transport of the MCP server, so an external agent drives the
 # server's tools directly: newline delimited `JSON-RPC` on stdin and stdout.
-# Run as python3 python/mcp_stdio.py --root ROOT. Each input line is parsed
-# by `jslb.json_decode`, the decoders' door for bad numbers. A line that is
-# not a JSON object is a hard error: the exception reaches stderr and the
-# exit code is 1. After a request answered with an exception it writes the
-# answer, then raises the exception, so the process exits 1: fail loud.
-# The modules beside this file are imported inside the functions that use
-# them, after their bytecode has been sent to build/.
+# Run as python3 python/mcp_stdio.py --root ROOT. It reads the root's
+# settings, then its parameters, parameters.json, and sets its switches from
+# them, as bootstrap.py does, so that debug mode is the root's. Each input
+# line is parsed by `jslb.json_decode`, the decoders' door for bad numbers.
+# A line that is not a JSON object is a hard error: the exception reaches
+# stderr and the exit code is 1. After a request answered with an exception
+# it writes the answer, then raises the exception, so the process exits 1:
+# fail loud. The modules beside this file are imported inside the functions
+# that use them, after their bytecode has been sent to build/.
 
 import argparse, io, json, os, sys
 from collections.abc import Callable
@@ -80,7 +82,7 @@ def stdio_run(
 
 # Serves the server's MCP tools as newline delimited `JSON-RPC` on stdio.
 def stdio_serve(argv: list[str]) -> int:
-    import engine_system, settings
+    import engine_system, settings, switches
 
     parser = argparse.ArgumentParser(
         description="Serve the server's MCP tools as newline delimited"
@@ -88,8 +90,9 @@ def stdio_serve(argv: list[str]) -> int:
     )
     parser.add_argument("--root", required=True, help="the server's root")
     root: str = parser.parse_args(argv).root
-    loaded = settings.settings_load(os.path.join(root, _SETTINGS_NAME))
-    debug: bool = loaded["debug"]
+    settings.settings_load(os.path.join(root, _SETTINGS_NAME))
+    switches.switches_apply(switches.parameters_load(root))
+    debug = switches.debug
     # The streams take the transport's encoding in place of the locale's.
     for stream in (sys.stdin, sys.stdout):
         cast(io.TextIOWrapper, stream).reconfigure(encoding=_ENCODING)

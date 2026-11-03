@@ -1,0 +1,6 @@
+{
+  "running_seconds": 0.2,
+  "texts": {
+    "stall_loop_run_reached": "loop_run ran in {0}, though loop_prepare never returns."
+  }
+}

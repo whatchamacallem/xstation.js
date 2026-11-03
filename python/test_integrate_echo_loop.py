@@ -27,7 +27,7 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
-# The id of this module's gold in `test_settings.json`.
+# The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_integrate_echo_loop"
 
 # A size chosen by its writer, small: a blob over it streams to the cache.
@@ -171,7 +171,7 @@ def _session_serve(root: str, read_fd: int, write_fd: int) -> str:
     path = os.path.join(root, "settings.json")
     with open(path, encoding="utf-8") as file:
         values: dict[str, Any] = json.load(file)
-    verbose.log_open(root, values["verbose_ring"])
+    verbose.log_open(root, values["verbose_ring"], values["blob_max"])
     echo_loop.loop_prepare(root)
     echo_loop.loop_run(read_fd, write_fd, root)
     return _ENDING_RETURNED
