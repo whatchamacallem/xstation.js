@@ -4,6 +4,11 @@
 // awaited reply is in, the verbose sink of the thread, and in debug mode a
 // verbose line for every submit, dispatch, sleep, wake and reply.
 //
+// The lines of each input run in the order they come, in both modes, and a
+// wake runs in its last reply's place, before every line that came after
+// that reply, so that the order a queue runs its lines in is the order its
+// inputs gave them.
+//
 // The blob bytes it holds are bounded by `blob_max`, the largest database:
 // a held line counts the blobs it holds in memory, `line_bytes`, so a blob
 // streamed to a cache file counts nothing and a database of `blob_max` with

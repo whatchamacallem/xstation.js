@@ -332,6 +332,7 @@ _C_INTEGRATION: list[tuple[str, str]] = [
     ("test_integrate_wire.ts", "smoke-test"),
     ("test_worker_ai_console.ts", "smoke-test"),
     ("test_tools_browser_console.ts", "smoke-test"),
+    ("test_console_open.ts", "smoke-test"),
 ]
 
 # Every suite and block of a run, in the phases of the order above.

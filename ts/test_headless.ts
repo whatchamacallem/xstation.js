@@ -234,6 +234,10 @@ namespace test_headless {
       side: "worker",
       topology: test_tools_browser_console.topology_build,
     },
+    test_console_open: {
+      side: "ui",
+      topology: test_console_open.topology_build,
+    },
   });
 
   // Where the lane stands: not yet open, open, then started by the driver.

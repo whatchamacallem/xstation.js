@@ -211,6 +211,12 @@ command only to name the log.
   script, a double, a mock or anything else. It is the primary exception to
   the ban on mock test objects: the test suites must run without an AI API
   endpoint, since an AI API endpoint is non-deterministic.
+- ttyd's ends are asynchronous by its design: the close of its socket, the
+  end of the process behind it and the output around them come in no fixed
+  order relative to the lines that asked for them. This is a known limitation
+  of ttyd, not a question for the maintainer, however often a race of it is
+  found. Tests are designed to work with it: each waits for the end it needs,
+  and none expects an order that ttyd does not keep.
 - Directly changing a module's internal state during testing to emulate a
   test environment is forbidden. All tests go through the APIs being tested
   and show normal operation. They do not use isolated operation of an

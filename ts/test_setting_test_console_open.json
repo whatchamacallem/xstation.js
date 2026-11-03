@@ -1,0 +1,227 @@
+{
+  "cases": [
+    {
+      "expect": [
+        "phase_1_reply"
+      ],
+      "name": "hidden_idle",
+      "seconds": 10,
+      "send": [
+        "phase_1"
+      ]
+    },
+    {
+      "expect": [
+        "show_2_reply"
+      ],
+      "name": "shown_opened",
+      "seconds": 10,
+      "send": [
+        "show_2"
+      ]
+    },
+    {
+      "expect": [
+        "phase_3_reply"
+      ],
+      "name": "open_read",
+      "seconds": 10,
+      "send": [
+        "phase_3"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "prompt_drawn",
+      "seconds": 2,
+      "send": []
+    },
+    {
+      "expect": [
+        "rows_4_reply"
+      ],
+      "name": "prompt_read",
+      "seconds": 10,
+      "send": [
+        "rows_4"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "echo_typed",
+      "seconds": 0.2,
+      "send": [
+        "type_size"
+      ]
+    },
+    {
+      "expect": [
+        "rows_5_reply"
+      ],
+      "name": "echo_read",
+      "seconds": 10,
+      "send": [
+        "rows_5"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "size_run",
+      "seconds": 1,
+      "send": [
+        "type_enter"
+      ]
+    },
+    {
+      "expect": [
+        "rows_6_reply"
+      ],
+      "name": "size_read",
+      "seconds": 10,
+      "send": [
+        "rows_6"
+      ]
+    },
+    {
+      "expect": [],
+      "name": "closed",
+      "seconds": 1,
+      "send": [
+        "close_ask"
+      ]
+    },
+    {
+      "expect": [
+        "phase_7_reply"
+      ],
+      "name": "idle_read",
+      "seconds": 10,
+      "send": [
+        "phase_7"
+      ]
+    }
+  ],
+  "lines": {
+    "close_ask": {
+      "0": {
+        "type": "console_probe.close"
+      }
+    },
+    "phase_1": {
+      "0": {
+        "id": 1,
+        "type": "console_probe.phase"
+      }
+    },
+    "phase_1_reply": {
+      "0": {
+        "reply": 1,
+        "type": "console_probe.phase"
+      },
+      "open": false,
+      "wanted": false
+    },
+    "phase_3": {
+      "0": {
+        "id": 3,
+        "type": "console_probe.phase"
+      }
+    },
+    "phase_3_reply": {
+      "0": {
+        "reply": 3,
+        "type": "console_probe.phase"
+      },
+      "open": true,
+      "wanted": false
+    },
+    "phase_7": {
+      "0": {
+        "id": 7,
+        "type": "console_probe.phase"
+      }
+    },
+    "phase_7_reply": {
+      "0": {
+        "reply": 7,
+        "type": "console_probe.phase"
+      },
+      "open": false,
+      "wanted": true
+    },
+    "rows_4": {
+      "0": {
+        "id": 4,
+        "type": "console_probe.rows"
+      }
+    },
+    "rows_4_reply": {
+      "0": {
+        "reply": 4,
+        "type": "console_probe.rows"
+      },
+      "rows": [
+        "$"
+      ]
+    },
+    "rows_5": {
+      "0": {
+        "id": 5,
+        "type": "console_probe.rows"
+      }
+    },
+    "rows_5_reply": {
+      "0": {
+        "reply": 5,
+        "type": "console_probe.rows"
+      },
+      "rows": [
+        "$ stty size"
+      ]
+    },
+    "rows_6": {
+      "0": {
+        "id": 6,
+        "type": "console_probe.rows"
+      }
+    },
+    "rows_6_reply": {
+      "0": {
+        "reply": 6,
+        "type": "console_probe.rows"
+      },
+      "rows": [
+        "$ stty size",
+        "20 120",
+        "$"
+      ]
+    },
+    "show_2": {
+      "0": {
+        "id": 2,
+        "type": "console.show"
+      }
+    },
+    "show_2_reply": {
+      "0": {
+        "reply": 2,
+        "type": "console.show"
+      }
+    },
+    "type_enter": {
+      "0": {
+        "type": "console_probe.type"
+      },
+      "text": "\r"
+    },
+    "type_size": {
+      "0": {
+        "type": "console_probe.type"
+      },
+      "text": "stty size"
+    }
+  },
+  "prompt": "$ ",
+  "root": {},
+  "rows": 20
+}

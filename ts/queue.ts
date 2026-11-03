@@ -898,7 +898,12 @@ namespace queue {
         owed: sleep.owed,
         bytes: sleep.bytes,
       };
-      this.item_push(item, true);
+      // The wake takes its reply's place, before what came after the reply.
+      if (this.synchronous) {
+        this.local.push(item);
+      } else {
+        this.inbox.unshift(item);
+      }
     }
 
     // Posts a reply line on the port of the request it answers, if owed.

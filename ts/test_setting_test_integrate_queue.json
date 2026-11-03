@@ -41,9 +41,20 @@
       "name": "note_silent",
       "seconds": 0.2,
       "send": ["note"]
+    },
+    {
+      "expect": ["order_reply", "after_seen"],
+      "name": "wake_ordered",
+      "seconds": 10,
+      "send": ["order_request", "go"]
     }
   ],
   "lines": {
+    "after_seen": {
+      "0": {
+        "type": "queue_ui.after"
+      }
+    },
     "echo_five": {
       "0": {
         "id": 5,
@@ -100,6 +111,11 @@
       },
       "text": "six"
     },
+    "go": {
+      "0": {
+        "type": "queue_end.go"
+      }
+    },
     "halves_ab_cd": {
       "0": {
         "blobs": 2,
@@ -151,6 +167,18 @@
         "type": "queue_test.note"
       },
       "text": "unanswered"
+    },
+    "order_reply": {
+      "0": {
+        "reply": 7,
+        "type": "queue_test.order"
+      }
+    },
+    "order_request": {
+      "0": {
+        "id": 7,
+        "type": "queue_test.order"
+      }
     },
     "pair_reply": {
       "0": {

@@ -470,7 +470,8 @@ Windows path:
    returns at once, starting no program and changing no file; otherwise it
    builds. So a run builds whenever `build/ttyd/ttyd` is missing
    or was built from another archive or other patches, since `build/` may
-   be deleted at any time and Docker starts from a clean checkout. A record
+   be deleted at any time and a run may start from a clean checkout. A
+   record
    of another layout, or one cut short, is a record of other inputs. The
    record is written last, after `ttyd --version` exits 0, so a failed
    build leaves none and the next run builds again.
@@ -573,6 +574,13 @@ test path, and the second answer as no test starting a Windows program
    bubblewrap since 2026-10-30 (7.4), in use too, and the install script
    neither checks for nor names the apt package `bubblewrap`; and its ttyd
    build could run `python/ttyd_build.py` through WSL (3.15 item 8).
+5. By the maintainer's answer to Question P1 of task 11's postmortem,
+   "powershell will never be made available, i keep telling you to ignore
+   it. do everything you can without it, a dependency on it is
+   undesirable.": PowerShell is ignored, no question is asked of it,
+   nothing of the Linux run waits on it, and the designs written for the
+   Windows path's return, 3.27 item 6 among them, stay as written and
+   are built by no task.
 
 3.17 The switches, by the maintainer's answer of 2026-11-01 to 11.2 item
 29: "so far we have --anthropic --debug and --verbose and i want them all
@@ -880,6 +888,54 @@ formatter and no checker of `python/reformat_table.json`:
    patch of ttyd's `src/server.c` sets `info.extensions` to NULL, so that
    ttyd offers no extension and sends every frame uncompressed, and the
    runs go on.
+
+3.28 Each queue runs the lines of its inputs in the order they come, by
+the maintainer's answer to Question P4 of task 11's postmortem
+(`tmp/tasks_30_2127.md` section 28), "jslb input streams need to be
+executed in order. out of order execution is non-deterministic and hard to
+test. update and overrule pervious instructions if any.", written here
+before any code.
+
+1. In a queue that is not synchronous a reply's wake was held at the end
+   of the inbox when the reply's step ran, so a line that came after the
+   reply and before that step ran before the wake (7.9.1 item 2). From
+   now a wake takes its last reply's place: in a queue that is not
+   synchronous it is held at the front of the inbox and runs at the next
+   step, before every line that came after that reply. In synchronous
+   mode a reply runs only once the queue's own items are done, so its
+   wake, held with them, already runs before every later input, and
+   nothing changes there.
+2. `API/ts/queue.d.ts` says so first: the lines of each input run in the
+   order they come, and a wake runs in its last reply's place, in both
+   modes.
+3. The test: `test_queue`'s tests run in synchronous mode, within the
+   test's call, and two lines a test sends on a MessageChannel need not
+   both be held before the queue's next step, since the step's own
+   message can run between them; so A's `test_integrate_queue`, whose
+   queues follow `queue_synchronous`, false in every run, gains a far end
+   whose posts reach the queue within the post. Its `ai` queue's lane of
+   thread `http`, a name of `queue.ThreadName` it gives no other use, is
+   one of a linked pair of `queue.LocalPort`s whose other end's receiver
+   is the test's own function (6.9 item 3.2), owning `queue_end.`. The
+   new case `wake_ordered` sends `queue_test.order`, whose handler submits
+   `queue_end.ask` and sleeps, and then `queue_end.go`, which the queue
+   forwards to that end; the end then posts the reply to the request it
+   kept and a `queue_test.after`, both within the forward, so that both
+   are held before the reply's step runs. The wake answers the order and
+   the `queue_test.after` handler notifies `queue_ui.after`, so the case
+   expects the order's reply and then that notice; with the wake held at
+   the inbox's end the notice comes first and the case fails.
+4. What it overrules: 11.2 item 52, the race settled in `console_view`,
+   and 7.9.1 item 2's design. With the wake in order, the AI side's reply
+   to `console.close`, posted before the socket's close, always runs on
+   the UI before tty 0's `console.exit`. An end before the close's wake
+   is then a case that cannot happen, so the view's phase `ended`, its
+   flag `close_woken`, `TestClosing.test_exit_first` and the stub's
+   paragraph on that end go, and `close_done` refuses any phase but
+   `closing` again.
+5. The order of ttyd's own ends, its socket's close against its process's
+   end and the last output, stays as ttyd's design makes it, a known
+   limitation by the project rules; the tests wait for the end they need.
 
 ## 4 The rules every task follows
 
@@ -2416,6 +2472,47 @@ dash with none (log item 38.1).
             SHA-256 checked equal to its own before.
          4. The block takes about 1.1 s in the stream, and 3.5 s of wall
             time alone with the bring up.
+8. dash's controlling tty, by the maintainer's message of task 12 of
+   `tmp/tasks_30_2127.md`, "re """can't access tty; job control turned
+   off""" no this has to be fixed, add that to the plan.", planned and not
+   yet built. Measured on 2026-11-03 under `build/repro/tty/` as `xsjs`,
+   bubblewrap 0.9.0, each argv on a pty of its own whose child leads its
+   session with the pty as its controlling terminal, as ttyd starts the
+   console role:
+   1. The argv of now: bwrap's `--new-session` gives the shell a session
+      with no controlling terminal, so dash writes the line on job
+      control, `$-` is `si`, and `exit 7` returns 7.
+   2. The argv without `--new-session`: dash shares the console role's
+      session and its tty, job control is on and `$-` is `smi`, but at its
+      exit dash cannot set back the process group it found, which lies
+      outside its pid namespace; it writes "Cannot set tty process group
+      (No such process)" and returns 2 for `exit 7`. Refused.
+   3. util-linux's `setsid --ctty` before dash inside the sandbox: the pty
+      is still the console role's controlling terminal, so taking it is
+      refused, "Operation not permitted". Refused.
+   4. The design: the console role gives up the pty as its controlling
+      terminal by `TIOCNOTTY` on fd 0 just before it starts bwrap, its
+      `SIGHUP` ignored for that call alone, since a session leader's
+      `TIOCNOTTY` sends its own process group SIGHUP, and then restored to
+      the handler it had. Inside the sandbox, where bwrap's init leads the
+      session and the shell's process is pid 2 of process group 1, a step
+      of Python's standard library, `python3 -I -c`, calls `os.setsid()`
+      and `TIOCSCTTY` on fd 0, then `os.execv` of `/bin/dash` with dash's
+      own arguments, `-v` in the verbose form. Measured: no line on job
+      control, `$-` `smi`, `jobs` lists a background job, and `exit 7`
+      returns 7. `--new-session` is kept.
+   5. What it changes: the argv constant of `python/bootstrap.py`, the
+      maintainer's exact command of this section's first paragraph,
+      gains the Python step before dash; its stub's header and the gold
+      copies of the argv follow (item 2.4); the console role's start of
+      bwrap gains the release; and item 5's measurements are made again,
+      `$-` and the codes of item 5.4 among them, since a dash that holds
+      the pty as its controlling terminal takes the hangup of its own
+      session when ttyd closes the pty. The line on job control leaves
+      every output; item 2.3 stays, for whatever a sandbox writes first.
+   6. The Python inside the sandbox starts no command line utility: it
+      replaces itself with dash, which the maintainer gave, by the
+      standard library alone.
 
 7.5 The driver's phase C and its blocks, every new or changed API given
 before any code.
@@ -2889,6 +2986,85 @@ first, and ends with the report of 4.9 item 4.
    Under the lock: its gold, `ts/tsconfig.test.json`, its entry in
    `ts/test_headless.ts`, its entry in `_C_INTEGRATION`, and any string of
    `i18n/en-US.json`. Needs 7.8.1 and 7.8.2. Runs and is done as 7.8.3.
+   1. Design, on 2026-11-03, task 11 of `tmp/tasks_30_2127.md`, before
+      its code. The UI side is built as `test_integrate_console_view`
+      builds it, the frame fitted to the gold's `rows` and the page's
+      elements, on a real UI queue in the mode of `queue_synchronous`,
+      the block's file holding its own copy of those builders since the
+      task owns no other file. The UI queue's `ai` lane is one of a
+      linked pair of `queue.LocalPort`s whose other end is the `ui` lane
+      of a second real queue of thread `ai` in synchronous mode, with
+      `worker_ai.owners_make()`, `worker_ai.console_register` and a real
+      `wire.ConsolePort` at `location.href` as its `console` owner, whose
+      close receiver, the test's own, pushes `console.exit` with the
+      close code to the UI as `test_worker_ai_console`'s does. The
+      test's end is a `queue.ThreadPort` over a MessageChannel on the UI
+      queue's lane of thread `server`: `queue.ThreadName` is closed, `ai`
+      is the linked port, and the UI thread's table gives `server` no
+      type, so a request on it of a type the UI owns runs there and its
+      reply goes back on it. The check of 6.9 item 3.1: the relay
+      registers `console.open`, `worker.console_opened` and
+      `console.close`, and the page's handlers none of them. The probes,
+      of the prefix `console_probe.` that the UI owns: `rows`, the
+      console's rows read from the DOM as `test_integrate_console_view`
+      reads them, from the first that starts with the gold's `prompt` on,
+      by 7.4 item 2.3, since dash writes its line on job control first
+      (7.4 item 5.1); `phase`, the view's `open_is()` and `open_wanted()`;
+      `type`, text typed into the terminal's input; and `close`, the
+      view's `close_request()`. The cases: the view hidden and idle;
+      `console.show` answered once tty 0 is open; the view open; a wait
+      of 2 s, then dash's first prompt read from the rows; `stty size`
+      typed and drawn as the view's echo; Enter, a wait of 1 s, then the
+      command's line echoed by the tty, its output, the gold's 20 rows
+      and the view's 120 columns that ttyd's first message gave, and the
+      prompt; the close, a wait of 1 s, then the view shown and idle, so
+      that a show would open tty 0 anew. ttyd's token is the empty one,
+      the block's ttyd having no credential, and the prompt drawn shows
+      that ttyd took the first message. Labelled `smoke-test` (7.2 item
+      4), last in `_C_INTEGRATION`, after the blocks of the modules it
+      runs; its file in `ts/tsconfig.test.json` before
+      `ts/test_headless.ts`, which names it.
+   2. Found on 2026-11-03 by the block's breaks, before any change of the
+      product for it: in the last break's run, whose own case never ran,
+      the page faulted in the case of the close with
+      `console_view.closed_phase`, "The console got the reply to
+      console.close while it was idle, not closing.". In a queue that is
+      not synchronous, `queue_synchronous` being false in
+      `settings.json`, a reply's wake is held at the end of the inbox
+      when the reply's step runs, so a `console.exit` that came after
+      the reply and before that step runs before the wake: `exit_done`
+      left the view idle and `close_done` threw. The product has the
+      same order across the AI worker's MessagePort; synchronous mode,
+      debug only, holds a queue's own items ahead of its inputs and
+      hides it. The design, in `API/ts/console_view.d.ts` before its
+      code: tty 0's end may come before the wake of the close it
+      follows, so the view's new phase `ended` holds an end that came
+      while closing; `close_done` takes the wake in `closing`, the
+      phase kept until the end, or in `ended`, which leaves the view
+      idle, and is refused in any other phase as before; `exit_done` in
+      `open` leaves it idle, in `closing` makes it `ended`, and is
+      refused otherwise. While `ended` the view takes no input and asks
+      for no opening, as while closing. `test_console_view` gains
+      `TestClosing.test_exit_first`: the end before the close's wake,
+      the view not wanting an opening until the wake, then opened again.
+      The other place for it, the queue holding a wake in its last
+      reply's place in both modes, is left to the maintainer (11.2 item
+      52).
+   3. Status, on 2026-11-03: done. Its first run found dash's line on
+      job control before the first prompt, which 7.4 item 2.3 keeps out
+      of the comparison, so `rows` reads from the gold's `prompt` on; the
+      next passed its 11 cases in 4.424 s. Each case broken once in the
+      gold failed at that case, the last after the change of item 2,
+      before which its run faulted on the race; the gold then restored
+      and checked by SHA-256. After the change, 20 runs of 20 passed,
+      `test_console_view` with `test_exit_first` passed, and the block
+      passed in a `--normal-test` run. `stty size` printed `20 120`. The
+      smoke target passed 119 of 119 in 121.303 s of its 180 s, the
+      block 4.383 s of it; the normal target passed in 634.118 s.
+   4. Overturned on 2026-11-03 by 3.28, the maintainer's answer to
+      Question P4: item 2's design in `console_view` goes, the queue's
+      wake in its reply's place preventing the race; item 2's finding
+      stands.
 2. 7.9.2, the order of C and the whole runs. Owns the order of
    `_C_INTEGRATION`, under the lock, and C's layer table, written into this
    plan under its lock. Computes C's layers by 6.8 item 7's method, then
@@ -2907,6 +3083,15 @@ first, and ends with the report of 4.9 item 4.
       `worker_ai.console_register` as `test_worker_ai_console` tests it. C's
       layer table by the compiler API, the whole runs and the label moves
       wait.
+   2. Status, 2026-11-03, task 11 of `tmp/tasks_30_2127.md`, the order
+      alone, by the same rules read by hand: `test_console_open` last,
+      since it runs `wire.ConsolePort` and `worker_ai.console_register`,
+      which `test_integrate_wire` and `test_worker_ai_console` test, and no
+      other block of C runs `console_view` or `page`. With it the whole
+      runs passed: the smoke target 119 of 119 in 121.303 s, the normal
+      target 121 of 121 in 634.118 s, and `--tty --stream` 119 of 119 in
+      118.573 s. C's layer table by the compiler API and the label moves
+      wait.
 3. 7.9.3, the check agent, alone, last: `python3 python/reformat.py` twice
    over the whole tree, staged first and unstaged after; both configs; ruff
    and pyright strict over `python/`; nothing staged, no lock left,
@@ -2922,10 +3107,11 @@ first, and ends with the report of 4.9 item 4.
    item 6); the page's display of its worker's load error, and
    `error_overlay`'s append while the parser runs a script (7.6 item 5).
 3. 10.7's scripted console, not planned (7.2 item 7).
-4. Docker, where `test_posix.sh` will run: the console's shell needs the
-   user namespaces that this Ubuntu lets bubblewrap make, which a container
-   may not, and the image needs `bubblewrap`, `chrome-headless-shell` and
-   ttyd's build tools; measured when the run moves there.
+4. No Docker, by the maintainer's answer to Question P2 of task 11's
+   postmortem, "remove the use of docker from your plan right now. once
+   the script passes in your env it can be assumed to work in any
+   container...": `test_posix.sh` passing in this environment is taken to
+   pass in any container, and nothing is planned for one.
 
 7.11 Wave 4, by the maintainer's answers of 2026-11-01
 (`tmp/tasks_30_2127.md` task 5), each task an agent's, on the files it
@@ -3813,8 +3999,7 @@ wanting confirmation. Every item here was confirmed on 2026-11-02
     `chrome-headless-shell` through `devtools.LinuxPipe` (36.4, 7.6, 7.7).
 19. The reading of "automated testing should be ubuntu only, not wsl" (item
     35): no test starts a Windows program, and the official run is
-    `test_posix.sh`'s on Ubuntu, which here runs inside WSL2 until it moves
-    to Docker (3.16).
+    `test_posix.sh`'s on Ubuntu, which here runs inside WSL2 (3.16).
 20. The coordinator's decisions after the maintainer's answer of item 39:
     the console's shell a constant argv at the top of `python/bootstrap.py`,
     in use and in the tests alike, not a setting, since nothing asks for the
@@ -3996,6 +4181,20 @@ wanting confirmation. Every item here was confirmed on 2026-11-02
     with no caller in an official run; the normal-test run still
     formatting; the Windows target's formatting in a smoke run left as
     it is, its design written in item 6, while it is offline.
+51. Task 11's decisions of 7.9.1 item 1: the test's end on the UI
+    queue's lane of thread `server`, since `queue.ThreadName` is closed
+    and `ai` is the linked port, rather than a new thread name in the
+    API; the builders of `test_integrate_console_view` copied into the
+    block's file, which is the only file the task owns, rather than
+    exported from that block; and fixed waits of the gold's seconds for
+    dash's prompt and output, as `test_integrate_console_view` waits for
+    the terminal to draw, rather than a probe that polls the rows.
+52. Task 11's decision of 7.9.1 item 2: the race of tty 0's end and the
+    close's wake settled in `console_view`, its phase `ended`, rather
+    than in `queue`, whose wake would take its last reply's place in
+    the order in both modes as synchronous mode already does; the
+    queue's change would alter the one synchronization tool for every
+    caller, and the view's is cheap to undo. Overturned by 11.3 item 36.
 
 11.3 Class C, confirmed by the answers and acceptances of 2026-10-30 and
 2026-11-01:
@@ -4153,6 +4352,22 @@ wanting confirmation. Every item here was confirmed on 2026-11-02
     compression if there is a blocking problem using it and continue, it
     is only being used for bring up and may be replaced": compression
     stays while it causes no blocking problem (3.27 item 7).
+33. Question P1 of task 11's postmortem, answered in the maintainer's
+    message of task 12: PowerShell is ignored and nothing depends on it
+    (3.16 item 5).
+34. Question P2, answered in the same message: Docker is out of the plan
+    (7.10 item 4).
+35. Question P3, answered in the same message, "don't plan. i want the
+    current tests all passing.": no suite of a live AI endpoint is
+    planned.
+36. Question P4, answered in the same message: each queue runs its inputs
+    in order, a wake in its last reply's place (3.28), which overturns
+    11.2 item 52.
+37. The races of ttyd's ends, by the same message, "it is a known part of
+    the design of ttyd so there is no reason asking the maintainer about
+    it.": a rule of the project, and the tests designed to work with it.
+38. dash's line on job control, by the same message, "this has to be
+    fixed": the fix planned in 7.4 item 8.
 
 11.4 Class D:
 
@@ -4188,9 +4403,15 @@ wanting confirmation. Every item here was confirmed on 2026-11-02
 15. "try bwrap ... /bin/dash" (item 39): the command is the console's shell,
     exactly as given, its verbose form adding `-v` (7.4, task 7.8.1).
 
-11.5 Unresolved on 2026-11-03, at the end of task 10 of
-`tmp/tasks_30_2127.md`: item 50 of 11.2, the decisions of task 10, which
-stand unless the maintainer overturns one. Earlier record, after the
+11.5 Unresolved on 2026-11-03, at the end of task 12 of
+`tmp/tasks_30_2127.md`: items 50 and 51 of 11.2, the decisions of tasks
+10 and 11, which stand unless the maintainer overturns one; item 52 is
+overturned by 11.3 item 36. Earlier record, at the end of task 11: items
+50 to 52 of 11.2, the decisions of tasks 10 and 11, which stand unless the
+maintainer overturns one. Earlier
+record, at the end of task 10: item 50 of 11.2, the decisions of task
+10, which stand unless the maintainer overturns one. Earlier record,
+after the
 message of task 10: none of 11.2, items 48 and 49 of which 11.3 items 31
 and 32 settled. Earlier record, at the end of task 9: items 48 and 49 of
 11.2, the decisions of task 9, which stand unless the maintainer

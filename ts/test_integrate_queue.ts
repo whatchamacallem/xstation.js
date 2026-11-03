@@ -11,8 +11,13 @@
 // file's own functions. The cases, the gold of the block's id, are a request
 // answered, a blob carried by a submit and its reply, two replies in submit
 // order, a blob forwarded both ways, blobs over one buffer moved once,
-// replies in the order of their requests, and a notification that nothing
-// answers.
+// replies in the order of their requests, a notification that nothing
+// answers, and a wake run in its reply's place. For that case the queue's
+// lane of thread `http` is one of a linked pair of local ports whose other
+// end's receiver is this file's own function, owning `queue_end.`: it keeps
+// the request it gets, and at `queue_end.go` posts that request's reply and
+// then a `queue_test.after`, both within the forward, so that both are held
+// before the reply's step runs.
 
 namespace test_integrate_queue {
   // The threads, the type prefixes and types, and the handlers' version.
@@ -20,9 +25,11 @@ namespace test_integrate_queue {
     thread: "ai" as const,
     far_thread: "server" as const,
     test_thread: "ui" as const,
+    end_thread: "http" as const,
     owner_prefix: "queue_test.",
     far_prefix: "queue_far.",
     test_prefix: "queue_ui.",
+    end_prefix: "queue_end.",
     echo_type: "queue_test.echo",
     relay_type: "queue_test.relay",
     relay_wake: "queue_test.relay_wake",
@@ -30,6 +37,12 @@ namespace test_integrate_queue {
     pair_wake: "queue_test.pair_wake",
     halves_type: "queue_test.halves",
     note_type: "queue_test.note",
+    order_type: "queue_test.order",
+    order_wake: "queue_test.order_wake",
+    after_type: "queue_test.after",
+    end_ask: "queue_end.ask",
+    end_go: "queue_end.go",
+    after_out: "queue_ui.after",
     far_echo: "queue_far.echo",
     far_keep: "queue_far.keep",
     kept_type: "queue_ui.kept",
@@ -118,11 +131,45 @@ namespace test_integrate_queue {
       tasks.line_notify(line_new(constants.halves_out, halves, {}));
       return undefined;
     });
+    handler_add(constants.order_type, (line) => {
+      const id = tasks.task_submit(line_new(constants.end_ask, [], {}));
+      const state: WaitState = { request: line };
+      return dispatch.task_sleep(state, [id], constants.order_wake);
+    });
+    handler_add(constants.order_wake, (line) => {
+      const { request } = line.state as WaitState;
+      return dispatch.reply_make(request, {});
+    });
+    handler_add(constants.after_type, () => {
+      tasks.line_notify(line_new(constants.after_out, [], {}));
+      return undefined;
+    });
     handler_add(constants.far_echo, echo_make);
     handler_add(constants.far_keep, (line) => {
       const payload = jslb.payload_of(line);
       far.line_notify(line_new(constants.kept_type, blobs_of(line), payload));
       return undefined;
+    });
+  }
+
+  // The end of `http`, which posts the kept request's reply, then an after.
+  function end_add(tasks: queue.TaskQueue): void {
+    const near = new queue.LocalPort();
+    tasks.port_add(constants.end_thread, near);
+    const end = new queue.LocalPort(near);
+    let kept: lines.Line | undefined = undefined;
+    end.line_receive((line) => {
+      const type = jslb.field_get(line[0], "type");
+      if (type === constants.end_ask) {
+        kept = line;
+        return;
+      }
+      if (type !== constants.end_go || kept === undefined) {
+        throw new Error("internal error");
+      }
+      end.line_post(dispatch.reply_make(kept, {}), []);
+      end.line_post(line_new(constants.after_type, [], {}), []);
+      kept = undefined;
     });
   }
 
@@ -135,6 +182,7 @@ namespace test_integrate_queue {
       [constants.owner_prefix]: constants.thread,
       [constants.far_prefix]: constants.far_thread,
       [constants.test_prefix]: constants.test_thread,
+      [constants.end_prefix]: constants.end_thread,
     };
     const far_owners: queue.OwnerTable = {
       [constants.owner_prefix]: constants.thread,
@@ -148,6 +196,7 @@ namespace test_integrate_queue {
       synchronous,
     );
     handlers_register(tasks, far);
+    end_add(tasks);
     const link = new MessageChannel();
     tasks.port_add(constants.far_thread, new queue.ThreadPort(link.port1));
     far.port_add(constants.thread, new queue.ThreadPort(link.port2));

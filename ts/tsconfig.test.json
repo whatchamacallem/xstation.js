@@ -85,6 +85,7 @@
     "test_integrate_page.ts",
     "test_worker_ai.ts",
     "test_worker_ai_console.ts",
+    "test_console_open.ts",
     "test_integrate_worker_ai.ts",
     "test_boot.ts",
     "test_line_case.ts",
