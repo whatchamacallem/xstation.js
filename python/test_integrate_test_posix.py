@@ -7,12 +7,11 @@
 # formatter starts. The step runs in a forked child whose stdout and stderr
 # go to a scratch file under build/, so that nothing it prints reaches the
 # stream. A smoke-test run, given a Python file that ruff would change,
-# prints its advisory and leaves the file as it is; a normal-test run, given
+# prints nothing and leaves the file as it is; a normal-test run, given
 # PowerShell files, which the Linux rows of reformat_table.json leave to
 # Windows, prints nothing and formats.
 
-import functools, harness, os, signal, sys, tempfile, test_posix, traceback
-import unittest
+import functools, os, signal, sys, tempfile, test_posix, traceback, unittest
 from collections.abc import Callable
 
 # The checkout's top directory, above this file's `python/`.
@@ -20,12 +19,6 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
-
-# The id of this module's gold, in its own `test_setting_` file.
-_GOLD_ID = "python.test_integrate_test_posix"
-
-# The advisory a `smoke-test` run prints in place of the formatting.
-_ADVISORY: str = harness.gold_get(f"{_GOLD_ID}.format_advisory")
 
 # The category that runs no formatter.
 _SMOKE_TEST = "smoke-test"
@@ -111,12 +104,12 @@ class TestFormatterStep(ChildCase):
         work = functools.partial(test_posix.formatter_run, paths, chosen)
         return self.child_run(work)
 
-    # A `smoke-test` run prints the advisory and leaves the files alone.
-    def test_smoke_advised(self) -> None:
+    # A `smoke-test` run prints nothing and leaves the files alone.
+    def test_smoke_untouched(self) -> None:
         path = self.file_write("b.py", _PYTHON_RAW)
         ending, output = self.step_run(_SMOKE_TEST, [path])
         self.assertEqual(ending, _ENDING_RETURNED)
-        self.assertEqual(output, _ADVISORY + "\n")
+        self.assertEqual(output, "")
         self.assertEqual(text_read(path), _PYTHON_RAW)
 
     # A `normal-test` run formats with no command and prints nothing.

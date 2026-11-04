@@ -16,7 +16,7 @@
 # output in its cause.
 
 import base64, harness, jslb, json, os, page_build, shutil, subprocess
-import switches, tap_consumer, tempfile, unittest
+import switches, tap_consumer, tempfile, time, unittest
 from typing import NoReturn, cast
 
 # The checkout's top directory, above this file's `python/`.
@@ -51,6 +51,15 @@ _BLOCK = "test_utility"
 
 # The type of the first line.
 _FIRST_TYPE = "tap.start"
+
+# What starts the parent point's duration line, before its value.
+_DURATION_PREFIX = "  duration_ms: "
+
+# Half the last digit a duration is written with, which rounding may add.
+_HALF_DIGIT = 0.05
+
+# The milliseconds in a second.
+_MILLISECONDS = 1000
 
 # The fixed id of the first line.
 _FIRST_ID = 101
@@ -180,7 +189,9 @@ class TestBundle(unittest.TestCase):
 
     # The realm answers `tap.start`, sends the passing block, and exits 0.
     def test_block_run(self) -> None:
+        started = time.perf_counter()
         completed = realm_run(self.path, start_bytes(_FIRST_TYPE))
+        limit = (time.perf_counter() - started) * _MILLISECONDS + _HALF_DIGIT
         self.assertEqual(completed.stderr, b"")
         self.assertEqual(completed.returncode, 0)
         decoder = jslb.LineDecoder(
@@ -202,7 +213,10 @@ class TestBundle(unittest.TestCase):
         stats = tap_consumer.document_stats("\n".join(texts) + "\n")
         self.assertTrue(stats.well_formed)
         self.assertEqual(stats.failed, 0)
-        self.assertEqual(texts[-2:], [f"ok 1 - {_BLOCK}", "1..1"])
+        ending = [f"ok 1 - {_BLOCK}", "  ---", "  ...", "1..1"]
+        self.assertEqual(texts[-5:-3] + texts[-2:], ending)
+        duration = texts[-3].removeprefix(_DURATION_PREFIX)
+        self.assertLessEqual(float(duration), limit)
 
     # A first line of another type is refused: nothing back, and exit 1.
     def test_first_refused(self) -> None:

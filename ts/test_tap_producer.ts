@@ -6,8 +6,10 @@
 // points arrive, every way a run of the TypeScript harness can fail, and the
 // marked report. Each failure is an expected failure: the test states the
 // stream the suite must write, its diagnostics by the lines they must hold,
-// and passes only when the suite fails exactly that way. The fixtures are not
-// exported, so that no loader collects them.
+// and passes only when the suite fails exactly that way. A measured
+// `duration_ms` is stated without its value, which must fit the grammar and be
+// at most the milliseconds the test measured around the calls. The fixtures
+// are not exported, so that no loader collects them.
 
 namespace test_tap_producer {
   // The lines and the names the expected streams are made of.
@@ -15,11 +17,19 @@ namespace test_tap_producer {
     assertion_line: "    # AssertionError: 1 != 2",
     bail_line: "Bail out! failfast",
     block_name: "fixture",
+    block_yaml: Object.freeze([
+      "      ---",
+      "      duration_ms:",
+      "      ...",
+    ]),
     diagnostic_prefix: "    # ",
+    duration_line: /^( *duration_ms:)(.*)$/,
+    duration_value: /^ [0-9]+\.[0-9]$/,
     error_line: "    # Error: fixture error",
     parent_failed: "not ok 1 - fixture",
     parent_passed: "ok 1 - fixture",
     parent_plan: "1..1",
+    parent_yaml: Object.freeze(["  ---", "  duration_ms:", "  ..."]),
     version_line: "TAP version 14",
   });
 
@@ -170,6 +180,31 @@ namespace test_tap_producer {
     throw new Error("the function threw nothing");
   }
 
+  // The milliseconds from `started`, a `performance.now` value, to now.
+  function milliseconds_since(started: number): number {
+    return performance.now() - started;
+  }
+
+  // The lines with each duration's value cut, checked by grammar and clock.
+  function durations_cut(
+    test: unittest.TestCase,
+    lines: readonly string[],
+    elapsed: number,
+  ): string[] {
+    const most = Number(elapsed.toFixed(1));
+    return lines.map((line) => {
+      const found = constants.duration_line.exec(line);
+      if (found === null) {
+        return line;
+      }
+      test.assertTrue(
+        constants.duration_value.test(found[2]) && Number(found[2]) <= most,
+        `${JSON.stringify(line)} is no duration of 0 to ${most} ms`,
+      );
+      return found[1];
+    });
+  }
+
   // The runs of consecutive diagnostic lines of a stream, in order.
   function runs_find(lines: readonly string[]): string[][] {
     const runs: string[][] = [];
@@ -226,33 +261,50 @@ namespace test_tap_producer {
     const lines: string[] = [];
     const runner = new tap_producer.TAPTestRunner(failfast);
     runner.set_stream((text) => lines.push(text));
+    const started = performance.now();
     const passed = runner.module_run(constants.block_name, load);
     const ended = runner.run_end();
-    test.assertEqual(stream_reduce(lines, expected), expected);
+    const cut = durations_cut(test, lines, milliseconds_since(started));
+    test.assertEqual(stream_reduce(cut, expected), expected);
     const graded = expected.includes(constants.parent_passed);
     test.assertEqual([passed, ended], [graded, graded]);
   }
 
   // Tests the tracker: numbered points, directives, diagnostics and plans.
   export class TestTracker extends unittest.TestCase {
-    // Points are numbered in order and the plan that comes last counts them.
+    // Points are numbered, durations to one digit, and the last plan counts.
     test_points_numbered(): void {
       const lines: string[] = [];
       const tracker = new tap_producer.Tracker((text) => lines.push(text));
-      tracker.add_ok("Case", "test_one");
-      tracker.add_not_ok("Case", "test_two", "", "first\nsecond\n");
-      tracker.add_skip("Case", "test_three", "why");
-      tracker.add_skip("Case", "test_four", "");
-      tracker.add_not_ok("Case", "test_five", "TODO later");
+      tracker.add_ok("Case", "test_one", 0);
+      tracker.add_not_ok("Case", "test_two", 1.04, "", "first\nsecond\n");
+      tracker.add_skip("Case", "test_three", 2.96, "why");
+      tracker.add_skip("Case", "test_four", 1234.5678, "");
+      tracker.add_not_ok("Case", "test_five", 0.05, "TODO later");
       tracker.generate_tap_reports();
       this.assertEqual(lines, [
         "ok 1 - test_one",
+        "  ---",
+        "  duration_ms: 0.0",
+        "  ...",
         "not ok 2 - test_two",
+        "  ---",
+        "  duration_ms: 1.0",
+        "  ...",
         "# first",
         "# second",
         "ok 3 - test_three # SKIP why",
+        "  ---",
+        "  duration_ms: 3.0",
+        "  ...",
         "ok 4 - test_four # SKIP",
+        "  ---",
+        "  duration_ms: 1234.6",
+        "  ...",
         "not ok 5 - test_five # TODO later",
+        "  ---",
+        "  duration_ms: 0.1",
+        "  ...",
         "1..5",
       ]);
     }
@@ -262,13 +314,19 @@ namespace test_tap_producer {
       const lines: string[] = [];
       const tracker = new tap_producer.Tracker((text) => lines.push(text));
       tracker.set_plan(2);
-      tracker.add_ok("Case", "test_one", "", "note");
-      tracker.add_ok("Case", "test_two");
+      tracker.add_ok("Case", "test_one", 0, "", "note");
+      tracker.add_ok("Case", "test_two", 0);
       this.assertEqual(lines, [
         "1..2",
         "ok 1 - test_one",
+        "  ---",
+        "  duration_ms: 0.0",
+        "  ...",
         "# note",
         "ok 2 - test_two",
+        "  ---",
+        "  duration_ms: 0.0",
+        "  ...",
       ]);
     }
 
@@ -276,8 +334,16 @@ namespace test_tap_producer {
     test_diagnostics_blank(): void {
       const lines: string[] = [];
       const tracker = new tap_producer.Tracker((text) => lines.push(text));
-      tracker.add_not_ok("Case", "test_one", "", "a\n\nb");
-      this.assertEqual(lines, ["not ok 1 - test_one", "# a", "# ", "# b"]);
+      tracker.add_not_ok("Case", "test_one", 0, "", "a\n\nb");
+      this.assertEqual(lines, [
+        "not ok 1 - test_one",
+        "  ---",
+        "  duration_ms: 0.0",
+        "  ...",
+        "# a",
+        "# ",
+        "# b",
+      ]);
     }
 
     // Text that would break its line is refused with its diagnostics.
@@ -291,7 +357,7 @@ namespace test_tap_producer {
       ];
       for (const [description, directive, diagnostics] of refused) {
         const message = thrown_message(() =>
-          tracker.add_ok("Case", description, directive, diagnostics),
+          tracker.add_ok("Case", description, 0, directive, diagnostics),
         );
         this.assertEqual(
           message,
@@ -312,18 +378,23 @@ namespace test_tap_producer {
       const runner = new tap_producer.TAPTestRunner(false);
       runner.set_stream((text) => lines.push(text));
       const load = class_load(PassingFixture);
+      const started = performance.now();
       this.assertTrue(runner.module_run("first", load));
       this.assertTrue(
         runner.module_run("second", () => new unittest.TestSuite()),
       );
       this.assertTrue(runner.run_end());
-      this.assertEqual(lines, [
+      const elapsed = milliseconds_since(started);
+      this.assertEqual(durations_cut(this, lines, elapsed), [
         constants.version_line,
         "    1..1",
         "    ok 1 - test_values_equal",
+        ...constants.block_yaml,
         "ok 1 - first",
+        ...constants.parent_yaml,
         "    1..0",
         "ok 2 - second",
+        ...constants.parent_yaml,
         "1..2",
       ]);
     }
@@ -334,22 +405,27 @@ namespace test_tap_producer {
       const runner = new tap_producer.TAPTestRunner(false);
       runner.set_stream((text) => lines.push(text));
       const load = class_load(AssertionFixture);
+      const started = performance.now();
       this.assertFalse(runner.module_run("first", load));
       this.assertTrue(
         runner.module_run("second", () => new unittest.TestSuite()),
       );
       this.assertFalse(runner.run_end());
+      const cut = durations_cut(this, lines, milliseconds_since(started));
       const expected = [
         constants.version_line,
         "    1..1",
         "    not ok 1 - test_values_differ",
+        ...constants.block_yaml,
         constants.assertion_line,
         "not ok 1 - first",
+        ...constants.parent_yaml,
         "    1..0",
         "ok 2 - second",
+        ...constants.parent_yaml,
         "1..2",
       ];
-      this.assertEqual(stream_reduce(lines, expected), expected);
+      this.assertEqual(stream_reduce(cut, expected), expected);
     }
 
     // A stream that bailed out takes no other module and writes no plan.
@@ -422,26 +498,53 @@ namespace test_tap_producer {
       const lines: string[] = [];
       const runner = new tap_producer.TAPTestRunner(false);
       runner.set_stream((text) => lines.push(text));
+      const started = performance.now();
       const tracker = runner.block_start("first", 3);
       this.assertEqual(lines.at(-1), "    1..3");
-      tracker.add_ok("Case", "case_one");
-      this.assertEqual(lines.at(-1), "    ok 1 - case_one");
-      tracker.add_not_ok("Case", "case_two", "TODO later", "note");
-      tracker.add_skip("Case", "case_three", "why");
+      tracker.add_ok("Case", "case_one", milliseconds_since(started));
+      const point = durations_cut(
+        this,
+        lines.slice(-4),
+        milliseconds_since(started),
+      );
+      this.assertEqual(point, [
+        "    ok 1 - case_one",
+        ...constants.block_yaml,
+      ]);
+      tracker.add_not_ok(
+        "Case",
+        "case_two",
+        milliseconds_since(started),
+        "TODO later",
+        "note",
+      );
+      tracker.add_skip(
+        "Case",
+        "case_three",
+        milliseconds_since(started),
+        "why",
+      );
       this.assertTrue(runner.block_end("first"));
       this.assertTrue(runner.module_run("second", class_load(PassingFixture)));
       this.assertTrue(runner.run_end());
-      this.assertEqual(lines, [
+      const elapsed = milliseconds_since(started);
+      this.assertEqual(durations_cut(this, lines, elapsed), [
         constants.version_line,
         "    1..3",
         "    ok 1 - case_one",
+        ...constants.block_yaml,
         "    not ok 2 - case_two # TODO later",
+        ...constants.block_yaml,
         "    # note",
         "    ok 3 - case_three # SKIP why",
+        ...constants.block_yaml,
         "ok 1 - first",
+        ...constants.parent_yaml,
         "    1..1",
         "    ok 1 - test_values_equal",
+        ...constants.block_yaml,
         "ok 2 - second",
+        ...constants.parent_yaml,
         "1..2",
       ]);
     }
@@ -451,22 +554,29 @@ namespace test_tap_producer {
       const lines: string[] = [];
       const runner = new tap_producer.TAPTestRunner(false);
       runner.set_stream((text) => lines.push(text));
+      const started = performance.now();
       const tracker = runner.block_start("first", 2);
-      tracker.add_not_ok("Case", "case_one", "", "why");
-      tracker.add_ok("Case", "case_two");
+      const late = milliseconds_since(started);
+      tracker.add_not_ok("Case", "case_one", late, "", "why");
+      tracker.add_ok("Case", "case_two", milliseconds_since(started));
       this.assertFalse(runner.block_end("first"));
       runner.block_start("second", 0);
       this.assertTrue(runner.block_end("second"));
       this.assertFalse(runner.run_end());
-      this.assertEqual(lines, [
+      const elapsed = milliseconds_since(started);
+      this.assertEqual(durations_cut(this, lines, elapsed), [
         constants.version_line,
         "    1..2",
         "    not ok 1 - case_one",
+        ...constants.block_yaml,
         "    # why",
         "    ok 2 - case_two",
+        ...constants.block_yaml,
         "not ok 1 - first",
+        ...constants.parent_yaml,
         "    1..0",
         "ok 2 - second",
+        ...constants.parent_yaml,
         "1..2",
       ]);
     }
@@ -477,18 +587,22 @@ namespace test_tap_producer {
       const runner = new tap_producer.TAPTestRunner(true);
       runner.set_stream((text) => lines.push(text));
       this.assertTrue(runner.failfast);
+      const started = performance.now();
       const tracker = runner.block_start("first", 3);
-      tracker.add_ok("Case", "case_one");
-      tracker.add_not_ok("Case", "case_two");
+      tracker.add_ok("Case", "case_one", milliseconds_since(started));
+      tracker.add_not_ok("Case", "case_two", milliseconds_since(started));
       this.assertFalse(runner.block_end("first"));
       const late = thrown_message(() => runner.block_start("second", 0));
       this.assertEqual(late, 'the TAP stream ended before "second"');
       this.assertFalse(runner.run_end());
-      this.assertEqual(lines, [
+      const elapsed = milliseconds_since(started);
+      this.assertEqual(durations_cut(this, lines, elapsed), [
         constants.version_line,
         "    1..3",
         "    ok 1 - case_one",
+        ...constants.block_yaml,
         "    not ok 2 - case_two",
+        ...constants.block_yaml,
         constants.bail_line,
       ]);
     }
@@ -500,6 +614,7 @@ namespace test_tap_producer {
       runner.set_stream((text) => lines.push(text));
       const unopened = thrown_message(() => runner.block_end("first"));
       this.assertEqual(unopened, 'no TAP block is open to end as "first"');
+      const started = performance.now();
       runner.block_start("first", 0);
       const texts = [
         thrown_message(() => runner.block_start("second", 0)),
@@ -517,10 +632,12 @@ namespace test_tap_producer {
       ]);
       this.assertTrue(runner.block_end("first"));
       this.assertTrue(runner.run_end());
-      this.assertEqual(lines, [
+      const elapsed = milliseconds_since(started);
+      this.assertEqual(durations_cut(this, lines, elapsed), [
         constants.version_line,
         "    1..0",
         "ok 1 - first",
+        ...constants.parent_yaml,
         "1..1",
       ]);
     }
@@ -549,8 +666,10 @@ namespace test_tap_producer {
         constants.version_line,
         "    1..1",
         "    not ok 1 - test_values_differ",
+        ...constants.block_yaml,
         constants.assertion_line,
         constants.parent_failed,
+        ...constants.parent_yaml,
         constants.parent_plan,
       ]);
     }
@@ -561,8 +680,10 @@ namespace test_tap_producer {
         constants.version_line,
         "    1..1",
         "    not ok 1 - test_error_thrown",
+        ...constants.block_yaml,
         constants.error_line,
         constants.parent_failed,
+        ...constants.parent_yaml,
         constants.parent_plan,
       ]);
     }
@@ -573,8 +694,10 @@ namespace test_tap_producer {
         constants.version_line,
         "    1..1",
         "    not ok 1 - test_values_equal",
+        ...constants.block_yaml,
         constants.error_line,
         constants.parent_failed,
+        ...constants.parent_yaml,
         constants.parent_plan,
       ]);
     }
@@ -585,8 +708,10 @@ namespace test_tap_producer {
         constants.version_line,
         "    1..1",
         "    not ok 1 - test_values_equal",
+        ...constants.block_yaml,
         constants.error_line,
         constants.parent_failed,
+        ...constants.parent_yaml,
         constants.parent_plan,
       ]);
     }
@@ -597,9 +722,11 @@ namespace test_tap_producer {
         constants.version_line,
         "    1..1",
         "    not ok 1 - test_values_differ",
+        ...constants.block_yaml,
         constants.assertion_line,
         constants.error_line,
         constants.parent_failed,
+        ...constants.parent_yaml,
         constants.parent_plan,
       ]);
     }
@@ -610,8 +737,10 @@ namespace test_tap_producer {
         constants.version_line,
         "    1..1",
         "    not ok 1 - test_values_differ # TODO expected failure",
+        ...constants.block_yaml,
         constants.assertion_line,
         constants.parent_passed,
+        ...constants.parent_yaml,
         constants.parent_plan,
       ]);
     }
@@ -622,8 +751,10 @@ namespace test_tap_producer {
         constants.version_line,
         "    1..1",
         "    not ok 1 - test_values_equal",
+        ...constants.block_yaml,
         "    # unexpected success",
         constants.parent_failed,
+        ...constants.parent_yaml,
         constants.parent_plan,
       ]);
     }
@@ -634,7 +765,9 @@ namespace test_tap_producer {
         constants.version_line,
         "    1..1",
         "    ok 1 - test_skip_self # SKIP fixture skip",
+        ...constants.block_yaml,
         constants.parent_passed,
+        ...constants.parent_yaml,
         constants.parent_plan,
       ]);
     }
@@ -645,12 +778,17 @@ namespace test_tap_producer {
         constants.version_line,
         "    1..4",
         "    ok 1 - test_alpha_passes",
+        ...constants.block_yaml,
         "    not ok 2 - test_bravo_fails",
+        ...constants.block_yaml,
         constants.assertion_line,
         "    not ok 3 - test_charlie_raises",
+        ...constants.block_yaml,
         constants.error_line,
         "    ok 4 - test_delta_skips # SKIP fixture skip",
+        ...constants.block_yaml,
         constants.parent_failed,
+        ...constants.parent_yaml,
         constants.parent_plan,
       ]);
     }
@@ -661,7 +799,9 @@ namespace test_tap_producer {
         constants.version_line,
         "    1..4",
         "    ok 1 - test_alpha_passes",
+        ...constants.block_yaml,
         "    not ok 2 - test_bravo_fails",
+        ...constants.block_yaml,
         constants.assertion_line,
         constants.bail_line,
       ]);
@@ -673,8 +813,10 @@ namespace test_tap_producer {
         constants.version_line,
         "    1..1",
         "    not ok 1 - fixture",
+        ...constants.block_yaml,
         constants.error_line,
         constants.parent_failed,
+        ...constants.parent_yaml,
         constants.parent_plan,
       ]);
     }
@@ -685,6 +827,7 @@ namespace test_tap_producer {
         constants.version_line,
         "    1..1",
         "    not ok 1 - fixture",
+        ...constants.block_yaml,
         constants.error_line,
         constants.bail_line,
       ]);
@@ -725,17 +868,21 @@ namespace test_tap_producer {
       const lines: string[] = [];
       const runner = new tap_producer.TAPTestRunner(false);
       runner.set_stream((text) => lines.push(text));
+      const started = performance.now();
       runner.module_run(constants.block_name, class_load(ErrorFixture));
       runner.run_end();
+      const cut = durations_cut(this, lines, milliseconds_since(started));
       const expected = [
         constants.version_line,
         "    1..1",
         "    not ok 1 - test_error_thrown",
+        ...constants.block_yaml,
         constants.assertion_line,
         constants.parent_failed,
+        ...constants.parent_yaml,
         constants.parent_plan,
       ];
-      const reduced = stream_reduce(lines, expected);
+      const reduced = stream_reduce(cut, expected);
       this.assertFalse(
         reduced.length === expected.length &&
           reduced.every((line, index) => line === expected[index]),
@@ -745,20 +892,35 @@ namespace test_tap_producer {
 
   // Tests the marked report of a stream for the test page.
   export class TestReport extends unittest.TestCase {
-    // Failing points with their diagnostics, and failed parents, are wrapped.
+    // Failed points with their YAML blocks and diagnostics are wrapped.
     test_report_spans(): void {
       const text = [
         "TAP version 14",
         "    1..3",
         "    ok 1 - test_one",
+        "      ---",
+        "      duration_ms: 0.1",
+        "      ...",
         "    not ok 2 - test_two",
+        "      ---",
+        "      duration_ms: 0.2",
+        "      ...",
         "    # trace one",
         "    # trace two",
         "    not ok 3 - test_three # TODO expected failure",
+        "      ---",
+        "      duration_ms: 0.3",
+        "      ...",
         "    # trace three",
         "not ok 1 - first",
+        "  ---",
+        "  duration_ms: 0.7",
+        "  ...",
         "    1..1",
         "    not ok 1 - test_four",
+        "      ---",
+        "      duration_ms: 0.4",
+        "      ...",
         "    # trace four",
         "Bail out! failfast",
         "",
@@ -767,14 +929,29 @@ namespace test_tap_producer {
         "TAP version 14",
         "    1..3",
         "    ok 1 - test_one",
+        "      ---",
+        "      duration_ms: 0.1",
+        "      ...",
         '<span class="failed">    not ok 2 - test_two',
+        "      ---",
+        "      duration_ms: 0.2",
+        "      ...",
         "    # trace one",
         "    # trace two</span>",
         "    not ok 3 - test_three # TODO expected failure",
+        "      ---",
+        "      duration_ms: 0.3",
+        "      ...",
         "    # trace three",
-        '<span class="failed">not ok 1 - first</span>',
+        '<span class="failed">not ok 1 - first',
+        "  ---",
+        "  duration_ms: 0.7",
+        "  ...</span>",
         "    1..1",
         '<span class="failed">    not ok 1 - test_four',
+        "      ---",
+        "      duration_ms: 0.4",
+        "      ...",
         "    # trace four</span>",
         "Bail out! failfast",
         "",

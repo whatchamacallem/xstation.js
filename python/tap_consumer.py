@@ -15,7 +15,10 @@
 # too, since the server appends one when the browser fails: it counts as one
 # failure unless it follows a failed point, as the producer's own does, and
 # reading stops there, every line after it ignored, as TAP 14 asks a harness
-# to stop at a bail out.
+# to stop at a bail out. Each point is followed at once by its YAML block,
+# indented two spaces more: `---`, `duration_ms: N` and `...`, the grammar
+# hardcoded with no YAML parser, so the parser gives those three lines alone
+# as YAML and the reader takes them in order, refusing any other attribute.
 
 import io, re
 from collections.abc import Iterator
@@ -43,6 +46,12 @@ _TAP_VERSION = 14
 
 # The version line: the version it names.
 _VERSION_PATTERN = re.compile(r"TAP version ([0-9]+)")
+
+# A line of a point's YAML block: its indent and one of its three texts.
+_YAML_PATTERN = re.compile(r"( {4})?  (---|duration_ms: [0-9]+\.[0-9]|\.\.\.)")
+
+# The texts of a YAML block's lines in their order, the duration's by prefix.
+_YAML_TEXTS = ("---", "duration_ms: ", "...")
 
 
 # A test point: depth, whether it passed, number, description, directive.
@@ -87,13 +96,21 @@ class Version(NamedTuple):
     version: int
 
 
+# One of the three lines of a point's YAML block: its depth and its text.
+class YamlLine(NamedTuple):
+    depth: int
+    text: str
+
+
 # Any other line: its text.
 class Unknown(NamedTuple):
     text: str
 
 
 # Any line kind the parser returns.
-Line: TypeAlias = Result | Plan | Diagnostic | Bail | Version | Unknown
+Line: TypeAlias = (
+    Result | Plan | Diagnostic | Bail | Version | YamlLine | Unknown
+)
 
 
 # What a document held: its planned points, its counts, and whether it fits.
@@ -134,6 +151,9 @@ class Parser:
         if found := _BAIL_PATTERN.fullmatch(text):
             indent, reason = found.groups("")
             return Bail(len(indent) // _INDENT_WIDTH, reason)
+        if found := _YAML_PATTERN.fullmatch(text):
+            indent, line = found.groups("")
+            return YamlLine(len(indent) // _INDENT_WIDTH, line)
         return Unknown(text)
 
 
@@ -151,6 +171,9 @@ class StreamReader:
         self._points = 0
         self._block_failed = False
         self._last_failed = False
+        self._yaml_depth = 0
+        self._yaml_line = 0
+        self._yaml_after = "between"
 
     # Whether the stream ended, with its parent plan or a bail out line.
     def stream_ended(self) -> bool:
@@ -171,7 +194,11 @@ class StreamReader:
                 pass
             case "block", Result(depth=0) as parent:
                 return self._parent_read(parent)
-            case "version" | "between" | "block", Bail(depth=0):
+            case "yaml", YamlLine(depth=depth, text=text) if (
+                depth == self._yaml_depth
+            ):
+                return self._yaml_read(text)
+            case "version" | "between" | "block" | "yaml", Bail(depth=0):
                 self._bail_read()
             case "bailed", _:
                 # Reading stopped at the bail out, so the line is ignored.
@@ -182,9 +209,26 @@ class StreamReader:
 
     # Ends the stream, one failure more unless the last point read failed.
     def _bail_read(self) -> None:
-        if not (self._state == "block" and self._last_failed):
+        place = self._yaml_after if self._state == "yaml" else self._state
+        if not (place == "block" and self._last_failed):
             self.failed += 1
         self._state = "bailed"
+
+    # Waits for the YAML block of a point at the depth, then the place after.
+    def _yaml_open(self, depth: int, after: str) -> None:
+        self._yaml_depth = depth
+        self._yaml_line = 0
+        self._yaml_after = after
+        self._state = "yaml"
+
+    # Takes the next line of a point's YAML block, refusing one out of order.
+    def _yaml_read(self, text: str) -> bool:
+        if not text.startswith(_YAML_TEXTS[self._yaml_line]):
+            return False
+        self._yaml_line += 1
+        if self._yaml_line == len(_YAML_TEXTS):
+            self._state = self._yaml_after
+        return True
 
     # Opens a block with the number of points its plan line names.
     def _block_open(self, total: int) -> None:
@@ -215,6 +259,7 @@ class StreamReader:
             self.skipped += 1
         else:
             self.passed += 1
+        self._yaml_open(1, "block")
         return True
 
     # Closes the block with a parent line of the next number, graded by it.
@@ -227,7 +272,7 @@ class StreamReader:
         ):
             return False
         self._parents += 1
-        self._state = "between"
+        self._yaml_open(0, "between")
         return True
 
 

@@ -11,9 +11,9 @@
 # SharedArrayBuffer outside its comments and its string, template and regular
 # expression literals, then, in the category that --smoke-test, the default,
 # or --normal-test chooses, formats the whitelisted files with reformat.py in
-# a normal-test run, or in a smoke-test run runs no formatter and prints an
-# advisory to wait for a normal-test run, then lints them with the linters of
-# their rows. reformat_table.json gives each
+# a normal-test run, or in a smoke-test run runs no formatter and prints
+# nothing, then lints them with the linters of their rows, each quiet unless
+# it finds something. reformat_table.json gives each
 # extension its comment lexer, codec, checker, formatter and linter; a
 # PowerShell file, formatted on Windows, is read past a UTF-8 byte order mark
 # at its start and only its characters and comments are checked. Below a
@@ -56,12 +56,6 @@ _AUDIT_REFUSED = (
     "Atomics.wait(a, 0, 0);\n",
     "new SharedArrayBuffer(8);\n",
     "const t = `${await x}`;\n",
-)
-
-# What a `smoke-test` run prints in place of the formatting.
-_FORMAT_ADVISORY = (
-    "test_posix.py: this smoke-test run leaves the formatting alone; wait"
-    " for a normal-test run, which does the reformatting."
 )
 
 # A Doxygen code span, cut from a comment before its punctuation is checked.
@@ -268,14 +262,12 @@ def end_find(path: str, text: str, i: int, needle: str) -> int:
     return end + len(needle)
 
 
-# Formats in a `normal-test` run, only advises in a `smoke-test` run.
+# Formats in a `normal-test` run, and does nothing in a `smoke-test` run.
 def formatter_run(paths: list[str], chosen: str) -> None:
     import category, reformat
 
     if category.suite_runs(_REFORMAT_LABEL, chosen):
         reformat.reformat(paths)
-    else:
-        print(_FORMAT_ADVISORY, flush=True)
 
 
 # Adds the comments of HTML and of its script and style elements.

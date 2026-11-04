@@ -267,14 +267,16 @@ namespace test_wire_end {
       return;
     }
     const entry = points[index];
+    const started = performance.now();
     const seconds = gold_value("point_seconds") as number;
     const point = new PointRun(entry.name, seconds, (difference) => {
+      const duration_ms = performance.now() - started;
       if (difference === undefined) {
-        tracker.add_ok(name, entry.name);
+        tracker.add_ok(name, entry.name, duration_ms);
         points_run(tracker, name, index + 1, then);
       } else {
         // A failed point's port may still hold its server and the root's lock.
-        tracker.add_not_ok(name, entry.name, "", difference);
+        tracker.add_not_ok(name, entry.name, duration_ms, "", difference);
         then();
       }
     });

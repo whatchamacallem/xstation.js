@@ -261,9 +261,10 @@ namespace test_tap_pair {
     const runs = runs_list();
     const tracker = runner.block_start(name, runs.length);
     for (const run of runs) {
+      const started = performance.now();
       const pair = pair_make(run);
       send(pair_line(pair));
-      tracker.add_ok(name, pair.run);
+      tracker.add_ok(name, pair.run, performance.now() - started);
     }
     done(runner.block_end(name));
   }

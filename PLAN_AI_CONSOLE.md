@@ -406,7 +406,10 @@ task 5: which keys may go to tty 0 outside a line? By the answer to C2,
 lines go only when a newline submits them, so a key that is not part of a
 line has no turn of its own. Dash in its sandbox has no line editing, and
 bubblewrap's `--new-session` gives it no controlling terminal, so what the
-interrupt `ctrl-C` reaches there is not yet measured.
+interrupt `ctrl-C` reaches there was not yet measured. Measured on
+2026-11-04, once `TEST_PLAN_TS.md` 7.4 item 8 gave dash its controlling
+terminal: `ctrl-C` typed while `sleep 5` runs ends the sleep, `$?` 130,
+and the console role lives on (`TEST_PLAN_TS.md` 7.4 item 8.7.2.9).
 
 [ ] A. None, as built (3.7 item 5): the view drops the person's other
 control keys and escape sequences, the AI's text goes within its lines as

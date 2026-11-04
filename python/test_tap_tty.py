@@ -17,7 +17,7 @@
 # same root while the engine runs. On stall_loop.py, the hangup that ends an
 # engine that never writes its first line. On the TAP suite server,
 # tap_loop.py: a suite of this checkout relayed by suites_relay as a passing
-# stream, its timings carried in the reply; failing_suite.py, which fails by
+# stream, the reply's stderr empty; failing_suite.py, which fails by
 # design, relayed whole with its failures expected exactly, run again with
 # one failure fewer and one more expected, each failing the run, and relayed
 # by a failfast run, its stream ended by a bail out; and a suite the driver
@@ -80,6 +80,15 @@ _PROVIDER_KEY = "provider/script.json"
 
 # The key of the value the line types test puts in the castle.
 _KEPT_KEY = "kept"
+
+# What starts a parent point's duration line, before its value.
+_DURATION_PREFIX = "  duration_ms: "
+
+# Half the last digit a duration is written with, which rounding may add.
+_HALF_DIGIT = 0.05
+
+# The milliseconds in a second.
+_MILLISECONDS = 1000
 
 # The root's log, a database of its own.
 _LOG_DB = "_verbose"
@@ -502,7 +511,7 @@ class TestSuites(ScratchCase):
         self.assertEqual(
             [line for line in lines if line.startswith("ok ")], parents
         )
-        self.assertTrue(errors.startswith(_text_get("timing")), errors)
+        self.assertEqual(errors, "")
 
     # Relays the failing suite on a root of its own, expecting `failures`.
     def failing_relay(
@@ -519,12 +528,17 @@ class TestSuites(ScratchCase):
     # The failing suite relayed whole holds its failures, exactly expected.
     def test_failures_relayed(self) -> None:
         failures: int = _gold_value("failing.failures")
+        started = time.perf_counter()
         code, lines = self.failing_relay("root", "normal-test", failures)
+        limit = (time.perf_counter() - started) * _MILLISECONDS + _HALF_DIGIT
         self.assertEqual(code, 0)
         stats = tap_consumer.TapStats(*_gold_value("failing.stats"))
         self.assertEqual(_stats_read(lines), stats)
         suite: str = _gold_value("failing.suite")
-        self.assertEqual(lines[-2:], [f"not ok 1 - {suite}", "1..1"])
+        ending = [f"not ok 1 - {suite}", "  ---", "  ...", "1..1"]
+        self.assertEqual(lines[-5:-3] + lines[-2:], ending)
+        duration = lines[-3].removeprefix(_DURATION_PREFIX)
+        self.assertLessEqual(float(duration), limit)
 
     # Expecting one failure fewer or one more than the stream holds fails.
     def test_failures_miscounted(self) -> None:

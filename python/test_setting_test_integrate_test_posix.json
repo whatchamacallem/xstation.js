@@ -1,3 +1,0 @@
-{
-  "format_advisory": "test_posix.py: this smoke-test run leaves the formatting alone; wait for a normal-test run, which does the reformatting."
-}

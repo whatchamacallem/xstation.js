@@ -27,7 +27,8 @@
 # waits are the gold's.
 
 import devtools, functools, harness, http.server, os, signal, socket, struct
-import tempfile, threading, time, unittest
+import switches, tempfile, threading, time, unittest
+from typing import Any
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -172,6 +173,14 @@ def browser_make() -> devtools.Browser:
     return devtools.Browser(_WIDTH_PX, _HEIGHT_PX, devtools.LinuxPipe())
 
 
+# Serves the pages, its request lines written to stderr under `--verbose`.
+class PageHandler(http.server.SimpleHTTPRequestHandler):
+    # Writes the request's line as http.server does, under `--verbose` only.
+    def log_message(self, format: str, *args: Any) -> None:
+        if switches.verbose:
+            super().log_message(format, *args)
+
+
 # Gives each test a browser of its own, started on the Linux pipe.
 class BrowserCase(unittest.TestCase):
     # Starts the browser, stopped when the test ends.
@@ -202,9 +211,7 @@ class ServedCase(BrowserCase):
             path = os.path.join(pages_path, name)
             with open(path, "w", encoding="utf-8") as file:
                 file.write(text)
-        handler = functools.partial(
-            http.server.SimpleHTTPRequestHandler, directory=pages_path
-        )
+        handler = functools.partial(PageHandler, directory=pages_path)
         server = http.server.ThreadingHTTPServer((_LOCAL_ADDRESS, 0), handler)
         # Closed after the browser stops, so no connection of it is open.
         self.addCleanup(server.server_close)

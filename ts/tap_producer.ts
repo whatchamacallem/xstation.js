@@ -7,8 +7,9 @@
 // moment each is added, `TAPTestResult` turns the outcomes of the unittest
 // harness into one point per test, and `TAPTestRunner` writes one stream: the
 // version line, then per module a block indented four spaces with its plan
-// first, its points and their diagnostics, then a parent line, and the parent
-// plan last. With failfast the first failure ends the stream with a bail out
+// first, its points, each with its YAML block of `duration_ms` and then its
+// diagnostics, then a parent line with its YAML block, and the parent plan
+// last. With failfast the first failure ends the stream with a bail out
 // line in place of the parent line and the parent plan. A block whose points
 // arrive after the call that starts it opens with `block_start`, which writes
 // its plan of the count given and hands out its tracker, and closes with
@@ -20,17 +21,20 @@ namespace tap_producer {
   const constants = Object.freeze({
     bail_line: "Bail out! failfast",
     block_indent: "    ",
-    diagnostic_prefix: "    # ",
+    diagnostic_prefix: "# ",
+    duration_prefix: "duration_ms: ",
     expected_directive: "TODO expected failure",
     line_break: /[\r\n]/,
-    parent_failed: "not ok ",
-    point_failed: "    not ok ",
+    point_failed: "not ok ",
     point_todo: " # TODO",
     todo_word: "TODO",
     span_close: "</span>",
     span_open: '<span class="failed">',
     surprise_text: "unexpected success",
     version_line: "TAP version 14",
+    yaml_end: "...",
+    yaml_indent: "  ",
+    yaml_start: "---",
   });
 
   // One outcome of a test: its word, its directive and its diagnostic text.
@@ -102,25 +106,39 @@ namespace tap_producer {
     add_ok(
       class_name: string,
       description: string,
+      duration_ms: number,
       directive = "",
       diagnostics?: string,
     ): void {
-      this.#point_add("ok", description, directive, diagnostics);
+      this.#point_add("ok", description, duration_ms, directive, diagnostics);
     }
 
     // Writes a failing point. `class_name` is tappy's and is not written.
     add_not_ok(
       class_name: string,
       description: string,
+      duration_ms: number,
       directive = "",
       diagnostics?: string,
     ): void {
-      this.#point_add("not ok", description, directive, diagnostics);
+      this.#point_add(
+        "not ok",
+        description,
+        duration_ms,
+        directive,
+        diagnostics,
+      );
     }
 
     // Writes a passing point with a `SKIP` directive and the reason.
-    add_skip(class_name: string, description: string, reason: string): void {
-      this.#point_add("ok", description, skip_directive(reason), undefined);
+    add_skip(
+      class_name: string,
+      description: string,
+      duration_ms: number,
+      reason: string,
+    ): void {
+      const directive = skip_directive(reason);
+      this.#point_add("ok", description, duration_ms, directive, undefined);
     }
 
     // Writes the plan of the points added, for a level whose plan comes last.
@@ -128,10 +146,11 @@ namespace tap_producer {
       this.#write(`1..${this.#count}`);
     }
 
-    // Writes the next numbered point, then a diagnostic line per text line.
+    // Writes the next numbered point, its YAML block, then its diagnostics.
     #point_add(
       word: string,
       description: string,
+      duration_ms: number,
       directive: string,
       diagnostics: string | undefined,
     ): void {
@@ -139,6 +158,10 @@ namespace tap_producer {
       this.#count += 1;
       const suffix = directive === "" ? "" : ` # ${directive}`;
       this.#write(`${word} ${this.#count} - ${description}${suffix}`);
+      const indent = constants.yaml_indent;
+      this.#write(indent + constants.yaml_start);
+      this.#write(indent + constants.duration_prefix + duration_ms.toFixed(1));
+      this.#write(indent + constants.yaml_end);
       if (diagnostics !== undefined) {
         for (const line of diagnostics.replace(/\n$/, "").split("\n")) {
           this.#write(`# ${line}`);
@@ -155,6 +178,8 @@ namespace tap_producer {
     #current: unittest.TestCase | null = null;
     // The outcomes of the running test so far.
     #parts: PointPart[] = [];
+    // When the running test started, on `performance.now`.
+    #started = 0;
 
     // `tracker` writes the points, and `failfast` stops at the first failure.
     constructor(tracker: Tracker, failfast: boolean) {
@@ -167,6 +192,7 @@ namespace tap_producer {
       this.point_flush();
       super.startTest(test);
       this.#current = test;
+      this.#started = performance.now();
     }
 
     // Keeps a pass.
@@ -238,10 +264,18 @@ namespace tap_producer {
       const name = id.slice(id.lastIndexOf(".") + 1);
       const diagnostics = lines.length === 0 ? undefined : lines.join("\n");
       const owner = test.constructor.name;
+      const duration_ms = performance.now() - this.#started;
+      const tracker = this.#tracker;
       if (lead.word === "ok") {
-        this.#tracker.add_ok(owner, name, lead.directive, diagnostics);
+        tracker.add_ok(owner, name, duration_ms, lead.directive, diagnostics);
       } else {
-        this.#tracker.add_not_ok(owner, name, lead.directive, diagnostics);
+        tracker.add_not_ok(
+          owner,
+          name,
+          duration_ms,
+          lead.directive,
+          diagnostics,
+        );
       }
     }
 
@@ -271,10 +305,17 @@ namespace tap_producer {
     override add_not_ok(
       class_name: string,
       description: string,
+      duration_ms: number,
       directive = "",
       diagnostics?: string,
     ): void {
-      super.add_not_ok(class_name, description, directive, diagnostics);
+      super.add_not_ok(
+        class_name,
+        description,
+        duration_ms,
+        directive,
+        diagnostics,
+      );
       if (!directive.startsWith(constants.todo_word)) {
         this.failed = true;
       }
@@ -285,6 +326,8 @@ namespace tap_producer {
   interface OpenBlock {
     readonly name: string;
     readonly tracker: BlockTracker;
+    // When `block_start` opened it, on `performance.now`.
+    readonly started: number;
   }
 
   // Writes TAP for a unittest run: one plan, one indented block per module.
@@ -333,6 +376,7 @@ namespace tap_producer {
     module_run(module: string, load: () => unittest.TestSuite): boolean {
       this.#block_check(module);
       line_check(module, "", undefined);
+      const started = performance.now();
       let suite: unittest.TestSuite;
       try {
         suite = load();
@@ -344,14 +388,17 @@ namespace tap_producer {
         }
         const block = new Tracker((text) => this.#block_write(text));
         block.set_plan(1);
-        block.add_not_ok(module, module, "", stack_text(module, error));
-        return this.#block_end(module, false, this.failfast);
+        const duration_ms = performance.now() - started;
+        const stack = stack_text(module, error);
+        block.add_not_ok(module, module, duration_ms, "", stack);
+        return this.#block_end(module, false, this.failfast, started);
       }
       const result = this.run(suite);
       return this.#block_end(
         module,
         result.wasSuccessful(),
         result.shouldStop,
+        started,
       );
     }
 
@@ -359,9 +406,10 @@ namespace tap_producer {
     block_start(name: string, count: number): Tracker {
       this.#block_check(name);
       line_check(name, "", undefined);
+      const started = performance.now();
       const tracker = new BlockTracker((text) => this.#block_write(text));
       tracker.set_plan(count);
-      this.#open = { name, tracker };
+      this.#open = { name, tracker, started };
       return tracker;
     }
 
@@ -381,7 +429,12 @@ namespace tap_producer {
       }
       this.#open = null;
       const failed = open.tracker.failed;
-      return this.#block_end(name, !failed, failed && this.failfast);
+      return this.#block_end(
+        name,
+        !failed,
+        failed && this.failfast,
+        open.started,
+      );
     }
 
     // Writes the parent plan unless the stream bailed out. True if all passed.
@@ -417,17 +470,23 @@ namespace tap_producer {
     }
 
     // Bails out when the block stopped the run, else writes its parent line.
-    #block_end(module: string, passed: boolean, stopped: boolean): boolean {
+    #block_end(
+      module: string,
+      passed: boolean,
+      stopped: boolean,
+      started: number,
+    ): boolean {
       if (stopped) {
         this.#line_write(constants.bail_line);
         this.#bailed = true;
         this.#passed = false;
         return false;
       }
+      const duration_ms = performance.now() - started;
       if (passed) {
-        this.#parent.add_ok(module, module);
+        this.#parent.add_ok(module, module, duration_ms);
       } else {
-        this.#parent.add_not_ok(module, module);
+        this.#parent.add_not_ok(module, module, duration_ms);
       }
       this.#passed = this.#passed && passed;
       return passed;
@@ -450,29 +509,52 @@ namespace tap_producer {
     }
   }
 
-  // Escapes the text and puts each failing line and its diagnostics in a span.
+  // The indent of a failed point, a parent's or a block's, if the line is one.
+  function failed_indent(line: string): string | undefined {
+    if (line.includes(constants.point_todo)) {
+      return undefined;
+    }
+    return ["", constants.block_indent].find((indent) =>
+      line.startsWith(indent + constants.point_failed),
+    );
+  }
+
+  // Whether the line is of the YAML block or the diagnostics of the point.
+  function point_follows(indent: string, line: string): boolean {
+    if (!line.startsWith(indent)) {
+      return false;
+    }
+    const rest = line.slice(indent.length);
+    const yaml = constants.yaml_indent;
+    return (
+      rest === yaml + constants.yaml_start ||
+      rest.startsWith(yaml + constants.duration_prefix) ||
+      rest === yaml + constants.yaml_end ||
+      rest.startsWith(constants.diagnostic_prefix)
+    );
+  }
+
+  // Escapes the text and spans each failed point, its YAML and diagnostics.
   export function report_html(text: string): string {
     let html = "";
-    let open = false;
+    // The indent of the failed point whose span is open, if one is.
+    let open: string | undefined = undefined;
     for (const [index, line] of text.split("\n").entries()) {
-      if (open && !line.startsWith(constants.diagnostic_prefix)) {
+      if (open !== undefined && !point_follows(open, line)) {
         html += constants.span_close;
-        open = false;
+        open = undefined;
       }
       if (index > 0) {
         html += "\n";
       }
-      const todo = line.includes(constants.point_todo);
-      if (line.startsWith(constants.point_failed) && !todo) {
-        html += constants.span_open + html_escape(line);
-        open = true;
-      } else if (line.startsWith(constants.parent_failed)) {
-        html += constants.span_open + html_escape(line) + constants.span_close;
-      } else {
-        html += html_escape(line);
+      const failed = failed_indent(line);
+      if (failed !== undefined) {
+        html += constants.span_open;
+        open = failed;
       }
+      html += html_escape(line);
     }
-    if (open) {
+    if (open !== undefined) {
       html += constants.span_close;
     }
     return html;

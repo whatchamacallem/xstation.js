@@ -8,7 +8,10 @@
 // which writes its parent line, or with failfast after a failed point the
 // bail out line, and returns whether it passed. A failed point is `not ok`
 // without a `TODO` directive. No module or block runs while one is open, and
-// the stream does not end then.
+// the stream does not end then. Every point is followed by its YAML block of
+// the one attribute `duration_ms`, the point's milliseconds on
+// `performance.now` with one digit after the point: a test's from its start,
+// a block's from `module_run` or `block_start` to its parent line.
 
 declare namespace tap_producer {
   // Writes the lines of one level of a stream the moment each is added.
@@ -21,17 +24,24 @@ declare namespace tap_producer {
     add_ok(
       class_name: string,
       description: string,
+      duration_ms: number,
       directive?: string,
       diagnostics?: string,
     ): void;
     add_not_ok(
       class_name: string,
       description: string,
+      duration_ms: number,
       directive?: string,
       diagnostics?: string,
     ): void;
     // A passing point with a `SKIP` directive and the reason.
-    add_skip(class_name: string, description: string, reason: string): void;
+    add_skip(
+      class_name: string,
+      description: string,
+      duration_ms: number,
+      reason: string,
+    ): void;
     // Writes the plan of the points added, for a level whose plan comes last.
     generate_tap_reports(): void;
   }
@@ -71,6 +81,6 @@ declare namespace tap_producer {
     run_end(): boolean;
   }
 
-  // Marks every `not ok` line and its diagnostic lines, for the test page.
+  // Marks each failed point with its YAML block and diagnostics, for the page.
   function report_html(text: string): string;
 }

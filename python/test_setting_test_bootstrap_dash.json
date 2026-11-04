@@ -21,6 +21,10 @@
     "--die-with-parent",
     "--chdir",
     "/tmp",
+    "python3",
+    "-I",
+    "-c",
+    "import fcntl, os, signal, sys, termios; os.setsid(); fcntl.ioctl(0, termios.TIOCSCTTY, 0); signal.signal(signal.SIGPIPE, signal.SIG_DFL); signal.signal(signal.SIGXFSZ, signal.SIG_DFL); entries = open(\"/proc/self/environ\", \"rb\").read().split(b\"\\0\")[:-1]; given = dict(entry.split(b\"=\", 1) for entry in entries); os.execve(sys.argv[1], sys.argv[1:], given)",
     "/bin/dash"
   ],
   "argv_verbose": [
@@ -45,6 +49,10 @@
     "--die-with-parent",
     "--chdir",
     "/tmp",
+    "python3",
+    "-I",
+    "-c",
+    "import fcntl, os, signal, sys, termios; os.setsid(); fcntl.ioctl(0, termios.TIOCSCTTY, 0); signal.signal(signal.SIGPIPE, signal.SIG_DFL); signal.signal(signal.SIGXFSZ, signal.SIG_DFL); entries = open(\"/proc/self/environ\", \"rb\").read().split(b\"\\0\")[:-1]; given = dict(entry.split(b\"=\", 1) for entry in entries); os.execve(sys.argv[1], sys.argv[1:], given)",
     "/bin/dash",
     "-v"
   ],

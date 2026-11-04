@@ -10,7 +10,13 @@
 # server writes one when the browser fails, which can be before the version
 # line. Each line kind is a class named as tappy's category of it, and a
 # line inside a stream carries its depth: 0 for the stream, 1 for a block
-# indented four spaces.
+# indented four spaces. Every point, a block's or a parent's, is followed at
+# once by its YAML block, indented two spaces more than the point, of the
+# three lines `---`, `duration_ms: N` with N the milliseconds `[0-9]+.[0-9]`,
+# and `...`, then by its diagnostic lines. The parser gives those three
+# lines alone as YAML, any other text at that indent being unknown, and the
+# reader takes them in order after each point: a hardcoded grammar, no YAML
+# parser, so that any other attribute is refused.
 
 from collections.abc import Iterator
 from typing import NamedTuple, TypeAlias
@@ -48,12 +54,19 @@ class Bail(NamedTuple):
 class Version(NamedTuple):
     version: int
 
+# A line of a point's YAML block: its point's depth, its text after the indent.
+class YamlLine(NamedTuple):
+    depth: int
+    text: str
+
 # Any other line, tappy's "unknown": its text.
 class Unknown(NamedTuple):
     text: str
 
 # Any line kind the parser returns.
-Line: TypeAlias = Result | Plan | Diagnostic | Bail | Version | Unknown
+Line: TypeAlias = (
+    Result | Plan | Diagnostic | Bail | Version | YamlLine | Unknown
+)
 
 # tappy's `Parser`, its names recalled from tappy's documentation.
 class Parser:

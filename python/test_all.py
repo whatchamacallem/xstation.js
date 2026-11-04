@@ -123,14 +123,15 @@
 # its stop; the block's relay ends after. A root made for a block that did not
 # run stops before the browser, its log to stderr.
 #
-# After each module it writes "<module>: <label>, <s> s" to stderr, so that
-# stdout stays the TAP stream. After the checks of test_posix.py it prints
-# "test_posix.py: smoke-test, <s> s", and a passing run ends with "the
-# <category> run took <s> s". A smoke-test run has the driver's gold
-# python.test_all.smoke_seconds in all from its start: each alarm ends at that
-# deadline at the latest, a deadline passed before a suite starts raises at
-# once, and passing it fails naming the suite it stopped. A normal-test run has
-# no limit of its own. Standard library only:
+# Each point of the stream carries its milliseconds in its YAML block, a
+# module's in its parent point, so stdout stays the TAP stream and nothing
+# else is written of them. Under --verbose, after the checks of test_posix.py
+# it prints "test_posix.py: smoke-test, <s> s", and a passing run ends with
+# "the <category> run took <s> s". A smoke-test run has the driver's gold
+# python.test_all.smoke_seconds in all from its start: each alarm ends at
+# that deadline at the latest, a deadline passed before a suite starts raises
+# at once, and passing it fails naming the suite it stopped. A normal-test
+# run has no limit of its own. Standard library only:
 #
 #     python3 python/test_all.py [--smoke-test | --normal-test] [--failfast]
 #         [--stream] [--module NAME]... [--failures N] [--tty] [--coverage]
@@ -148,8 +149,8 @@
 # debug root in build/, which runs this file with --stream on the same
 # suites and blocks and the same --failures, and pushes each line of its
 # stream, and each line relayed is written to stdout and read by the
-# consumer as it comes. The server's run writes its stderr, its timings
-# among it, to this stderr when it ends, and its exit code must be the
+# consumer as it comes. The server's run writes its stderr to this stderr
+# when it ends, and its exit code must be the
 # stream's verdict. --coverage counts with line_coverage.py the lines run
 # from before any other project module loads, and after the passing block of
 # the last suite of the run that counts for a module, it fails at that
@@ -300,8 +301,8 @@ _B_UNIT: list[tuple[str, str]] = [
     ("test_error_overlay.ts", "smoke-test"),
     ("test_error_overlay_worker.ts", "smoke-test"),
     ("test_overlay.ts", "smoke-test"),
-    ("test_substrate_store.ts", "smoke-test"),
     ("test_substrate_limit.ts", "smoke-test"),
+    ("test_substrate_store.ts", "smoke-test"),
     ("test_jslb_decode.ts", "smoke-test"),
     ("test_console_view.ts", "smoke-test"),
     ("test_media_cache.ts", "smoke-test"),
@@ -1215,7 +1216,7 @@ def stream_run(
     realms = RealmRunner(runner, stream.reader, servers)
     pages = PageRunner(runner, stream.reader, servers, ttyd)
     try:
-        for index, (name, label) in enumerate(modules):
+        for index, (name, _) in enumerate(modules):
             failed = stream.reader.failed
             realm = name in _NODE_BLOCKS
             page = name in _CHROME_BLOCKS
@@ -1243,9 +1244,6 @@ def stream_run(
             if count is not None:
                 count.suite_leave()
             timer_stop()
-            seconds = time.monotonic() - begun
-            sys.stderr.write(f"{name}: {label}, {seconds:.3f} s\n")
-            sys.stderr.flush()
             # The consumer's count, not the producer's verdict, stops the run.
             if stream.reader.failed > failed:
                 break
@@ -1410,7 +1408,8 @@ def main(arguments: list[str]) -> int:
         test_posix.main([f"--{chosen}"])
         timer_stop()
         seconds = time.monotonic() - begun
-        print(f"test_posix.py: {posix_label}, {seconds:.3f} s", flush=True)
+        if switches.verbose:
+            print(f"test_posix.py: {posix_label}, {seconds:.3f} s", flush=True)
     import test_wire
 
     elapsed = time.monotonic() - started
@@ -1428,7 +1427,8 @@ def main(arguments: list[str]) -> int:
     if code:
         return code
     elapsed = time.monotonic() - started
-    print(f"the {chosen} run took {elapsed:.3f} s", flush=True)
+    if switches.verbose:
+        print(f"the {chosen} run took {elapsed:.3f} s", flush=True)
     return 0
 
 

@@ -11,10 +11,12 @@
 # and then kills itself, so that the module reaches no other test. A relayed
 # realm's stream is real TAP text, most of it written by the producer itself
 # as a realm writes it, relayed into a stream that the real consumer reads a
-# line at a time, as the driver's gate reads its own.
+# line at a time, as the driver's gate reads its own. Each point's YAML
+# block is checked by its duration's bound, the test's own clock, and then
+# compared with its value left out.
 
-import importlib, os, signal, sys, tap_consumer, tap_producer, traceback
-import types, unittest
+import importlib, os, re, signal, sys, tap_consumer, tap_producer, time
+import traceback, types, unittest
 from collections.abc import Callable, Sequence
 from typing import cast
 
@@ -33,6 +35,12 @@ _BLOCK_NAME = "fixture"
 # What starts each diagnostic line of a block.
 _DIAGNOSTIC_PREFIX = "    # "
 
+# A point's duration line: its indent and its value.
+_DURATION_PATTERN = re.compile(r"( *)duration_ms: ([0-9]+\.[0-9])")
+
+# A point's duration line after its indent, its value left out.
+_DURATION_TEXT = "duration_ms:"
+
 # The ending a child writes when its work raised nothing.
 _ENDING_PASSED = "passed"
 
@@ -42,6 +50,12 @@ _ERROR_LINE = "    # RuntimeError: fixture error"
 # The module name the module fixture claims, registered only in its child.
 _FIXTURE_MODULE = "tap_fixture_module"
 
+# Half the last digit a duration is written with, which rounding may add.
+_HALF_DIGIT = 0.05
+
+# The milliseconds in a second.
+_MILLISECONDS = 1000
+
 # The parent line of a fixture block that failed.
 _PARENT_FAILED = "not ok 1 - fixture"
 
@@ -50,6 +64,9 @@ _PARENT_PASSED = "ok 1 - fixture"
 
 # The parent plan of a stream of one block.
 _PARENT_PLAN = "1..1"
+
+# A test point, with the indent of its block.
+_POINT_PATTERN = re.compile(r"( {4})?(?:not )?ok [0-9]+ - .*")
 
 # What starts each line of a block.
 _BLOCK_INDENT = "    "
@@ -68,6 +85,9 @@ _TRACEBACK_LINE = "    # Traceback (most recent call last):"
 
 # The first line of every stream.
 _VERSION_LINE = "TAP version 14"
+
+# A point's YAML block after the point's indent, its value left out.
+_YAML_TEXTS = ("  ---", "  " + _DURATION_TEXT, "  ...")
 
 
 # Raises, as the module fixture's `setUpModule`.
@@ -91,6 +111,31 @@ def class_load(
 def absent_load() -> unittest.TestSuite:
     module = importlib.import_module(_ABSENT_MODULE)
     return unittest.TestLoader().loadTestsFromModule(module)
+
+
+# The lines with each point followed by its YAML block, its value left out.
+def blocks_add(lines: Sequence[str]) -> list[str]:
+    added: list[str] = []
+    for line in lines:
+        added.append(line)
+        if found := _POINT_PATTERN.fullmatch(line):
+            indent = found.group(1) or ""
+            added.extend(indent + text for text in _YAML_TEXTS)
+    return added
+
+
+# The lines with each duration cut, once within the milliseconds since start.
+def durations_cut(
+    case: unittest.TestCase, lines: Sequence[str], started: float
+) -> list[str]:
+    limit = (time.perf_counter() - started) * _MILLISECONDS + _HALF_DIGIT
+    cut: list[str] = []
+    for line in lines:
+        if found := _DURATION_PATTERN.fullmatch(line):
+            case.assertLessEqual(float(found.group(2)), limit, line)
+            line = found.group(1) + _DURATION_TEXT
+        cut.append(line)
+    return cut
 
 
 # The runs of consecutive diagnostic lines of a stream, in order.
@@ -136,11 +181,14 @@ def stream_expect(
     expected: Sequence[str],
 ) -> None:
     lines: list[str] = []
+    started = time.perf_counter()
     runner = tap_producer.TAPTestRunner(failfast)
     runner.set_stream(lines.append)
     passed = runner.module_run(_BLOCK_NAME, load)
     ended = runner.run_end()
-    case.assertEqual(stream_reduce(lines, expected), list(expected))
+    wanted = blocks_add(expected)
+    cut = durations_cut(case, lines, started)
+    case.assertEqual(stream_reduce(cut, wanted), wanted)
     case.assertEqual([passed, ended], [_PARENT_PASSED in expected] * 2)
 
 
@@ -193,6 +241,7 @@ def relay_expect(
     failfast: bool,
     ending: list[str],
     stats: tap_consumer.TapStats,
+    started: float,
 ) -> None:
     runner, gate = relay_open(failfast)
     for text in realm:
@@ -206,7 +255,9 @@ def relay_expect(
         "    ok 1 - test_values_equal",
         f"ok 1 - {_FIRST_NAME}",
     ]
-    case.assertEqual(gate.lines, first + block + ending)
+    wanted = blocks_add(first) + durations_cut(case, block, started)
+    wanted += blocks_add(ending)
+    case.assertEqual(durations_cut(case, gate.lines, started), wanted)
     case.assertEqual(passed, "ok 2 - fixture" in ending)
     case.assertEqual(ended, passed)
     case.assertTrue(gate.reader.stream_ended())
@@ -258,20 +309,26 @@ class TestTracker(unittest.TestCase):
     def test_points_numbered(self) -> None:
         lines: list[str] = []
         tracker = tap_producer.Tracker(lines.append)
-        tracker.add_ok("Case", "test_one")
-        tracker.add_not_ok("Case", "test_two", diagnostics="first\nsecond\n")
-        tracker.add_skip("Case", "test_three", "why")
-        tracker.add_skip("Case", "test_four", "")
-        tracker.add_not_ok("Case", "test_five", "TODO later")
+        tracker.add_ok("Case", "test_one", 14.2)
+        text = "first\nsecond\n"
+        tracker.add_not_ok("Case", "test_two", 0.0, diagnostics=text)
+        tracker.add_skip("Case", "test_three", 1234.56, "why")
+        tracker.add_skip("Case", "test_four", 0.04, "")
+        tracker.add_not_ok("Case", "test_five", 9.96, "TODO later")
         tracker.generate_tap_reports()
         expected = [
             "ok 1 - test_one",
+            *("  ---", "  duration_ms: 14.2", "  ..."),
             "not ok 2 - test_two",
+            *("  ---", "  duration_ms: 0.0", "  ..."),
             "# first",
             "# second",
             "ok 3 - test_three # SKIP why",
+            *("  ---", "  duration_ms: 1234.6", "  ..."),
             "ok 4 - test_four # SKIP",
+            *("  ---", "  duration_ms: 0.0", "  ..."),
             "not ok 5 - test_five # TODO later",
+            *("  ---", "  duration_ms: 10.0", "  ..."),
             "1..5",
         ]
         self.assertEqual(lines, expected)
@@ -281,17 +338,26 @@ class TestTracker(unittest.TestCase):
         lines: list[str] = []
         tracker = tap_producer.Tracker(lines.append)
         tracker.set_plan(2)
-        tracker.add_ok("Case", "test_one", "", "note")
-        tracker.add_ok("Case", "test_two")
-        expected = ["1..2", "ok 1 - test_one", "# note", "ok 2 - test_two"]
+        tracker.add_ok("Case", "test_one", 1.0, "", "note")
+        tracker.add_ok("Case", "test_two", 2.0)
+        expected = [
+            "1..2",
+            "ok 1 - test_one",
+            *("  ---", "  duration_ms: 1.0", "  ..."),
+            "# note",
+            "ok 2 - test_two",
+            *("  ---", "  duration_ms: 2.0", "  ..."),
+        ]
         self.assertEqual(lines, expected)
 
     # A blank line of diagnostic text is still a diagnostic line.
     def test_diagnostics_blank(self) -> None:
         lines: list[str] = []
         tracker = tap_producer.Tracker(lines.append)
-        tracker.add_not_ok("Case", "test_one", diagnostics="a\n\nb")
-        self.assertEqual(lines, ["not ok 1 - test_one", "# a", "# ", "# b"])
+        tracker.add_not_ok("Case", "test_one", 0.5, diagnostics="a\n\nb")
+        block = ["  ---", "  duration_ms: 0.5", "  ..."]
+        expected = ["not ok 1 - test_one", *block, "# a", "# ", "# b"]
+        self.assertEqual(lines, expected)
 
     # Text that would break its line is refused with its diagnostics.
     def test_line_refused(self) -> None:
@@ -304,7 +370,9 @@ class TestTracker(unittest.TestCase):
         )
         for description, directive, diagnostics in refused:
             with self.assertRaises(ValueError) as caught:
-                tracker.add_ok("Case", description, directive, diagnostics)
+                tracker.add_ok(
+                    "Case", description, 0.0, directive, diagnostics
+                )
             message = (
                 f"the TAP point {description!r} # {directive!r} does not fit"
                 f" on one line, its diagnostics: {diagnostics!r}"
@@ -318,6 +386,7 @@ class TestRunner(unittest.TestCase):
     # Blocks plan first, parents follow, and the parent plan comes last.
     def test_modules_pass(self) -> None:
         lines: list[str] = []
+        started = time.perf_counter()
         runner = tap_producer.TAPTestRunner(False)
         runner.set_stream(lines.append)
         load = class_load(TestFailures.PassingFixture)
@@ -333,11 +402,13 @@ class TestRunner(unittest.TestCase):
             "ok 2 - second",
             "1..2",
         ]
-        self.assertEqual(lines, expected)
+        cut = durations_cut(self, lines, started)
+        self.assertEqual(cut, blocks_add(expected))
 
     # Without failfast a failed module is graded and the stream goes on.
     def test_module_fails(self) -> None:
         lines: list[str] = []
+        started = time.perf_counter()
         runner = tap_producer.TAPTestRunner(False)
         runner.set_stream(lines.append)
         load = class_load(TestFailures.AssertionFixture)
@@ -354,7 +425,9 @@ class TestRunner(unittest.TestCase):
             "ok 2 - second",
             "1..2",
         ]
-        self.assertEqual(stream_reduce(lines, expected), expected)
+        wanted = blocks_add(expected)
+        cut = durations_cut(self, lines, started)
+        self.assertEqual(stream_reduce(cut, wanted), wanted)
 
     # A stream that bailed out takes no other module and writes no plan.
     def test_bail_ends(self) -> None:
@@ -834,31 +907,35 @@ class TestFailures(unittest.TestCase):
 class TestRelay(unittest.TestCase):
     # A passing block is relayed unchanged, its parent line numbered anew.
     def test_relay_passes(self) -> None:
+        started = time.perf_counter()
         realm = realm_run(class_load(TestFailures.PassingFixture), False)
         ending = ["ok 2 - fixture", "1..2"]
         stats = tap_consumer.TapStats(2, 2, 0, 0, True)
-        relay_expect(self, realm, False, ending, stats)
+        relay_expect(self, realm, False, ending, stats, started)
 
     # An expected failure, which the consumer does not count, passes the block.
     def test_relay_todo(self) -> None:
+        started = time.perf_counter()
         realm = realm_run(class_load(TestFailures.ExpectedFixture), False)
         ending = ["ok 2 - fixture", "1..2"]
         stats = tap_consumer.TapStats(2, 2, 0, 0, True)
-        relay_expect(self, realm, False, ending, stats)
+        relay_expect(self, realm, False, ending, stats, started)
 
     # A failing block fails its parent line, and the stream goes on to its end.
     def test_relay_fails(self) -> None:
+        started = time.perf_counter()
         realm = realm_run(class_load(TestFailures.MixedFixture), False)
         ending = ["not ok 2 - fixture", "1..2"]
         stats = tap_consumer.TapStats(5, 2, 2, 1, True)
-        relay_expect(self, realm, False, ending, stats)
+        relay_expect(self, realm, False, ending, stats, started)
 
     # The realm's bail out ends the stream, which then takes no other block.
     def test_relay_bails(self) -> None:
+        started = time.perf_counter()
         realm = realm_run(class_load(TestFailures.MixedFixture), True)
         self.assertEqual(realm[-1], _BAIL_LINE)
         stats = tap_consumer.TapStats(5, 2, 1, 0, True)
-        relay_expect(self, realm, True, [_BAIL_LINE], stats)
+        relay_expect(self, realm, True, [_BAIL_LINE], stats, started)
 
     # A realm's parent line that the consumer's count contradicts fails it.
     def test_relay_disagrees(self) -> None:
@@ -869,7 +946,8 @@ class TestRelay(unittest.TestCase):
         for point, parent, failures in cases:
             with self.subTest(parent=parent):
                 runner, gate = relay_open(False)
-                for text in (_VERSION_LINE, "    1..1", point):
+                block = ["      ---", "      duration_ms: 0.5", "      ..."]
+                for text in (_VERSION_LINE, "    1..1", point, *block):
                     runner.relay_feed(text)
                 with self.assertRaises(RuntimeError) as caught:
                     runner.relay_feed(parent)
@@ -878,7 +956,7 @@ class TestRelay(unittest.TestCase):
                     f" {failures} failures the consumer counted in its block"
                 )
                 self.assertEqual(str(caught.exception), message)
-                self.assertEqual(gate.lines[-2:], ["    1..1", point])
+                self.assertEqual(gate.lines[-5:], ["    1..1", point, *block])
 
     # A realm whose stream ends before its parent plan or a bail out fails.
     def test_relay_unfinished(self) -> None:
@@ -899,12 +977,17 @@ class TestRelay(unittest.TestCase):
             ([], "    1..1"),
             ([], "ok 1 - fixture"),
             (realm[:1], _VERSION_LINE),
-            (realm[:3], "ok 1 - other"),
-            (realm[:3], "ok 2 - fixture"),
-            (realm[:3], "ok 1 - fixture # SKIP"),
-            (realm[:3], "1..1"),
-            (realm[:4], "    ok 2 - test_late"),
-            (realm[:4], "1..2"),
+            (realm[:6], "ok 1 - other"),
+            (realm[:6], "ok 2 - fixture"),
+            (realm[:6], "ok 1 - fixture # SKIP"),
+            (realm[:6], "1..1"),
+            (realm[:7], "    ok 2 - test_late"),
+            (realm[:7], "1..2"),
+            (realm[:7], "1..1"),
+            (realm[:7], "  ..."),
+            (realm[:7], "  seconds: 0.5"),
+            (realm[:8], "  ---"),
+            (realm[:10], "  ---"),
             (realm, "1..1"),
             (realm, _BAIL_LINE),
         )
@@ -929,7 +1012,7 @@ class TestRelay(unittest.TestCase):
             runner.relay_feed("    ok 1 - test_one")
         message = "the TAP line '    ok 1 - test_one' does not fit the stream"
         self.assertEqual(str(caught.exception), message)
-        self.assertEqual(gate.lines[-1], f"ok 1 - {_FIRST_NAME}")
+        self.assertEqual(gate.lines[-4], f"ok 1 - {_FIRST_NAME}")
 
     # No module, relay or end of the stream starts while a relay is open.
     def test_relay_open(self) -> None:
@@ -1003,6 +1086,7 @@ class TestExpectation(unittest.TestCase):
     # A suite that fails another way does not match the stated failure.
     def test_failure_other(self) -> None:
         lines: list[str] = []
+        started = time.perf_counter()
         runner = tap_producer.TAPTestRunner(False)
         runner.set_stream(lines.append)
         runner.module_run(_BLOCK_NAME, class_load(TestFailures.ErrorFixture))
@@ -1015,4 +1099,6 @@ class TestExpectation(unittest.TestCase):
             _PARENT_FAILED,
             _PARENT_PLAN,
         ]
-        self.assertNotEqual(stream_reduce(lines, expected), expected)
+        wanted = blocks_add(expected)
+        cut = durations_cut(self, lines, started)
+        self.assertNotEqual(stream_reduce(cut, wanted), wanted)

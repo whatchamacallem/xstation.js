@@ -6,9 +6,10 @@
 # streams as the producers write them, passing, failing, bailed out and with
 # expected failures, a bail out wherever it stands counting one failure
 # unless it follows a failed point and the lines after it ignored, the stream
-# reader fed line by line, then streams with one fault each.
+# reader fed line by line, then streams with one fault each. Each point of a
+# stream is followed by its YAML block, which `blocks_add` puts in.
 
-import tap_consumer, unittest
+import re, tap_consumer, unittest
 from collections.abc import Sequence
 
 # A failfast stream, which bails out at its first failure.
@@ -64,16 +65,10 @@ _PASSING_LINES = (
 _BROWSER_BAIL = "Bail out! The browser failed: boom"
 
 # The counts of `passed`, `failed` and `skipped` after each passing line.
-_PASSING_COUNTS = [
-    (0, 0, 0),
-    (0, 0, 0),
-    (1, 0, 0),
-    (1, 0, 1),
-    (1, 0, 1),
-    (1, 0, 1),
-    (1, 0, 1),
-    (1, 0, 1),
-]
+_PASSING_COUNTS = [(0, 0, 0)] * 2 + [(1, 0, 0)] * 4 + [(1, 0, 1)] * 14
+
+# A test point, with the indent of its block.
+_POINT_PATTERN = re.compile(r"( {4})?(?:not )?ok [0-9]+ - .*")
 
 # A block with an expected failure, which passes, and an unexpected success.
 _TODO_LINES = (
@@ -87,9 +82,28 @@ _TODO_LINES = (
     "1..1",
 )
 
+# A point's YAML block after the point's indent, its duration the fixture's.
+_YAML_LINES = ("  ---", "  duration_ms: 0.5", "  ...")
 
-# The stats of the lines as a document, each line ended by a newline.
+
+# The lines with each point followed by its YAML block, at the point's indent.
+def blocks_add(lines: Sequence[str]) -> list[str]:
+    added: list[str] = []
+    for line in lines:
+        added.append(line)
+        if found := _POINT_PATTERN.fullmatch(line):
+            indent = found.group(1) or ""
+            added.extend(indent + text for text in _YAML_LINES)
+    return added
+
+
+# The stats of the lines with their YAML blocks as a document.
 def stats_read(lines: Sequence[str]) -> tap_consumer.TapStats:
+    return document_read(blocks_add(lines))
+
+
+# The stats of the lines as they are, as a document, each ended by a newline.
+def document_read(lines: Sequence[str]) -> tap_consumer.TapStats:
     return tap_consumer.document_stats("".join(line + "\n" for line in lines))
 
 
@@ -180,6 +194,34 @@ class TestParser(unittest.TestCase):
         expected = [tap_consumer.Bail(0, "failfast")]
         expected.append(tap_consumer.Bail(0, ""))
         self.assertEqual(lines, expected)
+
+    # The three lines of a YAML block are YAML at either depth, and no other.
+    def test_yaml_line(self) -> None:
+        parser = tap_consumer.Parser()
+        cases = (
+            ("  ---", (0, "---")),
+            ("  duration_ms: 14.2", (0, "duration_ms: 14.2")),
+            ("  ...", (0, "...")),
+            ("      ---", (1, "---")),
+            ("      duration_ms: 0.0", (1, "duration_ms: 0.0")),
+            ("      ...", (1, "...")),
+        )
+        for text, (depth, words) in cases:
+            line = parser.parse_line(text)
+            self.assertEqual(line, tap_consumer.YamlLine(depth, words))
+        texts = (
+            "  duration_ms: 14",
+            "  duration_ms: 1.25",
+            "  duration_ms: -1.0",
+            "  seconds: 0.5",
+            "  ----",
+            "    ---",
+            "---",
+            "   ...",
+        )
+        for text in texts:
+            line = parser.parse_line(text)
+            self.assertEqual(line, tap_consumer.Unknown(text))
 
     # A line of no kind the producers write is unknown, with its text.
     def test_unknown_line(self) -> None:
@@ -283,7 +325,7 @@ class TestStreamReader(unittest.TestCase):
         parser = tap_consumer.Parser()
         reader = tap_consumer.StreamReader()
         counts: list[tuple[int, int, int]] = []
-        for text in _PASSING_LINES:
+        for text in blocks_add(_PASSING_LINES):
             self.assertFalse(reader.stream_ended(), text)
             self.assertTrue(reader.line_read(parser.parse_line(text)), text)
             counts.append((reader.passed, reader.failed, reader.skipped))
@@ -291,7 +333,7 @@ class TestStreamReader(unittest.TestCase):
         self.assertEqual(reader.plan, 2)
         self.assertEqual(counts, _PASSING_COUNTS)
 
-    # A bail out ends the stream, and a line after it is ignored.
+    # A bail out ends the stream before a point's block, a line after ignored.
     def test_bail_ended(self) -> None:
         parser = tap_consumer.Parser()
         reader = tap_consumer.StreamReader()
@@ -369,7 +411,7 @@ class TestFaults(unittest.TestCase):
 
     # A stream with its plan line present but its last newline cut is a fault.
     def test_newline_missing(self) -> None:
-        text = "".join(line + "\n" for line in _PASSING_LINES)
+        text = "".join(line + "\n" for line in blocks_add(_PASSING_LINES))
         whole = tap_consumer.document_stats(text)
         cut = tap_consumer.document_stats(text.removesuffix("\n"))
         self.assertEqual(whole, tap_consumer.TapStats(2, 1, 0, 1, True))
@@ -396,3 +438,43 @@ class TestFaults(unittest.TestCase):
     def test_line_unknown(self) -> None:
         stats = stats_read(line_insert(_PASSING_LINES, 3, "    hello"))
         self.assertEqual(stats, tap_consumer.TapStats(2, 1, 0, 0, False))
+
+    # A point without its YAML block is a fault at the line after it.
+    def test_yaml_missing(self) -> None:
+        stats = document_read(_PASSING_LINES)
+        self.assertEqual(stats, tap_consumer.TapStats(2, 1, 0, 0, False))
+
+    # An attribute other than `duration_ms` is refused.
+    def test_yaml_attribute(self) -> None:
+        lines = line_replace(
+            blocks_add(_PASSING_LINES), 4, "      seconds: 0.5"
+        )
+        stats = document_read(lines)
+        self.assertEqual(stats, tap_consumer.TapStats(2, 1, 0, 0, False))
+
+    # The block's lines out of their order are a fault.
+    def test_yaml_order(self) -> None:
+        lines = blocks_add(_PASSING_LINES)
+        lines[3], lines[4] = lines[4], lines[3]
+        stats = document_read(lines)
+        self.assertEqual(stats, tap_consumer.TapStats(2, 1, 0, 0, False))
+
+    # A block at a depth other than its point's is a fault.
+    def test_yaml_depth(self) -> None:
+        lines = line_replace(blocks_add(_PASSING_LINES), 3, "  ---")
+        stats = document_read(lines)
+        self.assertEqual(stats, tap_consumer.TapStats(2, 1, 0, 0, False))
+
+    # A YAML line that follows no point, or a second block, is a fault.
+    def test_yaml_outside(self) -> None:
+        cases = ((14, "  ---", (2, 1, 0, 1)), (6, "      ---", (2, 1, 0, 0)))
+        for index, text, counts in cases:
+            lines = line_insert(blocks_add(_PASSING_LINES), index, text)
+            stats = document_read(lines)
+            self.assertEqual(stats, tap_consumer.TapStats(*counts, False))
+
+    # A bail out inside a failed point's block counts no second failure.
+    def test_bail_yaml(self) -> None:
+        lines = line_insert(blocks_add(_FAILFAST_LINES), 7, _BROWSER_BAIL)
+        stats = document_read(lines[:8])
+        self.assertEqual(stats, tap_consumer.TapStats(4, 1, 1, 0, True))

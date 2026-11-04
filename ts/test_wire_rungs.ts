@@ -286,6 +286,9 @@ namespace test_wire_rungs {
     #sent_sha256 = "";
     // The client of the mcp rung.
     #client: mcp.Client | undefined = undefined;
+    // When the rungs started, and when the rung running started.
+    readonly #chain_started = performance.now();
+    #rung_started = 0;
 
     // Takes the queue, the start, and the rungs, checked before any line.
     constructor(
@@ -339,6 +342,7 @@ namespace test_wire_rungs {
 
     // Runs the next rung, or holds it when the gold names it held.
     rung_follow(): void {
+      this.#rung_started = performance.now();
       const rung = this.#names[this.#index];
       const held = gold_value("held_rungs") as string[];
       if (held.includes(rung)) {
@@ -424,20 +428,26 @@ namespace test_wire_rungs {
     // Writes the failed point and the bail out, and stops the chain.
     #fail(rung: string, error: Error): void {
       const diagnostics = `${error.message}\n${error.stack ?? ""}`;
-      this.#block.add_not_ok(rung, rung, "", diagnostics);
+      const duration_ms = performance.now() - this.#rung_started;
+      this.#block.add_not_ok(rung, rung, duration_ms, "", diagnostics);
       line_send(this.#tasks, constants.bail_prefix + rung);
       this.#stopped = true;
     }
 
     // Writes the passing point, then runs on: the next rung, or the end.
     #pass(rung: string, diagnostics?: string): undefined {
-      this.#block.add_ok(rung, rung, "", diagnostics);
+      const duration_ms = performance.now() - this.#rung_started;
+      this.#block.add_ok(rung, rung, duration_ms, "", diagnostics);
       this.#index += 1;
       if (this.#index < this.#names.length) {
         this.rung_follow();
         return undefined;
       }
-      this.#parent.add_ok(constants.module_name, constants.module_name);
+      this.#parent.add_ok(
+        constants.module_name,
+        constants.module_name,
+        performance.now() - this.#chain_started,
+      );
       this.#parent.generate_tap_reports();
       return undefined;
     }

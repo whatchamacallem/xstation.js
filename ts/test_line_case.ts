@@ -8,7 +8,8 @@
 // at each end, the queue's at one and the test's at the other. Each run of
 // `line_case.block_run` writes its block through a runner of its own into a
 // list of lines, the writer of `set_stream`, and the test adds one point when
-// that stream equals the stream of the gold and the verdict is as stated: a
+// that stream, each `duration_ms` value checked by its grammar and the test's
+// clock and cut, equals the stream of the gold and the verdict is as stated: a
 // run of cases that pass, a run whose cases fail by design, each a different
 // way, and that run again with failfast. One handler answers with a real
 // `error` line built by `dispatch.error_make`, whose stack and whose cause's
@@ -30,6 +31,8 @@ namespace test_line_case {
     fail_type: "line_case_test.fail",
     handler_version: 0,
     synchronous_setting: "queue_synchronous",
+    duration_line: /^( *duration_ms:)(.*)$/,
+    duration_value: /^ [0-9]+\.[0-9]$/,
   });
 
   // One run of the block: its cases, failfast, its stream and its verdict.
@@ -144,14 +147,40 @@ namespace test_line_case {
     return undefined;
   }
 
+  // The first duration out of its grammar or over the elapsed ms, if any.
+  function duration_difference(
+    written: readonly string[],
+    elapsed: number,
+  ): string | undefined {
+    const most = Number(elapsed.toFixed(1));
+    for (const line of written) {
+      const value = constants.duration_line.exec(line)?.[2];
+      if (
+        value !== undefined &&
+        !(constants.duration_value.test(value) && Number(value) <= most)
+      ) {
+        return `${JSON.stringify(line)} is no duration of 0 to ${most} ms`;
+      }
+    }
+    return undefined;
+  }
+
+  // The stream with the value of each duration cut, as the gold holds it.
+  function durations_cut(written: readonly string[]): string[] {
+    return written.map((line) => line.replace(constants.duration_line, "$1"));
+  }
+
   // How a run differs from its gold stream or its stated verdict, if it does.
   function run_difference(
     run: RunEntry,
     written: readonly string[],
+    elapsed: number,
     stream: readonly string[],
     passed: boolean,
   ): string | undefined {
-    const difference = stream_difference(written, stream);
+    const difference =
+      duration_difference(written, elapsed) ??
+      stream_difference(durations_cut(written), stream);
     if (difference !== undefined) {
       return difference;
     }
@@ -167,6 +196,7 @@ namespace test_line_case {
     run: RunEntry,
     then: (ok: boolean) => void,
   ): void {
+    const started = performance.now();
     const written: string[] = [];
     const runner = new tap_producer.TAPTestRunner(run.failfast);
     runner.set_stream((text) => written.push(text));
@@ -177,15 +207,24 @@ namespace test_line_case {
       id,
       topology_build,
       (passed) => {
+        const elapsed = performance.now() - started;
         runner.run_end();
         const stream = harness.gold_get(
           `${constants.gold_id}.streams.${run.stream}`,
         ) as string[];
-        const difference = run_difference(run, written, stream, passed);
+        const difference = run_difference(
+          run,
+          written,
+          elapsed,
+          stream,
+          passed,
+        );
+        const duration_ms = performance.now() - started;
+        const name = constants.block_name;
         if (difference === undefined) {
-          tracker.add_ok(constants.block_name, run.name);
+          tracker.add_ok(name, run.name, duration_ms);
         } else {
-          tracker.add_not_ok(constants.block_name, run.name, "", difference);
+          tracker.add_not_ok(name, run.name, duration_ms, "", difference);
         }
         then(difference === undefined);
       },

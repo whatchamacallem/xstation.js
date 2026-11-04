@@ -51,6 +51,8 @@ namespace line_case {
     readonly expected: lines.Line[];
     readonly came: lines.Line[];
     timer: number | undefined;
+    // When the case started, on `performance.now`.
+    readonly started: number;
   }
 
   // Whether the value is a plain object, from a literal or a clone of one.
@@ -276,10 +278,17 @@ namespace line_case {
         return;
       }
       this.#next = index + 1;
+      const started = performance.now();
       const test = this.#cases[index];
       const expected = test.expect.map((name) => line_read(this.#id, name));
       const sent = test.send.map((name) => line_read(this.#id, name));
-      const state: CaseState = { test, expected, came: [], timer: undefined };
+      const state: CaseState = {
+        test,
+        expected,
+        came: [],
+        timer: undefined,
+        started,
+      };
       this.#state = state;
       state.timer = setTimeout(
         () => this.#point_add(state),
@@ -309,11 +318,18 @@ namespace line_case {
     #point_add(state: CaseState): void {
       this.#state = undefined;
       const difference = difference_find(state);
+      const duration_ms = performance.now() - state.started;
       if (difference === undefined) {
-        this.#tracker.add_ok(this.#name, state.test.name);
+        this.#tracker.add_ok(this.#name, state.test.name, duration_ms);
       } else {
         this.#failed = true;
-        this.#tracker.add_not_ok(this.#name, state.test.name, "", difference);
+        this.#tracker.add_not_ok(
+          this.#name,
+          state.test.name,
+          duration_ms,
+          "",
+          difference,
+        );
       }
       this.#case_next();
     }

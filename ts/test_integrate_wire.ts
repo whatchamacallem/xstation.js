@@ -32,8 +32,8 @@
 // `console.output` line, which the case compares by size and SHA-256 with
 // the gold's line, the payload as the pty's output processing changes it.
 // So neither the terminal's echo of the typed lines, which holds only the
-// markers' escapes, nor the job control line and the prompts before the
-// markers are compared.
+// markers' escapes, nor what comes before the first prompt and the prompts
+// before the markers are compared.
 
 namespace test_integrate_wire {
   // The gold of this block and the line types.

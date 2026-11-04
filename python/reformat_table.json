@@ -3,7 +3,7 @@
     "checker": ["prettier", "--check", "--no-config", "--print-width", "79"],
     "comments": "html",
     "encoding": "utf-8",
-    "formatter": ["prettier", "--write", "--no-config", "--print-width", "79"],
+    "formatter": ["prettier", "--write", "--log-level", "warn", "--no-config", "--print-width", "79"],
     "linter": [],
     "system": "linux"
   },
@@ -11,7 +11,7 @@
     "checker": ["prettier", "--check", "--no-config", "--print-width", "79"],
     "comments": "javascript",
     "encoding": "utf-8",
-    "formatter": ["prettier", "--write", "--no-config", "--print-width", "79"],
+    "formatter": ["prettier", "--write", "--log-level", "warn", "--no-config", "--print-width", "79"],
     "linter": [],
     "system": "linux"
   },
@@ -35,16 +35,16 @@
     "checker": ["ruff", "format", "--check", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
     "comments": "python",
     "encoding": "utf-8",
-    "formatter": ["ruff", "format", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
-    "linter": ["ruff", "check", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
+    "formatter": ["ruff", "format", "--quiet", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
+    "linter": ["ruff", "check", "--quiet", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
     "system": "linux"
   },
   ".pyi": {
     "checker": ["ruff", "format", "--check", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
     "comments": "python",
     "encoding": "utf-8",
-    "formatter": ["ruff", "format", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
-    "linter": ["ruff", "check", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
+    "formatter": ["ruff", "format", "--quiet", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
+    "linter": ["ruff", "check", "--quiet", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
     "system": "linux"
   },
   ".sh": {
@@ -59,7 +59,7 @@
     "checker": ["prettier", "--check", "--no-config", "--print-width", "79"],
     "comments": "javascript",
     "encoding": "utf-8",
-    "formatter": ["prettier", "--write", "--no-config", "--print-width", "79"],
+    "formatter": ["prettier", "--write", "--log-level", "warn", "--no-config", "--print-width", "79"],
     "linter": [],
     "system": "linux"
   }

@@ -359,7 +359,6 @@
     "engine_tap_browser_failed": "The browser failed: boom",
     "failed_prefix": "The server failed",
     "module_refused": "argument --module: invalid choice: 'test_no_such'",
-    "name_invalid": "The name ../a.py is not a plain file name that ends in .py and does not start with a dot.",
-    "timing": "test_tap_producer: smoke-test, "
+    "name_invalid": "The name ../a.py is not a plain file name that ends in .py and does not start with a dot."
   }
 }

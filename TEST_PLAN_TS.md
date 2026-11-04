@@ -888,6 +888,7 @@ formatter and no checker of `python/reformat_table.json`:
    patch of ttyd's `src/server.c` sets `info.extensions` to NULL, so that
    ttyd offers no extension and sends every frame uncompressed, and the
    runs go on.
+8. Item 1's advisory goes by 3.29, the maintainer's message of task 13.
 
 3.28 Each queue runs the lines of its inputs in the order they come, by
 the maintainer's answer to Question P4 of task 11's postmortem
@@ -936,6 +937,184 @@ before any code.
 5. The order of ttyd's own ends, its socket's close against its process's
    end and the last output, stays as ttyd's design makes it, a known
    limitation by the project rules; the tests wait for the end they need.
+
+3.29 A run writes TAP and what a failure needs, by the maintainer's message
+of 2026-11-04, task 13 of `tmp/tasks_30_2127.md`: "add to the plan to
+remove messages that are not required that you are reading that contain
+information that an ai would already know and are not part of the TAP
+protocol. no human will see these messages, and it cost electricity to have
+ai read them all day long for no reason." The same message has every choice
+of this plan's new work "accepted and resolved in favor of your judgement",
+so each choice of 3.29 and 3.30 is class C (11.3 items 39 to 41), written
+here before any code. Surveyed from task 12's runs: a passing smoke run
+wrote 2149 lines on stdout and 252 on stderr, a passing normal run 2327 and
+627, and outside TAP these:
+
+1. What goes, since it holds nothing the reader of a run lacks, on a pass
+   or a failure:
+   1. Each block's label and seconds on stderr, such as `test_tap_consumer:
+      smoke-test, 0.004 s`, written by `test_all.py`'s `stream_run`: the
+      label is the driver's own table, and the seconds move into the
+      block's parent point as its `duration_ms` (3.30).
+   2. `test_posix.py`'s advisory in a smoke-test run, the gold
+      `format_advisory` of `test_integrate_test_posix`, which 3.27 item 1
+      added: the reader knows that a smoke-test run formats nothing. This
+      overturns the advisory kept of 11.2 item 50 (11.3 item 42).
+   3. The success output of the formatters and linters that `test_posix.py`
+      and `reformat.py` start: ruff check's "All checks passed!", ruff
+      format's count of the files left unchanged, and prettier's line per
+      file, by each command's own option in `python/reformat_table.json`,
+      `--quiet` for ruff check and ruff format and `--log-level warn` for
+      prettier. shfmt's `--list` names only a file it rewrote, and stays. A
+      finding or a rewrite is still written, and a failing command still
+      ends the run with its code.
+2. What a run writes only under `--verbose`, since it holds measurements or
+   logs that a failure may need and a pass does not:
+   1. `test_all.py`'s line of `test_posix.py`'s seconds and its last line
+      of the run's seconds, `the smoke-test run took 124.250 s`.
+   2. The wire test's and the browser test's narration of each rung and
+      step with its label and seconds, `RungLog`'s `rung_print`,
+      `step_print`, `setup_print` and `note_print`, among them their build
+      lines and the line naming the roots a failed run keeps.
+   3. The copies on stderr of the logs of what a test starts: ttyd's log,
+      which `TtydServer` keeps for its checks and copies; the page's
+      console, `console_copy`; and the request lines of the HTTP servers
+      that suites and programs start, which `http.server`'s `log_message`
+      writes, as `test_devtools_chrome`'s does. The checks read what they
+      keep as before.
+   4. Under `--verbose`, which also sets the console's verbose level
+      (3.17), they are written as now. 7.2 item 4's moves of labels by
+      measured seconds read the programs' seconds from a run with it, and
+      the stream's from its YAML blocks.
+3. What stays: every line of the TAP stream on stdout, the YAML blocks of
+   3.30 among them; every error a run writes, the first failure's report
+   and what a failing command writes; the bail out of a failed run.
+4. So a passing run without `--verbose` writes its TAP stream alone on
+   stdout and nothing on stderr. The `--tty` path relays the same stream,
+   and its errors as now.
+5. The tests that expect a removed line change with it:
+   `test_integrate_test_posix`'s smoke case checks that the step writes
+   nothing and changes nothing, the gold `format_advisory` removed; the
+   suites of `reformat` and `test_posix` that hold the table's commands
+   follow the table.
+6. Status, on 2026-11-04, task 13 of `tmp/tasks_30_2127.md`: done.
+   1. Built: `test_all.py`'s `stream_run` writes no line of its own, and
+      its line of `test_posix.py`'s seconds and its last line are under
+      `--verbose`; `test_posix.py`'s advisory and the gold
+      `format_advisory` removed; `--quiet` on ruff check and ruff format
+      and `--log-level warn` on prettier in `python/reformat_table.json`;
+      the narration of `test_wire.py` and `test_browser.py`, their copies
+      of ttyd's log and of the page's console, and the request lines of
+      `test_browser.py`'s stub server and `test_devtools_chrome.py`'s page
+      server, under `--verbose`. `test_integrate_test_posix`'s smoke case
+      and `test_test_posix_formatters` expect no output.
+   2. Runs as `xsjs` with `--anthropic` under the run lock: the smoke
+      target 119 of 119, exit 0 in 126.2 s of its 180 s, its stdout 8145
+      lines, every one a line of TAP, and nothing on stderr; the normal
+      target 121 of 121 with the wire test and the browser test, exit 0 in
+      664.0 s, nothing on stderr; and `--tty --stream` 119 of 119, exit 0
+      in 113.6 s, nothing on stderr. `python/reformat.py` run twice writes
+      nothing.
+   3. Found by the smoke target and not by the stream, which does not run
+      `test_posix.py`: its comment audit refused a comment of two lines in
+      `API/python/tap_consumer.pyi` and the flag `--verbose` outside a code
+      span in eight comments the change added; the first made one line and
+      the flag put in a code span in the eight.
+
+3.30 A YAML block of `duration_ms` after every point, by the same message:
+"next ad a task to the plan to enhance the tap producers/consumers to emit
+and consume yaml information. have all producers emit duration_ms: [the
+block of 3 lines] in yaml. do not allow unrecognized yaml attributes in the
+consumer for now and hardcode the expectations of always having that one
+yaml attribute instead of calling a full yaml parser when every test will
+always look like this [a point and its block]. later on a full yaml
+writer/parser can be added and this code will be future comaptable." Prose
+first in `API/python/tap_consumer.pyi`, `API/python/tap_producer.pyi` and
+`API/ts/tap_producer.d.ts`, then the code.
+
+1. The grammar. Every test point that either producer writes, a block's
+   point at depth 1 and a parent point at depth 0, is followed at once by
+   its YAML block of TAP 14, indented two spaces more than the point, of
+   three lines alone: `---`, `duration_ms: N` and `...`. N is the point's
+   milliseconds as measured, written with one digit after the point,
+   `[0-9]+\.[0-9]`, by Python's `f"{value:.1f}"` and TypeScript's
+   `toFixed(1)`. A point's diagnostic lines follow its block. A plan line,
+   the version line and a bail out line have none. A block's point,
+   indented four spaces, reads ` ok 1 - test_bail_indented`, then ` ---`, `
+   duration_ms: 0.1` and ` ...`.
+2. What is measured, on each producer's own monotonic clock, Python's
+   `time.perf_counter` and TypeScript's `performance.now`:
+   1. A unittest point: from `startTest` to the point's write. A fixture's
+      failure written as a point of its own, Python's `_failure_add`: from
+      the write of the point before it, or of the block's plan.
+   2. A block's parent point: from the start of `module_run`, its loading
+      included, or of `block_start`, to the parent line's write. A module
+      that fails to load: its one point from that start.
+   3. A relayed block's parent point: from `block_relay` to the realm's
+      parent line. The realm's own parent block is read by the relay's
+      grammar and not written, as its parent line is replaced by the
+      stream's own.
+   4. A point of line cases, of `test_wire_end`, `test_tap_pair`,
+      `test_line_case` and the wire rungs: from the start of its case or
+      rung to its verdict, fixed waits included. The wire rungs' parent
+      point: from their start to their end.
+3. The API. `Tracker`'s `add_ok`, `add_not_ok` and `add_skip` in both
+   producers take `duration_ms`, the point's milliseconds, as their third
+   parameter, before `directive`, and require it, so that no point is
+   written without its block. `TAPTestResult` measures its tests and
+   `TAPTestRunner` its blocks; every other caller passes what it measured.
+4. The consumer. `tap_consumer.Parser` gives each of the three lines of
+   item 1, and only them, indented two spaces more than the points of a
+   depth, as the new kind `YamlLine`, its depth that of its point and its
+   text the rest of the line. Any other text there is `Unknown`, which fits
+   nowhere, so that an attribute other than `duration_ms` is refused with
+   no YAML parser, the grammar hardcoded. tappy keeps a YAML block as its
+   test's `yaml_block`, which a parser of one line at a time cannot give.
+   `StreamReader` takes the three in their order at once after each point,
+   at its depth, refusing a point without them and a YAML line anywhere
+   else; a bail out line at depth 0 still ends the stream wherever it
+   stands. `document_stats` reads a document so. The relay of a realm's
+   block (3.4) checks the realm's parent block in that order as it checks
+   the parent line, and does not write it.
+5. The other readers of TAP: `test_browser.py`'s `tap_failure` passes over
+   a failed point's block to reach its diagnostics, and
+   `ts/tap_producer.ts`'s `report_html` marks a failed point's block with
+   the point. The server's `engine_tap`, which appends each line unread,
+   does not change.
+6. Future compatibility: each block written is a TAP 14 YAML block and a
+   YAML 1.2 document of one mapping, so a later YAML writer and parser read
+   and write the same lines. That parser replaces `StreamReader`'s three
+   hardcoded lines with the block's mapping, and the parameter
+   `duration_ms` stays.
+7. The tests: `test_tap_consumer` gains the grammar's cases, each refusal
+   of item 4 among them. The producers' suites, `test_tap_producer` in both
+   languages, the pair tests, `test_line_case` and every gold that holds
+   TAP lines compare a producer's lines with expected lines that hold
+   `duration_ms:` without its value, and check each value by item 1's
+   grammar and against the test's own clock around the call, so that no
+   gold holds a measured value.
+8. Status, on 2026-11-04, task 13 of `tmp/tasks_30_2127.md`: done, built in
+   a copy of the tree under `build/` and copied back file by file, no file
+   of it changed in the tree meanwhile.
+   1. Built as items 1 to 5 give it, in `python/tap_producer.py`,
+      `python/tap_consumer.py`, `ts/tap_producer.ts`, `ts/line_case.ts`,
+      the TypeScript callers of `Tracker` and their stubs. `report_html`
+      spans a failed point, a block's or a parent's, with its YAML block
+      and its diagnostics.
+   2. The tests: `test_tap_consumer` gains `test_yaml_line`,
+      `test_yaml_missing`, `test_yaml_attribute`, `test_yaml_order`,
+      `test_yaml_depth`, `test_yaml_outside` and `test_bail_yaml`; the gold
+      `timing` of `test_tap_tty` is removed with the line it matched; every
+      other suite and gold of item 7 holds `duration_ms:` without its value
+      and checks each value against its own clock.
+   3. The smoke target's stream holds 2006 points, 1887 in blocks and 119
+      parents, each followed by its block, 6018 lines of YAML, and
+      `tap_consumer.document_stats` reads it as well formed, 1887 of 1887
+      passed. Runs: the smoke target 119 of 119, exit 0 in 126.2 s of its
+      180 s, its stdout 8145 lines, every one a line of TAP, and nothing on
+      stderr; the normal target 121 of 121 with the wire test and the
+      browser test, exit 0 in 664.0 s, nothing on stderr; and `--tty
+      --stream` 119 of 119, exit 0 in 113.6 s, nothing on stderr.
 
 ## 4 The rules every task follows
 
@@ -2497,10 +2676,29 @@ dash with none (log item 38.1).
       the handler it had. Inside the sandbox, where bwrap's init leads the
       session and the shell's process is pid 2 of process group 1, a step
       of Python's standard library, `python3 -I -c`, calls `os.setsid()`
-      and `TIOCSCTTY` on fd 0, then `os.execv` of `/bin/dash` with dash's
-      own arguments, `-v` in the verbose form. Measured: no line on job
-      control, `$-` `smi`, `jobs` lists a background job, and `exit 7`
-      returns 7. `--new-session` is kept.
+      and `TIOCSCTTY` on fd 0, sets SIGPIPE and SIGXFSZ back to their
+      default, then calls `os.execve` of `/bin/dash` with dash's own
+      arguments, which follow the step's code on its command line, `-v` in
+      the verbose form, and with the environment the step was given, read
+      from `/proc/self/environ`. Measured: no line on job control, `$-`
+      `smi`, `jobs` lists a background job, and `exit 7` returns 7.
+      `--new-session` is kept.
+      1. The two restorations, added by task 13 of `tmp/tasks_30_2127.md`
+         on 2026-11-04 before the step was built, undo what Python's start
+         does to its own process, which the step as first planned,
+         `os.execv` of dash, passed on to dash and to every command dash
+         runs. Python's start ignores SIGPIPE and SIGXFSZ, which
+         `subprocess` sets back to their default in the console role's
+         child, bwrap. In the C locale, as with no `LANG` or with
+         `LANG=C`, it adds `LC_CTYPE=C.UTF-8` to its environment by PEP
+         538's coercion, which `-I` does not turn off; measured under
+         `build/repro/tty/` by `probe4.py`, the step as first planned gave
+         dash `LC_CTYPE`, which neither item 1's scrubbed environment nor
+         item 5.3 holds. `/proc/self/environ` holds what `execve` gave the
+         process, before that coercion. The other designs, not chosen: dash
+         given `LC_CTYPE`, a change of the scrubbed environment that no
+         requirement asks for; and the step removing `LC_CTYPE`, which
+         would tie it to the console role's list of kept variables.
    5. What it changes: the argv constant of `python/bootstrap.py`, the
       maintainer's exact command of this section's first paragraph,
       gains the Python step before dash; its stub's header and the gold
@@ -2513,6 +2711,107 @@ dash with none (log item 38.1).
    6. The Python inside the sandbox starts no command line utility: it
       replaces itself with dash, which the maintainer gave, by the
       standard library alone.
+   7. Status, on 2026-11-04, task 13 of `tmp/tasks_30_2127.md`: built.
+      1. What was built: in `python/bootstrap.py`, `_TERMINAL_STEP`, the
+         step of item 4 as its statements joined by `; `, and `_DASH_ARGV`
+         with `python3 -I -c` and the step between `--chdir /tmp` and
+         `/bin/dash`, its verbose form still the same argv with `-v` after
+         `/bin/dash`, so that dash's own arguments follow the step's code;
+         and `_terminal_release`, which the console role calls on fd 0
+         after its scrub of the environment, just before `verbose.exec`
+         logs and starts bwrap. The header of `API/python/bootstrap.pyi`
+         names the command and the step's statements, and the gold copies
+         of the argv follow: `argv` and `argv_verbose` of
+         `python.test_bootstrap_dash`, and `verbose_exec_run` of
+         `python.test_bootstrap`. No gold of `ts/` holds the argv.
+         `python3` is found inside the sandbox on the kept `PATH`, as
+         `bwrap` is outside it.
+      2. Item 5's measurements made again on 2026-11-04 as `xsjs`,
+         bubblewrap 0.9.0, Python 3.14.6, by `build/repro/tty/remeasure.py`
+         through bootstrap's way: `bootstrap_run` in a forked child that
+         leads its session with a new pty as its controlling terminal, as
+         `test_bootstrap_dash` and ttyd run it, at level 1 unless a level is
+         named, each beside the same script's run on the code before the
+         change:
+         1. Item 5.1: nothing comes before the first `$ ` prompt, the line
+            on job control gone, and `$-` is `smi`, or `vsmi` at level 2,
+            where it was `si` and `vsi`. With `-v` each input line still
+            comes back twice.
+         2. Item 5.2, unchanged: dash starts in `/tmp`; `/home`, `/tmp`,
+            `/root` and `/mnt` are empty; `/home/t`, the root and `/mnt/c`
+            cannot be entered; `/` is the real root, read only; writes to
+            `/tmp` and `/home` work, and neither outlives the sandbox.
+         3. Item 5.3, unchanged: with no `LANG` and with `LANG=C` the
+            environment is the given HOME, LANG, PATH and TERM and dash's
+            `PWD='/tmp'`, `OLDPWD` only after a `cd`, and a `cat` that dash
+            runs ignores no signal, `SigIgn: 0000000000000000`. The step as
+            first planned, measured by the same script, gave dash
+            `LC_CTYPE='C.UTF-8'` and its commands `SigIgn:
+            0000000001001000`, SIGPIPE and SIGXFSZ, the cause of item 4.1.
+            Dash itself now ignores SIGTSTP and SIGTTOU beside SIGQUIT and
+            SIGTERM, as a shell with job control does.
+         4. Item 5.4, the code `verbose.exec` returns, then the console
+            role's, unchanged: `exit 3`, 3 and 3; `kill -9 $$`, 137 and
+            137; from outside, to the pid the console role forked, SIGKILL
+            -9 and 137, SIGTERM -15 and 143, SIGHUP -1 and 129. The pty's
+            master closed: 129 and 129, a normal exit of the outer bwrap,
+            since the hangup now reaches dash, the leader of the pty's
+            session, and no longer the console role. Before the change the
+            same script measured the console role ended by that hangup's
+            SIGHUP, with no exit logged and no code returned, where item 5.4
+            had measured -1 and 129. The console role killed by SIGKILL or
+            SIGTERM: bwrap and dash gone within 2.5 ms of the signal, a wait
+            that holds the reaping and the polling of `/proc`, against 1.6
+            ms by the same script before, and the log holding only the
+            `Running` line, as item 5.7 measured.
+         5. Item 5.5: inside, `$$` is 2 and `$PPID` 1, and dash leads
+            process group 2 and session 2, the pty its controlling terminal
+            and dash's group its foreground group. Outside, the console role
+            and the bwrap it forked share the console role's session with no
+            controlling terminal, the inner bwrap leads a session with none,
+            and dash leads its own session and process group, the pty its
+            controlling terminal. So the pty's hangup ends the shell through
+            dash itself, and ttyd's SIGHUP to the console role's process
+            group on a page's close still ends the console role and the
+            outer bwrap, the inner bwrap and dash then by
+            `--die-with-parent`.
+         6. Item 5.6, medians of 10 runs, in two runs of the script: from
+            the fork to the first prompt 38.8 and 39.9 ms through
+            bootstrap's way, against 23.5 ms before the change, and 27.0 and
+            25.2 ms by the argv alone on a pty, against 8.1 ms, the
+            difference being the step's Python start; from `exit 0` to
+            reaped 2.0 and 1.8 ms through bootstrap's way, against 1.8 ms,
+            and 0.59 and 0.76 ms by the argv alone, against 0.51 ms.
+         7. Item 5.7: at levels 1 and 2 the log's `Running` and `exited
+            with code 0` lines name the whole argv, the step's code quoted
+            by `shlex.join`, ending in `/bin/dash -v` at level 2.
+         8. Item 4's check: `jobs` lists `[1] + Running sleep 1`, and `exit
+            7` returns 7 through `verbose.exec` and the console role.
+         9. Three of item 7.7.2's bytes typed plainly while `sleep 5` runs,
+            beside the code before the change: `0x03`, VINTR, ends the
+            sleep, `$?` 130, where it ended the console role with
+            `KeyboardInterrupt`; `0x1c`, VQUIT, ends the sleep with `Quit`,
+            `$?` 131, where it killed the console role by SIGQUIT; and
+            `0x1a`, VSUSP, stops the sleep, `[1] + Stopped sleep 5`, `$?`
+            148, the first `exit` after it answered "You have stopped
+            jobs." and the second ending dash with 0. The console role lives
+            on in all three. The binary heredoc types each of them after
+            `0x16`, so its cases are unchanged.
+      3. Runs as `xsjs` with `--anthropic` under the run lock, each
+         passing: `test_bootstrap`, `test_bootstrap_dash` and
+         `test_integrate_bootstrap`, 36 tests, exit 0 in 1.7 s;
+         `test_integrate_wire.ts`, `test_worker_ai_console.ts`,
+         `test_tools_browser_console.ts` and `test_console_open.ts`, 36
+         cases, exit 0 in 18.2 s; and the smoke target, 119 of 119 with
+         the wire test's rungs `console` and `lines`, exit 0 in 126.0 s of
+         its 180 s. The browser test's rung `stage 7: console open, close,
+         exit, open` is labelled normal-test and waits for the next normal
+         run.
+      4. 7.5 item 6.2's cause and 7.9.1 item 1's `rows` probe, and the
+         header of `ts/test_integrate_wire.ts`, named the line on job
+         control as what comes before the first prompt. That line no longer
+         comes, so each now names whatever comes before the first prompt;
+         item 2.3, on which each rests, stays.
 
 7.5 The driver's phase C and its blocks, every new or changed API given
 before any code.
@@ -2653,7 +2952,7 @@ before any code.
       that the first command's read starts after it (7.4 item 2.3). The
       cause: the console view sends ttyd's first message as soon as the open
       is answered, and a read started before the first prompt ends at it,
-      the job control line its output. The other design, not chosen: a case
+      whatever comes before the first prompt its output. The other design, not chosen: a case
       that sends the first message and expects nothing, waiting its seconds,
       which costs them in every smoke run and rests on dash starting within
       them.
@@ -3008,8 +3307,8 @@ first, and ends with the report of 4.9 item 4.
       of the prefix `console_probe.` that the UI owns: `rows`, the
       console's rows read from the DOM as `test_integrate_console_view`
       reads them, from the first that starts with the gold's `prompt` on,
-      by 7.4 item 2.3, since dash writes its line on job control first
-      (7.4 item 5.1); `phase`, the view's `open_is()` and `open_wanted()`;
+      by 7.4 item 2.3, which keeps whatever comes before the first
+      prompt out of the comparison; `phase`, the view's `open_is()` and `open_wanted()`;
       `type`, text typed into the terminal's input; and `close`, the
       view's `close_request()`. The cases: the view hidden and idle;
       `console.show` answered once tty 0 is open; the view open; a wait
@@ -3092,6 +3391,102 @@ first, and ends with the report of 4.9 item 4.
       target 121 of 121 in 634.118 s, and `--tty --stream` 119 of 119 in
       118.573 s. C's layer table by the compiler API and the label moves
       wait.
+   3. Status, 2026-11-04, task 13 of `tmp/tasks_30_2127.md`: C's layer
+      table by the compiler API, alone. The graph is the TypeScript 5.2.2
+      compiler API's, a program and its type checker for each of
+      `ts/tsconfig.test.json`, 88 files, and `ts/tsconfig.node.json`, 51
+      files, 91 in all, by a script in `build/layers13/`. M calls into N
+      when an identifier of M's code resolves to a top level name of N's
+      file: 486 edges between files are counted. An identifier in a type
+      position, a type annotation or argument, an `implements` clause, an
+      interface, a type alias or a `declare` statement, is type-only and
+      left out: 96 pairs of files are referenced only that way, such as
+      `test_wire_end`'s `tap_producer.TAPTestRunner`. The blocks, their
+      groups and their order are read from the lists of
+      `python/test_all.py`, and each block's kind, a unittest module, line
+      cases or its own points, from its entry in `ts/test_node.ts` or
+      `ts/test_headless.ts`.
+      1. 6.8 item 7's rules, applied as written. `tap_producer` and
+         `unittest` are layer 0. `line_case` counts for the four blocks of
+         C that build a topology, and not for `test_wire_end`, which writes
+         its own points. No block of C names `test_headless` or `boot`, so
+         the bring up counts for none, and no case of C is a line of
+         `worker_ai.tap_start`, so 6.8 item 7.2 adds no edge;
+         `test_wire_end`'s `tap.start` is its reply to its server's first
+         line, the wire's own. A block of C follows every unit block of A,
+         B and C of a module it calls into, and an integration block of C
+         also the integration blocks of those modules and the unit blocks
+         of its own. `test_console_open` is counted as `console_view`'s,
+         which moves nothing, since it follows `test_integrate_page`.
+      2. Over the same graph and rules every layer of A and B comes out as
+         5.11 item 5 and 6.8 item 7 with its item 6 give it, with
+         `test_switches` in layer 3 and `test_substrate_limit` in layer 7.
+         `_B_UNIT` lists `test_substrate_store` before
+         `test_substrate_limit`, both in layer 7, which the alphabet orders
+         the other way: a discrepancy of 6.8's order, not of C's.
+      3. Two readings the rules leave open, decided here. `test_wire_end`
+         is `wire`'s unit block, run in C's one phase, since 3.5 makes a
+         block of a module's API on its real callees a unit block and gives
+         `wire` one integration block, `test_integrate_wire`. Read as an
+         integration block, it would follow `test_substrate_crash`, of the
+         `substrate` its `CacheFiles` runs, into layer 12, and C's order
+         would be `test_integrate_wire`, `test_wire_end`,
+         `test_worker_ai_console`, `test_console_open`,
+         `test_tools_browser_console`. The other: `test_harness` now calls
+         `switches.debug_on`, through which it reaches `i18n` and
+         `ui_strings`, while `test_i18n` and `test_switches` call `harness`.
+         Both edges of each pair are a test's, so by 6.8 item 7.4 the order
+         of the unit blocks in the lists decides, and `test_harness`'s edge
+         goes with what it reaches only through `switches`. Were only the
+         two edges between the blocks to go, `test_harness` would follow
+         `test_ui_strings` into layer 2 and every layer from `test_i18n`'s
+         on, C's among them, would be one higher, every order the same but
+         A's, where `test_ui_strings` would come before `test_harness`.
+      4. The edges of C, each block's own calls: `test_wire_end` into
+         `wire`, `substrate`, `harness` and `utility`; `test_integrate_wire`
+         into `wire`, `queue`, `jslb`, `settings`, `harness`, `utility` and
+         `line_case`; `test_worker_ai_console` into `worker_ai`, `wire`,
+         `queue`, `dispatch`, `jslb`, `settings` and `line_case`;
+         `test_tools_browser_console` into `tools_browser`, `worker_ai`,
+         `wire`, `mcp`, `substrate`, `queue`, `dispatch`, `jslb`,
+         `switches`, `harness` and `line_case`; and `test_console_open` into
+         `console_view`, also by the xterm.js `Terminal` that its file
+         declares, `page`, `worker_ai`, `wire`, `media`, `overlay`,
+         `queue`, `dispatch`, `jslb`, `settings`, `switches`, `harness` and
+         `line_case`.
+      5. Where each layer comes from: `test_wire_end` follows
+         `test_jslb_decode`, layer 8, of the `jslb` that `substrate` calls;
+         `test_integrate_wire` follows `test_wire_end`, a unit block of its
+         own module; `test_worker_ai_console` follows `test_integrate_wire`,
+         the integration block of the `wire` it runs;
+         `test_tools_browser_console` follows `test_substrate_crash` and
+         `test_worker_ai_console`, both layer 11; and `test_console_open`
+         follows `test_integrate_page`, layer 12.
+      6. `_C_INTEGRATION`'s order, `test_wire_end`, `test_integrate_wire`,
+         `test_worker_ai_console`, `test_tools_browser_console`,
+         `test_console_open`, agrees with the layers, one block to a layer,
+         so no block moves. The layers continue B's:
+
+      | Layer | C integration |
+      | --- | --- |
+      | 9 | `test_wire_end` |
+      | 10 | `test_integrate_wire` |
+      | 11 | `test_worker_ai_console` |
+      | 12 | `test_tools_browser_console` |
+      | 13 | `test_console_open` |
+
+   4. Status, 2026-11-04, task 13 of `tmp/tasks_30_2127.md`: done. Item
+      3.2's discrepancy is settled: `_B_UNIT` lists `test_substrate_limit`
+      before `test_substrate_store`, by the alphabet within layer 7.
+      "within 120 s" is read as the gold's `smoke_seconds`, 180 s since
+      3.21. The whole runs, with 3.29, 3.30 and 7.4 item 8 built: the smoke
+      target 119 of 119, exit 0 in 126.2 s of its 180 s, its stdout 8145
+      lines, every one a line of TAP, and nothing on stderr; the normal
+      target 121 of 121 with the wire test and the browser test, exit 0 in
+      664.0 s, nothing on stderr; and `--tty --stream` 119 of 119, exit 0
+      in 113.6 s, nothing on stderr. No label moves, since by 7.2 item 4
+      only a smoke run past its deadline moves one.
+
 3. 7.9.3, the check agent, alone, last: `python3 python/reformat.py` twice
    over the whole tree, staged first and unstaged after; both configs; ruff
    and pyright strict over `python/`; nothing staged, no lock left,
@@ -4180,7 +4575,8 @@ wanting confirmation. Every item here was confirmed on 2026-11-02
     categories; `reformat.format_check` and the table's checkers kept
     with no caller in an official run; the normal-test run still
     formatting; the Windows target's formatting in a smoke run left as
-    it is, its design written in item 6, while it is offline.
+    it is, its design written in item 6, while it is offline. Its
+    advisory kept is overturned by 11.3 item 42.
 51. Task 11's decisions of 7.9.1 item 1: the test's end on the UI
     queue's lane of thread `server`, since `queue.ThreadName` is closed
     and `ai` is the linked port, rather than a new thread name in the
@@ -4368,6 +4764,19 @@ wanting confirmation. Every item here was confirmed on 2026-11-02
     it.": a rule of the project, and the tests designed to work with it.
 38. dash's line on job control, by the same message, "this has to be
     fixed": the fix planned in 7.4 item 8.
+39. The maintainer's message of task 13 of `tmp/tasks_30_2127.md`,
+    2026-11-04: a run's output cut to TAP and what a failure needs (3.29).
+40. The same message: a YAML block of `duration_ms` after every point of
+    both producers, the consumer taking that block alone by a hardcoded
+    grammar (3.30).
+41. The same message, "write a new planning document scheduling all of the
+    above as accepted and resolved in favor of your judgement, including
+    the follow up options too. please just keep scheduling everying that is
+    unblocked, part of the plan and needs finishing.":
+    `TEST_SCHEDULE_TS.md` schedules 3.29, 3.30, 7.4 item 8 and 7.9.2 as
+    accepted, each choice of them resolved in the agent's judgement.
+42. 11.2 item 50's advisory kept, overturned by the same message (3.29 item
+    1.2).
 
 11.4 Class D:
 
@@ -4403,8 +4812,11 @@ wanting confirmation. Every item here was confirmed on 2026-11-02
 15. "try bwrap ... /bin/dash" (item 39): the command is the console's shell,
     exactly as given, its verbose form adding `-v` (7.4, task 7.8.1).
 
-11.5 Unresolved on 2026-11-03, at the end of task 12 of
+11.5 Unresolved on 2026-11-04, at the start of task 13 of
 `tmp/tasks_30_2127.md`: items 50 and 51 of 11.2, the decisions of tasks
+10 and 11, which stand unless the maintainer overturns one, item 50's
+advisory overturned by 11.3 item 42. Earlier record, on 2026-11-03, at the
+end of task 12: items 50 and 51 of 11.2, the decisions of tasks
 10 and 11, which stand unless the maintainer overturns one; item 52 is
 overturned by 11.3 item 36. Earlier record, at the end of task 11: items
 50 to 52 of 11.2, the decisions of tasks 10 and 11, which stand unless the

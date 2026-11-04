@@ -8,7 +8,11 @@
 # consumer reading this stream counted no failure in the block and the
 # realm's parent line was `ok`, the two required to agree; a bail out from
 # the realm ends the stream. No module or relay starts while a relay is
-# open, and the stream does not end then.
+# open, and the stream does not end then. Every point is followed by its
+# YAML block of the one attribute `duration_ms`, the point's milliseconds
+# on `time.perf_counter` with one digit after the point: a test's from its
+# start, a block's from its start, a relayed block's from `block_relay` to
+# the realm's parent line, whose own block the relay checks and drops.
 
 import tap_consumer, unittest
 from collections.abc import Callable
@@ -23,6 +27,7 @@ class Tracker:
         self,
         class_name: str,
         description: str,
+        duration_ms: float,
         directive: str = "",
         diagnostics: str | None = None,
     ) -> None: ...
@@ -30,11 +35,16 @@ class Tracker:
         self,
         class_name: str,
         description: str,
+        duration_ms: float,
         directive: str = "",
         diagnostics: str | None = None,
     ) -> None: ...
     def add_skip(
-        self, class_name: str, description: str, reason: str
+        self,
+        class_name: str,
+        description: str,
+        duration_ms: float,
+        reason: str,
     ) -> None: ...
     # Writes the plan of the points added, for a level whose plan comes last.
     def generate_tap_reports(self) -> None: ...

@@ -21,15 +21,17 @@
 # reads no provider key and no provider file: no program but the test suites
 # runs. --main-loop is served only to the engine role in debug mode, and
 # neither option may be given twice. With the role console, in debug mode,
-# it opens the root's log and runs the console's shell, dash in the
-# bubblewrap sandbox of the argv below, with a scrubbed environment through
-# verbose.exec at the shell's level, 2 when the parameter verbose is true and
-# 1 otherwise, and it exits 1 outside debug mode. The sandbox binds / read
-# only, gives dash empty /tmp, /home, /mnt and /root, unshares every
-# namespace, gives it a session of its own, ends it with the console role and
-# starts it in its own /tmp; the console role first refuses a root that is
-# not under /home/, so dash never sees the root and nothing it writes
-# outlives it. Any exception writes one error line, its cascade under cause,
+# it opens the root's log, gives up the pty as its controlling terminal and
+# runs the console's shell, dash in the bubblewrap sandbox of the argv below,
+# with a scrubbed environment through verbose.exec at the shell's level, 2
+# when the parameter verbose is true and 1 otherwise, and it exits 1 outside
+# debug mode. The sandbox binds / read only, gives dash empty /tmp, /home,
+# /mnt and /root, unshares every namespace, gives it a session of its own,
+# whose controlling terminal the pty becomes by the step before dash, ends it
+# with the console role and starts it in its own /tmp; the console role first
+# refuses a root that is not under /home/, so dash never sees the root and
+# nothing it writes outlives it.
+# Any exception writes one error line, its cascade under cause,
 # in full names since it may come before the settings, and exits 1; once the
 # log is open the exception's message is logged before its error line is
 # written. Immediately before it writes that line it ignores SIGHUP, so that
@@ -79,7 +81,21 @@ _LOCK_MODE = 0o600
 # The role that runs the console, the only role there is.
 _CONSOLE_ROLE = "console"
 
-# The console's shell: dash in the bubblewrap sandbox the maintainer gave.
+# The Python before dash that gives it the pty as its controlling terminal.
+_TERMINAL_STEP = "; ".join(
+    (
+        "import fcntl, os, signal, sys, termios",
+        "os.setsid()",
+        "fcntl.ioctl(0, termios.TIOCSCTTY, 0)",
+        "signal.signal(signal.SIGPIPE, signal.SIG_DFL)",
+        "signal.signal(signal.SIGXFSZ, signal.SIG_DFL)",
+        'entries = open("/proc/self/environ", "rb").read().split(b"\\0")[:-1]',
+        'given = dict(entry.split(b"=", 1) for entry in entries)',
+        "os.execve(sys.argv[1], sys.argv[1:], given)",
+    )
+)
+
+# The console's shell: dash, after the step, in the maintainer's sandbox.
 _DASH_ARGV = (
     "bwrap",
     "--ro-bind",
@@ -102,6 +118,10 @@ _DASH_ARGV = (
     "--die-with-parent",
     "--chdir",
     "/tmp",
+    "python3",
+    "-I",
+    "-c",
+    _TERMINAL_STEP,
     "/bin/dash",
 )
 
@@ -119,6 +139,9 @@ _CONSOLE_HOME = "/home/"
 
 # The environment variables the console keeps when they are set.
 _CONSOLE_VARIABLES = ("HOME", "LANG", "PATH", "TERM")
+
+# The descriptor of the console role's pty, which it gives up before bwrap.
+_CONSOLE_FD = 0
 
 # The descriptor the engine reads its lines from, its pty.
 _READ_FD = 0
@@ -373,7 +396,14 @@ def _engine_run(root: str, main_loop: str | None) -> int:
     )
 
 
-# Runs the sandboxed dash through `verbose.exec` at the level, its code back.
+# Gives up the pty as the controlling terminal, its group's SIGHUP ignored.
+def _terminal_release() -> None:
+    handler = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    fcntl.ioctl(_CONSOLE_FD, termios.TIOCNOTTY)
+    signal.signal(signal.SIGHUP, handler)
+
+
+# Gives up the pty and runs the sandboxed dash at the level, its code back.
 def _dash_run(level: int) -> int:
     import verbose
 
@@ -384,6 +414,7 @@ def _dash_run(level: int) -> int:
     }
     os.environ.clear()
     os.environ.update(kept)
+    _terminal_release()
     code = verbose.exec(level, list(_DASH_ARGV), list(_DASH_VERBOSE))
     return code if code >= 0 else _SIGNAL_BASE - code
 

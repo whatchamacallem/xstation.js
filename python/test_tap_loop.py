@@ -6,17 +6,17 @@
 # with roots in `build/` whose settings are the checkout's with the gold's
 # overflow_bytes and whose parameters are the run's with debug as each test
 # sets it, which a serving child sets as `bootstrap.py` does, and its error
-# texts against the gold. The driver it runs
-# is the real test_all.py, on a small suite and on failing_suite, the suite
-# that fails by design: the pushes and the reply are compared with what the
-# test reads from the same driver, run by the test with the command line the
-# request must build, the times it writes to stderr aside. Each child writes
-# how its work ended to a file, or to stderr with the failure when that
-# write fails, then kills itself whatever happened, so the handler it
-# registers never reaches another test.
+# texts against the gold. The driver it runs is the real test_all.py, on a
+# small suite and on failing_suite, the suite that fails by design: the
+# pushes and the reply are compared with what the test reads from the same
+# driver, run by the test with the command line the request must build, each
+# point's duration checked against the test's clock and then left out. Each
+# child writes how its work ended to a file, or to stderr with the failure
+# when that write fails, then kills itself whatever happened, so the handler
+# it registers never reaches another test.
 
 import functools, harness, json, os, re, signal, subprocess, switches, sys
-import tap_loop, tempfile, traceback, unittest
+import tap_loop, tempfile, time, traceback, unittest
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
@@ -53,8 +53,17 @@ _DRIVER_PASSED = 0
 # The exit code of the driver when they are not.
 _DRIVER_FAILED = 1
 
-# A run of digits, such as the seconds the driver writes to stderr.
-_DIGITS = re.compile(r"[0-9]+")
+# A point's duration line: its indent and its value.
+_DURATION_PATTERN = re.compile(r"( *)duration_ms: ([0-9]+\.[0-9])")
+
+# A point's duration line after its indent, its value left out.
+_DURATION_TEXT = "duration_ms:"
+
+# Half the last digit a duration is written with, which rounding may add.
+_HALF_DIGIT = 0.05
+
+# The milliseconds in a second.
+_MILLISECONDS = 1000
 
 # A `tap.run` in short names: `normal-test`, failfast, 1 failure, 2 suites.
 _RUN_SHORT = (
@@ -144,11 +153,6 @@ def _blob_line(size: int) -> bytes:
     return text.encode("utf-8") + bytes(size)
 
 
-# The text with each run of digits made `0`, so that two runs' times agree.
-def _digits_mask(text: str) -> str:
-    return _DIGITS.sub("0", text)
-
-
 # Reads a pipe to its end and closes it.
 def _pipe_drain(fd: int) -> bytes:
     data = bytearray()
@@ -229,6 +233,7 @@ class ScratchCase(unittest.TestCase):
         self.root = os.path.join(scratch.name, "root")
         os.mkdir(self.root)
         self.settings_write(False)
+        self.started = time.perf_counter()
 
     # Writes the root's settings, and its parameters with `debug` as given.
     def settings_write(self, debug: bool) -> None:
@@ -272,7 +277,7 @@ class ScratchCase(unittest.TestCase):
         ending, output = self.child_run(work, data)
         return ending, _lines_split(output)
 
-    # Checks each line pushed, the reply's exit code and stderr, times aside.
+    # Checks each line pushed, the reply's exit code and stderr.
     def served_check(
         self,
         lines: list[dict[str, Any]],
@@ -281,14 +286,25 @@ class ScratchCase(unittest.TestCase):
         full: bool,
     ) -> None:
         *pushes, reply = lines
-        expected = [_push_make(text, full) for text in run.lines]
+        expected = [
+            _push_make(self.duration_cut(text), full) for text in run.lines
+        ]
+        for push in pushes:
+            push["text"] = self.duration_cut(push["text"])
         self.assertEqual(pushes, expected)
         self.assertEqual(sorted(reply), ["0", "code", "stderr"])
         self.assertEqual(reply["0"], header)
         self.assertEqual(reply["code"], run.code)
-        self.assertEqual(
-            _digits_mask(reply["stderr"]), _digits_mask(run.errors)
-        )
+        self.assertEqual(reply["stderr"], run.errors)
+
+    # The line with a duration's value left out, once within the test's time.
+    def duration_cut(self, text: str) -> str:
+        found = _DURATION_PATTERN.fullmatch(text)
+        if found is None:
+            return text
+        limit = (time.perf_counter() - self.started) * _MILLISECONDS
+        self.assertLessEqual(float(found.group(2)), limit + _HALF_DIGIT)
+        return found.group(1) + _DURATION_TEXT
 
     # Checks the one line written is an `error` line with the header given.
     def error_check(

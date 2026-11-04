@@ -18,9 +18,13 @@
 # realm's own parent line was `ok`, and the run fails when the two differ. A
 # bail out line from the realm ends the stream as it stands. The realm's
 # version line, parent line and parent plan, which only the relay reads, are
-# checked by it alone.
+# checked by it alone. Every point is followed by its YAML block of the one
+# attribute `duration_ms`, its milliseconds on `time.perf_counter`: a test's
+# from its start to its stop, a block's from its start to its parent line,
+# a relayed block's from `block_relay` to the realm's parent line, whose own
+# YAML block the relay checks and does not write.
 
-import re, tap_consumer, traceback, types, unittest
+import re, tap_consumer, time, traceback, types, unittest
 from collections.abc import Callable
 from typing import NamedTuple, TypeAlias, cast
 
@@ -30,17 +34,35 @@ _BAIL_LINE = "Bail out! failfast"
 # What starts each line of a module's block.
 _BLOCK_INDENT = "    "
 
+# What starts the line of a YAML block's duration, before its value.
+_DURATION_PREFIX = "duration_ms: "
+
 # The directive of a test that failed the way it was expected to.
 _EXPECTED_DIRECTIVE = "TODO expected failure"
 
 # A line break, which no text written on one TAP line may hold.
 _LINE_BREAK = re.compile(r"[\r\n]")
 
+# The milliseconds in a second.
+_MILLISECONDS = 1000
+
 # The diagnostic of a test that passed though it was expected to fail.
 _SURPRISE_TEXT = "unexpected success"
 
 # The first line of every stream.
 _VERSION_LINE = "TAP version 14"
+
+# The last line of a point's YAML block.
+_YAML_END = "..."
+
+# What starts each line of a point's YAML block, after the point's indent.
+_YAML_INDENT = "  "
+
+# The first line of a point's YAML block.
+_YAML_START = "---"
+
+# The texts of a YAML block's lines in order, the duration's by its prefix.
+_YAML_LINES = (_YAML_START, _DURATION_PREFIX, _YAML_END)
 
 # What unittest reports an error with, as `sys.exc_info` returns it.
 _ErrorInfo: TypeAlias = (
@@ -58,6 +80,11 @@ def _line_check(
             f"the TAP point {description!r} # {directive!r} does not fit on"
             f" one line, its diagnostics: {diagnostics!r}"
         )
+
+
+# The milliseconds from `started`, a `time.perf_counter` value, to now.
+def _milliseconds_since(started: float) -> float:
+    return (time.perf_counter() - started) * _MILLISECONDS
 
 
 # The directive of a skipped test, with its reason when it has one.
@@ -88,34 +115,46 @@ class Tracker:
         self,
         class_name: str,
         description: str,
+        duration_ms: float,
         directive: str = "",
         diagnostics: str | None = None,
     ) -> None:
-        self._point_add("ok", description, directive, diagnostics)
+        self._point_add("ok", description, duration_ms, directive, diagnostics)
 
     # Writes a failing point. `class_name` is tappy's and is not written.
     def add_not_ok(
         self,
         class_name: str,
         description: str,
+        duration_ms: float,
         directive: str = "",
         diagnostics: str | None = None,
     ) -> None:
-        self._point_add("not ok", description, directive, diagnostics)
+        self._point_add(
+            "not ok", description, duration_ms, directive, diagnostics
+        )
 
     # Writes a passing point with a `SKIP` directive and the reason.
-    def add_skip(self, class_name: str, description: str, reason: str) -> None:
-        self._point_add("ok", description, _skip_directive(reason), None)
+    def add_skip(
+        self,
+        class_name: str,
+        description: str,
+        duration_ms: float,
+        reason: str,
+    ) -> None:
+        directive = _skip_directive(reason)
+        self._point_add("ok", description, duration_ms, directive, None)
 
     # Writes the plan of the points added, for a level whose plan comes last.
     def generate_tap_reports(self) -> None:
         self._write(f"1..{self._count}")
 
-    # Writes the next numbered point, then a diagnostic line per text line.
+    # Writes the next numbered point, its YAML block, then its diagnostics.
     def _point_add(
         self,
         word: str,
         description: str,
+        duration_ms: float,
         directive: str,
         diagnostics: str | None,
     ) -> None:
@@ -123,6 +162,9 @@ class Tracker:
         self._count += 1
         suffix = f" # {directive}" if directive else ""
         self._write(f"{word} {self._count} - {description}{suffix}")
+        self._write(_YAML_INDENT + _YAML_START)
+        self._write(f"{_YAML_INDENT}{_DURATION_PREFIX}{duration_ms:.1f}")
+        self._write(_YAML_INDENT + _YAML_END)
         if diagnostics is not None:
             for line in diagnostics.removesuffix("\n").split("\n"):
                 self._write("# " + line)
@@ -137,6 +179,8 @@ class _BlockRelay:
         self.failed = reader.failed
         self.place = "version"
         self.passed = False
+        self.started = time.perf_counter()
+        self.yaml_line = 0
 
 
 # Turns unittest's outcomes into one point per test, written once all are in.
@@ -147,12 +191,21 @@ class TAPTestResult(unittest.TestResult):
         self._tracker = tracker
         self._current: unittest.TestCase | None = None
         self._parts: list[_PointPart] = []
+        self._mark = time.perf_counter()
+        self._started = self._mark
+        self._stopped = self._mark
 
     # Writes the point of the test before, then marks this one as running.
     def startTest(self, test: unittest.TestCase) -> None:
         self.point_flush()
         super().startTest(test)
         self._current = test
+        self._started = time.perf_counter()
+
+    # Keeps when the running test stopped, the end of its duration.
+    def stopTest(self, test: unittest.TestCase) -> None:
+        self._stopped = time.perf_counter()
+        super().stopTest(test)
 
     # Keeps a pass.
     def addSuccess(self, test: unittest.TestCase) -> None:
@@ -223,14 +276,17 @@ class TAPTestResult(unittest.TestResult):
                 lines.append(part.diagnostics)
         name = test.id().rsplit(".", 1)[1]
         diagnostics = "\n".join(lines) if lines else None
+        duration_ms = (self._stopped - self._started) * _MILLISECONDS
+        owner = type(test).__name__
         if lead.word == "ok":
             self._tracker.add_ok(
-                type(test).__name__, name, lead.directive, diagnostics
+                owner, name, duration_ms, lead.directive, diagnostics
             )
         else:
             self._tracker.add_not_ok(
-                type(test).__name__, name, lead.directive, diagnostics
+                owner, name, duration_ms, lead.directive, diagnostics
             )
+        self._mark = time.perf_counter()
 
     # Keeps a failing part, or writes the point of a failed fixture and stops.
     def _failure_add(self, test: unittest.TestCase, text: str) -> None:
@@ -238,9 +294,11 @@ class TAPTestResult(unittest.TestResult):
             self._parts.append(_PointPart("not ok", "", text))
             return
         self.point_flush()
+        duration_ms = _milliseconds_since(self._mark)
         self._tracker.add_not_ok(
-            type(test).__name__, test.id(), diagnostics=text
+            type(test).__name__, test.id(), duration_ms, diagnostics=text
         )
+        self._mark = time.perf_counter()
         self.stop()
 
     # Keeps a part of the running test, raising for an outcome of any other.
@@ -290,17 +348,19 @@ class TAPTestRunner:
     ) -> bool:
         self._stream_check(module)
         _line_check(module, "", None)
+        started = time.perf_counter()
         try:
             suite = load()
         except Exception as error:
             block = Tracker(self._block_write)
             block.set_plan(1)
             text = "".join(traceback.format_exception(error))
-            block.add_not_ok(module, module, diagnostics=text)
-            return self._block_end(module, False, self.failfast)
+            duration_ms = _milliseconds_since(started)
+            block.add_not_ok(module, module, duration_ms, diagnostics=text)
+            return self._block_end(module, False, self.failfast, started)
         result = self.run(suite)
         return self._block_end(
-            module, result.wasSuccessful(), result.shouldStop
+            module, result.wasSuccessful(), result.shouldStop, started
         )
 
     # Opens the relay of a realm's one block, graded by the stream's reader.
@@ -330,7 +390,13 @@ class TAPTestRunner:
             case "block", tap_consumer.Bail(depth=0):
                 self._bail_write(text)
                 relay.place = "bailed"
-            case "parent", tap_consumer.Plan(depth=0, expected_tests=1):
+            case "parent", tap_consumer.YamlLine(depth=0, text=found) if (
+                found.startswith(_YAML_LINES[relay.yaml_line])
+            ):
+                relay.yaml_line += 1
+                if relay.yaml_line == len(_YAML_LINES):
+                    relay.place = "closed"
+            case "closed", tap_consumer.Plan(depth=0, expected_tests=1):
                 relay.place = "ended"
             case _:
                 raise RuntimeError(
@@ -384,7 +450,9 @@ class TAPTestRunner:
                 f"the realm's parent line {text!r} disagrees with the"
                 f" {failures} failures the consumer counted in its block"
             )
-        relay.passed = self._block_end(relay.module, passed, False)
+        relay.passed = self._block_end(
+            relay.module, passed, False, relay.started
+        )
         relay.place = "parent"
 
     # Ends the stream with the bail out line.
@@ -394,14 +462,17 @@ class TAPTestRunner:
         self._passed = False
 
     # Bails out when the block stopped the run, else writes its parent line.
-    def _block_end(self, module: str, passed: bool, stopped: bool) -> bool:
+    def _block_end(
+        self, module: str, passed: bool, stopped: bool, started: float
+    ) -> bool:
         if stopped:
             self._bail_write(_BAIL_LINE)
             return False
+        duration_ms = _milliseconds_since(started)
         if passed:
-            self._parent.add_ok(module, module)
+            self._parent.add_ok(module, module, duration_ms)
         else:
-            self._parent.add_not_ok(module, module)
+            self._parent.add_not_ok(module, module, duration_ms)
         self._passed = self._passed and passed
         return passed
 

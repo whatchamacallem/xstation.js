@@ -25,11 +25,12 @@
 # build/test_browser/, each of the gold's window size. Each root and each rung
 # is labelled smoke-test or normal-test: a smoke-test run, the default, runs
 # the rungs labelled smoke-test and starts no ttyd and no page for a root with
-# none, a normal-test run runs every rung, and a mislabel fails the run. It
-# prints one line per rung that runs, ending with its label and seconds, and
-# one per request for /favicon.ico, which the stub answers 404, and exits 0, or
-# stops at the first failed check, names its rung and exits 1. ttyd's log and
-# the page's console are copied to stderr. Its timers, sizes and the roots'
+# none, a normal-test run runs every rung, and a mislabel fails the run.
+# Under --verbose it prints one line per rung that runs, ending with its label
+# and seconds, and one per request for /favicon.ico, which the stub answers
+# 404, and copies ttyd's log, the page's console and the stub's request lines
+# to stderr. It exits 0, or stops at the first failed check, names its rung
+# and exits 1. Its timers, sizes and the roots'
 # pinned settings, the texts it expects and the headers it checks come from its
 # gold, python.test_browser, its own test_setting_ file, read through
 # harness.py, and the values of settings.json it repeats from that file; the
@@ -819,8 +820,12 @@ class RungLog:
         self.started = time.monotonic()
         self.client.deadline_set(self.timer.end)
 
-    # Prints one whole line, as the stub's threads print notes too.
+    # Prints one whole line under `--verbose`, as the stub's threads print too.
     def line_print(self, text: str) -> None:
+        import switches
+
+        if not switches.verbose:
+            return
         with self.lock:
             print(text, flush=True)
 
@@ -931,13 +936,16 @@ class TtydServer:
     def signal_send(self, number: int) -> None:
         os.kill(self.process.pid, number)
 
-    # Copies whole log lines to stderr and keeps them.
+    # Keeps whole log lines, and copies them to stderr under `--verbose`.
     def lines_take(self, data: bytes) -> None:
+        import switches
+
         *complete, self.partial = (self.partial + data).split(b"\n")
         for line in complete:
             text = line.decode()
             self.lines.append(text)
-            sys.stderr.write(f"{text}\n")
+            if switches.verbose:
+                sys.stderr.write(f"{text}\n")
 
     # Reads the log once, failing at its end, as ttyd must not exit.
     def log_read(self) -> None:
@@ -997,6 +1005,8 @@ class TtydServer:
 
     # Stops ttyd, then reads the rest of its log. False when it needed SIGKILL.
     def process_stop(self) -> bool:
+        import switches
+
         with failure_held():
             stopped = True
             if self.process.poll() is None:
@@ -1010,7 +1020,7 @@ class TtydServer:
             while data := os.read(self.fd, gold_value("read_bytes")):
                 self.lines_take(data)
             os.close(self.fd)
-            if self.partial:
+            if self.partial and switches.verbose:
                 sys.stderr.write(f"{self.partial.decode()}\n")
             return stopped
 
@@ -1185,6 +1195,13 @@ class StubHandler(http.server.BaseHTTPRequestHandler):
     # The stub server this handler answers for.
     def stub_get(self) -> StubServer:
         return cast(StubServer, self.server)
+
+    # Writes the request's line to stderr as http.server does, if `--verbose`.
+    def log_message(self, format: str, *args: Any) -> None:
+        import switches
+
+        if switches.verbose:
+            super().log_message(format, *args)
 
     # Records the request with its body.
     def request_keep(self, body: bytes) -> None:
@@ -1517,9 +1534,12 @@ def file_text(path: str) -> str:
     return lines_after(path, 0)
 
 
-# Copies each console message of the page to stderr.
+# Copies each console message of the page to stderr under `--verbose`.
 def console_copy(text: str) -> None:
-    sys.stderr.write(f"console: {text}\n")
+    import switches
+
+    if switches.verbose:
+        sys.stderr.write(f"console: {text}\n")
 
 
 # The run's stub server, started the first time a rung needs it.
@@ -1715,6 +1735,9 @@ def tap_failure(document: str) -> list[str]:
         match kind:
             case tap_consumer.Diagnostic() if shown:
                 shown.append(text)
+            case tap_consumer.YamlLine() if shown:
+                # The failed point's YAML block comes before its diagnostics.
+                pass
             case _ if shown:
                 break
             case tap_consumer.Result() if not kind.ok and not kind.todo:

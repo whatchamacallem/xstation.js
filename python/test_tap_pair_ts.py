@@ -24,7 +24,7 @@
 # writes one only after a failed point, where the consumer counts none.
 
 import harness, jslb, os, page_build, shutil, subprocess, switches
-import tap_consumer, tempfile, unittest
+import tap_consumer, tempfile, time, unittest
 from typing import Any, NamedTuple, NoReturn, cast
 
 # The checkout's top directory, above this file's `python/`.
@@ -50,6 +50,15 @@ _LANGUAGE = "typescript"
 
 # The type of the push that carries one run of the fixtures.
 _PAIR_TYPE = "tap.pair"
+
+# What starts the parent point's duration line, before its value.
+_DURATION_PREFIX = "  duration_ms: "
+
+# Half the last digit a duration is written with, which rounding may add.
+_HALF_DIGIT = 0.05
+
+# The milliseconds in a second.
+_MILLISECONDS = 1000
 
 
 # The oracle of one block of a run: its verdict and its unittest counts.
@@ -136,13 +145,18 @@ class TestPair(unittest.TestCase):
     completed: subprocess.CompletedProcess[bytes]
     found: list[jslb.Object]
     idle: bool
+    # The seconds node ran, which bound the durations it wrote.
+    seconds: float
 
     # Builds the bundle in a scratch directory under `build`, then runs node.
     @classmethod
     def setUpClass(cls) -> None:
         os.makedirs(_BUILD_PATH, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
-            cls.completed = realm_run(page_build.node_build(scratch))
+            path = page_build.node_build(scratch)
+            started = time.perf_counter()
+            cls.completed = realm_run(path)
+            cls.seconds = time.perf_counter() - started
         decoder = jslb.LineDecoder(
             harness.setting_get("line_max"),
             harness.setting_get("blob_max"),
@@ -185,7 +199,11 @@ class TestPair(unittest.TestCase):
         stats = tap_consumer.document_stats(text)
         self.assertTrue(stats.well_formed)
         self.assertEqual(stats.failed, 0)
-        self.assertEqual(texts[-2:], [f"ok 1 - {_BLOCK}", "1..1"])
+        ending = [f"ok 1 - {_BLOCK}", "  ---", "  ...", "1..1"]
+        self.assertEqual(texts[-5:-3] + texts[-2:], ending)
+        limit = self.seconds * _MILLISECONDS + _HALF_DIGIT
+        duration = texts[-3].removeprefix(_DURATION_PREFIX)
+        self.assertLessEqual(float(duration), limit)
         points = [
             line.description
             for line in tap_consumer.Parser().parse_text(text)
