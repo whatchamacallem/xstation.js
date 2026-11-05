@@ -15,7 +15,8 @@
 # and reach its DevTools differs by platform, so each platform has a module,
 # xsjs_screenshot_<platform>.py, with a Browser class: a context manager
 # whose devtools_reader and devtools_writer carry a connection to DevTools
-# at devtools_host and devtools_path. So far there is xsjs_screenshot_wsl.py.
+# at devtools_host and devtools_path. There is xsjs_screenshot_wsl.py for
+# WSL and xsjs_screenshot_posix.py for elsewhere.
 
 from __future__ import annotations
 
@@ -257,12 +258,14 @@ class DevTools:
 
 
 # Answers the module that starts a browser on this platform.
-def browser_module() -> ModuleType | None:
+def browser_module() -> ModuleType:
     if "microsoft" in platform.uname().release.lower():
         import xsjs_screenshot_wsl
 
         return xsjs_screenshot_wsl
-    return None
+    import xsjs_screenshot_posix
+
+    return xsjs_screenshot_posix
 
 
 # Types the answer at bootstrap.py's CHALLENGE, waits for the echo, then
@@ -515,14 +518,6 @@ def main() -> int:
         return 2
 
     module = browser_module()
-    if module is None:
-        print(
-            f"error: no xsjs_screenshot_<platform>.py for {platform.system()}"
-            f" {platform.release()} yet, only for WSL",
-            file=sys.stderr,
-        )
-        return 2
-
     for signal_number in (signal.SIGHUP, signal.SIGTERM):
         signal.signal(signal_number, signal_exit)
     image_path = os.path.abspath(namespace.out)

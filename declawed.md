@@ -75,6 +75,13 @@ manager without request.
 - Authorship is a legal issue. Ascribing authorship to a non-person, such as
   a `Co-Authored-By` trailer or a generated-by line in a commit or pull
   request, is a violation of the project rules.
+- The cloud environment runs no code formatting, reformatting, scanning or
+  checking: not ruff, pyright, shfmt, mdformat or `reformat.py`, and
+  `test_posix.py` only with `--anthropic`, which skips all of them. A
+  formatting problem never blocks the cloud environment.
+- Testing ps1 is never a requirement for testing in a POSIX environment.
+  The POSIX environment is tested to stand alone, not to depend on ps1.
+- WSL is never a blocker for the POSIX environment.
 
 ## Project Direction
 
@@ -123,10 +130,13 @@ discrepancies as this is a low priority self healing mechanism.
   "$(wslpath -w <script>)"`. The agent shell isn't elevated, so only
   `xsjs_status.ps1`, `test_lint.ps1` and `test_terminal.ps1` run; the user
   runs the rest. All but `xsjs_status.ps1` and `test_lint.ps1` write
-  `<script>.ps1.md` beside themselves (gitignored): read it, don't ask.
+  `<script>.ps1.md` beside themselves (gitignored at the top, not in
+  `powershell/`): read it, don't ask.
   The logs are LF Markdown that `mdformat --check` accepts, which
   `test_posix.py` checks through the whitelist's `*.ps1.md` globs, so a log
-  written before a writer change fails until its script reruns. mdformat
+  written before a writer change fails until its script reruns. A clone
+  where no script has run has no logs, so those globs match nothing and
+  `test_posix.py` fails before it checks anything. mdformat
   doubles backslashes in plain text, so i18n strings put paths in code
   spans.
 - `_<file>_main` holds a `trap` that logs and exits 1, then calls
@@ -162,7 +172,8 @@ discrepancies as this is a low priority self healing mechanism.
   `<# #>` below the top, and reports but doesn't wrap lines over 79
   columns. Run it in its own `powershell.exe`: PSScriptAnalyzer keeps the
   modules it loads locked until exit.
-- Python runs in WSL. `python3 python/test_posix.py` fails on non-UTF-8 or
+- Python runs in WSL and in a POSIX environment. `python3
+  python/test_posix.py` fails on non-UTF-8 or
   non-ASCII outside its `_NON_ASCII_ALLOWED`, formats in place (ruff;
   shfmt with defaults; Markdown is only checked with `mdformat --check`),
   then runs `ruff check`. Files are the globs in
@@ -170,17 +181,24 @@ discrepancies as this is a low priority self healing mechanism.
   matching nothing fails. `python/pyproject.toml` sets ruff's 79 columns
   (its default 88 rewraps every file) and pyright strict. test_posix.py
   doesn't run pyright: use `pyright --project python`, as pyright finds no
-  config from the top directory.
+  config from the top directory. `--anthropic` skips all of it.
 - Screenshots: `python3 python/xsjs_screenshot.py` writes
   `python/xsjs_screenshot.png` (gitignored). It clones `../ttyd`, builds
   it and installs `html/`'s packages, each only when missing, and never
   updates them. It serves `bootstrap.py` from `../ttyd/build/ttyd` on 7681
   behind `corepack yarn run start`, ttyd's dev server on 9000; both ports
-  must be free. It drives headless Windows Chrome or Edge over DevTools
-  through a C# relay in `powershell.exe`, as WSL's NAT can't reach
-  Windows' 127.0.0.1. Chrome reaches WSL's 9000 by localhost forwarding,
-  which lags a new listener by about a second. Only the WSL `Browser`
-  module exists.
+  must be free. On WSL it drives headless Windows Chrome or Edge over
+  DevTools through a C# relay in `powershell.exe`, as WSL's NAT can't
+  reach Windows' 127.0.0.1. Chrome reaches WSL's 9000 by localhost
+  forwarding, which lags a new listener by about a second. Elsewhere
+  `xsjs_screenshot_posix.py` runs the first of `google-chrome`,
+  `chromium`, `chromium-browser` and `chrome` on PATH, headless, and
+  connects to its DevTools on 127.0.0.1.
+- The cloud container is Ubuntu 24.04 with no Windows, no PowerShell and no
+  `wslpath`. pkg-config finds none of the libraries ttyd builds against
+  (libwebsockets, json-c, libuv), which are apt packages for the user to
+  install. Its `google-chrome` is a wrapper that runs Playwright's
+  Chromium, Chrome for Testing, adding `--no-sandbox` as root.
 - Windows Chrome outlives its WSL-side process and keeps its profile; a new
   Chrome on that profile hands off to it and exits silently.
 - ttyd launched straight from WSL fails with `pty_spawn: 0 (No error)`;

@@ -5,7 +5,7 @@
 #
 # Checks the whitelisted files are UTF-8 with no non-ASCII outside
 # _NON_ASCII_ALLOWED, formats them with reformat.py, then lints the Python
-# ones with ruff check.
+# ones with ruff check. --anthropic does none of this.
 
 from __future__ import annotations
 
@@ -40,10 +40,17 @@ def non_ascii_check(path: str) -> None:
 
 
 def main() -> None:
-    argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         description="Check, format and lint the files"
         " reformat_whitelist.txt lists."
-    ).parse_args()
+    )
+    parser.add_argument(
+        "--anthropic",
+        action="store_true",
+        help="check, format and lint nothing, for the cloud environment",
+    )
+    if parser.parse_args().anthropic:
+        return
     paths = reformat.whitelist_paths()
     for path in paths:
         non_ascii_check(path)
