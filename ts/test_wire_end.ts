@@ -3,25 +3,14 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // Tests of the wire port's end, group C, on the headless page that ttyd
-// serves: `wire_end` on an open socket, which sends its line and calls its
-// function at the server's close, and `wire_end` on a socket already closed,
-// by the server or by `wire_close`, which calls its function at once and sends
-// nothing. Each point opens a real `wire.WirePort` at the page's address to
-// the block's own server through ttyd's tty 1, which runs the echo main loop,
-// its replies streaming into a real, empty `substrate.CacheFiles([])`. A point
-// waits for its server's close before the next point opens a port, so that the
-// next server finds the root's lock free; the last point closes its port
-// itself, a close the port reports to no one. The block writes its own points
-// as they arrive, through `block_start`, its plan the number of points, and
-// `block_end` of the runner it is handed. A point with no verdict within the
-// gold's `point_seconds` fails, naming what it waited for, and a point that
-// comes to a second verdict throws. A failed point ends the block, failfast or
-// not, since its port may still hold the server whose lock the next point's
-// server would meet. After `wire_close` any line taken fails the point. The
-// lines the points send and expect and the close code are the gold of
-// `ts/test_setting_test_wire_end.json`; an `error` line's `stack`, and each
-// `stack` down its `cause` chain, is compared by its first line only, as line
-// cases compare it.
+// serves: `wire_end` on an open socket and on one already closed. Each point
+// opens a real `wire.WirePort` to the block's own server through ttyd's tty 1,
+// which runs the echo main loop. A point waits for its server's close before
+// the next point opens a port, so that the next server finds the root's lock
+// free. A point with no verdict within the gold's `point_seconds` fails, and a
+// point that comes to a second verdict throws. A failed point ends the block,
+// failfast or not, since its port may still hold the server whose lock the
+// next point's server would meet.
 
 namespace test_wire_end {
   // The gold of this block, the milliseconds of a second, a stack's break.

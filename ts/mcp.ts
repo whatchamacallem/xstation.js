@@ -3,26 +3,19 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // The Model Context Protocol of the AI worker over `JSON-RPC 2.0`, revision
-// `2025-06-18`: the server that answers the `mcp` line and continues a tool
-// that sleeps in the wakes registered with it, the client that submits its
-// requests as `mcp` lines to the owner of its server, and the set of clients
-// that the agent sees as one list of prefixed tools. MCP is a testing
-// protocol for now: no AI is a requirement of the tests yet.
+// `2025-06-18`. MCP is a testing protocol for now: no AI is a requirement of
+// the tests yet.
 //
 // Fail loud: an exception while a request is handled answers that request,
-// then the server stops. A tool's exception, thrown by the tool or by the
-// wake that continues it, answers with a `tools/call` result whose `isError`
-// is true and whose one text content is the JSON text of the cascade, its
-// `message`, `stack` and nested `cause`, as `dispatch.cause_make` writes it.
-// A protocol error, as an unknown method or tool or bad params, answers with
-// a JSON-RPC error whose `data` is that cascade. `failure_take` then returns
-// the exception once, and `line_handle` returns a `dispatch.Failure` that
-// holds the answer and the exception, so the queue posts the answer and then
-// fails. A test driver reads `isError`, or the error, to tell an exception
-// from the expected response. Continuing after an exception is deferred.
-// A message that is not a JSON-RPC 2.0 request is answered with -32600 and
-// is no exception, as in Python. Every `mcp` line the client builds takes
-// the form `settings.names_full()` picks.
+// then the server stops. A tool's exception answers with a `tools/call` result
+// whose `isError` is true and whose one text content is the JSON text of the
+// cascade. A protocol error answers with a JSON-RPC error whose `data` is that
+// cascade. `line_handle` returns a `dispatch.Failure` that holds the answer
+// and the exception, so the queue posts the answer and then fails. A test
+// driver reads `isError`, or the error, to tell an exception from the expected
+// response. Continuing after an exception is deferred. A message that is not a
+// JSON-RPC 2.0 request is answered with -32600 and is no exception, as in
+// Python.
 
 namespace mcp {
   // The revision pinned, the names and codes of the protocol, the line type.

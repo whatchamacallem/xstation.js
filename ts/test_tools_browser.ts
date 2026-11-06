@@ -2,32 +2,19 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of tools_browser.ts on real parts: the tools registered on a real
-// `mcp.Server` over a real `substrate.Store` on the realm's sqlite3 module and
-// pool, its cache over the realm's test slots, and a real queue of thread `ai`
-// in synchronous mode whose `mcp` handler hands each line to the server. A
-// tool's call comes from the queue of thread `server`, whose real `mcp.Client`
-// submits it from a handler of the test's own and keeps the result its wake
-// reads. The far ends of the requests the tools send are second real queues
-// whose handlers are the test's own functions: `http` answers the image
-// requests, `ui` the image keeping, rendering and permits, and `server` the
-// verbose tail, each with the reply the test scripted from the gold, keeping
-// every request it got; `server` also keeps the store's pushes. A tool that
-// throws stops the queue that runs it by design, so such a call goes straight
-// to the server's `line_handle`, and the test reads the failure it returns.
+// Tests of tools_browser.ts on real parts. A tool's call comes from the queue
+// of thread `server`, whose real `mcp.Client` submits it from a handler of the
+// test's own. The far ends of the tools' requests are second real queues,
+// `http`, `ui` and `server`, whose handlers are the test's own functions
+// answering from the gold. A tool that throws stops the queue that runs it by
+// design, so such a call goes straight to the server's `line_handle`, and the
+// test reads the failure it returns.
 //
 // A realm takes one registration of the tools, since the server registers
 // their wake types in the realm's one dispatch table, so the tests share the
-// one bench, built at the first test, and each test starts with no database:
-// `setUp` drops every database of the store through the store's API. The
-// tools read debug mode through the settings reader the bench hands them,
-// the test's own function, which a test may answer for with values of its
-// own until its `tearDown`. They check the tools in the order and texts of
-// API/mcp/tools.json, the result of every tool and what the store holds after
-// it, every line a tool sends against the gold in full names, the castle
-// turn's image and render, a denied permit, the step script, a lost cache
-// file, and every error. The inputs and digests are those of
-// test_digests.json. The provider key is set by provider.key_set.
+// one bench, built at the first test, and `setUp` drops every database through
+// the store's API. The tools read debug mode through the settings reader the
+// bench hands them, which a test may answer for until its `tearDown`.
 
 namespace test_tools_browser {
   // The vectors the test page carries, each file's bytes in base64.

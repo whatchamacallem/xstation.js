@@ -3,43 +3,21 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# The browser test. It builds two pages with page_build.py, the ttyd page of
-# html/test.html, whose bring up runs through ttyd and the server, and the
-# headless page of html/headless.html, which starts no worker until a block
-# asks. It makes server roots under build/ as the start script makes them, each
-# with settings.json and the page, which carries the TypeScript suites' gold,
-# removing them once the run passes and keeping them after a failure, serves
-# each through a ttyd of its own, build/ttyd/ttyd as ttyd_build.py builds it,
-# and drives chrome-headless-shell through devtools.LinuxPipe, rung by rung,
-# each rung under a timer and named by the stage of the plan it proves. The
-# suites root runs the ttyd page's bring up over TAP, each thread writing a
-# document of no block, as every block runs in group A or B, and checks the TAP
-# file the server keeps with the TAP consumer. The probe, credential and echo
-# roots serve the headless page, whose binding of the realm lane the browser
-# adds before any page loads, and drive its modules on the page's main thread
-# through the probe kit, a stub HTTP server of this process and the server; the
-# other roots serve the ttyd page. The rungs check what the page shows and what
-# the server holds, and a fault the headless page's realm reports that no rung
-# waited for fails the run. Some roots name a main loop file in ttyd's command,
-# and one has ttyd ask a credential. PNGs of the surveyed states go to
-# build/test_browser/, each of the gold's window size. Each root and each rung
-# is labelled smoke-test or normal-test: a smoke-test run, the default, runs
-# the rungs labelled smoke-test and starts no ttyd and no page for a root with
-# none, a normal-test run runs every rung, and a mislabel fails the run.
-# Under --verbose it prints one line per rung that runs, ending with its label
-# and seconds, and one per request for /favicon.ico, which the stub answers
-# 404, and copies ttyd's log, the page's console and the stub's request lines
-# to stderr. It exits 0, or stops at the first failed check, names its rung
-# and exits 1. Its timers, sizes and the roots'
-# pinned settings, the texts it expects and the headers it checks come from its
-# gold, python.test_browser, its own test_setting_ file, read through
-# harness.py, and the values of settings.json it repeats from that file; the
-# server's databases are read with sqlite3 by the substrate's tables. It
-# imports the standard library and the infrastructure for testing only, and
-# ttyd, the browser and tsc through page_build.py are the programs it starts:
+# The browser test. It builds the ttyd page and the headless page, which starts
+# no worker until a block asks, makes server roots under build/ as the start
+# script makes them, serves each through a ttyd of its own, and drives
+# chrome-headless-shell rung by rung, each rung under a timer and named by the
+# stage of the plan it proves. Roots go once the run passes and stay after a
+# failure.
 #
-#     python3 python/test_browser.py [--smoke-test | --normal-test]
-#         [--anthropic] [--debug] [--verbose]
+# The suites root runs the ttyd page's bring up over TAP, each thread writing a
+# document of no block, as every block runs in group A or B. The probe,
+# credential and echo roots serve the headless page and drive its modules on
+# the main thread through the probe kit, a stub HTTP server of this process and
+# the server. A fault the headless page's realm reports that no rung waited for
+# fails the run. PNGs of the surveyed states go to build/test_browser/. Each
+# root and rung is labelled smoke-test or normal-test, and a mislabel fails the
+# run. It imports the standard library and the infrastructure for testing only.
 
 import argparse, base64, contextlib, fcntl, hashlib, http.server, json, os, re
 import select, shutil, signal, sqlite3, subprocess, sys, tempfile, threading

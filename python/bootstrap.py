@@ -3,42 +3,12 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# The platform services around the main loop, the command ttyd runs:
-#
-#     python3 python/bootstrap.py --root ROOT [console] [--main-loop NAME]
-#
-# Each role reads the root's settings, then its parameters, parameters.json,
-# by switches.parameters_load, and sets its switches from them by
-# switches.switches_apply, so that every module it runs and every child it
-# starts reads the root's: debug mode is switches.debug. With no role it is
-# the engine: it puts its pty in raw mode, takes the engine.lock file of the
-# root, reads the settings and the parameters and opens the root's log, loads
-# the main loop file and has it prepare the root, then writes the first line,
-# tap.start with the fixed id 101, which carries the settings and the
-# root's switches and no gold, which the page carries itself; the line
-# goes in full names in debug mode. It reads the Empty reply to 101 a byte at a time, then runs the main
-# loop, whose own requests take their ids from dispatch.id_next, from 102. It
-# reads no provider key and no provider file: no program but the test suites
-# runs. --main-loop is served only to the engine role in debug mode, and
-# neither option may be given twice. With the role console, in debug mode,
-# it opens the root's log, gives up the pty as its controlling terminal and
-# runs the console's shell, dash in the bubblewrap sandbox of the argv below,
-# with a scrubbed environment through verbose.exec at the shell's level, 2
-# when the parameter verbose is true and 1 otherwise, and it exits 1 outside
-# debug mode. The sandbox binds / read only, gives dash empty /tmp, /home,
-# /mnt and /root, unshares every namespace, gives it a session of its own,
-# whose controlling terminal the pty becomes by the step before dash, ends it
-# with the console role and starts it in its own /tmp; the console role first
-# refuses a root that is not under /home/, so dash never sees the root and
-# nothing it writes outlives it.
-# Any exception writes one error line, its cascade under cause,
-# in full names since it may come before the settings, and exits 1; once the
-# log is open the exception's message is logged before its error line is
-# written. Immediately before it writes that line it ignores SIGHUP, so that
-# ttyd's hangup after the page's close cannot end it in the write: it exits 1
-# itself, by its return or by the write's own failure. In debug mode the log
-# traces tap.start. The modules beside this file are imported inside the
-# functions that use them, after their bytecode has been sent to build/.
+# The platform services around the main loop, the command ttyd runs.
+# API/python/bootstrap.pyi holds its roles. Its error line goes in full names,
+# since it may come before the settings, and once the log is open the
+# exception's message is logged before that line is written. The modules beside
+# this file are imported inside the functions that use them, after their
+# bytecode has been sent to build/.
 
 import argparse, fcntl, importlib.machinery, importlib.util, json, os, signal
 import sys, termios, traceback, tty, types

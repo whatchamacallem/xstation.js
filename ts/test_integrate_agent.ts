@@ -3,22 +3,14 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // The line cases of the agent: the player's turns through a real queue of
-// thread `ai` on which the agent is registered with a real
-// `substrate.Store` on the realm's sqlite3 module and pool and a real
-// `mcp.ClientSet`, whose client reaches `tools_browser` on a real
-// `mcp.Server` over the same store, its handshake run when the topology is
-// built. The provider is the scripted AI, a real `provider_script.ScriptPort`
-// that the queue owns as `http`, walking the script of this block's gold
-// under `script`: the castle turn, whose tool calls build the castle's
-// gatehouse scene through the tools, then the turn after it. The store is
-// in the hyperposition when the cases start. A queue sends a request only
-// from a handler's submit, so each case sends an `ask` line to a second real
-// queue of thread `ui`, whose handler of this file's own submits its
-// `request` to the agent and replies to the `ask` with the turn's reply as
-// its `answer`; that queue also keeps the images and renders the tools send,
-// answering each as the UI does, and a third real queue of thread `server`
-// takes the store's pushes. The test's end is a real `queue.ThreadPort` over
-// a MessageChannel whose other end the `ui` queue owns as its DOM port.
+// thread `ai`, every part real and the provider the scripted AI, a real
+// `provider_script.ScriptPort` that the queue owns as `http`, walking this
+// block's gold under `script`. The store is in the hyperposition when the
+// cases start. A queue sends a request only from a handler's submit, so each
+// case sends an `ask` line to a second real queue of thread `ui`, whose
+// handler of this file's own submits its `request` to the agent and replies to
+// the `ask` with the turn's reply as its `answer`. A third real queue of
+// thread `server` takes the store's pushes.
 
 namespace test_integrate_agent {
   // The initialized sqlite3.wasm module, a global the test page sets.

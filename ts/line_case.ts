@@ -2,26 +2,7 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// The line cases of a block, the infrastructure for testing a module that
-// serves JSLB lines through a port. The block's suite builds the module's
-// real topology and hands over the test's end of the lane, a real
-// `queue.ThreadPort`. The gold of the block's id lists its cases under
-// `cases`, each naming lines of the gold under `lines`, whose blob headers
-// hold their bytes in `d` as base64. Each case's lines go out through the
-// test's end, every line that comes back is collected, and one point is
-// added when as many lines came as the case expects, or when its seconds are
-// up, so a case that expects none waits its seconds. The point is `ok` when
-// the lines that came equal the expected lines in order: the header and the
-// payload by value, each blob header but `d` by value, each blob's bytes by
-// their size and `utility.sha256_hex`, and an `error` line's `stack`, and
-// each `stack` down its `cause` chain, by its first line only, the error's
-// name and message, since the rest holds build paths and line numbers.
-// Otherwise it is `not ok` with one diagnostic line naming the first
-// difference, a line still missing or a line not expected. With the runner's
-// failfast the first failed point ends the cases. The block is written
-// through `block_start`, its plan the number of cases, and `block_end` of
-// the runner. A line that comes once the last point is in throws. A case
-// never answers a request the module makes.
+// The line cases of a block. API/ts/line_case.d.ts holds their rules.
 
 namespace line_case {
   // The keys of a block's gold, the field of a blob's bytes, the error type.

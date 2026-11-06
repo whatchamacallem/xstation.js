@@ -3,22 +3,17 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # The three switches of a run, --anthropic, --debug and --verbose, as global
-# bools of this module in every process of the run. A program with a command
-# line takes them by options_add and switches_set, which also puts each one
-# given in the environment, XSJS_ANTHROPIC, XSJS_DEBUG or XSJS_VERBOSE set
+# bools of this module in every process of the run. switches_set also puts each
+# one given in the environment, XSJS_ANTHROPIC, XSJS_DEBUG or XSJS_VERBOSE set
 # to 1, so that every child process starts with it, ttyd's commands, Node and
-# Chrome included; at import a process reads the three from its environment,
-# an unset variable false and any value but 1 refused. No switch turns one
-# off. The TypeScript realms take them in tap.start, as switches_get gives
-# them. anthropic has the run take the parts of Anthropic's cloud container:
+# Chrome included. An unset variable is false, any value but 1 is refused, and
+# no switch turns one off. The TypeScript realms take them in tap.start.
+# anthropic has the run take the parts of Anthropic's cloud container:
 # Playwright's headless shell and ttyd's source from the package manager, has
 # test_posix.py check nothing, and has test_all.py take no suite that starts a
-# formatter.
-# debug is debug mode and verbose the console's verbose level, 2 when on and
-# 1 otherwise. A server takes its root's instead: <root>/parameters.json,
-# the three by name and nothing else, each a bool, which parameters_load
-# reads by jslb.json_decode and switches_apply sets, here and in its
-# children.
+# formatter. debug is debug mode and verbose the console's verbose level, 2
+# when on and 1 otherwise. A server takes its root's instead:
+# <root>/parameters.json, the three by name and nothing else.
 
 import argparse, jslb, json, os
 from internationalization import i18n

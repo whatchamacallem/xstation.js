@@ -3,28 +3,19 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Opens the page in Chrome as a person would and saves a screenshot of it. It
-# builds the page as the start script does, makes a root for the run under
-# build/ with debug on, which runs the page's suites, and serves the root
-# through build/ttyd/ttyd, the ttyd that ttyd_build.py builds, on a dumb
-# terminal, its log going to stderr as it comes. It waits for the page's bring
-# up to write both TAP documents to the root, fails on the page's fault screen
-# or a failing point, checks the page shows the last document and ttyd runs one
-# bootstrap.py, saves a screenshot of the whole page, leaves the page and
-# checks the program is gone:
+# Opens the page in Chrome as a person would and saves a screenshot of it, on a
+# root under build/ with debug on, which runs the page's suites. It fails on
+# the page's fault screen or a failing point.
 #
-#     python3 python/xsjs_screenshot.py
-#     python3 python/xsjs_screenshot.py --out shot.png
-#     python3 python/xsjs_screenshot.py --browser chrome-headless-shell
+#     python3 python/xsjs_screenshot.py [--out shot.png] [--browser NAME]
 #
-# It drives Chrome through Chrome's DevTools protocol. How to start Chrome
-# and reach its DevTools differs by platform, so each platform has a module,
-# xsjs_screenshot_<platform>.py, with a Browser class: a context manager
-# whose devtools_reader and devtools_writer carry a connection to DevTools
-# at devtools_host and devtools_path. There is xsjs_screenshot_wsl.py for
-# WSL and xsjs_screenshot_posix.py for elsewhere. --browser names one of the
-# browsers of xsjs_screenshot_posix.py, by its path or its name on PATH, and
-# starts it through that module, on WSL too.
+# How to start Chrome and reach its DevTools differs by platform, so each
+# platform has a module, xsjs_screenshot_<platform>.py, with a Browser class: a
+# context manager whose devtools_reader and devtools_writer carry a connection
+# to DevTools at devtools_host and devtools_path. There is
+# xsjs_screenshot_wsl.py for WSL and xsjs_screenshot_posix.py for elsewhere.
+# --browser names one of the browsers of xsjs_screenshot_posix.py, by its path
+# or its name on PATH, and starts it through that module, on WSL too.
 
 import argparse, base64, contextlib, hashlib, json, os, platform, shutil
 import signal, socket, subprocess, sys, tempfile, time, types

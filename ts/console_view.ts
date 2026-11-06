@@ -2,35 +2,11 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// The console view on the UI thread: one xterm.js terminal in a hidden child
-// of a container, speaking ttyd's client protocol to tty 0 as `console.input`
-// and `console.output` lines, built in the form `settings.names_full()`
-// picks, asking for tty 0 and its close, and asking for it again once it has
-// ended. The terminal's rows are fitted to the height the container has
-// above the band, the element after it, at each show and whenever the page
-// or the band changes size while the view is shown, so every row is seen
-// without scrolling. The fit changes only the terminal on the page: no
-// resize goes to tty 0, whose size is the one the first message gives at its
-// opening, which is debug only. While the AI's command runs, from
-// `console.busy` to `console.idle`, the terminal takes no keystrokes.
-//
-// The person's line is held in the view until Enter submits it whole with
-// its carriage return as one `console.input`: printable text and Tab join
-// it, Backspace removes its last character, and every other control key and
-// escape sequence is dropped. A paste is cut at its carriage returns. The
-// view echoes the held line at the cursor and erases the echo before it
-// submits, before it writes output, after which it echoes the line again,
-// and at `console.busy`; at `console.idle` it echoes the line again. It
-// finds the echo by xterm's buffer and saves no cursor of its own: drawing
-// the echo marks its start's row, which xterm moves as the scrollback drops
-// rows, and its column; the erase moves the cursor there and erases below,
-// from the screen's top for a start above the screen. Its writes go to the
-// terminal one at a time, each once xterm has parsed the one before it. It
-// injects no newline: an echo that started at a pending wrap is erased from
-// the next row, then the filled row's last cell is written again from the
-// buffer with its attributes as SGR, a wide character from its first
-// column, then the attributes of the echo's first cell, the program's, so
-// that the wrap is pending again as the program left it.
+// The console view on the UI thread. API/ts/console_view.d.ts holds its rules.
+// The terminal's rows are fitted to the height the container has above the
+// band, the element after it, at each show and whenever the page or the band
+// changes size while the view is shown, so every row is seen without
+// scrolling.
 
 // An xterm.js 5.5.0 marker of a buffer row, its line `-1` once disposed.
 declare interface TerminalMarker {

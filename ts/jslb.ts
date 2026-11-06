@@ -3,26 +3,20 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // JSLB, the wire format: a line is one JSON object ending in CR, its headers
-// at the integer keys 0, 1, ... and its payload at the other keys, followed
-// by the bytes of each blob the line header counts. The builders, field
-// access, the encoder, the debug rendering, json_decode, and the decoder,
-// which bounds the blobs of a message by blob_max, streams a blob over
-// overflow_bytes into a sink that hashes it on the way, and holds a fault met
-// after finished lines for the next feed.
+// at the integer keys 0, 1, ... and its payload at the other keys, followed by
+// the bytes of each blob the line header counts.
 //
 // The decoders are the single door for bad numbers: no other layer checks a
-// number. At read, an integer token, digits without a fraction or an
-// exponent, beyond 2^53 either way is refused with jslb.integer_refused, its
-// text compared by BigInt, and a number token whose double overflows to an
-// infinity, such as 1e400, with jslb.number_overflow, both as WireError. The
-// tokens are found by scanning the text JSON.parse accepted, strings
-// skipped. json_decode applies the same rules to a JSON text read from
-// anywhere but a line. The encoder keeps its own refusal of NaN and the
+// number. An integer token beyond 2^53 either way is refused with
+// jslb.integer_refused, its text compared by BigInt, and a number token whose
+// double overflows to an infinity, such as 1e400, with jslb.number_overflow,
+// both as WireError. The tokens are found by scanning the text JSON.parse
+// accepted, strings skipped. The encoder keeps its own refusal of NaN and the
 // infinities, jslb.number_refused, inside the same layer.
 //
 // A sink_close that throws while the decoder shuts a stream after a fault is
-// thrown with the first fault under its innermost cause, by
-// utility.cause_append, so one error holds both.
+// thrown with the first fault under its innermost cause, so one error holds
+// both.
 namespace jslb {
   // A line: header 0, blob headers 1 on, the payload at the other keys.
   export type Line = lines.Line;

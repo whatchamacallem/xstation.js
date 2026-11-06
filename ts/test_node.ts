@@ -8,22 +8,10 @@
 //     node node.js BLOCK [--failfast]
 //
 // It speaks JSLB with the driver on the lane `realm`, its stdin and stdout.
-// The first line must be `tap.start` with `i` 101, carrying the settings, the
-// switches and the test settings, decoded by `jslb.LineDecoder` over an empty
-// `substrate.CacheFiles`, as the bring up of the page decodes its first line.
-// It sets this realm's settings, switches and harness's values, answers with
-// an Empty reply, and runs the block named BLOCK of the table below as the one
-// block of a TAP stream, each line sent as a `tap.line` push the moment it is
-// made. A block is a unittest module, run through `TAPTestRunner.module_run`,
-// a block of line cases, whose suite's topology `line_case.block_run` runs on
-// the gold `typescript.BLOCK`, or a block that writes its own points as they
-// arrive, as `test_line_case` does, and may send lines of its own to the
-// driver, as `test_tap_pair` sends `tap.pair`. With `--failfast` the first
-// failure ends the stream with a bail out. The realm exits 0 after `run_end`.
-// Any other first line, a second line, or any throw exits 1 with the cascade
-// on stderr, which is Node's own report of a throw no handler caught. Node
-// writes to a pipe synchronously on Linux, so a hard exit loses no line. The
-// queues' MessageChannels keep Node's loop alive, so the realm ends by
+// Any first line but `tap.start`, a second line, or any throw exits 1 with the
+// cascade on stderr, which is Node's own report of a throw no handler caught.
+// Node writes to a pipe synchronously on Linux, so a hard exit loses no line.
+// The queues' MessageChannels keep Node's loop alive, so the realm ends by
 // exiting. `process` is declared here with the members this file uses, as no
 // package declares it.
 

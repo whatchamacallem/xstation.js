@@ -3,166 +3,21 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# The one runner of every test suite, by category. A smoke-test run runs the
-# suites labelled smoke-test, the important ones that fit in 3 minutes; a
-# normal-test run runs the suites of both labels. Each suite's label is
-# written beside it, and category.py holds the labels, the options and their
-# checks. It runs the Python test suites and the TypeScript blocks in the
-# order below, each one block of one TAP stream that goes to stdout a line
-# at a time, each line read by the TAP consumer as it is written: it raises
-# at the first line that does not fit, naming the block it is in or follows,
-# and stops after the first block in which the consumer counts a failure. It
-# raises unless the stream then ended, with its parent plan or a bail out,
-# and exits 1 unless the consumer counted exactly the failing points
-# --failures expects, none by default, a bail out counting as one unless it
-# follows a failing point. When the stream passes so it runs, in this
-# process and given the category, the checks of test_posix.py, the wire test
-# and the browser test, and ends at the first that fails, with its exit
-# code. Every suite and block has a timer, the driver's gold
-# python.test_all.module_seconds.
-# Before the first block, in this process and outside every timer, the run
-# has third_party_fetch.py fetch each pinned third party file that is not in
-# place with its pinned digest, then has ttyd_build.py build ttyd where
-# settings.json says, from the pinned archive and the project's patches,
-# unless it was built from them, its programs' output in a log there, and a
-# failed fetch or build fails the run there. It refuses to start as root.
+# The one runner of every test suite, by category: smoke-test runs the
+# important suites that fit in 3 minutes, normal-test the suites of both
+# labels. Every suite and block is one block of one TAP stream on stdout, read
+# by the consumer as it is written, so nothing else writes to stdout during the
+# stream.
 #
-# The suites run in strict dependency order, in nine phases that only the
-# order of the lists shows. Three are of Python: the unit suites,
-# test_<module>.py, by layer; then the pair test of the TAP producer and
-# consumer, test_tap_pair.py, and the integration suites,
-# test_integrate_<module>.py, by the layer of their module; then the stdio
-# suites, which start bootstrap.py or mcp_stdio.py as a program and talk to
-# it over its stdio, by layer. Two are of group A, the TypeScript blocks run
-# in Node: the unit blocks, test_<module>.ts, by layer; then the pair test
-# of the TypeScript TAP producer and the Python consumer, test_tap_pair_ts.py,
-# and the integration blocks, test_integrate_<module>.ts, by the layer of
-# their block. Two are of group B, the TypeScript blocks run in headless
-# Chrome: the unit blocks, then the integration blocks, each by layer as in A.
-# One is of group C, the TypeScript blocks behind ttyd: its integration blocks,
-# by layer as in A. The last is a Python suite again, that of the screenshot
-# tool, which opens the whole page behind ttyd, so that every block of the
-# page passes first. A module calls into another when it imports it, at the top
-# or in a function, loads its file, runs it as a program, or has it run inside
-# the block of its suite, as this file has the TAP producer and consumer in
-# every block; a call of a function it was handed is no call into the module
-# that handed it over. A suite runs only after the suites of
-# every module that its module or its own code calls into, directly or
-# transitively, have passed. Layer 0 holds the suites of the TAP producer
-# and consumer, whose only callees are the two of them, so the blocks of the
-# unit phase are trusted to the two before the pair test proves that they
-# agree, as group A's unit blocks are trusted to the TypeScript producer and
-# the Python consumer before theirs. Each next layer holds the suites whose
-# callees' suites all sit in earlier layers, alphabetical within it, and
-# test_test is the one suite of harness.py, category.py and line_coverage.py.
-# Two modules that call into each other are a bug. The later suites, listed
-# apart with the programs they wait on, which are not yet approved, are in
-# no phase: --module refuses them, and no category runs them.
-#
-# A TypeScript block is named by its file in ts, as test_jslb.ts, and runs
-# in a realm of its own, a node process. Before the first block the run
-# builds the Node bundle, build/ts/node.js, with page_build.node_build, and a
-# build that fails fails the run. Each realm runs node build/ts/node.js
-# BLOCK, with --failfast when the run's first failing test ends the stream.
-# It is sent tap.start, with the id 101, the settings and the run's switches
-# with debug on, built as a debug root's engine builds it, and answers with
-# an Empty reply; its gold is the bundle's own.
-# The text of each tap.line it pushes then goes to the relay of the TAP
-# producer, which writes the block's indented lines to the stream and its
-# parent line, under the block's timer. The realm must exit 0, and is killed
-# when its block ends. Any failure of a block fails the run, the realm's
-# stderr in its cause. The local HTTP server of local_http.py, the scripted
-# far end of a block's fetches, starts from the gold's script before the
-# first block that needs it, and stops when the stream ends, before the
-# checks after it.
-#
-# A block of group B runs in a page load of its own in the one browser of the
-# run, chrome-headless-shell on its DevTools pipe. Before the first B block,
-# outside every block timer, the run builds the headless page,
-# build/headless.html, with page_build.page_build, starts the browser, and
-# adds the binding realm_line, which stands on every later load; a build or
-# a start that fails fails the run. The page comes from the local HTTP
-# server, from the server of the block's script if it has one, so that its
-# fetches are of the page's own origin, and from that of the gold's
-# typescript.test_headless.server if not. Under the block's timer the block
-# loads the page, then calls test_headless.realm_start(BLOCK, FAILFAST,
-# LINE) by Runtime.evaluate, LINE the base64 of tap.start; every DevTools
-# wait of the block ends at the timer's end alone, so that the gold's
-# seconds are the block's one limit. Each call of
-# realm_line carries the base64 of one of the realm's lines: the Empty reply
-# first, then each tap.line, whose text goes to the relay as in A. A worker
-# block also sends verbose.put pushes, whose entries go to the block's log
-# with the page's console messages, and the settings.set its worker sends
-# toward the UI thread, which no UI thread takes there. Any other line, as an
-# error or a fault, fails the block. The realm's stream ends at its last
-# line, its parent plan or a bail out, and the block then loads about:blank,
-# which ends the page and its worker, before the relay ends. Any failure of
-# a block fails the run, the block's log in its cause. The browser stops when
-# the stream ends, before the servers, so that it holds none of their
-# connections.
-#
-# A block of group C runs as a block of B does, on the headless page that a
-# ttyd of its own serves as its index, so that the block's ports to tty 0 and
-# tty 1 reach that ttyd and the server it runs. Before the block, outside its
-# timer and inside the deadline, the run makes the block's root in build/ as
-# the start script makes the server's: the modules of
-# powershell.runtime_modules and the seed in its python/, i18n/en-US.json,
-# settings.json, parameters.json of the run's switches with debug true, and
-# in its main_loop/ the main loop file of python/ that the gold's
-# typescript.BLOCK.root names under main_loop, if it names one; the page
-# carries the gold. It starts the ttyd that ttyd_build.py built, in a session of
-# its own, with the start script's options, --port 0, --interface the bind
-# address, --writable, --check-origin, --terminal-type, --url-arg and
-# --srv-buf-size, and --index build/headless.html, to run python3
-# ROOT/python/bootstrap.py --root ROOT, with --main-loop and the file's name
-# when the gold names one. ttyd writes its log to a file of its own, from which
-# the run reads its version and its port, and a ttyd that ends first fails the
-# run, its log in the cause. The block loads http://ADDRESS:PORT/. After the
-# block's about:blank, outside its timer and inside the deadline, the run stops
-# ttyd's process group by SIGTERM, kills it when it still runs after the gold's
-# typescript.test_headless.stop_seconds, copies ttyd's log to the block's log,
-# removes the root, then fails the run if ttyd was killed or had ended before
-# its stop; the block's relay ends after. A root made for a block that did not
-# run stops before the browser, its log to stderr.
-#
-# Each point of the stream carries its milliseconds in its YAML block, a
-# module's in its parent point, so stdout stays the TAP stream and nothing
-# else is written of them. Under --verbose, after the checks of test_posix.py
-# it prints "test_posix.py: smoke-test, <s> s", and a passing run ends with
-# "the <category> run took <s> s". A smoke-test run has the driver's gold
-# python.test_all.smoke_seconds in all from its start: each alarm ends at
-# that deadline at the latest, a deadline passed before a suite starts raises
-# at once, and passing it fails naming the suite it stopped. A normal-test
-# run has no limit of its own. Standard library only:
-#
-#     python3 python/test_all.py [--smoke-test | --normal-test] [--failfast]
-#         [--stream] [--module NAME]... [--failures N] [--tty] [--coverage]
-#         [--anthropic] [--debug] [--verbose]
-#
-# --smoke-test is the default. In a smoke-test run, or with --failfast, the
-# first failing test ends the stream. --stream ends the run once the stream
-# is checked, before the checks after it, and writes nothing to stdout but
-# the stream. --module runs only the suites and blocks it names, once each,
-# in the order above, each one the category runs; it alone runs a suite or a
-# block that fails by design, listed apart, so that a run can check that
-# failures are counted, and counted right, by --failures. --tty runs the
-# stream on the engine tty instead of in this process: through tap_tty.py,
-# bootstrap.py on a new pty serves the TAP suite server, tap_loop.py, on a
-# debug root in build/, which runs this file with --stream on the same
-# suites and blocks and the same --failures, and pushes each line of its
-# stream, and each line relayed is written to stdout and read by the
-# consumer as it comes. The server's run writes its stderr to this stderr
-# when it ends, and its exit code must be the
-# stream's verdict. --coverage counts with line_coverage.py the lines run
-# from before any other project module loads, and after the passing block of
-# the last suite of the run that counts for a module, it fails at that
-# module's first line never counted as run. A unit suite counts for the
-# module of its name, or for those listed for it, and an integration or
-# stdio suite, or a TypeScript block, for none. It counts in this process,
-# so it refuses --tty. --anthropic, --debug and --verbose turn on the run's
-# switches of switches.py, here and in every process the run starts. Under
-# --anthropic the cloud environment runs no formatter, so a run takes no suite
-# that starts one, and --module refuses those.
+# The order of the lists below is strict dependency order: a suite runs only
+# after the suites of every module it calls into, directly or transitively,
+# have passed, and two modules that call into each other are a bug. A module
+# calls into another when it imports it, loads its file, runs it as a program
+# or has it run in its suite's block; a call of a function it was handed does
+# not count. Layer 0 is the TAP producer and consumer, trusted until the pair
+# tests prove they agree. TypeScript blocks run in group A, in Node, group B,
+# in headless Chrome, or group C, behind ttyd. The later suites wait on
+# programs not yet approved, and no category runs them.
 
 import argparse, base64, contextlib, functools, importlib, json, os, re
 import shutil, signal, subprocess, sys, tempfile, time, types, unittest

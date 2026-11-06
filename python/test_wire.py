@@ -3,55 +3,21 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# The wire test, a TAP run: the producer is JavaScript in the page,
-# ts/test_wire_rungs.ts, which runs the rungs on the page's own wire, and
-# this file is the consumer. It builds the one page with page_build.py, makes
-# three roots under build/ as the start script makes the server root, echo,
-# stock and restart, each with its settings.json and its own copy of the
-# page, whose gold, written into the copy by page_build.page_copy, has
-# typescript.test_all.run "wire" and typescript.test_wire_rungs naming the
-# rungs the root runs and their gold. That gold is the rungs' fixed
-# parameters, python.test_wire.rungs of the checkout's gold, with the parts
-# known at run time added: the root, its rungs, the digest of the tool's
-# text, and the text and digest of the restart's main loop file. The texts
-# this file finds in the server's log, its timers and its sizes are
-# python.test_wire too. Each root gets its own ttyd as python/ttyd_build.py
-# builds it, given its options as the start script gives them and the built
-# page as --index, running `python3 <root>/python/bootstrap.py --root
-# <root>`, with --main-loop echo_loop.py on the echo root, and its own load
-# of the page in chrome-headless-shell through devtools.LinuxPipe. The page
-# meets ttyd's protocol as ts/wire.ts annotates it: the token from /token,
-# /ws and /ws?arg=console with the subprotocol tty, a first message of JSON
-# text, then '0' input, and from ttyd '0' output, '1' the title and '2' the
-# preferences. That ttyd 1.7.7 accepts a first message without a size is from
-# memory, owed to testing. The server appends each line of the page's stream
-# to <root>/tap/typescript.tap; this file reads it as it grows, through
-# tap_consumer.py, a line at a time under the timer of the rung it waits for,
-# under `--verbose` prints one line per point with its label and seconds, and
-# stops at the first not ok, bail out or line that does not fit, naming it.
-# Around the streams it makes the checks only this process can make: ttyd's
-# resident size after the fit rung, the largest blob, and its end when killed
-# after the echo stream; the stock server's database files, its log and its
-# exit after the unknown rung; and on the restart root the server found at
-# the first point, before the page runs the restart rung, which the page
-# holds until this file, having read that point, releases it by posting the
-# rung's name on a BroadcastChannel of the page's origin, then a stream that
-# ended passing, the server's exit and its pid kept by the exec, its log of
-# the reply it did not expect to its second first line, which names the
-# page's refusal alone, since the page holds what it posts after
-# system.restart, and the page's fault screen holding its refusal. After each
-# server's end it waits within the rung's time until the server is reaped,
-# its /proc entry gone: by ttyd after its logged exit, and on the echo root
-# by the process that adopted it once ttyd was killed; ttyd itself is reaped
-# by its wait before the next root starts, the browser at its end. Each root
-# and rung is labelled smoke-test or normal-test: a smoke-test run, the
-# default, leaves the normal-test rungs out of the gold, and a mislabel fails
-# the run. It exits 0, or 1 at the first failed check, naming its rung. Under
-# --verbose ttyd's log and the page's console are copied to stderr. ttyd, the
-# browser and tsc through page_build.py are the programs it starts:
+# The wire test: the producer is JavaScript in the page, ts/test_wire_rungs.ts,
+# and this file is the consumer. It makes three roots under build/ as the start
+# script makes the server root, echo, stock and restart, each with its own
+# ttyd, its own load of the page and its own copy of the page, whose gold names
+# the rungs the root runs. The server appends each line of the page's stream to
+# <root>/tap/typescript.tap, and this file reads it as it grows.
 #
-#     python3 python/test_wire.py [--smoke-test | --normal-test]
-#         [--anthropic] [--debug] [--verbose]
+# Around the streams it makes the checks only this process can make: ttyd's
+# resident size and its end when killed, the stock server's database files, log
+# and exit, and the restart server's pid kept by the exec. The restart rung is
+# held until this file, having read the point before it, releases it on a
+# BroadcastChannel of the page's origin. After each server's end it waits until
+# the server is reaped, its /proc entry gone. Each root and rung is labelled
+# smoke-test or normal-test, and a mislabel fails the run. That ttyd 1.7.7
+# accepts a first message without a size is from memory, owed to testing.
 
 import argparse, contextlib, hashlib, json, os, pathlib, re, select, shutil
 import signal, sqlite3, subprocess, sys, tempfile, time, types

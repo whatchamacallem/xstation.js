@@ -3,24 +3,14 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // Tests of substrate.ts's cache and store, a block of group B in the AI
-// worker: the sink's incremental hash against known digests, the cache over
-// the open OPFS files the bring up gives the block as `test_slots`, each test
-// clearing the files it takes, and the store on the sqlite3.wasm module and
-// OPFS pool the bring up sets as globals: the database of a ref, databases,
-// values, documents, turns, compaction at the threshold, SQL and the names the
-// schema's triggers raise, transactions, snapshots and restores with their
-// cache files, values whose cache file is lost, the push of each committed
-// operation through a real `queue.TaskQueue` to the test's own end of its
-// server lane, a create that a full pool stops, a file cut under a finished
-// blob, and the handlers, which the test's own register function takes. It
-// also holds the pause point of a put held inside its transaction, which a
-// browser rung uses to kill a worker of the test page there. The texts,
-// pushes, names and reply texts it expects and the lines it sends are its gold
-// in `ts/test_setting_test_substrate_store.json`, read through the harness
-// with the `overflow_bytes` and `turn_compact_turns` of `settings.json` its
-// stores take. Each digest and its input are one entry of `test_digests.json`
-// in `test_vectors`, under `test_substrate_store`, and the test uses that
-// input.
+// worker, on the open OPFS files the bring up gives the block as `test_slots`
+// and the sqlite3.wasm module and OPFS pool it sets as globals. It also holds
+// the pause point of a put held inside its transaction, which a browser rung
+// uses to kill a worker of the test page there. What it sends and expects is
+// its gold, read through the harness with the `overflow_bytes` and
+// `turn_compact_turns` of `settings.json`. Each digest and its input are one
+// entry of `test_digests.json` in `test_vectors`, under
+// `test_substrate_store`.
 namespace test_substrate_store {
   // The initialized sqlite3.wasm module, a global the bring up sets.
   declare const test_sqlite3: substrate.SqliteModule;

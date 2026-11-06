@@ -3,29 +3,17 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Writes the JSLB vectors that the Python and the TypeScript decoders read
-# into build/vectors, an intermediate made anew by a Python suite and the test
-# page's build before their tests read it, the files an earlier run left
-# removed first. NAME.jslb holds a stream of messages that jslb.py
-# encodes or bytes made by hand, which the encoder would write otherwise or
-# refuse. NAME.json beside it holds the limits its decoder is built with, the
-# messages that decoder returns, every key a string and each blob's d in
-# lowercase hex, and their rendered form. A success sidecar says whether
-# jslb.py encodes the messages back to the same bytes; an error sidecar names
-# the slug of the fault that follows its messages. The number vectors are
-# error vectors of the decoders' number rules: an integer token just past
-# 2^53 either way, integers of 310 and of 4301 digits and a token whose
-# double overflows either way, each refused at read. sha256.json beside them
-# holds the digest vectors that check the hand written SHA-256 of the
-# TypeScript at the edges of its padding: a JSON object whose keys sha256_55,
-# sha256_56 and sha256_64 each name an object of an input of that many bytes,
-# data, and its SHA-256 digest, sha256, both in lowercase hex.
-# test_digests.json beside it holds the digests the TypeScript test modules
-# compare with, a JSON object of each module's entries by name, each an
-# input, data, and its digest, sha256, in the same form. The command line
-# writes them all into build/vectors:
-#
-#     python3 python/vectors_make.py
+# Writes the JSLB vectors that the Python and the TypeScript decoders read into
+# build/vectors, an intermediate made anew by a Python suite and the test
+# page's build before their tests read it. NAME.jslb holds a stream of messages
+# that jslb.py encodes or bytes made by hand, which the encoder would write
+# otherwise or refuse. NAME.json beside it holds the limits its decoder is
+# built with, the messages it returns and their rendered form. A success
+# sidecar says whether jslb.py encodes the messages back to the same bytes; an
+# error sidecar names the slug of the fault that follows its messages.
+# sha256.json checks the hand written SHA-256 of the TypeScript at the edges of
+# its padding, and test_digests.json holds the digests the TypeScript test
+# modules compare with.
 
 import argparse, hashlib, json, os, sys
 from typing import Any, NamedTuple

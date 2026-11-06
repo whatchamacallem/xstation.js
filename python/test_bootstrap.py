@@ -3,22 +3,12 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the platform services in process: each run of `bootstrap_run` is a
-# forked child whose controlling tty, stdin, stdout and stderr are a new pty of
-# `pty.openpty`, as ttyd runs it, with its environment set in the child, and
-# the test plays the page on the other side of the pty. It tests the arguments,
-# the engine lock, the raw mode of the pty, the first line, `tap.start` with
-# the fixed id 101, its settings, the root's switches, read from the root's
-# parameters and set in the process and its environment, and no gold and
-# no provider field, the reply, the choice and
-# loading of the main loop file, the console role where it runs no shell, the
-# error line in full names with its cascade, the hangup that cannot end a run
-# while it writes that line, and the lines bootstrap writes to the root's
-# log. The test main loop files, named by `--main-loop` in debug mode,
-# write their calls to files in the root; with no `--main-loop` the stock
-# main_loop.py answers a request. Each child writes how its run ended to a
-# file, then kills itself, so that the lock, the log and the loaded main loop
-# never reach another test. The expected texts and lines are the gold's. The
-# scratch directories go under build/.
+# forked child on a new pty, as ttyd runs it, and the test plays the page on
+# the other side of the pty. The test main loop files, named by `--main-loop`
+# in debug mode, write their calls to files in the root; with no `--main-loop`
+# the stock main_loop.py answers a request. Each child writes how its run ended
+# to a file, then kills itself, so that the lock, the log and the loaded main
+# loop never reach another test.
 
 import bootstrap, contextlib, errno, fcntl, harness, json, os, pty, resource
 import signal, sqlite3, switches, sys, tempfile, termios, time, traceback

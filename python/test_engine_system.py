@@ -2,23 +2,14 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests the handlers of `settings.put`, `source.put` and `system.restart`
-# and the two tools of the same names, each in a forked child: the handlers
-# registered with the real dispatcher on a scratch root in `build/`, and the
-# tools on a real MCP server and called through it, so the root, debug
-# mode and the handlers never reach another test. Each handler is called
-# as the dispatcher calls it on lines of the gold, a blob's `d` the bytes or
-# the path of a file the decoder would have streamed. The settings file is
-# rewritten whole, a main loop file is written from bytes or moved from the
-# streamed file, and its name is refused unless plain. The refusals of the
-# restart run in a child that a restart would replace, so its ending shows
-# the process kept; the exec itself runs only in a whole program. Debug mode
-# gates all of them. The settings check holds the types of every table, the
-# PowerShell constants' among them. The tools are those of the API file, and
-# a tool's exception is the one the server keeps. The registration is read
-# from the dispatcher, which refuses a second one of each type. Each child
-# writes how its work ended to a file, or to stderr when that write fails,
-# then kills itself.
+# Tests the handlers of `settings.put`, `source.put` and `system.restart` and
+# the two tools of the same names, each in a forked child, so the root, debug
+# mode and the handlers never reach another test. The refusals of the restart
+# run in a child that a restart would replace, so its ending shows the process
+# kept; the exec itself runs only in a whole program. A blob's `d` is the bytes
+# or the path of a file the decoder would have streamed. Each child writes how
+# its work ended to a file, or to stderr when that write fails, then kills
+# itself.
 
 import engine_system, functools, harness, hashlib, json, os, re, signal, sys
 import tempfile, traceback, unittest

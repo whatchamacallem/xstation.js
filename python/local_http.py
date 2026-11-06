@@ -2,31 +2,21 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# The local HTTP server of the test run, infrastructure for testing that the
-# driver starts on 127.0.0.1 before the first block that needs it and stops
-# when the run's stream ends: a `ThreadingHTTPServer` of the standard
-# library on a thread of its own, one handler thread per request. It is the
-# scripted far end of a connection. The script is an object of the gold:
-# `host`, `port`, `closed_port`, and `paths`, each path's `status`,
-# `headers`, `body` and `delay`. Each path of the script answers GET and
-# POST alike: the request's body is read by its Content-Length and dropped,
-# the delay is slept, the status line is written by `send_response_only` as
-# HTTP/1.0, then exactly the script's headers and the body as UTF-8, all of
-# it sent by one write, so that a client that closed its end during the
-# delay takes the answer as TCP allows. Any other path that starts with
-# `/NAME/` is the file at the rest of the path in the directory served,
-# `NAME` the directory's own name, such as `/build/headless.html`, the page
-# of group B, answered with its type, by the standard library's own table
-# and no file of the system, and its length. The script's `closed_port` is
-# bound and never listens, so that a fetch to it is refused. Any failure of a
-# handler, an unknown path or a request the standard library would refuse
-# among them, is a hard failure: `handle_error` keeps the first and sends
-# the main thread `SIGUSR2`, which the server holds while it serves, whose
-# handler raises it there at once, wherever the main thread is, the
-# handler's traceback as its cause, as the driver's own timers raise. A
-# failure after the first ends its request with no answer and is not
-# raised, since the run stops at the first. Standard library only, and
-# plain English texts.
+# The local HTTP server of the test run, infrastructure for testing, the
+# scripted far end of a connection, on 127.0.0.1. The script is an object of
+# the gold: `host`, `port`, `closed_port`, and `paths`, each path's `status`,
+# `headers`, `body` and `delay`. An answer is sent by one write, so that a
+# client that closed its end during the delay takes the answer as TCP allows.
+# `closed_port` is bound and never listens, so that a fetch to it is refused.
+# Any other path that starts with `/NAME/` is the file at the rest of the path
+# in the directory served, `NAME` the directory's own name, its type from the
+# standard library's own table and no file of the system.
+#
+# Any failure of a handler is a hard failure: `handle_error` keeps the first
+# and sends the main thread `SIGUSR2`, whose handler raises it there at once,
+# as the driver's own timers raise. A failure after the first is not raised,
+# since the run stops at the first. Standard library only, and plain English
+# texts.
 
 import functools, http.server, mimetypes, os, signal, socket, socketserver
 import sys, threading, time, types

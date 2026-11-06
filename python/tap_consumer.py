@@ -3,22 +3,15 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # The Python TAP consumer, shaped after tappy's: a `Parser` reads TAP version
-# 14 text line by line into tappy's line kinds, each with its depth, zero for
-# the stream and one for a block indented four spaces. A `StreamReader`
-# checks a stream against the one the producers write, a line at a time as
-# it arrives, as the wire test reads the TypeScript stream the server
-# writes, and counts its points; `document_stats` reads a whole document so
-# and returns its stats: the points its blocks plan, how many passed, failed
-# and were skipped, and whether it is well formed. Reading stops at the
-# first fault: the counts are those of the lines before it. A `Bail out!`
-# line at depth 0 ends a stream wherever it stands, before the version line
-# too, since the server appends one when the browser fails: it counts as one
-# failure unless it follows a failed point, as the producer's own does, and
-# reading stops there, every line after it ignored, as TAP 14 asks a harness
-# to stop at a bail out. Each point is followed at once by its YAML block,
-# indented two spaces more: `---`, `duration_ms: N` and `...`, the grammar
-# hardcoded with no YAML parser, so the parser gives those three lines alone
-# as YAML and the reader takes them in order, refusing any other attribute.
+# 14 text line by line into tappy's line kinds, each with its depth. A
+# `StreamReader` checks a stream against the one the producers write, a line at
+# a time as it arrives. Reading stops at the first fault: the counts are those
+# of the lines before it. A `Bail out!` line at depth 0 ends a stream wherever
+# it stands, before the version line too, since the server appends one when the
+# browser fails: it counts as one failure unless it follows a failed point, as
+# the producer's own does, and every line after it is ignored. Each point is
+# followed at once by its YAML block, `---`, `duration_ms: N` and `...`, the
+# grammar hardcoded with no YAML parser, refusing any other attribute.
 
 import io, re
 from collections.abc import Iterator

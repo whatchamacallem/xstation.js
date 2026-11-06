@@ -1,31 +1,23 @@
 // The settings of `settings.json`, which `tap.start` carries unmodified, set
-// once per thread, read by id and, in debug mode, changed by id. The file
-// also holds the constants of the PowerShell scripts, under `powershell`,
-// which the browser receives and does not read.
+// once per thread, read by id and, in debug mode, changed by id. The file also
+// holds the constants of the PowerShell scripts, under `powershell`, which the
+// browser receives and does not read.
 //
-// The limits, every one set so that the largest database moves as one blob:
-// `blob_max` is the largest database, the one hard bound of a database's
-// size. It bounds the blob bytes of one message in all, so a database file
-// is the one blob of its `db.restore` line, and each cache file, which is a
-// value over `overflow_bytes` or the blob of a `db.file` line, is at most
-// `blob_max` too. It bounds the blob bytes a queue and the wire's frame queue
-// hold in memory, a blob streamed to a cache file counting nothing.
-// `line_max` bounds the JSON text of one line without its blobs, so one
-// message is at most `line_max` plus `blob_max` bytes. It bounds a verbose
-// entry: a `verbose.put` that holds one entry stays below it, and a wire
-// line whose rendering would not fit is logged as its header and the sizes
-// of its payload and blobs only. A blob over `overflow_bytes` streams to a
-// cache file as it arrives. `chunk_bytes` is one input frame of the wire and
-// one read of the server. `srv_buf_size` is ttyd's receive chunk, for the
-// start script's ttyd and the tests' alike. The first line is read before
-// the settings exist, under the fixed bound `first_line_max` of the wire,
-// 10 MiB, which `settings.json` fits.
+// The limits are set so that the largest database moves as one blob.
+// `blob_max` is the largest database, the one hard bound of a database's size.
+// It bounds the blob bytes of one message in all, each cache file, and the
+// blob bytes a queue and the wire's frame queue hold in memory, a blob
+// streamed to a cache file counting nothing. `line_max` bounds the JSON text
+// of one line without its blobs, and so a verbose entry. A blob over
+// `overflow_bytes` streams to a cache file as it arrives. `chunk_bytes` is one
+// input frame of the wire and one read of the server. `srv_buf_size` is ttyd's
+// receive chunk, for the start script's ttyd and the tests' alike. The first
+// line is read before the settings exist, under the fixed bound
+// `first_line_max` of the wire, 10 MiB, which `settings.json` fits.
 //
-// Debug mode is not a setting: a store reads it from the reader it was
-// made with, the module's own store from `switches.debug_on()`, which each
-// thread sets before its settings. `names_full()` is the one choice of the
-// name form of the lines a thread builds: full names until the settings are
-// set, then full names in debug mode and short names otherwise.
+// Debug mode is not a setting: a store reads it from the reader it was made
+// with. `names_full()` is the one choice of the name form of the lines a
+// thread builds.
 
 declare namespace settings {
   interface Settings {

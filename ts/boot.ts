@@ -2,48 +2,15 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// The bring-up of the two test pages. The ttyd page, on both of its threads:
-// its last script, `test_all.suites_run()`, reads `self.name`: "ai" in the
-// AI worker, "" on the main thread, never undefined. No program but the test
-// suites runs: there is no hello, no start chain and no first render.
+// The bring-up of the two test pages. API/ts/boot.d.ts holds its order.
+// Initialization waits on the platform's promises here, the one module that
+// does so outside the task manager.
 //
-// The worker: the error overlay first, then the page's first message, the
-// wire to the server, whose first line is `tap.start` with `i` 101, then the
-// platform: sqlite3.wasm and the test pool, cleared at start, set as the
-// globals `test_sqlite3` and `test_pool`, and the test slots, files cleared
-// at start that no cache holds, set as the global `test_slots`; then the
-// test cache, its files cleared at start, as the wire's sink, so that a
-// reply's blob over `overflow_bytes` streams to a file, then
-// `worker_ai.tap_start`, the wire its server's port and `wire_end` its end,
-// which answers `tap.start` and runs the worker's suites, whose stream sends
-// `ui.tests` at its end. `run` gets the queue and, for the wire rungs, the
-// first line and the page's address. Initialization waits on the platform's
-// promises here, the one module that does so outside the task manager.
-//
-// The page: the error overlay first, the AI worker made from the texts of the
-// worker scripts, then at `settings.set` the UI thread's queue, whose
-// `ui.tests` handler runs the UI thread's suites.
-//
-// The headless worker, whose page `test_headless` runs: the error overlay
-// first, then the page's first message, which holds the worker's end of the
-// realm lane, its end of the UI channel, and the start: `tap.start`, which
-// the page took from the driver, and the block the driver named with its
-// failfast. The platform then starts by the same code as the ttyd worker's,
-// its pool and test slots cleared at start unless the start's `clear` is
-// false, when the worker keeps what the worker before it left in them. Such
-// a worker first waits for every file of the pool's directory and of the
-// slots' directory to open, since the platform frees the files of a worker
-// it terminated in a loop about 2 s later and tells no one: it opens each
-// file for synchronous access and closes it at once, and a refusal of a file
-// still held, a `DOMException` named `NoModificationAllowedError`, ends the
-// try, which comes again 10 ms later; anything else is thrown. Once a try is
-// refused after the start's `wait_seconds`, it throws `boot.files_busy` with
-// that refusal as its `cause`. The wait comes before the pool's install,
-// since SQLite keeps a failed install as the answer to every later one. Then
-// comes `worker_ai.tap_start`, the realm lane its server's port, a
-// `queue.ThreadPort`, whose end posts the line on the lane and calls back at
-// once, since the lane keeps its order and the page relays each line to the
-// driver as it comes. `run` gets the queue and the start.
+// A headless worker with `clear` false first waits for its files to open. A
+// file still held refuses with a `DOMException` named
+// `NoModificationAllowedError`, which ends the try, and the next comes 10 ms
+// later; anything else is thrown. The wait comes before the pool's install,
+// since SQLite keeps a failed install as the answer to every later one.
 
 namespace boot {
   // The options of `installOpfsSAHPoolVfs` that the bring up sets.

@@ -2,29 +2,16 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// The line cases of the console view on the page: `console.show`,
-// `console.output` and `console.exit`, which the page's handlers serve on a
-// real queue of the UI thread, its lane to the AI worker the test's end. The
-// view is the real one, on the real xterm.js terminal, in a frame sized from
-// the cells of a terminal the topology measures first, so that the rows a
-// show fits are the gold's `rows` whatever the font. The page's other parts
-// are real too: the DOM port on the page's elements, the media port and the
-// overlays. The cases also send lines of types of the topology's own, whose
-// handlers read the DOM back, the console's rows and whether it is shown,
-// and act as the player does, a key with control, typed text, and the close
-// that only a handler asks for. Output reaches the rows after the call that
-// feeds it, so a case that feeds output waits its seconds for the terminal
-// to draw. The last cases type a line and read its echo: after the output
-// that follows it, gone at `console.busy`, back at `console.idle`, edited
-// by Backspace, and erased once Enter submits it; typed on the bottom row,
-// wrapping and scrolling the screen, and erased whole from its start; and
-// drawn and erased between a program's saved cursor, ESC 7, and its
-// restore, ESC 8, which puts the program's next output at its own place;
-// and drawn at a program's pending wrap, a row filled to its last column,
-// red, then green, and a row ending in a wide character, whose erase
-// leaves the wrap pending, so that the program's carriage return goes back
-// to the filled row, which keeps its last cell and its colour, and the echo
-// is drawn there in the program's colour. A probe reads a row's runs of
+// The line cases of the console view on the page, every part real, on a queue
+// of the UI thread whose lane to the AI worker is the test's end. The frame is
+// sized from the cells of a terminal the topology measures first, so that the
+// rows a show fits are the gold's `rows` whatever the font. Lines of types of
+// the topology's own read the DOM back and act as the player does. Output
+// reaches the rows after the call that feeds it, so a case that feeds output
+// waits its seconds for the terminal to draw. The last cases check the echo of
+// a typed line: around `console.busy`, on the bottom row, between a program's
+// saved cursor, ESC 7, and its restore, ESC 8, and at a program's pending
+// wrap, whose erase leaves the wrap pending. A probe reads a row's runs of
 // text with their colour classes, the runs of one colour joined.
 namespace test_integrate_console_view {
   // The threads, the types of the topology's own and the page's elements.

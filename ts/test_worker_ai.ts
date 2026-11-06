@@ -3,27 +3,15 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // Tests of the AI worker on the UI side, in a page load of its own, where no
-// bring up has registered the types its relays register: the owner table, the
-// synchronous mode, the wire's tap in its full and sized forms, the note of
-// tty 1, the relays of the console's close and of the settings, and the
-// cascade of a fault sent as an `error` line by the end function `tap_start`
-// takes, the worker's own and the UI's. A relay runs on a real queue of thread
-// `ai` in synchronous mode, its handlers registered through the real dispatch,
-// its lanes linked local ports whose far ends are the test's, so the whole
-// exchange runs within the test's call: the test posts the UI's lines at the
-// far end of `ui` and reads what comes back there, and the far end of `server`
-// keeps each line and answers a request with the gold's reply, as the server
-// does, since the AI side handles `settings.put` too. The tap's inner port is
-// one of a linked pair, and the end function is the test's own. The lines the
-// tests send and expect and the texts of the notes and throws are those of the
-// gold record, `ts/test_setting_test_worker_ai.json`. `tap_start` runs once
-// per worker, at bring up, whose line cases are `test_integrate_worker_ai`, so
-// no test here calls it. The relay of the console's opening, which needs the
-// console on tty 0, is the module `test_worker_ai_console`, of group C. The
-// console's writer writes to one of a linked pair of local ports, whose far
-// end keeps what came and sends tty 0's output back, the writer's posts to
-// the UI and what it passes back are kept, and the writer's lines are built
-// here.
+// bring up has registered the types its relays register. A relay runs on a
+// real queue of thread `ai` in synchronous mode, its lanes linked local ports
+// whose far ends are the test's, so the whole exchange runs within the test's
+// call. The far end of `server` answers a request with the gold's reply, as
+// the server does, since the AI side handles `settings.put` too. `tap_start`
+// runs once per worker, at bring up, whose line cases are
+// `test_integrate_worker_ai`, so no test here calls it. The relay of the
+// console's opening, which needs the console on tty 0, is the module
+// `test_worker_ai_console`, of group C.
 
 namespace test_worker_ai {
   // The values the tests use.

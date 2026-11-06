@@ -5,22 +5,13 @@
 // The line cases of the AI worker's bring up: `worker_ai.tap_start` in a fresh
 // worker as `boot.headless_worker` runs it, seen from the headless page's main
 // thread, a realm whose dispatch table holds none of the worker's handlers.
-// The test's end is joined to the worker's two channels, its lane to the
-// server and its channel to the UI thread, by real thread ports whose
-// receivers are this file's functions. Every line of the server's lane goes to
-// the test's end, but each `verbose.put`, which goes to the driver uncompared,
-// as its entries hold clock readings; a request also goes to the scripted
-// server, a second real queue of thread `server` in synchronous mode joined by
-// linked local ports, whose handler, this file's function, answers
-// `settings.put` with the gold's reply, which goes back to the worker on its
-// lane. The UI channel's `settings.set`, whose payload is the whole of
-// `tap.start`, the TypeScript suites' gold included, is compared with the
-// first line by value, a difference thrown; any other line of it goes to the
-// test's end. A line the cases send goes on the UI channel. Lines of two
-// channels keep no order between them, so no case expects lines of both. The
-// cases, the gold of the block's id, are the Empty reply to `tap.start`, a UI
-// `settings.put` relayed to the server and answered, and a UI `fault` sent on
-// as the `error` line of its cascade, last, as the worker then closes itself.
+// Every line of the server's lane goes to the test's end, but each
+// `verbose.put`, which goes to the driver uncompared, as its entries hold
+// clock readings. A request also goes to the scripted server, a second real
+// queue of thread `server`. The UI channel's `settings.set`, whose payload is
+// the whole of `tap.start`, is compared with the first line by value. Lines of
+// two channels keep no order between them, so no case expects lines of both.
+// The UI `fault` case is last, as the worker then closes itself.
 
 namespace test_integrate_worker_ai {
   // The threads, the line types, the gold reply, the handler's version.

@@ -3,25 +3,15 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # The TAP suite server, a main loop file that runs the Python test suites on
-# the engine tty and reports them over it, in place of the stock main loop.
-# bootstrap.py runs it from the root's main_loop directory when --main-loop
-# names it in debug mode, and writes the first line, `tap.start`, and reads
-# its reply as for any main loop. loop_prepare reads the settings for the
-# decoder's limits and the name form. loop_run decodes each line, refuses
-# any reply and serves the one type `tap.run`: its handler runs the driver,
-# test_all.py, as `python3 test_all.py --stream`, with the category, with
-# --failfast when asked, with --failures for the failing tests the run
-# expects, and with --module for each suite named, its input empty. The
-# driver is the file beside the checkout's modules this file imports, as a
-# copy of this file runs from the root. Each line of the driver's stdout, a
-# line of its TAP stream, is pushed the moment it ends as a `tap.line` of
-# the language python, in the name form of the parameter `debug`; what it
-# writes to stderr is kept, and when it exits the reply carries its exit
-# code and that text. Its stdout ending inside a line is a fault. A line of
-# no other type has a handler, a blob is refused, and a failure writes one
-# `error` line and exits 1, as the stock main loop does. The hangup that
-# ends the connection ends the loop, and a driver still running with it, as
-# both are in the tty's foreground group.
+# the engine tty and reports them over it, in place of the stock main loop,
+# when --main-loop names it in debug mode. It serves the one type `tap.run`:
+# its handler runs the driver as `python3 test_all.py --stream`, each line of
+# its stdout pushed the moment it ends as a `tap.line`, and the reply carries
+# its exit code and what it wrote to stderr. The driver is the file beside the
+# checkout's modules this file imports, as a copy of this file runs from the
+# root. Its stdout ending inside a line is a fault. The hangup that ends the
+# connection ends the loop, and a driver still running with it, as both are in
+# the tty's foreground group.
 
 import dispatch, functools, jslb, os, select, settings, subprocess
 import switches, sys

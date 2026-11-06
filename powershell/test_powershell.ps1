@@ -5,28 +5,19 @@
 # Offline since 2026-10-30, kept, run by nothing, and to be brought back later.
 #
 # Formats and checks the scripts (test_lint.ps1), then runs the whole
-# lifecycle, each script in its own PowerShell as a person would: serving
-# localhost, starting again while running, stopping softly, then serving
-# HTTPS with a throwaway password, which opens port 5768 to the network
-# with a port proxy and a Windows Firewall rule until the last stop. Each
-# step's output and log go to test_powershell.ps1.md. After the install it
-# runs python/test_all.py in WSL from the checkout with the category option,
-# which needs in WSL what that runner needs.
+# lifecycle, each script in its own PowerShell as a person would, then
+# python/test_all.py in WSL. Each step's output and log go to
+# test_powershell.ps1.md.
 #
 # The checkout must first hold what the scripts read and don't make:
-# settings.json, the suites' gold test_setting_*.json beside the suites,
-# provider.json, i18n\en-US.json and the page
-# build\hyperposition-engine.html.
-# Make the page in WSL in the checkout: python3 python/third_party_fetch.py
-# fetches the pinned archives over the network, then
-# python3 python/page_build.py test hyperposition-engine builds the page
-# from them with tsc.
+# settings.json, the suites' gold, provider.json, i18n\en-US.json and the page
+# build\hyperposition-engine.html, made in WSL by python3
+# python/third_party_fetch.py, then python3 python/page_build.py test
+# hyperposition-engine.
 #
 # The test command has to be run as admin:
-#
 # Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 # .\powershell\test_powershell.ps1 [--smoke-test | --normal-test]
-#
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
     'PSAvoidUsingWriteHost', '',
     Justification = 'Coloured headings for the person running it.')]

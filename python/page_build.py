@@ -3,32 +3,12 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# `python3 python/page_build.py TEMPLATE NAME` builds build/NAME.html from
-# the template html/TEMPLATE.html, read first, and prints the page's
-# SHA-256, which page_build returns and never prints, since stdout is the
-# driver's TAP stream when the driver builds the headless page. tsc compiles
-# the test bundle by ts/tsconfig.test.json, the text of i18n/en-US.json
-# takes the place of the bundle's strings table identifier, and the template
-# receives html/engine.css, the bundle, every file of build/vectors/ as
-# base64, written anew by vectors_make.py first, the gold of the TypeScript
-# suites, every ts/test_setting_<suite>.json read by jslb.json_decode as
-# {"typescript": {suite: gold}} on the one line that defines test_gold,
-# SQLite's JavaScript glue,
-# its wasm as base64, and xterm.js and its css, read from the archives
-# third_party_fetch.py places in third_party/. Each template takes the same
-# pieces: html/test.html, the ttyd page, which the start script serves as
-# hyperposition-engine.html, and html/headless.html, the headless page of
-# group B, which the driver's HTTP server serves. page_copy writes a built
-# page at another path with other gold on that line, for a root whose test
-# gives its page its own gold.
-#
-# node_build builds the Node bundle of group A in the build directory it is
-# given: the vectors written anew into its vectors/ first, then tsc compiling
-# ts/tsconfig.node.json into its ts/node.js, the place the config's outFile
-# names in build/, which is rewritten as the strict line, then test_vectors
-# and test_gold defined as the page defines them, then the bundle with the
-# strings table in place, and its path returned. tsc's output never reaches stdout: a failed
-# compile raises, tsc's output in its cause.
+# Builds the pages and the Node bundle. API/python/page_build.pyi holds the
+# contract. stdout is the driver's TAP stream when the driver builds the
+# headless page, so page_build returns the digest and never prints it, and
+# tsc's output never reaches stdout: a failed compile raises, tsc's output in
+# its cause. SQLite's glue and wasm and xterm.js come from the archives
+# third_party_fetch.py places in third_party/.
 
 import argparse, base64, hashlib, json, os, re, shutil, subprocess, sys
 import tarfile, zipfile

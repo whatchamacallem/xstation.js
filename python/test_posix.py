@@ -3,25 +3,17 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Checks the whitelisted files are UTF-8 with no non-ASCII outside
-# _NON_ASCII_ALLOWED, checks the comments of those, including the TypeScript,
-# JavaScript and PowerShell ones, proves the synchronization audit on probe
-# files under build/, audits every ts/*.ts file other than the
-# _SYNCHRONIZATION_MODULES for await, .then(, new Promise, Atomics and
-# SharedArrayBuffer outside its comments and its string, template and regular
-# expression literals, then, in the category that --smoke-test, the default,
-# or --normal-test chooses, formats the whitelisted files with reformat.py in
-# a normal-test run, or in a smoke-test run runs no formatter and prints
-# nothing, then lints them with the linters of their rows, each quiet unless
-# it finds something. reformat_table.json gives each
-# extension its comment lexer, codec, checker, formatter and linter; a
-# PowerShell file, formatted on Windows, is read past a UTF-8 byte order mark
-# at its start and only its characters and comments are checked. Below a
-# file's header, the comment at its top, a comment must be one line, not be a
-# <# #> comment, and outside its Doxygen `code` spans hold nothing but
-# letters, digits, white space and _ENGLISH_PUNCT, unless its words are a
-# formatter escape of _FORMAT_ESCAPES. The switch --anthropic, here or on
-# test_all.py, does none of this, for the cloud environment.
+# Checks the characters and comments of the whitelisted files, audits every
+# ts/*.ts file other than the _SYNCHRONIZATION_MODULES for synchronization
+# tokens, formats the files in a normal-test run, then lints them. A PowerShell
+# file, formatted on Windows, has only its characters and comments checked.
+#
+# A file's header, the comment at its top, runs to at most _HEADER_LIMIT lines.
+# Below it a comment must be one line, not be a <# #> comment, and outside its
+# Doxygen `code` spans hold nothing but letters, digits, white space and
+# _ENGLISH_PUNCT, unless its words are a formatter escape of _FORMAT_ESCAPES.
+# The switch --anthropic, here or on test_all.py, does none of this, for the
+# cloud environment.
 
 import argparse, glob, io, os, re, subprocess, sys, tempfile, tokenize
 from typing import NamedTuple
@@ -70,6 +62,9 @@ _FORMAT_ESCAPES = {"prettier-ignore"}
 
 # The comment header may have a doctype line before it.
 _HEADER_BEFORE = re.compile(r"(?:<!DOCTYPE html>)?\s*", re.IGNORECASE)
+
+# The lines a header may run to, each line of its comments counted.
+_HEADER_LIMIT = 20
 
 # HTML comments, and the script and style elements, whose comments differ.
 _HTML_REGION = re.compile(r"<!--|<(script|style)\b[^>]*>", re.IGNORECASE)
@@ -173,7 +168,7 @@ def audit_probe() -> None:
                 )
 
 
-# Fails on the first comment below the header that breaks a comment rule.
+# Fails on a header past its limit, or a comment below it that breaks a rule.
 def comments_check(path: str, encoding: str, lexer: str) -> None:
     with open(path, encoding=encoding) as file:
         text = file.read()
@@ -190,7 +185,14 @@ def comments_check(path: str, encoding: str, lexer: str) -> None:
         else:
             groups.append([comment])
     if groups and _HEADER_BEFORE.fullmatch(text, 0, groups[0][0].start):
-        groups.pop(0)
+        header = groups.pop(0)
+        first_line = offset_line(text, header[0].start)
+        last_line = offset_line(text, header[-1].end)
+        if last_line - first_line >= _HEADER_LIMIT:
+            raise RuntimeError(
+                f"{path}:{first_line}: header runs to line {last_line},"
+                f" past its {_HEADER_LIMIT} lines"
+            )
     for group in groups:
         first_line = offset_line(text, group[0].start)
         for comment in group:

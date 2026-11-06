@@ -3,22 +3,16 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Line coverage of modules by their own unit suites, counted with the LINE
-# events of `sys.monitoring` in the process that counts. It imports the
-# standard library only, and its texts are plain English. The lines that
-# count are those that hold code: the lines of `co_lines()` over every code
-# object of a file, found through `co_consts`, leaving out the
-# `__annotate__` code of deferred annotations, which runs only when the
-# annotations are read. A line of module or class body code counts whenever
-# it ran; a line of a function counts only while a suite of its file runs.
-# The callback returns `DISABLE`, so that a location fires once and the run
-# stays fast, and a suite's start turns every location on again. A forked
-# child, which may end by SIGKILL, marks each line of the suite's files it
-# runs in anonymous memory shared with the counting process, which counts
-# the marks at the suite's end. A line a forked child runs of any other
-# file, or that a program started by the process runs, is not counted. A
-# statement whose first line ends with `# pragma: no cover` is exempt, with
-# the block that line opens, as coverage.py does. Files are compared by
-# their real paths.
+# events of `sys.monitoring`. Standard library only, and plain English texts.
+# The `__annotate__` code of deferred annotations is left out, as it runs only
+# when the annotations are read. A line of a function counts only while a suite
+# of its file runs. The callback returns `DISABLE`, so that a location fires
+# once and the run stays fast, and a suite's start turns every location on
+# again. A forked child, which may end by SIGKILL, marks each line it runs in
+# anonymous memory shared with the counting process. A line a forked child runs
+# of any other file, or that a program started by the process runs, is not
+# counted. A statement whose first line ends with `# pragma: no cover` is
+# exempt, with the block that line opens.
 
 import ast, collections, inspect, mmap, os, sys, types
 from collections.abc import Iterable

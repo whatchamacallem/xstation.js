@@ -4,26 +4,12 @@
 #
 # Tests the parts of devtools.py that need the Linux browser, a later suite of
 # devtools on /usr/local/bin/chrome-headless-shell, which the maintainer
-# approved for the test driver on 2026-10-30. Each test starts a Browser of
-# its own on the Linux pipe: the first page is about:blank and evaluates, a
-# value longer than any pipe's buffer comes back whole, the page's exception
-# and DevTools' refusal of an unknown method fail loud; a binding's calls come
-# back with their payloads, on the page loaded after the binding too; a data:
-# URL loads, and a refused navigation fails at once; a console message reaches
-# its follower; and the browser's exit closes its pipe, the exit code the
-# cause, whether the browser is closed, crashes or is killed, the last seen by
-# the Browser's end alone. The profile is read from the browser's own command
+# approved for the test driver on 2026-10-30. Each test starts a Browser of its
+# own on the Linux pipe. The profile is read from the browser's own command
 # line, through the process id DevTools gives, and is a directory under build/
-# that goes when the browser does. The methods the browser test
-# calls are tested here first, as the Windows suite tested them on the relay,
-# the pages served from a scratch directory under build/ by a local HTTP
-# server of the standard library on 127.0.0.1: a screenshot is a PNG of the
-# window's width and height; a trace started afresh ends with every event
-# sent, a synchronous load on the UI thread among them, and none of the trace
-# before; a worker that posts every 10 ms posts nothing once paused in its
-# debugger; a load the page starts itself shows in the lifecycle events under
-# a loader of its own; and the page closes while another page stays. The
-# waits are the gold's.
+# that goes when the browser does. The methods the browser test calls are
+# tested here first, as the Windows suite tested them on the relay. The waits
+# are the gold's.
 
 import devtools, functools, harness, http.server, os, signal, socket, struct
 import switches, tempfile, threading, time, unittest

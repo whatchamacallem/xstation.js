@@ -2,31 +2,8 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# The server substrate, the single door to SQLite: one connection for each
-# database file under a root, the substrate's tables in each, rows of values
-# with overflow to the cache directory `<root>/cache`, which holds the values
-# over `overflow_bytes` by their digest, documents, turns, SQL and snapshots.
-# It applies the browser's committed operations as plain messages, through
-# the same methods as any caller, and keeps more history than the browser:
-# it never compacts turns. Nothing here numbers, orders or checks a change
-# against another store.
-#
-# A value whose row names a cache file this side does not hold is lost: its
-# row stays, `kv_list` lists it, `kv_put` replaces it, and `kv_get` raises
-# `substrate.file_lost`. `db_restore` tolerates such rows, and `db_snapshot`
-# lists only the cache files it holds, so a database moves as one blob with
-# the cache files that exist and works but for the lost values.
-#
-# The schema's triggers raise the name of a string of the strings table, as
-# `agent.content_ambiguous`: a statement that fails with such a message
-# raises that string, the `sqlite3` error as its `__cause__`.
-#
-# Every connection it opens holds its database to `blob_max` bytes, `PRAGMA
-# max_page_count` over the database's `page_size`, set before any statement
-# of its own: a write that needs a page past it fails with SQLite's
-# `SQLITE_FULL`, which it raises and never catches. The connection then sets
-# SQLite's authorizer, which denies a `PRAGMA max_page_count` that has a
-# value, so that SQLite refuses it with `SQLITE_AUTH` when it is prepared.
+# The server substrate, the single door to SQLite. API/python/substrate.pyi
+# holds its rules.
 
 import hashlib, json, os, re, sqlite3, tempfile, urllib.parse
 from collections.abc import Callable, Iterable

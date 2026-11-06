@@ -2,32 +2,19 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the agent loop on real parts: the agent registered on the realm's
-// dispatch with a real `substrate.Store` on the realm's sqlite3 module and
-// pool, a real `mcp.ClientSet` whose client reaches `tools_browser` on a real
-// `mcp.Server` over the same store, and a real queue of thread `ai` in
+// Tests of the agent loop on real parts, on a real queue of thread `ai` in
 // synchronous mode, which runs the turn, the client's `mcp` lines and the
-// tools alike. The player's text or click comes from the queue of thread
-// `ui`, whose handler of the test's own submits it and keeps the reply its
-// wake gets. The far ends are second real queues whose handlers are the
-// test's own functions, each answering with the reply the test scripted from
-// the gold and keeping every request it got: `http` is the scripted AI,
-// which answers the chat requests with the castle turn's frames and the
-// image request with its image, `ui` keeps the image and renders, and
-// `server` keeps the store's pushes.
+// tools alike. The far ends are second real queues whose handlers are the
+// test's own functions: `http` is the scripted AI, `ui` keeps the image and
+// renders, and `server` keeps the store's pushes.
 //
 // A realm takes one registration of the agent and of the tools, since each
 // registers its line types in the realm's one dispatch table, so the tests
 // share the one bench, built at the first test, and each test starts in the
-// hyperposition: `setUp` drops every database of the store through its API,
-// then writes the world, the scene, the analyst's prompt, the universe table
-// and the bootstrap script. The castle turn, in which the player answers 1
-// and the analyst builds the castle's gatehouse scene through the tools, is
-// checked by its requests, the store it leaves, its turns and its reply; then
-// the turn after it, short turns and a click, a compacted scene, a round
-// stored only after its tool ran, and the system prompt and its errors. The
-// request frames, the lines the turns end with and the texts are those of
-// the gold record.
+// hyperposition: `setUp` drops every database through the store's API, then
+// writes the world, the scene, the analyst's prompt, the universe table and
+// the bootstrap script. In the castle turn the player answers 1 and the
+// analyst builds the castle's gatehouse scene through the tools.
 
 namespace test_agent {
   // The initialized sqlite3.wasm module, a global the test page sets.

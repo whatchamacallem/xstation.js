@@ -3,25 +3,15 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the TAP producer of TypeScript and the TAP consumer of Python as a
-# pair: the consumer validates each stream the TypeScript producer writes,
-# and counts it as the TypeScript unittest's own result counts the same
-# tests. One Node bundle is built into a scratch directory under build/, and
-# node runs its pair block once, on real pipes: the first line, tap.start
-# with i 101 built as bootstrap.py builds it, is answered with an Empty
-# reply, then for each run of the block's fixtures comes one tap.pair push,
-# then the tap.line push of the block's point naming that run, and node
-# exits 0. Each kind of outcome a test, its setUp and tearDown, or a
-# module's load has in TypeScript runs with and without failfast, alone and
-# as a block between passing blocks, which run until one fails, as the
-# driver runs them. For each run every line parses to a known kind, the
-# stream reader takes each and the stream ends, the document is well formed
-# with the oracle's counts, and the consumer fails the stream exactly when
-# the runner does. The oracle is the unittest.TestResult of each block that
-# ran, its counts carried in the run's push: a failure, an error and an
-# unexpected success each fail one test, a skip skips one, and every other
-# test run passed, an expected failure among them, since no fixture has two
-# outcomes in one test. A bail out counts for nothing, since the producer
-# writes one only after a failed point, where the consumer counts none.
+# pair: the consumer validates each stream the TypeScript producer writes, and
+# counts it as the TypeScript unittest's own result counts the same tests. node
+# runs the pair block once, on real pipes. The oracle is the
+# unittest.TestResult of each block that ran, its counts carried in the run's
+# `tap.pair` push: a failure, an error and an unexpected success each fail one
+# test, a skip skips one, and every other test run passed, an expected failure
+# among them, since no fixture has two outcomes in one test. A bail out counts
+# for nothing, since the producer writes one only after a failed point, where
+# the consumer counts none.
 
 import harness, jslb, os, page_build, shutil, subprocess, switches
 import tap_consumer, tempfile, time, unittest

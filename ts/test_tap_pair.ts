@@ -4,22 +4,14 @@
 //
 // The TypeScript half of the pair test of the TAP producer of TypeScript and
 // the TAP consumer of Python: this block writes the streams, and the Python
-// suite that starts its realm checks them. Each kind of outcome unittest has
-// here, of a test, of its setUp and tearDown and of a module's load, runs
-// with failfast and without, alone and as a block between passing blocks,
-// which run until one fails, as the driver runs them, through
-// `TAPTestRunner` into a list of lines. Each run goes to the driver as one
-// `tap.pair` push: its name, its failfast, its lines, and for each block
-// that ran the verdict of `module_run`, its `countTestCases` and the counts
-// of a `unittest.TestResult` that ran the same tests anew, the oracle.
-// Python's subtests and its class and module fixtures have no form here, and
-// no fixture has two outcomes in one test, since the counts are per block. A
-// load that fails is a module whose one member throws when the loader reads
-// it, and its oracle is one test that runs that load, as Python's loader
-// makes one failing test of a module that fails to import. The block writes
-// one point per run once the run's push is sent, through `block_start` and
-// `block_end` of the runner it is handed; the checks are the Python suite's.
-// The fixtures are not exported, so that no loader collects them.
+// suite that starts its realm checks them. Each run goes to the driver as one
+// `tap.pair` push, with the counts of a `unittest.TestResult` that ran the
+// same tests anew, the oracle. Python's subtests and its class and module
+// fixtures have no form here, and no fixture has two outcomes in one test,
+// since the counts are per block. A load that fails is a module whose one
+// member throws when the loader reads it, and its oracle is one test that runs
+// that load, as Python's loader makes one failing test of a module that fails
+// to import. The fixtures are not exported, so that no loader collects them.
 
 namespace test_tap_pair {
   // The texts of the fixtures, and the type of the line of each run.

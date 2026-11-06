@@ -3,25 +3,15 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // The line cases of the store's crash, a block of the side `workers` of
-// `test_headless`, whose page brings up a fresh AI worker for each case and
-// terminates it before the next. In each worker this file's part makes a
-// real `substrate.Store` on the sqlite3.wasm module and the OPFS pool the
-// bring up sets as globals, the root of this block's gold, a cache over the
-// test slots, the `overflow_bytes` and `turn_compact_turns` of
-// `settings.json`, and the bring up's queue as the store's queue, so that
-// its pushes go to the server on the worker's lane. A worker brought up on a
-// cleared pool and cleared slots runs `test_substrate_store.kill_put`, which
-// creates `alpha` and holds inside the transaction of a put of a value over
-// `overflow_bytes`, after the value's cache file is written and its `_kv`
-// row inserted, but before the commit; on its pause it sends the notice
-// `test_substrate_crash.paused` to the server, and the page terminates it at
-// the next case's start. A worker brought up on the pool and the slots that
-// worker left runs `test_substrate_store.kill_check`, which opens `alpha`,
-// lists the rows of the value, and removes the cache files no row names,
-// then sends the notice `test_substrate_crash.checked` with the count of
-// each. The cases, the gold of the block's id, expect the worker's Empty
-// reply to `tap.start` and the lines of its lane: the put's `db.create` and
-// its pause, then no row and one cache file removed.
+// `test_headless`, with a fresh AI worker for each case. A worker on a cleared
+// pool and cleared slots runs `test_substrate_store.kill_put`, which holds
+// inside the transaction of a put of a value over `overflow_bytes`, after the
+// value's cache file is written and its `_kv` row inserted, but before the
+// commit. On its pause it sends the notice `test_substrate_crash.paused`, and
+// the page terminates it at the next case's start. A worker on what that
+// worker left runs `test_substrate_store.kill_check`, which lists the rows of
+// the value and removes the cache files no row names, then sends
+// `test_substrate_crash.checked` with the count of each.
 
 namespace test_substrate_crash {
   // The initialized sqlite3.wasm module, a global the bring up sets.

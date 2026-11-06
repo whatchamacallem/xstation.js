@@ -1,52 +1,22 @@
 // The store on the AI thread: sqlite3.wasm on the OPFS SAH pool VFS under a
 // root, and the OPFS cache files beside it, which hold the values over
-// `overflow_bytes` by their digest. Every method is synchronous and runs
-// inside the task that called it. Names and parameters follow
-// API/python/substrate.pyi, the server's store, except where each store does
-// its own maintenance: only this one compacts turns, inside `turn_append` at
-// the threshold and by `turn_compact`, which the AI's scripts call through
-// `engine.store`. Nothing of a compaction goes to the server.
+// `overflow_bytes` by their digest. Every method is synchronous. Names and
+// parameters follow API/python/substrate.pyi, except that only this store
+// compacts turns, and nothing of a compaction goes to the server.
 //
 // Each modifying operation goes to the server as one push line of the same
-// type, built in the form `settings.names_full()` picks and given to
-// `tasks.line_notify(line, "server")`: `db.create` and `db.drop` once done,
-// the others once the outermost transaction that ran them commits, in order.
-// A `kv.put` carries its value's bytes as blob 1, read out of the cache file
-// when the value is one, never a cache handle. An operation that changes
-// nothing sends nothing, and a rolled back transaction sends nothing. Nothing
-// waits for, numbers or checks what the server does with it: the sync is
-// lossy by design.
+// type: `db.create` and `db.drop` once done, the others once the outermost
+// transaction that ran them commits, in order. An operation that changes
+// nothing sends nothing, and a rolled back transaction sends nothing. A value
+// whose row names a cache file this side does not hold is lost: the row stays
+// and `kv_get` throws `substrate.file_lost`. `db_restore` tolerates such rows.
 //
-// A value whose row names a cache file this side does not hold is lost: its
-// row stays, `kv_list` lists it, `kv_put` replaces it, `kv_check` counts
-// nothing for it, and `kv_get` throws `substrate.file_lost`. `db_snapshot`
-// names only the cache files this side holds, and `db_restore` tolerates
-// such rows, so a database restored without some of its cache files works
-// but for those values. A cache handle is a name this store's cache holds or
-// a blob its sink finished: `db_snapshot` gives names, and `db_restore` takes
-// either, or the bytes, keeping each file under the digest of its bytes.
-//
-// Every connection the store opens holds its database to `blob_max` bytes:
-// `PRAGMA max_page_count` is `blob_max` over the database's `page_size`, set
-// before any statement of the store's own. A write that needs a page past it
-// fails with SQLite's `SQLITE_FULL`, "database or disk is full", an
-// `sqlite3.SQLite3Error` that the store throws and never catches. The
-// connection then sets SQLite's authorizer, `sqlite3_set_authorizer`, which
-// denies a `PRAGMA max_page_count` that has a value, so that SQLite refuses
-// the statement when it is prepared with `SQLITE_AUTH`, "not authorized", an
-// `sqlite3.SQLite3Error` that the store throws and never catches. A read of
-// the pragma, with no value, is allowed, as every other statement.
-//
-// The handlers of the store's lines: the ui-ai requests of `lines.d.ts`,
-// answered with their replies, and the server's pushes `db.restore` and
-// `db.file`. A `db.restore` waits for its `files` lines of `db.file`, then
-// `db_restore` runs, at once when `files` is 0. A second `db.restore` while
-// one waits throws `substrate.restore_pending`, and a `db.file` with no
-// restore of its database waiting throws `substrate.file_unexpected`.
-//
-// The schema's triggers raise the name of a string of the strings table, as
-// `agent.content_ambiguous`: a statement that fails with such a message
-// throws that string, the SQLite error as its `cause`.
+// Every connection holds its database to `blob_max` bytes by `PRAGMA
+// max_page_count`, set before any statement of the store's own, then sets
+// SQLite's authorizer, which denies that pragma with a value. `SQLITE_FULL`
+// and `SQLITE_AUTH` are thrown, never caught. The schema's triggers raise the
+// name of a string of the strings table: such a statement throws that string,
+// the SQLite error as its `cause`.
 
 declare namespace substrate {
   // A file of the cache held open for synchronous access, as OPFS gives it.

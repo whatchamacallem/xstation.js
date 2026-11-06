@@ -1,31 +1,23 @@
-# The server's store: one connection for each database file under a root,
-# the substrate's tables in each, and the cache directory `<root>/cache`,
-# which holds the values over `overflow_bytes` by their digest. It applies
-# the browser's committed operations as plain messages, through the same
-# methods as any caller, and keeps more history than the browser: it never
-# compacts turns. Nothing here numbers, orders or checks a change against
-# another store.
+# The server's store: one connection for each database file under a root, the
+# substrate's tables in each, and the cache directory `<root>/cache`, which
+# holds the values over `overflow_bytes` by their digest. It applies the
+# browser's committed operations as plain messages, through the same methods as
+# any caller, and keeps more history than the browser: it never compacts turns.
+# Nothing here numbers, orders or checks a change against another store.
 #
-# A value whose row names a cache file this side does not hold is lost: its
-# row stays, `kv_list` lists it, `kv_put` replaces it, and `kv_get` raises
-# `substrate.file_lost`. `db_restore` tolerates such rows, and `db_snapshot`
-# lists only the cache files it holds, so a database moves as one blob with
-# the cache files that exist and works but for the lost values.
+# A value whose row names a cache file this side does not hold is lost: its row
+# stays and `kv_get` raises `substrate.file_lost`. `db_restore` tolerates such
+# rows, so a database moves as one blob with the cache files that exist and
+# works but for the lost values.
 #
-# The schema's triggers raise the name of a string of the strings table, as
-# `agent.content_ambiguous`: a statement that fails with such a message
-# raises that string, the `sqlite3` error as its `__cause__`.
+# The schema's triggers raise the name of a string of the strings table: a
+# statement that fails with such a message raises that string, the `sqlite3`
+# error as its `__cause__`.
 #
-# Every connection the store opens holds its database to `blob_max` bytes:
-# `PRAGMA max_page_count` is `blob_max` over the database's `page_size`, set
-# before any statement of the store's own. A write that needs a page past it
-# fails with SQLite's `SQLITE_FULL`, "database or disk is full", an
-# `sqlite3.OperationalError` that the store raises and never catches. The
-# connection then sets SQLite's authorizer, which denies a `PRAGMA
-# max_page_count` that has a value, so that SQLite refuses the statement when
-# it is prepared with `SQLITE_AUTH`, "not authorized", a
-# `sqlite3.DatabaseError` that the store raises and never catches. A read of
-# the pragma, with no value, is allowed, as every other statement.
+# Every connection holds its database to `blob_max` bytes by `PRAGMA
+# max_page_count`, set before any statement of the store's own, then sets
+# SQLite's authorizer, which denies that pragma with a value. `SQLITE_FULL` and
+# `SQLITE_AUTH` are raised, never caught.
 
 import sqlite3
 from collections.abc import Callable

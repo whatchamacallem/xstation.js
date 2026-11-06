@@ -2,29 +2,11 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Builds ttyd from the pinned source archive and the project's patches by the
-# steps of xsjs_install.ps1's ttyd build, for the test driver's bring up.
-# checkout_build reads powershell.ttyd_archive, powershell.ttyd_patches and
-# powershell.ttyd_build of settings.json, paths from the checkout's top, and
-# hands them to inputs_build; with the switch anthropic the archive is the
-# package manager's, third_party_fetch.package_path's, of the same tree, and
-# tarfile reads either compression. A build directory holds the record
-# inputs.json, the SHA-256 of the archive, then the name and SHA-256 of each
-# patch in the order they apply; one whose ttyd is present and whose record's
-# bytes equal those the inputs give now is left alone, with no program started.
-# Every other call builds from the archive, as a patch applies only once: the
-# build directory is removed, the archive unpacked by tarfile into its source/
-# with the first component of each path and hard link target stripped, each
-# *.patch applied in name order with patch --batch -p1, then cmake -S, with
-# git's package disabled so that cmake starts no git, and cmake --build run and
-# the built ttyd --version, and the record written last, so that a failed build
-# leaves none. Python starts patch, cmake and the built ttyd, and nothing else.
-# Each program's stdin is /dev/null and its stdout and stderr go to build.log
-# in the build directory, which the program writes itself, so nothing reaches
-# stdout, the driver's TAP stream, and a hard exit loses no line of the log. A
-# program that exits other than 0 raises naming its command line, its exit code
-# and the log, the log's last lines in the cause. No program has a time limit,
-# since the build is outside every limit of the run.
+# Builds ttyd for the test driver's bring up. API/python/ttyd_build.pyi holds
+# the contract. Every build starts from the archive, as a patch applies only
+# once. Python starts patch, cmake and the built ttyd, and nothing else. Each
+# program writes build.log itself, so a hard exit loses no line of the log. No
+# program has a time limit, since the build is outside every limit of the run.
 
 import hashlib, json, os, settings, shlex, shutil, subprocess, switches
 import tarfile, third_party_fetch

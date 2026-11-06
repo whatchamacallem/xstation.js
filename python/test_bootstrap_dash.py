@@ -2,23 +2,15 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests the console role in debug mode, which runs the console's shell, dash
-# in its bubblewrap sandbox: each run of `bootstrap_run` is a forked child
-# whose controlling tty, stdin, stdout and stderr are a new pty of
-# `pty.openpty`, as ttyd runs it, with its environment set in the child, and
-# the test types a command line to the shell on the other side of the pty
-# once its first prompt has come. The test reads only what the shell prints
-# on the pty, from its first prompt on, and finds a command's output between
-# two markers that `printf` escapes make, so that no echo of the input holds
-# them. Dash starts in the sandbox's /tmp with only the variables the
-# console keeps, at the shell's verbose level of the root's parameter
-# verbose, its code given back; SIGTERM sent from outside to the sandbox the console role
-# forked, found by its parent pid in /proc, gives 128 plus the signal; and a
-# heredoc of binary bytes typed to `cat` comes back as the pty's output
-# processing changes it, so that a connection that is not binary fails. The
-# logged argv, the prompt, the start directory, the codes of the terminated
-# sandbox, the heredoc's payload and output, and the expected texts are the
-# gold's. The scratch directories go under build/.
+# Tests the console role in debug mode, which runs dash in its bubblewrap
+# sandbox: each run of `bootstrap_run` is a forked child on a new pty, as ttyd
+# runs it, and the test types a command line to the shell once its first prompt
+# has come. It reads only what the shell prints from its first prompt on, and
+# finds a command's output between two markers that `printf` escapes make, so
+# that no echo of the input holds them. SIGTERM goes to the sandbox the console
+# role forked, found by its parent pid in /proc. A heredoc of binary bytes
+# comes back as the pty's output processing changes it, so that a connection
+# that is not binary fails.
 
 import base64, bootstrap, contextlib, errno, harness, json, os, pty, select
 import shlex, signal, sqlite3, switches, sys, tempfile, termios, time

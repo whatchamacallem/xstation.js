@@ -10,6 +10,7 @@
 # comments are found past its strings and here strings, each refusal
 # compared with its message. An HTML comment that is the formatter escape
 # prettier-ignore passes the comment check, one with more words is refused.
+# A header passes at the limit on its lines and is refused past it.
 # A synchronization token outside the exempt modules is refused with its
 # message too. No test reaches the formatter step, which calls into category
 # and reformat.
@@ -29,6 +30,9 @@ _BANNER_CHARACTERS = "".join(map(chr, (0x2588, 0x2591, 0x2592, 0x2593)))
 
 # A block character beside them, which no file may hold.
 _BLOCK_REFUSED = chr(0x2594)
+
+# The lines a header may run to.
+_HEADER_LIMIT = 20
 
 # The name the lexer tests give their text.
 _TEXT_PATH = "a.ps1"
@@ -229,6 +233,48 @@ class TestEscapeCheck(unittest.TestCase):
                 " spans"
             )
             self.assertEqual(caught.exception.args, (expected,))
+
+
+# The limit on the lines of a header, whatever comments make it up.
+class TestHeaderLimit(unittest.TestCase):
+    # Makes the checkout's `build/` for the scratch directories.
+    def setUp(self) -> None:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+
+    # A header of line comments at the limit passes.
+    def test_limit_passed(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
+            data = b"# h\n" * _HEADER_LIMIT + b"\na = 1\n"
+            path = file_write(scratch, "a.py", data)
+            test_posix.comments_check(path, "utf-8", "python")
+
+    # A header of line comments past the limit is refused at its first line.
+    def test_limit_refused(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
+            data = b"# h\n" * (_HEADER_LIMIT + 1) + b"\na = 1\n"
+            path = file_write(scratch, "a.py", data)
+            with self.assertRaises(RuntimeError) as caught:
+                test_posix.comments_check(path, "utf-8", "python")
+            expected = f"{path}:1: header runs to line 21, past its 20 lines"
+            self.assertEqual(caught.exception.args, (expected,))
+
+    # A block comment header is counted by the lines it spans.
+    def test_block_counted(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
+            data = b"<!--\n" + b"h\n" * _HEADER_LIMIT + b"-->\n<p></p>\n"
+            path = file_write(scratch, "a.html", data)
+            with self.assertRaises(RuntimeError) as caught:
+                test_posix.comments_check(path, "utf-8", "html")
+            expected = f"{path}:1: header runs to line 22, past its 20 lines"
+            self.assertEqual(caught.exception.args, (expected,))
+
+    # A doctype line before a header is not one of its lines.
+    def test_doctype_uncounted(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
+            lines = b"h\n" * (_HEADER_LIMIT - 2)
+            data = b"<!DOCTYPE html>\n<!--\n" + lines + b"-->\n<p></p>\n"
+            path = file_write(scratch, "a.html", data)
+            test_posix.comments_check(path, "utf-8", "html")
 
 
 # The lexer names that `comments_find` knows.

@@ -3,23 +3,20 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # The Model Context Protocol server and client, transport agnostic: `JSON-RPC
-# 2.0` messages go in and out as dicts. The server answers `initialize`,
-# `ping`, `tools/list` and `tools/call` and takes `notifications/initialized`,
-# for the revision in `_PROTOCOL_VERSION`, with the capability `tools` only.
-# MCP is a testing protocol for now: no AI is a requirement of the tests yet.
+# 2.0` messages go in and out as dicts, for the revision in
+# `_PROTOCOL_VERSION`, with the capability `tools` only. MCP is a testing
+# protocol for now: no AI is a requirement of the tests yet.
 #
-# Fail loud: an exception while a request is handled answers that request,
-# then the server stops. A tool's exception, an `RpcError` it raises
-# included, answers with a `tools/call` result whose `isError` is true and
-# whose one text content is the JSON text of the cascade, `message`, `stack`
-# and nested `cause`, as `dispatch.cause_make` writes it. An `RpcError` or
-# any other exception of a method answers with a `JSON-RPC` error whose
-# `data` is that cascade. `failure_take` then returns the exception once:
-# `engine_mcp` returns it as a `dispatch.Failure`, and `mcp_stdio` writes the
-# answer, then raises it. A test driver reads `isError`, or the error, to
-# tell an exception from the expected response. A message that is not a
-# `JSON-RPC 2.0` request is answered with -32600 and is no exception, as in
-# TypeScript. Continuing after an exception is deferred.
+# Fail loud: an exception while a request is handled answers that request, then
+# the server stops. A tool's exception, an `RpcError` it raises included,
+# answers with a `tools/call` result whose `isError` is true and whose one text
+# content is the JSON text of the cascade. Any exception of a method answers
+# with a `JSON-RPC` error whose `data` is that cascade. `failure_take` then
+# returns the exception once: `engine_mcp` returns it as a `dispatch.Failure`,
+# and `mcp_stdio` writes the answer, then raises it. A test driver reads
+# `isError`, or the error, to tell an exception from the expected response. A
+# message that is not a `JSON-RPC 2.0` request is answered with -32600 and is
+# no exception, as in TypeScript. Continuing after an exception is deferred.
 
 import dispatch, json
 from collections.abc import Callable

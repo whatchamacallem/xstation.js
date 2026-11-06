@@ -3,30 +3,15 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // The line cases of the agent's faults, a block of the side `workers` of
-// `test_headless`, whose page brings up a fresh AI worker for each case and
-// terminates it before the next, since each case fails the agent's queue,
-// as fail loud intends, and a realm holds one agent. In each worker this
-// file's part registers the agent on the bring up's own queue, the AI
-// thread's real queue, with a real `substrate.Store` on the sqlite3.wasm
-// module and the OPFS pool the bring up sets as globals, a cache over the
-// test slots, and that queue as the store's queue, so that its pushes go to
-// the server on the worker's lane; a real `mcp.ClientSet` whose client
-// reaches `tools_browser` on a real `mcp.Server` over the same store; and
-// the scripted AI, a real `provider_script.ScriptPort` that the queue owns
-// as `http`, walking the script of this block's gold under `script`, whose
-// start node answers each input with one case's reply. It writes the
-// hyperposition the agent reads, the database `metaverse` with its universe
-// table, world, scene and the analyst's prompt, runs the client's handshake
-// by this file's own handlers, and at its end calls `ready`, after which
-// the page posts the case's `ai.say` on the UI channel, as the UI thread
-// does. The cases, the gold of the block's id, expect the Empty reply to
-// `tap.start`, the hyperposition's pushes, the ready notice, the push of the
-// player's turn, and then the `error` line of the queue's fault, which the
-// page compares by its message and the first line of each stack down its
-// cause chain: arguments that are not JSON, a number that overflows a
-// double, four kinds of JSON that are not an object, a reply with neither
-// tool calls nor content, and a round whose second tool throws after its
-// first committed its push.
+// `test_headless`, with a fresh AI worker for each case, since each case fails
+// the agent's queue, as fail loud intends, and a realm holds one agent. In
+// each worker this file's part registers the agent on the bring up's own queue
+// with real parts and the scripted AI, a real `provider_script.ScriptPort`
+// that the queue owns as `http`, walking this block's gold under `script`. It
+// writes the hyperposition the agent reads, runs the client's handshake by
+// this file's own handlers, and at its end calls `ready`. The page compares
+// the `error` line of the queue's fault by its message and the first line of
+// each stack down its cause chain.
 
 namespace test_agent_faults {
   // The initialized sqlite3.wasm module, a global the bring up sets.

@@ -2,31 +2,16 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// The line cases of the console view's open path, group C, on the UI side
-// of the headless page that the block's own ttyd serves, through dash on
-// tty 0. The page's handlers serve on a real UI queue with the real view on
-// the real xterm.js terminal, in a frame whose console fits the gold's
-// `rows`, and the page's other parts are real too, as the console view's
-// integration block builds them. The UI queue's `ai` lane is one of a
-// linked pair of `queue.LocalPort`s whose other end is the `ui` lane of a
+// The line cases of the console view's open path, group C, on the UI side of
+// the headless page that the block's own ttyd serves, through dash on tty 0,
+// every part real. The UI queue's `ai` lane is linked to the `ui` lane of a
 // second real queue of thread `ai` in the same realm, which holds
-// `worker_ai.console_register` and a real `wire.ConsolePort` at the page's
-// address as its `console` owner; the port's close receiver, the test's
-// own, pushes the end of tty 0 to the UI as `console.exit` with the close
-// code. The test's end is the UI queue's lane of thread `server`, which the
-// UI thread's table gives no type, so the requests it sends of the types
-// the UI owns run there and their replies come back on it. The cases send
-// `console.show`, answered once the view's `console.open` went through the
-// relay, the port fetched ttyd's token and opened tty 0, and the view sent
-// ttyd's first message with the terminal's size, and lines of types of the
-// topology's own, whose handlers read the DOM back, the console's rows and
-// the view's phase, and act as the player does, typed text and the close.
-// The rows are read from the first that starts with the gold's `prompt` on,
-// so that what comes before dash's first prompt changes no expectation.
-// dash's first prompt is read from the rows; a typed `stty size` is drawn
-// as the view's echo, then Enter runs it and its output, the rows and the
-// columns ttyd's first message gave, is drawn; and the close ends tty 0,
-// leaving the view shown and idle.
+// `worker_ai.console_register` and a real `wire.ConsolePort`. The test's end
+// is the UI queue's lane of thread `server`, which the UI thread's table gives
+// no type, so the requests it sends of the types the UI owns run there and
+// their replies come back on it. The rows are read from the first that starts
+// with the gold's `prompt` on, so that what comes before dash's first prompt
+// changes no expectation.
 namespace test_console_open {
   // The threads, the lanes, the types of the topology's own, the elements.
   const constants = Object.freeze({

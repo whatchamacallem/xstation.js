@@ -3,27 +3,11 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests bootstrap.py run whole on a pty as ttyd runs it, unpatched, through
-# tap_tty's EngineTty, with roots in build/ whose settings are the
-# checkout's, whose parameters are the run's with debug as each test sets it
-# and which hold no gold. On the stock main loop: the first line in either
-# name form and its payload, which carries no gold in either, the empty
-# reply, a wrong reply to tap.start refused, each line type the stock main
-# loop registers sent once with its reply and the databases checked, the
-# restart that system.restart starts going on over the same tty after
-# settings.put and source.put, the page's error line ending the TypeScript
-# stream with its cascade logged, a handler's Failure answered before the
-# server's error line, a request no handler serves, the hangup that ends
-# the engine with SIGHUP with a reply unread, and mcp_stdio.py served on the
-# same root while the engine runs. On stall_loop.py, the hangup that ends an
-# engine that never writes its first line. On the TAP suite server,
-# tap_loop.py: a suite of this checkout relayed by suites_relay as a passing
-# stream, the reply's stderr empty; failing_suite.py, which fails by
-# design, relayed whole with its failures expected exactly, run again with
-# one failure fewer and one more expected, each failing the run, and relayed
-# by a failfast run, its stream ended by a bail out; and a suite the driver
-# does not know refused by its exit code and its stderr, with no stream. The
-# lines sent and expected, the texts, the suites run and the failing suite's
-# counts are this module's gold.
+# tap_tty's EngineTty, with roots in build/ that hold no gold: on the stock
+# main loop, on stall_loop.py, whose engine never writes its first line, and on
+# the TAP suite server, tap_loop.py, relaying a suite of this checkout and
+# failing_suite.py, which fails by design. The lines sent and expected, the
+# texts, the suites run and the failing suite's counts are this module's gold.
 
 import contextlib, copy, harness, hashlib, jslb, json, os, shutil, signal
 import sqlite3, subprocess, switches, sys, tap_consumer, tap_tty, tempfile

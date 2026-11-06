@@ -3,93 +3,20 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // The headless realm of one block of group B or C, on the page whose last
-// script, a worker script, is `test_headless.realm_open()`: it runs on both
-// threads and reads `self.name`, as `test_all.suites_run()` does on the ttyd
-// page, "ai" in the worker, "" on the main thread.
+// script, a worker script, is `test_headless.realm_open()`. It runs on both
+// threads and tells them apart by `self.name`, "ai" in the worker and "" on
+// the main thread. API/ts/test_headless.d.ts holds the sides a block runs on.
 //
-// The main thread opens the lane `realm` to the driver, over DevTools. The
-// driver adds the binding `realm_line` by `Runtime.addBinding` before the
-// page loads, and `realm_open()` throws without it. Each line the realm
-// sends is one call of `realm_line` with the base64 of its bytes by
-// `jslb.line_encode`. The driver then calls, by `Runtime.evaluate`,
+// A throw while `realm_start` runs, in a UI block's synchronous run too, is
+// the exception of the `Runtime.evaluate` call and not a line of the lane.
 //
-//     test_headless.realm_start(BLOCK, FAILFAST, LINE)
-//
-// with the name of a block of the table below, a boolean, true when the first
-// failure ends the stream with a bail out, and the base64 of the bytes of the
-// first line, which must be `tap.start` with `i` 101, carrying the settings,
-// the switches and the test settings. It is decoded by `jslb.LineDecoder` over
-// an empty `substrate.CacheFiles`, under the bounds the wire reads the page's
-// first line with. A throw while `realm_start` runs, as at any other first
-// line, an unknown block, a call before `realm_open()` or after a first call,
-// or in a UI block's synchronous run, is the exception of the
-// `Runtime.evaluate` call, and not a line of the lane.
-//
-// A UI block runs on the main thread, in its own page load: the settings, the
-// switches and the harness's values are set, an Empty reply answers
-// `tap.start`, and the block runs as the one block of a TAP stream, each line
-// sent as a `tap.line` push the moment it is made. A block is a unittest
-// module, run through `TAPTestRunner.module_run`, a block of line cases, whose
-// suite's topology `line_case.block_run` runs on the gold `typescript.BLOCK`,
-// or a block that writes its own points as they arrive, as `test_line_case`
-// does in the Node realm.
-//
-// A worker block runs in a fresh Worker made from the texts of the
-// `data-worker` scripts and named "ai", which `boot.headless_worker` brings
-// up. The page posts it the worker's ends of two channels, the realm lane
-// and the UI channel, and the start: `tap.start`, the block and failfast.
-// Its `worker_ai.tap_start` sets its settings, sends `settings.set` on the
-// UI channel, answers `tap.start` with an Empty reply on the realm lane, and
-// runs the block in its `worker.tests` task, each TAP line a `tap.line` to
-// its queue's server, the realm lane, which in debug mode also carries the
-// worker's `verbose.put` pushes. The page holds a `queue.ThreadPort` at its
-// end of each channel and relays every line that comes on either to the
-// driver, and the `fault` lines the worker posts to the page.
-//
-// A block of the side `lanes` runs on the main thread over a fresh worker
-// brought up as a worker block's is, with the same start: the settings and
-// the harness's values are set and an Empty reply answers `tap.start`, as
-// for a UI block, then `line_case.block_run` runs the cases of the gold
-// `typescript.BLOCK` with a topology that calls the block's `LanesBuild`
-// with the first line, the page's ends of the worker's two channels and the
-// writer of a line to the driver, which returns the test's end. The page
-// writes the TAP, and the worker runs no block.
-//
-// A block of the side `workers` runs on the main thread over a fresh worker
-// for each of its cases. The settings and the harness's values are set and
-// an Empty reply answers `tap.start`, as for a UI block, then
-// `line_case.block_run` runs the cases of the gold `typescript.BLOCK` with
-// a topology of this file's own, whose junction takes each line the cases
-// send. Each case sends first the notice `test_headless.worker_start`, whose
-// payload is `{clear}`, with `wait_seconds` too when `clear` is false: the
-// junction ends the worker of the case before and brings up a fresh one with
-// the page's start and those, which tell its bring up whether to clear the
-// test pool and the test slots, and if not how long it may wait for files
-// the worker before it still holds. Each other
-// line a case sends is held, then posted in order on the worker's UI
-// channel once the worker has sent the notice `test_headless.worker_ready`
-// on its lane to the server, which the block's `WorkerRun` sends by calling
-// `ready` once its topology is up, since a topology whose set up takes
-// tasks of the worker's queue would take the case's lines first. Every line
-// of the server lane goes to the test's end but each `verbose.put`, which
-// goes to the driver, and every line of the UI channel but `settings.set`,
-// which goes to the driver, as a worker block's lines do. The `fault` line
-// the worker's error overlay posts after its report keeps no order with the
-// server lane, so it is held and checked against the worker's `error` line,
-// the same message, stack and cause chain; one that differs, or that has no
-// `error` line by the worker's end, goes to the driver, which fails the
-// block. A worker is ended by `Worker.terminate`, at once, unless it sent an
-// `error` line whose `fault` line has not come, then when it comes, and the
-// last one at the block's end, before the stream's last line. In the worker
-// the block's `WorkerRun` runs in the task of `worker.tests`, with the
-// queue, the start and `ready`, and no TAP block runs there.
-//
-// A fault of the main thread goes to the driver as an `error` line of its
-// cascade by `dispatch.cause_make`, from the stop function of the error
-// overlay. A fault of the worker goes as `tap_start`'s report function sends
-// it, an `error` line on the realm lane, then its `fault` line; before
-// `tap_start`, its `fault` line alone. The realm's last line ends its TAP
-// stream, and the driver ends the realm by its next page load.
+// A `workers` case's lines are held until `test_headless.worker_ready`, since
+// a topology whose set up takes tasks of the worker's queue would take the
+// case's lines first. The `fault` line the worker's error overlay posts after
+// its report keeps no order with the server lane, so it is held and checked
+// against the worker's `error` line. A worker's fault goes as an `error` line
+// on the realm lane, then its `fault` line; before `tap_start`, its `fault`
+// line alone.
 
 namespace test_headless {
   // The binding the driver adds by `Runtime.addBinding`, one call per line.

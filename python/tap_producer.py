@@ -3,26 +3,18 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # The Python TAP producer, shaped after tappy's: a `Tracker` writes the lines
-# of one level of a TAP version 14 stream the moment each is added,
-# `TAPTestResult` turns the outcomes of unittest into one point per test, and
-# `TAPTestRunner` writes one stream: the version line, then per module a block
-# indented four spaces with its plan first, its points and their diagnostics,
-# then a parent line, and the parent plan last. A run that has to stop, by
-# failfast or by a class or module fixture that failed, ends with a bail out
-# line in place of the parent line and the parent plan. A realm's own stream
-# of one block, as a TypeScript realm writes it, is relayed in as a block of
-# this stream, a line at a time as each is fed: its indented lines go to the
-# stream unchanged, so that the consumer reading the stream checks each,
-# then the runner writes the parent line with its own number. That line is
-# `ok` only when the consumer counted no failure in the block and the
-# realm's own parent line was `ok`, and the run fails when the two differ. A
-# bail out line from the realm ends the stream as it stands. The realm's
-# version line, parent line and parent plan, which only the relay reads, are
-# checked by it alone. Every point is followed by its YAML block of the one
-# attribute `duration_ms`, its milliseconds on `time.perf_counter`: a test's
-# from its start to its stop, a block's from its start to its parent line,
-# a relayed block's from `block_relay` to the realm's parent line, whose own
-# YAML block the relay checks and does not write.
+# of one level of a TAP version 14 stream the moment each is added. A run that
+# has to stop, by failfast or by a class or module fixture that failed, ends
+# with a bail out line in place of the parent line and the parent plan.
+#
+# A realm's own stream of one block is relayed in as a block of this stream, a
+# line at a time, its indented lines going to the stream unchanged, so that the
+# consumer reading the stream checks each. The runner then writes the parent
+# line with its own number, `ok` only when the consumer counted no failure in
+# the block and the realm's own parent line was `ok`, and the run fails when
+# the two differ. The realm's version line, parent line and parent plan, which
+# only the relay reads, are checked by it alone. Every point is followed by its
+# YAML block of the one attribute `duration_ms`.
 
 import re, tap_consumer, time, traceback, types, unittest
 from collections.abc import Callable

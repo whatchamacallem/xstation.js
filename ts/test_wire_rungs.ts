@@ -3,41 +3,21 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // The producer of the wire test, run on the AI worker when the gold's
-// `typescript.test_all.run` is "wire": one TAP stream of one block,
-// `test_wire_rungs`, one point per rung the gold names, in its order, then the
-// parent point and the parent plan `1..1`. Python's consumer is
-// `python/test_wire.py`, which writes the gold `typescript.test_wire_rungs` of
-// each root into the root's copy of the page. TypeScript's `unittest` is
-// synchronous and a rung waits on the network, so a rung is a task chain on
-// the worker's queue: `rungs.next`, a
-// push of the worker to itself, runs the next rung, which checks what it has
-// and writes its point, or submits its requests to the server and sleeps with
-// `rungs.reply`, whose handler checks the replies against the gold. The
-// console and lines rungs drive their own `wire.ConsolePort` and write their
-// points from its callbacks, since the worker's owner table routes
-// `console.output` to the UI thread, which runs nothing in a wire run. Every
-// TAP line goes out at once as a `tap.line` push. The first failed check
-// writes its `not ok` point with the reason, its message and stack, then `Bail
-// out!` and the rung's name, and the chain stops: the failure is reported in
-// the stream, not thrown on. A rung that ends the session, `unknown` or
-// `restart`, writes its point and the parent lines before its last push.
-// The restart rung then posts the gold's `restart_after`, a TAP comment
-// that the port holds, so that a post the port let through would reach the
-// restarted server before the page's refusal of its `tap.start`. A
-// rung the gold's `held_rungs` names, `restart`, is held once the rung before
-// it has passed, until the driver, having read that point, releases it by
-// posting the rung's name on the gold's `release_channel`, a
-// `BroadcastChannel` of the page's origin, so that the driver reads the
-// server before it execs. Errors are plain English.
+// `typescript.test_all.run` is "wire"; python/test_wire.py is its consumer.
+// TypeScript's `unittest` is synchronous and a rung waits on the network, so a
+// rung is a task chain on the worker's queue: `rungs.next`, a push of the
+// worker to itself, runs the next rung.
 //
-// ttyd's protocol where the wire meets ttyd: the token from `/token`; `/ws`
-// and `/ws?arg=console` with the subprotocol `tty`; the first message, JSON
-// text, on tty 1 only `{"AuthToken": token}`, on tty 0 also `columns` and
-// `rows`; client messages '0', input, and '1', a resize, which the page
-// never sends; server messages '0' output, '1' the title and '2' the
-// preferences; the command run once the first message is in, and the socket
-// ended when the command exits. That ttyd 1.7.7 accepts a first message
-// without a size is from memory, owed to testing.
+// The console and lines rungs drive their own `wire.ConsolePort`, since the
+// worker's owner table routes `console.output` to the UI thread, which runs
+// nothing in a wire run. The first failed check writes its `not ok` point,
+// then `Bail out!`, and the chain stops: the failure is reported in the
+// stream, not thrown on. After its last push the restart rung posts the gold's
+// `restart_after`, a TAP comment that the port holds, so that a post the port
+// let through would reach the restarted server before the page's refusal of
+// its `tap.start`. A rung the gold's `held_rungs` names is held until the
+// driver releases it on the gold's `release_channel`, so that the driver reads
+// the server before it execs.
 
 namespace test_wire_rungs {
   // The gold's id, the stream's text, the line types, owners and kinds.

@@ -1,36 +1,22 @@
-// The task manager of one thread, the one synchronization tool: its ports,
-// the owner table, one line dispatched at a time, a handler run to
-// completion, sleeping tasks woken by a line of their `then_type` once every
-// awaited reply is in, the verbose sink of the thread, and in debug mode a
-// verbose line for every submit, dispatch, sleep, wake and reply.
+// The task manager of one thread, the one synchronization tool: one line
+// dispatched at a time, a handler run to completion, sleeping tasks woken by a
+// line of their `then_type` once every awaited reply is in.
 //
 // The lines of each input run in the order they come, in both modes, and a
-// wake runs in its last reply's place, before every line that came after
-// that reply, so that the order a queue runs its lines in is the order its
-// inputs gave them.
-//
-// The blob bytes it holds are bounded by `blob_max`, the largest database:
-// a held line counts the blobs it holds in memory, `line_bytes`, so a blob
-// streamed to a cache file counts nothing and a database of `blob_max` with
-// its cache files passes through as long as the lines' bytes are streamed.
+// wake runs in its last reply's place, before every line that came after that
+// reply. The blob bytes it holds are bounded by `blob_max`, the largest
+// database: a blob streamed to a cache file counts nothing, so a database of
+// `blob_max` with its cache files passes through.
 //
 // A handler's `dispatch.Failure` is answered first: its reply is posted, then
-// the queue fails with its error. When that handler submitted requests it
-// does not sleep on, the queue fails with `queue.wait_missing` whose `cause`
-// is the failure's error, so the handler's own message is kept.
+// the queue fails with its error. A handler that submitted requests it does
+// not sleep on fails with `queue.wait_missing`, that error its `cause`, so its
+// own message is kept. An `error` line stops a queue with `queue.error_line`,
+// the line's `cause` entries rebuilt as Errors, so the sender's cascade is
+// kept whole.
 //
-// An `error` line that reaches a queue stops it with `queue.error_line`,
-// which names the line's `message` and `stack` and holds the line's own
-// `cause` entries rebuilt as Errors under its `cause`, so the sender's
-// cascade is kept whole.
-//
-// A wake line is built in the form `settings.names_full()` picks.
-//
-// A `LocalPort` hands each line as it is to the receiver of its far end,
-// which is the port itself unless it was made with another as its far end.
-// Two ports so linked join two queues of one thread, each holding one end,
-// so a line posted at one end runs on the other queue within the post. A
-// port that is linked already cannot be linked again.
+// Two linked `LocalPort`s join two queues of one thread, so a line posted at
+// one end runs on the other queue within the post.
 
 declare namespace queue {
   // The owners a line can have: the threads, the server and the ports.

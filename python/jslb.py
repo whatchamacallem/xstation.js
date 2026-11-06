@@ -2,26 +2,20 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# JSLB, the wire format: a line is one JSON object ending in CR, its headers
-# at the integer keys 0, 1, ... and its payload at the other keys, followed by
-# the bytes of each blob the line header counts. The builders, field access,
-# the encoder, the debug rendering, json_decode, and the decoder, which
-# streams a blob over overflow_bytes into the file its sink names, hashing it
-# on the way.
+# JSLB, the wire format: a line is one JSON object ending in CR, its headers at
+# the integer keys 0, 1, ... and its payload at the other keys, followed by the
+# bytes of each blob the line header counts.
 #
 # The decoders are the single door for bad numbers: no other layer checks a
-# number. At read, an integer token, digits without a fraction or an
-# exponent, beyond 2**53 either way is refused with jslb.integer_refused, a
-# token of more than 16 digits before int reads it, and a number token whose
-# float overflows to an infinity, such as 1e400, with jslb.number_overflow,
-# both as WireError, raised by the hooks of json.loads as they read. A token
-# with a fraction or an exponent within the doubles reads as its float.
-# json_decode applies the same rules to a JSON text read from anywhere but a
-# line. The encoder keeps its own refusals of NaN, the infinities and
+# number. An integer token beyond 2**53 either way is refused with
+# jslb.integer_refused, a token of more than 16 digits before int reads it, and
+# a number token whose float overflows to an infinity, such as 1e400, with
+# jslb.number_overflow, both as WireError, raised by the hooks of json.loads as
+# they read. The encoder keeps its own refusals of NaN, the infinities and
 # integers beyond 2**53, inside the same layer.
 #
-# A file of a streamed blob that fails to close after a fault raises its
-# error with the first fault as its __context__, so one cascade holds both.
+# A file of a streamed blob that fails to close after a fault raises its error
+# with the first fault as its __context__, so one cascade holds both.
 
 import hashlib, io, json, math, os, re
 from collections.abc import Callable, Iterable, Iterator

@@ -3,37 +3,21 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // The line cases of the console port over the whole console connection, a
-// block of group C on the headless page that the block's own ttyd serves:
-// `console.open` and `console.input` lines through a real `wire.ConsolePort`
-// at the page's address to ttyd's tty 0, whose command, `bootstrap.py`'s
-// console role, runs dash in its bubblewrap sandbox on ttyd's pty, and the
-// `console.output` messages back. The cases, the gold of the block's id:
-// tty 0 opened and answered with ttyd's token; ttyd's first message with the
-// gold's size, which starts the command; a heredoc of binary bytes typed one
-// line per `console.input` push, `cat <<'END'` between two `printf` markers,
-// its output back byte for byte; and tty 0 closed. The heredoc's payload is
-// every byte that dash and the pty's line discipline carry, each control
-// byte the line discipline acts on after its literal next, 0x16, and UTF-8
-// sequences that are not valid, so a connection that is not binary changes
-// the bytes and fails the case.
+// block of group C on the headless page that the block's own ttyd serves,
+// through `bootstrap.py`'s console role and dash on ttyd's pty.
 //
-// The test's end is a real `queue.ThreadPort` over a MessageChannel, and the
-// port at the other end hands each line to the console port and its lines
-// back, by receivers that are this file's own functions, as in
-// `test_integrate_http`: a queue passes on no request that has an id, such
-// as `console.open`, which only a handler's submit sends. The far end calls
-// `ConsolePort.console_close` for the push `console.close`, the one line the
-// port does not take, and passes the port's close on as the push
-// `console.exit` with the close code, as `worker_ai.console_attach` does for
-// the ttyd page's port. The console port's receiver
-// passes on every line but the `console.output` pushes: it joins the bytes of
-// their messages of kind 0, ttyd's output, and once the end marker has come
-// after the start marker it passes the bytes between them on as one
-// `console.output` line, which the case compares by size and SHA-256 with
-// the gold's line, the payload as the pty's output processing changes it.
-// So neither the terminal's echo of the typed lines, which holds only the
-// markers' escapes, nor what comes before the first prompt and the prompts
-// before the markers are compared.
+// A heredoc of binary bytes is typed one line per `console.input` push. Its
+// payload is every byte that dash and the pty's line discipline carry, each
+// control byte the line discipline acts on after its literal next, 0x16, and
+// UTF-8 sequences that are not valid, so a connection that is not binary
+// changes the bytes and fails the case.
+//
+// The far end's receivers are this file's own functions, as in
+// `test_integrate_http`, since a queue passes on no request that has an id,
+// such as `console.open`, which only a handler's submit sends. The bytes
+// between the two `printf` markers go on as one `console.output` line, so
+// neither the terminal's echo of the typed lines nor what comes before the
+// first prompt is compared.
 
 namespace test_integrate_wire {
   // The gold of this block and the line types.

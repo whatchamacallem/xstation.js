@@ -2,48 +2,17 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// The line cases of the browser's console tools, group C, in a fresh
-// worker of the headless page that the block's own ttyd serves: `mcp` lines
-// through a real queue of thread `ai`, whose `mcp` handler hands each one to
-// a real `mcp.Server` that holds the tools of `tools_browser` over a real
-// `substrate.Store` on the realm's sqlite3 module and pool, with a real
-// `wire.ConsolePort` at the page's address attached to the same queue by
-// `worker_ai.console_attach`, as the ttyd page's bring up attaches it, which
-// types into dash on ttyd's tty 0 through the console's shell. The queue's
-// owners are the AI thread's, with `mcp` its own. Its `server` and `ui`
-// lanes each end in this file's junction, joined by linked local ports, and
-// the test's end is a real `queue.ThreadPort` over a MessageChannel whose
-// other end the junction holds. A case's `mcp` line goes on the `server`
-// lane and every other line it sends on the `ui` lane, so tty 0 is opened
-// from the UI's side as the console view opens it. Every line of the
-// `server` lane goes to the test's end, and every line of the `ui` lane but
-// `console.output`, tty 0's output, which is not compared; a request of the
-// `ui` lane also goes to the scripted UI, a second real queue of thread `ui`
-// in synchronous mode joined by linked local ports, whose handlers, this
-// file's functions, answer `permit.ask` by its number with the gold's
-// `permit_accept` or `permit_always` and `console.show` with the gold's
-// Empty reply, which go back on the `ui` lane. The junction holds the
-// cases' `mcp` lines until dash's first prompt has shown in tty 0's output,
-// so that each command's read starts after it. `console_attach` pushes the
-// end of tty 0 to the UI as `console.exit`, though no case closes it. Each
-// command's `console.busy` before its typing and `console.idle` once its read
-// ends come on the `ui` lane between the show and the tool's reply. Once
-// dash's first prompt has shown, the junction watches the output for the
-// gold's `released`, the output of the view's line, and then sends the
-// test's end the gold's `view_released`. The cases, the gold of the
-// block's id: tty 0 opened and ttyd's token back; ttyd's first message sent
-// with the gold's size, then `echo hi` asked, accepted, shown, typed and
-// read back to the prompt; `echo 2` asked again with the next number;
-// `echo 3` allowed always; `pwd` with no ask; `console_write` of a command
-// that prompts, a `console_read` timed out on its `read`, the answer
-// written and a read to the prompt that ends the turn; a write with no
-// newline, a read that finds nothing typed, the rest of the line and its
-// read; the prompting command again with the view's line sent inside the
-// turn, which waits until the turn's end, so that the program reads the
-// AI's answer and the view's line runs after; the view's `sleep 2`, then
-// `echo after` run, whose turn waits for the prompt after the sleep;
-// `sleep 600` read until the tool's timeout; and `echo never` run while
-// it sleeps, whose wait passes its timeout with no turn and nothing typed.
+// The line cases of the browser's console tools, group C, in a fresh worker of
+// the headless page that the block's own ttyd serves, its parts real down to
+// dash on ttyd's tty 0. A case's `mcp` line goes on the `server` lane and
+// every other line on the `ui` lane, so tty 0 is opened from the UI's side as
+// the console view opens it. `console.output`, tty 0's output, is not
+// compared.
+//
+// The junction holds the cases' `mcp` lines until dash's first prompt has
+// shown, so that each command's read starts after it. It then watches the
+// output for the gold's `released`, the output of the view's line, and sends
+// the test's end the gold's `view_released`.
 
 namespace test_tools_browser_console {
   // The initialized sqlite3.wasm module, a global the test page sets.

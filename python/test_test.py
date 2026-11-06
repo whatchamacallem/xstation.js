@@ -2,23 +2,12 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests of the infrastructure for testing. The harness, on the checkout's own
-# settings.json and every suite's gold file, test_setting_<suite>.json beside
-# its module, each also read with `json` as the oracle, and the gold under this
-# suite's own id: a value of the settings or the gold by a top or nested id,
-# the refusal of an unknown id naming the file or the gold, each file read
-# once, and the deep copies of the whole settings and the whole gold.
-# Category: the options --smoke-test and --normal-test on a parser, which
-# suites a run of each category runs, the seconds a run may take, the gold's
-# smoke_seconds, the alarm of a suite, its own seconds or the deadline of a
-# smoke-test run, whichever comes first, own seconds winning a tie, or a
-# refusal once the deadline has passed, and the checks LabelBook makes of the
-# labels of the roots and rungs a runner reaches, each refusal compared with
-# its message. No real alarm is armed, since the runner's alarm of this module
-# is running. Line coverage: sample modules written to a scratch directory in
-# build/ and run with `runpy` while a count runs, their functions called in
-# this process or in a forked child ended by SIGKILL, the first line the count
-# finds never run compared with the line each refusal names.
+# Tests of the infrastructure for testing: the harness on the checkout's own
+# settings.json and every suite's gold file, each also read with `json` as the
+# oracle; category, with no real alarm armed, since the runner's alarm of this
+# module is running; and line coverage on sample modules written to a scratch
+# directory in build/ and run with `runpy`, their functions called in this
+# process or in a forked child ended by SIGKILL.
 
 import argparse, category, contextlib, harness, io, json, line_coverage, os
 import runpy, signal, tempfile, unittest

@@ -3,25 +3,13 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // The line cases of the store, a block of group B in the AI worker: the
-// requests of the ui-ai lane, their replies and the pushes of their commits.
-// A real `queue.TaskQueue` on thread `ai`, in the mode of the setting
-// `queue_synchronous`, owns the store's line types by the owner table of the
-// gold, and holds the store's handlers, which the store's own register
-// function gives the real dispatch. The store runs on the sqlite3.wasm module
-// and OPFS pool the bring up sets as globals, under a root of its own, its
-// cache over the first of the open OPFS files the bring up gives the block
-// as `test_slots`, cleared, with the `overflow_bytes` of the gold, so that a
-// value of a few bytes goes to a cache file and the gold stays small. The
-// lane `ui` is a MessageChannel with a `queue.ThreadPort` at each end, the
-// test's end the one the cases speak. The lane `server` is a linked pair of
-// `queue.LocalPort`s whose far end is the test's own receiver, which posts
-// each push on the queue's end of the ui lane, so that a case reads the
-// pushes of a commit and its reply in the order the store sent them. The
-// cases, the gold of the block's id, create a database, put, read and list
-// values in a row and in a cache file, put a value that changes nothing,
-// write and read a document's head, append a turn, run statements that
-// change rows and one that does not, delete a value and an absent one, and
-// drop the database.
+// requests of the ui-ai lane, their replies and the pushes of their commits,
+// on real parts. The cache takes the `overflow_bytes` of the gold, so that a
+// value of a few bytes goes to a cache file and the gold stays small. The lane
+// `server` is a linked pair of `queue.LocalPort`s whose far end is the test's
+// own receiver, which posts each push on the queue's end of the ui lane, so
+// that a case reads the pushes of a commit and its reply in the order the
+// store sent them.
 
 namespace test_integrate_substrate {
   // The initialized sqlite3.wasm module, a global the bring up sets.

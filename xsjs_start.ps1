@@ -2,37 +2,22 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Serves the engine, python\bootstrap.py with its page,
-# build\hyperposition-engine.html, through ttyd in WSL on port 5768, now and
-# whenever you sign in to Windows. Run xsjs_install.ps1 once first, build the
-# page in WSL with python3 python/page_build.py test hyperposition-engine,
-# then run this from an administrator PowerShell:
+# Serves the engine through ttyd in WSL on port 5768, now and whenever you sign
+# in to Windows. Run xsjs_install.ps1 once first, build the page in WSL with
+# python3 python/page_build.py test hyperposition-engine, then run this from an
+# administrator PowerShell:
 #
 #     .\xsjs_start.ps1                    http://localhost:5768/
 #     .\xsjs_start.ps1 username:password  https://<this PC>:5768/
 #     .\xsjs_start.ps1 [--debug] [--verbose] [username:password]
 #
-# Each run copies the ttyd that xsjs_install.ps1 built, the engine's modules
-# and seeds from python\, i18n\en-US.json, settings.json, provider.json and
-# the page, which carries the TypeScript suites' gold, into ~/.cache/xsjs in
-# Linux, and ttyd runs that copy on port 5769 of WSL's 127.0.0.1. A Windows
-# port proxy forwards port 5768 to it. The environment variable
-# XSJS_PROVIDER_KEY of your user account, when set, is passed on to ttyd.
-#
-# The root's parameters.json holds the parameters of the server's run:
 # --debug runs the page in debug mode, which the console role needs, and
-# --verbose the console's shell at verbose level 2 rather than 1; each is
-# false unless given, and anthropic is always false. The file is written in
-# the state folder and copied into the root.
-#
-# With a username and password, ttyd serves HTTPS and asks for them, the
-# port proxy listens on every network interface, and a Windows Firewall
-# rule lets other computers in. Without, the port proxy listens on
-# 127.0.0.1 only. The TLS certificate is self-signed, so browsers warn
-# about it the first time: check the fingerprint they show against the one
-# this script prints.
-#
-# Run it again to change the settings. Stop it with xsjs_stop.ps1.
+# --verbose the console's shell at level 2 rather than 1. With a username and
+# password, ttyd serves HTTPS, the port proxy listens on every network
+# interface and a Windows Firewall rule lets other computers in; without, it
+# listens on 127.0.0.1 only. The TLS certificate is self-signed: check the
+# fingerprint browsers show against the one this script prints. Run it again to
+# change settings. Stop it with xsjs_stop.ps1.
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
     'PSAvoidUsingWriteHost', '',
     Justification = 'Coloured status for the person running it.')]

@@ -2,25 +2,9 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// The browser's store, the single door to SQLite in the AI worker: one
-// sqlite3.wasm connection for each database file of the OPFS pool under a
-// root, the substrate's tables in each, values with overflow to a cache of
-// OPFS files held open for synchronous access, documents, turns that compact
-// themselves for this side alone when a `user` turn finds `compact_turns` of
-// them, SQL, and whole databases as a file and the cache files its rows name.
-// Each committed modifying operation goes to the server as one push line of
-// its type, given to the thread's queue, which nothing waits for, numbers or
-// checks: the sync is lossy. A row whose cache file this side lacks stays,
-// and only a read of its value fails. A statement a schema trigger stops
-// throws the string whose name the trigger raises. The handlers answer the
-// UI thread's requests and take the server's restores. It is given an
-// initialized module, an installed pool and open cache files, and waits on
-// nothing. Every connection it opens holds its database to `blob_max` bytes,
-// `PRAGMA max_page_count` over the database's `page_size`, set before any
-// statement of its own: a write that needs a page past it fails with
-// SQLite's `SQLITE_FULL`, which it throws and never catches. The connection
-// then sets SQLite's authorizer, which denies a `PRAGMA max_page_count` that
-// has a value, so that SQLite refuses it with `SQLITE_AUTH` when prepared.
+// The browser's store, the single door to SQLite in the AI worker.
+// API/ts/substrate.d.ts holds its rules. It is given an initialized module, an
+// installed pool and open cache files, and waits on nothing.
 namespace substrate {
   // The schema, names, patterns and sizes the store uses.
   const constants = Object.freeze({
