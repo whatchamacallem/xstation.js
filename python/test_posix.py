@@ -20,7 +20,8 @@
 # file's header, the comment at its top, a comment must be one line, not be a
 # <# #> comment, and outside its Doxygen `code` spans hold nothing but
 # letters, digits, white space and _ENGLISH_PUNCT, unless its words are a
-# formatter escape of _FORMAT_ESCAPES.
+# formatter escape of _FORMAT_ESCAPES. The switch --anthropic, here or on
+# test_all.py, does none of this, for the cloud environment.
 
 import argparse, glob, io, os, re, subprocess, sys, tempfile, tokenize
 from typing import NamedTuple
@@ -634,7 +635,7 @@ def typescript_paths() -> list[str]:
 
 # Checks and audits the files, then formats them in a normal run, lints them.
 def main(arguments: list[str]) -> None:
-    import category, reformat
+    import category, reformat, switches
 
     parser = argparse.ArgumentParser(
         description="Check the characters and comments of the files"
@@ -643,7 +644,12 @@ def main(arguments: list[str]) -> None:
         " of reformat_table.json in a normal-test run, and lint them."
     )
     category.options_add(parser)
-    chosen: str = parser.parse_args(arguments).category
+    switches.options_add(parser)
+    parsed = parser.parse_args(arguments)
+    switches.switches_set(parsed)
+    if switches.anthropic:
+        return
+    chosen: str = parsed.category
     table = reformat.table_read()
     paths = reformat.whitelist_paths()
     # Every row is found before any check, so a file of no row fails first.

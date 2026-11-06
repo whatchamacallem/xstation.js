@@ -2,16 +2,20 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests test_posix.py with its project callees, category.py and reformat.py,
-# whose suites have passed: its formatter step in each category, so that no
-# formatter starts. The step runs in a forked child whose stdout and stderr
-# go to a scratch file under build/, so that nothing it prints reaches the
-# stream. A smoke-test run, given a Python file that ruff would change,
-# prints nothing and leaves the file as it is; a normal-test run, given
-# PowerShell files, which the Linux rows of reformat_table.json leave to
-# Windows, prints nothing and formats.
+# Tests test_posix.py with its project callees, category.py, reformat.py and
+# switches.py, whose suites have passed: its formatter step in each category,
+# so that no formatter starts, and its switch of the cloud environment. Each
+# runs in a forked child whose stdout and stderr go to a scratch file under
+# build/, so that nothing it prints reaches the stream. A smoke-test run,
+# given a Python file that ruff would change, prints nothing and leaves the
+# file as it is; a normal-test run, given PowerShell files, which the Linux
+# rows of reformat_table.json leave to Windows, prints nothing and formats.
+# With no program on PATH, which a linter could not start from, main returns
+# and prints nothing when given --anthropic, and when test_all.py has turned
+# the switch on before calling it.
 
-import functools, os, signal, sys, tempfile, test_posix, traceback, unittest
+import argparse, functools, os, signal, switches, sys, tempfile, test_posix
+import traceback, unittest
 from collections.abc import Callable
 
 # The checkout's top directory, above this file's `python/`.
@@ -116,5 +120,35 @@ class TestFormatterStep(ChildCase):
     def test_normal_formatted(self) -> None:
         paths = [self.file_write(name, "") for name in _WINDOWS_NAMES]
         ending, output = self.step_run(_NORMAL_TEST, paths)
+        self.assertEqual(ending, _ENDING_RETURNED)
+        self.assertEqual(output, "")
+
+
+# The switch of the cloud environment, which skips every check.
+class TestAnthropicSwitch(ChildCase):
+    # Runs main in a child that finds no program, so no linter can start.
+    def main_run(self, arguments: list[str]) -> tuple[str, str]:
+        def work() -> None:
+            os.environ["PATH"] = self.scratch
+            test_posix.main(arguments)
+
+        return self.child_run(work)
+
+    # Given to `test_posix.py`, the switch has it return, printing nothing.
+    def test_option_skipped(self) -> None:
+        ending, output = self.main_run(["--anthropic"])
+        self.assertEqual(ending, _ENDING_RETURNED)
+        self.assertEqual(output, "")
+
+    # Set by the test driver before its call, the switch does the same.
+    def test_driver_skipped(self) -> None:
+        def work() -> None:
+            parser = argparse.ArgumentParser()
+            switches.options_add(parser)
+            switches.switches_set(parser.parse_args(["--anthropic"]))
+            os.environ["PATH"] = self.scratch
+            test_posix.main([f"--{_SMOKE_TEST}"])
+
+        ending, output = self.child_run(work)
         self.assertEqual(ending, _ENDING_RETURNED)
         self.assertEqual(output, "")

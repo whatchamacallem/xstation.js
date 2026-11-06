@@ -223,6 +223,13 @@ command only to name the log.
   internal component in a way that violates separation of concerns.
 - `internationalization` does not count as a module when labelling another
   module's test a unit test; otherwise there would be no unit tests.
+- The cloud environment runs no code formatting, reformatting, scanning or
+  checking: not ruff, pyright, shfmt, mdformat or `reformat.py`, and
+  `test_posix.py` only with `--anthropic`, which skips all of them. A
+  formatting problem never blocks the cloud environment.
+- Testing ps1 is never a requirement for testing in a POSIX environment.
+  The POSIX environment is tested to stand alone, not to depend on ps1.
+- WSL is never a blocker for the POSIX environment.
 
 ### Remaining Rules
 

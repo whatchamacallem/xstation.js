@@ -3,17 +3,18 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Drives bootstrap.html in Chrome as a person would: puts the module update,
-# typed with the time of day in it and ended with ^D, runs it with
-# arguments, types a line to its stdin, checks the whole transcript against
-# one built from this script's own measurements, closes the page, checks
-# the program is gone, then saves a screenshot of the whole page. ttyd, from
-# a checkout of ttyd beside this project, serves the page on a dumb terminal
-# and runs bootstrap.py on a modules directory made under build/ for the
-# run; its log goes to stderr as it comes:
+# Opens the page in Chrome as a person would and saves a screenshot of it. It
+# builds the page as the start script does, makes a root for the run under
+# build/ with debug on, which runs the page's suites, and serves the root
+# through build/ttyd/ttyd, the ttyd that ttyd_build.py builds, on a dumb
+# terminal, its log going to stderr as it comes. It waits for the page's bring
+# up to write both TAP documents to the root, fails on the page's fault screen
+# or a failing point, checks the page shows the last document and ttyd runs one
+# bootstrap.py, saves a screenshot of the whole page, leaves the page and
+# checks the program is gone:
 #
 #     python3 python/xsjs_screenshot.py
-#     python3 python/xsjs_screenshot.py --typing 'héllo' --out shot.png
+#     python3 python/xsjs_screenshot.py --out shot.png
 #
 # It drives Chrome through Chrome's DevTools protocol. How to start Chrome
 # and reach its DevTools differs by platform, so each platform has a module,
@@ -22,9 +23,9 @@
 # at devtools_host and devtools_path. There is xsjs_screenshot_wsl.py for
 # WSL and xsjs_screenshot_posix.py for elsewhere.
 
-import argparse, base64, contextlib, datetime, hashlib, json, os, platform, re
-import shlex, signal, socket, subprocess, sys, tempfile, time, types
-from collections.abc import Callable, Generator
+import argparse, base64, contextlib, hashlib, json, os, platform, shutil
+import signal, socket, subprocess, sys, tempfile, time, types
+from collections.abc import Generator
 from typing import Any
 
 _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -36,33 +37,19 @@ sys.pycache_prefix = os.path.join(
     os.path.dirname(_PYTHON_PATH), "build", "pycache"
 )
 
-# The line `bootstrap.py` writes first, its measurements by name.
-_BANNER_PATTERN = re.compile(
-    r"bootstrap (?P<bootstrap>.+) sha256 (?P<sha256>[0-9a-f]{64})"
-    r" pid (?P<pid>[0-9]+) python (?P<python>\S+) modules (?P<modules>.+)"
-)
+_BLANK_URL = "about:blank"
 
-# The program and the page ttyd serves.
-_BOOTSTRAP_PATH = os.path.join(_PYTHON_PATH, "bootstrap.py")
-_BOOTSTRAP_PAGE_PATH = os.path.join(_PYTHON_PATH, "bootstrap.html")
+# The checkout, which holds the `python` directory.
+_CHECKOUT_PATH = os.path.dirname(_PYTHON_PATH)
 
-# Where the modules directory of each run goes.
-_BUILD_PATH = os.path.join(os.path.dirname(_PYTHON_PATH), "build")
+# Where the page and the root of each run go.
+_BUILD_PATH = os.path.join(_CHECKOUT_PATH, "build")
 
-# Returns the middle of the element with the id, where a person clicks.
-_CENTER_SCRIPT = """id => {
-    const box = document.getElementById(id).getBoundingClientRect();
-    return [box.x + box.width / 2, box.y + box.height / 2];
-}"""
-
-_CLOSE_CODE_NORMAL = 1000
-
-_ENTER_KEY: dict[str, str | int] = {
-    "code": "Enter",
-    "key": "Enter",
-    "nativeVirtualKeyCode": 13,
-    "windowsVirtualKeyCode": 13,
-}
+# Returns the text of the page's fault screen, null with none.
+_FAULT_SCRIPT = """(() => {
+    const pre = document.querySelector("body > pre:not(#tap_output)");
+    return pre === null ? null : pre.textContent;
+})()"""
 
 # Waits until the page has drawn what it holds.
 _FRAMES_DRAWN_SCRIPT = (
@@ -71,31 +58,6 @@ _FRAMES_DRAWN_SCRIPT = (
 )
 
 _IMAGE_NAME = "xsjs_screenshot.png"
-
-# The module typed into the page, its arguments, and its text with a stamp.
-_MODULE_ARGS = ["--who", "demo", "42"]
-_MODULE_NAME = "update"
-_MODULE_SOURCE = """\
-import os, sys
-
-STAMP = "{stamp}"
-
-
-def main(args):
-    print("stamp", STAMP)
-    print("argv", args)
-    print("bootstrap", os.environ["XSJS_BOOTSTRAP"])
-    print("modules", os.environ["XSJS_MODULES"])
-    here = os.path.dirname(os.path.abspath(__file__))
-    print("dir", here)
-    for name in sorted(os.listdir(here)):
-        print(os.path.getsize(os.path.join(here, name)), name)
-    print("stdin", sys.stdin.readline(), end="")
-
-
-if __name__ == "__main__":
-    main(sys.argv[1:])
-"""
 
 # Returns the viewport's size and how far the page's scrolling parts overflow.
 _PAGE_OVERFLOW_SCRIPT = """(() => {
@@ -114,10 +76,10 @@ _PAGE_OVERFLOW_SCRIPT = """(() => {
     return [window.innerWidth, window.innerHeight, ...overflow];
 })()"""
 
-_POLL_SECONDS = 0.1
+# The page's template, in `html/`.
+_PAGE_TEMPLATE = "test"
 
-# What `bootstrap.py` writes when it waits for a command.
-_PROMPT = "$ "
+_POLL_SECONDS = 0.1
 
 _REFUSED_ERROR_TEXT = "net::ERR_CONNECTION_REFUSED"
 
@@ -126,17 +88,24 @@ _RUN_TIMEOUT_SECONDS = 180
 
 _SERVER_WAIT_SECONDS = 60
 
+_SETTINGS_PATH = os.path.join(_CHECKOUT_PATH, "settings.json")
+
 _STOP_WAIT_SECONDS = 5
 
-_TTYD_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(_PYTHON_PATH)), "ttyd"
-)
+# Returns the stream the page shows.
+_STREAM_SCRIPT = "document.getElementById('tap_output').textContent"
+
+_STRINGS_PATH = os.path.join("i18n", "en-US.json")
+
+# The worker's document, then the UI thread's, which the page shows.
+_TAP_DOCUMENTS = 2
+# The file of the root that the server keeps them in.
+_TAP_FILE_PATH = os.path.join("tap", "typescript.tap")
+_TAP_VERSION = "TAP version 14\n"
+
 # ttyd serves the page on this port.
 _TTYD_PORT = 7681
 _TTYD_PAGE_URL = f"http://localhost:{_TTYD_PORT}/"
-_TTYD_REPOSITORY_URL = "https://github.com/tsl0922/ttyd.git"
-
-_TYPING_DEFAULT = "h\u00e9llo w\u00f6rld \u00a9 2026"
 
 _VIEWPORT_HEIGHT_PX = 720
 _VIEWPORT_WIDTH_PX = 1280
@@ -301,38 +270,25 @@ def browser_module() -> types.ModuleType:
     return xsjs_screenshot_posix
 
 
-# Clicks the element with the id at its middle, as a mouse would.
-def click(devtools: DevTools, element_id: str) -> None:
-    x, y = devtools.evaluate(f"({_CENTER_SCRIPT})({json.dumps(element_id)})")
-    devtools.call(
-        "Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y}
-    )
-    for event_type in ("mousePressed", "mouseReleased"):
-        devtools.call(
-            "Input.dispatchMouseEvent",
-            {
-                "type": event_type,
-                "x": x,
-                "y": y,
-                "button": "left",
-                "clickCount": 1,
-            },
-        )
+# Returns the root's TAP documents once the last has ended, failing on a fault.
+def documents_wait(devtools: DevTools, tap_path: str) -> list[str]:
+    import tap_consumer
 
-
-# Runs a command to its end, its output going to stderr.
-def command_run(arguments: list[str], cwd: str) -> None:
-    completed = subprocess.run(
-        arguments,
-        check=False,
-        cwd=cwd,
-        stdin=subprocess.DEVNULL,
-        stdout=sys.stderr,
-    )
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"{' '.join(arguments)} exited with {completed.returncode}"
-        )
+    while True:
+        fault: str | None = devtools.evaluate(_FAULT_SCRIPT)
+        if fault is not None:
+            raise RuntimeError(f"the page faulted: {fault}")
+        documents = tap_documents(tap_path)
+        if (
+            len(documents) == _TAP_DOCUMENTS
+            and tap_consumer.document_stats(documents[-1]).well_formed
+        ):
+            for document in documents:
+                stats = tap_consumer.document_stats(document)
+                if stats.failed or not stats.well_formed:
+                    raise RuntimeError(f"{tap_path} holds {document!r}")
+            return documents
+        time.sleep(_POLL_SECONDS)
 
 
 # Decodes the base64 image into the path, making its directory as needed.
@@ -342,32 +298,6 @@ def image_save(image_path: str, data: str) -> None:
         os.makedirs(image_dir, exist_ok=True)
     with open(image_path, "wb") as image_file:
         image_file.write(base64.b64decode(data))
-
-
-# Returns the directory's entries with their sizes, as update.py prints them.
-def listing_lines(path: str) -> list[str]:
-    return [
-        f"{os.path.getsize(os.path.join(path, name))} {name}"
-        for name in sorted(os.listdir(path))
-    ]
-
-
-# Types the text into the page's input and sends it with Enter.
-def line_send(devtools: DevTools, text: str) -> None:
-    click(devtools, "input")
-    if devtools.evaluate("document.activeElement.id") != "input":
-        raise RuntimeError("clicking the page's input didn't focus it")
-    devtools.call("Input.insertText", {"text": text})
-    typed = devtools.evaluate("document.getElementById('input').value")
-    if typed != text:
-        raise RuntimeError(
-            f"the page's input holds {typed!r} where {text!r} was typed"
-        )
-    devtools.call(
-        "Input.dispatchKeyEvent",
-        {"type": "keyDown", "text": "\r", "unmodifiedText": "\r"} | _ENTER_KEY,
-    )
-    devtools.call("Input.dispatchKeyEvent", {"type": "keyUp"} | _ENTER_KEY)
 
 
 # Grows the viewport until no part scrolls, so a screenshot holds the page.
@@ -382,143 +312,37 @@ def page_fit(devtools: DevTools) -> None:
         viewport_set(devtools, width_px + overflow[0], height_px + overflow[1])
 
 
-# Drives the page as a person would and saves a PNG. Returns the close detail.
+# Waits for the page's streams, saves a PNG and leaves. Returns the detail.
 def page_meet(
-    devtools: DevTools,
-    typing: str,
-    image_path: str,
-    ttyd_pid: int,
-    modules_path: str,
+    devtools: DevTools, image_path: str, ttyd_pid: int, root_path: str
 ) -> str:
     devtools.page_attach()
     viewport_set(devtools, _VIEWPORT_WIDTH_PX, _VIEWPORT_HEIGHT_PX)
-    # A headless page has no focus to type into unless it pretends to.
-    devtools.call("Emulation.setFocusEmulationEnabled", {"enabled": True})
     page_navigate(devtools, _TTYD_PAGE_URL)
-    # The banner is whole once the prompt follows it.
-    results = page_wait(
-        devtools,
-        lambda results: (
-            len(results["output"].partition("\n")[2]) >= len(_PROMPT)
-        ),
-    )
-    ttyd = results["ttyd"]
-    print(f"ttyd title {ttyd['title']}", flush=True)
-    print(f"ttyd preferences {ttyd['preferences']}", flush=True)
-    banner: str = results["output"].partition("\n")[0]
-    print(banner, flush=True)
-    due = f"{banner}\n{_PROMPT}"
-    transcript_check(results["output"], due)
-    match = _BANNER_PATTERN.fullmatch(banner)
-    if match is None:
-        raise RuntimeError(
-            f"the banner doesn't match {_BANNER_PATTERN.pattern}"
-        )
-    with open(_BOOTSTRAP_PATH, "rb") as bootstrap_file:
-        digest = hashlib.sha256(bootstrap_file.read()).hexdigest()
-    expected_banner = {
-        "bootstrap": _BOOTSTRAP_PATH,
-        "sha256": digest,
-        "modules": modules_path,
-    }
-    for name, value in expected_banner.items():
-        if match[name] != value:
-            raise RuntimeError(
-                f"the banner's {name} is {match[name]}, not {value}"
-            )
-    pid = int(match["pid"])
-    command = ttyd_command(modules_path)
+    tap_path = os.path.join(root_path, _TAP_FILE_PATH)
+    documents = documents_wait(devtools, tap_path)
+    # The page puts newlines between its lines and none after the last.
+    stream_wait(devtools, documents[-1].removesuffix("\n"))
+    command = ttyd_command(root_path)
     pids = program_pids(ttyd_pid, command)
-    if pids != [pid]:
+    if len(pids) != 1:
         raise RuntimeError(
-            f"ttyd runs {' '.join(command)} as pids {pids}, where the"
-            f" banner's pid is {pid}"
+            f"ttyd runs {' '.join(command)} as pids {pids} where one was due"
         )
-    stamp = datetime.datetime.now(datetime.UTC).isoformat()
-    source = _MODULE_SOURCE.format(stamp=stamp)
-    put_line = f"put {_MODULE_NAME}"
-    line_send(devtools, put_line)
-    due += f"{put_line}\n"
-    transcript_wait(devtools, due)
-    # Enter ends the text's last line, then `^D` ends the text.
-    line_send(devtools, source.removesuffix("\n"))
-    due += source
-    transcript_wait(devtools, due)
-    click(devtools, "eof")
-    data = source.encode()
-    file_name = f"{_MODULE_NAME}.py"
-    saved = (
-        f"saved {file_name} {len(data)} bytes sha256"
-        f" {hashlib.sha256(data).hexdigest()}"
-    )
-    due += f"{saved}\n{_PROMPT}"
-    transcript_wait(devtools, due)
-    with open(os.path.join(modules_path, file_name), "rb") as module_file:
-        if module_file.read() != data:
-            raise RuntimeError(
-                f"{file_name} on disk differs from what was put"
-            )
-    print(saved, flush=True)
-    run_line = shlex.join([_MODULE_NAME, *_MODULE_ARGS])
-    line_send(devtools, run_line)
-    printed = "".join(
-        f"{line}\n"
-        for line in (
-            f"stamp {stamp}",
-            f"argv {_MODULE_ARGS!r}",
-            f"bootstrap {_BOOTSTRAP_PATH}",
-            f"modules {modules_path}",
-            f"dir {modules_path}",
-            *listing_lines(modules_path),
-        )
-    )
-    # The module waits on stdin after its listing.
-    due += f"{run_line}\n{printed}"
-    transcript_wait(devtools, due)
-    module_pids = program_pids(pid, command)
-    if len(module_pids) != 1:
-        raise RuntimeError(
-            f"{_MODULE_NAME} runs as pids {module_pids} where one was due"
-        )
-    line_send(devtools, typing)
-    read = f"stdin {typing}\n"
-    # The terminal echoes the line, the module prints it, then the prompt.
-    due += f"{typing}\n{read}{_PROMPT}"
-    transcript_wait(devtools, due)
-    print(printed + read, end="", flush=True)
-    print(
-        f"run {_MODULE_NAME} pid {module_pids[0]} args"
-        f" {shlex.join(_MODULE_ARGS)}, {len((printed + read).splitlines())}"
-        " lines as measured here",
-        flush=True,
-    )
-    click(devtools, "close")
-    results = page_wait(
-        devtools, lambda results: results["closed"] is not None
-    )
-    closed = results["closed"]
-    if closed["code"] != _CLOSE_CODE_NORMAL:
-        # A close other than Close's is ttyd's fault, not this repo's.
-        raise RuntimeError(
-            f"the page closed with {closed} after Close"
-            f" ({ttyd_version(_TTYD_PATH)})"
-        )
-    transcript_check(results["output"], due)
-    deadline = time.monotonic() + _STOP_WAIT_SECONDS
-    while pids := program_pids(ttyd_pid, command):
-        if time.monotonic() > deadline:
-            raise RuntimeError(
-                f"{' '.join(command)} still runs as pids {pids}"
-                f" {_STOP_WAIT_SECONDS} s after the page closed"
-            )
-        time.sleep(_POLL_SECONDS)
     page_fit(devtools)
     image = devtools.call("Page.captureScreenshot", {"format": "png"})
     image_save(image_path, image["data"])
-    return (
-        f"{len(results['output'].splitlines())} transcript lines, closed"
-        f" {closed['code']} after Close, pid {pid} gone"
-    )
+    # The page has no way to close but being left, which ends the program.
+    page_navigate(devtools, _BLANK_URL)
+    deadline = time.monotonic() + _STOP_WAIT_SECONDS
+    while pids_left := program_pids(ttyd_pid, command):
+        if time.monotonic() > deadline:
+            raise RuntimeError(
+                f"{' '.join(command)} still runs as pids {pids_left}"
+                f" {_STOP_WAIT_SECONDS} s after the page was left"
+            )
+        time.sleep(_POLL_SECONDS)
+    return f"{len(documents)} TAP documents, pid {pids[0]} gone"
 
 
 # Opens the URL, retrying refusals, since WSL forwards a new port with a lag.
@@ -536,30 +360,13 @@ def page_navigate(devtools: DevTools, url: str) -> None:
         time.sleep(_POLL_SECONDS)
 
 
-# Returns the state once the condition holds, failing on a failure or close.
-def page_wait(
-    devtools: DevTools, condition: Callable[[dict[str, Any]], bool]
-) -> dict[str, Any]:
-    while True:
-        results: dict[str, Any] | None = devtools.evaluate("window.boot")
-        # None until the page's script has run.
-        if results is not None:
-            failure = results["failure"]
-            closed = results["closed"]
-            if failure is not None:
-                message = f"the page failed: {failure}"
-                # A close other than Close's is ttyd's fault, not this repo's.
-                if closed is not None and closed["code"] != _CLOSE_CODE_NORMAL:
-                    message += f" ({ttyd_version(_TTYD_PATH)})"
-                raise RuntimeError(message)
-            if condition(results):
-                return results
-            if closed is not None:
-                raise RuntimeError(
-                    f"the page closed with {closed} before Close"
-                    f" ({ttyd_version(_TTYD_PATH)})"
-                )
-        time.sleep(_POLL_SECONDS)
+# Builds the page as the start script does and returns its path.
+def page_ready(values: dict[str, Any]) -> str:
+    import page_build
+
+    page_name: str = values["powershell"]["engine_page"]
+    page_build.page_build(_PAGE_TEMPLATE, os.path.splitext(page_name)[0])
+    return os.path.join(_BUILD_PATH, page_name)
 
 
 # Fails if something already listens on the port, as it would answer instead.
@@ -634,6 +441,38 @@ def program_pids(ttyd_pid: int, command: list[str]) -> list[int]:
     return sorted(pids)
 
 
+# Makes a root as the start script does, with debug on, and returns its page.
+def root_make(values: dict[str, Any], page_path: str, root_path: str) -> str:
+    import switches
+
+    settings = values["powershell"]
+    python_path = os.path.join(root_path, "python")
+    os.makedirs(python_path)
+    for module in settings["runtime_modules"]:
+        shutil.copy(os.path.join(_PYTHON_PATH, f"{module}.py"), python_path)
+    shutil.copytree(
+        os.path.join(_PYTHON_PATH, "seed"), os.path.join(python_path, "seed")
+    )
+    os.makedirs(os.path.join(root_path, os.path.dirname(_STRINGS_PATH)))
+    shutil.copy(
+        os.path.join(_CHECKOUT_PATH, _STRINGS_PATH),
+        os.path.join(root_path, _STRINGS_PATH),
+    )
+    for name in settings["root_files"]:
+        shutil.copy(os.path.join(_CHECKOUT_PATH, name), root_path)
+    switches.parameters_write(
+        root_path, {**switches.switches_get(), "debug": True}
+    )
+    return shutil.copy(page_path, root_path)
+
+
+# Returns the settings of the checkout.
+def settings_read() -> dict[str, Any]:
+    with open(_SETTINGS_PATH, encoding="utf-8") as settings_file:
+        values: dict[str, Any] = json.load(settings_file)
+    return values
+
+
 # Exits with 128 plus the signal's number, so cleanups still run.
 def signal_exit(signal_number: int, frame: types.FrameType | None) -> None:
     sys.exit(128 + signal_number)
@@ -644,84 +483,76 @@ def signal_time_out(signal_number: int, frame: types.FrameType | None) -> None:
     raise TimeoutError(f"gave up after {_RUN_TIMEOUT_SECONDS} s")
 
 
-# Fails with both texts unless the transcript is the one due.
-def transcript_check(output: str, due: str) -> None:
-    if output != due:
-        raise RuntimeError(f"the page shows {output!r} where {due!r} was due")
+# Waits until the page shows the text or departs from it.
+def stream_wait(devtools: DevTools, due: str) -> None:
+    while True:
+        shown: str = devtools.evaluate(_STREAM_SCRIPT)
+        if shown == due:
+            return
+        if not due.startswith(shown):
+            raise RuntimeError(
+                f"the page shows {shown!r} where {due!r} was due"
+            )
+        time.sleep(_POLL_SECONDS)
 
 
-# Waits until the transcript is the one due or departs from it, then checks.
-def transcript_wait(devtools: DevTools, due: str) -> None:
-    results = page_wait(
-        devtools,
-        lambda results: (
-            results["output"] == due or not due.startswith(results["output"])
-        ),
+# Returns the whole TAP documents of the file, none before the server makes it.
+def tap_documents(tap_path: str) -> list[str]:
+    try:
+        with open(tap_path, "rb") as tap_file:
+            data = tap_file.read()
+    except FileNotFoundError:
+        return []
+    before, *documents = (
+        data[: data.rfind(b"\n") + 1].decode().split(_TAP_VERSION)
     )
-    transcript_check(results["output"], due)
+    if before:
+        raise RuntimeError(f"{tap_path} starts with {before!r}")
+    return [_TAP_VERSION + document for document in documents]
 
 
-# Returns the command ttyd runs: bootstrap.py on the modules directory.
-def ttyd_command(modules_path: str) -> list[str]:
-    return ["python3", _BOOTSTRAP_PATH, modules_path]
+# Returns the command ttyd runs: the root's bootstrap.py on the root.
+def ttyd_command(root_path: str) -> list[str]:
+    return [
+        "python3",
+        os.path.join(root_path, "python", "bootstrap.py"),
+        "--root",
+        root_path,
+    ]
 
 
-# Clones ttyd and builds it, each only when missing: the maintainer updates it.
-def ttyd_prepare(ttyd_path: str) -> None:
-    if not os.path.isdir(ttyd_path):
-        command_run(
-            ["git", "clone", _TTYD_REPOSITORY_URL, ttyd_path],
-            os.path.dirname(ttyd_path),
-        )
-    build_path = os.path.join(ttyd_path, "build")
-    if not os.path.isfile(os.path.join(build_path, "ttyd")):
-        os.makedirs(build_path, exist_ok=True)
-        command_run(["cmake", ".."], build_path)
-        command_run(["make"], build_path)
-
-
-# Yields ttyd serving the page with `xsjs_start.ps1`'s flags but no password.
+# Yields ttyd serving the page with the start script's options but no password.
 @contextlib.contextmanager
 def ttyd_serve(
-    ttyd_path: str, modules_path: str
+    values: dict[str, Any], root_path: str, page_path: str
 ) -> Generator[subprocess.Popen[bytes]]:
+    settings = values["powershell"]
+    ttyd_path = os.path.join(_CHECKOUT_PATH, settings["ttyd_build"], "ttyd")
+    if not os.path.isfile(ttyd_path):
+        raise RuntimeError(f"{ttyd_path} is missing: ttyd_build.py builds it")
     port_check(_TTYD_PORT)
     arguments = [
-        os.path.join(ttyd_path, "build", "ttyd"),
+        ttyd_path,
         "--port",
         str(_TTYD_PORT),
+        "--interface",
+        settings["bind_address"],
         "--writable",
         "--check-origin",
-        "--interface",
-        "127.0.0.1",
         "--terminal-type",
-        "dumb",
+        settings["terminal_type"],
         "--index",
-        _BOOTSTRAP_PAGE_PATH,
-        *ttyd_command(modules_path),
+        page_path,
+        "--url-arg",
+        f"--srv-buf-size={values['srv_buf_size']}",
+        *ttyd_command(root_path),
     ]
-    ttyd = process_start(arguments, _PYTHON_PATH)
+    ttyd = process_start(arguments, root_path)
     try:
         port_wait(ttyd, "ttyd", _TTYD_PORT)
         yield ttyd
     finally:
         process_stop(ttyd)
-
-
-# Returns what ttyd says its version is, for reports of its faults.
-def ttyd_version(ttyd_path: str) -> str:
-    completed = subprocess.run(
-        [os.path.join(ttyd_path, "build", "ttyd"), "--version"],
-        check=False,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        text=True,
-    )
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"ttyd --version exited with {completed.returncode}"
-        )
-    return completed.stdout.strip()
 
 
 # Resizes the page's viewport to the width and height, as on a desktop.
@@ -740,27 +571,15 @@ def viewport_set(devtools: DevTools, width_px: int, height_px: int) -> None:
 # Parses the options, runs ttyd and the browser, and returns the exit code.
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Put and run a module through bootstrap.html from Chrome"
-        " and save a screenshot of the page."
+        description="Open the page through ttyd in Chrome and save a"
+        " screenshot of it."
     )
     parser.add_argument(
         "--out",
         default=os.path.join(_PYTHON_PATH, _IMAGE_NAME),
         help="where the PNG goes (default %(default)s)",
     )
-    parser.add_argument(
-        "--typing",
-        default=_TYPING_DEFAULT,
-        help="the line Chrome types to the module's stdin (default"
-        " %(default)s)",
-    )
-    namespace = parser.parse_args()
-    typing: str = namespace.typing
-    # The terminal takes these as edits or signals, `DEL` as an erase.
-    if any(character < " " or character == "\x7f" for character in typing):
-        print("error: --typing can't hold control characters", file=sys.stderr)
-        return 2
-    out: str = namespace.out
+    out: str = parser.parse_args().out
 
     module = browser_module()
     for signal_number in (signal.SIGHUP, signal.SIGTERM):
@@ -768,16 +587,17 @@ def main() -> int:
     image_path = os.path.abspath(out)
     started = time.monotonic()
     try:
-        ttyd_prepare(_TTYD_PATH)
-        # A first build and install can take longer than this allows.
+        values = settings_read()
+        page_path = page_ready(values)
+        # Building the page can take longer than this allows.
         signal.signal(signal.SIGALRM, signal_time_out)
         signal.alarm(_RUN_TIMEOUT_SECONDS)
-        os.makedirs(_BUILD_PATH, exist_ok=True)
         with tempfile.TemporaryDirectory(
             prefix="xsjs_screenshot-", dir=_BUILD_PATH
         ) as work_path:
-            modules_path = os.path.join(work_path, "modules")
-            with ttyd_serve(_TTYD_PATH, modules_path) as ttyd:
+            root_path = os.path.join(work_path, "root")
+            index_path = root_make(values, page_path, root_path)
+            with ttyd_serve(values, root_path, index_path) as ttyd:
                 browser = module.Browser(
                     _VIEWPORT_WIDTH_PX, _VIEWPORT_HEIGHT_PX
                 )
@@ -785,11 +605,7 @@ def main() -> int:
                     devtools = DevTools(browser)
                     try:
                         detail = page_meet(
-                            devtools,
-                            typing,
-                            image_path,
-                            ttyd.pid,
-                            modules_path,
+                            devtools, image_path, ttyd.pid, root_path
                         )
                     finally:
                         devtools.browser_close()
