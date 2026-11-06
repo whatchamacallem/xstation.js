@@ -37,6 +37,7 @@ __all__ = [
     "WindowsRelay",
     "blocking_categories",
     "blocking_find",
+    "chrome_path",
 ]
 
 # The Linux browser of Anthropic's cloud container, Playwright's, one match.

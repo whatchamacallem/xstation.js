@@ -3,14 +3,21 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # xsjs_screenshot.py's Browser off WSL: the first Chrome or Chromium on
-# PATH, headless, with a profile of its own that goes when it does. It
-# serves DevTools on its own 127.0.0.1, so a socket carries the connection.
+# PATH, or the one of those named by its path or its name, headless, with a
+# profile of its own that goes when it does. It serves DevTools on its own
+# 127.0.0.1, so a socket carries the connection.
 
 import contextlib, os, shutil, signal, socket, subprocess, tempfile, time
 import types
 from typing import IO, NamedTuple, Self
 
-_BROWSER_NAMES = ("google-chrome", "chromium", "chromium-browser", "chrome")
+_BROWSER_NAMES = (
+    "google-chrome",
+    "chromium",
+    "chromium-browser",
+    "chrome",
+    "chrome-headless-shell",
+)
 
 # Where the profile goes, as the run's other intermediates do.
 _BUILD_PATH = os.path.join(
@@ -35,8 +42,17 @@ class DevToolsAddress(NamedTuple):
 
 
 class Browser:
-    # Keeps the window size, starting nothing yet.
-    def __init__(self, width_px: int, height_px: int) -> None:
+    # Keeps the window size and what to try, starting nothing yet.
+    def __init__(
+        self, width_px: int, height_px: int, browser_named: str | None = None
+    ) -> None:
+        self.browser_names = _BROWSER_NAMES
+        if browser_named is not None:
+            if os.path.basename(browser_named) not in _BROWSER_NAMES:
+                raise RuntimeError(
+                    f"{browser_named} is none of: " + ", ".join(_BROWSER_NAMES)
+                )
+            self.browser_names = (browser_named,)
         self.width_px = width_px
         self.height_px = height_px
         self.profile_path = ""
@@ -66,15 +82,15 @@ class Browser:
     ) -> None:
         self.close()
 
-    # Returns the path of the first browser on PATH.
+    # Returns the path of the first browser found.
     def browser_find(self) -> str:
-        for name in _BROWSER_NAMES:
+        for name in self.browser_names:
             path = shutil.which(name)
             if path is not None:
                 return path
         raise RuntimeError(
-            "no Chrome or Chromium on PATH. Tried: "
-            + ", ".join(_BROWSER_NAMES)
+            "no Chrome or Chromium found. Tried: "
+            + ", ".join(self.browser_names)
         )
 
     # Closes the connection, stops the browser, removes the profile.

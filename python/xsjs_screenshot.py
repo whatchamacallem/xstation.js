@@ -15,13 +15,16 @@
 #
 #     python3 python/xsjs_screenshot.py
 #     python3 python/xsjs_screenshot.py --out shot.png
+#     python3 python/xsjs_screenshot.py --browser chrome-headless-shell
 #
 # It drives Chrome through Chrome's DevTools protocol. How to start Chrome
 # and reach its DevTools differs by platform, so each platform has a module,
 # xsjs_screenshot_<platform>.py, with a Browser class: a context manager
 # whose devtools_reader and devtools_writer carry a connection to DevTools
 # at devtools_host and devtools_path. There is xsjs_screenshot_wsl.py for
-# WSL and xsjs_screenshot_posix.py for elsewhere.
+# WSL and xsjs_screenshot_posix.py for elsewhere. --browser names one of the
+# browsers of xsjs_screenshot_posix.py, by its path or its name on PATH, and
+# starts it through that module, on WSL too.
 
 import argparse, base64, contextlib, hashlib, json, os, platform, shutil
 import signal, socket, subprocess, sys, tempfile, time, types
@@ -268,6 +271,19 @@ def browser_module() -> types.ModuleType:
     import xsjs_screenshot_posix
 
     return xsjs_screenshot_posix
+
+
+# Returns the browser named, by the module off WSL, or else the platform's.
+def browser_make(browser_named: str | None) -> Any:
+    if browser_named is None:
+        return browser_module().Browser(
+            _VIEWPORT_WIDTH_PX, _VIEWPORT_HEIGHT_PX
+        )
+    import xsjs_screenshot_posix
+
+    return xsjs_screenshot_posix.Browser(
+        _VIEWPORT_WIDTH_PX, _VIEWPORT_HEIGHT_PX, browser_named
+    )
 
 
 # Returns the root's TAP documents once the last has ended, failing on a fault.
@@ -579,14 +595,20 @@ def main() -> int:
         default=os.path.join(_PYTHON_PATH, _IMAGE_NAME),
         help="where the PNG goes (default %(default)s)",
     )
-    out: str = parser.parse_args().out
+    parser.add_argument(
+        "--browser",
+        help="start this browser of xsjs_screenshot_posix.py, by its path or"
+        " its name on PATH, through that module, on WSL too",
+    )
+    parsed = parser.parse_args()
+    out: str = parsed.out
 
-    module = browser_module()
     for signal_number in (signal.SIGHUP, signal.SIGTERM):
         signal.signal(signal_number, signal_exit)
     image_path = os.path.abspath(out)
     started = time.monotonic()
     try:
+        browser = browser_make(parsed.browser)
         values = settings_read()
         page_path = page_ready(values)
         # Building the page can take longer than this allows.
@@ -598,9 +620,6 @@ def main() -> int:
             root_path = os.path.join(work_path, "root")
             index_path = root_make(values, page_path, root_path)
             with ttyd_serve(values, root_path, index_path) as ttyd:
-                browser = module.Browser(
-                    _VIEWPORT_WIDTH_PX, _VIEWPORT_HEIGHT_PX
-                )
                 with browser:
                     devtools = DevTools(browser)
                     try:

@@ -8,7 +8,6 @@ xsjs_stop.ps1
 powershell/*.ps1
 powershell/en-US/*.psd1
 python/*.py
-python/*.html
 python/seed/*.js
 ts/*.ts
 html/*.html

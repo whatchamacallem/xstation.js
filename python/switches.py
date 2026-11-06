@@ -11,8 +11,9 @@
 # an unset variable false and any value but 1 refused. No switch turns one
 # off. The TypeScript realms take them in tap.start, as switches_get gives
 # them. anthropic has the run take the parts of Anthropic's cloud container:
-# Playwright's headless shell and ttyd's source from the package manager, and
-# has test_posix.py check nothing.
+# Playwright's headless shell and ttyd's source from the package manager, has
+# test_posix.py check nothing, and has test_all.py take no suite that starts a
+# formatter.
 # debug is debug mode and verbose the console's verbose level, 2 when on and
 # 1 otherwise. A server takes its root's instead: <root>/parameters.json,
 # the three by name and nothing else, each a bool, which parameters_load
@@ -75,8 +76,9 @@ def options_add(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="in Anthropic's cloud container: start its headless shell,"
         " Playwright's, in place of /usr/local/bin/chrome-headless-shell,"
-        " build ttyd from the source the package manager gave, and have"
-        " test_posix.py check nothing, in this process and its children",
+        " build ttyd from the source the package manager gave, have"
+        " test_posix.py check nothing, and have test_all.py take no suite"
+        " that starts a formatter, in this process and its children",
     )
     parser.add_argument(
         "--debug",

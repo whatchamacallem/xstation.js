@@ -8,8 +8,10 @@
 # refused. No switch turns one off. The realms of TypeScript take them in
 # `tap.start` (`lines.TapStart.switches`). `anthropic` has the run take the
 # parts of Anthropic's cloud container: Playwright's headless shell and
-# ttyd's source from the package manager. `debug` is debug mode and
-# `verbose` the console's verbose level, 2 when on and 1 otherwise.
+# ttyd's source from the package manager, has `test_posix.py` check nothing,
+# and has `test_all.py` take no suite that starts a formatter. `debug` is
+# debug mode and `verbose` the console's verbose level, 2 when on and 1
+# otherwise.
 #
 # A server takes its root's instead: `<root>/parameters.json`, the
 # parameters of its run, `{"anthropic": bool, "debug": bool, "verbose":

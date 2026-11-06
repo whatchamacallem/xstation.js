@@ -27,7 +27,7 @@
 # unless it was built from them, its programs' output in a log there, and a
 # failed fetch or build fails the run there. It refuses to start as root.
 #
-# The suites run in strict dependency order, in eight phases that only the
+# The suites run in strict dependency order, in nine phases that only the
 # order of the lists shows. Three are of Python: the unit suites,
 # test_<module>.py, by layer; then the pair test of the TAP producer and
 # consumer, test_tap_pair.py, and the integration suites,
@@ -40,7 +40,9 @@
 # their block. Two are of group B, the TypeScript blocks run in headless
 # Chrome: the unit blocks, then the integration blocks, each by layer as in A.
 # One is of group C, the TypeScript blocks behind ttyd: its integration blocks,
-# by layer as in A. A module calls into another when it imports it, at the top
+# by layer as in A. The last is a Python suite again, that of the screenshot
+# tool, which opens the whole page behind ttyd, so that every block of the
+# page passes first. A module calls into another when it imports it, at the top
 # or in a function, loads its file, runs it as a program, or has it run inside
 # the block of its suite, as this file has the TAP producer and consumer in
 # every block; a call of a function it was handed is no call into the module
@@ -158,7 +160,9 @@
 # module of its name, or for those listed for it, and an integration or
 # stdio suite, or a TypeScript block, for none. It counts in this process,
 # so it refuses --tty. --anthropic, --debug and --verbose turn on the run's
-# switches of switches.py, here and in every process the run starts.
+# switches of switches.py, here and in every process the run starts. Under
+# --anthropic the cloud environment runs no formatter, so a run takes no suite
+# that starts one, and --module refuses those.
 
 import argparse, base64, contextlib, functools, importlib, json, os, re
 import shutil, signal, subprocess, sys, tempfile, time, types, unittest
@@ -336,6 +340,11 @@ _C_INTEGRATION: list[tuple[str, str]] = [
     ("test_console_open.ts", "smoke-test"),
 ]
 
+# The last phase, the Python suite of the tool that opens the whole page.
+_WHOLE_PAGE: list[tuple[str, str]] = [
+    ("test_integrate_xsjs_screenshot", "normal-test"),
+]
+
 # Every suite and block of a run, in the phases of the order above.
 _PHASES = (
     _MODULES
@@ -344,6 +353,12 @@ _PHASES = (
     + _B_UNIT
     + _B_INTEGRATION
     + _C_INTEGRATION
+    + _WHOLE_PAGE
+)
+
+# The suites that start formatters, which no run under `--anthropic` takes.
+_FORMATTER_SUITES = frozenset(
+    ("test_reformat_formatters", "test_test_posix_formatters")
 )
 
 # The suites and blocks that fail by design, which only `--module` runs.
@@ -557,23 +572,32 @@ def timer_stop() -> None:
     signal.setitimer(signal.ITIMER_REAL, 0)
 
 
+# Whether the run takes the suite: by its label, no formatter's in the cloud.
+def suite_taken(name: str, label: str, chosen: str) -> bool:
+    import category, switches
+
+    if switches.anthropic and name in _FORMATTER_SUITES:
+        return False
+    return category.suite_runs(label, chosen)
+
+
 # The suites the run takes: the category's, only those named if any are.
 def modules_chosen(
     parser: argparse.ArgumentParser, named: list[str], chosen: str
 ) -> list[tuple[str, str]]:
-    import category
-
     listed = _PHASES + _FAILING if named else _PHASES
     labels = dict(listed)
     for name in named:
         if named.count(name) > 1:
             parser.error(f"--module {name} is given more than once")
-        if not category.suite_runs(labels[name], chosen):
-            parser.error(f"--module {name} is not a suite of a {chosen} run")
+        if not suite_taken(name, labels[name], chosen):
+            parser.error(
+                f"--module {name} is not a suite of this {chosen} run"
+            )
     return [
         (name, label)
         for name, label in listed
-        if category.suite_runs(label, chosen) and (not named or name in named)
+        if suite_taken(name, label, chosen) and (not named or name in named)
     ]
 
 

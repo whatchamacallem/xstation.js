@@ -12,10 +12,12 @@
 # rows of reformat_table.json leave to Windows, prints nothing and formats.
 # With no program on PATH, which a linter could not start from, main returns
 # and prints nothing when given --anthropic, and when test_all.py has turned
-# the switch on before calling it.
+# the switch on before calling it. Under the switch test_all.py leaves the
+# suites that start formatters out of a normal-test run, and --module refuses
+# them, while without it the run takes them.
 
-import argparse, functools, os, signal, switches, sys, tempfile, test_posix
-import traceback, unittest
+import argparse, functools, os, signal, switches, sys, tempfile, test_all
+import test_posix, traceback, unittest
 from collections.abc import Callable
 
 # The checkout's top directory, above this file's `python/`.
@@ -39,11 +41,22 @@ _PYTHON_RAW = "x=1\n"
 # How the work of a child ended when it returned.
 _ENDING_RETURNED = "returned"
 
+# The suites that start formatters, as a run lists them.
+_FORMATTER_SUITES = ["test_reformat_formatters", "test_test_posix_formatters"]
+
+# How a child ended that a refusal of its parser stopped.
+_ENDING_REFUSED = "SystemExit: 2\n"
+
 
 # Returns the text of the file.
 def text_read(path: str) -> str:
     with open(path, encoding="utf-8") as file:
         return file.read()
+
+
+# Has the test driver choose the named suite of a `normal-test` run.
+def module_choose(name: str) -> None:
+    test_all.modules_chosen(argparse.ArgumentParser(), [name], _NORMAL_TEST)
 
 
 # In the forked child: runs the work, output to a file, writes its ending.
@@ -152,3 +165,48 @@ class TestAnthropicSwitch(ChildCase):
         ending, output = self.child_run(work)
         self.assertEqual(ending, _ENDING_RETURNED)
         self.assertEqual(output, "")
+
+
+# The suites the test driver takes, in a child with the switch set as given.
+class TestDriverSuites(ChildCase):
+    # Runs the work in a child, the switch of the cloud environment as given.
+    def switch_run(
+        self, anthropic: bool, work: Callable[[], None]
+    ) -> tuple[str, str]:
+        def switched() -> None:
+            switches.switches_apply(
+                {**switches.switches_get(), "anthropic": anthropic}
+            )
+            work()
+
+        return self.child_run(switched)
+
+    # Returns what a child prints of the suites of a `normal-test` run.
+    def suites_chosen(self, anthropic: bool) -> str:
+        def work() -> None:
+            parser = argparse.ArgumentParser()
+            modules = test_all.modules_chosen(parser, [], _NORMAL_TEST)
+            names = [name for name, _ in modules]
+            print(*(name for name in _FORMATTER_SUITES if name in names))
+
+        ending, output = self.switch_run(anthropic, work)
+        self.assertEqual(ending, _ENDING_RETURNED)
+        return output
+
+    # Under the switch, a `normal-test` run takes no suite of a formatter.
+    def test_formatters_left(self) -> None:
+        self.assertEqual(self.suites_chosen(True), "\n")
+
+    # Without the switch, a `normal-test` run takes them.
+    def test_formatters_taken(self) -> None:
+        expected = " ".join(_FORMATTER_SUITES) + "\n"
+        self.assertEqual(self.suites_chosen(False), expected)
+
+    # Under the switch, `--module` refuses each suite of a formatter.
+    def test_module_refused(self) -> None:
+        for name in _FORMATTER_SUITES:
+            work = functools.partial(module_choose, name)
+            ending, output = self.switch_run(True, work)
+            self.assertTrue(ending.endswith(_ENDING_REFUSED), ending)
+            expected = f"--module {name} is not a suite of this {_NORMAL_TEST}"
+            self.assertIn(expected, output)
