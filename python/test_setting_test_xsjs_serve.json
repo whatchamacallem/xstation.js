@@ -1,0 +1,50 @@
+{
+  "address_pattern": "http://localhost:([0-9]+)/\n",
+  "address_text": "http://localhost:{0}/",
+  "arguments": [
+    "--port",
+    "{port}",
+    "--interface",
+    "127.0.0.1",
+    "--writable",
+    "--check-origin",
+    "--terminal-type",
+    "dumb",
+    "--index",
+    "{root}/hyperposition-engine.html",
+    "--url-arg",
+    "--srv-buf-size=1048576",
+    "python3",
+    "{root}/python/bootstrap.py",
+    "--root",
+    "{root}"
+  ],
+  "database_name": "metaverse.sqlite",
+  "database_text": "a database of an earlier run\n",
+  "ended_code": 255,
+  "gone_seconds": 5,
+  "killed_code": 137,
+  "killed_ended_code": -9,
+  "log_port": " N:  Listening on port: {0}\n",
+  "log_refused": "Can not stat index.html: ",
+  "log_stop": "received signal: SIGTERM (15), exiting...\n",
+  "page_text": "<title>a page of this suite</title>\n",
+  "parameters": {
+    "anthropic": false,
+    "debug": true,
+    "verbose": false
+  },
+  "parameters_other": {
+    "anthropic": false,
+    "debug": false,
+    "verbose": true
+  },
+  "poll_seconds": 0.05,
+  "root_default": ".cache/xsjs/root",
+  "root_sample": "/home/a/root",
+  "stale_name": "stale.txt",
+  "stopped_code": 0,
+  "text_ended": "ttyd ended by itself with code {0} while it served the root {1}.",
+  "text_missing": "The built ttyd {0} is missing; a run of ./test_posix.sh builds it.",
+  "usage_code": 2
+}

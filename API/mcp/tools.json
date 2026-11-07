@@ -206,7 +206,7 @@
         },
         {
           "name": "verbose_tail",
-          "description": "The last lines of a thread's verbose ring: ui, ai or server.",
+          "description": "The last lines of a thread's verbose ring: ui, ai or server. count is a maximum, as a reply holds the newest lines that fit below line_max.",
           "inputSchema": {
             "type": "object",
             "properties": {

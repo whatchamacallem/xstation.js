@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// The bring-up of the two test pages. API/ts/boot.d.ts holds its order.
+// The bring-up of the three pages. API/ts/boot.d.ts holds its order.
 // Initialization waits on the platform's promises here, the one module that
 // does so outside the task manager.
 //
-// A headless worker with `clear` false first waits for its files to open. A
-// file still held refuses with a `DOMException` named
+// A headless worker with `clear` false and the engine worker first wait for
+// their files to open. A file still held refuses with a `DOMException` named
 // `NoModificationAllowedError`, which ends the try, and the next comes 10 ms
 // later; anything else is thrown. The wait comes before the pool's install,
 // since SQLite keeps a failed install as the answer to every later one.
@@ -47,10 +47,27 @@ namespace boot {
     base_url: string;
   }
 
-  // What the worker's `run` gets beside its queue.
-  export interface TestStart {
+  // What the worker's `run` gets beside its queue: its platform and wire sink.
+  export interface WorkerStart {
     first: lines.Line;
     base_url: string;
+    sqlite3: substrate.SqliteModule;
+    pool: substrate.SqlitePool;
+    cache: substrate.CacheFiles;
+  }
+
+  // sqlite3.wasm once it has started and its pool once it is installed.
+  interface PoolParts {
+    sqlite3: substrate.SqliteModule;
+    pool: substrate.SqlitePool;
+  }
+
+  // What sets the test worker's bring up and the engine worker's apart.
+  interface WorkerPlan {
+    platform: () => Promise<PoolParts>;
+    cache_directory: string;
+    cache_count: number;
+    overlay: boolean;
   }
 
   // What every start of the headless worker holds.
@@ -79,7 +96,7 @@ namespace boot {
     wasmBinary: Uint8Array;
   }): Promise<SqliteStart>;
 
-  // The test pool and the test cache's files.
+  // The pools and the caches' files of the test and engine platforms.
   const constants = Object.freeze({
     test_pool_name: "xsjs-test-pool",
     test_pool_directory: ".xsjs-test-pool",
@@ -91,6 +108,15 @@ namespace boot {
     test_slots_directory: "xsjs-test-slots",
     // The test slots, its writer's choice, for two caches of four files.
     test_slots_count: 8,
+    engine_pool_name: "xsjs-engine-pool",
+    engine_pool_directory: ".xsjs-engine-pool",
+    // The engine page's pool, cleared at start.
+    engine_capacity: 64,
+    engine_cache_directory: "xsjs-engine-cache",
+    // The engine page's cache, cleared at start.
+    engine_slot_count: 64,
+    // The wait for the files of a reloaded page, past their 2.05 s release.
+    engine_wait_seconds: 5,
     // The name of the platform's refusal to open a file another worker holds.
     busy_name: "NoModificationAllowedError",
     // Between tries of held files: a try took 3.5 ms, the release 2.05 s.
@@ -132,34 +158,55 @@ namespace boot {
       );
   }
 
-  // Starts sqlite3.wasm, the test pool and the test slots, and sets them.
-  function platform_open(clear: boolean): Promise<void> {
+  // Starts sqlite3.wasm and installs its pool.
+  function pool_open(options: PoolOptions): Promise<PoolParts> {
     return module_init().then((sqlite3) =>
       sqlite3
-        .installOpfsSAHPoolVfs({
-          name: constants.test_pool_name,
-          directory: constants.test_pool_directory,
-          initialCapacity: constants.test_capacity,
-          clearOnInit: clear,
-        })
-        .then((pool) =>
-          slots_open(
-            constants.test_slots_directory,
-            constants.test_slots_count,
-          ).then((test_slots) => {
-            // Cleared at start when the test pool is.
-            if (clear) {
-              for (const slot of test_slots) {
-                slot.truncate(0);
-              }
-            }
-            Object.assign(globalThis, {
-              test_sqlite3: sqlite3,
-              test_pool: pool,
-              test_slots,
-            });
-          }),
-        ),
+        .installOpfsSAHPoolVfs(options)
+        .then((pool) => ({ sqlite3, pool })),
+    );
+  }
+
+  // Starts sqlite3.wasm, the test pool and the test slots, and sets them.
+  function platform_open(clear: boolean): Promise<PoolParts> {
+    return pool_open({
+      name: constants.test_pool_name,
+      directory: constants.test_pool_directory,
+      initialCapacity: constants.test_capacity,
+      clearOnInit: clear,
+    }).then((parts) =>
+      slots_open(
+        constants.test_slots_directory,
+        constants.test_slots_count,
+      ).then((test_slots) => {
+        // Cleared at start when the test pool is.
+        if (clear) {
+          for (const slot of test_slots) {
+            slot.truncate(0);
+          }
+        }
+        Object.assign(globalThis, {
+          test_sqlite3: parts.sqlite3,
+          test_pool: parts.pool,
+          test_slots,
+        });
+        return parts;
+      }),
+    );
+  }
+
+  // Waits for the files a reload left held, then starts the cleared pool.
+  function engine_open(): Promise<PoolParts> {
+    return files_wait(
+      [constants.engine_pool_directory, constants.engine_cache_directory],
+      constants.engine_wait_seconds,
+    ).then(() =>
+      pool_open({
+        name: constants.engine_pool_name,
+        directory: constants.engine_pool_directory,
+        initialCapacity: constants.engine_capacity,
+        clearOnInit: true,
+      }),
     );
   }
 
@@ -203,13 +250,12 @@ namespace boot {
     return undefined;
   }
 
-  // Waits until no file of the pool or the slots is held, or throws.
-  async function files_wait(seconds: number): Promise<void> {
+  // Waits until no file of the directories is held, or throws.
+  async function files_wait(
+    names: readonly string[],
+    seconds: number,
+  ): Promise<void> {
     const end = performance.now() + seconds * constants.second_ms;
-    const names = [
-      constants.test_pool_directory,
-      constants.test_slots_directory,
-    ];
     for (;;) {
       const busy = await files_try(names);
       if (busy === undefined) {
@@ -224,10 +270,27 @@ namespace boot {
     }
   }
 
-  // Opens the wire, and at `tap.start` readies the test platform and runs.
-  function tests_open(
+  // The test worker's platform, its wire's lines kept off the overlay.
+  const test_plan = Object.freeze<WorkerPlan>({
+    platform: () => platform_open(true),
+    cache_directory: constants.test_cache_directory,
+    cache_count: constants.test_slot_count,
+    overlay: false,
+  });
+
+  // The engine worker's platform, its wire's lines shown on the overlay.
+  const engine_plan = Object.freeze<WorkerPlan>({
+    platform: engine_open,
+    cache_directory: constants.engine_cache_directory,
+    cache_count: constants.engine_slot_count,
+    overlay: true,
+  });
+
+  // Opens the wire, and at `tap.start` readies the plan's platform and runs.
+  function worker_open(
     message: StartMessage,
-    run: (tasks: queue.TaskQueue, start: TestStart) => void,
+    plan: WorkerPlan,
+    run: (tasks: queue.TaskQueue, start: WorkerStart) => void,
   ): void {
     const cache = new substrate.CacheFiles([]);
     const port = new wire.WirePort(
@@ -236,29 +299,26 @@ namespace boot {
       settings.settings_get,
     );
     port.wire_open((first: lines.Line) => {
-      platform_open(true)
-        .then(() =>
-          slots_open(
-            constants.test_cache_directory,
-            constants.test_slot_count,
-          ),
-        )
-        .then((slots) => {
-          // Cleared at start, as the test pool is.
+      plan.platform().then(({ sqlite3, pool }) =>
+        slots_open(plan.cache_directory, plan.cache_count).then((slots) => {
+          // Cleared at start, as the pool is.
           for (const slot of slots) {
             slot.truncate(0);
             cache.slot_add(slot);
           }
-          const start = { first, base_url: message.base_url };
+          const { base_url } = message;
+          const start = { first, base_url, sqlite3, pool, cache };
           const parts: worker_ai.TapParts = {
             first,
             server: port,
             end: (line, done) => port.wire_end(line, done),
             ui: message.port,
-            console: new wire.ConsolePort(message.base_url),
+            console: new wire.ConsolePort(base_url),
+            overlay: plan.overlay,
           };
           worker_ai.tap_start(parts, (tasks) => run(tasks, start));
-        });
+        }),
+      );
     });
   }
 
@@ -271,7 +331,10 @@ namespace boot {
     const start = message.start;
     const opened = start.clear
       ? platform_open(true)
-      : files_wait(start.wait_seconds).then(() => platform_open(false));
+      : files_wait(
+          [constants.test_pool_directory, constants.test_slots_directory],
+          start.wait_seconds,
+        ).then(() => platform_open(false));
     opened.then(() => {
       const parts: worker_ai.TapParts = {
         first: start.first,
@@ -284,6 +347,7 @@ namespace boot {
         ui: message.ui,
         // The headless page has no ttyd, so no tty 0.
         console: undefined,
+        overlay: false,
       };
       worker_ai.tap_start(parts, (tasks) => run(tasks, start));
     });
@@ -294,10 +358,22 @@ namespace boot {
 
   // The AI worker's bring up, `run` getting its queue once the wire is up.
   export function test_worker(
-    run: (tasks: queue.TaskQueue, start: TestStart) => void,
+    run: (tasks: queue.TaskQueue, start: WorkerStart) => void,
   ): void {
     error_overlay.overlay_install();
-    start_await<StartMessage>((message) => tests_open(message, run));
+    start_await<StartMessage>((message) =>
+      worker_open(message, test_plan, run),
+    );
+  }
+
+  // The engine page's AI worker's bring up, `run` as in `test_worker`.
+  export function engine_worker(
+    run: (tasks: queue.TaskQueue, start: WorkerStart) => void,
+  ): void {
+    error_overlay.overlay_install();
+    start_await<StartMessage>((message) =>
+      worker_open(message, engine_plan, run),
+    );
   }
 
   // The headless worker's bring up, `run` getting its queue at the start.

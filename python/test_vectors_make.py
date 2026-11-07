@@ -8,15 +8,28 @@
 # two vectors at the edge of blob_max, the six number vectors, the digest
 # vectors, inputs of 55, 56 and 64 bytes each beside its SHA-256 digest, and
 # the TypeScript test modules' digests, filed under the names of the blocks
-# that read them, each input in lowercase hex beside its SHA-256 digest.
+# that read them, each input in lowercase hex beside its SHA-256 digest. Then
+# the file run as a program through runpy, in a forked child that writes how
+# it ended to a file under build/, then kills itself: build/vectors then holds
+# what vectors_write makes, and a file an earlier run left there is gone.
 
-import hashlib, json, os, tempfile, unittest, vectors_make
+import hashlib, json, os, runpy, signal, sys, tempfile, traceback, unittest
+import vectors_make
 from typing import Any
 
 # The checkout's build directory, where each test makes its scratch directory.
 _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
 )
+
+# Where the file run as a program writes the vectors.
+_VECTORS_PATH = os.path.join(_BUILD_PATH, "vectors")
+
+# The name a file runs under as a program.
+_PROGRAM_NAME = "__main__"
+
+# How the program ended in its forked child when it returned.
+_ENDING_RETURNED = "returned"
 
 # The file of the digest vectors, which the TypeScript check reads by name.
 _DIGESTS_NAME = "sha256.json"
@@ -53,6 +66,31 @@ def names_ending(directory: str, suffix: str) -> list[str]:
         for name in os.listdir(directory)
         if name.endswith(suffix)
     )
+
+
+# Returns the bytes of each file in the directory, by name.
+def files_read(directory: str) -> dict[str, bytes]:
+    files: dict[str, bytes] = {}
+    for name in os.listdir(directory):
+        with open(os.path.join(directory, name), "rb") as file:
+            files[name] = file.read()
+    return files
+
+
+# In the forked child: runs the file as a program, writes how it ended.
+def program_end(ending_path: str) -> None:
+    try:
+        try:
+            # This process's arguments are the driver's, not the program's.
+            sys.argv = [vectors_make.__file__]
+            runpy.run_path(vectors_make.__file__, run_name=_PROGRAM_NAME)
+            ending = _ENDING_RETURNED
+        except BaseException:
+            ending = traceback.format_exc()
+        with open(ending_path, "w", encoding="utf-8") as file:
+            file.write(ending)
+    finally:
+        os.kill(os.getpid(), signal.SIGKILL)
 
 
 # The vectors and sidecars that `vectors_write` puts in a directory.
@@ -166,3 +204,29 @@ class TestVectorsWrite(unittest.TestCase):
         at_max = message["1"]["s"] + message["2"]["s"]
         self.assertEqual(at_max, limits["blob_max"])
         self.assertEqual(over["1"]["s"] + over["2"]["s"], at_max + 1)
+
+
+# The file run as a program, as `python3 python/vectors_make.py` runs it.
+class TestProgram(unittest.TestCase):
+    # It leaves `build/vectors` holding just what `vectors_write` makes.
+    def test_program_written(self) -> None:
+        os.makedirs(_VECTORS_PATH, exist_ok=True)
+        stale = os.path.join(_VECTORS_PATH, "stale_vector.jslb")
+        with open(stale, "wb") as file:
+            file.write(b'{"t":"echo"}\r')
+        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
+            ending_path = os.path.join(scratch, "ending.txt")
+            pid = os.fork()
+            if pid == 0:
+                program_end(ending_path)
+            status = os.waitpid(pid, 0)[1]
+            self.assertEqual(
+                os.waitstatus_to_exitcode(status), -signal.SIGKILL
+            )
+            with open(ending_path, encoding="utf-8") as ending_file:
+                ending = ending_file.read()
+            directory = os.path.join(scratch, "vectors")
+            vectors_make.vectors_write(directory)
+            expected = files_read(directory)
+        self.assertEqual(ending, _ENDING_RETURNED)
+        self.assertEqual(files_read(_VECTORS_PATH), expected)

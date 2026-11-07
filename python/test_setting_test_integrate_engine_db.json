@@ -70,9 +70,48 @@
       "1": {},
       "db": "castle",
       "files": 2
+    },
+    "sync": {
+      "0": {
+        "i": 7,
+        "t": "db.sync"
+      }
+    },
+    "sync_full": {
+      "0": {
+        "id": 7,
+        "type": "db.sync"
+      }
+    },
+    "sync_push": {
+      "0": {
+        "t": "db.sync"
+      }
+    },
+    "sync_reply": {
+      "0": {
+        "r": 7,
+        "t": "db.sync"
+      },
+      "databases": ["_files", "castle", "keep"]
+    },
+    "sync_reply_full": {
+      "0": {
+        "reply": 7,
+        "type": "db.sync"
+      },
+      "databases": ["_files", "castle", "keep"]
     }
   },
+  "sync_order": [
+    ["db.restore", "_files"],
+    ["db.restore", "castle"],
+    ["db.file", "castle"],
+    ["db.file", "castle"],
+    ["db.restore", "keep"]
+  ],
   "texts": {
+    "dispatch_notification_replied": "The handler for type db.sync version 0 returned a reply to a line with no id.",
     "dispatch_request_unanswered": "The handler for type db.create version 0 returned no reply to the request with id 7."
   }
 }

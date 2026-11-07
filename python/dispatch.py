@@ -6,12 +6,14 @@
 # the one a line names, and the reply and error lines and ids it builds. A
 # handler may return a `Failure`, a reply the main loop writes before it
 # fails with the failure's error, so an answer is never lost to the fault
-# after it. An error line holds the cascade as nested `cause` entries, the
-# first failure innermost. A line takes the name form of the line it
-# answers; with none, `full`, the caller's parameter `debug`, picks it.
+# after it, or a `Stream`, its twin: pushes the main loop writes in order
+# before the reply, which ends them. An error line holds the cascade as
+# nested `cause` entries, the first failure innermost. A line takes the name
+# form of the line it answers; with none, `full`, the caller's parameter
+# `debug`, picks it.
 
 import jslb, traceback
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from internationalization import i18n
 from typing import Any, NamedTuple, TypeAlias
 
@@ -25,8 +27,14 @@ class Failure(NamedTuple):
     error: BaseException
 
 
+# Pushes the main loop writes in order, then `reply`: the twin of `Failure`.
+class Stream(NamedTuple):
+    pushes: Iterable[jslb.Object]
+    reply: jslb.Object
+
+
 # A handler takes the line and its payload as keywords and returns the reply.
-Handler: TypeAlias = Callable[..., jslb.Object | Failure | None]
+Handler: TypeAlias = Callable[..., jslb.Object | Failure | Stream | None]
 
 # The registered handlers, by type and version.
 _HANDLERS: dict[tuple[str, int], Handler] = {}
@@ -65,8 +73,8 @@ def handler_register(type: str, version: int, fn: Handler) -> None:
     _HANDLERS[(type, version)] = fn
 
 
-# Calls `fn(line, **payload_of(line))`. Returns the reply with `r`, or None.
-def line_dispatch(line: jslb.Object) -> jslb.Object | Failure | None:
+# Calls `fn(line, **payload_of(line))`. Returns its answer, `r` set, or None.
+def line_dispatch(line: jslb.Object) -> jslb.Object | Failure | Stream | None:
     header: jslb.Object = line[0]
     name: str = jslb.field_get(header, "type")
     version = _version_get(header, name)
@@ -86,7 +94,7 @@ def line_dispatch(line: jslb.Object) -> jslb.Object | Failure | None:
         raise ValueError(
             i18n("dispatch.request_unanswered", name, version, request_id)
         )
-    reply = result.reply if isinstance(result, Failure) else result
+    reply = result.reply if isinstance(result, Failure | Stream) else result
     key = "reply" if _header_full(reply[0]) else "r"
     reply[0][key] = request_id
     return result

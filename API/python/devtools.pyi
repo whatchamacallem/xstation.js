@@ -1,19 +1,28 @@
 # Headless Chrome driven over the DevTools protocol by one client, the
-# Browser, on one of two transports: LinuxPipe, to chrome-headless-shell on
-# its descriptors 3 and 4, and WindowsRelay, to Chrome or Edge on Windows
-# through `powershell.exe`. WindowsRelay is offline since 2026-10-30, kept,
-# run by nothing, and to be brought back later. The switch
+# Browser, on the `Transport` it is given: LinuxPipe, to chrome-headless-shell
+# on its descriptors 3 and 4, or `devtools_windows.WindowsRelay`, to Chrome or
+# Edge on Windows. The relay's helpers that a running suite tests stay here,
+# and the relay itself is the module devtools_windows.py. The switch
 # `switches.anthropic` has LinuxPipe start Playwright's headless shell of
 # Anthropic's cloud container in place of chrome-headless-shell's path.
 
 from collections.abc import Callable
-from typing import Any, Self
+from typing import Any, Protocol, Self
 
 import types
 
 # The page's loads as loader and event name pairs, as DevTools reported them.
 class PageEvents:
     lifecycle: set[tuple[str, str]]
+
+# DevTools messages as WebSocket text frames on a byte channel.
+class SocketChannel: ...
+
+# DevTools messages each ended by a NUL byte, on the Linux browser's pipes.
+class PipeChannel: ...
+
+# Either channel of whole DevTools messages.
+AnyChannel = SocketChannel | PipeChannel
 
 # Speaks the DevTools protocol over a channel of whole messages.
 class ProtocolClient:
@@ -35,15 +44,25 @@ class ProtocolClient:
     # Ends every later wait at `end` alone, in place of the wait's own limit.
     def limit_set(self, end: float) -> None: ...
 
-# Chrome, or else Edge, on Windows, through a relay in `powershell.exe`.
-class WindowsRelay:
-    # Finds `powershell.exe` on the PATH, starting nothing yet.
-    def __init__(self) -> None: ...
+# What a Browser runs on, which starts the browser and stops it.
+class Transport(Protocol):
+    # Whether a refused navigation is sent again.
+    refused_retried: bool
+    # Starts the browser and returns the channel to its DevTools.
+    def transport_open(self, width_px: int, height_px: int) -> AnyChannel: ...
+    # Stops the browser and removes what it left.
+    def transport_close(self) -> None: ...
 
 # `/usr/local/bin/chrome-headless-shell` on Linux, with DevTools on fds 3, 4.
 class LinuxPipe:
+    # A refusal on this machine's own 127.0.0.1 is final, as nothing forwards.
+    refused_retried: bool
     # Starts nothing yet: the start makes its profile and caches in `build/`.
     def __init__(self) -> None: ...
+    # Starts the browser on a new profile in `build/`, DevTools on its pipes.
+    def transport_open(self, width_px: int, height_px: int) -> PipeChannel: ...
+    # Stops the browser, closes this side's pipe ends and removes the profile.
+    def transport_close(self) -> None: ...
 
 # Headless Chrome over DevTools, on the transport it is given.
 class Browser:
@@ -53,7 +72,7 @@ class Browser:
         self,
         width_px: int,
         height_px: int,
-        transport: WindowsRelay | LinuxPipe,
+        transport: Transport,
     ) -> None: ...
     # Starts the browser and its page, cleaning up if that fails.
     def __enter__(self) -> Self: ...

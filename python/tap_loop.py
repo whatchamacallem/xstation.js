@@ -184,8 +184,7 @@ def _bytes_serve(
                     rendered = jslb.line_render(line)
                     raise LookupError(i18n("tap_loop.reply_unknown", rendered))
                 reply = dispatch.line_dispatch(line)
-                if reply is not None:
-                    _line_write(cast(jslb.Object, reply), write_fd)
+                _line_write(cast(jslb.Object, reply), write_fd)
             line = None
     except Exception as error:
         _failure_exit(line, error, write_fd, full)

@@ -163,6 +163,64 @@
       "n": 2,
       "text": "x"
     },
+    "restore": {
+      "0": {
+        "t": "db.restore"
+      },
+      "db": "metaverse",
+      "files": 0
+    },
+    "sync": {
+      "0": {
+        "t": "db.sync"
+      }
+    },
+    "sync_answered": {
+      "0": {
+        "r": 7,
+        "t": "db.sync"
+      },
+      "databases": [
+        "metaverse"
+      ]
+    },
+    "sync_answered_full": {
+      "0": {
+        "reply": 7,
+        "type": "db.sync"
+      },
+      "databases": [
+        "metaverse"
+      ]
+    },
+    "sync_request": {
+      "0": {
+        "i": 7,
+        "t": "db.sync"
+      }
+    },
+    "sync_request_full": {
+      "0": {
+        "id": 7,
+        "type": "db.sync"
+      }
+    },
+    "sync_unset": {
+      "0": {
+        "t": "db.sync"
+      },
+      "databases": [
+        "metaverse"
+      ]
+    },
+    "sync_unset_full": {
+      "0": {
+        "type": "db.sync"
+      },
+      "databases": [
+        "metaverse"
+      ]
+    },
     "verbose_put": {
       "0": {
         "t": "verbose.put"
@@ -186,6 +244,7 @@
     "dispatch_id_refused_text": "The line of type kv.get has the id '1', which is not an integer of at least 1.",
     "dispatch_id_refused_zero": "The line of type kv.get has the id 0, which is not an integer of at least 1.",
     "dispatch_notification_replied_mcp": "The handler for type mcp version 0 returned a reply to a line with no id.",
+    "dispatch_notification_replied_sync": "The handler for type db.sync version 0 returned a reply to a line with no id.",
     "dispatch_notification_replied_verbose": "The handler for type verbose.put version 0 returned a reply to a line with no id.",
     "dispatch_request_unanswered": "The handler for type kv.get version 0 returned no reply to the request with id 7.",
     "dispatch_version_refused_bool": "The line of type kv.get has the version True, which is not an integer.",

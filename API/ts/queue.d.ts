@@ -1,22 +1,23 @@
 // The task manager of one thread, the one synchronization tool: one line
 // dispatched at a time, a handler run to completion, sleeping tasks woken by a
-// line of their `then_type` once every awaited reply is in.
-//
-// The lines of each input run in the order they come, in both modes, and a
-// wake runs in its last reply's place, before every line that came after that
-// reply. The blob bytes it holds are bounded by `blob_max`, the largest
-// database: a blob streamed to a cache file counts nothing, so a database of
-// `blob_max` with its cache files passes through.
+// line of their `then_type` once every awaited reply is in. The lines of each
+// input run in the order they come, in both modes, and a wake runs in its last
+// reply's place, before every line that came after that reply.
 //
 // A handler's `dispatch.Failure` is answered first: its reply is posted, then
 // the queue fails with its error. A handler that submitted requests it does
 // not sleep on fails with `queue.wait_missing`, that error its `cause`, so its
 // own message is kept. An `error` line stops a queue with `queue.error_line`,
-// the line's `cause` entries rebuilt as Errors, so the sender's cascade is
-// kept whole.
+// the line's `cause` entries rebuilt as Errors: the sender's whole cascade.
 //
-// Two linked `LocalPort`s join two queues of one thread, so a line posted at
-// one end runs on the other queue within the post.
+// In debug mode each timeline line, a submit, dispatch, notify, forward, reply,
+// receive, sleep or wake, holds its line by `jslb.line_render`, blob bytes
+// never shown; outside debug mode no line is rendered. A sleep holds the line
+// its handler ran. A wake line renders as its header, then as its payload each
+// reply, a space before each: its state is a task's memory on no lane, which
+// the renderer may refuse. Past `entry_fits`, `queue.line_sized` stands for the
+// rendering: the header and the sizes of the payload and blobs. It masks the
+// `Authorization` of `http.request` and the `token` of a `console.open` reply.
 
 declare namespace queue {
   // The owners a line can have: the threads, the server and the ports.

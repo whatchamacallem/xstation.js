@@ -1,0 +1,38 @@
+{
+  "interrupted_code": 130,
+  "later": {
+    "at": 60,
+    "printed": "6 60 ui ui submits to ai: {\"0\":{\"type\":\"ai.click\",\"id\":104},\"x\":1}",
+    "text": "ui submits to ai: {\"0\":{\"type\":\"ai.click\",\"id\":104},\"x\":1}"
+  },
+  "printed": [
+    "1 10 ui ui submits to ai: {\"0\":{\"type\":\"ai.say\",\"id\":102},\"text\":\"1\"}",
+    "2 20 ai ai dispatches from ui: {\"0\":{\"type\":\"ai.say\",\"id\":102},\"text\":\"1\"}",
+    "3 30 ai ai notifies server: {\"0\":{\"type\":\"kv.put\",\"blobs\":1},\"1\":{\"size\":4},\"ref\":\"/metaverse/demo/note\"}<blob \"n\"=1>",
+    "4 {0} server server dispatches from ai: {\"0\":{\"type\":\"kv.put\",\"blobs\":1},\"1\":{\"size\":4},\"ref\":\"/metaverse/demo/note\"}<blob \"n\"=1>",
+    "5 {1} server The server failed while serving the engine tty: boom\\n  at line_serve"
+  ],
+  "runs": {
+    "every_option": {
+      "arguments": ["--thread", "ai", "--type", "kv.put", "--grep", "metaverse"],
+      "printed": [2]
+    },
+    "grep": {
+      "arguments": ["--grep", "boom"],
+      "printed": [4]
+    },
+    "thread": {
+      "arguments": ["--thread", "ai"],
+      "printed": [1, 2]
+    },
+    "type": {
+      "arguments": ["--type", "kv.put"],
+      "printed": [2, 3]
+    }
+  },
+  "texts": {
+    "failure": "boom\n  at line_serve",
+    "xsjs_log_file_missing": "The root has no verbose log at {0}."
+  },
+  "usage_code": 2
+}

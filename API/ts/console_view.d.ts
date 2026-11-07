@@ -24,7 +24,8 @@ declare namespace console_view {
     constructor(container: HTMLElement, tasks: queue.TaskQueue);
     view_show(): void;
     view_hide(): void;
-    view_toggle(): void;
+    // Shows a hidden view, hides a shown one, and says whether it now shows.
+    view_toggle(): boolean;
     // Whether the view is shown while tty 0 is idle, so that it is asked for.
     open_wanted(): boolean;
     // Whether tty 0 is open: its first message sent and input taken.

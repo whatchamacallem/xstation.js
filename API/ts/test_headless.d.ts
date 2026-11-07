@@ -5,9 +5,10 @@
 //
 // A block runs on one side: `ui`, on the main thread in its own page load;
 // `worker`, in a fresh worker; `lanes`, on the main thread over a fresh
-// worker; or `workers`, on the main thread over a fresh worker for each case.
-// In `lanes` and `workers` the page writes the TAP and the worker runs no
-// block.
+// worker; `workers`, on the main thread over a fresh worker for each case; or
+// `engine`, on the main thread over a fresh worker named "engine", which
+// `realm_open` brings up by `boot.engine_worker` to run `engine.worker_run`.
+// In the last three the page writes the TAP and the worker runs no block.
 //
 // Each `workers` case first sends the notice `test_headless.worker_start`,
 // `{clear}` with `wait_seconds` too when `clear` is false: the junction ends
@@ -33,6 +34,9 @@ declare namespace test_headless {
     start: boot.HeadlessStart,
     ready: () => void,
   ) => void;
+
+  // Builds the far end of an engine worker's UI channel, the test's end of it.
+  type EngineBuild = (ui: MessagePort) => queue.ThreadPort;
 
   // Opens the realm lane on the main thread, or brings the worker up.
   function realm_open(): void;

@@ -3,11 +3,8 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Headless Chrome driven over the DevTools protocol by one client, the Browser,
-# on one of two transports. WindowsRelay drives Chrome, or else Edge, on
-# Windows from WSL: WSL's NAT networking can't reach Windows' 127.0.0.1, where
-# Chrome serves DevTools, so a relay in `powershell.exe` carries the WebSocket
-# over its stdin and stdout. WindowsRelay is offline since 2026-10-30, kept,
-# run by nothing, and to be brought back later.
+# on the `Transport` it is given: LinuxPipe here, or the WindowsRelay of
+# devtools_windows.py, whose helpers that a running suite tests stay here.
 #
 # LinuxPipe drives /usr/local/bin/chrome-headless-shell by
 # --remote-debugging-pipe, with XDG_CACHE_HOME set to the profile, where
@@ -17,17 +14,21 @@
 # switch `switches.anthropic`, LinuxPipe starts the headless shell of
 # Anthropic's cloud container, Playwright's, in its place.
 
-import base64, errno, fcntl, functools, glob, hashlib, json, math, os
-import select, shutil, signal, subprocess, switches, tempfile, time, types
-import uuid
+import base64, fcntl, functools, glob, hashlib, json, math, os, select, shutil
+import signal, subprocess, switches, tempfile, time, types
 from collections.abc import Callable
-from typing import Any, IO, NamedTuple, NoReturn, Self, cast
+from typing import Any, IO, NamedTuple, NoReturn, Protocol, Self
 
 # The public names of this module, as its stub declares them.
 __all__ = [
+    "AnyChannel",
     "Browser",
     "LinuxPipe",
-    "WindowsRelay",
+    "PageEvents",
+    "PipeChannel",
+    "ProtocolClient",
+    "SocketChannel",
+    "Transport",
     "blocking_categories",
     "blocking_find",
     "chrome_path",
@@ -51,15 +52,6 @@ _BLOCKING_EVENT_NAMES = frozenset(
     )
 )
 
-# Where to look for a browser, in order: a Windows variable and a path in it.
-_BROWSER_LOCATIONS: tuple[tuple[str, str], ...] = (
-    ("ProgramFiles", r"Google\Chrome\Application\chrome.exe"),
-    ("ProgramFiles(x86)", r"Google\Chrome\Application\chrome.exe"),
-    ("LOCALAPPDATA", r"Google\Chrome\Application\chrome.exe"),
-    ("ProgramFiles(x86)", r"Microsoft\Edge\Application\msedge.exe"),
-    ("ProgramFiles", r"Microsoft\Edge\Application\msedge.exe"),
-)
-
 # The build directory of the checkout, where a Linux browser's profile goes.
 _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
@@ -74,29 +66,11 @@ _CHROME_NAME = os.path.basename(_CHROME_PATH)
 # The descriptor the Linux browser reads DevTools from, as the pipe flag sets.
 _COMMAND_DESCRIPTOR = 3
 
-# The longest a command started here may run, a default chosen by its writer.
-_COMMAND_WAIT_SECONDS = 60
-
 # The lowest descriptor a browser's end of a pipe is copied to before start.
 _DESCRIPTOR_FLOOR = 5
 
 # The file the browser writes its DevTools port and path to, in the profile.
 _DEVTOOLS_PORT_FILE_NAME = "DevToolsActivePort"
-
-# Seconds for the browser to serve DevTools, a default chosen by its writer.
-_DEVTOOLS_WAIT_SECONDS = 60
-
-# Prints the Windows variables the browser is found from, as JSON.
-_ENVIRONMENT_SCRIPT = r"""
-$ProgressPreference = 'SilentlyContinue'
-[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
-$values_ = [ordered]@{}
-foreach ($name_ in 'LOCALAPPDATA', 'ProgramFiles', 'ProgramFiles(x86)',
-        'TEMP') {
-    $values_[$name_] = [Environment]::GetEnvironmentVariable($name_)
-}
-ConvertTo-Json $values_ -Compress
-"""
 
 # What ends each DevTools message on the Linux browser's pipes.
 _PIPE_END = b"\0"
@@ -107,19 +81,8 @@ _PIPE_READ_BYTES = 65536
 # How often a polling wait looks again, a default chosen by its writer.
 _POLL_SECONDS = 0.1
 
-# The program that runs scripts on Windows, looked up on the PATH.
-_POWERSHELL_NAME = "powershell.exe"
-
-# The errors of removing a file that a browser helper still holds open.
-_PROFILE_BUSY_ERRNOS = frozenset(
-    (errno.EACCES, errno.EBUSY, errno.ENOTEMPTY, errno.EPERM)
-)
-
 # The start of the name of the profile folder each run makes.
 _PROFILE_PREFIX = "xsjs_devtools-"
-
-# Seconds for the profile to become removable, a default chosen by its writer.
-_PROFILE_REMOVE_SECONDS = 10
 
 # The navigation error while WSL has not yet forwarded a new listener.
 _REFUSED_ERROR_TEXT = "net::ERR_CONNECTION_REFUSED"
@@ -173,36 +136,6 @@ _REPLY_WAIT_SECONDS = 60
 
 # Seconds to retry a refused navigation, a default chosen by its writer.
 _SERVER_WAIT_SECONDS = 60
-
-# Stops each process named `$name_` with `$profile_` in its command line.
-_STOP_SCRIPT = r"""
-$ProgressPreference = 'SilentlyContinue'
-$pattern_ = "*$profile_*"
-Get-CimInstance Win32_Process -Filter "Name = '$name_'" |
-    Where-Object { $_.CommandLine -like $pattern_ } |
-    ForEach-Object {
-        try {
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop
-        } catch {
-            # A helper gone with the browser is ObjectNotFound, as recalled.
-            if ($_.CategoryInfo.Category -ne 'ObjectNotFound') {
-                throw
-            }
-        }
-    }
-$end_ = [DateTime]::UtcNow.AddSeconds($seconds_)
-while ($true) {
-    $left_ = @(Get-CimInstance Win32_Process -Filter "Name = '$name_'" |
-        Where-Object { $_.CommandLine -like $pattern_ })
-    if ($left_.Count -eq 0) {
-        break
-    }
-    if ([DateTime]::UtcNow -gt $end_) {
-        throw "$name_ still runs on $profile_ after $seconds_ s"
-    }
-    Start-Sleep -Milliseconds $milliseconds_
-}
-"""
 
 # Seconds for a stopped process to be gone, a default chosen by its writer.
 _STOP_WAIT_SECONDS = 5
@@ -318,6 +251,14 @@ class PageEvents:
         elif method == "Debugger.paused":
             self.paused.add(message["sessionId"])
 
+    # Returns the trace's events, failing if DevTools lost any of them.
+    def trace_take(self) -> list[dict[str, Any]]:
+        if self.trace_lost:
+            raise RuntimeError(
+                "the trace lost events, so it can't show everything that ran"
+            )
+        return self.trace
+
 
 # A program started by `os.posix_spawn`, its exit read from a pidfd.
 class SpawnedProcess:
@@ -420,12 +361,16 @@ class PipeChannel:
             left = left[written:]
 
 
+# Either channel of whole DevTools messages.
+AnyChannel = SocketChannel | PipeChannel
+
+
 # Speaks the DevTools protocol over a channel of whole messages.
 class ProtocolClient:
     # Keeps the channel and where events go.
     def __init__(
         self,
-        channel: SocketChannel | PipeChannel,
+        channel: AnyChannel,
         event_fn: Callable[[dict[str, Any]], None],
         wait_seconds: float,
     ) -> None:
@@ -513,183 +458,16 @@ class ProtocolClient:
         return timer
 
 
-# Chrome, or else Edge, on Windows, through a relay in `powershell.exe`.
-class WindowsRelay:
-    # WSL forwards a new listener to Windows late, so a refusal is sent again.
-    refused_retried = True
+# What a Browser runs on. Each method sits on one line, which a count reaches.
+class Transport(Protocol):
+    # Whether a refused navigation is sent again.
+    refused_retried: bool
 
-    # Finds `powershell.exe` and names a profile, starting nothing yet.
-    def __init__(self) -> None:
-        powershell = shutil.which(_POWERSHELL_NAME)
-        if powershell is None:
-            raise RuntimeError(f"{_POWERSHELL_NAME} isn't on the PATH")
-        self.powershell = powershell
-        self.profile_name = _PROFILE_PREFIX + uuid.uuid4().hex
-        self.profile_path = ""
-        self.executable_name = ""
-        self.browser_process: subprocess.Popen[bytes] | None = None
-        self.relay_process: subprocess.Popen[bytes] | None = None
+    # Starts the browser and returns the channel to its DevTools.
+    def transport_open(self, width_px: int, height_px: int) -> AnyChannel: ...
 
-    # Returns the WSL path of the first browser installed.
-    def browser_find(self, environment: dict[str, str | None]) -> str:
-        tried: list[str] = []
-        for variable_name, relative_path in _BROWSER_LOCATIONS:
-            base_path = environment.get(variable_name)
-            if not base_path:
-                continue
-            windows_path = base_path.rstrip("\\") + "\\" + relative_path
-            tried.append(windows_path)
-            path = path_wsl(windows_path)
-            if os.path.isfile(path):
-                return path
-        raise RuntimeError(
-            "no Chrome or Edge found. Tried: " + ", ".join(tried)
-        )
-
-    # Stops the browser, which outlives its WSL side and holds the profile.
-    def browser_stop(self) -> None:
-        if self.browser_process is None:
-            return
-        self.powershell_run(
-            f"stopping {self.executable_name}",
-            f"$name_ = '{self.executable_name}'\n"
-            f"$profile_ = '{self.profile_name}'\n"
-            f"$seconds_ = {_STOP_WAIT_SECONDS}\n"
-            f"$milliseconds_ = {round(_POLL_SECONDS * 1000)}\n" + _STOP_SCRIPT,
-        )
-        self.process_wait(self.executable_name, self.browser_process)
-
-    # Returns the DevTools port and path once the browser has written them.
-    def devtools_wait(self) -> EndpointAddress:
-        process = cast(subprocess.Popen[bytes], self.browser_process)
-        port_path = os.path.join(self.profile_path, _DEVTOOLS_PORT_FILE_NAME)
-        timer = WaitTimer(
-            f"{self.executable_name} to serve DevTools", _DEVTOOLS_WAIT_SECONDS
-        )
-        while True:
-            try:
-                with open(port_path) as port_file:
-                    text = port_file.read()
-            except FileNotFoundError:
-                text = ""
-            # Fewer than two fields is a file the browser is still writing.
-            if len(text.split()) >= 2:
-                return address_parse(text)
-            exit_code = process.poll()
-            if exit_code is not None:
-                raise RuntimeError(
-                    f"{self.executable_name} exited with {exit_code} before"
-                    " serving DevTools"
-                )
-            time.sleep(min(_POLL_SECONDS, timer.seconds_left()))
-
-    # Returns what the script printed in PowerShell, as `UTF-8`.
-    def powershell_run(self, what: str, script: str) -> str:
-        return command_run(
-            f"{_POWERSHELL_NAME} {what}",
-            powershell_command(self.powershell, script),
-            os.path.dirname(self.powershell),
-        )
-
-    # Waits for the process to exit, killing it and failing if it takes long.
-    def process_wait(
-        self, what: str, process: subprocess.Popen[bytes]
-    ) -> None:
-        try:
-            process.wait(_STOP_WAIT_SECONDS)
-        except subprocess.TimeoutExpired as error:
-            process.kill()
-            process.wait()
-            raise TimeoutError(
-                f"gave up after {_STOP_WAIT_SECONDS} s waiting for {what}"
-                " to exit"
-            ) from error
-
-    # Removes the profile, waiting while browser helpers still hold its files.
-    def profile_remove(self) -> None:
-        if not self.profile_path or not os.path.isdir(self.profile_path):
-            return
-        timer = WaitTimer(
-            f"{self.profile_path} to be removable", _PROFILE_REMOVE_SECONDS
-        )
-        while True:
-            try:
-                shutil.rmtree(self.profile_path)
-                return
-            except OSError as error:
-                if error.errno not in _PROFILE_BUSY_ERRNOS:
-                    raise
-                time.sleep(min(_POLL_SECONDS, timer.seconds_left()))
-
-    # Ends the relay, which exits once its connection or its input ends.
-    def relay_stop(self) -> None:
-        process = self.relay_process
-        if process is None:
-            return
-        cast(IO[bytes], process.stdin).close()
-        self.process_wait(f"{_POWERSHELL_NAME} relaying DevTools", process)
-        cast(IO[bytes], process.stdout).close()
-
-    # Stops the browser and the relay, then removes the profile.
-    def transport_close(self) -> None:
-        try:
-            self.browser_stop()
-        finally:
-            try:
-                self.relay_stop()
-            finally:
-                self.profile_remove()
-
-    # Starts the browser on a new profile and opens a relay to its DevTools.
-    def transport_open(self, width_px: int, height_px: int) -> SocketChannel:
-        environment: dict[str, str | None] = json.loads(
-            self.powershell_run(
-                "reading the Windows environment", _ENVIRONMENT_SCRIPT
-            )
-        )
-        browser_path = self.browser_find(environment)
-        self.executable_name = os.path.basename(browser_path)
-        temp_windows_path = environment["TEMP"]
-        if not temp_windows_path:
-            raise RuntimeError("Windows has no TEMP folder")
-        temp_windows_path = temp_windows_path.rstrip("\\")
-        temp_path = path_wsl(temp_windows_path)
-        self.profile_path = os.path.join(temp_path, self.profile_name)
-        self.browser_process = subprocess.Popen(
-            [
-                browser_path,
-                "--headless=new",
-                "--hide-scrollbars",
-                "--no-default-browser-check",
-                "--no-first-run",
-                "--remote-debugging-port=0",
-                f"--user-data-dir={temp_windows_path}\\{self.profile_name}",
-                f"--window-size={width_px},{height_px}",
-                "about:blank",
-            ],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            cwd=temp_path,
-        )
-        address = self.devtools_wait()
-        self.relay_process = subprocess.Popen(
-            powershell_command(self.powershell, relay_script(address.port)),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            cwd=temp_path,
-        )
-        relay_input = cast(IO[bytes], self.relay_process.stdin)
-        relay_output = cast(IO[bytes], self.relay_process.stdout)
-        channel = SocketChannel(
-            functools.partial(pipe_read, relay_output.fileno()),
-            functools.partial(stream_write, relay_input),
-        )
-        timer = WaitTimer("the DevTools handshake answer", _REPLY_WAIT_SECONDS)
-        channel.handshake_open(
-            f"127.0.0.1:{address.port}", address.path, timer
-        )
-        return channel
+    # Stops the browser and removes what it left.
+    def transport_close(self) -> None: ...
 
 
 # `chrome-headless-shell` on Linux, with DevTools on its descriptors 3 and 4.
@@ -781,10 +559,7 @@ class LinuxPipe:
 class Browser:
     # Keeps the window size and the transport, starting nothing yet.
     def __init__(
-        self,
-        width_px: int,
-        height_px: int,
-        transport: WindowsRelay | LinuxPipe,
+        self, width_px: int, height_px: int, transport: Transport
     ) -> None:
         self.width_px = width_px
         self.height_px = height_px
@@ -925,11 +700,7 @@ class Browser:
         client.events_pump(
             "the trace to complete", lambda: self.events.trace_done
         )
-        if self.events.trace_lost:
-            raise RuntimeError(
-                "the trace lost events, so it can't show everything that ran"
-            )
-        return self.events.trace
+        return self.events.trace_take()
 
     # Starts a trace of the categories on the page, its events sent as events.
     def trace_start(self, categories: list[str]) -> None:
@@ -1019,21 +790,27 @@ def bytes_exact(read: Callable[[int], bytes], count: int) -> bytes:
     return bytes(data)
 
 
+# Returns the one browser the pattern matches, failing on any other count.
+def chrome_match(pattern: str) -> str:
+    paths = glob.glob(pattern)
+    if len(paths) != 1:
+        raise FileNotFoundError(
+            f"{len(paths)} browsers match {pattern}, not 1"
+        )
+    return paths[0]
+
+
 # Returns the Linux browser's path, Anthropic's by its switch.
 def chrome_path() -> str:
-    if switches.anthropic:  # pragma: no cover
-        paths = glob.glob(_ANTHROPIC_CHROME_PATTERN)
-        if len(paths) != 1:
-            raise FileNotFoundError(
-                f"{len(paths)} browsers match {_ANTHROPIC_CHROME_PATTERN},"
-                " not 1"
-            )
-        return paths[0]
+    if switches.anthropic:
+        return chrome_match(_ANTHROPIC_CHROME_PATTERN)
     return _CHROME_PATH
 
 
-# Runs a command to its end under a timer and returns its stdout as `UTF-8`.
-def command_run(what: str, arguments: list[str], cwd: str | None) -> str:
+# Runs a command to its end, for at most the seconds, returning its stdout.
+def command_run(
+    what: str, arguments: list[str], cwd: str | None, seconds: float
+) -> str:
     try:
         completed = subprocess.run(
             arguments,
@@ -1041,11 +818,11 @@ def command_run(what: str, arguments: list[str], cwd: str | None) -> str:
             cwd=cwd,
             stdin=subprocess.DEVNULL,
             capture_output=True,
-            timeout=_COMMAND_WAIT_SECONDS,
+            timeout=seconds,
         )
     except subprocess.TimeoutExpired as error:
         raise TimeoutError(
-            f"gave up after {_COMMAND_WAIT_SECONDS} s waiting for {what}"
+            f"gave up after {seconds:g} s waiting for {what}"
         ) from error
     if completed.returncode != 0:
         raise RuntimeError(
@@ -1201,16 +978,6 @@ def message_read(
         started = True
         if frame.final:
             return bytes(message)
-
-
-# Returns the WSL path of a Windows path, as wslpath maps it.
-def path_wsl(windows_path: str) -> str:
-    output = command_run(
-        f"wslpath mapping {windows_path}",
-        ["wslpath", "-u", windows_path],
-        None,
-    )
-    return output.strip()
 
 
 # Reads up to count bytes from the descriptor, failing when the timer ends.

@@ -70,7 +70,7 @@ namespace page {
 
   // The console view as the handlers drive it.
   export interface ConsoleControl {
-    view_toggle(): void;
+    view_toggle(): boolean;
     view_show(): void;
     open_wanted(): boolean;
     open_is(): boolean;
@@ -351,6 +351,7 @@ namespace page {
       if (!this.#ready) {
         this.#ready = true;
         input.disabled = false;
+        input.focus();
       }
       return dispatch.reply_make(line, {});
     }
@@ -416,18 +417,20 @@ namespace page {
       return dispatch.task_sleep(state, [id], constants.turn_wake);
     }
 
-    // Shows the subtitle the turn ended with and opens the input again.
+    // Shows the turn's last subtitle, opens the input and gives it the focus.
     turn_done(wake: lines.Line): undefined {
+      const { subtitle, input } = this.#parts;
       const [reply] = wake.replies as lines.Line[];
       const end = jslb.payload_of(reply) as unknown as lines.TurnEnd;
-      this.#parts.subtitle.textContent = end.subtitle;
-      this.#parts.input.disabled = false;
+      subtitle.textContent = end.subtitle;
+      input.disabled = false;
+      input.focus();
       return undefined;
     }
 
     // In debug mode toggles an overlay or the console, which asks for tty 0.
     key_take(line: lines.Line): dispatch.Sleep | undefined {
-      const { debug, view, overlays } = this.#parts;
+      const { debug, view, overlays, input } = this.#parts;
       const digit = jslb.payload_of(line).digit as number;
       // Outside debug mode the page gates the console and the overlays.
       if (!debug) {
@@ -437,7 +440,10 @@ namespace page {
         overlays.overlay_toggle(digit);
         return undefined;
       }
-      view.view_toggle();
+      // A hidden console leaves the focus nowhere, so an open box takes it.
+      if (!view.view_toggle() && !input.disabled) {
+        input.focus();
+      }
       // Shown and idle, at first or after its end, the view asks for tty 0.
       return view.open_wanted() ? view.open_request() : undefined;
     }
@@ -644,8 +650,10 @@ namespace page {
     return tasks;
   }
 
-  // The bring up of the UI thread, `run` getting its queue at `ui.tests`.
-  export function test_page(run: (tasks: queue.TaskQueue) => void): void {
+  // The bring up both pages share, `open` taking the queue at `settings.set`.
+  function page_open(
+    open: (tasks: queue.TaskQueue, set: lines.SettingsSet) => void,
+  ): void {
     error_overlay.overlay_install();
     const worker = worker_make();
     const channel = new MessageChannel();
@@ -654,7 +662,14 @@ namespace page {
     );
     channel.port1.onmessage = (event: MessageEvent<unknown>) => {
       const set = settings_take(event.data);
-      const tasks = thread_open(channel.port1, set);
+      open(thread_open(channel.port1, set), set);
+    };
+    worker_post(worker, channel.port2);
+  }
+
+  // The bring up of the UI thread, `run` getting its queue at `ui.tests`.
+  export function test_page(run: (tasks: queue.TaskQueue) => void): void {
+    page_open((tasks, set) => {
       if (switches.debug_on()) {
         harness.values_set(set.settings);
       }
@@ -666,8 +681,12 @@ namespace page {
           return undefined;
         },
       );
-    };
-    worker_post(worker, channel.port2);
+    });
+  }
+
+  // The engine page's bring up, `run` getting its queue at `settings.set`.
+  export function engine_page(run: (tasks: queue.TaskQueue) => void): void {
+    page_open(run);
   }
 }
 

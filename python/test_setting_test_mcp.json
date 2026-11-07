@@ -11,6 +11,7 @@
     "mcp_reply_unknown_again": "The reply to request 1 is not one the client awaits.",
     "mcp_reply_unknown_unasked": "The reply to request 99 is not one the client awaits.",
     "mcp_request_invalid": "The message is not a valid JSON-RPC 2.0 request.",
+    "mcp_result_none": "'NoneType' object has no attribute 'content'",
     "mcp_tool_twice": "A tool named {0} is already registered.",
     "mcp_tool_unknown": "There is no tool named nothing."
   }

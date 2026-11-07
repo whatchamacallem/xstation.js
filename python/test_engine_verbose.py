@@ -10,11 +10,12 @@
 # lines of the gold: the page lines a put writes under their thread, read
 # back from `_verbose`; the tail of the server from its ring, the lines it
 # logged with the times the log measured, and of a page thread from the
-# database, each with the count given; the gate of debug mode on
-# `verbose.put` alone; and the lines a put refuses, its batch unwritten. The
-# registration is read from the dispatcher, which refuses a second one of
-# each type. Each child writes how its work ended to a file, or to stderr
-# when that write fails, then kills itself.
+# database, each with the count given, and the newest lines that fit below
+# `line_max`; the gate of debug mode on `verbose.put` alone; and the lines a
+# put refuses, its batch unwritten. The registration is read from the
+# dispatcher, which refuses a second one of each type. Each child writes how
+# its work ended to a file, or to stderr when that write fails, then kills
+# itself.
 
 import contextlib, engine_verbose, functools, harness, json, os, re, signal
 import sqlite3, sys, tempfile, traceback, unittest
@@ -38,6 +39,9 @@ _RING: int = harness.setting_get("verbose_ring")
 
 # The `blob_max` of the settings, the largest log file.
 _BLOB_MAX: int = harness.setting_get("blob_max")
+
+# The `line_max` of the settings, the bound of a reply of the tail.
+_LINE_MAX: int = harness.setting_get("line_max")
 
 # The file of the root's log.
 _LOG_FILE = "_verbose.sqlite"
@@ -128,9 +132,9 @@ def _server_lines(
 
 
 # Opens the root's log through `engine_verbose`, then registers the handlers.
-def _log_register(root: str, debug: bool) -> None:
+def _log_register(root: str, debug: bool, line_max: int = _LINE_MAX) -> None:
     engine_verbose.verbose.log_open(root, _RING, _BLOB_MAX)
-    engine_verbose.handlers_register(debug)
+    engine_verbose.handlers_register(debug, line_max)
 
 
 # The work of a child: registers, then calls the put handler on each line.
@@ -154,9 +158,23 @@ def _tails_get(root: str, debug: bool, lines: list[Any]) -> list[Any]:
     return [_handler_call(engine_verbose.verbose_tail, line) for line in lines]
 
 
+# Child: registers under the limit, logs server texts, tails the line.
+def _tail_limited(root: str, line_max: int, line: Any) -> Any:
+    _log_register(root, True, line_max)
+    for text in _SERVER_TEXTS:
+        engine_verbose.verbose.log(text)
+    return _handler_call(engine_verbose.verbose_tail, line)
+
+
+# The bytes of a reply on the wire: its JSON text and a CR.
+def _wire_size(reply: dict[str, Any]) -> int:
+    text = json.dumps(reply, ensure_ascii=False, separators=(",", ":"))
+    return len(text.encode("utf-8")) + 1
+
+
 # The work of a child: registers, then registers a handler's type again.
 def _register_twice(name: str) -> None:
-    engine_verbose.handlers_register(True)
+    engine_verbose.handlers_register(True, _LINE_MAX)
     engine_verbose.dispatch.handler_register(
         name, 0, engine_verbose.verbose_tail
     )
@@ -297,6 +315,25 @@ class TestTail(ScratchCase):
         for count, reply in zip(counts, replies, strict=True):
             with self.subTest(count=count):
                 self.assertEqual(reply["lines"], _server_lines(rows, count))
+
+    # A reply keeps the newest lines below `line_max`, its count a maximum.
+    def test_tail_limited(self) -> None:
+        line = _gold_value("lines.tail_server")
+        line["count"] = len(_SERVER_TEXTS)
+        whole = self.child_value(
+            functools.partial(_tail_limited, self.root, _LINE_MAX, line)
+        )
+        size = _wire_size(whole)
+        cases = ((size + 1, _SERVER_TEXTS), (size, _SERVER_TEXTS[1:]), (1, []))
+        for line_max, texts in cases:
+            with self.subTest(line_max=line_max):
+                reply = self.child_value(
+                    functools.partial(
+                        _tail_limited, self.root, line_max, line
+                    )
+                )
+                kept = [entry["text"] for entry in reply["lines"]]
+                self.assertEqual(kept, texts)
 
     # A page thread's tail comes from the database with its thread and count.
     def test_page_threads(self) -> None:

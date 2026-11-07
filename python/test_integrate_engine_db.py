@@ -12,12 +12,15 @@
 # request is applied, then refused, its `error` line encoded by the real
 # JSLB encoder and read back. The `db.restore` and `db.file` lines of a
 # database are encoded, read back as the gold's in both name forms, and
-# restored into a second root, which gives back every value.
+# restored into a second root, which gives back every value. A `db.sync`
+# served the same way has its pushes and reply encoded and read back in the
+# gold's order and name forms, then restored into a second root, which holds
+# every database the reply names and every value. One with no `i` is refused.
 
 import copy, dispatch, engine_db, harness, jslb, json, os, signal, substrate
-import sys, tempfile, traceback, unittest, uuid
+import switches, sys, tempfile, traceback, unittest, uuid
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 # The checkout's build directory, where each test makes its scratch root.
 _BUILD_PATH = os.path.join(
@@ -29,6 +32,9 @@ _GOLD_ID = "python.test_integrate_engine_db"
 
 # The database the gold's lines name.
 _DATABASE = "castle"
+
+# The databases of a sync, made out of name order.
+_SYNC_MADE = ("keep", "castle", "_files")
 
 # The most bytes of a line the decoder reads, the checkout's setting.
 _LINE_MAX: int = harness.setting_get("line_max")
@@ -74,10 +80,16 @@ def _line_bytes(name: str, *blobs: bytes) -> bytes:
     return b"".join([text.encode("utf-8"), b"\r", *blobs])
 
 
-# A gold line as the decoder reads it, blob 1's size set and no data.
-def _sized_line(name: str, size: int) -> jslb.Object:
+# A gold line as the decoder reads it.
+def _decoded_line(name: str) -> jslb.Object:
     text = json.dumps(harness.gold_get(f"{_GOLD_ID}.lines.{name}"))
     line: jslb.Object = jslb.json_decode(text)
+    return line
+
+
+# A gold line as the decoder reads it, blob 1's size set and no data.
+def _sized_line(name: str, size: int) -> jslb.Object:
+    line = _decoded_line(name)
     line[1]["size" if "type" in line[0] else "s"] = size
     return line
 
@@ -255,3 +267,72 @@ class TestRestore(ScratchCase):
     # The lines in full names read back as the gold's, one per cache file.
     def test_full_names(self) -> None:
         self.child_run(lambda: self.lines_carry(True))
+
+
+# Tests `db.sync` served through the dispatcher and read back from the wire.
+class TestSync(ScratchCase):
+    # In the child: the lines that answer a gold request, read back.
+    def lines_sync(self, name: str, debug: bool) -> list[jslb.Object]:
+        store = self.store_register()
+        for db in _SYNC_MADE:
+            store.db_create(db)
+        for ref, value in _VALUES.items():
+            store.kv_put(ref, value)
+        switches.switches_apply({**switches.switches_get(), "debug": debug})
+        (line,) = self.lines_decode(_line_bytes(name))
+        answer = dispatch.line_dispatch(line)
+        self.assertIsInstance(answer, dispatch.Stream)
+        stream = cast(dispatch.Stream, answer)
+        lines = [*stream.pushes, stream.reply]
+        return self.lines_decode(b"".join(_line_wire(sent) for sent in lines))
+
+    # In the child: a second root restored from the pushes, as they came.
+    def pushes_restore(self, pushes: list[jslb.Object]) -> substrate.Store:
+        copied = os.path.join(self.scratch, "copy")
+        restored = substrate.Store(copied, _OVERFLOW_BYTES, _BLOB_MAX)
+        lines = iter(pushes)
+        for line in lines:
+            files: list[bytes | str] = [
+                _data_take(next(lines)) for _ in range(line["files"])
+            ]
+            restored.db_restore(line["db"], _data_take(line), files)
+        return restored
+
+    # In the child: the lines in their name forms, then the whole of each.
+    def sync_check(self, suffix: str, debug: bool) -> None:
+        *pushes, reply = self.lines_sync(f"sync{suffix}", debug)
+        self.assertEqual(reply, _decoded_line(f"sync_reply{suffix}"))
+        order = [
+            [jslb.field_get(line[0], "type"), line["db"]] for line in pushes
+        ]
+        self.assertEqual(order, _gold_copy("sync_order"))
+        self.assertEqual({"type" in line[0] for line in pushes}, {debug})
+        restored = self.pushes_restore(pushes)
+        self.assertEqual(sorted(restored.db_list()), reply["databases"])
+        for ref, value in _VALUES.items():
+            self.assertEqual(_value_bytes(restored.kv_get(ref).data), value)
+
+    # In short names the lines carry every database whole, in name order.
+    def test_short_names(self) -> None:
+        self.child_run(lambda: self.sync_check("", False))
+
+    # In full names the lines carry every database whole, in name order.
+    def test_full_names(self) -> None:
+        self.child_run(lambda: self.sync_check("_full", True))
+
+    # Debug on: the pushes are in full names, the reply in the request's.
+    def test_forms_differ(self) -> None:
+        self.child_run(lambda: self.sync_check("", True))
+
+    # In the child: a sync with no `i` refused for the reply it would have.
+    def push_check(self) -> None:
+        self.store_register()
+        (line,) = self.lines_decode(_line_bytes("sync_push"))
+        message = _text_get("dispatch_notification_replied")
+        with self.assertRaises(ValueError) as caught:
+            dispatch.line_dispatch(line)
+        self.assertEqual(str(caught.exception), message)
+
+    # A sync that is not a request is refused, as a reply to a push is.
+    def test_push_refused(self) -> None:
+        self.child_run(self.push_check)

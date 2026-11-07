@@ -5,10 +5,12 @@
 # Tests of the server substrate on scratch roots under build/: the tables on
 # first use, both ref forms, documents and heads, a document's stored text
 # against the body of a doc.put line of the gold, overflow to the cache at
-# the setting overflow_bytes, a lost cache file, a kill between a cache file
-# and its row, snapshots and restores with their cache files, some lost,
-# turns, SQL, a trigger's refusal, and transactions over several databases.
-# Each text a refusal is checked against is the gold's.
+# the setting overflow_bytes, a document read from its cache file, a lost
+# cache file, a put of the digest a row holds, a check beside a file with no
+# _kv table, a kill between a cache file and its row, snapshots and restores
+# with their cache files, some lost, turns, SQL, a trigger's refusal, and
+# transactions over several databases. Each text a refusal is checked against
+# is the gold's.
 
 import harness, hashlib, json, os, resource, signal, sqlite3, substrate
 import tempfile, traceback, unittest
@@ -701,6 +703,35 @@ class TestValues(unittest.TestCase):
         store.kv_put("/alpha/big", b"small")
         self.assertEqual(store.kv_get("/alpha/big").data, b"small")
 
+    # A put of the digest a row holds keeps the row and brings back its file.
+    def test_digest_same(self) -> None:
+        root = _root_make(self)
+        store = _store_make(self, root)
+        store.db_create("alpha")
+        small = store.kv_put("/alpha/small", b"small")
+        self.assertEqual(store.kv_put("/alpha/small", b"small"), small)
+        big = store.kv_put("/alpha/big", _VALUE_OVER)
+        os.remove(_cache_file(root, _VALUE_OVER))
+        self.assertEqual(store.kv_put("/alpha/big", _VALUE_OVER), big)
+        self.assertEqual(store.kv_list("alpha", ""), [big, small])
+        self.assertEqual(_value_bytes(store.kv_get("/alpha/big")), _VALUE_OVER)
+
+    # A file without `_kv` under the root names no cache file to `kv_check`.
+    def test_check_foreign(self) -> None:
+        root = _root_make(self)
+        store = _store_make(self, root)
+        store.db_create("alpha")
+        store.kv_put("/alpha/big", _VALUE_OVER)
+        path = os.path.join(root, "beta.sqlite")
+        _file_make(path, False, [_statement_make(_META_SQL)])
+        stray = os.path.join(root, "cache", "stray")
+        with open(stray, "wb") as file:
+            file.write(_VALUE_EXACT)
+        self.assertEqual(store.kv_check("alpha"), 1)
+        self.assertFalse(os.path.exists(stray))
+        self.assertTrue(os.path.isfile(_cache_file(root, _VALUE_OVER)))
+        self.assertEqual(_names_read(path), ["_meta"])
+
 
 # Documents: versions and heads, the encoded round trip, bad documents.
 class TestDocuments(unittest.TestCase):
@@ -960,6 +991,20 @@ class TestDocuments(unittest.TestCase):
         )
         keys = [row.key for row in store.kv_list("alpha", "")]
         self.assertEqual(keys, ["nest/1"])
+
+    # A document over `overflow_bytes` reads back whole from its cache file.
+    def test_document_cached(self) -> None:
+        root = _root_make(self)
+        store = _store_make(self, root)
+        store.db_create("alpha")
+        body: dict[int | str, Any] = {
+            0: {"t": "note"},
+            "text": _WIDE_TEXT + "x" * _OVERFLOW_BYTES,
+        }
+        ref = store.doc_put("alpha", "long", body)
+        text = _json_text(body).encode("utf-8")
+        self.assertEqual(store.kv_get(ref).data, _cache_file(root, text))
+        self.assertEqual(store.doc_get(ref), body)
 
 
 # Turns: appended in order and listed.

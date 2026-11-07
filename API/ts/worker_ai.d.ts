@@ -1,5 +1,6 @@
-// The AI worker once the boot has handed over its objects. Outside debug mode
-// no suite runs and nothing else does. In debug mode the server's port is a
+// The AI worker once the boot has handed over its objects. `tap_start` calls
+// `run` in every mode, at once after the Empty reply and outside any task, so
+// it may notify but not submit. In debug mode the server's port is a
 // `WireTap`, which logs each line it carries but a `verbose.put`.
 //
 // The `ConsoleWriter` is tty 0's one writer, one command line at a time. It
@@ -29,6 +30,8 @@ declare namespace worker_ai {
     end: ServerEnd;
     ui: MessagePort;
     console: wire.ConsolePort | undefined;
+    // Whether the `WireTap` notes through `note_make`: the engine page alone.
+    overlay: boolean;
   }
 
   // The owner table of the AI thread.
@@ -95,7 +98,7 @@ declare namespace worker_ai {
     close: () => void,
   ): void;
 
-  // The bring up described above. `run` gets the queue for the suites.
+  // The bring up above, `run` the worker's program or a test page's entry.
   function tap_start(
     parts: TapParts,
     run: (tasks: queue.TaskQueue) => void,

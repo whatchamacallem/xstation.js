@@ -4,11 +4,12 @@
 #
 # Offline since 2026-10-30, kept, run by nothing, and to be brought back later.
 #
-# Tests the parts of devtools.py that need a browser, a later suite that
-# waits on powershell.exe and on Chrome or Edge on Windows. Each test starts
-# a Browser of its own on the Windows relay, on a profile of its own, at the
-# DevTools address its port file gives, and a local HTTP server of the
-# standard library, bound to the address of settings.json, that serves a
+# Tests devtools_windows.py and the parts of devtools.py that need a browser,
+# a later suite that waits on powershell.exe and on Chrome or Edge on Windows.
+# A PATH that holds no PowerShell refuses the relay, with nothing started. Each
+# other test starts a Browser of its own on the Windows relay, on a profile of
+# its own, at the DevTools address its port file gives, and a local HTTP server
+# of the standard library, bound to the address of settings.json, that serves a
 # scratch directory of pages under build/ once the test has it listen. The
 # page opens again while it is refused, and fails on any other error or once
 # its timer ends; page methods go on the page's session and browser and
@@ -17,8 +18,8 @@
 # among them; a worker is paused in its debugger; and the page closes while
 # another page stays. The waits the tests give are the gold's.
 
-import devtools, functools, harness, http.server, os, tempfile, threading, time
-import unittest
+import devtools, devtools_windows, functools, harness, http.server, os
+import tempfile, threading, time, unittest
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -93,6 +94,19 @@ def serve_later(
     server.serve_forever()
 
 
+# The relay's start, as far as a machine shows it with no PowerShell.
+class TestRelay(unittest.TestCase):
+    # A PATH that holds no PowerShell fails loud, starting nothing.
+    def test_relay_unfound(self) -> None:
+        self.addCleanup(os.environ.__setitem__, "PATH", os.environ["PATH"])
+        os.environ["PATH"] = ""
+        with self.assertRaises(RuntimeError) as caught:
+            devtools_windows.WindowsRelay()
+        self.assertEqual(
+            str(caught.exception), "powershell.exe isn't on the PATH"
+        )
+
+
 # Gives each test the pages, a server bound to a port, and a browser.
 class BrowserCase(unittest.TestCase):
     # Writes the pages, binds the server, then starts the browser.
@@ -115,7 +129,9 @@ class BrowserCase(unittest.TestCase):
         self.addCleanup(self.server.server_close)
         self.server.server_bind()
         self.browser = self.enterContext(
-            devtools.Browser(_WIDTH_PX, _HEIGHT_PX, devtools.WindowsRelay())
+            devtools.Browser(
+                _WIDTH_PX, _HEIGHT_PX, devtools_windows.WindowsRelay()
+            )
         )
 
     # Listens after the seconds and serves on a thread until the test ends.

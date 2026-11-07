@@ -6,10 +6,11 @@
 # the two tools of the same names, each in a forked child, so the root, debug
 # mode and the handlers never reach another test. The refusals of the restart
 # run in a child that a restart would replace, so its ending shows the process
-# kept; the exec itself runs only in a whole program. A blob's `d` is the bytes
-# or the path of a file the decoder would have streamed. Each child writes how
-# its work ended to a file, or to stderr when that write fails, then kills
-# itself.
+# kept. A restart that goes through runs in a child given the process arguments
+# of the gold, and the program it starts writes that child's ending, so its
+# ending shows the process replaced. A blob's `d` is the bytes or the path of a
+# file the decoder would have streamed. Each child writes how its work ended to
+# a file, or to stderr when that write fails, then kills itself.
 
 import engine_system, functools, harness, hashlib, json, os, re, signal, sys
 import tempfile, traceback, unittest
@@ -68,6 +69,14 @@ _HANDLER_TYPES = (
 
 # The file in the scratch directory that a child writes how it ended to.
 _ENDING_NAME = "ending.json"
+
+# A restarted process: writes its words as the ending at its first word's path.
+_RESTARTED_PROGRAM = (
+    "import json, os, signal, sys\n"
+    "with open(sys.argv[1], 'w', encoding='utf-8') as file:\n"
+    "    json.dump({'returned': sys.argv[2:]}, file)\n"
+    "os.kill(os.getpid(), signal.SIGKILL)\n"
+)
 
 
 # Reads a file with a handle of its own.
@@ -209,6 +218,15 @@ def _register_twice(root: str, name: str) -> None:
     engine_system.dispatch.handler_register(
         name, 0, engine_system.settings_put
     )
+
+
+# The work of a child: gives the process the words, then restarts it.
+def _restart_given(
+    root: str, ending: str, words: list[str], line: dict[int | str, Any]
+) -> Any:
+    program = [sys.executable, "-c", _RESTARTED_PROGRAM]
+    sys.orig_argv = [*program, ending, *words]
+    return _handler_run(root, True, engine_system.system_restart, line)
 
 
 # In the forked child: runs the work, writes how it ended, kills itself.
@@ -541,6 +559,21 @@ class TestRestart(ScratchCase):
             RuntimeError,
             _text_get("engine_system_debug_off_restart"),
         )
+
+
+# Tests `system.restart` replacing a child by what its process arguments start.
+class TestReplaced(ScratchCase):
+    # The file's option takes the place of each form of the old one, rest kept.
+    def test_option_replaced(self) -> None:
+        _loop_write(self.root, "b.py")
+        line = _gold_value("lines.restart")
+        ending = os.path.join(self.scratch, _ENDING_NAME)
+        for name, case in _gold_raw("restarts").items():
+            with self.subTest(name=name):
+                work = functools.partial(
+                    _restart_given, self.root, ending, case["given"], line
+                )
+                self.assertEqual(self.child_value(work), case["expected"])
 
 
 # Tests the two tools, registered on a real server and called through it.

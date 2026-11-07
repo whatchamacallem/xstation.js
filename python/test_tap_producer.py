@@ -598,6 +598,16 @@ class TestFailures(unittest.TestCase):
         def test_skip_self(self) -> None:
             self.skipTest("fixture skip")
 
+    # Skips its test, then raises in `tearDown`: two outcomes of one test.
+    class SpoiledFixture(unittest.TestCase):
+        # Raises after the test.
+        def tearDown(self) -> None:
+            raise RuntimeError("fixture error")
+
+        # Skips itself with a reason.
+        def test_skip_self(self) -> None:
+            self.skipTest("fixture skip")
+
     # A pass, a failure, an error and a skip, in name order.
     class MixedFixture(unittest.TestCase):
         # Passes.
@@ -818,6 +828,20 @@ class TestFailures(unittest.TestCase):
             _PARENT_PLAN,
         ]
         stream_expect(self, class_load(self.SkipFixture), False, expected)
+
+    # A skip that a failure follows is a diagnostic line of the failing point.
+    def test_skip_fails(self) -> None:
+        expected = [
+            _VERSION_LINE,
+            "    1..1",
+            "    not ok 1 - test_skip_self",
+            f"{_DIAGNOSTIC_PREFIX}SKIP fixture skip",
+            _TRACEBACK_LINE,
+            _ERROR_LINE,
+            _PARENT_FAILED,
+            _PARENT_PLAN,
+        ]
+        stream_expect(self, class_load(self.SpoiledFixture), False, expected)
 
     # Without failfast every test runs and the failures fail the block.
     def test_mixed_outcomes(self) -> None:

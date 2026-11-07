@@ -1,6 +1,11 @@
 // The UI thread: the AI worker made from the texts of the worker scripts and
 // the channel to it, the queue built on the settings the worker sends first,
-// and the pieces of the UI the test suites build toward.
+// and the pieces of the UI, which the engine page's program builds. The test
+// page waits for `ui.tests`; `engine_page` runs its function at `settings.set`
+// itself, in every mode and outside any task, so it may notify but not submit.
+// The box takes the focus each time it opens: at the first render and at each
+// turn's end, as a disabled box loses the focus. An open box takes it too when
+// ctrl 0 hides the console.
 //
 // `console.show`, a request of the AI worker, shows the console view as ctrl 0
 // does, then answers once tty 0 is open. A view that is opening or closing
@@ -29,7 +34,7 @@ declare namespace page {
 
   // The console view as the handlers drive it.
   interface ConsoleControl {
-    view_toggle(): void;
+    view_toggle(): boolean;
     view_show(): void;
     open_wanted(): boolean;
     open_is(): boolean;
@@ -85,4 +90,7 @@ declare namespace page {
 
   // The bring up of the UI thread, `run` getting its queue at `ui.tests`.
   function test_page(run: (tasks: queue.TaskQueue) => void): void;
+
+  // The engine page's bring up, `run` getting its queue at `settings.set`.
+  function engine_page(run: (tasks: queue.TaskQueue) => void): void;
 }

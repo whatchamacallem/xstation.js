@@ -21,12 +21,15 @@
 namespace test_all {
   // The name of the AI worker's thread, the TAP line, the stream's element.
   const constants = Object.freeze({
-    worker_name: "ai",
+    worker_name: "ai" as const,
     line_type: "tap.line",
     language: "typescript" as const,
     output_id: "tap_output",
     // The gold's choice of whether a failing test ends the stream.
     failfast_id: "typescript.test_all.failfast",
+    // The line whose task runs the worker's share, and its handler's version.
+    worker_type: "worker.tests",
+    handler_version: 0,
     // The line that starts the UI's stream, sent when the worker's ends.
     tests_type: "ui.tests",
     // The owner of that line, the UI thread.
@@ -100,7 +103,7 @@ namespace test_all {
   }
 
   // Runs what the gold picks: the worker's stream, or the wire rungs alone.
-  function worker_run(tasks: queue.TaskQueue, start: boot.TestStart): void {
+  function worker_run(tasks: queue.TaskQueue, start: boot.WorkerStart): void {
     const run = harness.gold_get(constants.run_id);
     if (run === constants.run_wire) {
       test_wire_rungs.rungs_run(tasks, start);
@@ -119,10 +122,29 @@ namespace test_all {
     tasks.line_notify(jslb.line_make(header, [], {}), constants.tests_owner);
   }
 
+  // In debug mode, runs the worker's share in a task of `worker.tests`.
+  function tests_notify(tasks: queue.TaskQueue, start: boot.WorkerStart): void {
+    if (!switches.debug_on()) {
+      return;
+    }
+    dispatch.handler_register(
+      constants.worker_type,
+      constants.handler_version,
+      () => {
+        worker_run(tasks, start);
+        return undefined;
+      },
+    );
+    const header = jslb.header_make(constants.worker_type, {
+      full: settings.names_full(),
+    });
+    tasks.line_notify(jslb.line_make(header, [], {}), constants.worker_name);
+  }
+
   // Runs this thread's tests through the bring up of the thread.
   export function suites_run(): void {
     if (self.name === constants.worker_name) {
-      boot.test_worker(worker_run);
+      boot.test_worker(tests_notify);
     } else {
       boot.test_page(page_run);
     }

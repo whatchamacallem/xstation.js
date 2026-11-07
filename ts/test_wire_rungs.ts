@@ -41,6 +41,9 @@ namespace test_wire_rungs {
     echo_type: "echo",
     tail_type: "verbose.tail",
     tail_thread: "server",
+    sync_type: "db.sync",
+    restore_type: "db.restore",
+    file_type: "db.file",
     source_type: "source.put",
     restart_type: "system.restart",
     open_type: "console.open",
@@ -242,7 +245,7 @@ namespace test_wire_rungs {
   // The chain of the rungs: the stream's block, the rung running, its steps.
   class RungChain {
     readonly #tasks: queue.TaskQueue;
-    readonly #start: boot.TestStart;
+    readonly #start: boot.WorkerStart;
     readonly #names: string[];
     readonly #block: tap_producer.Tracker;
     readonly #parent: tap_producer.Tracker;
@@ -266,6 +269,8 @@ namespace test_wire_rungs {
     #sent_sha256 = "";
     // The client of the mcp rung.
     #client: mcp.Client | undefined = undefined;
+    // The restore and file lines of the sync, in the order they came.
+    readonly #sync_lines: lines.Line[] = [];
     // When the rungs started, and when the rung running started.
     readonly #chain_started = performance.now();
     #rung_started = 0;
@@ -273,7 +278,7 @@ namespace test_wire_rungs {
     // Takes the queue, the start, and the rungs, checked before any line.
     constructor(
       tasks: queue.TaskQueue,
-      start: boot.TestStart,
+      start: boot.WorkerStart,
       names: unknown,
     ) {
       this.#tasks = tasks;
@@ -291,6 +296,7 @@ namespace test_wire_rungs {
         fit: () =>
           this.#blob_run("fit", harness.setting_get(constants.blob_setting)),
         mcp: () => this.#mcp_run(),
+        sync: () => this.#sync_run(),
         commits: () => this.#commits_run(),
         verbose: () => this.#verbose_run(),
         console: () => this.#console_run(),
@@ -303,6 +309,7 @@ namespace test_wire_rungs {
         blob: (rung, replies) => this.#blob_take(rung, replies),
         initialize: (rung, replies) => this.#initialize_take(rung, replies),
         call: (rung, replies) => this.#call_take(rung, replies),
+        sync: (rung, replies) => this.#sync_take(rung, replies),
         verbose: (rung, replies) => this.#verbose_take(rung, replies),
         restart: (rung, replies) => this.#restart_take(rung, replies),
       };
@@ -359,6 +366,12 @@ namespace test_wire_rungs {
       const replies = wake.replies as lines.Line[];
       const step = this.#steps[state.step];
       return this.#guard(state.rung, () => step(state.rung, replies));
+    }
+
+    // The handler of `db.restore` and `db.file`: keeps the line for the rung.
+    sync_keep(line: lines.Line): undefined {
+      this.#sync_lines.push(line);
+      return undefined;
     }
 
     // The rung names, each one of a rung, a session's end only last.
@@ -562,6 +575,56 @@ namespace test_wire_rungs {
       return this.#pass(rung);
     }
 
+    // sync: `db.sync`, whose pushes `sync_keep` takes before the reply.
+    #sync_run(): dispatch.Sleep {
+      const line = line_build(constants.sync_type, [], {});
+      return this.#submit("sync", "sync", line);
+    }
+
+    // The reply: the gold's databases named, each one's lines in that order.
+    #sync_take(rung: string, replies: lines.Line[]): undefined {
+      const reply = this.#reply_one(replies, constants.sync_type);
+      check(blobs_of(reply).length === 0, "the sync's reply has blobs");
+      const databases = gold_value("sync_databases") as string[];
+      const named = utility.json_text({ databases });
+      const came = utility.json_text(jslb.payload_of(reply));
+      check(came === named, `the sync's reply is ${came}, not ${named}`);
+      let index = 0;
+      for (const db of databases) {
+        index = this.#database_check(db, index);
+      }
+      const count = this.#sync_lines.length;
+      check(index === count, `the sync sent ${count} lines, not ${index}`);
+      return this.#pass(rung);
+    }
+
+    // The lines of a database from the index, returning the index after them.
+    #database_check(db: string, start: number): number {
+      const restore = this.#sync_line(start, constants.restore_type, db);
+      const files = jslb.payload_of(restore).files as number;
+      for (let number = 1; number <= files; number += 1) {
+        this.#sync_line(start + number, constants.file_type, db);
+      }
+      return start + files + 1;
+    }
+
+    // The line at the index: of the type and database, with one blob.
+    #sync_line(index: number, type: string, db: string): lines.Line {
+      const what = `the ${type} line of ${db}`;
+      check(index < this.#sync_lines.length, `${what} did not come`);
+      const line = this.#sync_lines[index];
+      const came = String(jslb.payload_of(line).db);
+      check(
+        type_of(line) === type && came === db,
+        `${what} is a ${String(type_of(line))} line of ${came}`,
+      );
+      const blobs = blobs_of(line);
+      check(blobs.length === 1, `${what} has ${blobs.length} blobs`);
+      const size = jslb.field_get(blobs[0], "size");
+      check(size !== 0, `${what}'s blob is empty`);
+      return line;
+    }
+
     // commits: each push line the gold lists, sent to the server in order.
     #commits_run(): undefined {
       for (const entry of gold_value("commits") as CommitEntry[]) {
@@ -739,7 +802,7 @@ namespace test_wire_rungs {
   // Runs the rungs the gold names as one TAP stream, the chain on `tasks`.
   export function rungs_run(
     tasks: queue.TaskQueue,
-    start: boot.TestStart,
+    start: boot.WorkerStart,
   ): void {
     const chain = new RungChain(tasks, start, gold_value("rungs"));
     const releases = new BroadcastChannel(
@@ -759,6 +822,12 @@ namespace test_wire_rungs {
       constants.handler_version,
       (wake) => chain.reply_take(wake),
     );
+    // A wire run has no store, so the sync's pushes come to the chain.
+    for (const type of [constants.restore_type, constants.file_type]) {
+      dispatch.handler_register(type, constants.handler_version, (line) =>
+        chain.sync_keep(line),
+      );
+    }
     chain.rung_follow();
   }
 }

@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests page_build.py with its one project callee, vectors_make.py, whose
-# suite has passed: the piece of the page's vectors, which vectors_make.py
-# writes anew into a scratch directory under build/, carries every file
-# written there and none that was left there before.
+# Tests page_build.py with its project callees, vectors_make.py and jslb.py,
+# whose suites have passed: the piece of the page's vectors, which
+# vectors_make.py writes anew into a scratch directory under build/, carries
+# every file written there and none that was left there before.
 
 import json, os, page_build, tempfile, unittest
 

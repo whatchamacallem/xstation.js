@@ -1,5 +1,8 @@
 {
+  "exec_bytes": 262144,
+  "listen_seconds": 0.5,
   "poll_seconds": 0.1,
   "quiet_seconds": 0.5,
+  "stop_seconds": 5,
   "wait_seconds": 60
 }

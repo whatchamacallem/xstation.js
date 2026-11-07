@@ -1,6 +1,8 @@
 // The read only debug overlays of ttys 1 and up on the UI thread: a `pre`
 // per tty holding the last `verbose_ring` rendered lines in both directions,
-// newest last, fed by `overlay.line`. ctrl n toggles tty n.
+// newest last, fed by `overlay.line`. ctrl n toggles tty n. A shown overlay's
+// newest line is kept at the bottom of the view of the element that scrolls
+// it, the container or one above it, as `debug` on the engine page.
 
 declare namespace overlay {
   class Overlay {

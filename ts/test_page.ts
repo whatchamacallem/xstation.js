@@ -471,21 +471,24 @@ namespace test_page {
     }
   }
 
-  // The page's column of the style: the debug views never cover the band.
+  // The page's column of the style: nothing covers the band.
   export class TestLayout extends unittest.TestCase {
-    // The debug area and the subtitle band, made in `setUp`.
+    // The picture, the debug area and the band, made in `setUp`.
     #parts: HTMLElement[] = [];
 
-    // Puts a debug area twice the viewport's height above a subtitle band.
+    // Puts the template's body: a shown picture, a tall debug area, the band.
     setUp(): void {
+      const image = document.createElement("canvas");
+      image.id = "image";
       const debug = document.createElement("div");
       debug.id = "debug";
       const tall = document.createElement("div");
       tall.style.height = `${2 * innerHeight}px`;
       debug.append(tall);
       const area = document.createElement("div");
-      area.id = "subtitle";
+      area.id = "band";
       const text = document.createElement("p");
+      text.id = "subtitle";
       text.textContent = constants.greeting;
       const permit = document.createElement("div");
       permit.id = "permit";
@@ -497,20 +500,21 @@ namespace test_page {
       const input = document.createElement("input");
       input.id = "input";
       form.append(input);
-      area.append(text, permit, form);
-      document.body.append(debug, area);
-      this.#parts = [debug, area, text, button, input];
+      area.append(text, form, permit);
+      document.body.append(image, debug, area);
+      this.#parts = [image, debug, area, text, button, input];
     }
 
-    // Takes the debug area and the band out of the document.
+    // Takes the picture, the debug area and the band out of the document.
     tearDown(): void {
       this.#parts[0].remove();
       this.#parts[1].remove();
+      this.#parts[2].remove();
     }
 
-    // A tall debug view covers no part of the band: text, button, input.
+    // No picture or tall debug view covers the band: text, button, input.
     test_band_uncovered(): void {
-      const [debug, area, ...shown] = this.#parts;
+      const [, debug, area, ...shown] = this.#parts;
       const debug_box = debug.getBoundingClientRect();
       const area_box = area.getBoundingClientRect();
       this.assertTrue(

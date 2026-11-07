@@ -421,6 +421,16 @@ namespace test_jslb {
       }
     }
 
+    // Bytes in a value render as a tag of their size; the encoder refuses them.
+    test_bytes_tagged(): void {
+      const header = jslb.header_make("echo");
+      const bytes = new Uint8Array(3);
+      const line = jslb.line_make(header, [], { rows: [[1, bytes]] });
+      this.assertEqual(jslb.line_render(line), gold_text("jslb_bytes_tag"));
+      const refused = gold_text("jslb_value_refused_uint8array");
+      this.raised_assert(Error, refused, () => jslb.line_encode(line));
+    }
+
     // Text holding half a surrogate pair is refused, in values and keys.
     test_text_refused(): void {
       const header = jslb.header_make("echo");

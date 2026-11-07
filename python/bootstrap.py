@@ -6,12 +6,12 @@
 # The platform services around the main loop, the command ttyd runs.
 # API/python/bootstrap.pyi holds its roles. Its error line goes in full names,
 # since it may come before the settings, and once the log is open the
-# exception's message is logged before that line is written. The modules beside
-# this file are imported inside the functions that use them, after their
-# bytecode has been sent to build/.
+# exception's message, then in debug mode that line's rendering, is logged
+# before that line is written. The modules beside this file are imported inside
+# the functions that use them, after their bytecode has been sent to build/.
 
-import argparse, fcntl, importlib.machinery, importlib.util, json, os, signal
-import sys, termios, traceback, tty, types
+import argparse, fcntl, importlib.machinery, importlib.util, os, signal, sys
+import termios, traceback, tty, types
 from collections.abc import Callable, Iterator
 from typing import Any, NamedTuple, NoReturn, cast
 
@@ -280,8 +280,7 @@ def _first_write(loaded: dict[str, Any], full: bool) -> None:
     }
     line = jslb.line_make(header, [], **payload)
     if switches.debug:
-        text = json.dumps(line[0], ensure_ascii=False, separators=(",", ":"))
-        verbose.log(i18n("bootstrap.start_submit", text))
+        verbose.log(i18n("bootstrap.start_submit", jslb.line_render(line)))
     _bytes_write(_text_bytes(jslb.line_encode(line)))
 
 
@@ -325,7 +324,7 @@ def _reply_read(loaded: dict[str, Any]) -> None:
         )
 
 
-# Opens the root's log, then runs `serve`, always logging a failure.
+# Opens the root's log, then runs `serve`, logging and writing any failure.
 def _logged_run(
     root: str, loaded: dict[str, Any], serve: Callable[[], int]
 ) -> int:
@@ -337,7 +336,8 @@ def _logged_run(
         return serve()
     except Exception as error:
         verbose.log(i18n("bootstrap.run_failed", str(error)))
-        raise
+        _error_write(error, True)
+        return _EXIT_FAILURE
 
 
 # Serves the engine: the main loop's prepare, `tap.start`, its reply, the loop.
@@ -424,12 +424,15 @@ def _cause_make(error: BaseException) -> dict[str, Any]:
     return cascade
 
 
-# Writes the one `error` line for an exception, in full names, with no `r`.
-def _error_write(error: Exception) -> None:
-    import jslb
+# Writes the one `error` line, full names, no `r`, traced when the log is open.
+def _error_write(error: Exception, log_open: bool) -> None:
+    import jslb, switches, verbose
+    from internationalization import i18n
 
     header = jslb.header_make(_ERROR_TYPE, full=True)
     line = jslb.line_make(header, [], **_cause_make(error))
+    if log_open and switches.debug:
+        verbose.log(i18n("bootstrap.line_error", jslb.line_render(line)))
     data = _text_bytes(jslb.line_encode(line))
     # A hangup from here on cannot end the run, which exits 1 itself.
     signal.signal(signal.SIGHUP, signal.SIG_IGN)
@@ -443,7 +446,7 @@ def bootstrap_run(argv: list[str]) -> int:
     except Exception as error:
         # A refused command line may be the engine's, raw before it writes.
         tty.setraw(_READ_FD, termios.TCSANOW)
-        _error_write(error)
+        _error_write(error, False)
         return _EXIT_FAILURE
     try:
         if arguments.role == _CONSOLE_ROLE:
@@ -453,7 +456,7 @@ def bootstrap_run(argv: list[str]) -> int:
             return _console_run(arguments.root, loaded)
         return _engine_run(arguments.root, arguments.main_loop)
     except Exception as error:
-        _error_write(error)
+        _error_write(error, False)
         return _EXIT_FAILURE
 
 

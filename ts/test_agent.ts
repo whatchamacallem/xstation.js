@@ -644,6 +644,8 @@ namespace test_agent {
         this.reply_script("http.request", chat_reply(answer));
       }
       this.reply_script("http.request", image_reply());
+      // The image tool keeps the picture, and the render sends it again.
+      this.reply_script("media.store", gold_line("media_store_reply"));
       this.reply_script("media.store", gold_line("media_store_reply"));
       this.reply_script("render", gold_line("render_reply"));
       return this.turn_run("say_castle", answers.slice(2));
@@ -733,7 +735,7 @@ namespace test_agent {
         size: image.size,
         d: utility.base64_decode(gold_value("image_base64") as string),
       };
-      this.assertEqual(shown, [stored, gold_line("render_arrival")]);
+      this.assertEqual(shown, [stored, stored, gold_line("render_arrival")]);
     }
 
     // Every message of the turn is a turn of the scene, appended in order.

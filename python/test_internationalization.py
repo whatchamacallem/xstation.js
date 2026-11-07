@@ -4,15 +4,24 @@
 #
 # Tests the lookup and the placeholder rule of the strings module on the
 # texts of the real strings file, each found by its placeholders, then the
-# real strings file and the names the sources look up in it.
+# real strings file and the names the sources look up in it, then the read at
+# import, in scratch checkouts under build/ that hold the module as a link, so
+# that its lines count as the module's own.
 
-import glob, json, os, re, unittest
+import glob, json, os, re, runpy, tempfile, unittest
 from collections.abc import Callable
 from internationalization import i18n
-from typing import cast
+from typing import Any, cast
 
 # The root of the checkout.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Where the scratch directories go.
+_BUILD_PATH = os.path.join(_ROOT_PATH, "build")
+
+# The file name of the strings module and its file in the checkout.
+_MODULE_NAME = "internationalization.py"
+_MODULE_PATH = os.path.join(_ROOT_PATH, "python", _MODULE_NAME)
 
 # The strings file of the checkout.
 _STRINGS_PATH = os.path.join(_ROOT_PATH, "i18n", "en-US.json")
@@ -134,3 +143,47 @@ class TestStrings(unittest.TestCase):
                 text = file.read()
             for name in _CALL_NAME.findall(text):
                 self.assertTrue(name in strings, f"{path}: {name}")
+
+
+# Tests the read at import, in a scratch checkout the module is linked into.
+class TestImport(unittest.TestCase):
+    # Makes the scratch checkout, which has the strings module as a link.
+    def setUp(self) -> None:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+        scratch = self.enterContext(
+            tempfile.TemporaryDirectory(dir=_BUILD_PATH)
+        )
+        os.mkdir(os.path.join(scratch, "i18n"))
+        os.mkdir(os.path.join(scratch, "python"))
+        self.strings_path = os.path.join(scratch, "i18n", "en-US.json")
+        self.link_path = os.path.join(scratch, "python", _MODULE_NAME)
+        os.symlink(_MODULE_PATH, self.link_path)
+
+    # Writes the value as the strings file, then imports the module anew.
+    def module_import(self, value: object) -> dict[str, Any]:
+        with open(self.strings_path, "w", encoding="utf-8") as file:
+            json.dump(value, file)
+        return runpy.run_path(self.link_path)
+
+    # Asserts the import refuses the value, naming the file and the reason.
+    def import_fails(self, value: object, reason: str) -> None:
+        with self.assertRaises(ValueError) as caught:
+            self.module_import(value)
+        message = f"{self.strings_path}: {reason}"
+        self.assertEqual(caught.exception.args, (message,))
+
+    # The file of the `i18n` directory beside the module's own is the one read.
+    def test_file_beside(self) -> None:
+        self.assertNotIn(_NAME_ABSENT, _strings_read())
+        module = self.module_import({_NAME_ABSENT: "a {0}"})
+        self.assertEqual(module["i18n"](_NAME_ABSENT, "b"), "a b")
+
+    # A file that is not a JSON object is refused.
+    def test_file_list(self) -> None:
+        self.import_fails([_NAME_ABSENT], "not a JSON object")
+
+    # A value that is not a string is refused, by its name.
+    def test_value_number(self) -> None:
+        self.import_fails(
+            {_NAME_ABSENT: 1}, f"{_NAME_ABSENT!r} is not a string"
+        )

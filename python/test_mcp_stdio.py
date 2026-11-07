@@ -11,14 +11,17 @@
 # that is not a JSON object, or holds a bad number, ending the loop with an
 # exception, its texts against the gold. Then the runner refuses a command
 # line with no root, its usage error on a pipe that is the stderr of a
-# forked child. The loop that waits on its input and the runner run in
-# forked children, each of which writes how it ended to a file under
-# build/, then kills itself.
+# forked child, and serves a root in build/, its stdin a pipe and its stdout
+# a file: the tools of `engine_system`, the root's settings and parameters,
+# the transport's encoding, and the file run as a program through `runpy`.
+# The loop that waits on its input and the runner run in forked children,
+# each of which writes how it ended to a file under build/, then kills
+# itself.
 
-import harness, json, mcp, mcp_stdio, os, select, signal, sys, tempfile
-import traceback, unittest
+import harness, io, json, mcp, mcp_stdio, os, runpy, select, signal, switches
+import sys, tempfile, traceback, unittest
 from collections.abc import Callable
-from typing import Any, TextIO
+from typing import Any, TextIO, cast
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -35,8 +38,35 @@ _CHILD_SECONDS: int = harness.gold_get(f"{_GOLD_ID}.child_seconds")
 # The most bytes read from a pipe at once.
 _READ_BYTES: int = harness.gold_get(f"{_GOLD_ID}.read_bytes")
 
+# The tools of `engine_system`, as `tools/list` names them.
+_SERVER_TOOLS: list[str] = harness.gold_get(f"{_GOLD_ID}.server_tools")
+
+# The file an external agent starts, which a child runs through `runpy`.
+_STDIO_PATH = os.path.join(_ROOT_PATH, "python", "mcp_stdio.py")
+
+# The name a file runs under as a program.
+_PROGRAM_NAME = "__main__"
+
 # The file in its scratch directory a child writes how its work ended to.
 _ENDING_NAME = "ending.txt"
+
+# The child's stdout, a file: its `sys.stdout` keeps the parent's seekability.
+_OUTPUT_NAME = "output.txt"
+
+# The permissions of the stdout file.
+_OUTPUT_MODE = 0o600
+
+# The root's directory in its scratch directory.
+_ROOT_NAME = "root"
+
+# The name of the settings file in a root.
+_SETTINGS_NAME = "settings.json"
+
+# The setting a root's refused settings file lacks.
+_SETTING_LACKED = "line_max"
+
+# The encoding the child's streams have before the runner takes them.
+_ENCODING_NARROW = "ascii"
 
 # The message of the error the tool of the test raises.
 _FAIL_MESSAGE = "boom"
@@ -54,6 +84,12 @@ _PING_LINE = '{"jsonrpc":"2.0","id":1,"method":"ping"}'
 
 # The response to it.
 _PING_REPLY = '{"jsonrpc":"2.0","id":1,"result":{}}'
+
+# A ping whose id is a letter outside ASCII, as a client writes it.
+_WIDE_LINE = '{"jsonrpc":"2.0","id":"\xe9","method":"ping"}'
+
+# The response to it, in the `utf-8` codec MCP's stdio transport requires.
+_WIDE_REPLY = '{"jsonrpc":"2.0","id":"\xe9","result":{}}'
 
 # A client's `initialize` request, which opens a session.
 _INITIALIZE_LINE = (
@@ -153,6 +189,7 @@ class PipeCase(unittest.TestCase):
         os.makedirs(_BUILD_PATH, exist_ok=True)
         scratch = tempfile.TemporaryDirectory(dir=_BUILD_PATH)
         self.addCleanup(scratch.cleanup)
+        self.scratch = scratch.name
         self.ending_path = os.path.join(scratch.name, _ENDING_NAME)
         self.servers: list[mcp.Server] = []
         self.running: set[int] = set()
@@ -365,3 +402,121 @@ class TestErrors(PipeCase):
         last = errors.splitlines()[-1]
         expected = _text_get("argparse_root_required")
         self.assertTrue(last.endswith(expected), errors)
+
+
+# Runs the runner on a root in a forked child, on streams of the child's own.
+class RootCase(PipeCase):
+    # Makes the root, with the checkout's settings and the run's parameters.
+    def setUp(self) -> None:
+        super().setUp()
+        self.root = os.path.join(self.scratch, _ROOT_NAME)
+        os.mkdir(self.root)
+        self.arguments = ["--root", self.root]
+        self.settings_write(harness.settings_copy())
+        self.parameters_write(switches.debug)
+
+    # Writes the values as the root's settings file.
+    def settings_write(self, values: dict[str, Any]) -> None:
+        path = os.path.join(self.root, _SETTINGS_NAME)
+        with open(path, "w", encoding="utf-8") as file:
+            json.dump(values, file)
+
+    # Writes the run's parameters as the root's, with `debug` as given.
+    def parameters_write(self, debug: bool) -> None:
+        parameters = {**switches.switches_get(), "debug": debug}
+        switches.parameters_write(self.root, parameters)
+
+    # Runs the work in a child, stdin a pipe of the text and stdout a file.
+    def child_serve(
+        self, text: str, work: Callable[[], str]
+    ) -> tuple[str, str]:
+        input_read, input_write = os.pipe()
+        output_path = os.path.join(self.scratch, _OUTPUT_NAME)
+
+        # Puts the pipe and the file on the streams, then runs the work.
+        def streams_serve() -> str:
+            os.close(input_write)
+            os.dup2(input_read, 0)
+            os.close(input_read)
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            output = os.open(output_path, flags, _OUTPUT_MODE)
+            os.dup2(output, 1)
+            os.close(output)
+            return work()
+
+        pid = self.child_fork(streams_serve)
+        os.close(input_read)
+        with open(input_write, "wb") as writer:
+            writer.write(text.encode("utf-8"))
+        ending = self.child_ending(pid)
+        with open(output_path, encoding="utf-8") as file:
+            output = file.read()
+        os.remove(output_path)
+        return ending, output
+
+    # Serves the text on the root, returns how it ended and its output.
+    def root_serve(self, text: str) -> tuple[str, str]:
+        return self.child_serve(
+            text, lambda: repr(mcp_stdio.stdio_serve(self.arguments))
+        )
+
+
+# Tests the runner on a root, with the tools of `engine_system`.
+class TestServe(RootCase):
+    # Each line is answered, the root's tools listed, end of input exits 0.
+    def test_root_served(self) -> None:
+        lines = [_INITIALIZE_LINE, _INITIALIZED_LINE, _LIST_LINE]
+        text = "".join(line + "\n" for line in lines)
+        ending, output = self.root_serve(text)
+        self.assertEqual(ending, repr(0))
+        opened, listed = output.splitlines()
+        self.assertEqual(opened, _INITIALIZE_REPLY)
+        tools = json.loads(listed)["result"]["tools"]
+        self.assertEqual([tool["name"] for tool in tools], _SERVER_TOOLS)
+
+    # A settings file the reader refuses ends the runner with its error.
+    def test_settings_refused(self) -> None:
+        values = harness.settings_copy()
+        del values[_SETTING_LACKED]
+        self.settings_write(values)
+        ending, output = self.root_serve("")
+        message = _text_get("settings_key_missing_line_max")
+        self.assertEqual(ending.splitlines()[-1], f"ValueError: {message}")
+        self.assertEqual(output, "")
+
+    # The debug switch is the root's parameter, whatever the run's is.
+    def test_switches_root(self) -> None:
+        # Serves the root, then returns the debug switch it left.
+        def debug_read() -> str:
+            mcp_stdio.stdio_serve(self.arguments)
+            return repr(switches.debug)
+
+        for debug in (False, True):
+            with self.subTest(debug=debug):
+                self.parameters_write(debug)
+                served = self.child_serve("", debug_read)
+                self.assertEqual(served, (repr(debug), ""))
+
+    # The streams take the transport's encoding in place of the ones they had.
+    def test_streams_encoded(self) -> None:
+        # Tells the streams they are ASCII, then serves the root.
+        def narrow_serve() -> str:
+            for stream in (sys.stdin, sys.stdout):
+                wrapper = cast(io.TextIOWrapper, stream)
+                wrapper.reconfigure(encoding=_ENCODING_NARROW)
+            return repr(mcp_stdio.stdio_serve(self.arguments))
+
+        ending, output = self.child_serve(_WIDE_LINE + "\n", narrow_serve)
+        self.assertEqual(ending, repr(0))
+        self.assertEqual(output, _WIDE_REPLY + "\n")
+
+    # Run as a program, the file serves the root its command line names.
+    def test_program_run(self) -> None:
+        # Runs the file as an agent starts it, the root on its command line.
+        def program_run() -> str:
+            sys.argv = [_STDIO_PATH, *self.arguments]
+            return repr(runpy.run_path(_STDIO_PATH, run_name=_PROGRAM_NAME))
+
+        ending, output = self.child_serve(_PING_LINE + "\n", program_run)
+        self.assertEqual(ending, "exit 0")
+        self.assertEqual(output, _PING_REPLY + "\n")

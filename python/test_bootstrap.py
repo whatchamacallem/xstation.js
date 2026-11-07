@@ -11,8 +11,8 @@
 # loop never reach another test.
 
 import bootstrap, contextlib, errno, fcntl, harness, json, os, pty, resource
-import signal, sqlite3, switches, sys, tempfile, termios, time, traceback
-import unittest
+import runpy, signal, sqlite3, switches, sys, tempfile, termios, time
+import traceback, unittest
 from typing import Any, NamedTuple
 
 # The checkout's top directory, above this file's `python/`.
@@ -20,6 +20,9 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
+
+# The file ttyd starts as a program, with the arguments after its name.
+_BOOTSTRAP_PATH = os.path.join(_ROOT_PATH, "python", "bootstrap.py")
 
 # The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_bootstrap"
@@ -156,6 +159,21 @@ _LOOP_EXEC = (
     "    os.execv(sys.executable, [sys.executable, '-c', probe, path])\n"
 )
 
+# A main loop whose `loop_prepare` ends the input, a pipe nothing writes to.
+_LOOP_ENDED = (
+    "import os\n"
+    "\n"
+    "\n"
+    "def loop_prepare(root):\n"
+    "    read_fd, write_fd = os.pipe()\n"
+    "    os.close(write_fd)\n"
+    "    os.dup2(read_fd, 0)\n"
+    "\n"
+    "\n"
+    "def loop_run(read_fd, write_fd, root):\n"
+    "    pass\n"
+)
+
 # The reply to `tap.start` in short names.
 _REPLY_SHORT = b'{"0":{"t":"tap.start","r":101}}\r'
 
@@ -244,14 +262,21 @@ def _line_bytes(name: str) -> bytes:
     return text.encode("utf-8") + b"\r"
 
 
-# The log line of the trace of `tap.start`, in debug mode.
-def _trace_line() -> tuple[str, str]:
-    return (_SERVER_THREAD, _text_get("bootstrap_start_submit"))
+# The log line of the trace of `tap.start`, read back whole, in debug mode.
+def _trace_line(first: dict[str, Any]) -> tuple[str, str]:
+    text = json.dumps(first, ensure_ascii=False, separators=(",", ":"))
+    return (_SERVER_THREAD, _text_get("bootstrap_start_submit", text))
 
 
 # The log line of a failure with the message.
 def _failure_line(message: str) -> tuple[str, str]:
     return (_SERVER_THREAD, _text_get("bootstrap_run_failed", message))
+
+
+# The log line of the trace of an `error` line, as the pty gave it.
+def _error_line(line: dict[str, Any]) -> tuple[str, str]:
+    text = json.dumps(line, ensure_ascii=False, separators=(",", ":"))
+    return (_SERVER_THREAD, _text_get("bootstrap_line_error", text))
 
 
 # The thread and text of each line of the root's log, which must be open.
@@ -391,6 +416,16 @@ def _lock_hold(root: str) -> tuple[int, int]:
     return pid, release_write
 
 
+# Runs the file as ttyd starts it, and returns the code of its exit.
+def _program_run(argv: list[str]) -> object:
+    sys.argv = [_BOOTSTRAP_PATH, *argv]
+    try:
+        runpy.run_path(_BOOTSTRAP_PATH, run_name="__main__")
+    except SystemExit as error:
+        return error.code
+    raise AssertionError(f"{_BOOTSTRAP_PATH} ended with no exit")
+
+
 # In the forked child: `login_tty`, environment, run, ending to file, a kill.
 def _child_main(
     slave: int,
@@ -398,6 +433,7 @@ def _child_main(
     environment: dict[str, str],
     path: str,
     spawn_refused: bool,
+    program: bool,
 ) -> None:
     try:
         try:
@@ -407,7 +443,8 @@ def _child_main(
             if spawn_refused:
                 # The user may own no more processes, so none can start.
                 resource.setrlimit(resource.RLIMIT_NPROC, (0, 0))
-            ending = repr(bootstrap.bootstrap_run(argv))
+            run = _program_run if program else bootstrap.bootstrap_run
+            ending = repr(run(argv))
         except BaseException:
             ending = traceback.format_exc()
         with open(path, "w", encoding="utf-8") as file:
@@ -426,6 +463,7 @@ class EngineChild:
         argv: list[str],
         environment: dict[str, str],
         spawn_refused: bool = False,
+        program: bool = False,
     ) -> None:
         self.ending_path = os.path.join(made.scratch, _ENDING_NAME)
         master, slave = pty.openpty()
@@ -435,7 +473,12 @@ class EngineChild:
         if pid == 0:
             os.close(master)
             _child_main(
-                slave, argv, environment, self.ending_path, spawn_refused
+                slave,
+                argv,
+                environment,
+                self.ending_path,
+                spawn_refused,
+                program,
             )
         os.close(slave)
         self.pid = pid
@@ -696,7 +739,8 @@ class TestReply(unittest.TestCase):
         self.assertEqual(_error_check(self, line), expected)
         self.assertFalse(os.path.exists(os.path.join(made.root, _RUN_NAME)))
         self.assertEqual(
-            _log_read(made.root), [_trace_line(), _failure_line(expected)]
+            _log_read(made.root),
+            [_trace_line(first), _failure_line(expected), _error_line(line)],
         )
 
     # Each reply that is not the empty reply is refused, showing what came.
@@ -736,6 +780,23 @@ class TestReply(unittest.TestCase):
         given = json.dumps(reply, separators=(",", ":")).encode() + b"\r"
         expected = _text_get("bootstrap_reply_blob", str(size))
         self.refusal_check(made, given, expected)
+
+    # An input that ends before the reply is logged, then one error line.
+    def test_reply_closed(self) -> None:
+        made = _root_make(self, True)
+        _loop_write(made.root, _LOOP_ENDED)
+        argv = _engine_argv(made.root)
+        child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+        first = child.line_read()
+        self.assertEqual(first["0"], _line_get("first_full")["0"])
+        line = child.line_read()
+        self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
+        expected = _text_get("bootstrap_reply_closed")
+        self.assertEqual(_raised_check(self, line, "EOFError"), expected)
+        self.assertEqual(
+            _log_read(made.root),
+            [_trace_line(first), _failure_line(expected), _error_line(line)],
+        )
 
 
 # Tests the choice and the loading of the main loop file.
@@ -817,7 +878,8 @@ class TestConsole(unittest.TestCase):
         self.assertTrue(message.startswith(_SPAWN_REFUSED), message)
         started = (_SERVER_THREAD, _text_get("verbose_exec_run"))
         self.assertEqual(
-            _log_read(made.root), [started, _failure_line(message)]
+            _log_read(made.root),
+            [started, _failure_line(message), _error_line(line)],
         )
 
     # A root outside `/home/`, which dash's sandbox hides, is refused first.
@@ -864,7 +926,7 @@ class TestError(unittest.TestCase):
         self.assertEqual(list(line), ["0", "message", "stack"])
         _log_absent(self, made.root)
 
-    # Outside debug mode the error line is still in full names.
+    # Outside debug mode the error line is in full names and is not logged.
     def test_error_full(self) -> None:
         made = _root_make(self, False)
         _loop_write(made.root, _LOOP_TEXT)
@@ -873,6 +935,8 @@ class TestError(unittest.TestCase):
         line = child.line_read()
         self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
         self.assertEqual(line["0"], _line_get("error")["0"])
+        message = line["message"]
+        self.assertEqual(_log_read(made.root), [_failure_line(message)])
 
 
 # Tests the root's parameters, which set the switches of the run.
@@ -973,10 +1037,10 @@ class TestLog(unittest.TestCase):
             _loop_write(made.root, _LOOP_TEXT)
             argv = _engine_argv(made.root)
             child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
-            child.line_read()
+            first = child.line_read()
             child.bytes_write(_REPLY_FULL + _AFTER_REPLY)
             self.assertEqual(child.run_end(), (_ENDING_SERVED, b""))
-            self.assertEqual(_log_read(made.root), [_trace_line()])
+            self.assertEqual(_log_read(made.root), [_trace_line(first)])
 
     # Outside debug mode a run that does not fail logs nothing, at any level.
     def test_first_quiet(self) -> None:
@@ -989,3 +1053,31 @@ class TestLog(unittest.TestCase):
             self.assertEqual(child.line_read(), _line_get("tail_short_reply"))
             self.assertEqual(child.hangup(), _HUNG_UP)
             self.assertEqual(_log_read(made.root), [])
+
+
+# Tests the file run as a program, which is how ttyd starts it.
+class TestProgram(unittest.TestCase):
+    # The words after the file's name reach the run, and exit 0 ends a serve.
+    def test_program_served(self) -> None:
+        made = _root_make(self, True)
+        _loop_write(made.root, _LOOP_TEXT)
+        argv = _engine_argv(made.root)
+        child = EngineChild(
+            self, made, argv, _ENGINE_ENVIRONMENT, program=True
+        )
+        first = child.line_read()
+        self.assertEqual(first["0"], _line_get("first_full")["0"])
+        child.bytes_write(_REPLY_FULL + _AFTER_REPLY)
+        self.assertEqual(child.run_end(), (_ENDING_SERVED, b""))
+        self.assertEqual(
+            _marker_read(made.root, _RUN_NAME),
+            [0, 1, made.root, _AFTER_REPLY.decode("utf-8")],
+        )
+
+    # The code the run returns is the program's: a refused command line is 1.
+    def test_program_failed(self) -> None:
+        made = _root_make(self, True)
+        child = EngineChild(self, made, [], _ENGINE_ENVIRONMENT, program=True)
+        line = child.line_read()
+        self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
+        _raised_check(self, line, "argparse.ArgumentError")

@@ -63,7 +63,7 @@ def archive_unpack(archive_path: str, source_path: str) -> None:
 def checkout_build() -> str:
     loaded = settings.settings_load(_SETTINGS_PATH)["powershell"]
     archive = os.path.join(_ROOT_PATH, loaded["ttyd_archive"])
-    if switches.anthropic:  # pragma: no cover
+    if switches.anthropic:
         archive = third_party_fetch.package_path()
     return inputs_build(
         archive,

@@ -205,7 +205,9 @@ namespace test_tools_browser {
         '_seconds":{"type":"number"}},"required":["until","timeout_se' +
         'conds"]},"_meta":{"xsjs":{"permit":true}}}',
       '{"name":"verbose_tail","description":"The last lines of a' +
-        ' thread\'s verbose ring: ui, ai or server.","inputSchema":' +
+        " thread's verbose ring: ui, ai or server. count is a maximum," +
+        " as a reply holds the newest lines that fit below line_max." +
+        '","inputSchema":' +
         '{"type":"object","properties":{"thread":{"type":"string"},' +
         '"count":{"type":"integer"}},"required":["thread","count"]}}',
     ]),
@@ -928,16 +930,87 @@ namespace test_tools_browser {
       store.kv_put(`/${world}/scene`, digest_entry(scene).data);
     }
 
-    // The render names the world's scene, the image and the subtitle.
-    test_render_recorded(): void {
+    // Keeps the scene and the image, which no `media.store` has sent yet.
+    image_put(data: Uint8Array): void {
       this.scene_put("castle_world", "arrival_ref");
-      this.reply_script("render", gold_line("render_reply"));
-      const result = this.tool_call("render", {
+      this.dbs_create(["_files"]);
+      this.store_get().kv_put(constants.image_ref, data);
+    }
+
+    // The bytes of an image over `overflow_bytes`, which a cache file holds.
+    image_large(): Uint8Array {
+      const overflow = harness.setting_get(constants.overflow_setting);
+      const count = Math.ceil(
+        ((overflow as number) + 1) / constants.cached_text.length,
+      );
+      return utility.utf8_encode(constants.cached_text.repeat(count));
+    }
+
+    // The arguments of the render of the image the tests keep.
+    render_args(): { [key: string]: unknown } {
+      return {
         image: constants.image_ref,
         subtitle: constants.arrival_subtitle,
-      });
+      };
+    }
+
+    // Renders the image, then checks that its bytes went before the render.
+    render_checked(data: Uint8Array): void {
+      this.reply_script("media.store", gold_line("media_store_reply"));
+      this.reply_script("render", gold_line("render_reply"));
+      const result = this.tool_call("render", this.render_args());
       this.assertEqual(this.text_of(result), "{}");
-      this.assertEqual(this.got_unmarked(), [gold_line("render_arrival")]);
+      const stored = gold_line("media_store");
+      stored[1] = { size: data.length, d: data };
+      this.assertEqual(this.got_unmarked(), [
+        stored,
+        gold_line("render_arrival"),
+      ]);
+    }
+
+    // An image the page does not hold reaches it from the store, then renders.
+    test_render_recorded(): void {
+      const image = digest_entry("arrival_image");
+      this.image_put(image.data);
+      this.render_checked(image.data);
+    }
+
+    // An image a cache file holds goes as bytes in memory, never as a handle.
+    test_render_cached(): void {
+      const data = this.image_large();
+      this.image_put(data);
+      const row = this.store_get().kv_get(constants.image_ref);
+      this.assertEqual(typeof row.data, "string");
+      this.render_checked(data);
+    }
+
+    // A lost image fails as the store's `substrate.file_lost`, nothing sent.
+    test_render_lost(): void {
+      const data = this.image_large();
+      this.image_put(data);
+      const store = this.store_get();
+      const image = store.db_snapshot("_files");
+      store.kv_delete(constants.image_ref);
+      store.db_restore("_files", image.data, []);
+      const text = gold_text("substrate_file_lost_image");
+      const error = this.failure_of("render", this.render_args());
+      this.assertEqual(
+        error.message,
+        text.replaceAll("{1}", utility.sha256_hex(data)),
+      );
+      this.assertEqual(far.got, []);
+    }
+
+    // An image with no row fails as `substrate.key_missing`, nothing sent.
+    test_render_unknown(): void {
+      this.scene_put("castle_world", "arrival_ref");
+      this.dbs_create(["_files"]);
+      const error = this.failure_of("render", this.render_args());
+      this.assertEqual(
+        error.message,
+        gold_text("substrate_key_missing_image"),
+      );
+      this.assertEqual(far.got, []);
     }
 
     // A render with no image is black, as the boot's render is.

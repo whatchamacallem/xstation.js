@@ -97,6 +97,9 @@ _TAP_DOCUMENTS = 2
 _TAP_FILE_PATH = os.path.join("tap", "typescript.tap")
 _TAP_VERSION = "TAP version 14\n"
 
+# The program whose run builds ttyd, which a missing ttyd names.
+_TTYD_BUILDER = "./test_posix.sh"
+
 # ttyd serves the page on this port.
 _TTYD_PORT = 7681
 _TTYD_PAGE_URL = f"http://localhost:{_TTYD_PORT}/"
@@ -536,7 +539,9 @@ def ttyd_serve(
     settings = values["powershell"]
     ttyd_path = os.path.join(_CHECKOUT_PATH, settings["ttyd_build"], "ttyd")
     if not os.path.isfile(ttyd_path):
-        raise RuntimeError(f"{ttyd_path} is missing: ttyd_build.py builds it")
+        raise RuntimeError(
+            f"{ttyd_path} is missing: a run of {_TTYD_BUILDER} builds it"
+        )
     port_check(_TTYD_PORT)
     arguments = [
         ttyd_path,

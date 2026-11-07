@@ -16,10 +16,11 @@
 # folder unpacks the link to the stripped target, then fails at cmake. The
 # option takes its value after =, since an unpatched ttyd takes a separate
 # value as its start command and starts serving. With the switch anthropic
-# the archive is the package manager's, as the run's build is.
+# the archive is the package manager's, as the run's build is, and a forked
+# child turns the switch on to reach that branch of checkout_build.
 
-import harness, io, os, subprocess, switches, tarfile, tempfile
-import third_party_fetch, ttyd_build, unittest
+import harness, io, os, signal, subprocess, switches, tarfile, tempfile
+import third_party_fetch, traceback, ttyd_build, unittest
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -98,6 +99,21 @@ def tree_stamps(path: str) -> dict[str, tuple[int, int]]:
     return stamps
 
 
+# In the forked child: the run's build under the switch, its ending, a kill.
+def child_packaged(write_fd: int) -> None:
+    try:
+        try:
+            parameters = {**switches.switches_get(), "anthropic": True}
+            switches.switches_apply(parameters)
+            ending = ttyd_build.checkout_build()
+        except BaseException:
+            ending = traceback.format_exc()
+        with open(write_fd, "w", encoding="utf-8") as file:
+            file.write(ending)
+    finally:
+        os.kill(os.getpid(), signal.SIGKILL)
+
+
 # Tests of the run's build, made by the bring up where the settings say.
 class TestCheckout(unittest.TestCase):
     # The path is the settings' build directory's, and a second call keeps it.
@@ -108,6 +124,25 @@ class TestCheckout(unittest.TestCase):
         stamps = tree_stamps(build)
         self.assertEqual(ttyd_build.checkout_build(), path)
         self.assertEqual(tree_stamps(build), stamps)
+
+    # Under the switch anthropic the archive is the package manager's file.
+    def test_archive_packaged(self) -> None:
+        read_fd, write_fd = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            os.close(read_fd)
+            child_packaged(write_fd)
+        os.close(write_fd)
+        with open(read_fd, encoding="utf-8") as file:
+            ending = file.read()
+        status = os.waitpid(pid, 0)[1]
+        self.assertEqual(os.waitstatus_to_exitcode(status), -signal.SIGKILL)
+        package = third_party_fetch.package_path()
+        if os.path.exists(package):
+            build = setting_path("powershell.ttyd_build")
+            self.assertEqual(ending, os.path.join(build, _BINARY_NAME))
+        else:
+            self.assertIn(package, ending)
 
     # The version option writes the gold's line and exits 0.
     def test_version_written(self) -> None:

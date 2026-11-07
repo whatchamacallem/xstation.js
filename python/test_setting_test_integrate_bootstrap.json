@@ -46,12 +46,13 @@
   },
   "read_bytes": 65536,
   "texts": {
-    "bootstrap_start_submit": "server submits to ai: {\"type\":\"tap.start\",\"id\":101}",
+    "bootstrap_start_submit": "server submits to ai: {0}",
     "dispatch_handler_unknown": "No handler is registered for type no.such version 0.",
     "engine_tap_browser_cause": "caused by: first",
     "engine_tap_browser_failed": "The browser failed: boom",
-    "main_loop_line_dispatch_tail": "server dispatches from ai: {\"i\":1,\"t\":\"verbose.tail\"}",
-    "main_loop_line_dispatch_unknown": "server dispatches from ai: {\"i\":1,\"t\":\"no.such\"}",
+    "main_loop_line_dispatch_tail": "server dispatches from ai: {\"0\":{\"i\":1,\"t\":\"verbose.tail\"},\"count\":10,\"thread\":\"server\"}",
+    "main_loop_line_dispatch_unknown": "server dispatches from ai: {\"0\":{\"i\":1,\"t\":\"no.such\"}}",
+    "main_loop_line_error": "server reports to ai: {0}",
     "main_loop_serve_failed_unknown": "The server failed while serving the engine tty: No handler is registered for type no.such version 0."
   }
 }

@@ -105,7 +105,9 @@ def _wire_pass(line: jslb.Object) -> jslb.Object:
 
 
 # The reply a dispatch returned, which must be a line.
-def _reply_of(result: jslb.Object | dispatch.Failure | None) -> jslb.Object:
+def _reply_of(
+    result: jslb.Object | dispatch.Failure | dispatch.Stream | None,
+) -> jslb.Object:
     if not isinstance(result, jslb.Object):
         raise AssertionError(f"{result!r} is no reply line")
     return result

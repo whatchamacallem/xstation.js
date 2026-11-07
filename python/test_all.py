@@ -73,6 +73,7 @@ _MODULES: list[tuple[str, str]] = [
     ("test_dispatch", "smoke-test"),
     ("test_settings", "smoke-test"),
     ("test_vectors_make", "smoke-test"),
+    ("test_xsjs_log", "smoke-test"),
     ("test_engine_db", "smoke-test"),
     ("test_engine_doc", "smoke-test"),
     ("test_engine_kv", "smoke-test"),
@@ -94,11 +95,13 @@ _MODULES: list[tuple[str, str]] = [
     ("test_mcp_stdio", "smoke-test"),
     ("test_bootstrap", "smoke-test"),
     ("test_bootstrap_dash", "smoke-test"),
+    ("test_xsjs_serve", "smoke-test"),
     ("test_tap_pair", "smoke-test"),
     ("test_integrate_test_posix", "smoke-test"),
     ("test_integrate_dispatch", "smoke-test"),
     ("test_integrate_settings", "smoke-test"),
     ("test_integrate_vectors_make", "smoke-test"),
+    ("test_integrate_xsjs_log", "smoke-test"),
     ("test_integrate_engine_db", "smoke-test"),
     ("test_integrate_engine_doc", "smoke-test"),
     ("test_integrate_engine_kv", "smoke-test"),
@@ -115,6 +118,7 @@ _MODULES: list[tuple[str, str]] = [
     ("test_integrate_main_loop", "smoke-test"),
     ("test_integrate_mcp_stdio", "smoke-test"),
     ("test_integrate_bootstrap", "smoke-test"),
+    ("test_integrate_xsjs_serve", "smoke-test"),
     ("test_mcp_stdio_process", "smoke-test"),
     ("test_tap_tty", "smoke-test"),
 ]
@@ -171,6 +175,9 @@ _B_UNIT: list[tuple[str, str]] = [
     ("test_tools_browser.ts", "smoke-test"),
     ("test_agent.ts", "smoke-test"),
     ("test_boot.ts", "smoke-test"),
+    ("test_engine.ts", "smoke-test"),
+    ("test_engine_image.ts", "smoke-test"),
+    ("test_engine_page.ts", "smoke-test"),
 ]
 
 # Group B's integration phase, by the layer of each block.
@@ -193,6 +200,7 @@ _C_INTEGRATION: list[tuple[str, str]] = [
     ("test_worker_ai_console.ts", "smoke-test"),
     ("test_tools_browser_console.ts", "smoke-test"),
     ("test_console_open.ts", "smoke-test"),
+    ("test_integrate_engine.ts", "smoke-test"),
 ]
 
 # The last phase, the Python suite of the tool that opens the whole page.
@@ -349,12 +357,13 @@ _COUNTED: dict[str, tuple[str, ...]] = {
     "failing_suite": (),
     "test_bootstrap_dash": ("bootstrap",),
     "test_devtools_chrome": ("devtools",),
-    "test_devtools_powershell": ("devtools",),
+    "test_devtools_powershell": ("devtools_windows",),
     "test_jslb_vectors": ("jslb",),
     "test_mcp_stdio_process": (),
     "test_page_build_node": ("page_build",),
     "test_page_build_tsc": ("page_build",),
     "test_reformat_formatters": ("reformat",),
+    "test_substrate_limit": ("substrate",),
     "test_tap_pair": (),
     "test_tap_pair_ts": (),
     "test_tap_tty": (),
@@ -1186,7 +1195,7 @@ def main(arguments: list[str]) -> int:
         " and the TypeScript blocks in the testing order, the tests of the TAP"
         " modules first, as one"
         " TAP stream on stdout, check the stream, then run the checks of"
-        " test_posix.py, the wire test and the browser test.",
+        " test_posix.py, the wire test, the browser test and the demo test.",
         allow_abbrev=False,
     )
     parser.add_argument(
@@ -1305,6 +1314,14 @@ def main(arguments: list[str]) -> int:
     elapsed = time.monotonic() - started
     timer_start(category.alarm_plan("test_browser.py", None, limit, elapsed))
     code = test_browser.main(words)
+    timer_stop()
+    if code:
+        return code
+    import test_demo
+
+    elapsed = time.monotonic() - started
+    timer_start(category.alarm_plan("test_demo.py", None, limit, elapsed))
+    code = test_demo.main(words)
     timer_stop()
     if code:
         return code

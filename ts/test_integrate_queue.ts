@@ -5,19 +5,19 @@
 // The line cases of the task manager on real thread ports. A queue on thread
 // `ai`, in the mode of the setting `queue_synchronous`, owns the type prefix
 // `queue_test.`; a second real queue on `server`, in the same mode, owns
-// `queue_far.`; and lines of `queue_ui.` go to `ui`, the test's end. Each
-// lane is a MessageChannel with a `queue.ThreadPort` at each end, so every
-// post moves its blob bytes in the transfer list. The handlers are this
-// file's own functions. The cases, the gold of the block's id, are a request
-// answered, a blob carried by a submit and its reply, two replies in submit
-// order, a blob forwarded both ways, blobs over one buffer moved once,
-// replies in the order of their requests, a notification that nothing
-// answers, and a wake run in its reply's place. For that case the queue's
-// lane of thread `http` is one of a linked pair of local ports whose other
-// end's receiver is this file's own function, owning `queue_end.`: it keeps
-// the request it gets, and at `queue_end.go` posts that request's reply and
-// then a `queue_test.after`, both within the forward, so that both are held
-// before the reply's step runs.
+// `queue_far.` and takes `ai`'s `verbose.put`; and lines of `queue_ui.` go to
+// `ui`, the test's end. Each lane is a MessageChannel with a `queue.ThreadPort`
+// at each end, so every post moves its blob bytes in the transfer list. The
+// handlers are this file's own functions. The cases, the gold of the block's
+// id, are a request answered, a blob carried by a submit and its reply, two
+// replies in submit order, a blob forwarded both ways, blobs over one buffer
+// moved once, replies in the order of their requests, a notification that
+// nothing answers, a wake run in its reply's place, and a timeline in full,
+// which `server` sends back whole. For the wake the lane of thread `http` is
+// one of a linked pair of local ports whose other end's receiver, owning
+// `queue_end.`, keeps the request it gets, and at `queue_end.go` posts that
+// request's reply and then a `queue_test.after`, both within the forward, so
+// that both are held before the reply's step runs.
 
 namespace test_integrate_queue {
   // The threads, the type prefixes and types, and the handlers' version.
@@ -30,6 +30,8 @@ namespace test_integrate_queue {
     far_prefix: "queue_far.",
     test_prefix: "queue_ui.",
     end_prefix: "queue_end.",
+    verbose_prefix: "verbose.",
+    verbose_type: "verbose.put",
     echo_type: "queue_test.echo",
     relay_type: "queue_test.relay",
     relay_wake: "queue_test.relay_wake",
@@ -47,6 +49,13 @@ namespace test_integrate_queue {
     far_keep: "queue_far.keep",
     kept_type: "queue_ui.kept",
     halves_out: "queue_ui.halves",
+    traced_type: "queue_test.traced",
+    traced_wake: "queue_test.traced_wake",
+    far_traced: "queue_far.traced",
+    traced_mark: "traced",
+    timeline_go: "queue_test.timeline_go",
+    far_timeline: "queue_far.timeline",
+    timeline_out: "queue_ui.timeline",
     pair_texts: ["first", "second"],
     handler_version: 0,
     synchronous_setting: "queue_synchronous",
@@ -152,6 +161,48 @@ namespace test_integrate_queue {
     });
   }
 
+  // Registers the traced relay and `server`'s record of its timeline lines.
+  function timeline_register(
+    tasks: queue.TaskQueue,
+    far: queue.TaskQueue,
+  ): void {
+    const kept: string[] = [];
+    handler_add(constants.traced_type, (line) => {
+      const payload = jslb.payload_of(line);
+      const asked = line_new(constants.far_traced, blobs_of(line), payload);
+      const id = tasks.task_submit(asked);
+      const state: WaitState = { request: line };
+      return dispatch.task_sleep(state, [id], constants.traced_wake);
+    });
+    handler_add(constants.traced_wake, (line) => {
+      const [reply] = line.replies as lines.Line[];
+      const { request } = line.state as WaitState;
+      tasks.line_notify(line_new(constants.timeline_go, [], {}));
+      return dispatch.reply_make(
+        request,
+        jslb.payload_of(reply),
+        blobs_of(reply),
+      );
+    });
+    // Runs after the wake's batch went out, so `server` holds all it wrote.
+    handler_add(constants.timeline_go, () => {
+      tasks.line_notify(line_new(constants.far_timeline, [], {}));
+      return undefined;
+    });
+    handler_add(constants.far_traced, echo_make);
+    handler_add(constants.verbose_type, (line) => {
+      const put = jslb.payload_of(line) as unknown as lines.VerbosePut;
+      const texts = put.lines.map((entry) => entry.text);
+      const mark = constants.traced_mark;
+      kept.push(...texts.filter((text) => text.includes(mark)));
+      return undefined;
+    });
+    handler_add(constants.far_timeline, () => {
+      far.line_notify(line_new(constants.timeline_out, [], { texts: kept }));
+      return undefined;
+    });
+  }
+
   // The end of `http`, which posts the kept request's reply, then an after.
   function end_add(tasks: queue.TaskQueue): void {
     const near = new queue.LocalPort();
@@ -183,11 +234,13 @@ namespace test_integrate_queue {
       [constants.far_prefix]: constants.far_thread,
       [constants.test_prefix]: constants.test_thread,
       [constants.end_prefix]: constants.end_thread,
+      [constants.verbose_prefix]: constants.far_thread,
     };
     const far_owners: queue.OwnerTable = {
       [constants.owner_prefix]: constants.thread,
       [constants.far_prefix]: constants.far_thread,
       [constants.test_prefix]: constants.thread,
+      [constants.verbose_prefix]: constants.far_thread,
     };
     const tasks = new queue.TaskQueue(constants.thread, owners, synchronous);
     const far = new queue.TaskQueue(
@@ -195,7 +248,13 @@ namespace test_integrate_queue {
       far_owners,
       synchronous,
     );
+    tasks.sink_attach(
+      verbose.sink_set,
+      settings.settings_get,
+      switches.debug_on,
+    );
     handlers_register(tasks, far);
+    timeline_register(tasks, far);
     end_add(tasks);
     const link = new MessageChannel();
     tasks.port_add(constants.far_thread, new queue.ThreadPort(link.port1));

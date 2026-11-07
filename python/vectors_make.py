@@ -16,7 +16,7 @@
 # modules compare with.
 
 import argparse, hashlib, json, os, sys
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 # The checkout's `python` directory.
 _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -160,11 +160,8 @@ def _pattern_make(count: int) -> bytes:
 
 # Splits what `jslb.line_encode` returns into the line and the blob bytes.
 def _pieces_split(pieces: list[bytes | str]) -> _EncodedMessage:
-    found: list[bytes] = []
-    for piece in pieces:
-        if not isinstance(piece, bytes):
-            raise TypeError(f"a vector blob is the file {piece}, not bytes")
-        found.append(piece)
+    # Every vector's blobs are made from bytes, so no piece is a file's path.
+    found = cast(list[bytes], pieces)
     return _EncodedMessage(found[0], found[1:])
 
 

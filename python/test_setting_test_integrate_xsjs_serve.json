@@ -1,0 +1,10 @@
+{
+  "address_pattern": "http://localhost:([0-9]+)/\n",
+  "log_port": " N:  Listening on port: {0}\n",
+  "stopped_code": 0,
+  "token_path": "/token",
+  "token_reply": {
+    "token": ""
+  },
+  "token_status": 200
+}

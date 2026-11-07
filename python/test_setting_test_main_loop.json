@@ -1,5 +1,56 @@
 {
+  "analyst": {
+    "end_node": "menu",
+    "input_nodes": ["menu", "start"],
+    "inputs": {
+      "0": [],
+      "1": [
+        [
+          {
+            "arguments": {},
+            "name": "browser.render"
+          }
+        ]
+      ],
+      "2": [
+        [
+          {
+            "arguments": {
+              "ref": "/metaverse/demo/note"
+            },
+            "name": "browser.kv_put"
+          },
+          {
+            "arguments": {
+              "ref": "/metaverse/demo/note"
+            },
+            "name": "browser.kv_get"
+          }
+        ]
+      ],
+      "3": [
+        [
+          {
+            "arguments": {
+              "text": "echo hyperposition",
+              "timeout_seconds": 30
+            },
+            "name": "browser.console_run"
+          }
+        ],
+        [
+          {
+            "arguments": {},
+            "name": "browser.render"
+          }
+        ]
+      ]
+    },
+    "start_node": "start"
+  },
+  "at_sample": 1762500000000,
   "chunk_bytes": 1000,
+  "line_small": 100,
   "lines": {
     "browser_error": {
       "0": {
@@ -70,6 +121,18 @@
       "0": {
         "r": 1,
         "t": "error"
+      }
+    },
+    "fault_push": {
+      "0": {
+        "t": "test.push"
+      },
+      "text": "first"
+    },
+    "fault_request": {
+      "0": {
+        "i": 1,
+        "t": "test.fault"
       }
     },
     "initialize": {
@@ -173,14 +236,83 @@
         "t": "tap.start"
       }
     },
+    "stream_blob": {
+      "0": {
+        "b": 1,
+        "i": 1,
+        "t": "test.stream"
+      },
+      "1": {},
+      "text": "aské"
+    },
+    "stream_push_first": {
+      "0": {
+        "b": 1,
+        "t": "test.push"
+      },
+      "1": {
+        "s": 5
+      },
+      "text": "first"
+    },
+    "stream_push_second": {
+      "0": {
+        "b": 1,
+        "t": "test.push"
+      },
+      "1": {
+        "s": 6
+      },
+      "text": "second"
+    },
+    "stream_reply": {
+      "0": {
+        "r": 1,
+        "t": "test.stream"
+      },
+      "text": "asked"
+    },
+    "stream_request": {
+      "0": {
+        "i": 1,
+        "t": "test.stream"
+      },
+      "text": "asked"
+    },
+    "sync": {
+      "0": {
+        "i": 1,
+        "t": "db.sync"
+      }
+    },
+    "sync_reply": {
+      "0": {
+        "r": 1,
+        "t": "db.sync"
+      },
+      "databases": ["_files", "_preferences", "_settings", "metaverse"]
+    },
     "unknown_request": {
       "0": {
         "i": 1,
         "t": "no.such"
       }
+    },
+    "verbose_put": {
+      "0": {
+        "t": "verbose.put"
+      },
+      "lines": [
+        {
+          "at": 1,
+          "text": "kept"
+        }
+      ],
+      "thread": "ui"
     }
   },
   "overflow_bytes": 4096,
+  "push_texts": ["first", "second"],
   "read_bytes": 65536,
   "texts": {
     "dispatch_handler_unknown": "No handler is registered for type no.such version 0.",
@@ -190,15 +322,31 @@
     "engine_tap_browser_failed": "The browser failed: boom",
     "jslb_no_type": "The line header has no type string.",
     "main_loop_input_partial": "The engine input ended inside a message.",
-    "main_loop_line_dispatch_mcp": "server dispatches from ai: {\"i\":1,\"t\":\"mcp\"}",
-    "main_loop_line_dispatch_unknown": "server dispatches from ai: {\"i\":1,\"t\":\"no.such\"}",
-    "main_loop_line_reply_mcp": "server replies to ai: {\"t\":\"mcp\",\"r\":1}",
+    "main_loop_line_dispatch_mcp": "server dispatches from ai: {\"0\":{\"i\":1,\"t\":\"mcp\"},\"id\":1,\"jsonrpc\":\"2.0\",\"method\":\"initialize\",\"params\":{\"capabilities\":{},\"clientInfo\":{\"name\":\"hyperposition-engine\",\"version\":\"0\"},\"protocolVersion\":\"2025-06-18\"}}",
+    "main_loop_line_dispatch_put_sized": "server dispatches from ai: {\"t\":\"verbose.put\"} with a payload of 48 bytes and blobs of [] bytes",
+    "main_loop_line_dispatch_sized": "server dispatches from ai: {\"b\":1,\"i\":1,\"t\":\"test.stream\"} with a payload of 16 bytes and blobs of [5] bytes",
+    "main_loop_line_dispatch_stream": "server dispatches from ai: {\"0\":{\"i\":1,\"t\":\"test.stream\"},\"text\":\"asked\"}",
+    "main_loop_line_dispatch_stream_sized": "server dispatches from ai: {\"i\":1,\"t\":\"test.stream\"} with a payload of 16 bytes and blobs of [] bytes",
+    "main_loop_line_dispatch_unknown": "server dispatches from ai: {\"0\":{\"i\":1,\"t\":\"no.such\"}}",
+    "main_loop_line_error": "server reports to ai: {0}",
+    "main_loop_line_error_sized": "server reports to ai: {\"t\":\"error\",\"r\":1} with a payload of {0} bytes and blobs of [] bytes",
+    "main_loop_line_push_first": "server pushes to ai: {\"0\":{\"type\":\"test.push\",\"blobs\":1},\"1\":{\"size\":5},\"text\":\"first\"}<blob \"n\"=1>",
+    "main_loop_line_push_first_sized": "server pushes to ai: {\"type\":\"test.push\",\"blobs\":1} with a payload of 16 bytes and blobs of [5] bytes",
+    "main_loop_line_push_second": "server pushes to ai: {\"0\":{\"type\":\"test.push\",\"blobs\":1},\"1\":{\"size\":6},\"text\":\"second\"}<blob \"n\"=1>",
+    "main_loop_line_push_second_sized": "server pushes to ai: {\"type\":\"test.push\",\"blobs\":1} with a payload of 17 bytes and blobs of [6] bytes",
+    "main_loop_line_reply_mcp": "server replies to ai: {\"0\":{\"t\":\"mcp\",\"r\":1},\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"xsjs-server\",\"version\":\"0\"}}}",
+    "main_loop_line_reply_sized": "server replies to ai: {\"t\":\"test.stream\",\"r\":1} with a payload of 16 bytes and blobs of [] bytes",
+    "main_loop_line_reply_stream": "server replies to ai: {\"0\":{\"t\":\"test.stream\",\"r\":1},\"text\":\"asked\"}",
     "main_loop_not_prepared": "loop_run ran before loop_prepare prepared the root.",
     "main_loop_reply_unknown_101": "The line {\"0\":{\"r\":101,\"t\":\"tap.start\"}} replies to no request the server sent.",
     "main_loop_reply_unknown_102": "The line {\"0\":{\"r\":102,\"t\":\"mcp\"}} replies to no request the server sent.",
     "main_loop_reply_unknown_2": "The line {\"0\":{\"r\":2,\"t\":\"tap.start\"}} replies to no request the server sent.",
+    "main_loop_seed_invalid": "The seed file {0} does not hold a JSON object.",
     "main_loop_serve_failed_debug": "The server failed while serving the engine tty: source_put needs debug mode, and the parameter debug is false.",
+    "main_loop_serve_failed_stream": "The server failed while serving the engine tty: The stream failed between its pushes.",
     "main_loop_serve_failed_type": "The server failed while serving the engine tty: The line header has no type string.",
-    "main_loop_serve_failed_unknown": "The server failed while serving the engine tty: No handler is registered for type no.such version 0."
+    "main_loop_serve_failed_unknown": "The server failed while serving the engine tty: No handler is registered for type no.such version 0.",
+    "stream_fault": "The stream failed between its pushes.",
+    "verbose_put_entry": "kept"
   }
 }

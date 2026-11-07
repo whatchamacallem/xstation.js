@@ -8,8 +8,16 @@
 # database file as blob 1 and `files` set, then one `db.file` per cache file
 # the server holds for it, each with that file as blob 1, for the main loop
 # to write in order. A cache file the server lost is not among them.
+#
+# `db.sync`, the browser's one pull, answers with a `dispatch.Stream`: the
+# `restore_lines` of every database the store holds, in name order, each built
+# from its snapshot as the main loop reaches it, then the reply `DbSyncReply`,
+# whose `databases` names them in that order. The log's own `_verbose` is not
+# among them, as the store never holds it. The pushes take the name form of
+# the parameter `debug`, since a push answers nothing, and the reply that of
+# the request.
 
-import dispatch, jslb, substrate
+import dispatch, jslb, substrate, switches
 from collections.abc import Iterator
 from internationalization import i18n
 
@@ -59,8 +67,22 @@ def restore_lines(db: str, full: bool) -> Iterator[jslb.Object]:
         )
 
 
+# The lines of each database in turn, one snapshot held at a time.
+def _databases_lines(names: list[str], full: bool) -> Iterator[jslb.Object]:
+    for name in names:
+        yield from restore_lines(name, full)
+
+
+# `db.sync`: the lines of every database, then the reply naming them.
+def db_sync(line: jslb.Object) -> dispatch.Stream:
+    names = sorted(_store_get().db_list())
+    pushes = _databases_lines(names, switches.debug)
+    return dispatch.Stream(pushes, dispatch.reply_make(line, databases=names))
+
+
 # Registers the handlers on the store given.
 def handlers_register(store: substrate.Store) -> None:
     _STATE.store = store
     dispatch.handler_register("db.create", 0, db_create)
     dispatch.handler_register("db.drop", 0, db_drop)
+    dispatch.handler_register("db.sync", 0, db_sync)

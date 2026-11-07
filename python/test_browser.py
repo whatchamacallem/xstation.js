@@ -37,8 +37,8 @@ _BUILD_PATH = os.path.join(_CHECKOUT_PATH, "build")
 # The id of this driver's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_browser"
 
-# The module that builds ttyd, which a missing ttyd names.
-_TTYD_BUILDER = os.path.join("python", "ttyd_build.py")
+# The program whose run builds ttyd, which a missing ttyd names.
+_TTYD_BUILDER = "./test_posix.sh"
 
 # The start of the name of the directory each run makes and keeps its roots in.
 _WORK_PREFIX = "test_browser-"
@@ -2771,7 +2771,7 @@ def rungs_locked(session: PageSession) -> None:
         )
 
 
-# Random bytes the page keeps for its echoes, which ttyd's deflate can't shrink.
+# Random bytes the page keeps for echoes, which ttyd's deflate can't shrink.
 def noise_make(session: PageSession, size: int) -> bytes:
     text = cast(str, session.probe_call("noise_make", size))
     return base64.b64decode(text, validate=True)
@@ -3334,7 +3334,7 @@ def main(arguments: list[str]) -> int:
         prog=_PROGRAM_NAME,
         description="Run the browser test: the ttyd page's documents over TAP"
         " and the rungs of the ttyd page and the headless page, in roots"
-        " under build/, through the ttyd ttyd_build.py builds, in"
+        " under build/, through the ttyd a run of ./test_posix.sh builds, in"
         " chrome-headless-shell.",
     )
     category.options_add(parser)
@@ -3348,7 +3348,9 @@ def main(arguments: list[str]) -> int:
     try:
         ttyd = ttyd_path()
         if not os.path.isfile(ttyd):
-            raise CheckFailed(f"{ttyd} is missing: {_TTYD_BUILDER} builds it")
+            raise CheckFailed(
+                f"{ttyd} is missing: a run of {_TTYD_BUILDER} builds it"
+            )
         work = tempfile.mkdtemp(prefix=_WORK_PREFIX, dir=_BUILD_PATH)
         log.setup_print(f"the roots of this run are in {work} until it passes")
         stages_run(log, work)

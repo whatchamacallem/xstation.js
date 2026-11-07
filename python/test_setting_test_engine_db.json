@@ -12,6 +12,12 @@
       },
       "db": "castle"
     },
+    "create_log": {
+      "0": {
+        "t": "db.create"
+      },
+      "db": "_verbose"
+    },
     "create_request": {
       "0": {
         "i": 7,
@@ -80,11 +86,52 @@
       "1": {},
       "db": "castle",
       "files": 2
+    },
+    "sync": {
+      "0": {
+        "i": 7,
+        "t": "db.sync"
+      }
+    },
+    "sync_full": {
+      "0": {
+        "id": 7,
+        "type": "db.sync"
+      }
+    },
+    "sync_reply": {
+      "0": {
+        "r": 7,
+        "t": "db.sync"
+      },
+      "databases": ["_files", "castle", "keep"]
+    },
+    "sync_reply_empty": {
+      "0": {
+        "r": 7,
+        "t": "db.sync"
+      },
+      "databases": []
+    },
+    "sync_reply_full": {
+      "0": {
+        "reply": 7,
+        "type": "db.sync"
+      },
+      "databases": ["_files", "castle", "keep"]
     }
   },
+  "sync_order": [
+    ["db.restore", "_files"],
+    ["db.restore", "castle"],
+    ["db.file", "castle"],
+    ["db.file", "castle"],
+    ["db.restore", "keep"]
+  ],
   "texts": {
     "dispatch_handler_twice_create": "A handler is already registered for type db.create version 0.",
     "dispatch_handler_twice_drop": "A handler is already registered for type db.drop version 0.",
+    "dispatch_handler_twice_sync": "A handler is already registered for type db.sync version 0.",
     "engine_db_not_registered": "The db handlers were called before they were registered."
   }
 }

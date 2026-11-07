@@ -1,0 +1,203 @@
+{
+  "buttons": [
+    "Accept",
+    "Deny",
+    "Always Allow"
+  ],
+  "choices": {
+    "1": "There. Words on a black page. I trained for years for this.",
+    "2": "Noted, filed and read back. It was no more interesting the second time.",
+    "3": "It said hyperposition, as one could have guessed. Anything else?"
+  },
+  "console_output": "hyperposition",
+  "console_prompt": "$",
+  "hello_command": "echo hello",
+  "hello_output": "hello",
+  "log": [
+    {
+      "fragment": "ui dispatches from dom: {\"0\":{\"type\":\"ui.input\"}",
+      "jslb": "\"text\":\"1\"",
+      "thread": "ui"
+    },
+    {
+      "fragment": "ui submits to dom: {\"0\":{\"type\":\"dom.choice\"",
+      "jslb": "\"choices\":[\"accept\",\"deny\",\"always\"]",
+      "thread": "ui"
+    },
+    {
+      "fragment": "ui receives from dom: {\"0\":{\"type\":\"dom.choice\"",
+      "jslb": "\"choice\":\"accept\"",
+      "thread": "ui"
+    },
+    {
+      "fragment": "ui submits to ai: {\"0\":{\"type\":\"ai.say\"",
+      "jslb": "\"text\":\"1\"",
+      "thread": "ui"
+    },
+    {
+      "fragment": "ai dispatches from ui: {\"0\":{\"type\":\"ai.say\"",
+      "jslb": "\"text\":\"1\"",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ai replies to ui: {\"0\":{\"type\":\"ai.say\"",
+      "jslb": "\"subtitle\":\"There. Words on a black page. I trained for years for this.\"",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ui receives from ai: {\"0\":{\"type\":\"ai.say\"",
+      "jslb": "\"subtitle\":\"There. Words on a black page. I trained for years for this.\"",
+      "thread": "ui"
+    },
+    {
+      "fragment": "ai submits to ui: {\"0\":{\"type\":\"render\"",
+      "jslb": "\"subtitle\":\"A subtitle, as requested. Do try to contain yourself.\"",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ui dispatches from ai: {\"0\":{\"type\":\"render\"",
+      "jslb": "\"subtitle\":\"A subtitle, as requested. Do try to contain yourself.\"",
+      "thread": "ui"
+    },
+    {
+      "fragment": "ui replies to ai: {\"0\":{\"type\":\"render\"",
+      "jslb": "\"reply\":",
+      "thread": "ui"
+    },
+    {
+      "fragment": "ai receives from ui: {\"0\":{\"type\":\"render\"",
+      "jslb": "\"reply\":",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ai submits to ui: {\"0\":{\"type\":\"permit.ask\"",
+      "jslb": "\"tool\":\"browser.console_run\"",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ui replies to ai: {\"0\":{\"type\":\"permit.ask\"",
+      "jslb": "\"choice\":\"accept\"",
+      "thread": "ui"
+    },
+    {
+      "fragment": " until ai.model_reply: {\"0\":{\"type\":\"ai.say\"",
+      "jslb": "\"text\":\"1\"",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ai wakes ai.model_reply with the replies to ",
+      "jslb": "\"status\":200",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ai wakes ai.tool_reply with the replies to ",
+      "jslb": "\"result\":",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ai submits to ai: {\"0\":{\"type\":\"mcp\"",
+      "jslb": "\"method\":\"tools/call\"",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ai dispatches from ai: {\"0\":{\"type\":\"mcp\"",
+      "jslb": "\"method\":\"tools/call\"",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ai replies to ai: {\"0\":{\"type\":\"mcp\"",
+      "jslb": "\"result\":",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ai receives from ai: {\"0\":{\"type\":\"mcp\"",
+      "jslb": "\"result\":",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ai submits to http: {\"0\":{\"type\":\"http.request\"",
+      "jslb": "\"method\":\"POST\"",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ai receives from http: {\"0\":{\"type\":\"http.request\"",
+      "jslb": "\"status\":200",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ai notifies console: {\"0\":{\"type\":\"console.write\"}",
+      "jslb": "\"text\":\"echo hyperposition",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ai submits to console: {\"0\":{\"type\":\"console.read\"",
+      "jslb": "\"until\":\"$ \"",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ai receives from console: {\"0\":{\"type\":\"console.read\"",
+      "jslb": "\"timed_out\":false",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ai forwards to ui: {\"0\":{\"type\":\"console.output\"",
+      "jslb": "<blob \"n\"=1>",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ui dispatches from ai: {\"0\":{\"type\":\"console.output\"",
+      "jslb": "<blob \"n\"=1>",
+      "thread": "ui"
+    },
+    {
+      "fragment": "ai notifies server: {\"0\":{\"type\":\"turn.append\"}",
+      "jslb": "\"role\":\"user\"",
+      "thread": "ai"
+    },
+    {
+      "fragment": "server dispatches from ai: {\"0\":{\"type\":\"turn.append\"}",
+      "jslb": "\"role\":\"user\"",
+      "thread": "server"
+    },
+    {
+      "fragment": "ai submits to server: {\"0\":{\"type\":\"db.sync\"",
+      "jslb": "\"id\":",
+      "thread": "ai"
+    },
+    {
+      "fragment": "server pushes to ai: {\"0\":{\"type\":\"db.restore\"",
+      "jslb": "<blob \"n\"=1>",
+      "thread": "server"
+    },
+    {
+      "fragment": "ai dispatches from server: {\"0\":{\"type\":\"db.restore\"",
+      "jslb": "<blob \"n\"=1>",
+      "thread": "ai"
+    },
+    {
+      "fragment": "server replies to ai: {\"0\":{\"type\":\"db.sync\"",
+      "jslb": "\"databases\":[\"_files\",\"_preferences\",\"_settings\",\"metaverse\"]",
+      "thread": "server"
+    },
+    {
+      "fragment": "ai receives from server: {\"0\":{\"type\":\"db.sync\"",
+      "jslb": "\"databases\":[\"_files\",\"_preferences\",\"_settings\",\"metaverse\"]",
+      "thread": "ai"
+    }
+  ],
+  "note_db": "metaverse",
+  "note_key": "demo/note",
+  "note_text": "Patient presses numbers. Prognosis: tedious.",
+  "overlay_received": "< ",
+  "overlay_sent": "> ",
+  "permit_text": "browser.console_run asks to run with {\"text\":\"echo hyperposition\",\"timeout_seconds\":30}.",
+  "poll_seconds": 0.1,
+  "remark": "How can I help you?",
+  "root_debug": true,
+  "root_verbose": false,
+  "rung_seconds": 120,
+  "served_seconds": 240,
+  "ttyd_code": 0,
+  "window_height": 720,
+  "window_width": 1280
+}

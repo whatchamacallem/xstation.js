@@ -146,7 +146,7 @@ def loop_run(read_fd: int, write_fd: int, root: str) -> None:
     values = cast(dict[str, Any], _STATE.values)
     dispatch.handler_register(_ECHO_TYPE, _ECHO_VERSION, echo_reply)
     engine_tap.handlers_register(root)
-    engine_verbose.handlers_register(switches.debug)
+    engine_verbose.handlers_register(switches.debug, values["line_max"])
     decoder = jslb.LineDecoder(
         values["line_max"],
         values["blob_max"],

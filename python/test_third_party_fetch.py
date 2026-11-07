@@ -7,9 +7,11 @@
 # no pin uses, which git ignores as it ignores the pins. Each file a test
 # puts there is removed when the test ends, and the directory with it. Then
 # `pins_fetch` on the pins already in place, the gold's paths and digests.
+# Then the file as the program `xsjs_install.ps1` starts, run in a forked
+# child, whose lines of the file the line counter counts.
 
-import harness, hashlib, os, pathlib, switches, tempfile, third_party_fetch
-import unittest
+import contextlib, harness, hashlib, io, os, pathlib, runpy, signal, switches
+import sys, tempfile, third_party_fetch, traceback, unittest
 
 # The checkout's top directory.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -32,10 +34,36 @@ _PACKAGE_COMMAND = "apt-get source --download-only test-package=1.0-1"
 # The gold id of the pins with ttyd's from the package manager, by switch.
 _PINS_ANTHROPIC_ID = "python.test_third_party_fetch.pins_anthropic"
 
+# The gold id of the command that places ttyd's file from the package manager.
+_PACKAGE_COMMAND_ID = "python.test_third_party_fetch.package_command"
+
+# The file `xsjs_install.ps1` starts as a program.
+_PROGRAM_PATH = os.path.join(_ROOT_PATH, "python", "third_party_fetch.py")
+
+# What a forked child sends when the program returned, before what it printed.
+_ENDING_RETURNED = "returned"
+
 
 # Returns the name in the scratch library of the file name.
 def name_make(file_name: str) -> str:
     return _LIBRARY_NAME + "/" + file_name
+
+
+# In the forked child: the program run, its ending sent, then a kill.
+def _child_main(argv: list[str], write_fd: int) -> None:
+    try:
+        try:
+            sys.argv = [_PROGRAM_PATH, *argv]
+            shown = io.StringIO()
+            with contextlib.redirect_stdout(shown):
+                runpy.run_path(_PROGRAM_PATH, run_name="__main__")
+            ending = _ENDING_RETURNED + shown.getvalue()
+        except BaseException:
+            ending = traceback.format_exc()
+        with open(write_fd, "w", encoding="utf-8") as file:
+            file.write(ending)
+    finally:
+        os.kill(os.getpid(), signal.SIGKILL)
 
 
 # A test with a scratch source file and the scratch library of the target.
@@ -205,3 +233,33 @@ class TestPins(unittest.TestCase):
                 (stat.st_ino, stat.st_mtime_ns),
                 path,
             )
+
+
+# Tests of the file as a program, each run in a forked child.
+class TestProgram(unittest.TestCase):
+    # Runs the program with the options in a forked child, returns its ending.
+    def program_run(self, argv: list[str]) -> str:
+        read_fd, write_fd = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            os.close(read_fd)
+            _child_main(argv, write_fd)
+        os.close(write_fd)
+        with open(read_fd, encoding="utf-8") as file:
+            ending = file.read()
+        status = os.waitpid(pid, 0)[1]
+        self.assertEqual(os.waitstatus_to_exitcode(status), -signal.SIGKILL)
+        return ending
+
+    # With the pins in place the program returns and prints nothing.
+    def test_program_placed(self) -> None:
+        self.assertEqual(self.program_run([]), _ENDING_RETURNED)
+
+    # With `--anthropic` ttyd's pin is the package manager's file, checked.
+    def test_program_packaged(self) -> None:
+        ending = self.program_run(["--anthropic"])
+        if os.path.exists(third_party_fetch.package_path()):
+            self.assertEqual(ending, _ENDING_RETURNED)
+        else:
+            command: str = harness.gold_get(_PACKAGE_COMMAND_ID)
+            self.assertIn(command, ending)

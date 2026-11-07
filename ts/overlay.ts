@@ -4,7 +4,8 @@
 //
 // The read only debug overlays of ttys 1 and up: one `pre` for each tty
 // holding its last rendered lines, newest last, hidden until toggled. A shown
-// overlay's newest line is kept at the bottom of the container's view.
+// overlay's newest line is kept at the bottom of the view of the element that
+// scrolls it, the container or one above it.
 namespace overlay {
   // The constants of this module.
   const constants = Object.freeze({
@@ -51,16 +52,13 @@ namespace overlay {
       this.end_show(entry.pre);
     }
 
-    // Scrolls the container so that a shown `pre` ends at its visible bottom.
+    // Scrolls whatever scrolls a shown `pre` so that it ends at the bottom.
     private end_show(pre: HTMLPreElement): void {
       // A hidden `pre` shows no line, and the toggle that shows it scrolls.
       if (pre.hidden) {
         return;
       }
-      const container = this.container;
-      const box = container.getBoundingClientRect();
-      const bottom = box.top + container.clientTop + container.clientHeight;
-      container.scrollTop += pre.getBoundingClientRect().bottom - bottom;
+      pre.scrollIntoView({ block: "end" });
     }
 
     // The entry of a tty, made hidden in the container on first use.

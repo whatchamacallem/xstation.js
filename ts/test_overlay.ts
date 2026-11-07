@@ -4,9 +4,10 @@
 //
 // Tests of the debug overlays, run on containers that are not in the page,
 // and of the scrolling that keeps a shown overlay's newest line in view, run
-// on a container of a fixed size put in the page and taken out after. A
-// refused ring's text is the gold record's, and the count of a tall overlay
-// and the size of the scrolling container are read from the gold.
+// on a container of a fixed size put in the page and taken out after, or on
+// one inside it that does not scroll, as `overlays` sits in `debug` on the
+// engine page. A refused ring's text is the gold record's, and the count of a
+// tall overlay and the size of the scrolling container are read from the gold.
 namespace test_overlay {
   // The rings the tests set, which the expected texts are written for.
   const constants = Object.freeze({
@@ -399,6 +400,22 @@ namespace test_overlay {
       this.end_assert(lower);
       instance.line_add(1, "newest");
       this.end_assert(upper);
+    }
+
+    // In a container that does not scroll, the element above it is scrolled.
+    test_inner_container(): void {
+      const scroller = this.container_get();
+      const inner = document.createElement("div");
+      scroller.append(inner);
+      const instance = new overlay.Overlay(inner, tall_count());
+      instance.overlay_toggle(1);
+      lines_add(instance, 1);
+      const pre = pre_list(inner)[0];
+      this.assertTrue(scroller.scrollTop > 0);
+      this.end_assert(pre);
+      scroller.scrollTop = 0;
+      instance.line_add(1, "newest");
+      this.end_assert(pre);
     }
   }
 

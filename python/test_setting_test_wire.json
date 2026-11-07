@@ -106,6 +106,7 @@
     "release_channel": "test_wire_rungs",
     "restart_after": "# posted after system.restart, which the port holds",
     "restart_name": "echo_loop.py",
+    "sync_databases": ["_files", "_preferences", "_settings", "metaverse"],
     "unknown_type": "wire.unknown",
     "verbose_count": 10
   },

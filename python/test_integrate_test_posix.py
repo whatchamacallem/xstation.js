@@ -14,7 +14,9 @@
 # and prints nothing when given --anthropic, and when test_all.py has turned
 # the switch on before calling it. Under the switch test_all.py leaves the
 # suites that start formatters out of a test-all run, and --module refuses
-# them, while without it the run takes them.
+# them, while without it the run takes them. Every suite of a test-all run
+# counts under --coverage for modules that exist, the suite of the store's
+# limit for the store module.
 
 import argparse, functools, os, signal, switches, sys, tempfile, test_all
 import test_posix, traceback, unittest
@@ -46,6 +48,12 @@ _FORMATTER_SUITES = ["test_reformat_formatters", "test_test_posix_formatters"]
 
 # How a child ended that a refusal of its parser stopped.
 _ENDING_REFUSED = "SystemExit: 2\n"
+
+# The suite of the store's limit, which no module is named after.
+_LIMIT_SUITE = "test_substrate_limit"
+
+# The store module, which that suite counts for.
+_STORE_PATH = os.path.join(_ROOT_PATH, "python", "substrate.py")
 
 
 # Returns the text of the file.
@@ -210,3 +218,18 @@ class TestDriverSuites(ChildCase):
             self.assertTrue(ending.endswith(_ENDING_REFUSED), ending)
             expected = f"--module {name} is not a suite of this {_TEST_ALL}"
             self.assertIn(expected, output)
+
+
+# The modules the test driver counts each suite for under `--coverage`.
+class TestDriverCounted(unittest.TestCase):
+    # The suite of the store's limit counts for the store module.
+    def test_limit_counted(self) -> None:
+        counted = test_all.paths_counted(_LIMIT_SUITE)
+        self.assertEqual(counted, [_STORE_PATH])
+
+    # Every suite of a `test-all` run counts for modules that exist.
+    def test_modules_present(self) -> None:
+        parser = argparse.ArgumentParser()
+        for name, _ in test_all.modules_chosen(parser, [], _TEST_ALL):
+            for path in test_all.paths_counted(name):
+                self.assertTrue(os.path.isfile(path), path)

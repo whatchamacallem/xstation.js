@@ -91,6 +91,12 @@ def _line_bytes(name: str) -> bytes:
     return text.encode("utf-8") + b"\r"
 
 
+# The gold text of a log line that holds the whole of a line read back.
+def _line_text(name: str, line: dict[str, Any]) -> str:
+    text = json.dumps(line, ensure_ascii=False, separators=(",", ":"))
+    return _text_get(name).format(text)
+
+
 # The log lines of the texts, each of the server's thread.
 def _server_lines(texts: list[str]) -> list[tuple[str, str]]:
     return [(_SERVER_THREAD, text) for text in texts]
@@ -227,24 +233,24 @@ class EngineChild:
 
 # Tests bootstrap with the stock main loop and its engines.
 class TestStock(unittest.TestCase):
-    # Starts the engine on a new debug root and answers `tap.start`.
-    def engine_start(self) -> tuple[ScratchRoot, EngineChild]:
+    # Starts the engine on a new debug root and answers `tap.start`, returned.
+    def engine_start(self) -> tuple[ScratchRoot, EngineChild, dict[str, Any]]:
         made = _root_make(self)
         child = EngineChild(self, made)
         first = child.line_read()
         self.assertEqual(first["0"], _line_get("first_full")["0"])
         child.bytes_write(_REPLY_FULL)
-        return made, child
+        return made, child, first
 
     # `verbose.tail` reads bootstrap's `tap.start` trace, then the main loop's.
     def test_ring_shared(self) -> None:
-        _, child = self.engine_start()
+        _, child, first = self.engine_start()
         child.bytes_write(_line_bytes("tail_server"))
         reply = child.line_read()
         self.assertEqual(reply["0"], _line_get("tail_server_reply")["0"])
         texts = [entry["text"] for entry in reply["lines"]]
         expected = [
-            _text_get("bootstrap_start_submit"),
+            _line_text("bootstrap_start_submit", first),
             _text_get("main_loop_line_dispatch_tail"),
         ]
         self.assertEqual(texts, expected)
@@ -252,7 +258,7 @@ class TestStock(unittest.TestCase):
 
     # A loop failure logs once, writes one error line, bootstrap adds nothing.
     def test_failure_once(self) -> None:
-        made, child = self.engine_start()
+        made, child, first = self.engine_start()
         child.bytes_write(_line_bytes("unknown_request"))
         error = child.line_read()
         self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
@@ -260,15 +266,16 @@ class TestStock(unittest.TestCase):
         message = _text_get("dispatch_handler_unknown")
         self.assertEqual(error["message"], message)
         texts = [
-            _text_get("bootstrap_start_submit"),
+            _line_text("bootstrap_start_submit", first),
             _text_get("main_loop_line_dispatch_unknown"),
             _text_get("main_loop_serve_failed_unknown"),
+            _line_text("main_loop_line_error", error),
         ]
         self.assertEqual(_log_read(made.root), _server_lines(texts))
 
     # A page error ends the TAP file and run unanswered, cascade logged last.
     def test_page_failed(self) -> None:
-        made, child = self.engine_start()
+        made, child, first = self.engine_start()
         child.bytes_write(_line_bytes("browser_error"))
         self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
         error = _line_get("browser_error")
@@ -276,7 +283,7 @@ class TestStock(unittest.TestCase):
         with open(path, encoding="utf-8") as file:
             self.assertEqual(file.read(), f"Bail out! {error['message']}\n")
         texts: list[str] = [
-            _text_get("bootstrap_start_submit"),
+            _line_text("bootstrap_start_submit", first),
             _text_get("engine_tap_browser_failed"),
             error["stack"],
             _text_get("engine_tap_browser_cause"),

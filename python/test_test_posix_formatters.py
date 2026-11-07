@@ -3,12 +3,17 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the formatter step of test_posix.py with the real formatters of
-# reformat_table.json, ruff among them. The step runs in a forked child whose
-# stdout and stderr go to a scratch file under build/, so that no formatter
-# writes to the stream. A test-all run formats a Python file with ruff
-# and prints nothing.
+# reformat_table.json, ruff among them, and the whole program. Each runs in a
+# forked child whose stdout and stderr go to a scratch file under build/, so
+# that no formatter writes to the stream. A test-all run formats a Python file
+# with ruff and prints nothing. Run as a program with no option, test_posix.py
+# checks the checkout's whitelisted files and lints them with ruff, formatting
+# nothing and printing nothing, which is why that test is in this suite, one
+# the cloud environment leaves out. Given --anthropic with no program on PATH,
+# which a linter could not start from, it returns and prints nothing.
 
-import functools, os, signal, sys, tempfile, test_posix, traceback, unittest
+import functools, os, runpy, signal, sys, tempfile, test_posix, traceback
+import unittest
 from collections.abc import Callable
 
 # The checkout's top directory, above this file's `python/`.
@@ -29,11 +34,20 @@ _PYTHON_FORMATTED = "x = 1\n"
 # How the work of a child ended when it returned.
 _ENDING_RETURNED = "returned"
 
+# The module's file, as a command line starts it.
+_PROGRAM_PATH = os.path.join(_ROOT_PATH, "python", "test_posix.py")
+
 
 # Returns the text of the file.
 def text_read(path: str) -> str:
     with open(path, encoding="utf-8") as file:
         return file.read()
+
+
+# In the forked child: runs the module's file as a program of the arguments.
+def program_run(arguments: list[str]) -> None:
+    sys.argv = [_PROGRAM_PATH, *arguments]
+    runpy.run_path(_PROGRAM_PATH, run_name="__main__")
 
 
 # In the forked child: runs the work, output to a file, writes its ending.
@@ -105,3 +119,22 @@ class TestFormatterStep(ChildCase):
         self.assertEqual(ending, _ENDING_RETURNED)
         self.assertEqual(output, "")
         self.assertEqual(text_read(path), _PYTHON_FORMATTED)
+
+
+# The whole program, as a command line starts it.
+class TestProgramRun(ChildCase):
+    # With no option it checks the files and lints them, printing nothing.
+    def test_files_checked(self) -> None:
+        ending, output = self.child_run(functools.partial(program_run, []))
+        self.assertEqual(ending, _ENDING_RETURNED)
+        self.assertEqual(output, "")
+
+    # With no linter to start, the switch of the cloud environment returns.
+    def test_switch_skipped(self) -> None:
+        def work() -> None:
+            os.environ["PATH"] = self.scratch
+            program_run(["--anthropic"])
+
+        ending, output = self.child_run(work)
+        self.assertEqual(ending, _ENDING_RETURNED)
+        self.assertEqual(output, "")

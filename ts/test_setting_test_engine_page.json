@@ -1,0 +1,432 @@
+{
+  "cases": [
+    {
+      "expect": ["refusal_1_reply"],
+      "name": "refused",
+      "seconds": 10,
+      "send": ["refusal_1"]
+    },
+    {
+      "expect": ["band_2_reply", "image_3_reply"],
+      "name": "closed",
+      "seconds": 10,
+      "send": ["band_2", "image_3"]
+    },
+    {
+      "expect": ["render_4_reply"],
+      "name": "rendered",
+      "seconds": 10,
+      "send": ["render_4"]
+    },
+    {
+      "expect": ["image_5_reply", "band_6_reply"],
+      "name": "rendered_read",
+      "seconds": 10,
+      "send": ["image_5", "band_6"]
+    },
+    {
+      "expect": ["say_1"],
+      "name": "typed",
+      "seconds": 10,
+      "send": ["submit_one"]
+    },
+    {
+      "expect": ["band_7_reply"],
+      "name": "typed_read",
+      "seconds": 10,
+      "send": ["band_7"]
+    },
+    {
+      "expect": [],
+      "name": "typed_ended",
+      "seconds": 0.2,
+      "send": ["say_1_reply"]
+    },
+    {
+      "expect": ["band_8_reply"],
+      "name": "typed_shown",
+      "seconds": 10,
+      "send": ["band_8"]
+    },
+    {
+      "expect": ["say_2"],
+      "name": "permit_typed",
+      "seconds": 10,
+      "send": ["submit_three"]
+    },
+    {
+      "expect": [],
+      "name": "permit_asked",
+      "seconds": 0.2,
+      "send": ["ask_9"]
+    },
+    {
+      "expect": ["permit_10_reply"],
+      "name": "permit_shown",
+      "seconds": 10,
+      "send": ["permit_10"]
+    },
+    {
+      "expect": ["ask_9_reply"],
+      "name": "permit_chosen",
+      "seconds": 10,
+      "send": ["choose_accept"]
+    },
+    {
+      "expect": ["permit_11_reply"],
+      "name": "permit_cleared",
+      "seconds": 10,
+      "send": ["permit_11"]
+    },
+    {
+      "expect": [],
+      "name": "permit_ended",
+      "seconds": 0.2,
+      "send": ["say_2_reply"]
+    },
+    {
+      "expect": ["band_12_reply"],
+      "name": "permit_read",
+      "seconds": 10,
+      "send": ["band_12"]
+    },
+    {
+      "expect": ["open_4"],
+      "name": "console_shown",
+      "seconds": 10,
+      "send": ["key_console"]
+    },
+    {
+      "expect": ["band_13_reply"],
+      "name": "console_shown_read",
+      "seconds": 10,
+      "send": ["band_13"]
+    },
+    {
+      "expect": [],
+      "name": "console_hidden",
+      "seconds": 0.2,
+      "send": ["key_console"]
+    },
+    {
+      "expect": ["band_14_reply"],
+      "name": "console_hidden_read",
+      "seconds": 10,
+      "send": ["band_14"]
+    },
+    {
+      "expect": ["say_5"],
+      "name": "turn_typed",
+      "seconds": 10,
+      "send": ["submit_three"]
+    },
+    {
+      "expect": [],
+      "name": "turn_toggled",
+      "seconds": 0.2,
+      "send": ["key_console", "key_console"]
+    },
+    {
+      "expect": ["band_15_reply"],
+      "name": "turn_read",
+      "seconds": 10,
+      "send": ["band_15"]
+    }
+  ],
+  "lines": {
+    "ask_9": {
+      "0": {
+        "id": 9,
+        "type": "permit.ask"
+      },
+      "input": {
+        "text": "echo hyperposition",
+        "timeout_seconds": 30
+      },
+      "permit": 1,
+      "tool": "browser.console_run"
+    },
+    "ask_9_reply": {
+      "0": {
+        "reply": 9,
+        "type": "permit.ask"
+      },
+      "choice": "accept",
+      "permit": 1
+    },
+    "band_12": {
+      "0": {
+        "id": 12,
+        "type": "engine_probe.band"
+      }
+    },
+    "band_12_reply": {
+      "0": {
+        "reply": 12,
+        "type": "engine_probe.band"
+      },
+      "input_disabled": false,
+      "input_focused": true,
+      "subtitle": "Hyperposition."
+    },
+    "band_13": {
+      "0": {
+        "id": 13,
+        "type": "engine_probe.band"
+      }
+    },
+    "band_13_reply": {
+      "0": {
+        "reply": 13,
+        "type": "engine_probe.band"
+      },
+      "input_disabled": false,
+      "input_focused": false,
+      "subtitle": "Hyperposition."
+    },
+    "band_14": {
+      "0": {
+        "id": 14,
+        "type": "engine_probe.band"
+      }
+    },
+    "band_14_reply": {
+      "0": {
+        "reply": 14,
+        "type": "engine_probe.band"
+      },
+      "input_disabled": false,
+      "input_focused": true,
+      "subtitle": "Hyperposition."
+    },
+    "band_15": {
+      "0": {
+        "id": 15,
+        "type": "engine_probe.band"
+      }
+    },
+    "band_15_reply": {
+      "0": {
+        "reply": 15,
+        "type": "engine_probe.band"
+      },
+      "input_disabled": true,
+      "input_focused": false,
+      "subtitle": "Hyperposition."
+    },
+    "band_2": {
+      "0": {
+        "id": 2,
+        "type": "engine_probe.band"
+      }
+    },
+    "band_2_reply": {
+      "0": {
+        "reply": 2,
+        "type": "engine_probe.band"
+      },
+      "input_disabled": true,
+      "input_focused": false,
+      "subtitle": ""
+    },
+    "band_6": {
+      "0": {
+        "id": 6,
+        "type": "engine_probe.band"
+      }
+    },
+    "band_6_reply": {
+      "0": {
+        "reply": 6,
+        "type": "engine_probe.band"
+      },
+      "input_disabled": false,
+      "input_focused": true,
+      "subtitle": "How can I help you?"
+    },
+    "band_7": {
+      "0": {
+        "id": 7,
+        "type": "engine_probe.band"
+      }
+    },
+    "band_7_reply": {
+      "0": {
+        "reply": 7,
+        "type": "engine_probe.band"
+      },
+      "input_disabled": true,
+      "input_focused": false,
+      "subtitle": "How can I help you?"
+    },
+    "band_8": {
+      "0": {
+        "id": 8,
+        "type": "engine_probe.band"
+      }
+    },
+    "band_8_reply": {
+      "0": {
+        "reply": 8,
+        "type": "engine_probe.band"
+      },
+      "input_disabled": false,
+      "input_focused": true,
+      "subtitle": "Noted."
+    },
+    "choose_accept": {
+      "0": {
+        "type": "engine_probe.choose"
+      },
+      "button": 0
+    },
+    "image_3": {
+      "0": {
+        "id": 3,
+        "type": "engine_probe.image"
+      }
+    },
+    "image_3_reply": {
+      "0": {
+        "reply": 3,
+        "type": "engine_probe.image"
+      },
+      "background": "rgb(0, 0, 0)",
+      "hidden": false
+    },
+    "image_5": {
+      "0": {
+        "id": 5,
+        "type": "engine_probe.image"
+      }
+    },
+    "image_5_reply": {
+      "0": {
+        "reply": 5,
+        "type": "engine_probe.image"
+      },
+      "background": "rgb(0, 0, 0)",
+      "hidden": true
+    },
+    "key_console": {
+      "0": {
+        "type": "engine_probe.key"
+      },
+      "key": "0"
+    },
+    "open_4": {
+      "0": {
+        "id": 4,
+        "type": "console.open"
+      }
+    },
+    "permit_10": {
+      "0": {
+        "id": 10,
+        "type": "engine_probe.permit"
+      }
+    },
+    "permit_10_reply": {
+      "0": {
+        "reply": 10,
+        "type": "engine_probe.permit"
+      },
+      "buttons": ["Accept", "Deny", "Always Allow"],
+      "texts": [
+        "browser.console_run asks to run with {\"text\":\"echo hyperposition\",\"timeout_seconds\":30}."
+      ]
+    },
+    "permit_11": {
+      "0": {
+        "id": 11,
+        "type": "engine_probe.permit"
+      }
+    },
+    "permit_11_reply": {
+      "0": {
+        "reply": 11,
+        "type": "engine_probe.permit"
+      },
+      "buttons": [],
+      "texts": []
+    },
+    "refusal_1": {
+      "0": {
+        "id": 1,
+        "type": "engine_probe.refusal"
+      }
+    },
+    "refusal_1_reply": {
+      "0": {
+        "reply": 1,
+        "type": "engine_probe.refusal"
+      },
+      "message": "The engine page has no element with the id image."
+    },
+    "render_4": {
+      "0": {
+        "id": 4,
+        "type": "render"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "How can I help you?"
+    },
+    "render_4_reply": {
+      "0": {
+        "reply": 4,
+        "type": "render"
+      }
+    },
+    "say_1": {
+      "0": {
+        "id": 1,
+        "type": "ai.say"
+      },
+      "text": "1"
+    },
+    "say_1_reply": {
+      "0": {
+        "reply": 1,
+        "type": "ai.say"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "Noted.",
+      "turn": 1
+    },
+    "say_2": {
+      "0": {
+        "id": 2,
+        "type": "ai.say"
+      },
+      "text": "3"
+    },
+    "say_2_reply": {
+      "0": {
+        "reply": 2,
+        "type": "ai.say"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "Hyperposition.",
+      "turn": 2
+    },
+    "say_5": {
+      "0": {
+        "id": 5,
+        "type": "ai.say"
+      },
+      "text": "3"
+    },
+    "submit_one": {
+      "0": {
+        "type": "engine_probe.submit"
+      },
+      "text": "1"
+    },
+    "submit_three": {
+      "0": {
+        "type": "engine_probe.submit"
+      },
+      "text": "3"
+    }
+  }
+}

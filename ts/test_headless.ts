@@ -4,8 +4,9 @@
 //
 // The headless realm of one block of group B or C, on the page whose last
 // script, a worker script, is `test_headless.realm_open()`. It runs on both
-// threads and tells them apart by `self.name`, "ai" in the worker and "" on
-// the main thread. API/ts/test_headless.d.ts holds the sides a block runs on.
+// threads and tells them apart by `self.name`, "ai" or "engine" in a worker
+// and "" on the main thread. API/ts/test_headless.d.ts holds the sides a block
+// runs on.
 //
 // A throw while `realm_start` runs, in a UI block's synchronous run too, is
 // the exception of the `Runtime.evaluate` call and not a line of the lane.
@@ -24,7 +25,9 @@ namespace test_headless {
 
   // The worker, the lane's line types and numbers, and the first decoder.
   const constants = Object.freeze({
-    worker_name: "ai",
+    worker_name: "ai" as const,
+    // The name of the worker of a block of `engine`.
+    engine_name: "engine",
     worker_scripts: "script[data-worker]",
     strict_line: '"use strict";\n',
     script_join: "\n",
@@ -39,6 +42,9 @@ namespace test_headless {
     // The notices of a block of `workers`: a case's start, a worker's ready.
     start_type: "test_headless.worker_start",
     ready_type: "test_headless.worker_ready",
+    // The line whose task runs the worker's part, and its handler's version.
+    tests_type: "worker.tests",
+    handler_version: 0,
     server_owner: "server" as const,
     language: "typescript" as const,
     gold_prefix: "typescript.",
@@ -69,6 +75,9 @@ namespace test_headless {
     ready: () => void,
   ) => void;
 
+  // Builds the far end of an engine worker's UI channel, the test's end of it.
+  export type EngineBuild = (ui: MessagePort) => queue.ThreadPort;
+
   // A block: a unittest module, line cases or own points, or of a side.
   type Block =
     | {
@@ -85,7 +94,8 @@ namespace test_headless {
         ) => void;
       }
     | { readonly side: "lanes"; readonly lanes: LanesBuild }
-    | { readonly side: "workers"; readonly worker: WorkerRun };
+    | { readonly side: "workers"; readonly worker: WorkerRun }
+    | { readonly side: "engine"; readonly engine: EngineBuild };
 
   // The blocks of groups B and C by name.
   const blocks = Object.freeze<{ readonly [name: string]: Block }>({
@@ -131,6 +141,12 @@ namespace test_headless {
     },
     test_worker_ai: { side: "ui", module: () => test_worker_ai },
     test_boot: { side: "ui", module: () => test_boot },
+    test_engine: { side: "worker", module: () => test_engine },
+    test_engine_image: { side: "worker", module: () => test_engine_image },
+    test_engine_page: {
+      side: "ui",
+      topology: test_engine_page.topology_build,
+    },
     test_integrate_worker_ai: {
       side: "lanes",
       lanes: test_integrate_worker_ai.lanes_build,
@@ -164,6 +180,10 @@ namespace test_headless {
     test_console_open: {
       side: "ui",
       topology: test_console_open.topology_build,
+    },
+    test_integrate_engine: {
+      side: "engine",
+      engine: test_integrate_engine.engine_build,
     },
   });
 
@@ -286,16 +306,17 @@ namespace test_headless {
   }
 
   // Makes the worker from the texts of the worker scripts, faults to `fault`.
-  function worker_make(fault: (line: lines.Line) => void): Worker {
+  function worker_make(
+    fault: (line: lines.Line) => void,
+    name: string = constants.worker_name,
+  ): Worker {
     const scripts = document.querySelectorAll<HTMLScriptElement>(
       constants.worker_scripts,
     );
     const texts = Array.from(scripts, (script) => script.text);
     const source = constants.strict_line + texts.join(constants.script_join);
     const blob = new Blob([source], { type: constants.script_media });
-    const worker = new Worker(URL.createObjectURL(blob), {
-      name: constants.worker_name,
-    });
+    const worker = new Worker(URL.createObjectURL(blob), { name });
     // The `fault` line of the worker's error overlay, after any report sent.
     worker.onmessage = (event: MessageEvent<unknown>) => {
       fault(event.data as lines.Line);
@@ -346,6 +367,22 @@ namespace test_headless {
     const id = `${constants.gold_prefix}${start.block}`;
     const build = () => lanes(start.first, server, ui, line_write);
     line_case.block_run(runner, start.block, id, build, () => {
+      runner.run_end();
+    });
+  }
+
+  // Runs a block of `engine` here, over a fresh engine worker's UI channel.
+  function engine_run(start: boot.HeadlessStart, build: EngineBuild): void {
+    start_answer(start);
+    const worker = worker_make(line_write, constants.engine_name);
+    const ui = new MessageChannel();
+    const message = { port: ui.port2, base_url: location.href };
+    worker.postMessage(message, [ui.port2]);
+    const runner = new tap_producer.TAPTestRunner(start.failfast);
+    runner.set_stream((text) => line_write(text_line(text)));
+    const id = `${constants.gold_prefix}${start.block}`;
+    const topology = () => build(ui.port1);
+    line_case.block_run(runner, start.block, id, topology, () => {
       runner.run_end();
     });
   }
@@ -617,10 +654,33 @@ namespace test_headless {
     });
   }
 
+  // Runs the worker's part in a task of `worker.tests`, always in debug mode.
+  function tests_notify(
+    tasks: queue.TaskQueue,
+    start: boot.HeadlessStart,
+  ): void {
+    dispatch.handler_register(
+      constants.tests_type,
+      constants.handler_version,
+      () => {
+        worker_run(tasks, start);
+        return undefined;
+      },
+    );
+    const header = jslb.header_make(constants.tests_type, {
+      full: settings.names_full(),
+    });
+    tasks.line_notify(jslb.line_make(header, [], {}), constants.worker_name);
+  }
+
   // Opens the realm lane on the main thread, or brings the worker up.
   export function realm_open(): void {
     if (self.name === constants.worker_name) {
-      boot.headless_worker(worker_run);
+      boot.headless_worker(tests_notify);
+      return;
+    }
+    if (self.name === constants.engine_name) {
+      boot.engine_worker(engine.worker_run);
       return;
     }
     if (typeof realm_line !== "function") {
@@ -651,6 +711,8 @@ namespace test_headless {
       lanes_run(start, found.lanes);
     } else if (found.side === "workers") {
       workers_run(start);
+    } else if (found.side === "engine") {
+      engine_run(start, found.engine);
     } else if (found.side === "ui") {
       main_run(start);
     } else {

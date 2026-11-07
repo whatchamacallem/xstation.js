@@ -265,7 +265,7 @@ namespace jslb {
   // Returns the JSON bytes ending in CR, then each blob's `d` as it is.
   export function line_encode(line: Line): (Uint8Array | string)[] {
     const sizes = line_check(line, false);
-    const text = line_text(line, sizes.length) + "\r";
+    const text = line_text(line, sizes.length, false) + "\r";
     const pieces: (Uint8Array | string)[] = [utility.utf8_encode(text)];
     for (let number = 1; number <= sizes.length; number += 1) {
       const size = sizes[number - 1];
@@ -286,14 +286,14 @@ namespace jslb {
     return pieces;
   }
 
-  // The JSON text of a line followed by one `<blob "n"=K>` tag per blob.
+  // The JSON text, any bytes `<bytes "size"=N>`, then `<blob "n"=K>` per blob.
   export function line_render(line: Line): string {
     const count = line_check(line, false).length;
     let tags = "";
     for (let number = 1; number <= count; number += 1) {
       tags += `<blob "n"=${number}>`;
     }
-    return line_text(line, count) + tags;
+    return line_text(line, count, true) + tags;
   }
 
   // Parses a JSON text by the decoder's number rules, any JSON value.
@@ -423,8 +423,12 @@ namespace jslb {
     return sizes;
   }
 
-  // Returns the JSON text the encoder writes for a line with `count` blobs.
-  function line_text(line: { [key: string]: unknown }, count: number): string {
+  // Returns the JSON text of a line with `count` blobs, bytes tagged if asked.
+  function line_text(
+    line: { [key: string]: unknown },
+    count: number,
+    tagged: boolean,
+  ): string {
     const sent: { [key: string]: unknown } = { ...line };
     for (let number = 1; number <= count; number += 1) {
       const header = header_at(line, number);
@@ -432,11 +436,11 @@ namespace jslb {
         Object.entries(header).filter(([name]) => name !== "d"),
       );
     }
-    return json_write(sent);
+    return json_write(sent, tagged);
   }
 
   // Returns the JSON text of a value, integer keys first, numbers checked.
-  function json_write(value: unknown): string {
+  function json_write(value: unknown, tagged: boolean): string {
     if (value === null || typeof value === "boolean") {
       return String(value);
     }
@@ -451,7 +455,8 @@ namespace jslb {
     }
     if (Array.isArray(value)) {
       const items: readonly unknown[] = value;
-      return `[${Array.from(items, (item) => json_write(item)).join(",")}]`;
+      const texts = Array.from(items, (item) => json_write(item, tagged));
+      return `[${texts.join(",")}]`;
     }
     if (object_plain(value)) {
       const object: { [key: string]: unknown } = value;
@@ -459,9 +464,12 @@ namespace jslb {
       const numbers = keys.filter((key) => constants.number_key.test(key));
       const names = keys.filter((key) => !constants.number_key.test(key));
       const members = [...numbers.sort(key_compare), ...names].map(
-        (key) => `${text_write(key)}:${json_write(object[key])}`,
+        (key) => `${text_write(key)}:${json_write(object[key], tagged)}`,
       );
       return `{${members.join(",")}}`;
+    }
+    if (tagged && value instanceof Uint8Array) {
+      return `<bytes "size"=${value.length}>`;
     }
     throw new Error(
       i18n("jslb.value_refused", Object.prototype.toString.call(value)),

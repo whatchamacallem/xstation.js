@@ -11,11 +11,12 @@
 # TypeScript stream is appended to its file; the server's MCP server
 # answers `initialize`, and `tools/list` with the tools of
 # API/mcp/tools.json; `verbose.tail` gives the server's ring and the page's
-# lines; and `settings.put` and `source.put` write the root's files in debug
+# lines; `settings.put` and `source.put` write the root's files in debug
 # mode and are refused with the parameter debug false, which each child sets
-# from the root's parameters as `bootstrap.py` does. The lines fed to the loop are the
-# gold's, each its JSON text, a CR and its blobs' bytes, and the lines it
-# writes are read back the same way and checked against the gold.
+# from the root's parameters as `bootstrap.py` does; and `db.sync` streams
+# every database whole, each line logged in full. The lines fed to the loop
+# are the gold's, each its JSON text, a CR and its blobs' bytes, and the lines
+# it writes are read back the same way and checked against the gold.
 
 import contextlib, copy, functools, harness, hashlib, json, main_loop, os, re
 import signal, sqlite3, switches, tempfile, traceback, unittest
@@ -76,6 +77,21 @@ _SOURCE = b"pass\n"
 # The TAP file of the TypeScript stream in a root.
 _TAP_FILE = os.path.join("tap", "typescript.tap")
 
+# The value the sync tests keep in a row of the castle.
+_KEPT_VALUE = b"kept value"
+
+# The value the sync tests keep in a cache file, over `_OVERFLOW_BYTES`.
+_BIG_VALUE = bytes(index % 256 for index in range(_OVERFLOW_BYTES * 2 + 1))
+
+# The database of the server's log, under the root.
+_LOG_DB = "_verbose"
+
+# The query of the thread and text of each line of the log, in order.
+_LOG_QUERY = "SELECT thread, text FROM line ORDER BY seq"
+
+# The thread the server's own lines are stored under in the log.
+_SERVER_THREAD = "server"
+
 
 # A copy of a value of this module's gold, which the test may change.
 def _gold_copy(name: str) -> Any:
@@ -131,6 +147,26 @@ def _payload_of(line: dict[str, Any]) -> dict[str, Any]:
         for key, value in line.items()
         if _NUMBER_KEY.fullmatch(key) is None
     }
+
+
+# The bytes of the pushes that fill the castle, then of `db.sync`.
+def _sync_bytes() -> bytes:
+    lines = [
+        _line_bytes("create_castle"),
+        _line_bytes("put_kept", _KEPT_VALUE),
+        _line_bytes("put_big", _BIG_VALUE),
+        _line_bytes("sync"),
+    ]
+    return b"".join(lines)
+
+
+# The text logged for a push read back, the gold's with its values set.
+def _push_text(line: dict[str, Any]) -> str:
+    name = "restore" if "files" in line else "file"
+    text = _text_get(f"main_loop_line_push_{name}")
+    text = text.replace("SIZE", str(line["1"]["size"]))
+    text = text.replace("NAME", line["db"])
+    return text.replace("COUNT", str(line.get("files")))
 
 
 # The result of `tools/list`: each server tool of the API file, no permit.
@@ -273,6 +309,23 @@ class ScratchCase(unittest.TestCase):
     def header_check(self, line: dict[str, Any], name: str) -> None:
         self.assertEqual(line["0"], _gold_copy(f"lines.{name}")["0"])
 
+    # Checks a sync's pushes by type, and gives each database its blobs.
+    def restores_read(
+        self, pushes: list[dict[str, Any]]
+    ) -> dict[str, tuple[bytes, list[bytes]]]:
+        restores: dict[str, tuple[bytes, list[bytes]]] = {}
+        left = iter(pushes)
+        for restore in left:
+            self.assertEqual(restore["0"]["type"], "db.restore")
+            files: list[bytes] = []
+            for _ in range(restore["files"]):
+                file = next(left)
+                self.assertEqual(file["0"]["type"], "db.file")
+                self.assertEqual(file["db"], restore["db"])
+                files.append(file["1"]["d"])
+            restores[restore["db"]] = (restore["1"]["d"], files)
+        return restores
+
 
 # The main loop serving each engine's lines.
 class TestEngines(ScratchCase):
@@ -382,3 +435,35 @@ class TestEngines(ScratchCase):
         self.assertTrue(error["stack"].endswith(": " + message))
         directory = os.path.join(self.root, "main_loop")
         self.assertFalse(os.path.exists(directory))
+
+    # `db.sync` sends every database whole, each with its cache files after it.
+    def test_sync_whole(self) -> None:
+        lines = self.served_read(_sync_bytes())
+        expected = _gold_copy("lines.sync_reply")
+        self.assertEqual(lines[-1], expected)
+        restores = self.restores_read(lines[:-1])
+        self.assertEqual(list(restores), expected["databases"])
+        image, files = restores[_CASTLE_DB]
+        self.assertEqual(files, [_BIG_VALUE])
+        path = os.path.join(self.scratch, _CASTLE_DB + ".sqlite")
+        with open(path, "wb") as file:
+            file.write(image)
+        kept = _value_read(self.scratch, _CASTLE_DB, "kept")
+        self.assertEqual(kept, _KEPT_VALUE)
+
+    # A sync's lines are logged in order, in full, with no blob's bytes.
+    def test_sync_traced(self) -> None:
+        lines = self.served_read(_sync_bytes())
+        big = _text_get("main_loop_line_dispatch_big")
+        big = big.replace("SIZE", str(len(_BIG_VALUE)))
+        big = big.replace("DIGEST", hashlib.sha256(_BIG_VALUE).hexdigest())
+        texts = [
+            _text_get("main_loop_line_dispatch_create"),
+            _text_get("main_loop_line_dispatch_put"),
+            big,
+            _text_get("main_loop_line_dispatch_sync"),
+            *[_push_text(line) for line in lines[:-1]],
+            _text_get("main_loop_line_reply_sync"),
+        ]
+        rows = _rows_read(self.root, _LOG_DB, _LOG_QUERY)
+        self.assertEqual(rows, [(_SERVER_THREAD, text) for text in texts])

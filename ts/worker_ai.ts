@@ -5,8 +5,8 @@
 // The AI worker once the boot has handed over its objects.
 // API/ts/worker_ai.d.ts holds its rules. `tap_start` runs once per worker, so
 // each of its pieces is a function of its own, for the unit suites. The
-// overlay's note is a piece of the program the suites build toward and runs
-// nowhere at bring up.
+// overlay's note runs on the engine page alone, by `TapParts.overlay`, as a
+// test page registers no handler of `overlay.line`.
 
 namespace worker_ai {
   // The owners, settings, line types and numbers of the worker.
@@ -41,7 +41,6 @@ namespace worker_ai {
     fault_type: "fault",
     opened_type: "worker.console_opened",
     put_wake: "worker.settings_put",
-    tests_type: "worker.tests",
     handler_version: 0,
     wire_tty: 1,
   });
@@ -63,6 +62,8 @@ namespace worker_ai {
     end: ServerEnd;
     ui: MessagePort;
     console: wire.ConsolePort | undefined;
+    // Whether the `WireTap` notes through `note_make`: the engine page alone.
+    overlay: boolean;
   }
 
   // What a relay's wake keeps: the request it owes the reply to.
@@ -507,7 +508,7 @@ namespace worker_ai {
     });
   }
 
-  // The bring up described above. `run` gets the queue for the suites.
+  // The bring up above, `run` the worker's program or a test page's entry.
   export function tap_start(
     parts: TapParts,
     run: (tasks: queue.TaskQueue) => void,
@@ -529,9 +530,9 @@ namespace worker_ai {
       switches.debug_on,
     );
     tasks.port_add(constants.ui_owner, new queue.ThreadPort(parts.ui));
-    const debug = switches.debug_on();
-    const server: queue.Port = debug
-      ? new WireTap(parts.server, verbose.log)
+    const note = parts.overlay ? note_make(tasks, verbose.log) : verbose.log;
+    const server: queue.Port = switches.debug_on()
+      ? new WireTap(parts.server, note)
       : parts.server;
     tasks.port_add(constants.server_owner, server);
     settings_register(tasks, dispatch.handler_register, payload.settings);
@@ -553,18 +554,7 @@ namespace worker_ai {
     const set = line_build(constants.settings_type, notice);
     tasks.line_notify(set, constants.ui_owner);
     server.line_post(dispatch.reply_make(parts.first, {}), []);
-    if (debug) {
-      dispatch.handler_register(
-        constants.tests_type,
-        constants.handler_version,
-        () => {
-          run(tasks);
-          return undefined;
-        },
-      );
-      const tests = line_build(constants.tests_type, {});
-      tasks.line_notify(tests, constants.thread);
-    }
+    run(tasks);
   }
 }
 

@@ -3,16 +3,23 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests of reformat's table, of its check and its formatting of PowerShell
-# files, which start no command on Linux, and of its matching of whitelist
-# lines, the matching on a scratch tree under build/, each refusal compared
-# with its message. No formatter starts.
+# files, which start no command on Linux, of its matching of whitelist lines,
+# the matching on a scratch tree under build/, each refusal compared with its
+# message, and of the file run as a program, in a forked child whose PATH
+# finds no formatter. No formatter starts.
 
-import os, reformat, tempfile, unittest
+import os, reformat, runpy, signal, sys, tempfile, traceback, unittest
 
 # The checkout's build directory, where each test makes its scratch directory.
 _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
 )
+
+# How the program ended in its forked child when it returned.
+_ENDING_RETURNED = "returned"
+
+# The program a formatting of the checkout starts first, the `.html` row's.
+_FIRST_FORMATTER = "prettier"
 
 # The checkout's top directory, from which the whitelist's lines are paths.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -36,6 +43,25 @@ def tree_make(root: str, names: list[str]) -> None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "wb"):
             pass
+
+
+# In the forked child: runs the file as a program, writes how it ended.
+def program_end(directory: str, ending_path: str) -> None:
+    try:
+        try:
+            os.environ["PATH"] = directory
+            # This process's arguments are the driver's, not the program's.
+            sys.argv = [reformat.__file__]
+            runpy.run_path(reformat.__file__, run_name="__main__")
+            ending = _ENDING_RETURNED
+        except FileNotFoundError as error:
+            ending = error.filename
+        except BaseException:
+            ending = traceback.format_exc()
+        with open(ending_path, "w", encoding="utf-8") as file:
+            file.write(ending)
+    finally:
+        os.kill(os.getpid(), signal.SIGKILL)
 
 
 # The table's rows, and the row that a path's extension finds.
@@ -241,3 +267,25 @@ class TestWhitelist(unittest.TestCase):
         table = reformat.table_read()
         for path in reformat.whitelist_paths():
             reformat.type_find(table, path)
+
+
+# The file run as a program, in a forked child whose `PATH` finds no formatter.
+class TestProgram(unittest.TestCase):
+    # Makes the checkout's `build/` for the scratch directory.
+    def setUp(self) -> None:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+
+    # With no arguments it formats the whitelist, failing at the first program.
+    def test_formatter_missing(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as root:
+            ending_path = os.path.join(root, "ending.txt")
+            pid = os.fork()
+            if pid == 0:
+                program_end(root, ending_path)
+            status = os.waitpid(pid, 0)[1]
+            self.assertEqual(
+                os.waitstatus_to_exitcode(status), -signal.SIGKILL
+            )
+            with open(ending_path, encoding="utf-8") as ending_file:
+                ending = ending_file.read()
+        self.assertEqual(ending, _FIRST_FORMATTER)

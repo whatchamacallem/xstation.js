@@ -163,6 +163,10 @@ class TestServer(unittest.TestCase):
     ) -> mcp.ToolResult:
         raise error
 
+    # Returns no `ToolResult`, as a tool function with a bug does.
+    def tool_broken(self, arguments: dict[str, Any]) -> Any:
+        return None
+
     # Registers a tool that raises the error given when it is called.
     def failing_register(self, error: Exception) -> None:
         self.server.tool_register(
@@ -374,6 +378,26 @@ class TestServer(unittest.TestCase):
                 response["error"]["message"], _text_get("mcp_method_unknown")
             )
             self.data_check(response, self.rpc_check(-32601))
+
+    # An exception of a method that is no `RpcError` answers with its cascade.
+    def test_method_raises(self) -> None:
+        self.server.tool_register(
+            mcp.Tool("broken", "Breaks.", _EMPTY_SCHEMA, False),
+            self.tool_broken,
+        )
+        params: dict[str, Any] = {"name": "broken", "arguments": {}}
+        response = _response_get(
+            self.server, _request_make(12, "tools/call", params)
+        )
+        self.assertNotIn("result", response)
+        self.assertEqual(response["id"], 12)
+        self.assertEqual(response["error"]["code"], -32603)
+        self.assertEqual(
+            response["error"]["message"], _text_get("mcp_result_none")
+        )
+        failure = self.failure_get()
+        self.assertIsInstance(failure, AttributeError)
+        self.data_check(response, failure)
 
     # A message that is no request is invalid, with the id only if it is valid.
     def test_request_invalid(self) -> None:

@@ -4,18 +4,28 @@
 #
 # Tests the parts of devtools.py that need no browser: WebSocket frames with
 # and without masks, the handshake, joining a message from its fragments, the
-# relay script and the PowerShell arguments, the DevTools address, the
-# timers, a client on real pipes, filled before it reads or never written
-# to, a descriptor moved above the Linux browser's 3 and 4, the synchronous
-# loads picked out of a trace, and the page's loads, trace, workers and
-# pauses kept. Every byte a function reads, and every
-# frame a client writes, rides a real pipe, and a pipe in packet mode gives
-# the short reads. No process is started. The waits the tests give and the
-# size of a pipe are the gold's.
+# upgrade on real pipes with a thread answering its key, the relay script and
+# the PowerShell arguments, the commands run to their ends, the Linux
+# browser's path by its switch, a browser not started, the DevTools
+# address, the timers, a client on real
+# pipes, filled before it reads or never written to, a descriptor moved above
+# the Linux browser's 3 and 4, the synchronous loads picked out of a trace,
+# and the page's loads, trace, workers and pauses kept. Every byte a function
+# reads, and every frame a client writes, rides a real pipe, and a pipe in
+# packet mode gives the short reads. The only processes started are the
+# Python children of the commands. The waits the tests give and the size of a
+# pipe are the gold's.
 
-import devtools, errno, fcntl, functools, harness, json, os, time, unittest
+import base64, devtools, errno, fcntl, functools, harness, json, os, subprocess
+import switches, sys, tempfile, threading, time, unittest
 from collections.abc import Callable
 from typing import Any, BinaryIO
+
+# The checkout's top directory, above this file's `python/`.
+_ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Where the scratch directories go.
+_BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
 # The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_devtools"
@@ -62,6 +72,36 @@ _HELLO_PLAIN = bytes.fromhex("810548656c6c6f")
 # A mask that leaves the payload as it is.
 _ZERO_MASK = bytes(4)
 
+# The start of the line of an upgrade request that holds its key.
+_KEY_HEADER = "Sec-WebSocket-Key: "
+
+# The bytes of the key an upgrade request holds, as RFC 6455 sets.
+_KEY_BYTES = 16
+
+# The host of the upgrades the tests open.
+_UPGRADE_HOST = "127.0.0.1:9222"
+
+# The path of the upgrades the tests open.
+_UPGRADE_PATH = "/devtools/browser/abc"
+
+# The Linux browser, with the switch off.
+_CHROME_PATH = "/usr/local/bin/chrome-headless-shell"
+
+# What the path of the cloud container's browser starts with.
+_ANTHROPIC_START = "/opt/pw-browsers/chromium_headless_shell-"
+
+# A child that writes its folder, then a character of 3 bytes in `UTF-8`.
+_OUTPUT_SCRIPT = (
+    "import os, sys\n"
+    "sys.stdout.buffer.write(os.fsencode(os.getcwd()) + b'\\xe4\\xb8\\xad')\n"
+)
+
+# A child that exits with 1, its message on stderr.
+_FAILING_SCRIPT = "raise SystemExit('boom')"
+
+# A child that outlives a wait that ends soon.
+_SLEEPING_SCRIPT = f"import time; time.sleep({_WAIT_SECONDS})"
+
 
 # Returns the event of a target attached from the page, with its session.
 def attach_event(kind: str, session_id: str, title: str) -> dict[str, Any]:
@@ -80,6 +120,11 @@ def attach_event(kind: str, session_id: str, title: str) -> dict[str, Any]:
             "waitingForDebugger": False,
         },
     }
+
+
+# Returns the arguments that run the script in a Python child.
+def child_arguments(script: str) -> list[str]:
+    return [sys.executable, "-c", script]
 
 
 # Returns the frame a server sends for a DevTools message.
@@ -101,6 +146,16 @@ def paused_event(session_id: str) -> dict[str, Any]:
 def request_decode(frame: devtools.SocketFrame) -> dict[str, Any]:
     request: dict[str, Any] = json.loads(frame.payload)
     return request
+
+
+# Returns the key of an upgrade request.
+def request_key(head: bytes) -> str:
+    (line,) = [
+        line
+        for line in head.decode().split("\r\n")
+        if line.startswith(_KEY_HEADER)
+    ]
+    return line.removeprefix(_KEY_HEADER)
 
 
 # Returns the metadata event that names a thread of a process.
@@ -141,6 +196,17 @@ def trace_complete(lost: bool) -> dict[str, Any]:
 # Returns the event that carries some of a trace's events.
 def trace_data(values: list[dict[str, Any]]) -> dict[str, Any]:
     return {"method": "Tracing.dataCollected", "params": {"value": values}}
+
+
+# Keeps the upgrade read from one descriptor, accepts it and sends a frame.
+def upgrade_answer(
+    request_fd: int, answer_fd: int, heads: list[bytes]
+) -> None:
+    head = devtools.head_read(functools.partial(os.read, request_fd))
+    heads.append(head)
+    accept = devtools.accept_key(request_key(head))
+    answer = _ACCEPT_HEAD.replace(_SAMPLE_ACCEPT.encode(), accept.encode())
+    os.write(answer_fd, answer + _HELLO_PLAIN)
 
 
 # Gives each test real pipes, each end closed when the test ends.
@@ -400,6 +466,63 @@ class TestHandshake(PipeCase):
         self.assertEqual(devtools.head_read(read), _ACCEPT_HEAD)
         self.assertEqual(os.read(read_fd, _PIPE_BYTES), b"rest")
 
+    # An upgrade goes out with a new key, and its answer leaves what follows.
+    def test_open_accepted(self) -> None:
+        answer_read, answer_write = os.pipe()
+        self.addCleanup(os.close, answer_read)
+        self.addCleanup(os.close, answer_write)
+        channel = self.channel_make(answer_read)
+        heads: list[bytes] = []
+        peer = threading.Thread(
+            target=upgrade_answer,
+            args=(self.written_fd, answer_write, heads),
+        )
+        peer.start()
+        self.addCleanup(peer.join)
+        timer = devtools.WaitTimer("the upgrade", _WAIT_SECONDS)
+        channel.handshake_open(_UPGRADE_HOST, _UPGRADE_PATH, timer)
+        self.assertEqual(channel.message_receive(timer), b"Hello")
+        peer.join()
+        (head,) = heads
+        key = request_key(head)
+        self.assertEqual(len(base64.b64decode(key, validate=True)), _KEY_BYTES)
+        self.assertEqual(
+            head, devtools.handshake_request(_UPGRADE_HOST, _UPGRADE_PATH, key)
+        )
+
+    # An answer that accepts another key fails loud.
+    def test_open_wrong(self) -> None:
+        read_fd = self.pipe_filled([_ACCEPT_HEAD], _PIPE_FLAGS)
+        channel = self.channel_make(read_fd)
+        timer = devtools.WaitTimer("the upgrade", _WAIT_SECONDS)
+        with self.assertRaises(ConnectionError) as caught:
+            channel.handshake_open(_UPGRADE_HOST, _UPGRADE_PATH, timer)
+        self.assertEqual(
+            str(caught.exception), "DevTools answered a WebSocket key wrongly"
+        )
+
+    # A connection that ends inside its answer fails loud.
+    def test_open_ended(self) -> None:
+        read_fd = self.pipe_filled([_ACCEPT_HEAD[:-1]], _PIPE_FLAGS)
+        channel = self.channel_make(read_fd)
+        timer = devtools.WaitTimer("the upgrade", _WAIT_SECONDS)
+        with self.assertRaises(ConnectionError) as caught:
+            channel.handshake_open(_UPGRADE_HOST, _UPGRADE_PATH, timer)
+        self.assertEqual(
+            str(caught.exception), "DevTools closed the connection"
+        )
+
+    # An answer that never comes fails when its timer ends.
+    def test_open_timeout(self) -> None:
+        channel = self.channel_make(self.pipe_idle())
+        timer = devtools.WaitTimer("the upgrade", _EXPIRY_SECONDS)
+        with self.assertRaises(TimeoutError) as caught:
+            channel.handshake_open(_UPGRADE_HOST, _UPGRADE_PATH, timer)
+        self.assertEqual(
+            str(caught.exception),
+            f"gave up after {_EXPIRY_SECONDS:g} s waiting for the upgrade",
+        )
+
 
 # The address the browser writes to its port file.
 class TestAddress(unittest.TestCase):
@@ -453,6 +576,112 @@ class TestScripts(unittest.TestCase):
                 "-EncodedCommand",
                 "YQA=",
             ],
+        )
+
+
+# A command run to its end under a timer.
+class TestCommand(unittest.TestCase):
+    # The command runs in the folder given, its stdout read as `UTF-8`.
+    def test_run_output(self) -> None:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+        folder = self.enterContext(
+            tempfile.TemporaryDirectory(dir=_BUILD_PATH)
+        )
+        output = devtools.command_run(
+            "a child",
+            child_arguments(_OUTPUT_SCRIPT),
+            folder,
+            _WAIT_SECONDS,
+        )
+        self.assertEqual(output, os.path.realpath(folder) + chr(0x4E2D))
+
+    # A command that fails raises its exit code and its stderr.
+    def test_run_failed(self) -> None:
+        with self.assertRaises(RuntimeError) as caught:
+            devtools.command_run(
+                "a child",
+                child_arguments(_FAILING_SCRIPT),
+                None,
+                _WAIT_SECONDS,
+            )
+        self.assertEqual(str(caught.exception), "a child exited with 1: boom")
+
+    # A command past its time is killed and fails, naming what it waited for.
+    def test_run_timeout(self) -> None:
+        with self.assertRaises(TimeoutError) as caught:
+            devtools.command_run(
+                "a child",
+                child_arguments(_SLEEPING_SCRIPT),
+                None,
+                _EXPIRY_SECONDS,
+            )
+        self.assertEqual(
+            str(caught.exception),
+            f"gave up after {_EXPIRY_SECONDS:g} s waiting for a child",
+        )
+        self.assertIsInstance(
+            caught.exception.__cause__, subprocess.TimeoutExpired
+        )
+
+
+# The Linux browser's path, by the switch.
+class TestPath(unittest.TestCase):
+    # Sets the switch, which goes back as it was when the test ends.
+    def switch_set(self, on: bool) -> None:
+        saved = switches.switches_get()
+        self.addCleanup(switches.switches_apply, saved)
+        switches.switches_apply({**saved, "anthropic": on})
+
+    # With the switch off the path is the one the driver may start.
+    def test_path_stock(self) -> None:
+        self.switch_set(False)
+        self.assertEqual(devtools.chrome_path(), _CHROME_PATH)
+
+    # With the switch on the browser is looked for in the cloud container's.
+    def test_path_anthropic(self) -> None:
+        self.switch_set(True)
+        # The container holds the browser, and this machine has only the error.
+        try:
+            found = devtools.chrome_path()
+        except FileNotFoundError as error:
+            found = str(error)
+        self.assertIn(_ANTHROPIC_START, found)
+
+    # A pattern gives its one match, and any other count fails loud.
+    def test_match_count(self) -> None:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+        folder = self.enterContext(
+            tempfile.TemporaryDirectory(dir=_BUILD_PATH)
+        )
+        pattern = os.path.join(folder, "shell-*")
+        with self.assertRaises(FileNotFoundError) as caught:
+            devtools.chrome_match(pattern)
+        self.assertEqual(
+            str(caught.exception), f"0 browsers match {pattern}, not 1"
+        )
+        first = os.path.join(folder, "shell-1")
+        with open(first, "wb"):
+            pass
+        self.assertEqual(devtools.chrome_match(pattern), first)
+        with open(os.path.join(folder, "shell-2"), "wb"):
+            pass
+        with self.assertRaises(FileNotFoundError) as caught:
+            devtools.chrome_match(pattern)
+        self.assertEqual(
+            str(caught.exception), f"2 browsers match {pattern}, not 1"
+        )
+
+
+# A browser not started.
+class TestUnstarted(unittest.TestCase):
+    # Its client fails loud, naming the with block that starts it.
+    def test_client_unstarted(self) -> None:
+        browser = devtools.Browser(1, 1, devtools.LinuxPipe())
+        with self.assertRaises(RuntimeError) as caught:
+            browser.client_get()
+        self.assertEqual(
+            str(caught.exception),
+            "the browser isn't started: use a with block",
         )
 
 
@@ -862,6 +1091,21 @@ class TestTrace(unittest.TestCase):
         self.assertEqual(events.trace, [first, second, third])
         self.assertTrue(events.trace_done)
         self.assertTrue(events.trace_lost)
+
+    # A trace that lost none is given, and one that lost events fails loud.
+    def test_take_lost(self) -> None:
+        events = devtools.PageEvents()
+        first = thread_metadata(1, 10, "CrRendererMain")
+        events.message_handle(trace_data([first]))
+        events.message_handle(trace_complete(False))
+        self.assertEqual(events.trace_take(), [first])
+        events.message_handle(trace_complete(True))
+        with self.assertRaises(RuntimeError) as caught:
+            events.trace_take()
+        self.assertEqual(
+            str(caught.exception),
+            "the trace lost events, so it can't show everything that ran",
+        )
 
 
 # The workers attached from the page and the pauses of their debuggers.

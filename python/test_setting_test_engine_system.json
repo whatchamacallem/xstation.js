@@ -41,6 +41,32 @@
       }
     }
   },
+  "restarts": {
+    "abbreviated": {
+      "expected": ["--root", "r", "--main-loop", "b.py"],
+      "given": ["--main", "a.py", "--root", "r"]
+    },
+    "absent": {
+      "expected": ["--root", "r", "--main-loop", "b.py"],
+      "given": ["--root", "r"]
+    },
+    "joined": {
+      "expected": ["--root", "r", "--main-loop", "b.py"],
+      "given": ["--main-loop=a.py", "--root", "r"]
+    },
+    "separate": {
+      "expected": ["--root", "r", "--main-loop", "b.py"],
+      "given": ["--root", "r", "--main-loop", "a.py"]
+    },
+    "shortest": {
+      "expected": ["--root", "r", "--main-loop", "b.py"],
+      "given": ["--m=a.py", "--root", "r"]
+    },
+    "unrelated": {
+      "expected": ["--mainly=a.py", "--root", "r", "--", "--main-loop", "b.py"],
+      "given": ["--mainly=a.py", "--root", "r", "--"]
+    }
+  },
   "texts": {
     "dispatch_handler_twice_restart": "A handler is already registered for type system.restart version 0.",
     "dispatch_handler_twice_settings": "A handler is already registered for type settings.put version 0.",

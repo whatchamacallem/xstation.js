@@ -9,6 +9,10 @@
 // from anywhere but a line. The encoders keep their own refusal of NaN and
 // the infinities, `jslb.number_refused`, inside the same layer.
 //
+// Bytes nested in a value, as a BLOB column of a `sql.run` reply, have no JSON
+// text: `line_encode` refuses them, and `line_render` writes each as a tag of
+// its size, for the debug record.
+//
 // A fault met while a fault is being handled, as a `sink_close` that throws
 // while the decoder shuts a stream after a fault, is thrown with the first
 // fault under its innermost `cause`, so one error holds both.
@@ -66,7 +70,7 @@ declare namespace jslb {
   // The JSON bytes ending in CR, then each blob's `d` as it is.
   function line_encode(line: Line): (Uint8Array | string)[];
 
-  // The JSON text followed by one `<blob "n"=K>` tag per blob.
+  // The JSON text, any bytes `<bytes "size"=N>`, then `<blob "n"=K>` per blob.
   function line_render(line: Line): string;
 
   // Parses a JSON text by the decoder's number rules. Throws `WireError`.

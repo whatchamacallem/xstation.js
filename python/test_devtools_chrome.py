@@ -8,11 +8,12 @@
 # own on the Linux pipe. The profile is read from the browser's own command
 # line, through the process id DevTools gives, and is a directory under build/
 # that goes when the browser does. The methods the browser test calls are
-# tested here first, as the Windows suite tested them on the relay. The waits
-# are the gold's.
+# tested here first, as the Windows suite tested them on the relay. With the
+# relay offline, a refusal sent again is tested on the Linux pipe with that one
+# flag of its class changed. The waits are the gold's.
 
-import devtools, functools, harness, http.server, os, signal, socket, struct
-import switches, tempfile, threading, time, unittest
+import devtools, errno, functools, harness, http.server, os, signal, socket
+import struct, switches, tempfile, threading, time, unittest
 from typing import Any
 
 # The checkout's top directory, above this file's `python/`.
@@ -45,14 +46,26 @@ _PROFILE_FLAG = b"--user-data-dir="
 # The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_devtools_chrome"
 
+# A string longer than the kernel takes as one of an exec's, 128 KiB.
+_EXEC_BYTES: int = harness.gold_get(f"{_GOLD_ID}.exec_bytes")
+
+# How long a server is bound before it listens, refusing until then.
+_LISTEN_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.listen_seconds")
+
 # How often a polling wait looks again.
 _POLL_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.poll_seconds")
 
 # How long a paused worker is watched for a message, each of two times.
 _QUIET_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.quiet_seconds")
 
+# The wait a stop gives the browser, as the error of its end names it.
+_STOP_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.stop_seconds")
+
 # A wait no test reaches the end of.
 _WAIT_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.wait_seconds")
+
+# The variable that holds the string an exec refuses, chosen by its writer.
+_OVERSIZED_VARIABLE = "XSJS_OVERSIZED"
 
 # A PNG's signature, then its first chunk's length, type, width and height.
 _PNG_HEAD = struct.Struct(">8sI4sII")
@@ -127,7 +140,7 @@ def browser_pid(browser: devtools.Browser) -> int:
 # Returns the profile directory named on the browser's command line.
 def profile_read(browser: devtools.Browser) -> str:
     with open(f"/proc/{browser_pid(browser)}/cmdline", "rb") as file:
-        # The browser rewrites it as one string, its arguments joined by spaces.
+        # The browser rewrites it as one string, its words joined by spaces.
         arguments = file.read().replace(b"\0", b" ").split()
     (profile,) = [
         argument.removeprefix(_PROFILE_FLAG)
@@ -142,12 +155,37 @@ def browser_make() -> devtools.Browser:
     return devtools.Browser(_WIDTH_PX, _HEIGHT_PX, devtools.LinuxPipe())
 
 
+# Writes the pages in a scratch directory of the test, returning its path.
+def pages_make(case: unittest.TestCase) -> str:
+    os.makedirs(_BUILD_PATH, exist_ok=True)
+    pages_path = case.enterContext(
+        tempfile.TemporaryDirectory(dir=_BUILD_PATH)
+    )
+    for name, text in _PAGES.items():
+        path = os.path.join(pages_path, name)
+        with open(path, "w", encoding="utf-8") as file:
+            file.write(text)
+    return pages_path
+
+
+# Listens after the gold's wait, then serves until the server is shut down.
+def serve_later(server: http.server.ThreadingHTTPServer) -> None:
+    time.sleep(_LISTEN_SECONDS)
+    server.server_activate()
+    server.serve_forever()
+
+
 # Serves the pages, its request lines written to stderr under `--verbose`.
 class PageHandler(http.server.SimpleHTTPRequestHandler):
     # Writes the request's line as http.server does, under `--verbose` only.
     def log_message(self, format: str, *args: Any) -> None:
         if switches.verbose:
             super().log_message(format, *args)
+
+
+# The Linux pipe with a refusal sent again, as the relay's is.
+class RetriedPipe(devtools.LinuxPipe):
+    refused_retried = True
 
 
 # Gives each test a browser of its own, started on the Linux pipe.
@@ -172,15 +210,7 @@ class BrowserCase(unittest.TestCase):
 class ServedCase(BrowserCase):
     # Writes the pages and serves them, then starts the browser.
     def setUp(self) -> None:
-        os.makedirs(_BUILD_PATH, exist_ok=True)
-        pages_path = self.enterContext(
-            tempfile.TemporaryDirectory(dir=_BUILD_PATH)
-        )
-        for name, text in _PAGES.items():
-            path = os.path.join(pages_path, name)
-            with open(path, "w", encoding="utf-8") as file:
-                file.write(text)
-        handler = functools.partial(PageHandler, directory=pages_path)
+        handler = functools.partial(PageHandler, directory=pages_make(self))
         server = http.server.ThreadingHTTPServer((_LOCAL_ADDRESS, 0), handler)
         # Closed after the browser stops, so no connection of it is open.
         self.addCleanup(server.server_close)
@@ -218,6 +248,15 @@ class TestEvaluate(BrowserCase):
             self.browser.script_evaluate('throw new Error("boom")')
         first_line = str(caught.exception).split("\n")[0]
         self.assertEqual(first_line, "the page threw Error: boom")
+
+    # A value JSON can't hold fails loud, naming the value.
+    def test_evaluate_unserializable(self) -> None:
+        with self.assertRaises(RuntimeError) as caught:
+            self.browser.script_evaluate("NaN")
+        self.assertEqual(
+            str(caught.exception),
+            "the page returned NaN, which JSON can't hold",
+        )
 
     # A method DevTools doesn't have fails loud, naming the method.
     def test_method_unknown(self) -> None:
@@ -266,6 +305,30 @@ class TestNavigate(BrowserCase):
         self.assertEqual(
             str(caught.exception), url + ": net::ERR_CONNECTION_REFUSED"
         )
+
+
+# Navigation on a transport that sends a refusal again.
+class TestRetried(unittest.TestCase):
+    # A refused navigation is sent again until the server listens.
+    def test_navigate_retried(self) -> None:
+        handler = functools.partial(PageHandler, directory=pages_make(self))
+        server = http.server.ThreadingHTTPServer(
+            (_LOCAL_ADDRESS, 0), handler, bind_and_activate=False
+        )
+        # Closed after the browser stops, so no connection of it is open.
+        self.addCleanup(server.server_close)
+        server.server_bind()
+        browser = self.enterContext(
+            devtools.Browser(_WIDTH_PX, _HEIGHT_PX, RetriedPipe())
+        )
+        # The wait starts here, as the browser's start may take longer.
+        thread = threading.Thread(target=serve_later, args=(server,))
+        thread.start()
+        self.addCleanup(thread.join)
+        self.addCleanup(server.shutdown)
+        port = server.server_port
+        browser.page_open(f"http://{_LOCAL_ADDRESS}:{port}/index.html")
+        self.assertEqual(browser.script_evaluate("document.title"), "index")
 
 
 # The console of the page, passed to its follower as its text.
@@ -391,6 +454,20 @@ class TestClose(BrowserCase):
             self.browser.script_evaluate("1 + 1")
         self.assertTrue(str(caught.exception).startswith("Runtime.evaluate: "))
 
+    # With no page left an attach makes one, and with one it takes that one.
+    def test_attach_pages(self) -> None:
+        client = self.browser.client_get()
+        self.browser.page_close()
+        timer = devtools.WaitTimer("the page to close", _WAIT_SECONDS)
+        while self.pages_list(client):
+            time.sleep(min(_POLL_SECONDS, timer.seconds_left()))
+        self.browser.target_attach()
+        (made,) = self.pages_list(client)
+        self.assertEqual(self.browser.script_evaluate("1 + 1"), 2)
+        self.browser.target_attach()
+        self.assertEqual(self.pages_list(client), [made])
+        self.assertEqual(self.browser.script_evaluate("2 + 2"), 4)
+
 
 # The browser's exit, which closes its pipe, its code the cause.
 class TestExit(BrowserCase):
@@ -447,3 +524,31 @@ class TestProfile(unittest.TestCase):
         )
         (profile,) = profiles
         self.assertFalse(os.path.exists(profile))
+
+    # A browser that ignores the end of its pipe is killed, failing the end.
+    def test_exit_stopped(self) -> None:
+        profiles: list[str] = []
+        with self.assertRaises(TimeoutError) as caught:
+            with browser_make() as browser:
+                profiles.append(profile_read(browser))
+                os.kill(browser_pid(browser), signal.SIGSTOP)
+        self.assertEqual(
+            str(caught.exception),
+            f"gave up after {_STOP_SECONDS:g} s waiting for {_BROWSER_NAME}"
+            " to exit",
+        )
+        (profile,) = profiles
+        self.assertFalse(os.path.exists(profile))
+
+    # An exec the kernel refuses ends the start, leaving no pipe or profile.
+    def test_start_refused(self) -> None:
+        os.environ[_OVERSIZED_VARIABLE] = "x" * _EXEC_BYTES
+        self.addCleanup(os.environ.pop, _OVERSIZED_VARIABLE)
+        pipe = devtools.LinuxPipe()
+        with self.assertRaises(OSError) as caught:
+            with devtools.Browser(_WIDTH_PX, _HEIGHT_PX, pipe):
+                self.fail("the browser started")
+        self.assertEqual(caught.exception.errno, errno.E2BIG)
+        self.assertEqual((pipe.command_fd, pipe.reply_fd), (-1, -1))
+        self.assertEqual(os.path.dirname(pipe.profile_path), _BUILD_PATH)
+        self.assertFalse(os.path.exists(pipe.profile_path))

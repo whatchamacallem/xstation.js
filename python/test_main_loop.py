@@ -15,11 +15,14 @@
 # writing nothing, and a handler's `Failure` writes its reply, then the
 # server's own `error` line, in the name form of the parameter `debug`,
 # which each serving child sets from the root's parameters as `bootstrap.py`
-# does.
+# does. A handler's `dispatch.Stream`, registered through `dispatch` by the
+# child, writes its pushes, then its reply, each traced in full or by its
+# sizes. The analyst's seeded table is walked against the gold and the tools.
 
-import contextlib, copy, functools, harness, hashlib, json, main_loop, os, re
-import signal, sqlite3, switches, tempfile, traceback, unittest
-from collections.abc import Callable
+import contextlib, copy, dispatch, functools, harness, hashlib, jslb, json
+import main_loop, os, re, runpy, shutil, signal, sqlite3, switches, tempfile
+import traceback, unittest
+from collections.abc import Callable, Iterator
 from typing import Any
 
 # The checkout's top directory, above this file's `python/`.
@@ -30,6 +33,15 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
 # The seed files that the main loop reads for a new metaverse.
 _SEED_PATH = os.path.join(_ROOT_PATH, "python", "seed")
+
+# The main loop's file, which a root's link names beside a seed of its own.
+_MODULE_PATH = os.path.join(_ROOT_PATH, "python", "main_loop.py")
+
+# The tool list, which names the browser's tools the analyst's table calls.
+_TOOLS_PATH = os.path.join(_ROOT_PATH, "API", "mcp", "tools.json")
+
+# The prefix of a browser tool's name in a tool call.
+_BROWSER_PREFIX = "browser."
 
 # The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_main_loop"
@@ -127,6 +139,27 @@ _LOG_QUERY = "SELECT thread, text FROM line ORDER BY seq"
 # The thread the server's own lines are stored under in the log.
 _SERVER_THREAD = "server"
 
+# The thread of the gold's `verbose.put`, whose entry the log stores under it.
+_PAGE_THREAD = "ui"
+
+# The type of the request that a stream answers.
+_STREAM_TYPE = "test.stream"
+
+# The type of the request whose stream fails between its pushes.
+_FAULT_TYPE = "test.fault"
+
+# The type of a push of those streams.
+_PUSH_TYPE = "test.push"
+
+# The texts of a stream's pushes, each its blob's bytes too.
+_PUSH_TEXTS: list[str] = harness.gold_get(f"{_GOLD_ID}.push_texts")
+
+# A `line_max` chosen by its writer: no entry of a stream fits under it.
+_LINE_SMALL: int = harness.gold_get(f"{_GOLD_ID}.line_small")
+
+# A clock reading in milliseconds, as wide as every reading of this century.
+_AT_SAMPLE: int = harness.gold_get(f"{_GOLD_ID}.at_sample")
+
 
 # A copy of a value of this module's gold, which the test may change.
 def _gold_copy(name: str) -> Any:
@@ -186,10 +219,87 @@ def _seed_read(name: str) -> bytes:
         return file.read()
 
 
+# The names of the browser's tools in the tool list, each with its prefix.
+def _tools_browser() -> set[str]:
+    with open(_TOOLS_PATH, encoding="utf-8") as file:
+        tools: list[dict[str, Any]] = json.load(file)["browser"]["result"][
+            "tools"
+        ]
+    return {_BROWSER_PREFIX + tool["name"] for tool in tools}
+
+
+# Every reply of the table: each node's by input, then its `after_tools`.
+def _replies_all(script: dict[str, Any]) -> list[dict[str, Any]]:
+    replies: list[dict[str, Any]] = []
+    for node in script["nodes"].values():
+        replies.extend(node["replies"].values())
+        if "after_tools" in node:
+            replies.append(node["after_tools"])
+    return replies
+
+
+# A tool call of the table as the gold has it, its arguments decoded.
+def _call_read(call: dict[str, Any]) -> dict[str, Any]:
+    function = call["function"]
+    arguments = json.loads(function["arguments"])
+    return {"arguments": arguments, "name": function["name"]}
+
+
+# Every tool call of the table, as the gold has them.
+def _calls_all(script: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        _call_read(call)
+        for reply in _replies_all(script)
+        if "tool_calls" in reply
+        for call in reply["tool_calls"]
+    ]
+
+
+# Walks an input as the scripted provider does: its rounds, its last reply.
+def _input_walk(
+    script: dict[str, Any], node: str, text: str
+) -> tuple[list[list[dict[str, Any]]], dict[str, Any]]:
+    reply = script["nodes"][node]["replies"][text]
+    rounds: list[list[dict[str, Any]]] = []
+    while "tool_calls" in reply:
+        rounds.append([_call_read(call) for call in reply["tool_calls"]])
+        reply = script["nodes"][reply["next"]]["after_tools"]
+    return rounds, reply
+
+
+# A tool call with only the arguments the gold pins, as the texts are free.
+def _call_trim(
+    call: dict[str, Any], pinned: dict[str, Any]
+) -> dict[str, Any]:
+    arguments = call["arguments"]
+    kept = {key: arguments[key] for key in pinned["arguments"]}
+    return {"arguments": kept, "name": call["name"]}
+
+
+# The rounds of a walk with only the arguments the gold's rounds pin.
+def _rounds_trim(
+    rounds: list[list[dict[str, Any]]], gold: list[list[dict[str, Any]]]
+) -> list[list[dict[str, Any]]]:
+    return [
+        [_call_trim(*pair) for pair in zip(calls, pinned, strict=True)]
+        for calls, pinned in zip(rounds, gold, strict=True)
+    ]
+
+
 # The JSON text of a value, as the server stores a setting.
 def _json_bytes(value: object) -> bytes:
     text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     return text.encode("utf-8")
+
+
+# The bytes of one `verbose.put` of the server holding an entry of the text.
+def _put_bytes(text: str) -> int:
+    put = {
+        "0": {"type": "verbose.put"},
+        "thread": _SERVER_THREAD,
+        "lines": [{"at": _AT_SAMPLE, "text": text}],
+    }
+    return len(_json_bytes(put))
 
 
 # Runs a query on a database file under the root and returns its rows.
@@ -255,10 +365,22 @@ def _log_read(root: str) -> list[tuple[str, str]]:
     return rows
 
 
+# The thread and text of the trace of an `error` line, as the loop wrote it.
+def _error_row(line: dict[str, Any]) -> tuple[str, str]:
+    text = _json_bytes(line).decode("utf-8")
+    return (_SERVER_THREAD, _text_get("main_loop_line_error").format(text))
+
+
 # The work of a child that prepares the root and says what the prepare gave.
 def _prepare_once(root: str, read_fd: int, write_fd: int) -> str:
     _log_open(root)
     return repr(main_loop.loop_prepare(root))
+
+
+# The work of a child that prepares the root by the module run from a link.
+def _prepare_linked(root: str, link: str, read_fd: int, write_fd: int) -> str:
+    _log_open(root)
+    return repr(runpy.run_path(link)["loop_prepare"](root))
 
 
 # The work of a child that prepares the root and serves the pipes to the end.
@@ -274,6 +396,43 @@ def _loop_serve(root: str, read_fd: int, write_fd: int) -> str:
 def _loop_unprepared(root: str, read_fd: int, write_fd: int) -> str:
     main_loop.loop_run(read_fd, write_fd, root)
     return _ENDING_RETURNED
+
+
+# Builds a push of a stream in the name form of the parameter `debug`.
+def _push_make(text: str, blobs: list[jslb.Object]) -> jslb.Object:
+    header = jslb.header_make(_PUSH_TYPE, full=switches.debug)
+    return jslb.line_make(header, blobs, text=text)
+
+
+# The pushes of a stream, each logged as the loop reaches it.
+def _pushes_make() -> Iterator[jslb.Object]:
+    for text in _PUSH_TEXTS:
+        main_loop.verbose.log(text)
+        yield _push_make(text, [jslb.blob_make(text.encode("utf-8"))])
+
+
+# The pushes of a stream that fails: one, then a raise in place of the next.
+def _pushes_fail() -> Iterator[jslb.Object]:
+    yield _push_make(_PUSH_TEXTS[0], [])
+    raise ValueError(_text_get("stream_fault"))
+
+
+# The handler of `_STREAM_TYPE`: its pushes, then a reply of the line's text.
+def _stream_handle(line: jslb.Object, *, text: str) -> dispatch.Stream:
+    reply = dispatch.reply_make(line, text=text)
+    return dispatch.Stream(_pushes_make(), reply)
+
+
+# The handler of `_FAULT_TYPE`, whose reply the loop never reaches.
+def _fault_handle(line: jslb.Object) -> dispatch.Stream:
+    return dispatch.Stream(_pushes_fail(), dispatch.reply_make(line))
+
+
+# The work of a child that serves the pipes with both handlers registered.
+def _stream_serve(root: str, read_fd: int, write_fd: int) -> str:
+    dispatch.handler_register(_STREAM_TYPE, 0, _stream_handle)
+    dispatch.handler_register(_FAULT_TYPE, 0, _fault_handle)
+    return _loop_serve(root, read_fd, write_fd)
 
 
 # Gives each test a scratch directory in `build/` that holds an empty root.
@@ -469,6 +628,77 @@ class TestPrepare(ScratchCase):
         seeded = _value_read(self.root, "_files", _PROVIDER_KEY)
         self.assertEqual(seeded, _seed_read("provider_script.json"))
 
+    # A seed document that is no JSON object is refused, naming its file.
+    def test_seed_invalid(self) -> None:
+        self.settings_write()
+        directory = os.path.join(self.root, "python")
+        seed = os.path.join(directory, "seed")
+        shutil.copytree(_SEED_PATH, seed)
+        path = os.path.join(seed, "hyperposition.json")
+        with open(path, "w", encoding="utf-8") as file:
+            file.write("[]")
+        # The module reads the seed beside its file, so this link gives it one.
+        link = os.path.join(directory, "main_loop.py")
+        os.symlink(_MODULE_PATH, link)
+        work = functools.partial(_prepare_linked, self.root, link)
+        ending, output = self.child_run(work, b"")
+        self.assertEqual(output, b"")
+        last = ending.rstrip("\n").rsplit("\n", 1)[-1]
+        message = _text_get("main_loop_seed_invalid").format(path)
+        self.assertEqual(last, f"ValueError: {message}")
+
+
+# The analyst's table in the seed, whose texts only the demo's golds pin.
+class TestAnalyst(unittest.TestCase):
+    # Reads the table of the seed and the gold's account of it.
+    def setUp(self) -> None:
+        self.script: dict[str, Any] = json.loads(
+            _seed_read("provider_script.json")
+        )
+        self.gold: dict[str, Any] = _gold_copy("analyst")
+
+    # Every `next` names a node of the table.
+    def test_next_known(self) -> None:
+        for reply in _replies_all(self.script):
+            self.assertIn(reply["next"], self.script["nodes"])
+
+    # Every tool call names a browser tool of the tool list, with its prefix.
+    def test_tools_listed(self) -> None:
+        tools = _tools_browser()
+        for call in _calls_all(self.script):
+            self.assertIn(call["name"], tools)
+
+    # Every tool call's arguments are the text of a JSON object.
+    def test_arguments_object(self) -> None:
+        for call in _calls_all(self.script):
+            self.assertIsInstance(call["arguments"], dict, call["name"])
+
+    # A reply that calls tools has no text, and any other reply has text.
+    def test_content_text(self) -> None:
+        for reply in _replies_all(self.script):
+            if "tool_calls" in reply:
+                self.assertIsNone(reply["content"])
+            else:
+                self.assertIsInstance(reply["content"], str)
+
+    # The table starts in its start node, and only input nodes hold inputs.
+    def test_inputs_held(self) -> None:
+        self.assertEqual(self.script["start"], self.gold["start_node"])
+        inputs = sorted(self.gold["inputs"])
+        for name, node in self.script["nodes"].items():
+            held = inputs if name in self.gold["input_nodes"] else []
+            self.assertEqual(sorted(node["replies"]), held, name)
+
+    # Each input of each input node makes the gold's calls and ends in `menu`.
+    def test_inputs_lead(self) -> None:
+        for name in self.gold["input_nodes"]:
+            for text, rounds in self.gold["inputs"].items():
+                walked, last = _input_walk(self.script, name, text)
+                trimmed = _rounds_trim(walked, rounds)
+                self.assertEqual(trimmed, rounds, f"{name} {text}")
+                end = self.gold["end_node"]
+                self.assertEqual(last["next"], end, f"{name} {text}")
+
 
 # `loop_run` over pipes: the pushes, the replies, failures and the end.
 class TestLoop(ScratchCase):
@@ -522,6 +752,31 @@ class TestLoop(ScratchCase):
         self.assertEqual(ending, _ENDING_FAILED)
         return _lines_read(output)
 
+    # Has the loop serve the two streams, under the `line_max` given.
+    def stream_limit(self, line_max: int) -> None:
+        self.settings_write(
+            overflow_bytes=_OVERFLOW_BYTES,
+            chunk_bytes=_CHUNK_BYTES,
+            line_max=line_max,
+        )
+        self.work = functools.partial(_stream_serve, self.root)
+
+    # Checks a sync's pushes: each database's restore, then its file lines.
+    def restores_check(
+        self, pushes: list[dict[str, Any]], type_name: str
+    ) -> None:
+        left = list(pushes)
+        names: list[str] = _gold_copy("lines.sync_reply")["databases"]
+        for name in names:
+            restore = left.pop(0)
+            self.assertEqual(restore["0"][type_name], "db.restore", name)
+            self.assertEqual(restore["db"], name)
+            for _ in range(restore["files"]):
+                file = left.pop(0)
+                self.assertEqual(file["0"][type_name], "db.file", name)
+                self.assertEqual(file["db"], name)
+        self.assertEqual(left, [])
+
     # A value pushed is in the root's `_files`, byte for byte, unanswered.
     def test_put_get(self) -> None:
         value = bytes(range(256))
@@ -549,6 +804,13 @@ class TestLoop(ScratchCase):
             self.assertRegex(name, _HASH_NAME)
         stored = _value_read(self.root, "_files", "test/streamed")
         self.assertEqual(stored, value)
+
+    # A line's blob that is a cache file is copied to the output, whole.
+    def test_file_copied(self) -> None:
+        value = bytes(index % 256 for index in range(_STREAMED_BYTES))
+        put = _line_bytes("put_streamed", value)
+        lines = self.served_read(put + _line_bytes("sync"))
+        self.assertIn(value, [line["1"]["d"] for line in lines if "1" in line])
 
     # A database a push made in one process is open in the next one.
     def test_databases_reopened(self) -> None:
@@ -592,6 +854,7 @@ class TestLoop(ScratchCase):
             _text_get("main_loop_serve_failed_unknown"),
         ]
         expected = [(_SERVER_THREAD, text) for text in texts]
+        expected.append(_error_row(replies[0]))
         self.assertEqual(_log_read(self.root), expected)
 
     # A fault of the input with no line is logged the same way.
@@ -600,7 +863,28 @@ class TestLoop(ScratchCase):
         message = _text_get("jslb_no_type")
         self.error_check(replies[0], self.error_name(), message)
         text = _text_get("main_loop_serve_failed_type")
-        self.assertEqual(_log_read(self.root), [(_SERVER_THREAD, text)])
+        expected = [(_SERVER_THREAD, text), _error_row(replies[0])]
+        self.assertEqual(_log_read(self.root), expected)
+
+    # An `error` whose entry does not fit is traced as its header and sizes.
+    def test_failure_sized(self) -> None:
+        self.parameters_set(True, False)
+        self.stream_limit(_LINE_SMALL)
+        error = self.failure_read(_line_bytes("fault_request"))[-1]
+        size = len(_json_bytes(_payload_of(error)))
+        sized = _text_get("main_loop_line_error_sized")
+        text = sized.replace("{0}", str(size))
+        self.assertEqual(_log_read(self.root)[-1], (_SERVER_THREAD, text))
+
+    # A `verbose.put` is traced by its sizes, as its entries go to the rows.
+    def test_put_sized(self) -> None:
+        self.parameters_set(True, False)
+        self.assertEqual(self.served_read(_line_bytes("verbose_put")), [])
+        expected = [
+            (_SERVER_THREAD, _text_get("main_loop_line_dispatch_put_sized")),
+            (_PAGE_THREAD, _text_get("verbose_put_entry")),
+        ]
+        self.assertEqual(_log_read(self.root), expected)
 
     # An `error` line that answers no line is in full names in debug mode.
     def test_fault_names(self) -> None:
@@ -720,3 +1004,90 @@ class TestLoop(ScratchCase):
         self.assertIs(answer["result"]["isError"], True)
         message = _text_get("engine_system_name_invalid")
         self.error_check(error, "error_full", message)
+
+    # A `Stream` writes its pushes in order, then its reply, nothing traced.
+    def test_stream_written(self) -> None:
+        self.debug_write(False)
+        self.stream_limit(self.values["line_max"])
+        lines = self.served_read(_line_bytes("stream_request"))
+        self.assertEqual(len(lines), 3)
+        first, second, reply = lines
+        self.assertEqual(first["1"].pop("d"), b"first")
+        self.assertEqual(first, _gold_copy("lines.stream_push_first"))
+        self.assertEqual(second["1"].pop("d"), b"second")
+        self.assertEqual(second, _gold_copy("lines.stream_push_second"))
+        self.assertEqual(reply, _gold_copy("lines.stream_reply"))
+        expected = [(_SERVER_THREAD, text) for text in _PUSH_TEXTS]
+        self.assertEqual(_log_read(self.root), expected)
+
+    # In debug mode each line is traced in full as the loop reaches it.
+    def test_stream_traced(self) -> None:
+        self.parameters_set(True, False)
+        self.stream_limit(self.values["line_max"])
+        lines = self.served_read(_line_bytes("stream_request"))
+        self.assertEqual(len(lines), 3)
+        first, second = _PUSH_TEXTS
+        texts = [
+            _text_get("main_loop_line_dispatch_stream"),
+            first,
+            _text_get("main_loop_line_push_first"),
+            second,
+            _text_get("main_loop_line_push_second"),
+            _text_get("main_loop_line_reply_stream"),
+        ]
+        expected = [(_SERVER_THREAD, text) for text in texts]
+        self.assertEqual(_log_read(self.root), expected)
+
+    # A fault between pushes answers the request with an `error`, no reply.
+    def test_stream_fault(self) -> None:
+        self.debug_write(False)
+        self.stream_limit(self.values["line_max"])
+        lines = self.failure_read(_line_bytes("fault_request"))
+        self.assertEqual(len(lines), 2)
+        push, error = lines
+        self.assertEqual(push, _gold_copy("lines.fault_push"))
+        self.error_check(error, "error_reply", _text_get("stream_fault"))
+        text = _text_get("main_loop_serve_failed_stream")
+        self.assertEqual(_log_read(self.root), [(_SERVER_THREAD, text)])
+
+    # Each line past the limit is traced as its header and sizes.
+    def test_trace_sized(self) -> None:
+        self.parameters_set(True, False)
+        self.stream_limit(_LINE_SMALL)
+        lines = self.served_read(_line_bytes("stream_blob", b"bytes"))
+        self.assertEqual(len(lines), 3)
+        first, second = _PUSH_TEXTS
+        texts = [
+            _text_get("main_loop_line_dispatch_sized"),
+            first,
+            _text_get("main_loop_line_push_first_sized"),
+            second,
+            _text_get("main_loop_line_push_second_sized"),
+            _text_get("main_loop_line_reply_sized"),
+        ]
+        expected = [(_SERVER_THREAD, text) for text in texts]
+        self.assertEqual(_log_read(self.root), expected)
+
+    # An entry whose `verbose.put` stays below `line_max` is rendered.
+    def test_entry_fits(self) -> None:
+        text = _text_get("main_loop_line_dispatch_stream")
+        self.stream_limit(_put_bytes(text) + 1)
+        self.served_read(_line_bytes("stream_request"))
+        self.assertEqual(_log_read(self.root)[0], (_SERVER_THREAD, text))
+
+    # An entry whose `verbose.put` reaches `line_max` is logged by its sizes.
+    def test_entry_over(self) -> None:
+        text = _text_get("main_loop_line_dispatch_stream")
+        self.stream_limit(_put_bytes(text))
+        self.served_read(_line_bytes("stream_request"))
+        sized = _text_get("main_loop_line_dispatch_stream_sized")
+        self.assertEqual(_log_read(self.root)[0], (_SERVER_THREAD, sized))
+
+    # `db.sync` restores each database in name order, then names them.
+    def test_sync_served(self) -> None:
+        for debug, type_name in ((True, "type"), (False, "t")):
+            with self.subTest(debug=debug):
+                self.debug_write(debug)
+                lines = self.served_read(_line_bytes("sync"))
+                self.assertEqual(lines[-1], _gold_copy("lines.sync_reply"))
+                self.restores_check(lines[:-1], type_name)

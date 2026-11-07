@@ -12,7 +12,7 @@
 
 import argparse, base64, hashlib, json, os, re, shutil, subprocess, sys
 import tarfile, zipfile
-from typing import Any
+from typing import Any, IO, cast
 
 # The public name of this module, as its stub declares it.
 __all__ = ["node_build", "page_build", "page_copy"]
@@ -162,15 +162,15 @@ def gold_json(gold: dict[str, Any]) -> str:
     return json.dumps(gold, ensure_ascii=False, separators=(",", ":"))
 
 
-# Reads every TypeScript suite's gold file by the decoders, an object each.
-def gold_read() -> dict[str, Any]:
+# Reads each suite's gold file of the folder by the decoders, an object each.
+def gold_read(folder: str) -> dict[str, Any]:
     # Imported here so its bytecode goes under the prefix set above.
     import jslb
 
     suites: dict[str, Any] = {}
-    for name in sorted(os.listdir(_TS_PATH)):
+    for name in sorted(os.listdir(folder)):
         if name.startswith(_GOLD_PREFIX) and name.endswith(_GOLD_SUFFIX):
-            path = os.path.join(_TS_PATH, name)
+            path = os.path.join(folder, name)
             suite: object = jslb.json_decode(text_read(path))
             if not isinstance(suite, dict):
                 raise ValueError(f"{path}: holds no JSON object")
@@ -202,7 +202,7 @@ def node_build(build_path: str) -> str:
     config_path = os.path.join(_TS_PATH, _NODE_CONFIG_NAME)
     path = bundle_path(config_path, build_path)
     bundle = bundle_compile(config_path, path)
-    gold = gold_json(gold_read())
+    gold = gold_json(gold_read(_TS_PATH))
     text = _NODE_HEAD.format(vectors, gold) + table_substitute(
         bundle, text_read(_TABLE_PATH)
     )
@@ -231,7 +231,7 @@ def page_build(template: str, name: str) -> str:
         "XSJS_BUILD_ENGINE_CSS": text_read(_ENGINE_CSS_PATH),
         "XSJS_BUILD_SQLITE3_JS": sqlite_js.decode("utf-8"),
         "XSJS_BUILD_SQLITE3_WASM": base64.b64encode(sqlite_wasm).decode(),
-        "XSJS_BUILD_TEST_GOLD": gold_json(gold_read()),
+        "XSJS_BUILD_TEST_GOLD": gold_json(gold_read(_TS_PATH)),
         "XSJS_BUILD_TEST_VECTORS": vectors_build(_VECTORS_PATH),
         "XSJS_BUILD_XTERM_CSS": xterm_css.decode("utf-8"),
         "XSJS_BUILD_XTERM_JS": xterm_js.decode("utf-8"),
@@ -288,10 +288,9 @@ def tar_read(path: str, suffixes: list[str]) -> list[bytes]:
         names = [member.name for member in members]
         contents: list[bytes] = []
         for suffix in suffixes:
-            name = member_find(names, suffix)
-            file = archive.extractfile(members[names.index(name)])
-            if file is None:
-                raise LookupError(f"{path}: {name} gives no file to read")
+            member = members[names.index(member_find(names, suffix))]
+            # A regular file, all that `members` holds, always gives a reader.
+            file = cast(IO[bytes], archive.extractfile(member))
             contents.append(file.read())
         return contents
 

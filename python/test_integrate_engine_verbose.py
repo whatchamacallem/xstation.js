@@ -123,7 +123,7 @@ def _page_rows(root: str) -> list[tuple[int, str, str]]:
 # Child: opens the log, registers, logs server texts, returns lines' replies.
 def _lines_serve(root: str, debug: bool, data: bytes) -> list[object]:
     engine_verbose.verbose.log_open(root, _RING, _BLOB_MAX)
-    engine_verbose.handlers_register(debug)
+    engine_verbose.handlers_register(debug, _LINE_MAX)
     for text in _SERVER_TEXTS:
         engine_verbose.verbose.log(text)
     replies: list[object] = []

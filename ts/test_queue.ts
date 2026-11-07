@@ -5,19 +5,19 @@
 // Tests of the task manager on real ports and a real far queue: routing, ids,
 // replies, sleeps and wakes, the name form of a wake, faults, a handler's
 // failure, an error line's cascade, depth, blob moves, the bound on the blob
-// bytes it holds and `line_bytes`, the trace in debug mode, the verbose sink
+// bytes it holds and `line_bytes`, the trace whole or sized, the verbose sink
 // and its batches with a real `verbose.LineRing`, `entry_fits`, and linked
 // local ports. The queue under test runs on thread `ai`. Its lane to `ui` is a
 // pair of linked local ports whose far end is the test's: the test posts lines
-// into the queue there and reads what the queue posts back, and never answers
-// a request. Its lane to `server` reaches a second real queue in synchronous
-// mode, whose handlers are the test's own functions, which answers the
-// requests the queue submits. The lines and sleeps the tests build and the
-// texts they expect are the gold of `ts/test_setting_test_queue.json`, the
-// parts known only at run time, as a fresh type, an id the queue gave, a
-// blob's bytes or an error's stack, set by the test on its copy. What only a
-// thread port shows, the transfer list of a post, is in the line cases of
-// `test_integrate_queue`.
+// into the queue there and reads what the queue posts back, and answers a
+// request only in the test of the masks. Its lane to `server` reaches a second
+// real queue in synchronous mode, whose handlers are the test's own functions,
+// which answers the requests the queue submits. The lines and sleeps the tests
+// build and the texts they expect are the gold of
+// `ts/test_setting_test_queue.json`, the parts known only at run time, as a
+// fresh type, an id the queue gave, a blob's bytes or an error's stack, set by
+// the test on its copy. What only a thread port shows, the transfer list of a
+// post, is in the line cases of `test_integrate_queue`.
 
 namespace test_queue {
   // The type prefix the tests own, a type no owner table matches, the thread.
@@ -187,6 +187,16 @@ namespace test_queue {
     return sleep;
   }
 
+  // A copy of a gold sleep whose state refers to itself, as no JSON text can.
+  function sleep_circular(
+    then_type: string,
+    wait_ids: number[],
+  ): dispatch.Sleep {
+    const sleep = sleep_build("sleep_kept", then_type, wait_ids);
+    (sleep.state as { tag: unknown }).tag = sleep.state;
+    return sleep;
+  }
+
   // The request a wake's state keeps, which its reply answers.
   function request_kept(wake: lines.Line): lines.Line {
     return (wake.state as { request: lines.Line }).request;
@@ -235,6 +245,20 @@ namespace test_queue {
       () => {},
       reader,
       () => false,
+    );
+    return bench;
+  }
+
+  // A bench in debug mode whose queue reads the values given first.
+  function bench_traced(
+    far: queue.OwnerTable,
+    values: { [id: string]: unknown } = {},
+  ): QueueBench {
+    const bench = bench_make(owners_make({ "verbose.": "server", ...far }));
+    bench.tasks.sink_attach(
+      () => {},
+      reader_make(values),
+      () => true,
     );
     return bench;
   }
@@ -1269,15 +1293,12 @@ namespace test_queue {
           reader_make({}),
           () => debug,
         );
-        const request = line_build(echo, "request_1");
         const mark = mark_take();
-        ui_send(bench, request);
-        const asked = JSON.stringify(request[0]);
-        const answered = JSON.stringify(bench.ui.came[0][0]);
+        ui_send(bench, line_build(echo, "request_1"));
         const expected = debug
           ? [
-              text_fill("queue_dispatch", { 2: asked }),
-              text_fill("queue_reply", { 2: answered }),
+              text_fill("queue_dispatch", { 0: echo }),
+              text_fill("queue_reply", { 0: echo }),
             ]
           : [];
         this.assertEqual(texts_after(mark), expected);
@@ -1292,6 +1313,253 @@ namespace test_queue {
       ui_send(bench, line_build(echo, "request_1"));
       this.assertEqual(bench.ui.came.length, 1);
       this.assertEqual(texts_after(mark), []);
+    }
+
+    // Each timeline line holds its line's rendering, blob bytes never shown.
+    test_trace_rendered(): void {
+      const got: lines.Line[] = [];
+      const far = far_fresh(got, "reply_held");
+      const aside = far_fresh(got);
+      const to_ui = type_fresh();
+      const bench = bench_traced({
+        [far]: "server",
+        [aside]: "server",
+        [to_ui]: "ui",
+      });
+      const woken: lines.Line[] = [];
+      const done = handler_fresh((line) => {
+        woken.push(line);
+        return dispatch.reply_make(request_kept(line), {});
+      });
+      const start = handler_fresh((line) => {
+        const id = bench.tasks.task_submit(blob_line(far, "submit_six"));
+        bench.tasks.line_notify(line_build(to_ui, "note_true"));
+        return sleep_asked(line, done, [id]);
+      });
+      const mark = mark_take();
+      ui_send(bench, blob_line(aside, "forward_kept"));
+      ui_send(bench, line_build(start, "request_5"));
+      const values = {
+        0: start,
+        1: far,
+        2: to_ui,
+        3: done,
+        4: JSON.stringify(woken[0][0]),
+        5: aside,
+      };
+      const names = [
+        "trace_forward",
+        "trace_start",
+        "trace_submit",
+        "trace_notify",
+        "trace_sleep",
+        "trace_received",
+        "trace_wake",
+        "trace_woken",
+        "trace_reply",
+      ];
+      this.assertEqual(
+        texts_after(mark),
+        names.map((name) => text_fill(name, values)),
+      );
+    }
+
+    // A wake that sleeps again is held by its sleep in the form of a wake.
+    test_trace_resleep(): void {
+      const got: lines.Line[] = [];
+      const far = far_fresh(got, "reply_seven");
+      const bench = bench_traced({ [far]: "server" });
+      const last = handler_fresh(() => undefined);
+      const woken: lines.Line[] = [];
+      const first = handler_fresh((line) => {
+        woken.push(line);
+        const id = bench.tasks.task_submit(line_build(far));
+        return sleep_build("sleep_null", last, [id]);
+      });
+      const start = handler_fresh(() => {
+        const id = bench.tasks.task_submit(line_build(far));
+        return sleep_build("sleep_null", first, [id]);
+      });
+      const mark = mark_take();
+      ui_send(bench, line_build(start));
+      const values = { 0: far, 1: last, 2: JSON.stringify(woken[0][0]) };
+      this.assertEqual(
+        texts_after(mark)[7],
+        text_fill("trace_sleep_wake", values),
+      );
+    }
+
+    // A wake's state is a task's memory, which no timeline line reads.
+    test_trace_state(): void {
+      const got: lines.Line[] = [];
+      const far = far_fresh(got, "reply_seven");
+      const bench = bench_traced({ [far]: "server" });
+      const woken: lines.Line[] = [];
+      const wake = handler_fresh((line) => {
+        woken.push(line);
+        return undefined;
+      });
+      const start = handler_fresh(() => {
+        const id = bench.tasks.task_submit(line_build(far));
+        return sleep_circular(wake, [id]);
+      });
+      const mark = mark_take();
+      ui_send(bench, line_build(start));
+      const header = JSON.stringify(woken[0][0]);
+      this.assertEqual(
+        texts_after(mark).at(-1),
+        text_fill("trace_state", { 0: far, 1: header }),
+      );
+    }
+
+    // The timeline masks the two credentials, wakes too; the lines keep them.
+    test_trace_masked(): void {
+      const bench = bench_traced({});
+      const woken: lines.Line[] = [];
+      const wake = handler_fresh((line) => {
+        woken.push(line);
+        return undefined;
+      });
+      const start = handler_fresh(() => {
+        const first = bench.tasks.task_submit(gold_line("http_keyed"), "ui");
+        const second = bench.tasks.task_submit(gold_line("open_asked"), "ui");
+        return sleep_build("sleep_null", wake, [first, second]);
+      });
+      const mark = mark_take();
+      ui_send(bench, line_build(start));
+      const [keyed, asked] = bench.ui.came;
+      ui_send(bench, reply_gold(keyed, "http_answer"));
+      ui_send(bench, reply_gold(asked, "open_answer"));
+      const header = JSON.stringify(woken[0][0]);
+      const values = { 0: start, 1: wake, 2: header };
+      const names = [
+        "trace_masked_start",
+        "trace_masked_http",
+        "trace_masked_open",
+        "trace_masked_sleep",
+        "trace_masked_answer",
+        "trace_masked_token",
+        "trace_masked_wake",
+        "trace_masked_woken",
+      ];
+      this.assertEqual(
+        texts_after(mark),
+        names.map((name) => text_fill(name, values)),
+      );
+      this.assertEqual(keyed.headers, gold_line("http_keyed").headers);
+      const replies = woken[0].replies as lines.Line[];
+      this.assertEqual(replies[1].token, gold_line("open_answer").token);
+    }
+
+    // A line holds its sizes at the limit, and one byte above its rendering.
+    test_trace_sized(): void {
+      const note = handler_fresh(() => undefined);
+      const text = gold_line("sized_two").text;
+      const whole = text_fill("trace_whole", { 0: note, 1: text });
+      const sized = text_fill("trace_sized", { 0: note });
+      const empty = text_bytes(gold_line("put_empty_ai"));
+      const bytes = empty + text_bytes({ at: utility.time_now(), text: whole });
+      const runs: [number, string][] = [
+        [bytes, sized],
+        [bytes + 1, whole],
+      ];
+      for (const [line_max, expected] of runs) {
+        const bench = bench_traced({}, { line_max });
+        const mark = mark_take();
+        ui_send(bench, blob_line(note, "sized_two"));
+        this.assertEqual(texts_after(mark), [expected]);
+      }
+    }
+
+    // A wake past the limit counts its replies alone, its state never read.
+    test_trace_sized_wake(): void {
+      const got: lines.Line[] = [];
+      const long = far_fresh(got, "reply_long");
+      const held = far_fresh(got, "reply_held");
+      const line_max = gold_value("line_max_sized") as number;
+      const bench = bench_traced(
+        { [long]: "server", [held]: "server" },
+        { line_max },
+      );
+      const woken: lines.Line[] = [];
+      const wake = handler_fresh((line) => {
+        woken.push(line);
+        return undefined;
+      });
+      const start = handler_fresh(() => {
+        const first = bench.tasks.task_submit(line_build(long));
+        const second = bench.tasks.task_submit(line_build(held));
+        return sleep_circular(wake, [first, second]);
+      });
+      const mark = mark_take();
+      ui_send(bench, line_build(start));
+      const values = {
+        0: start,
+        1: long,
+        2: held,
+        3: wake,
+        4: JSON.stringify(woken[0][0]),
+      };
+      const names = [
+        "trace_sized_start",
+        "trace_sized_submit_first",
+        "trace_sized_submit_second",
+        "trace_sized_sleep",
+        "trace_sized_received",
+        "trace_sized_whole",
+        "trace_sized_wake",
+        "trace_sized_woken",
+      ];
+      this.assertEqual(
+        texts_after(mark),
+        names.map((name) => text_fill(name, values)),
+      );
+    }
+
+    // Outside debug mode, and before the sink is in, no line is rendered.
+    test_render_skipped(): void {
+      const seen: unknown[] = [];
+      const note = handler_fresh((line) => {
+        seen.push(line.n);
+        return undefined;
+      });
+      const bare = bench_make(owners_make({ "verbose.": "server" }));
+      const quiet = bench_make(owners_make({ "verbose.": "server" }));
+      quiet.tasks.sink_attach(
+        () => {},
+        reader_make({}),
+        () => false,
+      );
+      for (const bench of [bare, quiet]) {
+        const line = line_build(note);
+        line.n = Number.NaN;
+        ui_send(bench, line);
+      }
+      this.assertEqual(seen.length, 2);
+    }
+
+    // In debug mode a line the renderer refuses stops the queue.
+    test_render_refused(): void {
+      const note = handler_fresh(() => undefined);
+      const bench = bench_traced({});
+      const line = line_build(note);
+      line.n = Number.NaN;
+      const error = thrown_get(() => ui_send(bench, line));
+      this.assertEqual(error.message, gold_text("trace_refused"));
+      this.assertEqual(bench.tasks.depth(), 0);
+    }
+
+    // A BLOB column of a row, bytes in a payload, renders with no fault.
+    test_render_bytes(): void {
+      const note = handler_fresh(() => undefined);
+      const bench = bench_traced({});
+      const line = line_build(note);
+      line.rows = [[new Uint8Array(3)]];
+      const mark = mark_take();
+      ui_send(bench, line);
+      this.assertEqual(texts_after(mark), [
+        text_fill("trace_bytes", { 0: note }),
+      ]);
     }
   }
 

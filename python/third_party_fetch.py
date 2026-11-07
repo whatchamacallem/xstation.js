@@ -120,7 +120,7 @@ def pins_fetch() -> list[str]:
     paths: list[str] = []
     for name, url, sha256 in _PINS:
         packaged = switches.anthropic and name == _PACKAGE_REPLACED
-        if packaged:  # pragma: no cover
+        if packaged:
             paths.append(package_check(*_PACKAGE_PIN))
         else:
             paths.append(file_fetch(url, sha256, name))

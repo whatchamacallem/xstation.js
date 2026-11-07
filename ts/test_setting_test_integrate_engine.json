@@ -1,0 +1,311 @@
+{
+  "cases": [
+    {
+      "expect": [
+        "wire_initialize",
+        "wire_initialize_reply",
+        "wire_initialized",
+        "wire_list",
+        "wire_list_reply",
+        "first_render"
+      ],
+      "name": "first_render",
+      "seconds": 30,
+      "send": []
+    },
+    {
+      "expect": [
+        "wire_user_1",
+        "render_1",
+        "wire_asked_1",
+        "wire_result_1",
+        "wire_answer_1",
+        "say_1_reply"
+      ],
+      "name": "choice_1",
+      "seconds": 10,
+      "send": ["say_1"]
+    },
+    {
+      "expect": [
+        "wire_user_3",
+        "permit_ask",
+        "console_show",
+        "console_busy",
+        "dash_reached",
+        "console_idle",
+        "wire_asked_3",
+        "wire_result_3",
+        "render_output",
+        "wire_asked_output",
+        "wire_result_output",
+        "wire_answer_3",
+        "say_3_reply"
+      ],
+      "name": "choice_3",
+      "seconds": 40,
+      "send": ["say_3"]
+    }
+  ],
+  "columns": 120,
+  "lines": {
+    "console_busy": {
+      "0": {
+        "type": "console.busy"
+      }
+    },
+    "console_idle": {
+      "0": {
+        "type": "console.idle"
+      }
+    },
+    "console_show": {
+      "0": {
+        "id": 14,
+        "type": "console.show"
+      }
+    },
+    "dash_reached": {
+      "0": {
+        "type": "test_integrate_engine.dash_reached"
+      }
+    },
+    "first_render": {
+      "0": {
+        "id": 6,
+        "type": "render"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "How can I help you?"
+    },
+    "permit_ask": {
+      "0": {
+        "id": 13,
+        "type": "permit.ask"
+      },
+      "input": {
+        "text": "echo hyperposition",
+        "timeout_seconds": 30
+      },
+      "permit": 1,
+      "tool": "browser.console_run"
+    },
+    "render_1": {
+      "0": {
+        "id": 9,
+        "type": "render"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "A subtitle, as requested. Do try to contain yourself."
+    },
+    "render_output": {
+      "0": {
+        "id": 19,
+        "type": "render"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "hyperposition"
+    },
+    "say_1": {
+      "0": {
+        "id": 1001,
+        "type": "ai.say"
+      },
+      "text": "1"
+    },
+    "say_1_reply": {
+      "0": {
+        "reply": 1001,
+        "type": "ai.say"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "There. Words on a black page. I trained for years for this.",
+      "turn": 4
+    },
+    "say_3": {
+      "0": {
+        "id": 1002,
+        "type": "ai.say"
+      },
+      "text": "3"
+    },
+    "say_3_reply": {
+      "0": {
+        "reply": 1002,
+        "type": "ai.say"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "It said hyperposition, as one could have guessed. Anything else?",
+      "turn": 10
+    },
+    "wire_answer_1": {
+      "0": {
+        "type": "test_integrate_engine.wire_answer_1"
+      }
+    },
+    "wire_answer_3": {
+      "0": {
+        "type": "test_integrate_engine.wire_answer_3"
+      }
+    },
+    "wire_asked_1": {
+      "0": {
+        "type": "test_integrate_engine.wire_asked_1"
+      }
+    },
+    "wire_asked_3": {
+      "0": {
+        "type": "test_integrate_engine.wire_asked_3"
+      }
+    },
+    "wire_asked_output": {
+      "0": {
+        "type": "test_integrate_engine.wire_asked_output"
+      }
+    },
+    "wire_initialize": {
+      "0": {
+        "type": "test_integrate_engine.wire_initialize"
+      }
+    },
+    "wire_initialize_reply": {
+      "0": {
+        "type": "test_integrate_engine.wire_initialize_reply"
+      }
+    },
+    "wire_initialized": {
+      "0": {
+        "type": "test_integrate_engine.wire_initialized"
+      }
+    },
+    "wire_list": {
+      "0": {
+        "type": "test_integrate_engine.wire_list"
+      }
+    },
+    "wire_list_reply": {
+      "0": {
+        "type": "test_integrate_engine.wire_list_reply"
+      }
+    },
+    "wire_result_1": {
+      "0": {
+        "type": "test_integrate_engine.wire_result_1"
+      }
+    },
+    "wire_result_3": {
+      "0": {
+        "type": "test_integrate_engine.wire_result_3"
+      }
+    },
+    "wire_result_output": {
+      "0": {
+        "type": "test_integrate_engine.wire_result_output"
+      }
+    },
+    "wire_user_1": {
+      "0": {
+        "type": "test_integrate_engine.wire_user_1"
+      }
+    },
+    "wire_user_3": {
+      "0": {
+        "type": "test_integrate_engine.wire_user_3"
+      }
+    }
+  },
+  "output_kind": "0",
+  "permit_choice": "accept",
+  "reached": "\r\nhyperposition\r\n$ ",
+  "root": {},
+  "rows": 40,
+  "wire": [
+    {
+      "line": "wire_initialize",
+      "parts": ["> {\"0\":{\"type\":\"mcp\"", "\"method\":\"initialize\""]
+    },
+    {
+      "line": "wire_initialize_reply",
+      "parts": ["< {\"0\":", "\"serverInfo\""]
+    },
+    {
+      "line": "wire_initialized",
+      "parts": [
+        "> {\"0\":{\"type\":\"mcp\"",
+        "\"method\":\"notifications/initialized\""
+      ]
+    },
+    {
+      "line": "wire_list",
+      "parts": ["> {\"0\":{\"type\":\"mcp\"", "\"method\":\"tools/list\""]
+    },
+    {
+      "line": "wire_list_reply",
+      "parts": ["< {\"0\":", "\"name\":\"source_put\""]
+    },
+    {
+      "line": "wire_user_1",
+      "parts": [
+        "> {\"0\":{\"type\":\"turn.append\"}",
+        "\"role\":\"user\"",
+        "\"content\":\"1\""
+      ]
+    },
+    {
+      "line": "wire_asked_1",
+      "parts": ["> {\"0\":{\"type\":\"turn.append\"}", "\"id\":\"call_1\""]
+    },
+    {
+      "line": "wire_result_1",
+      "parts": [
+        "> {\"0\":{\"type\":\"turn.append\"}",
+        "\"tool_call_id\":\"call_1\""
+      ]
+    },
+    {
+      "line": "wire_answer_1",
+      "parts": [
+        "> {\"0\":{\"type\":\"turn.append\"}",
+        "\"content\":\"There. Words on a black page. I trained for years for this.\""
+      ]
+    },
+    {
+      "line": "wire_user_3",
+      "parts": [
+        "> {\"0\":{\"type\":\"turn.append\"}",
+        "\"role\":\"user\"",
+        "\"content\":\"3\""
+      ]
+    },
+    {
+      "line": "wire_asked_3",
+      "parts": ["> {\"0\":{\"type\":\"turn.append\"}", "\"id\":\"call_4\""]
+    },
+    {
+      "line": "wire_result_3",
+      "parts": [
+        "> {\"0\":{\"type\":\"turn.append\"}",
+        "\"tool_call_id\":\"call_4\"",
+        "hyperposition"
+      ]
+    },
+    {
+      "line": "wire_asked_output",
+      "parts": ["> {\"0\":{\"type\":\"turn.append\"}", "\"id\":\"call_5\""]
+    },
+    {
+      "line": "wire_result_output",
+      "parts": [
+        "> {\"0\":{\"type\":\"turn.append\"}",
+        "\"tool_call_id\":\"call_5\""
+      ]
+    },
+    {
+      "line": "wire_answer_3",
+      "parts": [
+        "> {\"0\":{\"type\":\"turn.append\"}",
+        "\"content\":\"It said hyperposition, as one could have guessed. Anything else?\""
+      ]
+    }
+  ]
+}

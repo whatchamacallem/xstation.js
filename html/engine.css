@@ -28,12 +28,19 @@ body {
   object-fit: contain;
 }
 
-/* The subtitle band at the bottom, on black so it shows over any image. */
+/* The subtitle, a line of the band, on black so it shows over any image. */
 #subtitle {
   position: relative;
   flex-shrink: 0;
   margin: 0;
   text-align: center;
+  background: black;
+}
+
+/* The band of the subtitle, the box and the permit area, over any image. */
+#band {
+  position: relative;
+  flex-shrink: 0;
   background: black;
 }
 

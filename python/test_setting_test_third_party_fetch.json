@@ -3,6 +3,7 @@
     "sqlite/sqlite-wasm-3460100.zip",
     "xterm/xterm-5.5.0.tgz"
   ],
+  "package_command": "apt-get source --download-only ttyd=1.7.7-4build1",
   "pins": [
     [
       "ttyd/ttyd-1.7.7.tar.gz",

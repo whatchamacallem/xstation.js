@@ -305,7 +305,7 @@ def _pragmas_set(connection: sqlite3.Connection) -> None:
     connection.execute("PRAGMA foreign_keys = ON")
     mode = connection.execute("PRAGMA journal_mode = WAL").fetchone()[0]
     if mode != "wal":
-        raise RuntimeError(i18n("substrate.journal_mode", mode))
+        raise RuntimeError("internal error")  # pragma: no cover
     connection.execute("PRAGMA synchronous = NORMAL")
     connection.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
 

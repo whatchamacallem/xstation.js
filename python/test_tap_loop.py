@@ -10,10 +10,12 @@
 # small suite and on failing_suite, the suite that fails by design: the
 # pushes and the reply are compared with what the test reads from the same
 # driver, run by the test with the command line the request must build, each
-# point's duration checked against the test's clock and then left out. Each
-# child writes how its work ended to a file, or to stderr with the failure
-# when that write fails, then kills itself whatever happened, so the handler
-# it registers never reaches another test.
+# point's duration checked against the test's clock and then left out. A
+# suite the driver refuses puts text on its stderr, and the driver's streams
+# in UTF-16 end its stdout inside a line, a byte past its last newline byte.
+# Each child writes how its work ended to a file, or to stderr with the
+# failure when that write fails, then kills itself whatever happened, so the
+# handler it registers never reaches another test.
 
 import functools, harness, json, os, re, signal, subprocess, switches, sys
 import tap_loop, tempfile, time, traceback, unittest
@@ -52,6 +54,18 @@ _DRIVER_PASSED = 0
 
 # The exit code of the driver when they are not.
 _DRIVER_FAILED = 1
+
+# The exit code of the driver when it refuses its command line.
+_DRIVER_REFUSED = 2
+
+# The variable that names the encoding of a Python program's streams.
+_ENCODING_VARIABLE = "PYTHONIOENCODING"
+
+# Two bytes a character, so the last byte of a newline ends no line.
+_ENCODING_WIDE = "utf-16-le"
+
+# The first line of a stream.
+_VERSION_LINE = "TAP version 14"
 
 # A point's duration line: its indent and its value.
 _DURATION_PATTERN = re.compile(r"( *)duration_ms: ([0-9]+\.[0-9])")
@@ -113,6 +127,24 @@ _WORDS_FAILED = [
     "0",
     "--module",
     "failing_suite",
+]
+
+# A suite the driver lists nowhere, which it names as it refuses it.
+_SUITE_ABSENT = "no_such_suite"
+
+# A `tap.run` of that suite.
+_RUN_REFUSED = (
+    b'{"0":{"t":"tap.run","i":3},"category":"smoke-test",'
+    b'"failfast":false,"failures":0,"modules":["no_such_suite"]}\r'
+)
+
+# The words of the command the driver gets for that request.
+_WORDS_REFUSED = [
+    "--stream",
+    "--failures",
+    "0",
+    "--module",
+    _SUITE_ABSENT,
 ]
 
 # A reply on the engine tty, which the server awaits none of.
@@ -219,6 +251,12 @@ def _suites_serve(root: str, read_fd: int, write_fd: int) -> str:
     tap_loop.loop_prepare(root)
     tap_loop.loop_run(read_fd, write_fd, root)
     return _ENDING_RETURNED
+
+
+# Child: serves as `_suites_serve` does, the driver's streams in `UTF-16`.
+def _suites_wide(root: str, read_fd: int, write_fd: int) -> str:
+    os.environ[_ENCODING_VARIABLE] = _ENCODING_WIDE
+    return _suites_serve(root, read_fd, write_fd)
 
 
 # Gives each test a scratch root in `build/` with the small blob limit.
@@ -353,6 +391,28 @@ class TestRun(ScratchCase):
         run = _driver_run(_WORDS_FAILED)
         self.assertEqual(run.code, _DRIVER_FAILED)
         self.served_check(lines, run, {"t": "tap.run", "r": 2}, False)
+
+    # What a refusing driver writes to stderr reaches the reply, none pushed.
+    def test_run_refused(self) -> None:
+        ending, lines = self.serve_read(_RUN_REFUSED)
+        self.assertEqual(ending, _ENDING_RETURNED)
+        run = _driver_run(_WORDS_REFUSED)
+        self.assertEqual(run.code, _DRIVER_REFUSED)
+        self.assertEqual(run.lines, [])
+        self.assertIn(_SUITE_ABSENT, run.errors)
+        self.served_check(lines, run, {"t": "tap.run", "r": 3}, False)
+
+    # Stdout ending inside a line fails the run, after the lines that ended.
+    def test_output_partial(self) -> None:
+        self.settings_write(True)
+        work = functools.partial(_suites_wide, self.root)
+        ending, output = self.child_run(work, _RUN_FULL)
+        self.assertEqual(ending, _ENDING_FAILED)
+        lines = _lines_split(output)
+        first = _VERSION_LINE.encode(_ENCODING_WIDE).decode("utf-8")
+        self.assertEqual(lines[0], _push_make(first, True))
+        text = _text_get("tap_loop_output_partial")
+        self.error_check(lines[-1:], {"type": "error", "reply": 7}, text)
 
     # A line carrying `r` is refused before dispatch, with no id answered.
     def test_reply_refused(self) -> None:

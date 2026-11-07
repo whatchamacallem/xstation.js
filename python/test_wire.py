@@ -35,8 +35,8 @@ _BUILD_PATH = os.path.join(_CHECKOUT_PATH, "build")
 # The id of this driver's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_wire"
 
-# The module that builds ttyd, which a missing ttyd names.
-_BUILD_SCRIPT = os.path.join("python", "ttyd_build.py")
+# The program whose run builds ttyd, which a missing ttyd names.
+_BUILD_SCRIPT = "./test_posix.sh"
 
 # The start of the name of the directory each run makes its roots in.
 _WORK_PREFIX = "test_wire-"
@@ -92,6 +92,7 @@ _ECHO_RUNGS = (
 _STOCK_RUNGS = (
     ("first", _SMOKE_TEST),
     ("mcp", _SMOKE_TEST),
+    ("sync", _SMOKE_TEST),
     ("commits", _SMOKE_TEST),
     ("verbose", _SMOKE_TEST),
     ("console", _SMOKE_TEST),
@@ -997,7 +998,7 @@ def main(arguments: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog=_PROGRAM_NAME,
         description="Run the wire test: the page's wire rungs on roots under"
-        " build/, through the ttyd python/ttyd_build.py builds, in"
+        " build/, through the ttyd a run of ./test_posix.sh builds, in"
         " chrome-headless-shell, their TAP stream read from each root.",
     )
     category.options_add(parser)
@@ -1011,7 +1012,9 @@ def main(arguments: list[str]) -> int:
     try:
         path = ttyd_path()
         if not os.path.isfile(path):
-            raise CheckFailed(f"{path} is missing: {_BUILD_SCRIPT} builds it")
+            raise CheckFailed(
+                f"{path} is missing: a run of {_BUILD_SCRIPT} builds it"
+            )
         with tempfile.TemporaryDirectory(
             prefix=_WORK_PREFIX, dir=_BUILD_PATH
         ) as work:

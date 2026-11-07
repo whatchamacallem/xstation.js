@@ -1,12 +1,13 @@
 # `python3 python/page_build.py TEMPLATE NAME` builds `build/NAME.html` from
 # `html/TEMPLATE.html` and prints its SHA-256. `page_build` returns the digest
-# and writes nothing to stdout, the driver's TAP stream. The templates are two
-# of one build, filled from the same pieces, so each holds the same markers
-# once each. `html/test.html` is the ttyd page. `html/headless.html`, the
-# headless page of group B, holds the same head and scripts,
+# and writes nothing to stdout, the driver's TAP stream. The templates are
+# three of one build, filled from the same pieces, so each holds the same
+# markers once each. `html/test.html` is the ttyd page. `html/headless.html`,
+# the headless page of group B, holds the same head and scripts,
 # `test_headless.realm_open()` last, and no `pre#tap_output`, since its realm
-# sends the stream to the driver. The template is read first, so a template
-# `html/` lacks fails before tsc starts.
+# sends the stream to the driver. `html/engine.html` holds the same scripts,
+# `engine.engine_start()` last, and no `pre#tap_output`. The template is read
+# first, so a template `html/` lacks fails before tsc starts.
 #
 # The gold is `{"typescript": {suite: gold}}` of the files
 # `ts/test_setting_<suite>.json`, which the page defines as `test_gold` on a

@@ -2,21 +2,24 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests the handlers of `db.create` and `db.drop`, and `restore_lines`, on a
-# real store on a scratch root in `build/`. Each test runs in a forked child
-# that registers the handlers in the real dispatcher and kills itself when
-# done, so that no registration reaches another test, and the parent checks
-# how the child said it ended. Each handler is called as the dispatcher
-# calls it on lines of the gold, lines in full names and a line with `i` the
-# handler leaves unanswered among them, and its effect is read from the
-# store. The `db.restore` and `db.file` lines are checked in both name forms
-# against the gold and the store's own snapshot, one filled to its limit,
-# `blob_max`, among them. The dispatcher refuses a second registration of each
-# type at version 0. Making, dropping, snapshotting and restoring a database
-# are the store's own, `test_substrate.py`'s.
+# Tests the handlers of `db.create`, `db.drop` and `db.sync`, and
+# `restore_lines`, on a real store on a scratch root in `build/`. Each test
+# runs in a forked child that registers the handlers in the real dispatcher
+# and kills itself when done, so that no registration reaches another test,
+# and the parent checks how the child said it ended. Each handler is called
+# as the dispatcher calls it on lines of the gold, lines in full names and a
+# line with `i` the handler leaves unanswered among them, and its effect is
+# read from the store. The `db.restore` and `db.file` lines are checked in
+# both name forms against the gold and the store's own snapshot, one filled
+# to its limit, `blob_max`, among them. The `Stream` of `db.sync` holds those
+# lines in the gold's order, in every pairing of the two name forms, each
+# database built as it is reached, a lost cache file left out and the log's
+# file never named. The dispatcher refuses a second registration of each type
+# at version 0. Making, dropping, snapshotting and restoring a database are
+# the store's own, `test_substrate.py`'s.
 
-import dispatch, engine_db, harness, os, re, signal, sqlite3, substrate
-import sys, tempfile, traceback, unittest
+import dispatch, engine_db, harness, jslb, os, re, signal, sqlite3, substrate
+import switches, sys, tempfile, traceback, unittest, verbose
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -42,6 +45,19 @@ _OVERFLOW_BYTES: int = harness.setting_get("overflow_bytes")
 
 # The largest database file the store lets grow, the checkout's setting.
 _BLOB_MAX: int = harness.setting_get("blob_max")
+
+# The lines of the log's ring, the checkout's setting.
+_RING: int = harness.setting_get("verbose_ring")
+
+# The databases of a sync, made out of name order.
+_SYNC_MADE = ("keep", "castle", "_files")
+
+# The last of those by name, which a stream reaches after the first.
+_LATE_DATABASE = "keep"
+
+# A ref in that database and a value written there while a stream runs.
+_LATE_REF = "/keep/late"
+_LATE_VALUE = b"a value written once the stream began"
 
 # A value over `overflow_bytes`, as the store keeps in a cache file.
 _VALUE_OVER = bytes(range(256)) * (_OVERFLOW_BYTES // 256 + 1)
@@ -101,6 +117,11 @@ def _handler_call(fn: Callable[..., Any], line: dict[int | str, Any]) -> Any:
         key: value for key, value in line.items() if isinstance(key, str)
     }
     return fn(line, **payload)
+
+
+# The type and database of each line, as the gold's `sync_order` lists them.
+def _lines_order(lines: list[jslb.Object]) -> list[list[str]]:
+    return [[jslb.field_get(line[0], "type"), line["db"]] for line in lines]
 
 
 # The bytes of a file.
@@ -285,6 +306,114 @@ class TestRestoreLines(ScratchCase):
         self.child_run(self.large_check)
 
 
+# Tests the handler of `db.sync`.
+class TestSync(ScratchCase):
+    # In the child: makes the databases out of name order, the values in one.
+    def databases_write(self, store: substrate.Store) -> None:
+        for name in _SYNC_MADE:
+            store.db_create(name)
+        for ref, value in _VALUES_OVER.items():
+            store.kv_put(ref, value)
+
+    # In the child: the handler's answer to a gold line, `debug` set first.
+    def stream_get(self, name: str, debug: bool) -> dispatch.Stream:
+        switches.switches_apply({**switches.switches_get(), "debug": debug})
+        line = _gold_value(f"lines.{name}")
+        stream: dispatch.Stream = _handler_call(engine_db.db_sync, line)
+        self.assertIsInstance(stream, dispatch.Stream)
+        return stream
+
+    # In the child: each database's lines in the gold's order, then the reply.
+    def stream_check(self, suffix: str, debug: bool) -> None:
+        store = self.store_register()
+        self.databases_write(store)
+        stream = self.stream_get(f"sync{suffix}", debug)
+        reply = _gold_value(f"lines.sync_reply{suffix}")
+        self.assertEqual(stream.reply, reply)
+        pushes = list(stream.pushes)
+        self.assertEqual(_lines_order(pushes), _gold_value("sync_order"))
+        expected: list[jslb.Object] = []
+        for name in reply["databases"]:
+            expected += engine_db.restore_lines(name, debug)
+        self.assertEqual(pushes, expected)
+
+    # With debug off and a request in short names every line is in short names.
+    def test_short_names(self) -> None:
+        self.child_run(lambda: self.stream_check("", False))
+
+    # With debug on and a request in full names every line is in full names.
+    def test_full_names(self) -> None:
+        self.child_run(lambda: self.stream_check("_full", True))
+
+    # Debug on: the pushes are in full names, the reply in the request's.
+    def test_pushes_full(self) -> None:
+        self.child_run(lambda: self.stream_check("", True))
+
+    # Debug off: the pushes are in short names, the reply in the request's.
+    def test_pushes_short(self) -> None:
+        self.child_run(lambda: self.stream_check("_full", False))
+
+    # In the child: with no database the reply goes alone.
+    def empty_check(self) -> None:
+        self.store_register()
+        stream = self.stream_get("sync", False)
+        self.assertEqual(list(stream.pushes), [])
+        self.assertEqual(stream.reply, _gold_value("lines.sync_reply_empty"))
+
+    # A store with no database sends no push, and the reply names none.
+    def test_no_database(self) -> None:
+        self.child_run(self.empty_check)
+
+    # In the child: a value written after the first line is in a later line.
+    def reached_check(self) -> None:
+        store = self.store_register()
+        self.databases_write(store)
+        pushes = iter(self.stream_get("sync", False).pushes)
+        next(pushes)
+        store.kv_put(_LATE_REF, _LATE_VALUE)
+        image = store.db_snapshot(_LATE_DATABASE)
+        self.assertEqual(list(pushes)[-1][1]["d"], image.data)
+
+    # Each database's snapshot is taken as the stream reaches it, not before.
+    def test_built_when_reached(self) -> None:
+        self.child_run(self.reached_check)
+
+    # In the child: one cache file removed, the other's line alone goes.
+    def lost_check(self) -> None:
+        store = self.store_register()
+        self.databases_write(store)
+        lost, held = store.db_snapshot(_DATABASE).files
+        os.remove(lost)
+        stream = self.stream_get("sync", False)
+        pushes = list(stream.pushes)
+        restore, *files = [line for line in pushes if line["db"] == _DATABASE]
+        self.assertEqual(restore["files"], 1)
+        self.assertEqual([line[1]["d"] for line in files], [held])
+        self.assertEqual(stream.reply, _gold_value("lines.sync_reply"))
+
+    # A cache file the server lost is left out, and the sync goes on.
+    def test_file_lost(self) -> None:
+        self.child_run(self.lost_check)
+
+    # In the child: the log's file refuses the store and goes unnamed.
+    def log_check(self) -> None:
+        store = self.store_register()
+        verbose.log_open(self.root, _RING, _BLOB_MAX)
+        line = _gold_value("lines.create_log")
+        self.assertTrue(os.path.isfile(self.database_path(line["db"])))
+        with self.assertRaises(FileExistsError):
+            _handler_call(engine_db.db_create, line)
+        self.databases_write(store)
+        stream = self.stream_get("sync", False)
+        self.assertEqual(stream.reply, _gold_value("lines.sync_reply"))
+        pushes = list(stream.pushes)
+        self.assertEqual(_lines_order(pushes), _gold_value("sync_order"))
+
+    # The log's `_verbose` is never held by the store, so no line names it.
+    def test_log_unnamed(self) -> None:
+        self.child_run(self.log_check)
+
+
 # Tests the registration.
 class TestRegister(ScratchCase):
     # In the child: the dispatcher refuses each type at version 0 again.
@@ -293,6 +422,7 @@ class TestRegister(ScratchCase):
         handlers = [
             ("db.create", engine_db.db_create, "create"),
             ("db.drop", engine_db.db_drop, "drop"),
+            ("db.sync", engine_db.db_sync, "sync"),
         ]
         for kind, fn, name in handlers:
             message = _text_get(f"dispatch_handler_twice_{name}")
@@ -310,10 +440,12 @@ class TestRegister(ScratchCase):
     def early_check(self) -> None:
         create = _gold_value("lines.create")
         drop = _gold_value("lines.drop")
+        sync = _gold_value("lines.sync")
         message = _text_get("engine_db_not_registered")
         calls: list[Callable[[], object]] = [
             lambda: _handler_call(engine_db.db_create, create),
             lambda: _handler_call(engine_db.db_drop, drop),
+            lambda: _handler_call(engine_db.db_sync, sync),
             lambda: next(engine_db.restore_lines(_DATABASE, False)),
         ]
         for call in calls:

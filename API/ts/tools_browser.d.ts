@@ -2,8 +2,9 @@
 // registered on the AI worker's server and run inside the task of the `mcp`
 // line. No tool exposes the backing store beyond routine SQL: no measure, no
 // VACUUM, no unloading or loading of a copy, no `seq`. kv_get and doc_get read
-// this side's store only. render shows the image and the subtitle and frees
-// nothing.
+// this side's store only. render first sends a named image's bytes from the
+// store by `media.store`, since the UI's cache may not hold them, and after
+// that reply shows the image and the subtitle. It frees nothing.
 //
 // console_run, console_write and console_read work in debug mode only, else
 // throw `tools_browser.debug_off`. Each asks its permit and shows the console,

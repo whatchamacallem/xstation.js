@@ -1,4 +1,159 @@
 {
   "start": "start",
-  "nodes": {"start": {"replies": {}}}
+  "nodes": {
+    "start": {
+      "replies": {
+        "0": {
+          "content": "Nothing at all, then. How restful. Do take your time.",
+          "next": "menu"
+        },
+        "1": {
+          "content": null,
+          "next": "after_render",
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": "{\"subtitle\":\"A subtitle, as requested. Do try to contain yourself.\"}",
+                "name": "browser.render"
+              },
+              "id": "call_1",
+              "type": "function"
+            }
+          ]
+        },
+        "2": {
+          "content": null,
+          "next": "after_note",
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": "{\"ref\":\"/metaverse/demo/note\",\"text\":\"Patient presses numbers. Prognosis: tedious.\"}",
+                "name": "browser.kv_put"
+              },
+              "id": "call_2",
+              "type": "function"
+            },
+            {
+              "function": {
+                "arguments": "{\"ref\":\"/metaverse/demo/note\"}",
+                "name": "browser.kv_get"
+              },
+              "id": "call_3",
+              "type": "function"
+            }
+          ]
+        },
+        "3": {
+          "content": null,
+          "next": "after_console",
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": "{\"text\":\"echo hyperposition\",\"timeout_seconds\":30}",
+                "name": "browser.console_run"
+              },
+              "id": "call_4",
+              "type": "function"
+            }
+          ]
+        }
+      }
+    },
+    "menu": {
+      "replies": {
+        "0": {
+          "content": "Nothing at all, then. How restful. Do take your time.",
+          "next": "menu"
+        },
+        "1": {
+          "content": null,
+          "next": "after_render",
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": "{\"subtitle\":\"A subtitle, as requested. Do try to contain yourself.\"}",
+                "name": "browser.render"
+              },
+              "id": "call_1",
+              "type": "function"
+            }
+          ]
+        },
+        "2": {
+          "content": null,
+          "next": "after_note",
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": "{\"ref\":\"/metaverse/demo/note\",\"text\":\"Patient presses numbers. Prognosis: tedious.\"}",
+                "name": "browser.kv_put"
+              },
+              "id": "call_2",
+              "type": "function"
+            },
+            {
+              "function": {
+                "arguments": "{\"ref\":\"/metaverse/demo/note\"}",
+                "name": "browser.kv_get"
+              },
+              "id": "call_3",
+              "type": "function"
+            }
+          ]
+        },
+        "3": {
+          "content": null,
+          "next": "after_console",
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": "{\"text\":\"echo hyperposition\",\"timeout_seconds\":30}",
+                "name": "browser.console_run"
+              },
+              "id": "call_4",
+              "type": "function"
+            }
+          ]
+        }
+      }
+    },
+    "after_render": {
+      "after_tools": {
+        "content": "There. Words on a black page. I trained for years for this.",
+        "next": "menu"
+      },
+      "replies": {}
+    },
+    "after_note": {
+      "after_tools": {
+        "content": "Noted, filed and read back. It was no more interesting the second time.",
+        "next": "menu"
+      },
+      "replies": {}
+    },
+    "after_console": {
+      "after_tools": {
+        "content": null,
+        "next": "after_output",
+        "tool_calls": [
+          {
+            "function": {
+              "arguments": "{\"subtitle\":\"hyperposition\"}",
+              "name": "browser.render"
+            },
+            "id": "call_5",
+            "type": "function"
+          }
+        ]
+      },
+      "replies": {}
+    },
+    "after_output": {
+      "after_tools": {
+        "content": "It said hyperposition, as one could have guessed. Anything else?",
+        "next": "menu"
+      },
+      "replies": {}
+    }
+  }
 }

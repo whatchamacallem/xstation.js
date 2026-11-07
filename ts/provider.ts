@@ -8,8 +8,8 @@
 // It starts no request. Each request line is built in the form
 // `settings.names_full()` picks. The request builders take the key as an
 // argument, and the one copy it holds is the key `key_set` keeps, which
-// nothing sets at bring up: `provider.set` is deferred.
-// The copy is in memory only.
+// the engine's program sets to the fixed text `scripted`: `provider.set` is
+// deferred. The copy is in memory only.
 
 namespace provider {
   // The line type, the request parts, the header names and the tool type.

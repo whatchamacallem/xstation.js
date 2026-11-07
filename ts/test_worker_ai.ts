@@ -310,6 +310,38 @@ namespace test_worker_ai {
       this.assertEqual(full_of(shown), switches.debug_on());
       this.assertEqual(logged, [text]);
     }
+
+    // A tap on the overlay's note, as on the engine page, shows and logs.
+    test_overlay_noted(): void {
+      const tasks = tasks_make();
+      const ui = lane_make(tasks, "ui");
+      const logged: string[] = [];
+      const note = worker_ai.note_make(tasks, (text) => {
+        logged.push(text);
+      });
+      const inner = new queue.LocalPort();
+      const far = end_link(inner);
+      const tap = new worker_ai.WireTap(inner, note);
+      const taken: lines.Line[] = [];
+      tap.line_receive((line) => {
+        taken.push(line);
+      });
+      const sent = gold_line("kv_list_first");
+      tap.line_post(sent, []);
+      this.assertTrue(far.came[0] === sent);
+      const received = gold_line("kv_list_reply");
+      far.port.line_post(received, []);
+      this.assertTrue(taken[0] === received);
+      const texts = [
+        gold_text("worker_ai_overlay_sent_first"),
+        gold_text("worker_ai_overlay_received"),
+      ];
+      this.assertEqual(logged, texts);
+      this.assertEqual(
+        ui.came,
+        texts.map((text) => ({ ...gold_line("overlay_line"), text })),
+      );
+    }
   }
 
   // The relays of the UI's console close and of the settings.

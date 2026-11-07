@@ -153,14 +153,14 @@ class Comment(NamedTuple):
 
 
 # Fails unless the audit refuses each probe token and passes each literal.
-def audit_probe() -> None:
+def audit_probe(refused: tuple[str, ...], passed: tuple[str, ...]) -> None:
     os.makedirs(_BUILD_PATH, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
         path = os.path.join(scratch, "probe.ts")
-        for code in _AUDIT_REFUSED:
+        for code in refused:
             if not token_find(probe_write(path, code)):
                 raise RuntimeError(f"the audit misses the token in {code!r}")
-        for code in _AUDIT_PASSED:
+        for code in passed:
             found = token_find(probe_write(path, code))
             if found:
                 raise RuntimeError(
@@ -626,13 +626,13 @@ def token_find(path: str) -> re.Match[str] | None:
 
 
 # Returns the TypeScript files under the top directory, failing on none.
-def typescript_paths() -> list[str]:
-    matched = glob.glob(_TYPESCRIPT_GLOB, root_dir=_ROOT_PATH)
+def typescript_paths(root_path: str) -> list[str]:
+    matched = glob.glob(_TYPESCRIPT_GLOB, root_dir=root_path)
     if not matched:
         raise RuntimeError(
-            f"{_TYPESCRIPT_GLOB} matches no file under {_ROOT_PATH}"
+            f"{_TYPESCRIPT_GLOB} matches no file under {root_path}"
         )
-    return sorted(os.path.join(_ROOT_PATH, path) for path in matched)
+    return sorted(os.path.join(root_path, path) for path in matched)
 
 
 # Checks and audits the files, then formats them in a normal run, lints them.
@@ -660,8 +660,8 @@ def main(arguments: list[str]) -> None:
         non_ascii_check(path, row.encoding)
     for path, row in zip(paths, rows, strict=True):
         comments_check(path, row.encoding, row.comments)
-    audit_probe()
-    for path in typescript_paths():
+    audit_probe(_AUDIT_REFUSED, _AUDIT_PASSED)
+    for path in typescript_paths(_ROOT_PATH):
         synchronization_check(path)
     formatter_run(paths, chosen)
     for extension, row in table.items():

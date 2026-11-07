@@ -1,8 +1,8 @@
-// A scripted provider for tests: no network, no AI. A port that answers the
-// `http.request` lines of provider.ts. The latest user message is one
-// integer that picks a reply from the current node; a tool result moves to
-// the node the reply names. Every image request is answered with the image
-// of `image_pattern` as `b64_json`.
+// A scripted provider, which the tests and the engine page run: no network,
+// no AI. A port that answers the `http.request` lines of provider.ts. The
+// latest user message is one integer that picks a reply from the current
+// node; a tool result moves to the node the reply names. Every image request
+// is answered with the image of `image_pattern` as `b64_json`.
 
 declare namespace provider_script {
   interface ScriptReply {

@@ -1,0 +1,94 @@
+{
+  "lines": {
+    "first_render": {
+      "0": {
+        "id": 7,
+        "type": "render"
+      },
+      "image": "/_files/test_engine/large",
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "A place with a picture."
+    },
+    "first_store": {
+      "0": {
+        "blobs": 1,
+        "id": 6,
+        "type": "media.store"
+      },
+      "k": "/_files/test_engine/large"
+    },
+    "say_one": {
+      "0": {
+        "id": 1,
+        "type": "ai.say"
+      },
+      "text": "1"
+    },
+    "tool_render": {
+      "0": {
+        "id": 11,
+        "type": "render"
+      },
+      "image": "/_files/test_engine/large",
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "Shown by the tool."
+    },
+    "tool_store": {
+      "0": {
+        "blobs": 1,
+        "id": 10,
+        "type": "media.store"
+      },
+      "k": "/_files/test_engine/large"
+    },
+    "turn_answer": {
+      "0": {
+        "reply": 1,
+        "type": "ai.say"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "Said and shown.",
+      "turn": 4
+    }
+  },
+  "scene": {
+    "0": {
+      "t": "scene"
+    },
+    "1": "/_files/test_engine/large",
+    "image": {
+      "$ref": 1
+    },
+    "subtitle": "A place with a picture."
+  },
+  "script": {
+    "nodes": {
+      "after": {
+        "after_tools": {
+          "content": "Said and shown.",
+          "next": "start"
+        },
+        "replies": {}
+      },
+      "start": {
+        "replies": {
+          "1": {
+            "content": null,
+            "next": "after",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"image\":\"/_files/test_engine/large\",\"subtitle\":\"Shown by the tool.\"}",
+                  "name": "browser.render"
+                },
+                "id": "call_1",
+                "type": "function"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "start": "start"
+  }
+}

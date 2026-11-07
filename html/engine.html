@@ -1,0 +1,62 @@
+<!doctype html>
+<!--
+SPDX-FileCopyrightText: © 2026 Adrian Johnston.
+SPDX-License-Identifier: MIT
+This file is licensed under the terms of the LICENSE.md file.
+The shell of the engine page, built as hyperposition-engine: the picture,
+hidden until a render names an image; the debug views, the container of the
+console view and of the overlays, over it by coming later; and the band after
+them, which the console view fits its rows above, holding the subtitle, the
+form of the box, disabled until the first render, and the permit area. The
+scripts are those of test.html in their order, the last one starting the
+engine in place of running test_all, with no pre for a TAP stream. The vectors
+and the gold ride along, as every template is filled from the same pieces.
+page_build.py replaces each build marker.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>hyperposition-engine</title>
+    <style>
+      XSJS_BUILD_ENGINE_CSS
+    </style>
+    <style>
+      XSJS_BUILD_XTERM_CSS
+    </style>
+  </head>
+  <body>
+    <canvas id="image" hidden></canvas>
+    <div id="debug">
+      <div id="overlays"></div>
+    </div>
+    <div id="band">
+      <p id="subtitle"></p>
+      <form>
+        <input id="input" disabled />
+      </form>
+      <div id="permit"></div>
+    </div>
+    <!-- The AI worker runs the text of each `data-worker` script in order. -->
+    <script data-worker>
+      var test_vectors = XSJS_BUILD_TEST_VECTORS;
+    </script>
+    <script data-worker>
+      var test_gold = XSJS_BUILD_TEST_GOLD;
+    </script>
+    <script data-worker>
+      XSJS_BUILD_BUNDLE;
+    </script>
+    <script type="text/plain" data-worker>
+      var sqlite3_wasm_base64 = "XSJS_BUILD_SQLITE3_WASM";
+    </script>
+    <script type="text/plain" data-worker>
+      XSJS_BUILD_SQLITE3_JS
+    </script>
+    <script>
+      XSJS_BUILD_XTERM_JS;
+    </script>
+    <script data-worker>
+      engine.engine_start();
+    </script>
+  </body>
+</html>

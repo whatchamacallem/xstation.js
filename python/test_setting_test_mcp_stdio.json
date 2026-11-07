@@ -1,6 +1,7 @@
 {
   "child_seconds": 30,
   "read_bytes": 65536,
+  "server_tools": ["source_put", "system_restart"],
   "texts": {
     "argparse_root_required": "error: the following arguments are required: --root",
     "jslb_number_overflow": "The number 1e400 overflows a double.",
@@ -9,6 +10,7 @@
     "mcp_stdio_line_malformed_blank": "Line 1 of the input is not JSON: The text is not JSON: Expecting value.",
     "mcp_stdio_line_malformed_delimiter": "Line 2 of the input is not JSON: The text is not JSON: Expecting ':' delimiter.",
     "mcp_stdio_line_malformed_overflow": "Line 1 of the input is not JSON: The number 1e400 overflows a double.",
-    "mcp_stdio_line_object": "Line 1 of the input is not a JSON object."
+    "mcp_stdio_line_object": "Line 1 of the input is not a JSON object.",
+    "settings_key_missing_line_max": "The settings lack the key line_max."
   }
 }

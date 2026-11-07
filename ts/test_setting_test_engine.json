@@ -1,0 +1,294 @@
+{
+  "chain_server": [
+    {
+      "0": {
+        "id": 3,
+        "type": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "initialize",
+      "params": {
+        "capabilities": {},
+        "clientInfo": {
+          "name": "hyperposition-engine",
+          "version": "0"
+        },
+        "protocolVersion": "2025-06-18"
+      }
+    },
+    {
+      "0": {
+        "type": "mcp"
+      },
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized"
+    },
+    {
+      "0": {
+        "id": 4,
+        "type": "mcp"
+      },
+      "id": 2,
+      "jsonrpc": "2.0",
+      "method": "tools/list"
+    },
+    {
+      "0": {
+        "id": 5,
+        "type": "db.sync"
+      }
+    }
+  ],
+  "databases": ["_files", "_preferences", "_settings", "metaverse"],
+  "hyperposition": {
+    "0": {
+      "t": "scene"
+    },
+    "subtitle": "How can I help you?"
+  },
+  "lines": {
+    "first": {
+      "0": {
+        "id": 101,
+        "type": "tap.start"
+      },
+      "settings": {
+        "provider": {
+          "scripted": true
+        }
+      },
+      "switches": {
+        "debug": true
+      }
+    },
+    "first_render": {
+      "0": {
+        "id": 6,
+        "type": "render"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "How can I help you?"
+    },
+    "first_unscripted": {
+      "0": {
+        "id": 101,
+        "type": "tap.start"
+      },
+      "settings": {
+        "provider": {
+          "scripted": false
+        }
+      },
+      "switches": {
+        "debug": true
+      }
+    },
+    "get_large": {
+      "0": {
+        "id": 1,
+        "key": "/_files/test_engine/large",
+        "type": "kv.get"
+      }
+    },
+    "list_world": {
+      "0": {
+        "id": 2,
+        "type": "kv.list"
+      },
+      "db": "metaverse",
+      "prefix": "world"
+    },
+    "media_small": {
+      "0": {
+        "blobs": 1,
+        "type": "media.store"
+      },
+      "k": "/metaverse/place.png"
+    },
+    "render_image": {
+      "0": {
+        "type": "render"
+      },
+      "image": "/_files/place.png",
+      "scene": "/metaverse/place/1",
+      "subtitle": "A place with a picture."
+    },
+    "render_plain": {
+      "0": {
+        "type": "render"
+      },
+      "scene": "/metaverse/place/1",
+      "subtitle": "A place."
+    },
+    "say_one": {
+      "0": {
+        "id": 3,
+        "type": "ai.say"
+      },
+      "text": "1"
+    },
+    "sync_other": {
+      "0": {
+        "reply": 1,
+        "type": "db.sync"
+      },
+      "databases": ["_files", "metaverse"]
+    },
+    "sync_same": {
+      "0": {
+        "reply": 1,
+        "type": "db.sync"
+      },
+      "databases": ["metaverse"]
+    },
+    "turn_answer": {
+      "0": {
+        "reply": 3,
+        "type": "ai.say"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "Said and shown.",
+      "turn": 4
+    },
+    "turn_render": {
+      "0": {
+        "id": 9,
+        "type": "render"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "Shown by the tool."
+    }
+  },
+  "module_names": [
+    "chain_register",
+    "chain_start",
+    "engine_start",
+    "media_make",
+    "page_run",
+    "provider_attach",
+    "render_make",
+    "store_build",
+    "sync_check",
+    "tools_build",
+    "worker_run"
+  ],
+  "prompt": {
+    "0": {
+      "t": "prompt"
+    },
+    "text": "You are the analyst of this block."
+  },
+  "scenes": {
+    "numbered": {
+      "0": {
+        "t": "scene"
+      },
+      "image": 7,
+      "subtitle": "A place."
+    },
+    "pictured": {
+      "0": {
+        "t": "scene"
+      },
+      "1": "/_files/place.png",
+      "image": {
+        "$ref": 1
+      },
+      "subtitle": "A place with a picture."
+    },
+    "plain": {
+      "0": {
+        "t": "scene"
+      },
+      "subtitle": "A place."
+    },
+    "untitled": {
+      "0": {
+        "t": "scene"
+      }
+    }
+  },
+  "script": {
+    "nodes": {
+      "after": {
+        "after_tools": {
+          "content": "Said and shown.",
+          "next": "start"
+        },
+        "replies": {}
+      },
+      "start": {
+        "replies": {
+          "1": {
+            "content": null,
+            "next": "after",
+            "tool_calls": [
+              {
+                "function": {
+                  "arguments": "{\"subtitle\":\"Shown by the tool.\"}",
+                  "name": "browser.render"
+                },
+                "id": "call_1",
+                "type": "function"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "start": "start"
+  },
+  "server_tools": [
+    {
+      "description": "Write a main loop file.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "source_put"
+    },
+    {
+      "description": "Serve a main loop file.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "system_restart"
+    }
+  ],
+  "texts": {
+    "file_lost": "The value /_files/test_engine/large names the cache file {1}, which this store does not hold.",
+    "image_text": "the bytes of a picture",
+    "key_missing": "The database metaverse has no key 'place.png'.",
+    "provider_key": "scripted",
+    "scene_invalid": "The document /metaverse/place/1 is not a scene: it needs its subtitle as text and, when it has one, its image as text.",
+    "scripted_off": "The setting provider.scripted is false, and the scripted provider is the only one the engine builds.",
+    "sync_differs": "The reply to db.sync names the databases [\"_files\",\"metaverse\"], and the browser's store holds [\"metaverse\"]."
+  },
+  "tool_names": [
+    "browser.sql_run",
+    "browser.db_create",
+    "browser.db_drop",
+    "browser.kv_get",
+    "browser.kv_put",
+    "browser.kv_delete",
+    "browser.kv_list",
+    "browser.doc_get",
+    "browser.doc_put",
+    "browser.doc_head",
+    "browser.script_run",
+    "browser.script_debug",
+    "browser.image_make",
+    "browser.render",
+    "browser.console_run",
+    "browser.console_write",
+    "browser.console_read",
+    "browser.verbose_tail",
+    "server.source_put",
+    "server.system_restart"
+  ],
+  "turn_commits": ["turn.append", "turn.append", "turn.append", "turn.append"],
+  "universe_sql": "CREATE TABLE universe (name TEXT PRIMARY KEY, title TEXT NOT NULL, player TEXT NOT NULL, world TEXT NOT NULL) WITHOUT ROWID, STRICT",
+  "world_keys": ["world"]
+}

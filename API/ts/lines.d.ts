@@ -1,6 +1,23 @@
 // The payloads of the JSLB line types, each interface below the payload of one
 // type, the wire API. A line is one JSON object: header 0, blob headers 1 to
 // b, the payload in every other key. A field at its default is not written.
+//
+// The browser pulls the databases by `db.sync`, so a suite sending none sees
+// no new line. The server answers with the whole of every database it holds
+// but its own `_verbose`: for each in name order its `db.restore` line and its
+// `db.file` lines, then `DbSyncReply`, which names them in that order. The
+// browser's queue runs the pushes in order, before the reply, so the task that
+// wakes on the reply finds every database restored and checks the list against
+// its own. No count and no end marker is needed: the reply is the end.
+//
+// `provider.set` is deferred and not built. The engine role reads the root's
+// `provider.json` and, from its environment, which the serve program and ttyd
+// pass on, the variable the settings name, `XSJS_PROVIDER_KEY`. When
+// `provider.scripted` is false it pushes this line at once after the Empty
+// reply to `tap.start`, before the program sends anything. The wire's tap and
+// the server's log write it as its header only. The worker's handler sets the
+// key in the provider door, keeps the three names for the agent and the image
+// tool, and the `http` owner becomes the HTTP port with `timeout_seconds`.
 
 declare namespace lines {
   // Header 0: `t` type, `v` version, `i` id, `r` reply, `k` key, `b` blobs.
@@ -61,11 +78,16 @@ declare namespace lines {
     cause?: ErrorCause;
   }
 
-  // The provider's address and model names, none empty.
+  // The provider's address and model names, empty in scripted mode.
   interface ProviderInfo {
     base_url: string;
     chat_model: string;
     image_model: string;
+  }
+
+  // provider.set: the server to the AI worker, no blobs. Deferred, not built.
+  interface ProviderSet extends ProviderInfo {
+    key: string;
   }
 
   // tap.start: the first line: settings and switches, no gold.
@@ -141,6 +163,14 @@ declare namespace lines {
     db: string;
   }
 
+  // db.sync: the AI worker to the server, no blobs and no payload.
+  interface DbSync {}
+
+  // The reply to db.sync: the databases sent, in the order they were sent.
+  interface DbSyncReply {
+    databases: string[];
+  }
+
   interface TurnAppend {
     scene: DocRef;
     role: provider.Role;
@@ -181,11 +211,13 @@ declare namespace lines {
     lines: VerboseLine[];
   }
 
+  // verbose.tail: `count` is a maximum, as the reply stays below `line_max`.
   interface VerboseTail {
     thread: "ui" | "ai" | "server";
     count: number;
   }
 
+  // The newest of those lines that fit, oldest first.
   interface VerboseTailReply {
     lines: VerboseLine[];
   }
@@ -274,7 +306,7 @@ declare namespace lines {
     subtitle: string;
   }
 
-  // render: the UI paints the image under `image`, or black, and the text.
+  // render: paints `image`, kept by `media.store` first, or black, and text.
   interface Render {
     scene: DocRef;
     subtitle: string;

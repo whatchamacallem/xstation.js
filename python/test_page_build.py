@@ -2,20 +2,25 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests the parts of page_build.py that call into no project module and
-# start no program but python3: the strings table substitution, the archive
-# member lookup by path suffix, the base64 of the vectors and the wasm, the
-# gold's one line and its copy at another path with other gold, the
-# markers of the two templates, html/test.html and html/headless.html, and
-# the check of each piece, the headless template holding the head and the
-# scripts of the test template in their order, its own entry last, and no
-# pre for the TAP stream, a template html/ lacks refused with no page
-# written, the command line refusing an option, or a name with no template,
-# before anything is built, run as a python3 child, and the hash of the page
-# written. No test starts tsc.
+# Tests the parts of page_build.py that start no program but python3 and call
+# into no project module but jslb.py, whose suite has passed: the strings
+# table substitution, the archive member lookup by path suffix, the base64 of
+# the vectors and the wasm, the gold's one line and its copy at another path
+# with other gold, a suite's gold file of no object refused, the markers of
+# the three templates, html/test.html, html/headless.html and
+# html/engine.html, and the check of each piece, the headless template
+# holding the head and the scripts of the test template in their order, its
+# own entry last, and no pre for the TAP stream, the engine template holding
+# those scripts with its own entry last, the body of the engine page's layout
+# and no pre, a template html/ lacks refused with no page written, the
+# command line refusing an option, or a name with no template, before
+# anything is built, run as a python3 child, and the hash of the page written.
+# Forked children, whose lines the count sees, run the script as the program
+# and refuse a PATH with no tsc. No test starts tsc.
 
-import base64, hashlib, html.parser, io, json, os, page_build, subprocess, sys
-import tarfile, tempfile, unittest, zipfile
+import base64, hashlib, html.parser, io, json, os, page_build, runpy, signal
+import subprocess, sys, tarfile, tempfile, traceback, unittest, zipfile
+from collections.abc import Callable
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -54,6 +59,9 @@ _TEST_TEMPLATE = "test"
 # The template of the headless page of group B.
 _HEADLESS_TEMPLATE = "headless"
 
+# The template of the engine page.
+_ENGINE_TEMPLATE = "engine"
+
 # A template `html/` lacks.
 _ABSENT_TEMPLATE = "page_build_absent"
 
@@ -63,8 +71,23 @@ _TEST_ENTRY = "test_all.suites_run();"
 # The last script of the headless template, in place of the test entry.
 _HEADLESS_ENTRY = "test_headless.realm_open();"
 
+# The last script of the engine template, in place of the test entry.
+_ENGINE_ENTRY = "engine.engine_start();"
+
 # The start tag of the test template's element for the TAP stream.
 _OUTPUT_TAG = ("pre", [("id", "tap_output")])
+
+# The engine template's body before its scripts: each depth and start tag.
+_ENGINE_BODY: list[tuple[int, tuple[str, list[tuple[str, str | None]]]]] = [
+    (2, ("canvas", [("id", "image"), ("hidden", None)])),
+    (2, ("div", [("id", "debug")])),
+    (3, ("div", [("id", "overlays")])),
+    (2, ("div", [("id", "band")])),
+    (3, ("p", [("id", "subtitle")])),
+    (3, ("form", [])),
+    (4, ("input", [("id", "input"), ("disabled", None)])),
+    (3, ("div", [("id", "permit")])),
+]
 
 # The start tag of a template's head.
 _HEAD_START = "<head>"
@@ -83,15 +106,37 @@ _REFUSED_NAME = "page_build_refused"
 # The page of that name, which no test may leave written.
 _REFUSED_PATH = os.path.join(_BUILD_PATH, _REFUSED_NAME + _PAGE_EXTENSION)
 
+# What a forked child reports when its work returned.
+_ENDING_RETURNED = "returned"
 
-# The start tags of a template in order, and the text of each of its scripts.
+# The configuration a compile names, which a `PATH` with no tsc never reads.
+_UNREAD_CONFIG = "tsconfig.json"
+
+# The bundle a compile names, which a `PATH` with no tsc never writes.
+_UNWRITTEN_NAME = "bundle.js"
+
+# The last line of the traceback of a `PATH` with no tsc.
+_TSC_ABSENT = (
+    "FileNotFoundError: tsc, the TypeScript compiler, is not on PATH\n"
+)
+
+# The line of a traceback that holds the frame of the command line's function.
+_MAIN_FRAME = ", in main\n"
+
+# A suite's gold file by its file name, in a scratch directory.
+_SUITE_NAME = "test_setting_test_a.json"
+
+
+# The start tags of a template in order, their depths, and each script's text.
 class TemplateReader(html.parser.HTMLParser):
     # Reads the whole text of the template.
     def __init__(self, text: str) -> None:
         super().__init__()
         self.tags: list[tuple[str, list[tuple[str, str | None]]]] = []
+        self.depths: list[int] = []
         self.scripts: list[str] = []
         self._inside = False
+        self._open = 0
         self.feed(text)
         self.close()
 
@@ -100,12 +145,15 @@ class TemplateReader(html.parser.HTMLParser):
         self, tag: str, attrs: list[tuple[str, str | None]]
     ) -> None:
         self.tags.append((tag, attrs))
+        self.depths.append(self._open)
+        self._open += 1
         if tag == "script":
             self._inside = True
             self.scripts.append("")
 
-    # Closes a script's text at its end tag.
+    # Closes an element, and a script's text at its end tag.
     def handle_endtag(self, tag: str) -> None:
+        self._open -= 1
         if tag == "script":
             self._inside = False
 
@@ -113,6 +161,50 @@ class TemplateReader(html.parser.HTMLParser):
     def handle_data(self, data: str) -> None:
         if self._inside:
             self.scripts[-1] += data
+
+
+# In the forked child: runs the work, writes how it ended, kills itself.
+def child_end(work: Callable[[], None], write_fd: int) -> None:
+    try:
+        try:
+            work()
+            ending = _ENDING_RETURNED
+        except BaseException:
+            ending = traceback.format_exc()
+        with os.fdopen(write_fd, "w", encoding="utf-8") as file:
+            file.write(ending)
+    finally:
+        os.kill(os.getpid(), signal.SIGKILL)
+
+
+# Runs the work in a forked child, whose lines count, returning how it ended.
+def child_run(case: unittest.TestCase, work: Callable[[], None]) -> str:
+    read_fd, write_fd = os.pipe()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    pid = os.fork()
+    if pid == 0:
+        os.close(read_fd)
+        child_end(work, write_fd)
+    os.close(write_fd)
+    with os.fdopen(read_fd, encoding="utf-8") as file:
+        ending = file.read()
+    status = os.waitpid(pid, 0)[1]
+    case.assertEqual(os.waitstatus_to_exitcode(status), -signal.SIGKILL)
+    return ending
+
+
+# In a forked child: runs the script as the program, on the arguments given.
+def script_run(arguments: list[str]) -> None:
+    sys.argv = [_SCRIPT_PATH, *arguments]
+    runpy.run_path(_SCRIPT_PATH, run_name="__main__")
+
+
+# In a forked child: compiles with the folder alone on `PATH`.
+def tsc_unfound(folder: str) -> None:
+    os.environ["PATH"] = folder
+    out_path = os.path.join(folder, _UNWRITTEN_NAME)
+    page_build.bundle_compile(_UNREAD_CONFIG, out_path)
 
 
 # Runs the command line in a python3 child with the arguments, to its end.
@@ -360,6 +452,18 @@ class TestGold(unittest.TestCase):
             "the gold's keys ['typescript', 'python'], not typescript",
         )
 
+    # A suite's gold file that holds no JSON object is refused by its path.
+    def test_suite_refused(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
+            path = os.path.join(scratch, _SUITE_NAME)
+            with open(path, "w", encoding="utf-8") as file:
+                file.write("[]")
+            with self.assertRaises(ValueError) as caught:
+                page_build.gold_read(scratch)
+        self.assertEqual(
+            str(caught.exception), f"{path}: holds no JSON object"
+        )
+
     # The copy is the page with the other gold on its one gold line.
     def test_page_copied(self) -> None:
         head = "<script data-worker>\n"
@@ -492,8 +596,15 @@ class TestMarkers(unittest.TestCase):
         page = page_build.markers_fill(template, pieces)
         self.assertNotIn("XSJS_BUILD_", page)
 
+    # The engine template holds the same markers once, from the same pieces.
+    def test_template_engine(self) -> None:
+        pieces = {marker: "" for marker in [*_PAGE_MARKERS, _VECTORS_MARKER]}
+        template = template_text(_ENGINE_TEMPLATE)
+        page = page_build.markers_fill(template, pieces)
+        self.assertNotIn("XSJS_BUILD_", page)
 
-# The headless template beside the test template, and a template `html/` lacks.
+
+# The other templates beside the test template, and a template `html/` lacks.
 class TestTemplates(unittest.TestCase):
     # The head of the headless template is that of the test template.
     def test_head_same(self) -> None:
@@ -518,6 +629,34 @@ class TestTemplates(unittest.TestCase):
         headless = [script.strip() for script in reader.scripts]
         self.assertEqual(tests[-1], _TEST_ENTRY)
         self.assertEqual(headless, [*tests[:-1], _HEADLESS_ENTRY])
+
+    # The engine template's scripts are the test template's, its entry last.
+    def test_engine_scripts(self) -> None:
+        reader = TemplateReader(template_text(_TEST_TEMPLATE))
+        tests = [script.strip() for script in reader.scripts]
+        tags = [tag for tag in reader.tags if tag[0] == "script"]
+        reader = TemplateReader(template_text(_ENGINE_TEMPLATE))
+        engine = [script.strip() for script in reader.scripts]
+        self.assertEqual(engine, [*tests[:-1], _ENGINE_ENTRY])
+        self.assertEqual(
+            [tag for tag in reader.tags if tag[0] == "script"], tags
+        )
+
+    # The engine template's body is the page's layout, its scripts after it.
+    def test_engine_body(self) -> None:
+        reader = TemplateReader(template_text(_ENGINE_TEMPLATE))
+        names = [tag[0] for tag in reader.tags]
+        first = names.index("body") + 1
+        last = names.index("script")
+        self.assertEqual(
+            list(zip(reader.depths[first:last], reader.tags[first:last])),
+            _ENGINE_BODY,
+        )
+
+    # The engine template holds no `pre`, as it shows no TAP stream.
+    def test_engine_output(self) -> None:
+        tags = TemplateReader(template_text(_ENGINE_TEMPLATE)).tags
+        self.assertNotIn("pre", [tag[0] for tag in tags])
 
     # A template `html/` lacks is refused by name, and no page is written.
     def test_template_absent(self) -> None:
@@ -549,6 +688,29 @@ class TestCommand(unittest.TestCase):
         )
         self.assertEqual(completed.stdout, b"")
         self.assertFalse(os.path.exists(_REFUSED_PATH))
+
+    # As the program, the file's last line reaches the build through `main`.
+    def test_script_forked(self) -> None:
+        arguments = [_ABSENT_TEMPLATE, _REFUSED_NAME]
+        ending = child_run(self, lambda: script_run(arguments))
+        path = os.path.join(_HTML_PATH, _ABSENT_TEMPLATE + _PAGE_EXTENSION)
+        self.assertIn(_MAIN_FRAME, ending)
+        self.assertTrue(ending.endswith(f"directory: {path!r}\n"), ending)
+        self.assertFalse(os.path.exists(_REFUSED_PATH))
+
+
+# The compiler looked for on `PATH`, in a forked child that changes its own.
+class TestCompiler(unittest.TestCase):
+    # Makes the checkout's `build/` for the scratch directories.
+    def setUp(self) -> None:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+
+    # A `PATH` with no tsc is refused by name, and nothing is written.
+    def test_tsc_absent(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
+            ending = child_run(self, lambda: tsc_unfound(scratch))
+            self.assertEqual(os.listdir(scratch), [])
+        self.assertTrue(ending.endswith(_TSC_ABSENT), ending)
 
 
 # Pieces that would change meaning as the raw text of their element.

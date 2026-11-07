@@ -16,8 +16,16 @@ namespace queue {
     reply_field: "reply",
     id_short: "i",
     full_marker: "type",
+    size_field: "size",
     line_setting: "line_max",
     limit_setting: "blob_max",
+    reply_gap: " ",
+    // The two credentials the timeline never holds, and what shows for them.
+    http_type: "http.request",
+    key_header: "Authorization",
+    open_type: "console.open",
+    token_field: "token",
+    mask_text: "<masked>",
   });
 
   // The owners a line can have: the threads, the server and the ports.
@@ -137,6 +145,63 @@ namespace queue {
   // The blob headers of a line, 1 on.
   function blobs_of(line: lines.Line): lines.BlobHeader[] {
     return jslb.headers_of(line).slice(1) as lines.BlobHeader[];
+  }
+
+  // A copy of the object with the field masked, the object itself without it.
+  function field_masked<Holder extends object>(
+    holder: Holder,
+    name: string,
+  ): Holder {
+    return Object.hasOwn(holder, name)
+      ? { ...holder, [name]: constants.mask_text }
+      : holder;
+  }
+
+  // The line the timeline renders, a copy when a credential of it is masked.
+  function line_masked(line: lines.Line): lines.Line {
+    const type = type_of(line[0]);
+    if (type === constants.open_type) {
+      return field_masked(line, constants.token_field);
+    }
+    if (type === constants.http_type && line.headers !== undefined) {
+      const headers = line.headers as object;
+      return {
+        ...line,
+        headers: field_masked(headers, constants.key_header),
+      };
+    }
+    return line;
+  }
+
+  // The rendering of a line, of a wake its header, then each of its replies.
+  function line_rendered(line: lines.Line, wake: boolean): string {
+    if (!wake) {
+      return jslb.line_render(line_masked(line));
+    }
+    const replies = line.replies as lines.Line[];
+    const rendered = replies.map((reply) =>
+      jslb.line_render(line_masked(reply)),
+    );
+    return [header_text(line), ...rendered].join(constants.reply_gap);
+  }
+
+  // A line's header and the sizes of its payload and blobs, a wake's replies'.
+  function line_sized(line: lines.Line, wake: boolean): string {
+    const counted = wake ? (line.replies as lines.Line[]) : [line];
+    const sizes: unknown[] = [];
+    let payload = 0;
+    for (const item of counted) {
+      payload += json_bytes(jslb.payload_of(item));
+      for (const blob of blobs_of(item)) {
+        sizes.push(jslb.field_get(blob, constants.size_field));
+      }
+    }
+    return i18n(
+      "queue.line_sized",
+      header_text(line),
+      payload,
+      utility.json_text(sizes),
+    );
   }
 
   // The blob bytes a held line counts: its blobs whose `d` is bytes.
@@ -434,8 +499,8 @@ namespace queue {
         : constants.id_short;
       Object.assign(header, { [name]: id });
       run.submitted.set(id, target);
-      this.log_write(
-        i18n("queue.submit", this.thread, target, header_text(line)),
+      this.log_write(line, false, (text) =>
+        i18n("queue.submit", this.thread, target, text),
       );
       this.line_send(target, blobs_move(line));
       return id;
@@ -449,8 +514,8 @@ namespace queue {
         throw new Error(i18n("queue.notify_marked", header_text(line)));
       }
       const target = owner ?? this.owner_find(type);
-      this.log_write(
-        i18n("queue.notify", this.thread, target, header_text(line)),
+      this.log_write(line, false, (text) =>
+        i18n("queue.notify", this.thread, target, text),
       );
       this.line_send(target, blobs_move(line));
     }
@@ -469,8 +534,8 @@ namespace queue {
           i18n("queue.forward_marked", this.thread, header_text(line)),
         );
       }
-      this.log_write(
-        i18n("queue.forward", this.thread, owner, header_text(line)),
+      this.log_write(line, false, (text) =>
+        i18n("queue.forward", this.thread, owner, text),
       );
       this.line_send(owner, line);
     }
@@ -658,7 +723,7 @@ namespace queue {
       const { line, from } = item;
       if (item.wake) {
         this.held_bytes -= item.bytes;
-        this.task_run(line, from, item.owed);
+        this.task_run(line, from, item.owed, true);
         return;
       }
       const header = line[0];
@@ -686,7 +751,8 @@ namespace queue {
       const owner = from === this.thread ? from : this.owner_find(type);
       if (owner === this.thread) {
         const id = field_number(header, constants.id_field);
-        this.task_run(line, from, id === undefined ? undefined : { id, from });
+        const owed = id === undefined ? undefined : { id, from };
+        this.task_run(line, from, owed, false);
         return;
       }
       if (owner === from) {
@@ -702,15 +768,16 @@ namespace queue {
       line: lines.Line,
       from: ThreadName,
       owed: OwedRequest | undefined,
+      wake: boolean,
     ): void {
-      this.log_write(
-        i18n("queue.dispatch", this.thread, from, header_text(line)),
+      this.log_write(line, wake, (text) =>
+        i18n("queue.dispatch", this.thread, from, text),
       );
       const run: HandlerRun = { submitted: new Map<number, ThreadName>() };
       this.current = run;
       const result = dispatch.line_dispatch(line);
       this.current = undefined;
-      this.result_take(line, run, result, owed);
+      this.result_take(line, run, result, owed, wake);
     }
 
     // Sleeps, posts a reply, fails after a failure's, or checks nothing owed.
@@ -719,9 +786,10 @@ namespace queue {
       run: HandlerRun,
       result: dispatch.Reply | dispatch.Sleep | dispatch.Failure,
       owed: OwedRequest | undefined,
+      wake: boolean,
     ): void {
       if (result !== undefined && sleep_is(result)) {
-        this.sleep_start(line, run, result, owed);
+        this.sleep_start(line, run, result, owed, wake);
         return;
       }
       if (result !== undefined && failure_is(result)) {
@@ -784,6 +852,7 @@ namespace queue {
       run: HandlerRun,
       sleep: dispatch.Sleep,
       owed: OwedRequest | undefined,
+      wake: boolean,
     ): void {
       const type = type_of(line[0]);
       const waits = new Set<number>();
@@ -809,12 +878,13 @@ namespace queue {
         this.pending.set(id, { owner, sleep: record });
       }
       this.sleeping += 1;
-      this.log_write(
+      this.log_write(line, wake, (text) =>
         i18n(
           "queue.sleep",
           this.thread,
           utility.json_text(sleep.wait_ids),
           sleep.then_type,
+          text,
         ),
       );
       if (record.count === 0) {
@@ -836,8 +906,8 @@ namespace queue {
         );
       }
       this.pending.delete(reply);
-      this.log_write(
-        i18n("queue.reply_received", this.thread, from, header_text(line)),
+      this.log_write(line, false, (text) =>
+        i18n("queue.reply_received", this.thread, from, text),
       );
       const sleep = request.sleep;
       sleep.replies.set(reply, line);
@@ -859,12 +929,13 @@ namespace queue {
         full: settings.names_full(),
       });
       const line = jslb.line_make(header, [], { state: sleep.state, replies });
-      this.log_write(
+      this.log_write(line, true, (text) =>
         i18n(
           "queue.wake",
           this.thread,
           sleep.then_type,
           utility.json_text(ids),
+          text,
         ),
       );
       const item = {
@@ -899,10 +970,11 @@ namespace queue {
           ),
         );
       }
-      this.log_write(
-        i18n("queue.reply", this.thread, owed.from, header_text(reply)),
+      const target = owed.from;
+      this.log_write(reply, false, (text) =>
+        i18n("queue.reply", this.thread, target, text),
       );
-      this.line_send(owed.from, reply);
+      this.line_send(target, reply);
     }
 
     // Sends the verbose lines kept since the last task, once a sink is in.
@@ -916,11 +988,31 @@ namespace queue {
     }
 
     // Writes one line of the thread's timeline once the sink is in, in debug.
-    private log_write(text: string): void {
+    private log_write(
+      line: lines.Line,
+      wake: boolean,
+      fill: (text: string) => string,
+    ): void {
       const debug_on = this.debug_on;
       if (debug_on !== undefined && debug_on()) {
-        verbose.log(text);
+        verbose.log(this.note_make(line, wake, fill));
       }
+    }
+
+    // A timeline line holding the rendering if its entry fits, else the sizes.
+    private note_make(
+      line: lines.Line,
+      wake: boolean,
+      fill: (text: string) => string,
+    ): string {
+      const text = fill(line_rendered(line, wake));
+      const settings_get = this.settings_get as (id: string) => unknown;
+      const line_max = settings_get(constants.line_setting) as number;
+      // A sink is in, and `VerboseBatch` refuses every other thread.
+      if (entry_fits(this.thread as "ui" | "ai", text, line_max)) {
+        return text;
+      }
+      return fill(line_sized(line, wake));
     }
   }
 }

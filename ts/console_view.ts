@@ -322,13 +322,14 @@ namespace console_view {
       this.child.hidden = true;
     }
 
-    // Shows the view when it is hidden and hides it when shown.
-    view_toggle(): void {
+    // Shows a hidden view, hides a shown one, and says whether it now shows.
+    view_toggle(): boolean {
       if (this.child.hidden) {
         this.view_show();
       } else {
         this.view_hide();
       }
+      return !this.child.hidden;
     }
 
     // Whether the view is shown while tty 0 is idle, so that it is asked for.

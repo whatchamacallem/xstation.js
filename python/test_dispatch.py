@@ -3,17 +3,18 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests registration, dispatch by type and version on lines of the gold, the
-# reply rules for requests and notifications, a `Failure`'s reply, the reply
-# and error lines it builds, each compared whole with a gold line in its name
-# form, the cascades against those built here from the raised exceptions by
-# the rule of `cause`, and the ids from 102. A handler is a function of the
-# test that keeps the line and the payload it is called with. Each test that
-# registers a handler or counts an id runs in a forked child, which writes
-# how it ended on a pipe and kills itself, so the handlers and the ids it
-# leaves never reach another test.
+# reply rules for requests and notifications, a `Failure`'s reply, a
+# `Stream`'s reply and its pushes, left unread, the reply and error lines it
+# builds, each compared whole with a gold line in its name form, the cascades
+# against those built here from the raised exceptions by the rule of `cause`,
+# and the ids from 102. A handler is a function of the test that keeps the
+# line and the payload it is called with. Each test that registers a handler
+# or counts an id runs in a forked child, which writes how it ended on a pipe
+# and kills itself, so the handlers and the ids it leaves never reach another
+# test.
 
 import dispatch, functools, harness, os, re, signal, sys, traceback, unittest
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from typing import Any, NoReturn, TypeAlias, cast
 
 # How a child ends when its test passed: any other ending is a traceback.
@@ -121,6 +122,13 @@ def _handler_raise(
     error: BaseException, line: Any, /, **payload: Any
 ) -> NoReturn:
     raise error
+
+
+# Pushes of a `Stream` as a generator, noting the line it reaches in `built`.
+def _pushes_build(built: list[Any]) -> Iterator[Any]:
+    line = _gold_value("lines.restore")
+    built.append(line)
+    yield line
 
 
 # Raises a `ValueError` and returns it, so that it carries a traceback.
@@ -424,6 +432,54 @@ class TestDispatch(ChildCase):
         )
         self.assertIs(caught.exception.__cause__, error)
         self.assertEqual(reply, _gold_value("lines.mcp"))
+
+    # A request's `Stream` is returned, `r` set on its reply, not its pushes.
+    @_child_run
+    def test_stream_request(self) -> None:
+        pushes = [_gold_value("lines.restore")]
+        stream = dispatch.Stream(pushes, _gold_value("lines.sync_unset"))
+        dispatch.handler_register("db.sync", 0, _handler_make([], stream))
+        request = _gold_value("lines.sync_request")
+        self.assertIs(dispatch.line_dispatch(request), stream)
+        self.assertEqual(stream.reply, _gold_value("lines.sync_answered"))
+        self.assertEqual(pushes, [_gold_value("lines.restore")])
+
+    # The reply of a `Stream` gets `r` in the name form of its header.
+    @_child_run
+    def test_stream_full(self) -> None:
+        reply = _gold_value("lines.sync_unset_full")
+        stream = dispatch.Stream([], reply)
+        dispatch.handler_register("db.sync", 0, _handler_make([], stream))
+        dispatch.line_dispatch(_gold_value("lines.sync_request_full"))
+        self.assertEqual(reply, _gold_value("lines.sync_answered_full"))
+
+    # The dispatch leaves a generator of pushes unread, for the main loop.
+    @_child_run
+    def test_stream_unread(self) -> None:
+        built: list[Any] = []
+        reply = _gold_value("lines.sync_unset")
+        stream = dispatch.Stream(_pushes_build(built), reply)
+        dispatch.handler_register("db.sync", 0, _handler_make([], stream))
+        dispatch.line_dispatch(_gold_value("lines.sync_request"))
+        self.assertEqual(built, [])
+        self.assertEqual(list(stream.pushes), [_gold_value("lines.restore")])
+
+    # A notification's `Stream` raises as a reply does, with no cause.
+    @_child_run
+    def test_stream_notification(self) -> None:
+        built: list[Any] = []
+        reply = _gold_value("lines.sync_unset")
+        stream = dispatch.Stream(_pushes_build(built), reply)
+        dispatch.handler_register("db.sync", 0, _handler_make([], stream))
+        with self.assertRaises(ValueError) as caught:
+            dispatch.line_dispatch(_gold_value("lines.sync"))
+        self.assertEqual(
+            str(caught.exception),
+            _text_get("dispatch_notification_replied_sync"),
+        )
+        self.assertIsNone(caught.exception.__cause__)
+        self.assertEqual(reply, _gold_value("lines.sync_unset"))
+        self.assertEqual(built, [])
 
 
 # Tests the reply line a handler builds.

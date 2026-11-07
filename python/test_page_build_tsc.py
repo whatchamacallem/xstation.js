@@ -4,20 +4,21 @@
 #
 # Tests page_build.py with the real tsc, a split suite of page_build that
 # reads the SQLite wasm and xterm.js archives the driver fetches before its
-# first block: a python3 child for each template, html/test.html and
-# html/headless.html, builds its page from the real html/, ts/,
-# i18n/en-US.json and the archives third_party_fetch.py places in their
-# library directories of third_party/, under a name of this run, removed
-# after. Each child prints its page's SHA-256, and each page holds the bundle
+# first block: a forked child for each template, html/test.html,
+# html/headless.html and html/engine.html, runs the command line, so that the
+# count sees its lines, and builds its page from the real
+# html/, ts/, i18n/en-US.json and the archives third_party_fetch.py places
+# in their library directories of third_party/, under a name of this run,
+# removed after. Each child prints its SHA-256, and each page holds the bundle
 # that tsc compiled by ts/tsconfig.test.json, the strings table in place, and
 # the members it takes from the two archives the gold lists for the pins.
 # Each page is its template with each marker replaced by its piece, the same
-# pieces for both: that bundle, html/engine.css, the vectors written anew
+# pieces for all: that bundle, html/engine.css, the vectors written anew
 # into build/vectors/, the gold of every ts/test_setting_<suite>.json,
 # SQLite's glue and its wasm as base64, and xterm.js and its css. A copy of
 # a built page with other gold differs from it on the gold's line alone.
 
-import base64, harness, hashlib, json, os, page_build, subprocess, sys
+import base64, harness, hashlib, json, os, page_build, signal, sys, traceback
 import unittest, uuid
 from typing import Any
 
@@ -33,10 +34,10 @@ _HTML_PATH = os.path.join(_ROOT_PATH, "html")
 # The extension of a template and of the page built from it.
 _PAGE_EXTENSION = ".html"
 
-# The two templates, each built into a page of its own.
-_TEMPLATES = ("test", "headless")
+# The three templates, each built into a page of its own.
+_TEMPLATES = ("test", "headless", "engine")
 
-# The script the child runs, beside this file.
+# The script whose command line the child runs, beside this file.
 _SCRIPT_PATH = os.path.join(_ROOT_PATH, "python", "page_build.py")
 
 # The configuration whose bundle the page carries, the test bundle.
@@ -112,6 +113,38 @@ def pieces_read() -> dict[str, str]:
     }
 
 
+# In the forked child: runs the command line on the pipe, then kills itself.
+def child_end(template: str, name: str, write_fd: int) -> None:
+    try:
+        try:
+            os.dup2(write_fd, 1)
+            sys.argv = [_SCRIPT_PATH, template, name]
+            page_build.main()
+        except BaseException:
+            traceback.print_exc(file=sys.stdout)
+        sys.stdout.flush()
+    finally:
+        os.kill(os.getpid(), signal.SIGKILL)
+
+
+# Runs the command line in a forked child, returning all that reached stdout.
+def command_fork(template: str, name: str) -> bytes:
+    read_fd, write_fd = os.pipe()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    pid = os.fork()
+    if pid == 0:
+        os.close(read_fd)
+        child_end(template, name, write_fd)
+    os.close(write_fd)
+    with os.fdopen(read_fd, "rb") as file:
+        printed = file.read()
+    code = os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1])
+    if code != -signal.SIGKILL:
+        raise RuntimeError(f"page_build.py {template} ended with {code}")
+    return printed
+
+
 # One page of each template built by a child with the real tsc.
 class TestBuild(unittest.TestCase):
     # What each child printed, and the page it built, by template.
@@ -126,21 +159,16 @@ class TestBuild(unittest.TestCase):
         run = uuid.uuid4().hex
         for template in _TEMPLATES:
             name = f"page_build_tsc-{template}-{run}"
-            completed = subprocess.run(
-                [sys.executable, _SCRIPT_PATH, template, name],
-                capture_output=True,
-                check=False,
-            )
-            if completed.returncode != 0:
-                raise RuntimeError(
-                    f"page_build.py {template} exited with"
-                    f" {completed.returncode}: "
-                    + completed.stderr.decode("utf-8", "replace")
-                )
+            printed = command_fork(template, name)
             page_path = os.path.join(_BUILD_PATH, name + _PAGE_EXTENSION)
+            if not os.path.isfile(page_path):
+                raise RuntimeError(
+                    f"page_build.py {template} built no page: "
+                    + printed.decode("utf-8", "replace")
+                )
             cls.addClassCleanup(os.remove, page_path)
             cls.page_paths[template] = page_path
-            cls.printed[template] = completed.stdout
+            cls.printed[template] = printed
 
     # The template and the name build that page, and the child prints its hex.
     def test_command_printed(self) -> None:

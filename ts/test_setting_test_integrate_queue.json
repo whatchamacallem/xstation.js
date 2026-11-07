@@ -47,6 +47,12 @@
       "name": "wake_ordered",
       "seconds": 10,
       "send": ["order_request", "go"]
+    },
+    {
+      "expect": ["traced_reply", "timeline_seen"],
+      "name": "timeline_full",
+      "seconds": 10,
+      "send": ["traced_abc"]
     }
   ],
   "lines": {
@@ -210,6 +216,44 @@
         "blobs": 1,
         "reply": 2,
         "type": "queue_test.relay"
+      },
+      "1": {
+        "d": "YWJj",
+        "size": 3
+      },
+      "text": "abc"
+    },
+    "timeline_seen": {
+      "0": {
+        "type": "queue_ui.timeline"
+      },
+      "texts": [
+        "ai dispatches from ui: {\"0\":{\"blobs\":1,\"id\":8,\"type\":\"queue_test.traced\"},\"1\":{\"size\":3},\"text\":\"abc\"}<blob \"n\"=1>",
+        "ai submits to server: {\"0\":{\"type\":\"queue_far.traced\",\"blobs\":1,\"id\":5},\"1\":{\"size\":3},\"text\":\"abc\"}<blob \"n\"=1>",
+        "ai sleeps on [5] until queue_test.traced_wake: {\"0\":{\"blobs\":1,\"id\":8,\"type\":\"queue_test.traced\"},\"1\":{\"size\":3},\"text\":\"abc\"}<blob \"n\"=1>",
+        "ai receives from server: {\"0\":{\"type\":\"queue_far.traced\",\"reply\":5,\"blobs\":1},\"1\":{\"size\":3},\"text\":\"abc\"}<blob \"n\"=1>",
+        "ai wakes queue_test.traced_wake with the replies to [5]: {\"type\":\"queue_test.traced_wake\"} {\"0\":{\"type\":\"queue_far.traced\",\"reply\":5,\"blobs\":1},\"1\":{\"size\":3},\"text\":\"abc\"}<blob \"n\"=1>",
+        "ai dispatches from ai: {\"type\":\"queue_test.traced_wake\"} {\"0\":{\"type\":\"queue_far.traced\",\"reply\":5,\"blobs\":1},\"1\":{\"size\":3},\"text\":\"abc\"}<blob \"n\"=1>",
+        "ai replies to ui: {\"0\":{\"type\":\"queue_test.traced\",\"reply\":8,\"blobs\":1},\"1\":{\"size\":3},\"text\":\"abc\"}<blob \"n\"=1>"
+      ]
+    },
+    "traced_abc": {
+      "0": {
+        "blobs": 1,
+        "id": 8,
+        "type": "queue_test.traced"
+      },
+      "1": {
+        "d": "YWJj",
+        "size": 3
+      },
+      "text": "abc"
+    },
+    "traced_reply": {
+      "0": {
+        "blobs": 1,
+        "reply": 8,
+        "type": "queue_test.traced"
       },
       "1": {
         "d": "YWJj",

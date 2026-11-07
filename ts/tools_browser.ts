@@ -16,6 +16,11 @@ namespace tools_browser {
     key: string;
   }
 
+  // The state of a wake that renders once the UI holds the image.
+  interface RenderState {
+    payload: { [key: string]: unknown };
+  }
+
   // The state of a wake of a console tool: its name, its text and timeout.
   interface ConsoleState {
     tool: string;
@@ -69,6 +74,7 @@ namespace tools_browser {
     image_wake: "tools.image_reply",
     media_wake: "tools.media_reply",
     fetch_wake: "tools.fetch_reply",
+    stored_wake: "tools.stored_reply",
     render_wake: "tools.render_reply",
     permit_wake: "tools.permit_reply",
     console_wake: "tools.console_reply",
@@ -259,7 +265,9 @@ namespace tools_browser {
       {
         name: "verbose_tail",
         description:
-          "The last lines of a thread's verbose ring: ui, ai or server.",
+          "The last lines of a thread's verbose ring: ui, ai or server." +
+          " count is a maximum, as a reply holds the newest lines that fit" +
+          " below line_max.",
         inputSchema: {
           type: "object",
           properties: {
@@ -375,15 +383,28 @@ namespace tools_browser {
       this.debug_on = debug_on;
     }
 
-    // The text of a KV value, read from the cache when it is held there.
-    text_read(ref: string): string {
+    // The bytes of a KV value, read from the cache when it is held there.
+    bytes_read(ref: string): Uint8Array {
       const value = this.store.kv_get(ref);
       const cache = this.store.sink() as substrate.CacheFiles;
-      const data =
-        typeof value.data === "string"
-          ? cache.cache_read(value.data, 0, value.size)
-          : value.data;
-      return utility.utf8_decode(data);
+      return typeof value.data === "string"
+        ? cache.cache_read(value.data, 0, value.size)
+        : value.data;
+    }
+
+    // The text of a KV value.
+    text_read(ref: string): string {
+      return utility.utf8_decode(this.bytes_read(ref));
+    }
+
+    // Asks the UI to paint a render's payload and sleeps until it has.
+    render_show(payload: { [key: string]: unknown }): dispatch.Sleep {
+      return this.request_sleep(
+        line_build(constants.render_type, payload),
+        constants.ui_owner,
+        {},
+        constants.render_wake,
+      );
     }
 
     // Submits a request to its owner and returns the sleep on its reply.
@@ -564,14 +585,20 @@ namespace tools_browser {
           scene,
           subtitle: args.subtitle,
         };
-        if (image !== undefined) {
-          payload.image = image;
+        if (image === undefined) {
+          return context.render_show(payload);
         }
+        payload.image = image;
+        // The UI's cache may not hold it, and this side alone has its bytes.
+        const kept = line_build(constants.store_type, { k: image }, [
+          jslb.blob_make(context.bytes_read(image)),
+        ]);
+        const state: RenderState = { payload };
         return context.request_sleep(
-          line_build(constants.render_type, payload),
+          kept,
           constants.ui_owner,
-          {},
-          constants.render_wake,
+          state,
+          constants.stored_wake,
         );
       },
       // Runs one command line to the next prompt, behind the permit.
@@ -664,6 +691,9 @@ namespace tools_browser {
         const row = store.kv_put(key, reply_data(replies));
         return result_json({ key, size: row.size, sha256: row.sha256 });
       },
+      // Renders once the UI has decoded the image the render names.
+      [constants.stored_wake]: (state) =>
+        context.render_show((state as RenderState).payload),
       // Ends the render once the UI has shown it.
       [constants.render_wake]: () => result_json({}),
       // Answers a denial with an error, else shows the console.
