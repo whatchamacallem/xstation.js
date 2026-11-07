@@ -10,7 +10,7 @@ _PROJECT_="$(basename "$PWD")"
 _DATE_="$(date +%Y-%m-%d)"
 _ARCHIVE_="$_PROJECT_-$_DATE_.git.txz"
 
-# Print help if there is more than one arg or the first arg starts with a -.
+# Print help if there is more than one arg or the first arg starts with a `-`.
 if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "${1#-}" != "$1" ]; }; then
 	{
 		echo "usage_error: $0 [destination-directory]"
@@ -27,7 +27,7 @@ if [ ! -d ".git" ]; then
 	exit 1
 fi
 
-# Extract archive if this script is the only non-hidden file.
+# Extract archive if this script is the only file that is not hidden.
 if [ "$(command ls)" = "$_SCRIPT_NAME_" ]; then
 	git fsck
 	git restore .

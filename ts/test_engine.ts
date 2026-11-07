@@ -291,10 +291,8 @@ namespace test_engine {
     const far = far_make();
     const owners = worker_ai.owners_make();
     const tasks = new queue.TaskQueue(constants.thread, owners, true);
-    const server = lane_make(
-      tasks,
-      constants.server_thread,
-      (end, line) => server_answer(seed, far, end, line),
+    const server = lane_make(tasks, constants.server_thread, (end, line) =>
+      server_answer(seed, far, end, line),
     );
     const ui = lane_make(tasks, constants.ui_thread, ui_answer);
     const cache = new substrate.CacheFiles(

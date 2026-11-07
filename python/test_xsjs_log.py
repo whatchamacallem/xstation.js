@@ -342,6 +342,8 @@ class TestRun(RootCase):
     def test_script_run(self) -> None:
         expected = _entries_printed(self.log_ended())
         self.addCleanup(setattr, sys, "argv", sys.argv)
+        pipe_action = signal.getsignal(signal.SIGPIPE)
+        self.addCleanup(signal.signal, signal.SIGPIPE, pipe_action)
         sys.argv = [_PROGRAM_PATH, self.root]
         with (
             contextlib.redirect_stdout(io.StringIO()) as output,

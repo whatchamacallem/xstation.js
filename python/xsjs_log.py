@@ -197,4 +197,6 @@ def log_run(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    # A reader that leaves, as `head` does, ends this as it ends any filter.
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     sys.exit(log_run(sys.argv[1:]))

@@ -115,102 +115,6 @@ namespace test_tools_browser {
     ]),
     // The header fields of an id, which a submit sets, in both forms.
     id_fields: Object.freeze(["i", "id"]),
-    // The tools of `tools/list` as `API/mcp/tools.json` holds them.
-    recorded_tools: Object.freeze<readonly string[]>([
-      '{"name":"sql_run","description":"Run SQL statements in one' +
-        " transaction on a database. DDL is allowed: your scripts are the" +
-        ' database administrator.","inputSchema":{"type":"object",' +
-        '"properties":{"db":{"type":"string"},"statements":{"type":"array",' +
-        '"items":{"type":"object","properties":{"sql":{"type":"string"},' +
-        '"params":{"type":"array"}},"required":["sql","params"]}}},' +
-        '"required":["db","statements"]}}',
-      '{"name":"db_create","description":"Create an empty database. The' +
-        ' name is a C identifier.","inputSchema":{"type":"object",' +
-        '"properties":{"db":{"type":"string"}},"required":["db"]}}',
-      '{"name":"db_drop","description":"Delete a database and everything' +
-        ' in it.","inputSchema":{"type":"object","properties":{"db":' +
-        '{"type":"string"}},"required":["db"]}}',
-      '{"name":"kv_get","description":"Read the value a Key-Value-Ref' +
-        ' names, /$db/$key, as text.","inputSchema":{"type":"object",' +
-        '"properties":{"ref":{"type":"string"}},"required":["ref"]}}',
-      '{"name":"kv_put","description":"Write text under a Key-Value-Ref,' +
-        " /$db/$key, and return its sha256. A script is the row" +
-        ' /_files/script/<name>.js.",' +
-        '"inputSchema":{"type":"object","properties":{"ref":' +
-        '{"type":"string"},"text":{"type":"string"}},"required":' +
-        '["ref","text"]}}',
-      '{"name":"kv_delete","description":"Delete the row a Key-Value-Ref' +
-        ' names.","inputSchema":{"type":"object","properties":{"ref":' +
-        '{"type":"string"}},"required":["ref"]}}',
-      '{"name":"kv_list","description":"List the keys of a database under' +
-        ' a prefix with sizes and hashes.","inputSchema":{"type":"object",' +
-        '"properties":{"db":{"type":"string"},"prefix":{"type":"string"}},' +
-        '"required":["db","prefix"]}}',
-      '{"name":"doc_get","description":"Read a document by Document-Ref,' +
-        " /$db/$id/$version, in its encoded form: header 0, references at" +
-        ' 1 on, {\\"$ref\\": n} in the body.","inputSchema":' +
-        '{"type":"object","properties":{"ref":{"type":"string"}},' +
-        '"required":["ref"]}}',
-      '{"name":"doc_put","description":"Write a new version of document' +
-        " $id in database $db and move its head. Returns the new" +
-        ' Document-Ref.","inputSchema":{"type":"object","properties":' +
-        '{"db":{"type":"string"},"id":{"type":"string"},"body":' +
-        '{"type":"object"}},"required":["db","id","body"]}}',
-      '{"name":"doc_head","description":"The current Document-Ref of' +
-        ' document $id in database $db.","inputSchema":{"type":"object",' +
-        '"properties":{"db":{"type":"string"},"id":{"type":"string"}},' +
-        '"required":["db","id"]}}',
-      '{"name":"script_run","description":"Run the script' +
-        " /_files/script/<name>.js with args as a task in this worker." +
-        " Returns its value or exception and the verbose lines it" +
-        ' wrote.","inputSchema":{"type":"object","properties":{"name":' +
-        '{"type":"string"},"args":{"type":"object"}},"required":' +
-        '["name","args"]}}',
-      '{"name":"script_debug","description":"Run the script as' +
-        " script_run does, tracing every substrate call it makes" +
-        ' first.","inputSchema":{"type":"object","properties":{"name":' +
-        '{"type":"string"},"args":{"type":"object"}},"required":' +
-        '["name","args"]}}',
-      '{"name":"image_make","description":"Generate an image from a' +
-        " prompt and keep it under /_files/<key>. Returns the key, size" +
-        ' and sha256.","inputSchema":{"type":"object","properties":' +
-        '{"prompt":{"type":"string"},"key":{"type":"string"}},' +
-        '"required":["prompt","key"]}}',
-      '{"name":"render","description":"Show an image by its' +
-        ' Key-Value-Ref with a subtitle. No image means black.",' +
-        '"inputSchema":{"type":"object","properties":{"image":' +
-        '{"type":"string"},"subtitle":{"type":"string"}},"required":' +
-        '["subtitle"]}}',
-      '{"name":"console_run","description":"Show the debug console as' +
-        " ctrl-0 does, run one command line in its dash and return its" +
-        " output until the next prompt or the timeout. Debug mode." +
-        '","inputSchema":' +
-        '{"type":"object","properties":{"text":{"type":"string"},' +
-        '"timeout_seconds":{"type":"number"}},"required":' +
-        '["text","timeout_seconds"]},"_meta":{"xsjs":{"permit":true}}}',
-      '{"name":"console_write","description":"Show the debug consol' +
-        "e as ctrl-0 does and type text into its dash, returning at o" +
-        "nce. A line goes when a newline ends it, and the text after " +
-        "the last newline waits for a later write. The console is you" +
-        "rs from the first write until console_read sees the prompt. " +
-        'Debug mode.","inputSchema":{"type":"object","properties":{"t' +
-        'ext":{"type":"string"}},"required":["text"]},"_meta":{"xsjs"' +
-        ':{"permit":true}}}',
-      '{"name":"console_read","description":"Show the debug console' +
-        " as ctrl-0 does and read its output from where the last read" +
-        " ended until the text until shows or the timeout, and whethe" +
-        "r it timed out. A read whose output ends with the prompt end" +
-        's your turn at the console. Debug mode.","inputSchema":{"typ' +
-        'e":"object","properties":{"until":{"type":"string"},"timeout' +
-        '_seconds":{"type":"number"}},"required":["until","timeout_se' +
-        'conds"]},"_meta":{"xsjs":{"permit":true}}}',
-      '{"name":"verbose_tail","description":"The last lines of a' +
-        " thread's verbose ring: ui, ai or server. count is a maximum," +
-        " as a reply holds the newest lines that fit below line_max." +
-        '","inputSchema":' +
-        '{"type":"object","properties":{"thread":{"type":"string"},' +
-        '"count":{"type":"integer"}},"required":["thread","count"]}}',
-    ]),
     // The world table of the castle universe.
     world_sql:
       "CREATE TABLE world" +
@@ -628,9 +532,7 @@ namespace test_tools_browser {
   export class TestRegistry extends ToolCase {
     // The tools are those of `API/mcp/tools.json`, whole and in its order.
     test_tools_recorded(): void {
-      const recorded = constants.recorded_tools.map(
-        (text) => JSON.parse(text) as mcp.Tool,
-      );
+      const recorded = gold_value("recorded_tools") as mcp.Tool[];
       this.assertEqual(recorded.length, 18);
       this.assertEqual(
         JSON.stringify(this.tools_listed()),

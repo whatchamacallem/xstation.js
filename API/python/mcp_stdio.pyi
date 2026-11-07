@@ -7,13 +7,11 @@
 # then raises the exception, so the process exits 1: fail loud.
 
 from collections.abc import Callable
-from typing import TextIO
-
-import mcp
+from typing import Any, TextIO
 
 # Serves the tools `register` adds to a new `mcp.Server` on the two streams.
 def stdio_run(
-    register: Callable[[mcp.Server], None], stdin: TextIO, stdout: TextIO
+    register: Callable[[Any], None], stdin: TextIO, stdout: TextIO
 ) -> int: ...
 
 # Returns the exit code.

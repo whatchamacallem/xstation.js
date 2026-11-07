@@ -421,7 +421,7 @@ namespace test_jslb {
       }
     }
 
-    // Bytes in a value render as a tag of their size; the encoder refuses them.
+    // Bytes in a value render as a tag of their size. The encoder refuses them.
     test_bytes_tagged(): void {
       const header = jslb.header_make("echo");
       const bytes = new Uint8Array(3);

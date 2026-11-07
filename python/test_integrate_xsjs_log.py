@@ -6,8 +6,9 @@
 # `verbose` writes in a scratch root in `build/`, each text rendered by the
 # real `jslb` under the real strings of the page's and the server's timeline
 # lines: the whole timeline, each option, a root given relative to the working
-# directory, a root with no log, a refused option, and a follow of a log the
-# server holds open, which SIGINT ends. The texts expected are the gold's.
+# directory, a root with no log, a refused option, a reader that leaves, and a
+# follow of a log the server holds open, which SIGINT ends. The texts expected
+# are the gold's.
 
 import harness, jslb, os, signal, subprocess, sys, tempfile, unittest, verbose
 from internationalization import i18n
@@ -163,6 +164,32 @@ class TestProgram(unittest.TestCase):
         ended = _program_run([self.root, "--thread", "console"])
         self.assertEqual(ended.stdout, "")
         self.assertEqual(ended.returncode, _USAGE_CODE)
+
+    # A reader that leaves, as `head` does, ends the program with no error.
+    def test_reader_left(self) -> None:
+        verbose.log_open(self.root, _RING, _BLOB_MAX)
+        self.addCleanup(verbose.log_close)
+        later: dict[str, Any] = _gold_value("later")
+        with subprocess.Popen(
+            [sys.executable, _PROGRAM_PATH, self.root, "--follow"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            encoding="utf-8",
+        ) as program:
+            try:
+                output = cast(IO[str], program.stdout)
+                for _ in self.printed:
+                    output.readline()
+                output.close()
+                line = verbose.LogLine(later["at"], later["text"])
+                verbose.lines_put("ui", [line])
+                errors = cast(IO[str], program.stderr).read()
+                program.wait()
+            finally:
+                program.kill()
+        self.assertEqual(errors, "")
+        self.assertEqual(program.returncode, -signal.SIGPIPE)
 
     # A follow prints the held lines, a new line of the open log, and ends.
     def test_follow_live(self) -> None:

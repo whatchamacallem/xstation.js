@@ -1412,7 +1412,7 @@ namespace test_queue {
       );
     }
 
-    // The timeline masks the two credentials, wakes too; the lines keep them.
+    // The timeline masks the two credentials, wakes too. The lines keep them.
     test_trace_masked(): void {
       const bench = bench_traced({});
       const woken: lines.Line[] = [];
@@ -1458,7 +1458,8 @@ namespace test_queue {
       const whole = text_fill("trace_whole", { 0: note, 1: text });
       const sized = text_fill("trace_sized", { 0: note });
       const empty = text_bytes(gold_line("put_empty_ai"));
-      const bytes = empty + text_bytes({ at: utility.time_now(), text: whole });
+      const bytes =
+        empty + text_bytes({ at: utility.time_now(), text: whole });
       const runs: [number, string][] = [
         [bytes, sized],
         [bytes + 1, whole],

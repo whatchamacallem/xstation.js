@@ -123,7 +123,10 @@ namespace test_all {
   }
 
   // In debug mode, runs the worker's share in a task of `worker.tests`.
-  function tests_notify(tasks: queue.TaskQueue, start: boot.WorkerStart): void {
+  function tests_notify(
+    tasks: queue.TaskQueue,
+    start: boot.WorkerStart,
+  ): void {
     if (!switches.debug_on()) {
       return;
     }

@@ -16,7 +16,7 @@
 # synchronization token outside the exempt modules is refused with its message
 # too, the audit's own check and its list of paths take what each test gives
 # them, and bytes that are not UTF-8 are refused. No test reaches the formatter
-# step or main, which call into category, page_build and reformat.
+# step or main, which call into api_match, category, page_build and reformat.
 
 import os, tempfile, test_posix, unittest
 
@@ -218,7 +218,7 @@ class TestJavascriptLexer(LexerCase):
 
     # Quoted strings hide a comment marker, past their escapes.
     def test_strings_skipped(self) -> None:
-        text = "\"// a\\\"\" '/* b'\n"
+        text = '"// a\\"" \'/* b\'\n'
         self.assertEqual(comment_words(text, "javascript"), [])
 
     # A regular expression hides a slash in its escapes and its class.
@@ -268,12 +268,12 @@ class TestShellLexer(LexerCase):
 
     # A double quoted string holds code in its `$( )` alone.
     def test_quoted_parts(self) -> None:
-        text = "\"a\\\" `# b` $(c # d\n) # e\" # f\n"
+        text = '"a\\" `# b` $(c # d\n) # e" # f\n'
         self.assertEqual(comment_words(text, "shell"), [" d", " f"])
 
     # A paren pair inside a `$( )` does not end it.
     def test_parens_nested(self) -> None:
-        text = "\"$((a) # b\n)\"\n"
+        text = '"$((a) # b\n)"\n'
         self.assertEqual(comment_words(text, "shell"), [" b"])
 
     # A here string opens no here document, so the next line is code.
@@ -301,7 +301,7 @@ class TestShellLexer(LexerCase):
         self.refusals_check(
             "shell",
             (
-                ("'a\n", "a:1: no \"'\" ends this"),
+                ("'a\n", 'a:1: no "\'" ends this'),
                 ('"a\n', "a:1: unterminated string"),
                 ('"$(a\n', "a:2: unterminated"),
                 ("a <<B\nc\n", "a:1: no line ends the here document 'B'"),

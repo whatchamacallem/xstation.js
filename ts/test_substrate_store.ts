@@ -929,6 +929,21 @@ namespace test_substrate_store {
       this.assertEqual(store.db_list(), ["alpha"]);
     }
 
+    // Its tables are the statements of `API/sql/substrate.sql`, in order.
+    test_tables_recorded(): void {
+      const store = this.store_fresh();
+      store.db_create("alpha");
+      const rows = rows_query(
+        store,
+        "alpha",
+        "SELECT sql FROM sqlite_schema WHERE type = 'table' ORDER BY rowid",
+      );
+      const made = rows.map((row) =>
+        (row[0] as string).split(/\s+/).join(" "),
+      );
+      this.assertEqual(made, gold_value("schema_statements"));
+    }
+
     // A database file made elsewhere gets the tables when first opened.
     test_tables_foreign(): void {
       const root = this.root_make();

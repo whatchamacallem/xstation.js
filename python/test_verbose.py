@@ -24,6 +24,14 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Where the scratch directories go.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
+# The API text of the log's database.
+_SCHEMA_PATH = os.path.join(_ROOT_PATH, "API", "sql", "verbose.sql")
+
+# The query of what a database holds.
+_SCHEMA_QUERY = (
+    "SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY name"
+)
+
 # Where the bytecode of a started program that imports the module goes.
 _PYCACHE_PATH = os.path.join(_BUILD_PATH, "pycache")
 
@@ -367,6 +375,16 @@ class TestDatabase(unittest.TestCase):
             path, "SELECT strict FROM pragma_table_list WHERE name = 'line'"
         )
         self.assertEqual(strict, [(1,)])
+
+    # The file holds what `API/sql/verbose.sql` makes, statement for statement.
+    def test_schema_recorded(self) -> None:
+        path = _log_ready(self, _RING_LINES)
+        with open(_SCHEMA_PATH, encoding="utf-8") as file:
+            text = file.read()
+        with contextlib.closing(sqlite3.connect(":memory:")) as connection:
+            connection.executescript(text)
+            recorded = connection.execute(_SCHEMA_QUERY).fetchall()
+        self.assertEqual(_query_read(path, _SCHEMA_QUERY), recorded)
 
     # The file is in the write ahead log mode.
     def test_journal_mode(self) -> None:

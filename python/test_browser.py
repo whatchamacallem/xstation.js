@@ -2938,9 +2938,7 @@ def rungs_suites(session: PageSession) -> None:
     log.rung_run(
         "stage 5: verbose sink", "test-all", lambda: rung_sink(session)
     )
-    log.rung_run(
-        "stage 8: long tasks", "test-all", lambda: rung_long(session)
-    )
+    log.rung_run("stage 8: long tasks", "test-all", lambda: rung_long(session))
     log.rung_run(
         "stage 5: traced synchronous load found",
         "test-all",
@@ -2963,9 +2961,7 @@ def rungs_faults(session: PageSession) -> None:
     log.rung_run(
         "stage 0: first fault only", "test-all", lambda: rung_first(session)
     )
-    log.rung_run(
-        "stage 0: reload", "test-all", lambda: rung_reload(session)
-    )
+    log.rung_run("stage 0: reload", "test-all", lambda: rung_reload(session))
     log.rung_run(
         "stage 0: rejection", "test-all", lambda: rung_rejection(session)
     )

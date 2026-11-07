@@ -328,9 +328,7 @@ class TestTail(ScratchCase):
         for line_max, texts in cases:
             with self.subTest(line_max=line_max):
                 reply = self.child_value(
-                    functools.partial(
-                        _tail_limited, self.root, line_max, line
-                    )
+                    functools.partial(_tail_limited, self.root, line_max, line)
                 )
                 kept = [entry["text"] for entry in reply["lines"]]
                 self.assertEqual(kept, texts)

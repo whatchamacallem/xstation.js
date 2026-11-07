@@ -20,6 +20,9 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 # The settings file at the top level of the checkout.
 _SETTINGS_PATH = os.path.join(_ROOT_PATH, "settings.json")
 
+# The API's copy of that file, which a test holds to it byte for byte.
+_API_SETTINGS_PATH = os.path.join(_ROOT_PATH, "API", "settings.json")
+
 # A good settings object, which each test copies before it damages the copy.
 _GOOD_SETTINGS: dict[str, Any] = {
     "queue_synchronous": False,
@@ -320,6 +323,13 @@ class TestLoad(unittest.TestCase):
             tempfile.TemporaryDirectory(dir=_BUILD_PATH)
         )
         self.file_path = os.path.join(scratch, "settings.json")
+
+    # The API text of the settings is the file the checkout reads.
+    def test_copy_equal(self) -> None:
+        with open(_SETTINGS_PATH, "rb") as file:
+            used = file.read()
+        with open(_API_SETTINGS_PATH, "rb") as file:
+            self.assertEqual(file.read(), used)
 
     # Asserts the load refuses the file with exactly the expected message.
     def load_fails(self, expected: str, note: str) -> None:

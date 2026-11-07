@@ -6,8 +6,10 @@
 # One of the two official test targets of the project: runs
 # python/test_all.py from the checkout and exits with its code. Without an
 # option it runs the smoke-test suites, and --test-all runs those of both
-# labels. The switches --anthropic, for Anthropic's cloud container, --debug
-# and --verbose are passed on, each at most once:
+# labels and counts the lines each module's own suites run, by --coverage,
+# which fails at a module's first line never run. The switches --anthropic,
+# for Anthropic's cloud container, --debug and --verbose are passed on, each
+# at most once:
 #
 #     ./test_posix.sh [--test-all] [--anthropic] [--debug] [--verbose]
 
@@ -17,7 +19,8 @@ set -euo pipefail
 usage_show() {
 	cat <<'EOF2'
 test_posix.sh [--test-all] [--anthropic] [--debug] [--verbose]
-  Runs python3 python/test_all.py with the options.
+  Runs python3 python/test_all.py with the options, and --coverage with
+  --test-all.
 EOF2
 }
 
@@ -32,7 +35,7 @@ for _ARGUMENT_ in "$@"; do
 			usage_show >&2
 			exit 2
 		fi
-		_OPTION_=("$_ARGUMENT_")
+		_OPTION_=("$_ARGUMENT_" --coverage)
 		;;
 	--anthropic | --debug | --verbose)
 		for _GIVEN_ in "${_SWITCHES_[@]}"; do

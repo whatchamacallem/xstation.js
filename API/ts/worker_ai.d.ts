@@ -20,6 +20,13 @@
 // thread goes the same way, and at that callback the worker closes itself.
 
 declare namespace worker_ai {
+  // Registers the handler of one line type and version, as dispatch does.
+  type HandlerRegister = (
+    type: string,
+    version: number,
+    fn: dispatch.Handler,
+  ) => void;
+
   // Sends the line to the server, then calls `done` once the server has it.
   type ServerEnd = (line: lines.Line, done: () => void) => void;
 
@@ -53,7 +60,7 @@ declare namespace worker_ai {
   // Relays the UI's `settings.put` to the server, `live` changed first.
   function settings_register(
     tasks: queue.TaskQueue,
-    register: (type: string, version: number, fn: dispatch.Handler) => void,
+    register: HandlerRegister,
     live: settings.Settings,
   ): void;
 
@@ -74,7 +81,7 @@ declare namespace worker_ai {
   // Relays the UI's `console.open` to tty 0, and its `console.close`.
   function console_register(
     tasks: queue.TaskQueue,
-    register: (type: string, version: number, fn: dispatch.Handler) => void,
+    register: HandlerRegister,
     close: () => void,
   ): void;
 
@@ -93,7 +100,7 @@ declare namespace worker_ai {
 
   // Registers the UI's `fault`: its cascade sent on, then `close` called.
   function fault_register(
-    register: (type: string, version: number, fn: dispatch.Handler) => void,
+    register: HandlerRegister,
     end: ServerEnd,
     close: () => void,
   ): void;

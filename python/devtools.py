@@ -29,6 +29,7 @@ __all__ = [
     "ProtocolClient",
     "SocketChannel",
     "Transport",
+    "WaitTimer",
     "blocking_categories",
     "blocking_find",
     "chrome_path",

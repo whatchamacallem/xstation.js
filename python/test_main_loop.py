@@ -34,6 +34,9 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 # The seed files that the main loop reads for a new metaverse.
 _SEED_PATH = os.path.join(_ROOT_PATH, "python", "seed")
 
+# The API text of the metaverse's own table.
+_SCHEMA_PATH = os.path.join(_ROOT_PATH, "API", "sql", "metaverse.sql")
+
 # The main loop's file, which a root's link names beside a seed of its own.
 _MODULE_PATH = os.path.join(_ROOT_PATH, "python", "main_loop.py")
 
@@ -112,6 +115,13 @@ _COLUMNS_QUERY = "SELECT name FROM pragma_table_info('universe')"
 
 # The query of the rows of the `universe` table.
 _UNIVERSE_QUERY = "SELECT * FROM universe"
+
+# The query of what a database holds beside the substrate's tables.
+_SCHEMA_QUERY = (
+    "SELECT type, name, tbl_name, sql FROM sqlite_schema"
+    " WHERE name NOT LIKE '|_%' ESCAPE '|'"
+    " AND name NOT LIKE 'sqlite|_%' ESCAPE '|' ORDER BY name"
+)
 
 # The query of the names of the triggers of a database.
 _TRIGGERS_QUERY = (
@@ -274,9 +284,7 @@ def _input_walk(
 
 
 # A tool call with only the arguments the gold pins, as the texts are free.
-def _call_trim(
-    call: dict[str, Any], pinned: dict[str, Any]
-) -> dict[str, Any]:
+def _call_trim(call: dict[str, Any], pinned: dict[str, Any]) -> dict[str, Any]:
     arguments = call["arguments"]
     kept = {key: arguments[key] for key in pinned["arguments"]}
     return {"arguments": kept, "name": call["name"]}
@@ -508,6 +516,13 @@ class TestPrepare(ScratchCase):
         self.assertEqual(columns, _UNIVERSE_COLUMNS)
         triggers = _rows_read(self.root, "metaverse", _TRIGGERS_QUERY)
         self.assertEqual(triggers, _UNIVERSE_TRIGGERS)
+        with open(_SCHEMA_PATH, encoding="utf-8") as file:
+            text = file.read()
+        with contextlib.closing(sqlite3.connect(":memory:")) as connection:
+            connection.executescript(text)
+            recorded = connection.execute(_SCHEMA_QUERY).fetchall()
+        schema = _rows_read(self.root, "metaverse", _SCHEMA_QUERY)
+        self.assertEqual(schema, recorded)
 
     # An empty root gets the databases, the settings and the seed.
     def test_root_empty(self) -> None:

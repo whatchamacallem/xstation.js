@@ -77,6 +77,21 @@ declare namespace substrate {
     capi: {
       sqlite3_js_db_export(pointer: number): Uint8Array;
       sqlite3_get_autocommit(pointer: number): number;
+      sqlite3_set_authorizer(
+        pointer: number,
+        authorize: (
+          data: number,
+          action: number,
+          name: string | 0,
+          value: string | 0,
+          schema: string | 0,
+          trigger: string | 0,
+        ) => number,
+        data: number,
+      ): number;
+      readonly SQLITE_OK: number;
+      readonly SQLITE_DENY: number;
+      readonly SQLITE_PRAGMA: number;
     };
   }
 
@@ -125,6 +140,13 @@ declare namespace substrate {
   interface Notifier {
     line_notify(line: lines.Line, owner?: queue.ThreadName): void;
   }
+
+  // Registers the handler of one line type and version.
+  type HandlerRegister = (
+    type: string,
+    version: number,
+    fn: dispatch.Handler,
+  ) => void;
 
   // Splits a `Key-Value-Ref` or `Document-Ref`. A bad ref throws.
   function ref_split(ref: string): RefParts;
@@ -197,8 +219,6 @@ declare namespace substrate {
     // The streaming sink of the decoder: the cache this store was given.
     sink(): jslb.BlobSink;
     // Registers the handlers of the store's lines on this thread.
-    handlers_register(
-      register: (type: string, version: number, fn: dispatch.Handler) => void,
-    ): void;
+    handlers_register(register: HandlerRegister): void;
   }
 }

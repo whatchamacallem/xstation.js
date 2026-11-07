@@ -259,6 +259,12 @@
   "meta_table": "_meta",
   "piece_bytes": 4096,
   "schema_other": "2",
+  "schema_statements": [
+    "CREATE TABLE _meta ( name TEXT PRIMARY KEY, value TEXT NOT NULL ) WITHOUT ROWID, STRICT",
+    "CREATE TABLE _kv ( key TEXT PRIMARY KEY, size INTEGER NOT NULL, sha256 BLOB NOT NULL, data BLOB ) WITHOUT ROWID, STRICT",
+    "CREATE TABLE _head ( id TEXT PRIMARY KEY, version INTEGER NOT NULL ) WITHOUT ROWID, STRICT",
+    "CREATE TABLE _turn ( scene TEXT NOT NULL, n INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL CHECK (json_valid(content)), PRIMARY KEY (scene, n) ) WITHOUT ROWID, STRICT"
+  ],
   "schema_tables": ["_head", "_kv", "_meta", "_turn"],
   "slot_count": 4,
   "texts": {

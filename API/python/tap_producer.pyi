@@ -14,8 +14,9 @@
 # start, a block's from its start, a relayed block's from `block_relay` to
 # the realm's parent line, whose own block the relay checks and drops.
 
-import tap_consumer, unittest
+import tap_consumer, types, unittest
 from collections.abc import Callable
+from typing import TypeAlias
 
 # Writes the lines of one level of a stream the moment each is added.
 class Tracker:
@@ -49,9 +50,40 @@ class Tracker:
     # Writes the plan of the points added, for a level whose plan comes last.
     def generate_tap_reports(self) -> None: ...
 
+# What unittest reports an error with, as `sys.exc_info` returns it.
+_ErrorInfo: TypeAlias = (
+    tuple[type[BaseException], BaseException, types.TracebackType]
+    | tuple[None, None, None]
+)
+
 # Turns unittest's outcomes into one point per test.
 class TAPTestResult(unittest.TestResult):
     def __init__(self, tracker: Tracker) -> None: ...
+    # Writes the point of the test before, then marks this one as running.
+    def startTest(self, test: unittest.TestCase) -> None: ...
+    # Keeps when the running test stopped, the end of its duration.
+    def stopTest(self, test: unittest.TestCase) -> None: ...
+    # Keeps a pass.
+    def addSuccess(self, test: unittest.TestCase) -> None: ...
+    # Keeps a skip and its reason.
+    def addSkip(self, test: unittest.TestCase, reason: str) -> None: ...
+    # Keeps a failed assertion and its traceback.
+    def addFailure(self, test: unittest.TestCase, err: _ErrorInfo) -> None: ...
+    # Keeps an error and its traceback, of a test or of a fixture.
+    def addError(self, test: unittest.TestCase, err: _ErrorInfo) -> None: ...
+    # Keeps a failed subtest's name and traceback. A passed one adds nothing.
+    def addSubTest(
+        self,
+        test: unittest.TestCase,
+        subtest: unittest.TestCase,
+        err: _ErrorInfo | None,
+    ) -> None: ...
+    # Keeps a failure the test was expected to have, with its traceback.
+    def addExpectedFailure(
+        self, test: unittest.TestCase, err: _ErrorInfo
+    ) -> None: ...
+    # Keeps the pass of a test that was expected to fail, which fails it.
+    def addUnexpectedSuccess(self, test: unittest.TestCase) -> None: ...
     # Writes the point of the last test.
     def point_flush(self) -> None: ...
 

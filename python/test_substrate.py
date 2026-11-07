@@ -17,9 +17,18 @@ import tempfile, traceback, unittest
 from collections.abc import Callable
 from typing import Any, NoReturn, cast
 
+# The checkout's top directory, above this file's `python/`.
+_ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 # The checkout's build directory, where each test makes its scratch roots.
-_BUILD_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
+_BUILD_PATH = os.path.join(_ROOT_PATH, "build")
+
+# The API text of the substrate's tables.
+_SCHEMA_PATH = os.path.join(_ROOT_PATH, "API", "sql", "substrate.sql")
+
+# The query of what a database holds.
+_SCHEMA_QUERY = (
+    "SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY name"
 )
 
 # The id of this module's gold, in its own `test_setting_` file.
@@ -300,6 +309,21 @@ class TestDatabases(unittest.TestCase):
         )
         self.assertEqual(rows, [["schema", "1"]])
         self.assertEqual(store.db_list(), ["alpha"])
+
+    # Its tables are what `API/sql/substrate.sql` makes, statement for statement.
+    def test_tables_recorded(self) -> None:
+        store = _store_make(self, _root_make(self))
+        store.db_create("alpha")
+        with open(_SCHEMA_PATH, encoding="utf-8") as file:
+            text = file.read()
+        connection = sqlite3.connect(":memory:")
+        try:
+            connection.executescript(text)
+            recorded = connection.execute(_SCHEMA_QUERY).fetchall()
+        finally:
+            connection.close()
+        rows = _rows_query(store, "alpha", _SCHEMA_QUERY)
+        self.assertEqual([tuple(row) for row in rows], recorded)
 
     # A database file made elsewhere gets the tables when first opened.
     def test_tables_foreign(self) -> None:

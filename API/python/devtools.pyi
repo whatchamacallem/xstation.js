@@ -14,6 +14,15 @@ import types
 # The page's loads as loader and event name pairs, as DevTools reported them.
 class PageEvents:
     lifecycle: set[tuple[str, str]]
+    # Starts with no followers, no bindings and nothing seen.
+    def __init__(self) -> None: ...
+    # Records a load, trace, worker or pause, or passes console text or a call.
+    def message_handle(self, message: dict[str, Any]) -> None: ...
+    # Returns the trace's events, failing if DevTools lost any of them.
+    def trace_take(self) -> list[dict[str, Any]]: ...
+
+# The time a wait has left.
+class WaitTimer: ...
 
 # DevTools messages as WebSocket text frames on a byte channel.
 class SocketChannel: ...
@@ -26,6 +35,17 @@ AnyChannel = SocketChannel | PipeChannel
 
 # Speaks the DevTools protocol over a channel of whole messages.
 class ProtocolClient:
+    # Keeps the channel and where events go.
+    def __init__(
+        self,
+        channel: AnyChannel,
+        event_fn: Callable[[dict[str, Any]], None],
+        wait_seconds: float,
+    ) -> None: ...
+    # Returns the timer of a wait, ended at the deadline when that comes first.
+    def timer_start(self, what: str) -> WaitTimer: ...
+    # Returns the next DevTools message, decoded, failing when the timer ends.
+    def message_next(self, timer: WaitTimer) -> dict[str, Any]: ...
     # Returns the result of a DevTools method, on the page once attached.
     def method_call(
         self, method: str, params: dict[str, Any] | None = None
@@ -61,6 +81,8 @@ class LinuxPipe:
     def __init__(self) -> None: ...
     # Starts the browser on a new profile in `build/`, DevTools on its pipes.
     def transport_open(self, width_px: int, height_px: int) -> PipeChannel: ...
+    # Ends the browser by closing its command pipe, failing on an unseen exit.
+    def browser_stop(self) -> None: ...
     # Stops the browser, closes this side's pipe ends and removes the profile.
     def transport_close(self) -> None: ...
 
@@ -74,6 +96,8 @@ class Browser:
         height_px: int,
         transport: Transport,
     ) -> None: ...
+    # Attaches to the browser's page and sets up its events and viewport.
+    def target_attach(self) -> None: ...
     # Starts the browser and its page, cleaning up if that fails.
     def __enter__(self) -> Self: ...
     # Stops the browser, removes its profile, fails on an exit no call saw.

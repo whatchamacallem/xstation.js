@@ -24,6 +24,9 @@ anthropic: bool
 debug: bool
 verbose: bool
 
+# Returns whether the variable is on, unset false, refusing a value but `1`.
+def variable_read(variable: str) -> bool: ...
+
 # Adds `--anthropic`, `--debug` and `--verbose` to the parser.
 def options_add(parser: argparse.ArgumentParser) -> None: ...
 

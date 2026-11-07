@@ -620,8 +620,8 @@ API files, and the type check of the TypeScript API passes: the config
 `ts/tsconfig.api.json` lists every file of `API/ts` by name,
 `page_build.api_check()` compiles it through `page_build.tsc_run` as a source
 check (`python/test_posix.py`), and a unit test checks that the config lists
-exactly those files. That compile proves the API text against itself and cannot
-see the code, so drift between an API file and its code stays unseen. A
+exactly those files. That compile proves the API text against itself. Beside
+it, `api_match.text_match` proves the text against the code, by decision 25. A
 mismatch leaves the code's own blocks running first in the default run only, by
 decision 23. No code.
 
@@ -701,7 +701,10 @@ session's log records what was seen and what was not.
 ### 5.8. The line count gate
 
 As 4.9: the mapping row, the fifteen gaps one at a time, the full run with the
-count, the times measured.
+count, the times measured. On 2026-11-07 the mapping row was in place and a
+count of every module found the fifteen gaps closed by the sessions before;
+only the new `api_match.py` had two lines, which a test then reached, and
+`./test_posix.sh --test-all` now passes `--coverage`.
 
 ## 6. Decisions made, each cheap to overturn
 
@@ -773,6 +776,17 @@ count, the times measured.
     the Python unit phase, before the TypeScript blocks.
 24. A root seeded before the image and `otherwise` is not migrated: it keeps
     its old scene and table, and `--fresh` takes the new seed.
+25. The API text is proved against the code, by the maintainer's request of
+    2026-11-07 that `API/` be checked against as much code as reasonably
+    possible, which answers question 1 of session 07 11:21: `python/api_match.py`
+    has tsc emit the code's declarations and compile them against `API/ts`
+    both ways, compares each stub of `API/python` with its module, each handler
+    with its payload in `API/ts/lines.d.ts`, and the browser suites' gold with
+    `API/mcp/tools.json` and `API/sql/substrate.sql`; the suites of the store,
+    the log, the seed and the settings hold the real databases and files to
+    `API/sql` and `API/settings.json`. It runs in `python/test_posix.py` after
+    the compile of 5.0. What it cannot see, parameter names of TypeScript among
+    them, is the section api_match of the rules.
 
 ## 7. Requirements by class
 
@@ -799,7 +813,7 @@ count, the times measured.
 | R14 current environment only, in the rules | D | done this session |
 | R15 the line count gate | D | 4.9, 5.8 |
 | R16 a suite of its own for ttyd's death | D | 4.7.3, 5.5; decision 22 |
-| R17 a config and a build step for the API text | D | 5.0; decision 23. The compile proves the API text against itself and cannot see the code |
+| R17 a config and a build step for the API text | D | 5.0; decisions 23 and 25 |
 | R18 wait for the engine's lock | D | 4.6.2, 5.5; decision 18 |
 | R19 a new log at each serve | D | 1.6, 4.6.1, 4.6.2, 4.8, 5.5; decision 3 |
 | R20 the console tools' refusal | D | 1.4, 4.4.2, 4.4.4, 5.3; decision 20 |

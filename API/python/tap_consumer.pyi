@@ -81,6 +81,8 @@ class StreamReader:
     passed: int
     failed: int
     skipped: int
+    # Starts before the version line, with every count at zero.
+    def __init__(self) -> None: ...
     # Takes the next line. Returns whether it fits where it stands.
     def line_read(self, line: Line) -> bool: ...
     # Whether the stream ended, by its parent plan or a bail out line.

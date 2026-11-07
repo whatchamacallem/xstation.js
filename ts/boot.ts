@@ -71,7 +71,7 @@ namespace boot {
   }
 
   // What every start of the headless worker holds.
-  interface StartFields {
+  export interface StartFields {
     first: lines.Line;
     block: string;
     failfast: boolean;

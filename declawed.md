@@ -399,14 +399,15 @@ maintainer. You have permission to update this file and fix errors.
 - Behaviour: Bring up, engine, Store, Errors, Console, ttyd protocol, queue,
   Tools
 - Build and start: page_build, ttyd_build, vectors_make, xsjs_start,
-  xsjs_serve, xsjs_log, devtools, xsjs_screenshot
+  xsjs_serve, xsjs_log, api_match, devtools, xsjs_screenshot
 - Test: test_all, Blocks, Realms, line_case, TAP, Rungs
 
 ## Files
 
 - `python/*.pyi`: the public names of the Python modules, as stubs, but for
-  reformat, test_posix, tap_loop, echo_loop, stall_loop and vectors_make, which
-  have none. A handler module lists one function per JSLB line type it serves,
+  reformat, test_posix, tap_loop, echo_loop, stall_loop, vectors_make,
+  failing_suite and the xsjs_screenshot programs, which have none. A handler
+  module lists one function per JSLB line type it serves,
   the payload as keyword parameters, which is how dispatch calls it.
 - `ts/*.d.ts`: the public surface of each TypeScript module. A module is one
   frozen object named after it, so a file is one `declare namespace`.
@@ -415,7 +416,7 @@ maintainer. You have permission to update this file and fix errors.
   namespace ts/ implements, so listing it beside the code would declare its
   functions twice. ts/tsconfig.api.json names every file of API/ts and no code,
   and page_build.api_check compiles it, so the API text is proved against
-  itself and never against the code.
+  itself; api_match.typescript_match then proves it against the code.
 - ts/tsconfig.api.json: extends ts/tsconfig.json, sets noEmit alone, and lists
   every file of API/ts by name. No config of the chain may set skipLibCheck, or
   tsc checks no .d.ts file.
@@ -1417,7 +1418,10 @@ fault realm REALM->DRIVER 0 push; fails the block
   stays on the removed file and prints nothing more, with no error, until
   SIGINT.
 - xsjs_log exit codes: 0 after a plain print, 130 at SIGINT in follow, 2 for
-  arguments the parser refuses, 1 for a raised error.
+  arguments the parser refuses, 1 for a raised error, and SIGPIPE's own end when
+  the reader leaves, as `head` does, 141 in a shell. The program sets SIGPIPE to
+  its default in its `__main__` statement alone, so log_run called in a process
+  of a test leaves that process's action as it was.
 - lines_read: the module function of the log, which the demo test's log rung
   reads.
 - xsjs_log.file_missing: a root with no `_verbose.sqlite` raises it as
@@ -1428,6 +1432,23 @@ fault realm REALM->DRIVER 0 push; fails the block
 - xsjs_log imports: internationalization alone of the project's modules,
   imported inside the function that uses it, after its bytecode has been sent
   to build/.
+
+## api_match
+
+- api_match.py: proves the text of API/ against the code, read and never imported, so a module with a fault at import fails its own suite and not this one. test_posix.py calls text_match last, after page_build.api_check, so a default run meets a difference after the stream and the cloud run skips it.
+- typescript_match: tsc emits the declarations of the bundle's project into build/api_match/, code_wrap moves them under a namespace `code` with `private` and `#private` members cut, since those make a class nominal and the text never declares them, and one project compiles them beside the API text with a check file. Each pair of the check assigns a member to its twin both ways.
+- typescript_match names: compared first, by names_match on members_read of each side: a member the text holds and the code lacks fails, as does one the code exports and the text lacks, a namespace with `export {};` holding only what says `export`. `function` and `const` are both a value. A class in one side is no interface in the other.
+- typescript_match failure: tsc's first error in check.ts names the member by its line over _PAIR_LINES, and tsc's whole output is the cause. A failure in another file keeps tsc's own error.
+- what typescript_match cannot see: parameter names, as TypeScript calls by position; any type on either side, which agrees with everything; comments. `lines` has no code, as the code is typed by it. A test module's namespace and failing_block have no text. A generic member would fail the check's compile for want of type arguments, as none exists.
+- python_match: each stub of API/python against its module by ast: the public functions, classes, their methods and class fields and aliases, each signature's names, kinds, annotations, decorators and whether a parameter has a default, each class's bases. A default's value is not compared, as a stub may write `...`.
+- python_match public names: those of the module's `__all__`, with the stub's own, else every name with no `_` first. In a class, a method Python names counts too.
+- python_match attributes: an instance attribute the stub names must be assigned in the class, its annotation compared when both have one. One the stub does not name is the class's own.
+- python_match opaque: a stub's `class Name: ...` leaves the class's members to the module.
+- python_match no stub: a test module, and the modules of _STUB_ABSENT, the programs nothing imports.
+- handlers_match: each handler `python/engine_*.py` registers takes as keywords exactly the fields of its payload in API/ts/lines.d.ts, a field that may be left out having a default. A payload's name is its line type spelled in words, or _PAYLOAD_NAMES. A handler that takes `**` is given the whole payload, as mcp, and has no fields to match.
+- gold_match: the browser's store and tools cannot be read from Python, so the suites compare them with the gold, and this proves the gold's keys against the text: recorded_tools of test_tools_browser against the browser tools of API/mcp/tools.json, schema_statements of test_substrate_store against API/sql/substrate.sql, comments cut and white space folded.
+- API/sql and settings: test_tables_recorded of test_substrate.py and test_substrate_store.ts, test_schema_recorded of test_verbose.py, metaverse_check of test_main_loop.py and test_copy_equal of test_settings.py hold the real databases and settings to API/sql and API/settings.json.
+- test_api_match: scratch checkouts in build/, written by checkout_write, with the real tsc: one that agrees passes text_match, and each kind of difference raises and names its member.
 
 ## devtools
 
@@ -1503,11 +1524,11 @@ fault realm REALM->DRIVER 0 push; fails the block
   a module, fails at that module's first line never run. A unit suite counts
   for the module of its name or those listed for it; integration and stdio
   suites and TypeScript blocks count for none. It refuses --tty.
-- line count run: `./test_posix.sh --test-all` does not pass --coverage yet:
-  the count runs by hand as `python3 python/test_all.py --test-all --coverage`,
-  until a count passes and one line of test_posix.sh passes it there. The
-  default run never does, and the tty run stays separate, as --coverage
-  refuses --tty.
+- line count run: `./test_posix.sh --test-all` passes --coverage to the driver,
+  so a full run fails at a module's first line never run. The default run never
+  does, and the tty run stays separate, as --coverage refuses --tty. A count of
+  2026-11-07 found every module complete but api_match, whose two lines a test
+  then reached.
 - --anthropic, --debug, --verbose: turn on the switches of switches.py here
   and in every process the run starts. Under --anthropic the run takes no
   suite that starts a formatter, and --module refuses those.
@@ -1545,7 +1566,7 @@ fault realm REALM->DRIVER 0 push; fails the block
 - test_posix.py: the checks of the whitelisted files: UTF-8 with no non-ASCII
   outside _NON_ASCII_ALLOWED; the comment rules; then the formatters of
   reformat.py in a test-all run; then the linters of their rows; last
-  page_build.api_check. reformat_table.json gives each extension its comment
+  page_build.api_check and api_match.text_match. reformat_table.json gives each extension its comment
   lexer, codec, checker, formatter and linter. --anthropic does none of this.
 - synchronization audit: test_posix.py fails a ts/*.ts file outside
   _SYNCHRONIZATION_MODULES that uses await, .then(, new Promise, Atomics or
@@ -1603,8 +1624,9 @@ fault realm REALM->DRIVER 0 push; fails the block
   That run compiles the API text, so a test-all run meets an API failure here,
   before the TypeScript blocks.
 - test_posix suites: test_test_posix and test_test_posix_formatters sit in the
-  layer after page_build's suites, and test_integrate_test_posix after
-  test_integrate_page_build's layer, as main imports page_build.
+  layer after test_api_match's, itself after page_build's suites, and
+  test_integrate_test_posix after test_integrate_page_build's layer, as main
+  imports api_match and page_build.
 
 ## Blocks
 

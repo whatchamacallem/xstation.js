@@ -295,8 +295,9 @@ class DemoRun:
     def band_wait(self, text: str) -> None:
         self.state_wait(
             f"{text!r} in the band with the box enabled",
-            lambda state: state["subtitle"] == text
-            and not state["input"]["disabled"],
+            lambda state: (
+                state["subtitle"] == text and not state["input"]["disabled"]
+            ),
         )
 
     # Presses and releases a key, `text` being what it types, if anything.
@@ -397,10 +398,9 @@ def programs_find(ttyd_pid: int, bootstrap: str) -> list[int]:
         pid = int(name)
         # A process can end between the listing and the reads.
         with contextlib.suppress(FileNotFoundError, ProcessLookupError):
-            if (
-                process_parent(pid) == ttyd_pid
-                and bootstrap.encode() in cmdline_read(pid)
-            ):
+            if process_parent(
+                pid
+            ) == ttyd_pid and bootstrap.encode() in cmdline_read(pid):
                 pids.append(pid)
     return pids
 
@@ -503,8 +503,10 @@ def rung_choice_console(run: DemoRun) -> str:
     run.line_type("3")
     state = run.state_wait(
         f"the permit text {permit!r} and the buttons {labels}",
-        lambda state: state["permit_texts"] == [permit]
-        and [button["text"] for button in state["buttons"]] == labels,
+        lambda state: (
+            state["permit_texts"] == [permit]
+            and [button["text"] for button in state["buttons"]] == labels
+        ),
     )
     # Accept comes first, as in the gold's buttons.
     accept: dict[str, Any] = state["buttons"][0]
@@ -514,8 +516,10 @@ def rung_choice_console(run: DemoRun) -> str:
     )
     run.state_wait(
         f"dash's prompt {prompt!r} and the row {output!r}",
-        lambda state: output in state["rows"]
-        and any(row.startswith(prompt) for row in state["rows"]),
+        lambda state: (
+            output in state["rows"]
+            and any(row.startswith(prompt) for row in state["rows"])
+        ),
     )
     run.band_wait(text)
     png = run.picture_save("choice_3")
@@ -532,9 +536,11 @@ def input_refuse(run: DemoRun, line: str) -> None:
     run.line_type(line)
     run.state_wait(
         f"{text!r} in the band after {line!r}, the box enabled and focused",
-        lambda state: state["subtitle"] == text
-        and not state["input"]["disabled"]
-        and state["input"]["focused"],
+        lambda state: (
+            state["subtitle"] == text
+            and not state["input"]["disabled"]
+            and state["input"]["focused"]
+        ),
     )
 
 
@@ -598,10 +604,12 @@ def rung_overlay(run: DemoRun) -> str:
     run.control_press(_OVERLAY_DIGIT)
     state = run.state_wait(
         f"the wire overlay with lines starting {sent!r} and {received!r}",
-        lambda state: any(
-            line.startswith(sent) for line in state["overlay_lines"]
-        )
-        and any(line.startswith(received) for line in state["overlay_lines"]),
+        lambda state: (
+            any(line.startswith(sent) for line in state["overlay_lines"])
+            and any(
+                line.startswith(received) for line in state["overlay_lines"]
+            )
+        ),
     )
     png = run.picture_save("overlay")
     run.control_press(_OVERLAY_DIGIT)

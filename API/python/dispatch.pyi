@@ -45,7 +45,7 @@ def line_dispatch(
 
 # Builds a reply to `line` with `r` set and the payload and blobs given.
 def reply_make(
-    line: jslb.Object, blobs: list[jslb.Object] = ..., **payload: Any
+    line: jslb.Object, blobs: list[jslb.Object] | None = None, **payload: Any
 ) -> jslb.Object: ...
 
 # Builds the one `error` line for a raise, its cascade under `cause`.

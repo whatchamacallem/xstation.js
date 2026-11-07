@@ -71,7 +71,26 @@ declare namespace mcp {
     isError?: boolean;
   }
 
-  const constants: { readonly protocol_version: string };
+  // The revision pinned, the names and codes of the protocol, the line type.
+  const constants: {
+    readonly protocol_version: "2025-06-18";
+    readonly jsonrpc_version: "2.0";
+    readonly line_type: "mcp";
+    readonly id_field: "id";
+    readonly reply_field: "reply";
+    readonly arguments_field: "arguments";
+    readonly error_field: "error";
+    readonly method_initialize: "initialize";
+    readonly method_initialized: "notifications/initialized";
+    readonly method_ping: "ping";
+    readonly method_list: "tools/list";
+    readonly method_call: "tools/call";
+    readonly code_invalid: -32600;
+    readonly code_unknown: -32601;
+    readonly code_params: -32602;
+    readonly code_internal: -32603;
+    readonly prefix_mark: ".";
+  };
 
   // A tool runs inside the `mcp` line's handler: its result or a sleep.
   type ToolFn = (args: {
