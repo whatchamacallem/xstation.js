@@ -32,6 +32,9 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 # The API file that holds the tools as `tools/list` returns them.
 _TOOLS_PATH = os.path.join(_ROOT_PATH, "API", "mcp", "tools.json")
 
+# The seed files that the main loop reads for a new metaverse.
+_SEED_PATH = os.path.join(_ROOT_PATH, "python", "seed")
+
 # The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_integrate_main_loop"
 
@@ -49,6 +52,9 @@ _READ_BYTES: int = harness.gold_get(f"{_GOLD_ID}.read_bytes")
 
 # A ring size chosen by its writer, other than the checkout's.
 _RING: int = harness.gold_get(f"{_GOLD_ID}.ring")
+
+# The seeded image: its file, its key in the metaverse and its ref.
+_SEED_IMAGE: dict[str, Any] = harness.gold_get(f"{_GOLD_ID}.image")
 
 # The query of the hash and the value of one key.
 _VALUE_QUERY = "SELECT sha256, data FROM _kv WHERE key = ?"
@@ -70,6 +76,9 @@ _CASTLE_DB = "castle"
 
 # The database the push test makes and drops.
 _DROPPED_DB = "dropped"
+
+# The seeded database that holds the image and the scene.
+_METAVERSE_DB = "metaverse"
 
 # The source the `source.put` line carries.
 _SOURCE = b"pass\n"
@@ -450,6 +459,21 @@ class TestEngines(ScratchCase):
             file.write(image)
         kept = _value_read(self.scratch, _CASTLE_DB, "kept")
         self.assertEqual(kept, _KEPT_VALUE)
+
+    # `db.sync` carries the seeded image's row and the scene that names it.
+    def test_sync_image(self) -> None:
+        lines = self.served_read(_sync_bytes())
+        data, _ = self.restores_read(lines[:-1])[_METAVERSE_DB]
+        path = os.path.join(self.scratch, _METAVERSE_DB + ".sqlite")
+        with open(path, "wb") as file:
+            file.write(data)
+        image = _value_read(self.scratch, _METAVERSE_DB, _SEED_IMAGE["key"])
+        with open(os.path.join(_SEED_PATH, _SEED_IMAGE["file"]), "rb") as file:
+            self.assertEqual(image, file.read())
+        document = _value_read(self.scratch, _METAVERSE_DB, "hyperposition/1")
+        scene: dict[str, Any] = json.loads(document)
+        self.assertEqual(scene["1"], _SEED_IMAGE["ref"])
+        self.assertEqual(scene["image"], {"$ref": 1})
 
     # A sync's lines are logged in order, in full, with no blob's bytes.
     def test_sync_traced(self) -> None:

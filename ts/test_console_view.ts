@@ -527,22 +527,6 @@ namespace test_console_view {
       this.assertFalse(rig.view.open_wanted());
       this.assertEqual(rig.came.length, 2);
     }
-
-    // The view is open only while tty 0 is open: not idle, opening, closing.
-    test_open_is(): void {
-      const rig = rig_make();
-      this.assertFalse(rig.view.open_is());
-      open_ask(rig);
-      this.assertFalse(rig.view.open_is());
-      request_answer(rig, "open_reply");
-      this.assertTrue(rig.view.open_is());
-      close_ask(rig);
-      this.assertFalse(rig.view.open_is());
-      request_answer(rig, "close_reply");
-      this.assertFalse(rig.view.open_is());
-      rig.view.exit_done();
-      this.assertFalse(rig.view.open_is());
-    }
   }
 
   // The request for tty 0, its wake and ttyd's first message.
@@ -1011,22 +995,12 @@ namespace test_console_view {
       fit_assert(this, rig);
     }
 
-    // A band that leaves no room for one row is refused.
-    test_rows_unfit(): void {
+    // A band that leaves no room for one row leaves the terminal one row.
+    test_rows_least(): void {
       const rig = rig_make();
       rig.band.style.height = `${constants.frame_height}px`;
-      const error = thrown_get(() => rig.view.view_show());
-      const { container, band } = rig;
-      const screen = part_find(rig, constants.screen_selector);
-      const cell = screen.getBoundingClientRect().height / rows_count(rig);
-      const top = container.getBoundingClientRect().top;
-      const bars = container.offsetHeight - container.clientHeight;
-      const space = band.getBoundingClientRect().top - top - bars;
-      this.assertEqual(
-        error.message,
-        text_fill(gold_text("console_view_rows_unfit"), [space, cell]),
-      );
-      this.assertEqual(rows_count(rig), 40);
+      rig.view.view_show();
+      this.assertEqual(rows_count(rig), 1);
     }
   }
 

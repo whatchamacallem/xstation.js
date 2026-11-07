@@ -2,10 +2,10 @@
 # command ttyd runs for each connection. Returns the exit code.
 #
 # Each role sets its switches from the root's parameters. The engine role
-# writes the first line, `tap.start`, which carries the settings and the root's
-# switches and no gold, which the page carries itself. It reads no provider key
-# and no provider file, as the scripted provider needs neither. `--main-loop`
-# is served to the engine role in debug mode only.
+# waits up to 5 s for the root's engine lock, then fails. It writes the first
+# line, `tap.start`, with the settings and the root's switches and no gold,
+# which the page carries. It reads no provider key or file, as the scripted
+# provider needs neither. `--main-loop` is served to it in debug mode only.
 #
 # The console role, in debug mode only, runs dash in a bubblewrap sandbox with
 # a scrubbed environment. A step of Python before dash takes the pty as its

@@ -6,7 +6,7 @@
 // The terminal's rows are fitted to the height the container has above the
 // band, the element after it, at each show and whenever the page or the band
 // changes size while the view is shown, so every row is seen without
-// scrolling.
+// scrolling. A height below one row leaves one row.
 
 // An xterm.js 5.5.0 marker of a buffer row, its line `-1` once disposed.
 declare interface TerminalMarker {
@@ -337,11 +337,6 @@ namespace console_view {
       return !this.child.hidden && this.phase === "idle";
     }
 
-    // Whether tty 0 is open: its first message sent and input taken.
-    open_is(): boolean {
-      return this.phase === "open";
-    }
-
     // Asks the AI worker for tty 0 from a UI handler, which returns the sleep.
     open_request(): dispatch.Sleep {
       if (this.phase !== "idle") {
@@ -594,10 +589,11 @@ namespace console_view {
       const bars = container.offsetHeight - container.clientHeight;
       const space = this.band_get().getBoundingClientRect().top - top - bars;
       const rows = Math.floor(space / this.cell);
-      if (!Number.isInteger(rows) || rows < 1) {
+      if (!Number.isInteger(rows)) {
         throw new Error(i18n("console_view.rows_unfit", space, this.cell));
       }
-      this.terminal.resize(this.terminal.cols, rows);
+      // A window shorter than one row is a person's choice and no fault.
+      this.terminal.resize(this.terminal.cols, Math.max(rows, 1));
     }
 
     // Fits the rows again when the page or the band changed size.

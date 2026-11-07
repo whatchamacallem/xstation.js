@@ -7,6 +7,7 @@
 # ts/*.ts file other than the _SYNCHRONIZATION_MODULES for synchronization
 # tokens, formats the files in a test-all run, then lints them. A PowerShell
 # file, formatted on Windows, has only its characters and comments checked.
+# Last, page_build.api_check compiles the API text of API/ts as one project.
 #
 # A file's header, the comment at its top, runs to at most _HEADER_LIMIT lines.
 # Below it a comment must be one line, not be a <# #> comment, and outside its
@@ -635,15 +636,16 @@ def typescript_paths(root_path: str) -> list[str]:
     return sorted(os.path.join(root_path, path) for path in matched)
 
 
-# Checks and audits the files, then formats them in a normal run, lints them.
+# Checks and audits the files, formats in a normal run, lints, checks the API.
 def main(arguments: list[str]) -> None:
-    import category, reformat, switches
+    import category, page_build, reformat, switches
 
     parser = argparse.ArgumentParser(
         description="Check the characters and comments of the files"
         " reformat_whitelist.txt lists, audit the ts/*.ts files for"
         " synchronization tokens, then format the files of the linux rows"
-        " of reformat_table.json in a test-all run, and lint them."
+        " of reformat_table.json in a test-all run, lint them, and compile"
+        " the API text of API/ts."
     )
     category.options_add(parser)
     switches.options_add(parser)
@@ -671,6 +673,8 @@ def main(arguments: list[str]) -> None:
         # With no files, ruff checks the directory.
         if matched and row.linter:
             subprocess.run([*row.linter, *matched], check=True, cwd=_ROOT_PATH)
+    # Last, so that a failure of the API text comes after the file checks.
+    page_build.api_check()
 
 
 if __name__ == "__main__":

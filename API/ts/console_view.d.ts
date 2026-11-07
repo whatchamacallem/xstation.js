@@ -22,14 +22,13 @@
 declare namespace console_view {
   class ConsoleView {
     constructor(container: HTMLElement, tasks: queue.TaskQueue);
+    // Shows the view, its rows fitted above the band, one row at the least.
     view_show(): void;
     view_hide(): void;
     // Shows a hidden view, hides a shown one, and says whether it now shows.
     view_toggle(): boolean;
     // Whether the view is shown while tty 0 is idle, so that it is asked for.
     open_wanted(): boolean;
-    // Whether tty 0 is open: its first message sent and input taken.
-    open_is(): boolean;
     // Asks the AI worker for tty 0 from a UI handler, which returns the sleep.
     open_request(): dispatch.Sleep;
     // Takes the wake of that sleep, sends the first message, takes input.

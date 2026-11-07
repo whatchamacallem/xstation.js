@@ -70,6 +70,12 @@ _HYPERPOSITION_ID = "hyperposition"
 # The id of the analyst's prompt document.
 _PROMPT_ID = "prompt"
 
+# The seed file of the hyperposition's image.
+_IMAGE_NAME = "hyperposition.bmp"
+
+# The key in the metaverse of the hyperposition's image, which the scene names.
+_IMAGE_KEY = "image/hyperposition"
+
 # The seed file of the bootstrap script.
 _SCRIPT_NAME = "bootstrap.js"
 
@@ -151,11 +157,12 @@ class _PreparedRoot(NamedTuple):
     store: substrate.Store
 
 
-# The seed of a new metaverse: its two documents and the bootstrap script.
+# The seed of a new metaverse: two documents, the bootstrap script, the image.
 class _SeedFiles(NamedTuple):
     hyperposition: dict[int | str, Any]
     prompt: dict[int | str, Any]
     script: bytes
+    image: bytes
 
 
 # Where the loop writes, its chunk, and what its trace needs.
@@ -216,10 +223,13 @@ def _document_read(name: str) -> dict[int | str, Any]:
 def _seed_read() -> _SeedFiles:
     with open(os.path.join(_SEED_DIRECTORY, _SCRIPT_NAME), "rb") as file:
         script = file.read()
+    with open(os.path.join(_SEED_DIRECTORY, _IMAGE_NAME), "rb") as file:
+        image = file.read()
     return _SeedFiles(
         _document_read(_HYPERPOSITION_ID + _SEED_EXTENSION),
         _document_read(_PROMPT_ID + _SEED_EXTENSION),
         script,
+        image,
     )
 
 
@@ -229,10 +239,11 @@ def _settings_write(store: substrate.Store, values: dict[str, Any]) -> None:
         store.kv_put(key, _json_text(value).encode("utf-8"), _SETTINGS_DB)
 
 
-# Creates `universe` and its triggers, writes two documents and three rows.
+# Creates `universe` and triggers, writes the image, two documents, three rows.
 def _metaverse_write(store: substrate.Store, seed: _SeedFiles) -> None:
     statements = [substrate.SqlStatement(sql, []) for sql in _METAVERSE_DDL]
     store.sql_run(_METAVERSE_DB, statements)
+    store.kv_put(_IMAGE_KEY, seed.image, _METAVERSE_DB)
     scene = store.doc_put(_METAVERSE_DB, _HYPERPOSITION_ID, seed.hyperposition)
     store.doc_put(_METAVERSE_DB, _PROMPT_ID, seed.prompt)
     rows = (

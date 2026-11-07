@@ -7,13 +7,13 @@
 # its roots and starts its ttyd through these functions, so that what it proves
 # is what the maintainer runs. `values` is the checkout's settings throughout.
 #
-# A root is made as the start script makes one: the modules of
-# `powershell.runtime_modules` and the seed in `python/`, `i18n/en-US.json`,
-# the files of `powershell.root_files`, the page and `parameters.json`. Each
-# run makes those anew and keeps the rest of the root, so that the maintainer's
-# databases persist. The engine's lock in the root means a second connection,
-# as a second tab, fails loud on the server's side and shows the fault screen:
-# one page per root.
+# A root is made as the start script makes one: `powershell.runtime_modules`
+# and the seed in `python/`, `i18n/en-US.json`, `powershell.root_files`, the
+# page and `parameters.json`. Each run makes those anew, removes the log,
+# `_verbose.sqlite` and its `-wal` and `-shm` files, so each serve starts a new
+# record, and keeps the rest, so the maintainer's databases persist. The
+# root's engine lock means a second connection, as a second tab, waits 5 s,
+# then fails loud on the server and shows the fault screen: one page per root.
 #
 # ttyd is the one the project built, in a session of its own, so that ctrl C
 # reaches this program alone. A ttyd not built raises `xsjs_serve.ttyd_missing`
@@ -48,7 +48,7 @@ def root_default(values: dict[str, Any]) -> str: ...
 # Builds the engine page from `html/engine.html`. Returns its path in `build/`.
 def page_ready(values: dict[str, Any]) -> str: ...
 
-# Makes the root from the built page, `fresh` removing any root there first.
+# Makes the root from the built page: its log goes, or with `fresh` all of it.
 def root_make(
     values: dict[str, Any],
     page: str,

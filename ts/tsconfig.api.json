@@ -1,0 +1,40 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "files": [
+    "../API/ts/agent.d.ts",
+    "../API/ts/boot.d.ts",
+    "../API/ts/console_view.d.ts",
+    "../API/ts/dispatch.d.ts",
+    "../API/ts/engine.d.ts",
+    "../API/ts/error_overlay.d.ts",
+    "../API/ts/harness.d.ts",
+    "../API/ts/http.d.ts",
+    "../API/ts/i18n.d.ts",
+    "../API/ts/jslb.d.ts",
+    "../API/ts/line_case.d.ts",
+    "../API/ts/lines.d.ts",
+    "../API/ts/mcp.d.ts",
+    "../API/ts/media.d.ts",
+    "../API/ts/overlay.d.ts",
+    "../API/ts/page.d.ts",
+    "../API/ts/provider.d.ts",
+    "../API/ts/provider_script.d.ts",
+    "../API/ts/queue.d.ts",
+    "../API/ts/script.d.ts",
+    "../API/ts/settings.d.ts",
+    "../API/ts/substrate.d.ts",
+    "../API/ts/switches.d.ts",
+    "../API/ts/tap_producer.d.ts",
+    "../API/ts/test_headless.d.ts",
+    "../API/ts/tools_browser.d.ts",
+    "../API/ts/ui_strings.d.ts",
+    "../API/ts/unittest.d.ts",
+    "../API/ts/utility.d.ts",
+    "../API/ts/verbose.d.ts",
+    "../API/ts/wire.d.ts",
+    "../API/ts/worker_ai.d.ts"
+  ]
+}

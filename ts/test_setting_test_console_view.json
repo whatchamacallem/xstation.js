@@ -136,7 +136,6 @@
     "console_view_reply_phase_open": "The console got the reply to console.open while it was open, not opening.",
     "console_view_reply_type_close": "The console got a reply of type console.close instead of console.open.",
     "console_view_reply_type_open": "The console got a reply of type console.open instead of console.close.",
-    "console_view_rows_unfit": "The console has {0} px above the band for rows of {1} px, which is not room for one row.",
     "console_view_token_invalid": "The reply to console.open carries a token of type undefined instead of text."
   }
 }

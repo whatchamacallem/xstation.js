@@ -131,6 +131,12 @@
       "name": "turn_read",
       "seconds": 10,
       "send": ["band_15"]
+    },
+    {
+      "expect": ["box_16_reply"],
+      "name": "box_bound",
+      "seconds": 10,
+      "send": ["box_16"]
     }
   ],
   "lines": {
@@ -273,6 +279,19 @@
       "input_disabled": false,
       "input_focused": true,
       "subtitle": "Noted."
+    },
+    "box_16": {
+      "0": {
+        "id": 16,
+        "type": "engine_probe.box"
+      }
+    },
+    "box_16_reply": {
+      "0": {
+        "reply": 16,
+        "type": "engine_probe.box"
+      },
+      "max_length": 131072
     },
     "choose_accept": {
       "0": {

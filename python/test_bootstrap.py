@@ -11,7 +11,7 @@
 # loop never reach another test.
 
 import bootstrap, contextlib, errno, fcntl, harness, json, os, pty, resource
-import runpy, signal, sqlite3, switches, sys, tempfile, termios, time
+import runpy, select, signal, sqlite3, switches, sys, tempfile, termios, time
 import traceback, unittest
 from typing import Any, NamedTuple
 
@@ -38,6 +38,12 @@ _BLOCKED_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.blocked_seconds")
 
 # The seconds between two looks at whether the run is blocked.
 _POLL_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.poll_seconds")
+
+# The seconds a run waits for a held lock, private to `bootstrap.py`.
+_LOCK_WAIT_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.lock_wait_seconds")
+
+# The seconds a test keeps the lock from a waiting run, well within that wait.
+_LOCK_HELD_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.lock_held_seconds")
 
 # The state `/proc/PID/stat` gives a process that sleeps, as in a write.
 _SLEEPING_STATE = "S"
@@ -387,7 +393,7 @@ def _lock_tried(root: str) -> bytes:
     return found
 
 
-# Holds the root's engine lock in a child until the returned descriptor closes.
+# Holds the root's engine lock in a child until `_lock_free` ends that child.
 def _lock_hold(root: str) -> tuple[int, int]:
     ready_read, ready_write = os.pipe()
     release_read, release_write = os.pipe()
@@ -414,6 +420,13 @@ def _lock_hold(root: str) -> tuple[int, int]:
         os.waitpid(pid, 0)
         raise RuntimeError("the child could not take the engine lock")
     return pid, release_write
+
+
+# Frees the lock by ending its holder, as a later fork keeps `release` open.
+def _lock_free(pid: int, release: int) -> None:
+    os.close(release)
+    os.kill(pid, signal.SIGKILL)
+    os.waitpid(pid, 0)
 
 
 # Runs the file as ttyd starts it, and returns the code of its exit.
@@ -529,6 +542,10 @@ class EngineChild:
         edited = lflag & (termios.ICANON | termios.ECHO)
         return not edited and not oflag & termios.OPOST
 
+    # Whether the child writes nothing for the seconds.
+    def output_quiet(self, seconds: float) -> bool:
+        return not select.select([self.master_get()], [], [], seconds)[0]
+
     # Reads the output to its end, then reaps the child: its code, the rest.
     def rest_read(self) -> tuple[int, bytes]:
         rest = self.buffer
@@ -621,19 +638,21 @@ class TestLock(unittest.TestCase):
         self.assertEqual(child.run_end(), (_ENDING_SERVED, b""))
         self.assertEqual(_lock_tried(made.root), b"taken")
 
-    # A held lock is one error line after raw mode, its cause the refusal.
+    # A lock held past the wait is one error line, its cause the last refusal.
     def test_lock_refused(self) -> None:
         made = _root_make(self, False)
         _loop_write(made.root, _LOOP_TEXT)
         argv = ["--root", made.root]
         pid, release = _lock_hold(made.root)
+        started = time.monotonic()
         try:
             child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
             line = child.line_read()
+            waited = time.monotonic() - started
             ending = child.run_end()
         finally:
-            os.close(release)
-            os.waitpid(pid, 0)
+            _lock_free(pid, release)
+        self.assertGreaterEqual(waited, _LOCK_WAIT_SECONDS)
         self.assertEqual(ending, (_ENDING_FAILED, b""))
         self.assertTrue(child.raw_get())
         path = os.path.join(made.root, "engine.lock")
@@ -649,6 +668,38 @@ class TestLock(unittest.TestCase):
         self.assertFalse(os.path.exists(prepared))
         _log_absent(self, made.root)
         self.assertEqual(_lock_tried(made.root), b"taken")
+
+    # A lock freed within the wait is taken, and the first line then comes.
+    def test_lock_waited(self) -> None:
+        made = _root_make(self, True)
+        _loop_write(made.root, _LOOP_TEXT)
+        argv = _engine_argv(made.root)
+        pid, release = _lock_hold(made.root)
+        try:
+            child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+            quiet = child.output_quiet(_LOCK_HELD_SECONDS)
+        finally:
+            _lock_free(pid, release)
+        self.assertTrue(quiet)
+        first = child.line_read()
+        self.assertEqual(first["0"], _line_get("first_full")["0"])
+        child.bytes_write(_REPLY_FULL + _AFTER_REPLY)
+        self.assertEqual(child.run_end(), (_ENDING_SERVED, b""))
+        self.assertEqual(_lock_tried(made.root), b"taken")
+
+    # A hangup during the wait ends the run by SIGHUP, as elsewhere.
+    def test_lock_hangup(self) -> None:
+        made = _root_make(self, False)
+        argv = ["--root", made.root]
+        pid, release = _lock_hold(made.root)
+        try:
+            child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
+            quiet = child.output_quiet(_LOCK_HELD_SECONDS)
+            code = child.hangup()
+        finally:
+            _lock_free(pid, release)
+        self.assertTrue(quiet)
+        self.assertEqual(code, _HUNG_UP)
 
     # The lock closes at `exec`, so the probe the main loop becomes takes it.
     def test_lock_released(self) -> None:

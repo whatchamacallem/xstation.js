@@ -26,7 +26,7 @@ namespace provider_script {
     tool_role: "tool",
     calls_reason: "tool_calls",
     stop_reason: "stop",
-    // The decimal text of one integer, which a user message must be.
+    // The decimal text of one integer, the only text `replies` answers.
     integer_text: /^(?:0|-?[1-9][0-9]*)$/,
     pattern_size: 16,
     square_size: 4,
@@ -86,8 +86,14 @@ namespace provider_script {
   export interface ScriptNode {
     // Replies by the integer the user sent, as decimal strings.
     replies: { [input: string]: ScriptReply };
+    // The reply to any other text the user sent.
+    otherwise?: ScriptReply;
     // The reply after tool results, when the node was reached by tools.
     after_tools?: ScriptReply;
+    // A text every tool result must hold for `after_tools` to follow.
+    after_holds?: string;
+    // The reply after tool results of which one lacks `after_holds`.
+    after_lacks?: ScriptReply;
   }
 
   // A script: the node it starts in and every node by name.
@@ -309,8 +315,8 @@ namespace provider_script {
     return { data };
   }
 
-  // The `tool_call_id` of each tool result that ends the messages, in order.
-  function results_ids(messages: unknown[]): unknown[] {
+  // The index of the first of the tool results that end the messages.
+  function results_start(messages: unknown[]): number {
     let start = messages.length;
     while (
       start > 0 &&
@@ -319,9 +325,48 @@ namespace provider_script {
     ) {
       start -= 1;
     }
+    return start;
+  }
+
+  // The `tool_call_id` of each tool result that ends the messages, in order.
+  function results_ids(messages: unknown[]): unknown[] {
     return messages
-      .slice(start)
+      .slice(results_start(messages))
       .map((message: unknown) => (message as FieldTable).tool_call_id);
+  }
+
+  // The text of each tool result that ends the messages, in order.
+  function results_texts(messages: unknown[]): string[] {
+    const start = results_start(messages);
+    return messages.slice(start).map((message: unknown, index: number) => {
+      const text = (message as FieldTable).content;
+      if (typeof text !== "string") {
+        return field_invalid(`json.messages[${start + index}].content`);
+      }
+      return text;
+    });
+  }
+
+  // The reply that follows tool results in the node, by the text they hold.
+  function after_read(
+    node: ScriptNode,
+    name: string,
+    messages: unknown[],
+  ): ScriptReply {
+    const { after_tools, after_holds, after_lacks } = node;
+    if (after_tools === undefined) {
+      throw new Error(i18n("provider_script.after_missing", name));
+    }
+    if (after_holds === undefined && after_lacks === undefined) {
+      return after_tools;
+    }
+    if (after_holds === undefined || after_lacks === undefined) {
+      throw new Error(i18n("provider_script.after_unpaired", name));
+    }
+    const held = results_texts(messages).every((text) =>
+      text.includes(after_holds),
+    );
+    return held ? after_tools : after_lacks;
   }
 
   // A port that answers each request from the script before its post returns.
@@ -464,10 +509,8 @@ namespace provider_script {
             ),
           );
         }
-        const after = node_get(this.script, pending).after_tools;
-        if (after === undefined) {
-          throw new Error(i18n("provider_script.after_missing", pending));
-        }
+        const reached = node_get(this.script, pending);
+        const after = after_read(reached, pending, messages);
         this.current = pending;
         this.pending = undefined;
         return after;
@@ -481,16 +524,23 @@ namespace provider_script {
         );
       }
       const input = last.content;
-      if (typeof input !== "string" || !constants.integer_text.test(input)) {
+      if (typeof input !== "string") {
         throw new Error(i18n("provider_script.input_invalid", String(input)));
       }
-      const replies = node_get(this.script, this.current).replies;
-      if (!Object.hasOwn(replies, input)) {
-        throw new Error(
-          i18n("provider_script.input_unknown", this.current, input),
-        );
+      const node = node_get(this.script, this.current);
+      const integer = constants.integer_text.test(input);
+      if (integer && Object.hasOwn(node.replies, input)) {
+        return node.replies[input];
       }
-      return replies[input];
+      if (node.otherwise !== undefined) {
+        return node.otherwise;
+      }
+      if (!integer) {
+        throw new Error(i18n("provider_script.input_invalid", input));
+      }
+      throw new Error(
+        i18n("provider_script.input_unknown", this.current, input),
+      );
     }
   }
 

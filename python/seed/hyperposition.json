@@ -1,4 +1,6 @@
 {
   "0": {"t": "scene"},
+  "1": "/metaverse/image/hyperposition",
+  "image": {"$ref": 1},
   "subtitle": "How can I help you?"
 }

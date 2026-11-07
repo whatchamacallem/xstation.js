@@ -3,7 +3,8 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // Tests of the scripted provider: a script walked through the castle turn,
-// which builds the gatehouse scene, the reply lines, every refusal, the image
+// which builds the gatehouse scene, the reply lines, every refusal, the
+// replies `otherwise` and `after_lacks` on a table as the seed's, the image
 // answer, and the PNG test pattern held against a reference PNG of the same
 // checkerboard in 88 bytes with other compressed data. The port is driven
 // directly by `line_post` and `line_receive`. The request lines it posts, the
@@ -11,13 +12,19 @@
 // `ts/test_setting_test_provider_script.json`, read through the harness.
 
 namespace test_provider_script {
-  // A model, the castle turn's values, the PNG's.
+  // A model, the castle turn's values, the analyst table's, the PNG's.
   const constants = Object.freeze({
     image_model: "grok-2-image",
     id_prefix: "chatcmpl-synthetic-",
     subtitle:
       "Mind the moat. The gatehouse keeper has been expecting someone, " +
       "though not necessarily you.",
+    otherwise_text: "That is not one of the choices.",
+    nothing_text: "Nothing at all, then.",
+    held_text: "hyperposition",
+    seen_text: "It said hyperposition.",
+    shut_text: "The console stayed shut.",
+    retried_text: "Still nothing.",
     recorded_png:
       "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2" +
       "AAAAH0lEQVR42mP4jwQYkAAucYZBqGGQO48o" +
@@ -172,14 +179,80 @@ namespace test_provider_script {
     };
   }
 
-  // A port on a new test script whose receiver keeps every reply.
-  function bench_make(): ScriptBench {
-    const port = new provider_script.ScriptPort(script_make());
+  // A table as the seed's: `otherwise`, `after_holds` and `after_lacks`.
+  function analyst_make(): provider_script.Script {
+    const run = call_make("call_1", "browser.console_run", { text: "look" });
+    const note = call_make("call_2", "browser.kv_get", {
+      ref: "/metaverse/world",
+    });
+    const read = call_make("call_3", "browser.console_read", { until: "$ " });
+    const { otherwise_text, nothing_text, seen_text, shut_text } = constants;
+    return {
+      start: "start",
+      nodes: {
+        start: {
+          otherwise: { content: otherwise_text, next: "menu" },
+          replies: { "0": { content: nothing_text, next: "menu" } },
+        },
+        menu: {
+          otherwise: { content: otherwise_text, next: "menu" },
+          replies: {
+            "0": { content: nothing_text, next: "menu" },
+            "1": { content: null, tool_calls: [run], next: "looked" },
+            "2": { content: null, tool_calls: [run, note], next: "looked" },
+            "3": { content: null, tool_calls: [run], next: "retried" },
+            "4": { content: null, tool_calls: [run], next: "lone_holds" },
+            "5": { content: null, tool_calls: [run], next: "lone_lacks" },
+            "6": { content: "Ask away.", next: "asking" },
+          },
+        },
+        asking: {
+          otherwise: { content: null, tool_calls: [run], next: "looked" },
+          replies: {},
+        },
+        looked: {
+          after_holds: constants.held_text,
+          after_lacks: { content: shut_text, next: "menu" },
+          after_tools: { content: seen_text, next: "menu" },
+          replies: {},
+        },
+        retried: {
+          after_holds: constants.held_text,
+          after_lacks: { content: null, tool_calls: [read], next: "given_up" },
+          after_tools: { content: seen_text, next: "menu" },
+          replies: {},
+        },
+        given_up: {
+          after_tools: { content: constants.retried_text, next: "menu" },
+          replies: {},
+        },
+        lone_holds: {
+          after_holds: constants.held_text,
+          after_tools: { content: seen_text, next: "menu" },
+          replies: {},
+        },
+        lone_lacks: {
+          after_lacks: { content: shut_text, next: "menu" },
+          after_tools: { content: seen_text, next: "menu" },
+          replies: {},
+        },
+      },
+    };
+  }
+
+  // A port on the script whose receiver keeps every reply.
+  function bench_on(script: provider_script.Script): ScriptBench {
+    const port = new provider_script.ScriptPort(script);
     const received: lines.Line[] = [];
     port.line_receive((line: lines.Line) => {
       received.push(line);
     });
     return { port, received };
+  }
+
+  // A port on a new test script whose receiver keeps every reply.
+  function bench_make(): ScriptBench {
+    return bench_on(script_make());
   }
 
   // A user message with the text.
@@ -221,6 +294,30 @@ namespace test_provider_script {
     for (const call of message.tool_calls ?? []) {
       messages.push({ role: "tool", tool_call_id: call.id, content: "{}" });
     }
+  }
+
+  // Adds the assistant message and a tool result of each text, one per call.
+  function results_give(
+    messages: provider.ChatMessage[],
+    message: provider.ChatMessage,
+    texts: (string | null)[],
+  ): void {
+    messages.push(message);
+    const calls = message.tool_calls ?? [];
+    for (const [index, call] of calls.entries()) {
+      const content = texts[index];
+      messages.push({ role: "tool", tool_call_id: call.id, content });
+    }
+  }
+
+  // The messages of a walk to the menu, the input, and the reply to it.
+  function menu_ask(
+    bench: ScriptBench,
+    input: string,
+  ): [provider.ChatMessage[], provider.ChatMessage] {
+    const messages = [user_say("0")];
+    messages.push(chat_post(bench, messages, 1).message, user_say(input));
+    return [messages, chat_post(bench, messages, 2).message];
   }
 
   // The names of the tools a choice calls, in order.
@@ -449,7 +546,7 @@ namespace test_provider_script {
       );
     }
 
-    // A user message that is not the decimal text of one integer is refused.
+    // With no `otherwise`, a content that is no decimal integer is refused.
     test_input_invalid(): void {
       const bench = bench_make();
       const cases: [string | null, string][] = [
@@ -473,7 +570,7 @@ namespace test_provider_script {
       this.assertEqual(bench.received.length, 0);
     }
 
-    // An integer the node has no reply for is refused.
+    // With no `otherwise`, an integer the node has no reply for is refused.
     test_input_unknown(): void {
       const bench = bench_make();
       const cases: [string, string][] = [
@@ -608,6 +705,161 @@ namespace test_provider_script {
         this.assertEqual(error.message, gold_text(name));
       }
       this.assertEqual(bench.received.length, 0);
+    }
+  }
+
+  // The reply to a text the node does not hold, and what it does not cover.
+  export class TestScriptOtherwise extends unittest.TestCase {
+    // Every text `replies` lacks gets `otherwise`, the click's words included.
+    test_otherwise_answers(): void {
+      const texts = [
+        "one",
+        "",
+        " 1",
+        "01",
+        "-0",
+        "1.0",
+        "9",
+        "-5",
+        i18n("agent.click_text", 2, -1),
+      ];
+      for (const text of texts) {
+        const bench = bench_on(analyst_make());
+        const choice = chat_post(bench, [user_say(text)], 1);
+        this.assertEqual(choice.message, {
+          role: "assistant",
+          content: constants.otherwise_text,
+        });
+        this.assertEqual(choice.finish_reason, "stop");
+      }
+    }
+
+    // `otherwise` moves to its next node, where the choices then answer.
+    test_otherwise_moves(): void {
+      const bench = bench_on(analyst_make());
+      const messages = [user_say("word")];
+      messages.push(chat_post(bench, messages, 1).message, user_say("1"));
+      const choice = chat_post(bench, messages, 2);
+      this.assertEqual(names_of(choice), ["browser.console_run"]);
+    }
+
+    // An input the node holds takes its own reply, not `otherwise`.
+    test_replies_first(): void {
+      const bench = bench_on(analyst_make());
+      const choice = chat_post(bench, [user_say("0")], 1);
+      this.assertEqual(choice.message.content, constants.nothing_text);
+    }
+
+    // An `otherwise` that calls tools moves on once their results are back.
+    test_otherwise_calls(): void {
+      const bench = bench_on(analyst_make());
+      const [messages, asked] = menu_ask(bench, "6");
+      messages.push(asked, user_say("word"));
+      const choice = chat_post(bench, messages, 3);
+      this.assertEqual(names_of(choice), ["browser.console_run"]);
+      results_give(messages, choice.message, [constants.held_text]);
+      const last = chat_post(bench, messages, 4);
+      this.assertEqual(last.message.content, constants.seen_text);
+    }
+
+    // A content that is not a string is refused with `otherwise` in the node.
+    test_content_refused(): void {
+      const bench = bench_on(analyst_make());
+      const error = thrown_get(() => chat_post(bench, [user_say(null)], 1));
+      this.assertEqual(
+        error.message,
+        gold_text("provider_script_input_invalid_null"),
+      );
+      this.assertEqual(bench.received.length, 0);
+    }
+  }
+
+  // The reply after tool results, by the text the results hold.
+  export class TestScriptAfter extends unittest.TestCase {
+    // Results that each hold the text are followed by `after_tools`.
+    test_holds_followed(): void {
+      const bench = bench_on(analyst_make());
+      const [messages, asked] = menu_ask(bench, "2");
+      const output = `{"output":"${constants.held_text}\\n"}`;
+      results_give(messages, asked, [output, constants.held_text]);
+      const choice = chat_post(bench, messages, 3);
+      this.assertEqual(choice.message, {
+        role: "assistant",
+        content: constants.seen_text,
+      });
+    }
+
+    // One result of the reply that lacks the text gives `after_lacks`.
+    test_lacks_followed(): void {
+      const { held_text } = constants;
+      const cases = [
+        ["denied", held_text],
+        [held_text, "denied"],
+        ["", ""],
+      ];
+      for (const texts of cases) {
+        const bench = bench_on(analyst_make());
+        const [messages, asked] = menu_ask(bench, "2");
+        results_give(messages, asked, texts);
+        const choice = chat_post(bench, messages, 3);
+        this.assertEqual(choice.message, {
+          role: "assistant",
+          content: constants.shut_text,
+        });
+      }
+    }
+
+    // `after_lacks` moves to its next node as `after_tools` does.
+    test_lacks_moves(): void {
+      const bench = bench_on(analyst_make());
+      const [messages, asked] = menu_ask(bench, "1");
+      results_give(messages, asked, ["denied"]);
+      messages.push(chat_post(bench, messages, 3).message, user_say("0"));
+      const choice = chat_post(bench, messages, 4);
+      this.assertEqual(choice.message.content, constants.nothing_text);
+    }
+
+    // The calls of `after_lacks` wait for their results, as any reply's do.
+    test_lacks_calls(): void {
+      const bench = bench_on(analyst_make());
+      const [messages, asked] = menu_ask(bench, "3");
+      results_give(messages, asked, ["denied"]);
+      const choice = chat_post(bench, messages, 3);
+      this.assertEqual(names_of(choice), ["browser.console_read"]);
+      this.assertEqual(choice.finish_reason, "tool_calls");
+      results_add(messages, choice.message);
+      const last = chat_post(bench, messages, 4);
+      this.assertEqual(last.message.content, constants.retried_text);
+    }
+
+    // A node with one of `after_holds` and `after_lacks` is a broken table.
+    test_after_unpaired(): void {
+      const cases: [string, string][] = [
+        ["4", "holds"],
+        ["5", "lacks"],
+      ];
+      for (const [input, suffix] of cases) {
+        const bench = bench_on(analyst_make());
+        const [messages, asked] = menu_ask(bench, input);
+        results_give(messages, asked, [constants.held_text]);
+        const error = thrown_get(() => chat_post(bench, messages, 3));
+        this.assertEqual(
+          error.message,
+          gold_text(`provider_script_after_unpaired_${suffix}`),
+        );
+      }
+    }
+
+    // A tool result whose content is not text cannot be read for the text.
+    test_result_refused(): void {
+      const bench = bench_on(analyst_make());
+      const [messages, asked] = menu_ask(bench, "1");
+      results_give(messages, asked, [null]);
+      const error = thrown_get(() => chat_post(bench, messages, 3));
+      this.assertEqual(
+        error.message,
+        gold_text("provider_script_field_invalid_content"),
+      );
     }
   }
 

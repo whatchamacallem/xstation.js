@@ -7,10 +7,11 @@
 # forked child whose stdout and stderr go to a scratch file under build/, so
 # that no formatter writes to the stream. A test-all run formats a Python file
 # with ruff and prints nothing. Run as a program with no option, test_posix.py
-# checks the checkout's whitelisted files and lints them with ruff, formatting
-# nothing and printing nothing, which is why that test is in this suite, one
-# the cloud environment leaves out. Given --anthropic with no program on PATH,
-# which a linter could not start from, it returns and prints nothing.
+# checks the checkout's whitelisted files, lints them with ruff and compiles
+# the API text with tsc, formatting nothing and printing nothing, which is why
+# that test is in this suite, one the cloud environment leaves out. Given
+# --anthropic with no program on PATH, which neither a linter nor tsc could
+# start from, it returns and prints nothing.
 
 import functools, os, runpy, signal, sys, tempfile, test_posix, traceback
 import unittest
@@ -123,13 +124,13 @@ class TestFormatterStep(ChildCase):
 
 # The whole program, as a command line starts it.
 class TestProgramRun(ChildCase):
-    # With no option it checks the files and lints them, printing nothing.
+    # With no option it checks, lints and compiles the API, printing nothing.
     def test_files_checked(self) -> None:
         ending, output = self.child_run(functools.partial(program_run, []))
         self.assertEqual(ending, _ENDING_RETURNED)
         self.assertEqual(output, "")
 
-    # With no linter to start, the switch of the cloud environment returns.
+    # With no program to start, the switch of the cloud environment returns.
     def test_switch_skipped(self) -> None:
         def work() -> None:
             os.environ["PATH"] = self.scratch

@@ -43,6 +43,9 @@ _TOOLS_PATH = os.path.join(_ROOT_PATH, "API", "mcp", "tools.json")
 # The prefix of a browser tool's name in a tool call.
 _BROWSER_PREFIX = "browser."
 
+# The keys of a node of the analyst's table that hold one reply each.
+_REPLY_KEYS = ("otherwise", "after_tools", "after_lacks")
+
 # The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_main_loop"
 
@@ -67,7 +70,7 @@ _PROVIDER_KEY = "provider/script.json"
 # The fixed databases the prepare opens, creating the missing ones.
 _FIXED_DBS = ("_settings", "_preferences", "_files", "metaverse")
 
-# The rows the seed writes in the metaverse beside the two documents.
+# The text rows the seed writes in the metaverse beside the two documents.
 _METAVERSE_ROWS = {
     "player": b"player",
     "world": b"metaverse",
@@ -79,6 +82,9 @@ _SEED_IDS = ("hyperposition", "prompt")
 
 # The heads of the two seeded documents.
 _SEED_HEADS = [("hyperposition", 1), ("prompt", 1)]
+
+# The seeded image: its file, its size, its key in the metaverse and its ref.
+_SEED_IMAGE: dict[str, Any] = harness.gold_get(f"{_GOLD_ID}.image")
 
 # The columns of the metaverse's `universe` table.
 _UNIVERSE_COLUMNS = [("name",), ("title",), ("player",), ("world",)]
@@ -228,13 +234,12 @@ def _tools_browser() -> set[str]:
     return {_BROWSER_PREFIX + tool["name"] for tool in tools}
 
 
-# Every reply of the table: each node's by input, then its `after_tools`.
+# Every reply of the table: each node's by input, then those of its keys.
 def _replies_all(script: dict[str, Any]) -> list[dict[str, Any]]:
     replies: list[dict[str, Any]] = []
     for node in script["nodes"].values():
         replies.extend(node["replies"].values())
-        if "after_tools" in node:
-            replies.append(node["after_tools"])
+        replies.extend(node[key] for key in _REPLY_KEYS if key in node)
     return replies
 
 
@@ -255,15 +260,16 @@ def _calls_all(script: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-# Walks an input as the scripted provider does: its rounds, its last reply.
+# Walks an input by the key `after` where a node holds it, else `after_tools`.
 def _input_walk(
-    script: dict[str, Any], node: str, text: str
+    script: dict[str, Any], node: str, text: str, after: str
 ) -> tuple[list[list[dict[str, Any]]], dict[str, Any]]:
     reply = script["nodes"][node]["replies"][text]
     rounds: list[list[dict[str, Any]]] = []
     while "tool_calls" in reply:
         rounds.append([_call_read(call) for call in reply["tool_calls"]])
-        reply = script["nodes"][reply["next"]]["after_tools"]
+        reached = script["nodes"][reply["next"]]
+        reply = reached[after if after in reached else "after_tools"]
     return rounds, reply
 
 
@@ -628,24 +634,63 @@ class TestPrepare(ScratchCase):
         seeded = _value_read(self.root, "_files", _PROVIDER_KEY)
         self.assertEqual(seeded, _seed_read("provider_script.json"))
 
-    # A seed document that is no JSON object is refused, naming its file.
-    def test_seed_invalid(self) -> None:
-        self.settings_write()
+    # A copy of the seed in the root and the link that makes a module read it.
+    def seed_link(self) -> tuple[str, str]:
         directory = os.path.join(self.root, "python")
         seed = os.path.join(directory, "seed")
         shutil.copytree(_SEED_PATH, seed)
-        path = os.path.join(seed, "hyperposition.json")
-        with open(path, "w", encoding="utf-8") as file:
-            file.write("[]")
         # The module reads the seed beside its file, so this link gives it one.
         link = os.path.join(directory, "main_loop.py")
         os.symlink(_MODULE_PATH, link)
+        return seed, link
+
+    # The last line of what a child's prepare by the link raised.
+    def refusal_read(self, link: str) -> str:
         work = functools.partial(_prepare_linked, self.root, link)
         ending, output = self.child_run(work, b"")
         self.assertEqual(output, b"")
-        last = ending.rstrip("\n").rsplit("\n", 1)[-1]
+        return ending.rstrip("\n").rsplit("\n", 1)[-1]
+
+    # A seed file that is gone raises as `open` does, naming the file.
+    def absent_check(self, name: str) -> None:
+        self.settings_write()
+        seed, link = self.seed_link()
+        path = os.path.join(seed, name)
+        os.remove(path)
+        message = _text_get("seed_absent").format(path)
+        self.assertEqual(
+            self.refusal_read(link), f"FileNotFoundError: {message}"
+        )
+
+    # The image's row holds the file's bytes, and the scene's header names it.
+    def test_image_seeded(self) -> None:
+        self.settings_write()
+        self.prepare_run()
+        image = _value_read(self.root, "metaverse", _SEED_IMAGE["key"])
+        self.assertEqual(len(image), _SEED_IMAGE["size"])
+        self.assertEqual(image, _seed_read(_SEED_IMAGE["file"]))
+        document = _value_read(self.root, "metaverse", "hyperposition/1")
+        scene: dict[str, Any] = json.loads(document)
+        self.assertEqual(scene["1"], _SEED_IMAGE["ref"])
+        self.assertEqual(scene["image"], {"$ref": 1})
+
+    # A seed document that is gone raises, naming its file.
+    def test_document_absent(self) -> None:
+        self.absent_check("hyperposition.json")
+
+    # An image that is gone raises as a document that is gone does.
+    def test_image_absent(self) -> None:
+        self.absent_check(_SEED_IMAGE["file"])
+
+    # A seed document that is no JSON object is refused, naming its file.
+    def test_seed_invalid(self) -> None:
+        self.settings_write()
+        seed, link = self.seed_link()
+        path = os.path.join(seed, "hyperposition.json")
+        with open(path, "w", encoding="utf-8") as file:
+            file.write("[]")
         message = _text_get("main_loop_seed_invalid").format(path)
-        self.assertEqual(last, f"ValueError: {message}")
+        self.assertEqual(self.refusal_read(link), f"ValueError: {message}")
 
 
 # The analyst's table in the seed, whose texts only the demo's golds pin.
@@ -690,14 +735,54 @@ class TestAnalyst(unittest.TestCase):
             self.assertEqual(sorted(node["replies"]), held, name)
 
     # Each input of each input node makes the gold's calls and ends in `menu`.
-    def test_inputs_lead(self) -> None:
+    def walks_check(self, inputs: dict[str, Any], after: str) -> None:
         for name in self.gold["input_nodes"]:
-            for text, rounds in self.gold["inputs"].items():
-                walked, last = _input_walk(self.script, name, text)
+            for text, rounds in inputs.items():
+                walked, last = _input_walk(self.script, name, text, after)
                 trimmed = _rounds_trim(walked, rounds)
                 self.assertEqual(trimmed, rounds, f"{name} {text}")
                 end = self.gold["end_node"]
                 self.assertEqual(last["next"], end, f"{name} {text}")
+
+    # Results that hold the texts lead through the table's every call.
+    def test_inputs_lead(self) -> None:
+        self.walks_check(self.gold["inputs"], "after_tools")
+
+    # Results that lack a text end the input there, as after a refusal.
+    def test_lacking_lead(self) -> None:
+        self.walks_check(self.gold["lacking"], "after_lacks")
+
+    # Every node with replies answers any other input, as a person errs.
+    def test_otherwise_held(self) -> None:
+        for name, node in self.script["nodes"].items():
+            if node["replies"]:
+                self.assertIn("otherwise", node, name)
+
+    # Every input node's `otherwise` is one reply: no tools, on to `menu`.
+    def test_otherwise_lead(self) -> None:
+        names = self.gold["input_nodes"]
+        replies = [self.script["nodes"][name]["otherwise"] for name in names]
+        for reply in replies:
+            self.assertEqual(reply, replies[0])
+            self.assertNotIn("tool_calls", reply)
+            self.assertEqual(reply["next"], self.gold["end_node"])
+
+    # `after_lacks` stands wherever `after_holds` does, and only there.
+    def test_lacks_paired(self) -> None:
+        for name, node in self.script["nodes"].items():
+            self.assertEqual(
+                "after_holds" in node, "after_lacks" in node, name
+            )
+
+    # The nodes that read the tools' results are the gold's, with its texts.
+    def test_holds_read(self) -> None:
+        nodes = self.script["nodes"].items()
+        holding = {
+            name: node["after_holds"]
+            for name, node in nodes
+            if "after_holds" in node
+        }
+        self.assertEqual(holding, self.gold["holding"])
 
 
 # `loop_run` over pipes: the pushes, the replies, failures and the end.

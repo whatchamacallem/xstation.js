@@ -146,10 +146,7 @@ namespace test_console_open {
       dispatch.reply_make(line, { rows: rows_read(parts.console_area) }),
     );
     dispatch.handler_register(constants.phase_type, version, (line) =>
-      dispatch.reply_make(line, {
-        open: parts.view.open_is(),
-        wanted: parts.view.open_wanted(),
-      }),
+      dispatch.reply_make(line, { wanted: parts.view.open_wanted() }),
     );
     // Text typed into the console's terminal, as an input method gives it.
     dispatch.handler_register(constants.text_type, version, (line) => {

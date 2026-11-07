@@ -524,7 +524,7 @@ namespace test_tools_browser {
       far = far_fresh();
     }
 
-    // Ends the test's own debug mode and checks every scripted reply was given.
+    // Ends the test's debug mode and checks every scripted reply was given.
     tearDown(): void {
       debug_mode = undefined;
       for (const [type, left] of far.replies) {
@@ -1064,28 +1064,44 @@ namespace test_tools_browser {
       ]);
     }
 
-    // Outside debug mode each tool throws and asks the player nothing.
+    // Outside debug mode each tool answers an error, the player asked nothing.
     test_debug_off(): void {
       debug_mode = false;
-      const error = this.failure_of("console_run", {
+      const result = this.tool_call("console_run", {
         text: "echo hi",
         timeout_seconds: 5,
       });
-      this.assertEqual(error.message, gold_text("tools_browser_debug_off"));
-      const written = this.failure_of("console_write", { text: "echo hi" });
-      this.assertEqual(
-        written.message,
-        gold_text("tools_browser_debug_off_write"),
-      );
-      const read = this.failure_of("console_read", {
+      const text = gold_text("tools_browser_debug_off");
+      this.assertEqual(result, {
+        content: [{ type: "text", text }],
+        isError: true,
+      });
+      const written = this.tool_call("console_write", { text: "echo hi" });
+      const write_text = gold_text("tools_browser_debug_off_write");
+      this.assertEqual(written, {
+        content: [{ type: "text", text: write_text }],
+        isError: true,
+      });
+      const read = this.tool_call("console_read", {
         until: "$ ",
         timeout_seconds: 5,
       });
-      this.assertEqual(
-        read.message,
-        gold_text("tools_browser_debug_off_read"),
-      );
+      const read_text = gold_text("tools_browser_debug_off_read");
+      this.assertEqual(read, {
+        content: [{ type: "text", text: read_text }],
+        isError: true,
+      });
       this.assertEqual(far.got, []);
+    }
+
+    // The refusal fails nothing, so that the turn's next call is answered.
+    test_debug_continued(): void {
+      debug_mode = false;
+      this.tool_call("console_write", { text: "echo hi" });
+      this.assertEqual(bench_get().server.failure_take(), undefined);
+      const created = this.tool_call("db_create", { db: "alpha" });
+      this.assertEqual(this.text_of(created), "{}");
+      this.assertEqual(this.store_get().db_list(), ["alpha"]);
     }
   }
 

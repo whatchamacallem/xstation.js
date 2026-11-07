@@ -2759,7 +2759,7 @@ def rung_error_first(session: PageSession) -> str:
     )
 
 
-# The root whose engine lock this process holds, so its server fails at once.
+# The root whose engine lock this process holds, so its server's wait fails.
 def rungs_locked(session: PageSession) -> None:
     path = os.path.join(session.root, _LOCK_FILE)
     with open(path, "ab") as file:

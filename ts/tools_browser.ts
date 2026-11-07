@@ -301,6 +301,11 @@ namespace tools_browser {
     return result_text(utility.json_text(value));
   }
 
+  // A refusal for the AI to read, marked as an error, failing nothing.
+  function result_refused(text: string): mcp.ToolResult {
+    return { ...result_text(text), isError: true };
+  }
+
   // The tool result of a script run, marked as an error when it threw.
   function script_result(run: script.ScriptResult): mcp.ToolResult {
     const result = result_json(run);
@@ -419,10 +424,13 @@ namespace tools_browser {
     }
 
     // In debug mode asks the tool's permit unless always allowed, then shows.
-    console_ask(state: ConsoleState, args: unknown): dispatch.Sleep {
+    console_ask(
+      state: ConsoleState,
+      args: unknown,
+    ): mcp.ToolResult | dispatch.Sleep {
       const name = constants.tool_prefix + state.tool;
       if (!this.debug_on()) {
-        throw new Error(i18n("tools_browser.debug_off", name));
+        return result_refused(i18n("tools_browser.debug_off", name));
       }
       if (this.allowed.has(name)) {
         return this.console_show(state);
@@ -702,8 +710,7 @@ namespace tools_browser {
         const name = constants.tool_prefix + asked.tool;
         const choice = reply_payload(replies).choice;
         if (choice === constants.deny_choice) {
-          const denied = i18n("tools_browser.permit_denied", name);
-          return { ...result_text(denied), isError: true };
+          return result_refused(i18n("tools_browser.permit_denied", name));
         }
         if (choice === constants.always_choice) {
           context.allowed.add(name);

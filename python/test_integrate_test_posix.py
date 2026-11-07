@@ -2,21 +2,21 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests test_posix.py with its project callees, category.py, reformat.py and
-# switches.py, whose suites have passed: its formatter step in each category,
-# so that no formatter starts, and its switch of the cloud environment. Each
-# runs in a forked child whose stdout and stderr go to a scratch file under
-# build/, so that nothing it prints reaches the stream. A smoke-test run,
-# given a Python file that ruff would change, prints nothing and leaves the
-# file as it is; a test-all run, given PowerShell files, which the Linux
-# rows of reformat_table.json leave to Windows, prints nothing and formats.
-# With no program on PATH, which a linter could not start from, main returns
-# and prints nothing when given --anthropic, and when test_all.py has turned
-# the switch on before calling it. Under the switch test_all.py leaves the
-# suites that start formatters out of a test-all run, and --module refuses
-# them, while without it the run takes them. Every suite of a test-all run
-# counts under --coverage for modules that exist, the suite of the store's
-# limit for the store module.
+# Tests test_posix.py with its project callees, category.py, page_build.py,
+# reformat.py and switches.py, whose suites have passed: its formatter step in
+# each category, so that no formatter starts, and its switch of the cloud
+# environment. Each runs in a forked child whose stdout and stderr go to a
+# scratch file under build/, so that nothing it prints reaches the stream. A
+# smoke-test run, given a Python file that ruff would change, prints nothing
+# and leaves the file as it is; a test-all run, given PowerShell files, which
+# the Linux rows of reformat_table.json leave to Windows, prints nothing and
+# formats. With no program on PATH, which neither a linter nor tsc could start
+# from, main returns and prints nothing when given --anthropic, and when
+# test_all.py has turned the switch on before calling it. Under the switch
+# test_all.py leaves the suites that start formatters out of a test-all run,
+# and --module refuses them, while without it the run takes them. Every suite
+# of a test-all run counts under --coverage for modules that exist, the suite
+# of the store's limit for the store module.
 
 import argparse, functools, os, signal, switches, sys, tempfile, test_all
 import test_posix, traceback, unittest
@@ -147,7 +147,7 @@ class TestFormatterStep(ChildCase):
 
 # The switch of the cloud environment, which skips every check.
 class TestAnthropicSwitch(ChildCase):
-    # Runs main in a child that finds no program, so no linter can start.
+    # Runs main in a child that finds no program, so no linter or tsc starts.
     def main_run(self, arguments: list[str]) -> tuple[str, str]:
         def work() -> None:
             os.environ["PATH"] = self.scratch

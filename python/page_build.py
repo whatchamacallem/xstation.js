@@ -3,19 +3,19 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Builds the pages and the Node bundle. API/python/page_build.pyi holds the
-# contract. stdout is the driver's TAP stream when the driver builds the
-# headless page, so page_build returns the digest and never prints it, and
-# tsc's output never reaches stdout: a failed compile raises, tsc's output in
-# its cause. SQLite's glue and wasm and xterm.js come from the archives
-# third_party_fetch.py places in third_party/.
+# Builds the pages and the Node bundle, and type checks the API text of
+# API/ts. API/python/page_build.pyi holds the contract. stdout is the driver's
+# TAP stream when the driver builds the headless page, so page_build returns
+# the digest and never prints it, and tsc's output never reaches stdout: a
+# failed compile raises, tsc's output in its cause. SQLite's glue and wasm and
+# xterm.js come from the archives third_party_fetch.py places in third_party/.
 
 import argparse, base64, hashlib, json, os, re, shutil, subprocess, sys
 import tarfile, zipfile
 from typing import Any, IO, cast
 
 # The public name of this module, as its stub declares it.
-__all__ = ["node_build", "page_build", "page_copy"]
+__all__ = ["api_check", "node_build", "page_build", "page_copy", "tsc_run"]
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -46,6 +46,9 @@ _CONFIG_NAME = "tsconfig.test.json"
 
 # The `tsc` configuration of the Node bundle, rewritten where its `outFile` is.
 _NODE_CONFIG_NAME = "tsconfig.node.json"
+
+# The `tsc` configuration of the API text, which emits nothing.
+_API_CONFIG_NAME = "tsconfig.api.json"
 
 # The start of the Node bundle: the strict line, `test_vectors`, `test_gold`.
 _NODE_HEAD = '"use strict";\nvar test_vectors = {};\nvar test_gold = {};\n'
@@ -109,22 +112,14 @@ _TSC_SECONDS = 120.0
 sys.pycache_prefix = os.path.join(_BUILD_PATH, "pycache")
 
 
+# Type checks the API text as one project, which proves it against itself.
+def api_check() -> None:
+    tsc_run(os.path.join(_TS_PATH, _API_CONFIG_NAME))
+
+
 # Compiles the project of the `tsc` config into the path, returning its text.
 def bundle_compile(config_path: str, out_path: str) -> str:
-    tsc_path = shutil.which("tsc")
-    if tsc_path is None:
-        raise FileNotFoundError("tsc, the TypeScript compiler, is not on PATH")
-    completed = subprocess.run(
-        [tsc_path, "--project", config_path, "--outFile", out_path],
-        capture_output=True,
-        check=False,
-        timeout=_TSC_SECONDS,
-    )
-    if completed.returncode != 0:
-        output = completed.stdout + completed.stderr
-        raise RuntimeError(
-            f"tsc exited with {completed.returncode} compiling {config_path}"
-        ) from RuntimeError(output.decode("utf-8", "replace"))
+    tsc_run(config_path, "--outFile", out_path)
     return text_read(out_path)
 
 
@@ -299,6 +294,24 @@ def tar_read(path: str, suffixes: list[str]) -> list[bytes]:
 def text_read(path: str) -> str:
     with open(path, "rb") as file:
         return file.read().decode("utf-8")
+
+
+# Runs `tsc` on the config and the options, its output kept off stdout.
+def tsc_run(config_path: str, *options: str) -> None:
+    tsc_path = shutil.which("tsc")
+    if tsc_path is None:
+        raise FileNotFoundError("tsc, the TypeScript compiler, is not on PATH")
+    completed = subprocess.run(
+        [tsc_path, "--project", config_path, *options],
+        capture_output=True,
+        check=False,
+        timeout=_TSC_SECONDS,
+    )
+    if completed.returncode != 0:
+        output = completed.stdout + completed.stderr
+        raise RuntimeError(
+            f"tsc exited with {completed.returncode} compiling {config_path}"
+        ) from RuntimeError(output.decode("utf-8", "replace"))
 
 
 # Writes the vectors into the folder anew, then returns them as base64 JSON.

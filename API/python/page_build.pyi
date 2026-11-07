@@ -21,6 +21,9 @@
 
 from typing import Any
 
+# Compiles `ts/tsconfig.api.json`, every file of `API/ts`, emitting nothing.
+def api_check() -> None: ...
+
 # Builds the Node bundle in the build directory. Returns the bundle's path.
 def node_build(build_path: str) -> str: ...
 
@@ -29,3 +32,6 @@ def page_build(template: str, name: str) -> str: ...
 
 # Writes `build/<name>.html` at the path with the gold `{"typescript": ...}`.
 def page_copy(name: str, path: str, gold: dict[str, Any]) -> str: ...
+
+# Runs tsc on the config, raising with its output: a test gives its own here.
+def tsc_run(config_path: str, *options: str) -> None: ...

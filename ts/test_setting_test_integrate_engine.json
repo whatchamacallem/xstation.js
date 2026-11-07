@@ -7,7 +7,9 @@
         "wire_initialized",
         "wire_list",
         "wire_list_reply",
-        "first_render"
+        "first_store",
+        "first_render",
+        "first_painted"
       ],
       "name": "first_render",
       "seconds": 30,
@@ -45,10 +47,77 @@
       "name": "choice_3",
       "seconds": 40,
       "send": ["say_3"]
+    },
+    {
+      "expect": ["wire_otherwise", "say_number_reply"],
+      "name": "bad_number",
+      "seconds": 5,
+      "send": ["say_number"]
+    },
+    {
+      "expect": ["wire_otherwise", "say_word_reply"],
+      "name": "bad_word",
+      "seconds": 5,
+      "send": ["say_word"]
+    },
+    {
+      "expect": ["wire_otherwise", "say_empty_reply"],
+      "name": "bad_empty",
+      "seconds": 5,
+      "send": ["say_empty"]
+    },
+    {
+      "expect": ["wire_otherwise", "click_reply"],
+      "name": "bad_click",
+      "seconds": 5,
+      "send": ["click"]
+    },
+    {
+      "expect": [
+        "wire_user_3",
+        "permit_denied",
+        "wire_asked_3",
+        "wire_denied",
+        "wire_lacks",
+        "say_denied_reply"
+      ],
+      "name": "choice_3_denied",
+      "seconds": 5,
+      "send": ["say_denied"]
+    },
+    {
+      "expect": [
+        "wire_user_1",
+        "render_again",
+        "wire_asked_1",
+        "wire_result_1",
+        "wire_answer_1",
+        "say_again_reply"
+      ],
+      "name": "choice_1_again",
+      "seconds": 5,
+      "send": ["say_again"]
     }
   ],
   "columns": 120,
   "lines": {
+    "click": {
+      "0": {
+        "id": 1006,
+        "type": "ai.click"
+      },
+      "x": 1,
+      "y": 2
+    },
+    "click_reply": {
+      "0": {
+        "reply": 1006,
+        "type": "ai.click"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "That is not one of the choices. 1, 2, 3 or 0, when you are quite ready.",
+      "turn": 18
+    },
     "console_busy": {
       "0": {
         "type": "console.busy"
@@ -61,7 +130,7 @@
     },
     "console_show": {
       "0": {
-        "id": 14,
+        "id": 15,
         "type": "console.show"
       }
     },
@@ -70,17 +139,39 @@
         "type": "test_integrate_engine.dash_reached"
       }
     },
+    "first_painted": {
+      "0": {
+        "type": "test_integrate_engine.first_painted"
+      },
+      "colours": ["0 0 0 255"],
+      "height": 4,
+      "hidden": false,
+      "width": 4
+    },
     "first_render": {
       "0": {
-        "id": 6,
+        "id": 7,
         "type": "render"
       },
+      "image": "/metaverse/image/hyperposition",
       "scene": "/metaverse/hyperposition/1",
       "subtitle": "How can I help you?"
     },
+    "first_store": {
+      "0": {
+        "blobs": 1,
+        "id": 6,
+        "type": "media.store"
+      },
+      "1": {
+        "d": "Qk1mAAAAAAAAADYAAAAoAAAABAAAAAQAAAABABgAAAAAADAAAAATCwAAEwsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "size": 102
+      },
+      "k": "/metaverse/image/hyperposition"
+    },
     "permit_ask": {
       "0": {
-        "id": 13,
+        "id": 14,
         "type": "permit.ask"
       },
       "input": {
@@ -90,9 +181,29 @@
       "permit": 1,
       "tool": "browser.console_run"
     },
+    "permit_denied": {
+      "0": {
+        "id": 28,
+        "type": "permit.ask"
+      },
+      "input": {
+        "text": "echo hyperposition",
+        "timeout_seconds": 30
+      },
+      "permit": 2,
+      "tool": "browser.console_run"
+    },
     "render_1": {
       "0": {
-        "id": 9,
+        "id": 10,
+        "type": "render"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "A subtitle, as requested. Do try to contain yourself."
+    },
+    "render_again": {
+      "0": {
+        "id": 32,
         "type": "render"
       },
       "scene": "/metaverse/hyperposition/1",
@@ -100,7 +211,7 @@
     },
     "render_output": {
       "0": {
-        "id": 19,
+        "id": 20,
         "type": "render"
       },
       "scene": "/metaverse/hyperposition/1",
@@ -138,6 +249,86 @@
       "subtitle": "It said hyperposition, as one could have guessed. Anything else?",
       "turn": 10
     },
+    "say_again": {
+      "0": {
+        "id": 1008,
+        "type": "ai.say"
+      },
+      "text": "1"
+    },
+    "say_again_reply": {
+      "0": {
+        "reply": 1008,
+        "type": "ai.say"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "There. Words on a black page. I trained for years for this.",
+      "turn": 26
+    },
+    "say_denied": {
+      "0": {
+        "id": 1007,
+        "type": "ai.say"
+      },
+      "text": "3"
+    },
+    "say_denied_reply": {
+      "0": {
+        "reply": 1007,
+        "type": "ai.say"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "The console stayed shut: you refused it, it was not served with --debug, or it took too long. I shall try to bear it.",
+      "turn": 22
+    },
+    "say_empty": {
+      "0": {
+        "id": 1005,
+        "type": "ai.say"
+      },
+      "text": ""
+    },
+    "say_empty_reply": {
+      "0": {
+        "reply": 1005,
+        "type": "ai.say"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "That is not one of the choices. 1, 2, 3 or 0, when you are quite ready.",
+      "turn": 16
+    },
+    "say_number": {
+      "0": {
+        "id": 1003,
+        "type": "ai.say"
+      },
+      "text": "7"
+    },
+    "say_number_reply": {
+      "0": {
+        "reply": 1003,
+        "type": "ai.say"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "That is not one of the choices. 1, 2, 3 or 0, when you are quite ready.",
+      "turn": 12
+    },
+    "say_word": {
+      "0": {
+        "id": 1004,
+        "type": "ai.say"
+      },
+      "text": "word"
+    },
+    "say_word_reply": {
+      "0": {
+        "reply": 1004,
+        "type": "ai.say"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "That is not one of the choices. 1, 2, 3 or 0, when you are quite ready.",
+      "turn": 14
+    },
     "wire_answer_1": {
       "0": {
         "type": "test_integrate_engine.wire_answer_1"
@@ -163,6 +354,11 @@
         "type": "test_integrate_engine.wire_asked_output"
       }
     },
+    "wire_denied": {
+      "0": {
+        "type": "test_integrate_engine.wire_denied"
+      }
+    },
     "wire_initialize": {
       "0": {
         "type": "test_integrate_engine.wire_initialize"
@@ -178,6 +374,11 @@
         "type": "test_integrate_engine.wire_initialized"
       }
     },
+    "wire_lacks": {
+      "0": {
+        "type": "test_integrate_engine.wire_lacks"
+      }
+    },
     "wire_list": {
       "0": {
         "type": "test_integrate_engine.wire_list"
@@ -186,6 +387,11 @@
     "wire_list_reply": {
       "0": {
         "type": "test_integrate_engine.wire_list_reply"
+      }
+    },
+    "wire_otherwise": {
+      "0": {
+        "type": "test_integrate_engine.wire_otherwise"
       }
     },
     "wire_result_1": {
@@ -215,7 +421,7 @@
     }
   },
   "output_kind": "0",
-  "permit_choice": "accept",
+  "permit_choices": ["accept", "deny"],
   "reached": "\r\nhyperposition\r\n$ ",
   "root": {},
   "rows": 40,
@@ -286,7 +492,7 @@
       "parts": [
         "> {\"0\":{\"type\":\"turn.append\"}",
         "\"tool_call_id\":\"call_4\"",
-        "hyperposition"
+        "hyperposition\\\\n"
       ]
     },
     {
@@ -305,6 +511,28 @@
       "parts": [
         "> {\"0\":{\"type\":\"turn.append\"}",
         "\"content\":\"It said hyperposition, as one could have guessed. Anything else?\""
+      ]
+    },
+    {
+      "line": "wire_otherwise",
+      "parts": [
+        "> {\"0\":{\"type\":\"turn.append\"}",
+        "\"content\":\"That is not one of the choices. 1, 2, 3 or 0, when you are quite ready.\""
+      ]
+    },
+    {
+      "line": "wire_denied",
+      "parts": [
+        "> {\"0\":{\"type\":\"turn.append\"}",
+        "\"tool_call_id\":\"call_4\"",
+        "The player denied the tool browser.console_run."
+      ]
+    },
+    {
+      "line": "wire_lacks",
+      "parts": [
+        "> {\"0\":{\"type\":\"turn.append\"}",
+        "\"content\":\"The console stayed shut: you refused it, it was not served with --debug, or it took too long. I shall try to bear it.\""
       ]
     }
   ]

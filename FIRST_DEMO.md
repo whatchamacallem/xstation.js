@@ -13,14 +13,19 @@ No real AI provider is contacted, by the rule added today.
 1.1. In WSL, from the checkout: `python3 python/xsjs_serve.py --debug`. It
 builds the engine page, makes a root in `~/.cache/xsjs/root` as the Windows
 start script makes one, serves it through the ttyd the project built on
-127.0.0.1 port 5769, and prints the address. It keeps serving until ctrl C.
+127.0.0.1 port 5769, and prints the address. It keeps serving until ctrl C. A
+root seeded before the image of 1.3 and the answers of 1.4 keeps its old seed,
+so `--fresh` is needed once to see them.
 
 1.2. In a browser on Windows: `http://localhost:5769/`. WSL2 forwards localhost
 to WSL's own ports, so no Windows script runs.
 
 1.3. The page is black. At the bottom is the subtitle band with the analyst's
 remark from the seed, "How can I help you?", and a text box. The picture area
-above it is black because the hyperposition has no image.
+above it shows the hyperposition's image, 4 px by 4 px and black, scaled up as
+a black square. The `render` tool calls of the choices below name no image, so
+the first of them hides the picture, and the page stays black until the next
+load.
 
 1.4. Type a number and Enter. The analyst, played by the scripted AI, answers.
 Each answer goes through the MCP tools and ends in the band:
@@ -33,9 +38,15 @@ Each answer goes through the MCP tools and ends in the band:
 | 0 | Answers in text, calling no tool | The provider request and reply only |
 
 The choices are the same at every step, so they can be taken in any order and
-as often as wanted. Any other number ends the page on the fault screen with the
-scripted provider's refusal and its cascade, which is the designed answer to an
-input the script does not hold.
+as often as wanted. Any input the table does not hold, another number, a word,
+an empty line or a click on the picture, is a person's error and not a fault:
+the analyst answers it in the band, the choices stay as they were, and the box
+opens again.
+
+Choice 3 ends the same way when its command does not run. On a root served
+without `--debug` the console tools work in debug mode only, so no permit is
+asked and no console shows. After a Deny no console shows. In both the analyst
+says so honestly in the band, and the turn ends normally.
 
 1.5. ctrl 0 shows the console, dash in the bubblewrap sandbox, where the
 maintainer types too; ctrl 0 again hides it. ctrl 1 shows the overlay of the
@@ -43,7 +54,9 @@ wire, every line sent and received on tty 1, rendered.
 
 1.6. Everything that crossed any lane is in the root's `_verbose.sqlite`.
 `python3 python/xsjs_log.py ~/.cache/xsjs/root` prints the timeline, every
-line's full JSLB, from both threads of the page and from the server.
+line's full JSLB, from both threads of the page and from the server. The record
+belongs to one serve: each start of the serve program begins a new log, and the
+last serve's stays readable until then.
 
 1.7. Before 1.1, `python3 python/test_demo.py` proves the page is ready: it
 serves a fresh root the same way, drives chrome-headless-shell through DevTools
@@ -80,6 +93,30 @@ The maintainer's words of 2026-11-06, numbered for reference below.
 
 R12 and R14 are done: both rules are in the Testing rules of the project as of
 this session. The rest is this plan.
+
+The maintainer's words of 2026-11-07, answering the questions of the run
+before, numbered on from R15.
+
+- R16. Test time limits: the test that ttyd dies with its parent moves to a
+  suite of its own in the full run. The default run stays fast, but the
+  guarantee is proved only in the full run.
+- R17. API type check: add a config listing every API file and a build step
+  that compiles it. This meets the plan, costs one more compile, and may show
+  many mismatches at first.
+- R18. Reload against the engine's lock: wait a few seconds for the lock. This
+  closes the race, but a real second tab takes that long to show its fault.
+- R19. A full debug log: start a new log at each serve. It needs no option, but
+  the old record goes at each start.
+- R20. Choice 3 without `--debug`: have the tool answer the AI with an error
+  and let the turn go on. This changes the rule that a failing tool fails the
+  server, for this one refusal.
+- R21. Update the docs to say that bad user input is an exception to the fail
+  early and fail entirely design. User error interacting with the web page is
+  not an exception class error, instead it is expected and designed for.
+- R22. The engine outside debug mode: leave it. The demo runs in debug mode.
+- R23. Images from end to end: add a scene with an image to the integration
+  block. It proves the whole path, and adds a seeded image and run time. A 4px
+  x 4px black image for the hyperposition scene is fine.
 
 ## 3. What exists and what is missing
 
@@ -190,8 +227,11 @@ own for the unit suite:
    `engine.synced`; then the first render with the wake `engine.rendered`. The
    render reads the current world from `/metaverse/world`, the current scene
    from the world's `scene` row, the scene document's `subtitle` and, when it
-   has one, its `image`, and submits `render` to the UI thread, which paints
-   black with the subtitle for the hyperposition and opens the box.
+   has one, its `image`. A scene with an image first stores the image with the
+   UI thread, `media.store` of its bytes with the wake `engine.stored`, as the
+   UI's cache is empty at a load, then submits `render`; a scene with none
+   submits `render` at once. The UI thread paints the hyperposition's image,
+   shows the subtitle and opens the box.
 
 4.2.3. Two changes to the bring up. The worker's `tap_start` runs its `run`
 function in every mode, at once after the Empty reply, instead of only in
@@ -204,6 +244,18 @@ test worker's on the pool `xsjs-engine-pool`, its directory
 cleared at start; and `TestStart`, what the worker's run gets beside its queue,
 becomes `WorkerStart`, as it is no longer the tests' alone. The sentence of the
 boot's contract that no program but the test suites runs goes.
+
+4.2.4. The seed's hyperposition scene names an image, 4 px by 4 px and black,
+the file `python/seed/hyperposition.bmp`. The server's seeding
+(`python/main_loop.py`) reads the file and writes the row
+`/metaverse/image/hyperposition` before the documents, and the scene document
+(`python/seed/hyperposition.json`) gains the header key 1 holding that ref, and
+`image` holds `{"$ref": 1}`, as the seed is written in the encoded form, since
+`doc_put` stores a body as given. The canvas then shows a black square, which
+is R2 taken literally. A root seeded before this keeps its old scene and its
+old table, as the seed goes into a new root only: `--fresh` is needed to see
+the image or the answers of 4.4.2, and until then an input the old table does
+not hold still ends on the fault screen.
 
 ### 4.3. The UI thread's program and the engine page
 
@@ -237,36 +289,75 @@ calls as `mcp` lines, each tool's own lines, the turn's rows as commits over
 the wire, and the end of the turn back to the UI thread, which shows the
 subtitle and opens the box again. These handlers all exist.
 
+4.3.4. A person's actions on the page end on no fault screen, by R21, in four
+more places. The box closes in its own submit and click listeners, as well as
+when its turn starts, as the queue's next step comes too late: a second Enter
+or click on a busy UI thread would start a second turn, which the scripted
+provider refuses. The UI thread's program sets the box's `maxLength` to
+`line_max` over 8, so that a paste past it is cut and the turn it says fits one
+line, at JSON's worst of 6 bytes a character and the line's own overhead. In a
+window too short for one row the console leaves one row, as a short window is a
+person's choice, where ctrl 0 or a resize used to throw. `console.show` on a
+view that is not idle, as when ctrl 0 has just asked for tty 0, is answered at
+once, as tty 0's writer holds the AI's lines until dash's prompt, and only an
+idle view sleeps until tty 0 opens. So the refusal `page.console_busy`, which
+ended that case on the fault screen, and the view's `open_is`, which then had
+no caller, are gone.
+
 ### 4.4. The scripted analyst
 
 4.4.1. The scripted provider walks a table of nodes: each node answers each
 input it holds with a reply, which may call tools and names the node to be in
 once their results are back, and a node reached by tools holds the reply that
-follows them. The seed of the table, which the server writes into `_files` of
-a new root, is the file `python/seed/provider_script.json`, which today holds
-one empty node.
+follows them, `after_tools`. A node may also hold `otherwise`, the reply to any
+input it does not hold. A node reached by tools may hold `after_holds`, a text
+every tool result of the reply must hold for `after_tools` to follow, with
+`after_lacks`, the reply when one does not. The seed of the table, which the
+server writes into `_files` of a new root, is the file
+`python/seed/provider_script.json`, which today holds one empty node.
 
 4.4.2. The demo's table has two nodes, `start` and `menu`, with the same four
-inputs in each, so that the choices are the same at every step:
+inputs and the same `otherwise` in each, so that the choices are the same at
+every step:
 
 | Input | Reply | Tool calls, in order | After the tools | Next node |
 |---|---|---|---|---|
 | 1 | no text | `browser.render` with a subtitle | text | `menu` |
 | 2 | no text | `browser.kv_put` on `/metaverse/demo/note`, `browser.kv_get` of it | text | `menu` |
-| 3 | no text | `browser.console_run` of `echo hyperposition` with a timeout | `browser.render` with the output's subtitle, then text | `menu` |
+| 3 | no text | `browser.console_run` of `echo hyperposition` with a timeout | `browser.render` with the output's subtitle, then text, when the tool's result holds `hyperposition`, by `after_holds`; else text alone, by `after_lacks` | `menu` |
 | 0 | text | none | | `menu` |
+| any other, `otherwise` | text naming the choices | none | | `menu` |
 
 The texts are the analyst's, bored and British as the prompt describes her,
 and they are the maintainer's to edit in the seed. The first screen shows the
 seed scene's remark alone; the choices are this table's. An input the table
-does not hold is refused by the scripted provider, which fails the worker loud
-and shows the fault screen with the cascade, as the Errors rules require.
+does not hold is a person's error, which the Errors rules expect and design
+for, so the analyst answers it. `otherwise` takes a number outside the table, a
+word, an empty line or a click on the picture, whose message is the text
+`agent.click_text`. The scripted provider's refusal stays only for a table
+holding no `otherwise`, a test's own script, where an input it lacks is a bug
+of the test: it fails the worker loud and shows the fault screen with the
+cascade, as the Errors rules require. A content that is not a string stays a
+refusal in every table, as no person can send one.
 
 4.4.3. The texts of the demo test's gold pin the subtitles, so a change of the
 seed changes the gold. A test of the seed's coherence runs beside the server's
 seeding tests: every `next` names a node, every tool call names a browser tool
-of the tool list with its prefix, every argument is a JSON object, and the
-demo's inputs lead where this table says.
+of the tool list with its prefix, every argument is a JSON object, every node
+with replies holds `otherwise`, `after_lacks` is wherever `after_holds` is, and
+the demo's inputs lead where this table says.
+
+4.4.4. The console tools (`ts/tools_browser.ts`) work in debug mode only. On a
+root served without `--debug` all three answer the AI with an error result
+holding the refusal's text, in the form of a permit denial, in place of
+throwing, so that the turn goes on. The rule that a tool that throws fails the
+server stays for every other throw. The error mark of a result does not reach a
+chat message, and a real provider's format has no such field, so the scripted
+provider sees only the tool's text and the analyst reads it as a real AI would:
+`after_holds` of the node reached after the console is `hyperposition`, and its
+`after_lacks` answers a refusal, a Deny and a command whose output lacks the
+text alike. A read that timed out after dash printed the word holds the text,
+so it follows `after_tools`.
 
 ### 4.5. Every line on every lane, recorded
 
@@ -309,17 +400,26 @@ keeps its root.
 4.6.1. `python3 python/xsjs_serve.py [--debug] [--verbose] [--port N] [--root
 PATH] [--fresh]`, standard library only, the POSIX start that stands alone
 from the Windows scripts, as the Testing rules require. It builds the engine
-page, makes the root and serves it through ttyd, prints the address, and keeps
-serving until SIGINT or SIGTERM, when it stops ttyd's process group and exits
-with ttyd's code. ttyd's log goes to stderr as it comes.
+page, makes the root, which begins a new log, and serves it through ttyd,
+prints the address, and keeps serving until SIGINT or SIGTERM, when it stops
+ttyd's process group and exits with ttyd's code. ttyd's log goes to stderr as
+it comes.
 
 4.6.2. The root, `~/.cache/xsjs/root` unless `--root` says otherwise, is made
 as the Windows start script makes one: the server's runtime modules and the
 seed from `python/`, `i18n/en-US.json`, `settings.json`, `provider.json`, the
 page, and `parameters.json` from the switches. It is kept between runs, so the
-maintainer's databases persist; `--fresh` removes it first. The engine's lock
-in the root means a second connection, as a second tab, fails loud on the
-server's side and shows the fault screen: one page per root.
+maintainer's databases persist; `--fresh` removes it first. The log alone does
+not persist: each run removes `_verbose.sqlite` and its `-wal` and `-shm` files
+when they exist and keeps every other file, so each serve begins a new record,
+and the last serve's stays readable by the log tool until the next start. Only
+a serve does this: a page load within one serve adds to the same log. A log
+that reaches `blob_max` still fails the server, and the cure is a new serve,
+which costs the old record and no database. The engine's lock in the root means
+one page per root. The engine role (`python/bootstrap.py`) waits up to 5 s for
+the lock, so a reload that reaches the server before the old one has exited
+takes it once the old one is gone. A second connection, as a second tab, waits
+those 5 s, then fails loud on the server's side and shows the fault screen.
 
 4.6.3. ttyd is the one the project built, `build/ttyd/ttyd`, with the start
 script's options: the port from the settings, 5769, on the bind address
@@ -345,18 +445,23 @@ passes and stay when it fails.
 
 | Rung | Label | What it proves |
 |---|---|---|
-| served | smoke-test | The page builds, the root is made, ttyd answers, the page loads, and the first render shows: the band holds the seed's remark, the box is enabled, the picture is hidden. Picture saved |
-| choice 1 | smoke-test | Typing 1 and Enter ends with the analyst's first text in the band and the box enabled again. Picture saved |
+| served | smoke-test | The page builds, the root is made, ttyd answers, the page loads, and the first render shows: the band holds the seed's remark, the box is enabled, the picture is shown, 4 by 4, its pixels black. Picture saved |
+| choice 1 | smoke-test | Typing 1 and Enter ends with the analyst's first text in the band, the box enabled again and the picture hidden. Picture saved |
 | choice 3 | smoke-test | Typing 3 shows the permit text and its three buttons; Accept shows the console view; dash's rows hold the prompt and `hyperposition`; the band holds the analyst's text. Picture saved |
+| bad input | smoke-test | Typing a number outside the table, then a word, then an empty line, each ends with the analyst's `otherwise` text in the band and the box enabled and holding the focus; a choice then still answers |
 | choice 2 | test-all | Typing 2 ends with its text; the server's metaverse database holds the note's row, read directly from the file as the browser test reads values |
 | console | test-all | ctrl 0 hides the view and shows it again; `echo hello` typed into the terminal's input shows `hello` in a row. Picture saved |
 | overlay | test-all | ctrl 1 shows the wire overlay holding a sent and a received line; ctrl 1 hides it. Picture saved |
-| log | smoke-test | The root's `_verbose.sqlite` holds each fragment of the gold's table, one per lane and direction a turn crosses, with its JSLB; the log tool's function reads them |
+| log | smoke-test | The root's `_verbose.sqlite` holds each fragment of the gold's table, one per lane and direction a turn crosses, the media lane that the first render's image crosses, and the bad input rung's inputs and answer, with its JSLB; the log tool's function reads them |
 | left | smoke-test | about:blank ends the page; the server's `bootstrap.py` under ttyd ends; ttyd stops; the root goes |
 
 4.7.3. The core rungs are smoke-test so that the default run proves the demo;
 the three test-all rungs keep the default run within its three minutes. The
 smoke run is about 100 s today, so the budget is measured when the test exists.
+The bad input rung comes after choice 3, so that the rungs before it keep their
+line ids. For the same budget the suite that proves ttyd dies with its parent,
+which makes two real page builds, is a suite of its own in the full run only,
+so that guarantee is proved only there.
 
 4.7.4. `--hold`: after a failed rung the test leaves the page, keeps ttyd
 serving the root, prints the address and waits for ctrl C, so that a person
@@ -364,9 +469,19 @@ opens the failed state in a browser: the root's databases hold the state and a
 fresh page load restores it from the server.
 
 4.7.5. The engine's integration block in group C, in 5.3 below, proves the
-same turn on the headless page without a DOM, and the demo test proves it with
-one. Together with the wire rung of the sync they are the non-trivial
-integration tests of R13.
+same turn on the headless page, a scripted UI in place of the person, and the
+demo test proves it on the engine page. The block's scene holds the seed's
+image: its scripted UI uses the real page handlers of `render`, `media.store`
+and its wake, and a real media port on real elements, so that the block proves
+the whole path of an image, from the server's database to the canvas. Together
+with the wire rung of the sync they are the non-trivial integration tests of
+R13.
+
+4.7.6. No test serves the engine outside debug mode, so that mode stays
+unproven, by the maintainer's choice in R22: the demo runs in debug mode. The
+answer to choice 3 on a root served without `--debug`, in 1.4, is therefore
+proved only below the engine, by the suites of the console tools and the
+scripted provider.
 
 ### 4.8. The debug stories
 
@@ -377,12 +492,14 @@ from inside the AI endpoint is not among them.
    state in `build/test_demo/`, or the first failed rung by name, its picture,
    the kept root and, with `--hold`, the page served for a look.
 2. Serve it: `python3 python/xsjs_serve.py --debug`, the address, ttyd's log on
-   stderr, ctrl C to stop.
+   stderr, ctrl C to stop. Each start begins a new log, which is also the cure
+   for a log that has filled.
 3. Read the timeline: `python3 python/xsjs_log.py ROOT`, every line of every
    lane in the order the server took them, filtered by thread, type or text,
-   or followed as it grows. This is the one record of a run: what the UI
-   thread sent the worker, what the worker asked the provider, what the
-   provider answered, each tool call and result, each commit, each reply.
+   or followed as it grows. This is the one record of a serve, readable until
+   the next start of the serve program removes it: what the UI thread sent the
+   worker, what the worker asked the provider, what the provider answered,
+   each tool call and result, each commit, each reply.
 4. On the page: ctrl 1 shows the wire overlay; ctrl 0 shows the console,
    where the maintainer or the AI runs commands in the sandboxed dash; a fault
    replaces the screen with its message, its stack and each cause's, with a
@@ -472,10 +589,12 @@ here, by the rule.
 images it fetches are the provider's. A setting of its own comes when images
 come from elsewhere.
 
-4.10.5. Pictures: `image_make` with the scripted provider's test pattern works
-end to end, as the agent's integration test proves. The demo's script does not
-call it, as the maintainer accepts no picture change; one more reply in the
-table would show the pattern.
+4.10.5. Pictures: the seed holds one, the hyperposition's black image of 4.2.4,
+which the first render shows. `image_make` with the scripted provider's test
+pattern works end to end, as the agent's integration test proves. The demo's
+script does not call it, and its `render` calls name no image, as the
+maintainer accepts no picture change; one more reply in the table would show
+the pattern.
 
 ## 5. Stages, in order
 
@@ -494,9 +613,17 @@ deferred; `dispatch.Stream` on the server; the sync handler of the database
 handlers; the main loop writing a stream; the worker's `tap_start` running its
 function in every mode; the boot's engine worker and `WorkerStart`; the
 `engine` module; the page's `engine_page`; the queue's full renderings; the
-serve and log programs' public functions; the new strings. Proof: the source
-checks of the whitelisted files pass on the API files, and the type check of
-the TypeScript API builds. No code.
+serve and log programs' public functions; the scripted provider's `otherwise`,
+`after_holds` and `after_lacks`; the page builder's `api_check` and `tsc_run`;
+the new strings. Proof: the source checks of the whitelisted files pass on the
+API files, and the type check of the TypeScript API passes: the config
+`ts/tsconfig.api.json` lists every file of `API/ts` by name,
+`page_build.api_check()` compiles it through `page_build.tsc_run` as a source
+check (`python/test_posix.py`), and a unit test checks that the config lists
+exactly those files. That compile proves the API text against itself and cannot
+see the code, so drift between an API file and its code stays unseen. A
+mismatch leaves the code's own blocks running first in the default run only, by
+decision 23. No code.
 
 ### 5.1. The record
 
@@ -520,16 +647,22 @@ the default run, the wire test included.
 
 The bring up's two changes with the worker's and the boot's unit suites and the
 two test pages' entries adjusted; the seed table of 4.4 with its coherence
-test; the `engine` module's worker pieces. Its group B unit block runs the
-pieces in a fresh worker of the headless page: the store built, the handshake
-against the real browser tools, the sync's wake applying restore lines that
-the block's own lane builds from a store it fills with the seed, the first
-render reaching the UI lane, then a turn on the block's own script. Its group
-C integration block runs against the real ttyd and server: the first render's
-line on the UI lane holds the seed's remark; `ai.say` of 1 ends with the seed
-table's text; the `mcp` lines and the turn's commits are seen on the wire; the
-console tool's permit request on the UI lane, answered accept, shows the
-console and reaches dash. Proof: groups B and C pass.
+test; the scripted provider's `otherwise`, `after_holds` and `after_lacks` and
+the console tools' refusal, each with its suites; the seed's image of 4.2.4
+with the server's seeding tests; the `engine` module's worker pieces. Its group
+B unit block runs the pieces in a fresh worker of the headless page: the store
+built, the handshake against the real browser tools, the sync's wake applying
+restore lines that the block's own lane builds from a store it fills with the
+seed, the first render reaching the UI lane, then a turn on the block's own
+script. Its group C integration block runs against the real ttyd and server:
+the first render's line on the UI lane holds the seed's remark and the scene's
+image, which the block's scripted UI stores and paints through the real page
+handlers and a real media port on real elements; `ai.say` of 1 ends with the
+seed table's text; the `mcp` lines and the turn's commits are seen on the wire;
+the console tool's permit request on the UI lane, answered accept, shows the
+console and reaches dash; bad inputs and a click end with `otherwise`; choice 3
+answered Deny ends with `after_lacks`, no console and no render; a later choice
+still works. Proof: groups B and C pass.
 
 ### 5.4. The UI thread's program and the engine page
 
@@ -545,9 +678,13 @@ builds.
 
 ### 5.5. The serve program
 
-The serve program with a unit suite of its root making and options and an
-integration suite that serves on port 0, fetches ttyd's token and stops it.
-Proof: the default run, and the program serves by hand.
+The serve program with a unit suite of its root making, the log's removal
+among it, and options and an integration suite that serves on port 0, fetches
+ttyd's token and stops it. The engine role's wait for its lock, with a unit
+test that a lock freed within the wait is taken. The test that ttyd dies with
+its parent is a suite of its own, `python/test_xsjs_serve_death.py`, labelled
+test-all. Proof: the default run, the full run for that suite, and the program
+serves by hand.
 
 ### 5.6. The demo test
 
@@ -568,18 +705,20 @@ count, the times measured.
 
 ## 6. Decisions made, each cheap to overturn
 
-1. The black square is the black picture area above the band: the canvas stays
-   hidden when a render names no image, as the render handler does today. A
-   literal square would show the canvas black at a fixed size instead.
+1. The black square is the hyperposition's image, 4 px by 4 px and black, which
+   the canvas scales up over the picture area. The canvas stays hidden when a
+   render names no image, as the render handler does today, and the picture
+   area is then the black page.
 2. The page is served from WSL on 127.0.0.1 port 5769 and reached from a
    Windows browser at `http://localhost:5769/` by WSL2's localhost forwarding.
    If that is off on the machine, the Windows start script's port proxy is the
    way, and it is outside this plan.
 3. The serve program's root is `~/.cache/xsjs/root`, the Windows start
-   script's folder, kept between runs; `--fresh` removes it. The tests' roots
-   are under `build/`.
+   script's folder, kept between runs but for its log, which each run removes;
+   `--fresh` removes the whole root. The tests' roots are under `build/`.
 4. The number is typed in the box. A click on the picture sends its
-   coordinates as a turn, which exists and is not part of the demo.
+   coordinates as a turn, which exists and is no choice of the demo: the
+   analyst answers it with `otherwise`, while the picture shows.
 5. The browser pulls the databases with `db.sync`; the server does not push
    them, so no existing suite sees a new line.
 6. The sync's reply follows its pushes, so no count or end marker exists.
@@ -590,7 +729,7 @@ count, the times measured.
 10. The media port's timer is the provider's `timeout_seconds`.
 11. The analyst's choices are 1, 2 and 3 at every node and 0 for a plain
     answer; the texts are the seed's and the maintainer's to edit; any other
-    input ends on the fault screen by design.
+    input is answered by `otherwise`, and the choices stay.
 12. The screenshot tool and its suite keep opening the test page; the demo's
     pictures come from the demo test.
 13. The demo test's core rungs are smoke-test and three are test-all, so
@@ -605,6 +744,35 @@ count, the times measured.
 17. The agent's integration bench and the demo's C block each keep their own
     script: the bench's castle turn is a test of the agent, the C block's is
     the seed.
+18. The wait for the engine's lock is 5 s, tried every 0.01 s, the same as the
+    page's own wait for the engine's files at a reload, `engine_wait_seconds`.
+    The wait and the try are both constants of the engine role
+    (`python/bootstrap.py`) and not settings, as the lock is taken before the
+    settings are read. The text of the refusal does not change.
+19. The seeded image is a BMP, `python/seed/hyperposition.bmp`, 102 bytes: this
+    work runs nothing, so no PNG's checksums can be computed, and a BMP has
+    none. Chrome's `createImageBitmap` decodes it from a Blob with no type.
+20. The table's new names are `otherwise`, `after_holds` and `after_lacks`.
+    `after_holds` reads the tool's text, as the error mark of a result does not
+    reach a chat message.
+21. The table's `browser.render` calls stay imageless, so a `render` tool call
+    hides the canvas and the page stays black, as the render tool's contract
+    says. Naming the seed's image in them would keep the square shown.
+22. The suite that proves ttyd dies with its parent is
+    `python/test_xsjs_serve_death.py`, labelled test-all, in the Python unit
+    list after the serve program's unit suite, with its gold
+    `python/test_setting_test_xsjs_serve_death.json`. It counts for the serve
+    program by a row of the driver's `_COUNTED`, and imports `ProgramCase` from
+    `python/test_xsjs_serve.py`, as `test_jslb_vectors` imports `test_jslb`.
+23. The API check's place is the source checks: `python/test_posix.py` calls
+    `page_build.api_check()`, and no page build does; it compiles through
+    `page_build.tsc_run`, as the page builds do. The cloud rule then holds with
+    no new branch. In the default run API mismatches do not stop the code's own
+    blocks from running first, as the source checks come after the stream. In a
+    full run they do, as `test_test_posix_formatters` runs the checks whole in
+    the Python unit phase, before the TypeScript blocks.
+24. A root seeded before the image and `otherwise` is not migrated: it keeps
+    its old scene and table, and `--fresh` takes the new seed.
 
 ## 7. Requirements by class
 
@@ -630,6 +798,14 @@ count, the times measured.
 | R13 integration tests before an endpoint | D | 4.7.5, 5.2, 5.3, 5.6 |
 | R14 current environment only, in the rules | D | done this session |
 | R15 the line count gate | D | 4.9, 5.8 |
+| R16 a suite of its own for ttyd's death | D | 4.7.3, 5.5; decision 22 |
+| R17 a config and a build step for the API text | D | 5.0; decision 23. The compile proves the API text against itself and cannot see the code |
+| R18 wait for the engine's lock | D | 4.6.2, 5.5; decision 18 |
+| R19 a new log at each serve | D | 1.6, 4.6.1, 4.6.2, 4.8, 5.5; decision 3 |
+| R20 the console tools' refusal | D | 1.4, 4.4.2, 4.4.4, 5.3; decision 20 |
+| R21 bad user input is no exception class error | B | 1.4, 4.3.4, 4.4.1 to 4.4.3, 4.7.2, 7.2: the words ask for the docs alone, and the plan goes beyond them by changing the seed and the scripted provider, so that the code agrees with the rule |
+| R22 the engine outside debug mode left alone | D | 4.7.6 |
+| R23 a seeded image in the integration block's scene | D | 1.3, 4.2.2, 4.2.4, 4.7.2, 4.7.5, 5.3; decisions 1, 19, 21 |
 
 ### 7.1. Unfinished Logging
 
@@ -641,4 +817,16 @@ question is what the record holds for a line that is not.
 below `line_max` is recorded as its header and the sizes of its payload and
 blobs, as the wire's tap does today. Nothing new is written, and every lane is
 recorded the same way.
+
+### 7.2. Bad User Input
+
+R21 asks that the docs say bad user input is no exception class error. The docs
+alone would leave the seed and the scripted provider ending such an input on
+the fault screen, so the rule would be false of the program it describes. The
+plan therefore goes beyond the words "update the docs": the rule is in the
+Errors and Data rules, the seed and the scripted provider change by 4.4.1 and
+4.4.2, and the page changes by 4.3.4, so that the code agrees with it. That
+change is the cause of class B, as the maintainer has not confirmed it. The
+requirement is satisfied in this plan but for the rare ways a person's action
+still reaches a throw, which session 07 11:21's postmortem lists as questions.
 

@@ -118,7 +118,6 @@
         "reply": 1,
         "type": "console_probe.phase"
       },
-      "open": false,
       "wanted": false
     },
     "phase_3": {
@@ -132,7 +131,6 @@
         "reply": 3,
         "type": "console_probe.phase"
       },
-      "open": true,
       "wanted": false
     },
     "phase_7": {
@@ -146,7 +144,6 @@
         "reply": 7,
         "type": "console_probe.phase"
       },
-      "open": false,
       "wanted": true
     },
     "rows_4": {

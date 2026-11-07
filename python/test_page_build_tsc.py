@@ -17,9 +17,10 @@
 # into build/vectors/, the gold of every ts/test_setting_<suite>.json,
 # SQLite's glue and its wasm as base64, and xterm.js and its css. A copy of
 # a built page with other gold differs from it on the gold's line alone.
+# A project of the API text's options passes; one with a type error raises.
 
-import base64, harness, hashlib, json, os, page_build, signal, sys, traceback
-import unittest, uuid
+import base64, harness, hashlib, json, os, page_build, signal, sys, tempfile
+import traceback, unittest, uuid
 from typing import Any
 
 # The checkout's top directory, above this file's `python/`.
@@ -69,6 +70,33 @@ _XTERM_JS = "package/lib/xterm.js"
 
 # The `xterm.js` style inside its package archive.
 _XTERM_CSS = "package/css/xterm.css"
+
+# The configuration of a scratch project, by its file name.
+_PROJECT_CONFIG_NAME = "tsconfig.json"
+
+# The one file of a scratch project, a `.d.ts` file as the API text's are.
+_PROJECT_NAME = "project.d.ts"
+
+# The configuration of a scratch project: the API text's options on its base.
+_PROJECT_CONFIG = {
+    "extends": os.path.join(_ROOT_PATH, "ts", "tsconfig.json"),
+    "compilerOptions": {"noEmit": True},
+    "files": [_PROJECT_NAME],
+}
+
+# The file of a project that compiles.
+_PROJECT_PASSED = "declare const count: number;\n"
+
+# The file of a project that names a type nothing declares.
+_PROJECT_REFUSED = "declare const count: missing_name;\n"
+
+# The diagnostic tsc writes for that file.
+_PROJECT_ERROR = (
+    "project.d.ts(1,22): error TS2304: Cannot find name 'missing_name'."
+)
+
+# The exit code of tsc for a type error under `noEmit`.
+_PROJECT_CODE = 2
 
 
 # Returns the path of the bundle that tsc compiles by the test config.
@@ -234,3 +262,45 @@ class TestBuild(unittest.TestCase):
             page = page_build.text_read(path)
             # Compared by `==`, so that a failure prints no page of megabytes.
             self.assertTrue(page == filled, template_path)
+
+
+# A scratch project with the options of the API text, by the real tsc.
+class TestCheck(unittest.TestCase):
+    # Makes a scratch directory in the checkout's `build/`.
+    def setUp(self) -> None:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+        self.scratch = self.enterContext(
+            tempfile.TemporaryDirectory(dir=_BUILD_PATH)
+        )
+
+    # Writes the project of the text, returning its configuration's path.
+    def project_write(self, text: str) -> str:
+        source_path = os.path.join(self.scratch, _PROJECT_NAME)
+        with open(source_path, "w", encoding="utf-8") as file:
+            file.write(text)
+        config_path = os.path.join(self.scratch, _PROJECT_CONFIG_NAME)
+        with open(config_path, "w", encoding="utf-8") as file:
+            json.dump(_PROJECT_CONFIG, file)
+        return config_path
+
+    # A project that compiles passes and writes nothing.
+    def test_project_passed(self) -> None:
+        config_path = self.project_write(_PROJECT_PASSED)
+        page_build.tsc_run(config_path)
+        self.assertEqual(
+            sorted(os.listdir(self.scratch)),
+            sorted([_PROJECT_CONFIG_NAME, _PROJECT_NAME]),
+        )
+
+    # A type error in a `.d.ts` file raises, tsc's output in the cause.
+    def test_project_refused(self) -> None:
+        config_path = self.project_write(_PROJECT_REFUSED)
+        with self.assertRaises(RuntimeError) as caught:
+            page_build.tsc_run(config_path)
+        self.assertEqual(
+            str(caught.exception),
+            f"tsc exited with {_PROJECT_CODE} compiling {config_path}",
+        )
+        cause = caught.exception.__cause__
+        self.assertIsInstance(cause, RuntimeError)
+        self.assertIn(_PROJECT_ERROR, str(cause))

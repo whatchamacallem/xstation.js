@@ -16,11 +16,13 @@
 # command line refusing an option, or a name with no template, before
 # anything is built, run as a python3 child, and the hash of the page written.
 # Forked children, whose lines the count sees, run the script as the program
-# and refuse a PATH with no tsc. No test starts tsc.
+# and refuse a PATH with no tsc. The config of the API text lists exactly the
+# files of API/ts and leaves their check on. No test starts tsc.
 
 import base64, hashlib, html.parser, io, json, os, page_build, runpy, signal
 import subprocess, sys, tarfile, tempfile, traceback, unittest, zipfile
 from collections.abc import Callable
+from typing import Any
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -126,6 +128,27 @@ _MAIN_FRAME = ", in main\n"
 # A suite's gold file by its file name, in a scratch directory.
 _SUITE_NAME = "test_setting_test_a.json"
 
+# The configuration of the API text, which names each of its files.
+_API_CONFIG_PATH = os.path.join(_ROOT_PATH, "ts", "tsconfig.api.json")
+
+# The configuration that one extends, as that one names it.
+_BASE_CONFIG_NAME = "./tsconfig.json"
+
+# The configuration that one extends, by its place in the checkout.
+_BASE_CONFIG_PATH = os.path.join(_ROOT_PATH, "ts", "tsconfig.json")
+
+# The options of the API text's own configuration.
+_API_OPTIONS = {"noEmit": True}
+
+# The directory of the API text.
+_API_TEXT_PATH = os.path.join(_ROOT_PATH, "API", "ts")
+
+# The start of each file of the API text, as its configuration names it.
+_API_FILE_START = "../API/ts/"
+
+# The option that would leave every `.d.ts` file unchecked.
+_SKIP_OPTION = "skipLibCheck"
+
 
 # The start tags of a template in order, their depths, and each script's text.
 class TemplateReader(html.parser.HTMLParser):
@@ -205,6 +228,19 @@ def tsc_unfound(folder: str) -> None:
     os.environ["PATH"] = folder
     out_path = os.path.join(folder, _UNWRITTEN_NAME)
     page_build.bundle_compile(_UNREAD_CONFIG, out_path)
+
+
+# In a forked child: checks the API text with the folder alone on `PATH`.
+def api_unfound(folder: str) -> None:
+    os.environ["PATH"] = folder
+    page_build.api_check()
+
+
+# Returns the object of the `tsc` configuration.
+def config_read(path: str) -> dict[str, Any]:
+    with open(path, encoding="utf-8") as file:
+        config: dict[str, Any] = json.load(file)
+    return config
 
 
 # Runs the command line in a python3 child with the arguments, to its end.
@@ -711,6 +747,33 @@ class TestCompiler(unittest.TestCase):
             ending = child_run(self, lambda: tsc_unfound(scratch))
             self.assertEqual(os.listdir(scratch), [])
         self.assertTrue(ending.endswith(_TSC_ABSENT), ending)
+
+    # The check of the API text is refused the same way.
+    def test_api_absent(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
+            ending = child_run(self, lambda: api_unfound(scratch))
+        self.assertTrue(ending.endswith(_TSC_ABSENT), ending)
+
+
+# The configuration `page_build.api_check` compiles, read and never compiled.
+class TestApiConfig(unittest.TestCase):
+    # It lists exactly the files of `API/ts`, each once.
+    def test_files_listed(self) -> None:
+        listed: list[str] = config_read(_API_CONFIG_PATH)["files"]
+        names = os.listdir(_API_TEXT_PATH)
+        expected = [_API_FILE_START + name for name in names]
+        self.assertEqual(sorted(listed), sorted(expected))
+
+    # It extends the base and emits nothing, its only option.
+    def test_options_own(self) -> None:
+        config = config_read(_API_CONFIG_PATH)
+        self.assertEqual(config["extends"], _BASE_CONFIG_NAME)
+        self.assertEqual(config["compilerOptions"], _API_OPTIONS)
+
+    # The base leaves the `.d.ts` files checked, or nothing would be.
+    def test_text_checked(self) -> None:
+        base = config_read(_BASE_CONFIG_PATH)
+        self.assertNotIn(_SKIP_OPTION, base["compilerOptions"])
 
 
 # Pieces that would change meaning as the raw text of their element.

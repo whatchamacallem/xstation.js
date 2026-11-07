@@ -18,6 +18,12 @@
         "t": "console.show"
       }
     },
+    "console_show_7_reply": {
+      "0": {
+        "r": 7,
+        "t": "console.show"
+      }
+    },
     "control_key_0": {
       "0": {
         "t": "ui.control_key"
@@ -123,7 +129,6 @@
     "page_choice_always": "Always Allow",
     "page_choice_deny": "Deny",
     "page_choice_unknown": "The DOM port has no button for the choice maybe.",
-    "page_console_busy": "console.show found the console view opening or closing, so it can neither answer at once nor ask for tty 0.",
     "page_dom_type": "The DOM port answers dom.choice lines, not dom.other.",
     "page_element_missing": "The page has no element with the id image.",
     "page_id_missing": "The DOM port cannot answer dom.choice without an id.",

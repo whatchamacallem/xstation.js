@@ -178,7 +178,7 @@ namespace test_page {
 
   // The DOM port: the player's text, clicks and keys, the permit buttons.
   export class TestDomPort extends ElementsCase {
-    // A submitted text is posted as `ui.input` and the input emptied.
+    // A submitted text is posted as `ui.input`, the input emptied and closed.
     test_text_submitted(): void {
       const elements = this.elements_get();
       const port = new page.DomPort(elements.container);
@@ -195,6 +195,7 @@ namespace test_page {
       this.assertTrue(submit.defaultPrevented);
       this.assertEqual(received, [gold_line("ui_input_text")]);
       this.assertEqual(elements.input.value, "");
+      this.assertTrue(elements.input.disabled);
     }
 
     // A click is posted as the point of the image's pixels it falls on.
@@ -219,6 +220,24 @@ namespace test_page {
       });
       canvas.dispatchEvent(click);
       this.assertEqual(received, [gold_line("ui_input_click")]);
+    }
+
+    // A click closes the input at once, so that a second one is not taken.
+    test_click_once(): void {
+      const elements = this.elements_get();
+      elements.canvas.width = 4;
+      elements.canvas.height = 2;
+      const port = new page.DomPort(elements.container);
+      const received: lines.Line[] = [];
+      port.line_receive((line) => {
+        received.push(line);
+      });
+      for (let clicks = 0; clicks < 2; clicks += 1) {
+        const click = new MouseEvent("click", { bubbles: true });
+        elements.canvas.dispatchEvent(click);
+      }
+      this.assertEqual(received.length, 1);
+      this.assertTrue(elements.input.disabled);
     }
 
     // A click while the input is closed is not taken.
@@ -444,16 +463,18 @@ namespace test_page {
       this.assertFalse(this.elements_get().canvas.hidden);
     }
 
-    // A console that is opening can neither answer nor be asked for again.
-    test_show_busy(): void {
+    // A console that is opening answers at once and is not asked for again.
+    test_show_opening(): void {
       const rig = this.rig_new(true);
       const show = version_set(gold_line("console_show_6"), rig.version);
       rig.ai.port.line_post(show, []);
       this.assertEqual(rig.ai.came, [gold_line("console_open_request")]);
       const second = version_set(gold_line("console_show_7"), rig.version);
-      const error = thrown_get(() => rig.ai.port.line_post(second, []));
-      this.assertEqual(error.message, gold_text("page_console_busy"));
-      this.assertEqual(rig.ai.came.length, 1);
+      rig.ai.port.line_post(second, []);
+      this.assertEqual(rig.ai.came, [
+        gold_line("console_open_request"),
+        gold_line("console_show_7_reply"),
+      ]);
     }
 
     // Outside debug mode the keys toggle nothing and ask for nothing.

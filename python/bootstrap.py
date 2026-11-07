@@ -11,7 +11,7 @@
 # the functions that use them, after their bytecode has been sent to build/.
 
 import argparse, fcntl, importlib.machinery, importlib.util, os, signal, sys
-import termios, traceback, tty, types
+import termios, time, traceback, tty, types
 from collections.abc import Callable, Iterator
 from typing import Any, NamedTuple, NoReturn, cast
 
@@ -47,6 +47,12 @@ _LOCK_NAME = "engine.lock"
 
 # The permissions the lock file is created with: read and write by its owner.
 _LOCK_MODE = 0o600
+
+# The lock's wait, before the settings exist: as long as `engine_wait_seconds`.
+_LOCK_WAIT_SECONDS = 5
+
+# Between tries of the lock, also before the settings: the page's `busy_ms`.
+_LOCK_POLL_SECONDS = 0.01
 
 # The role that runs the console, the only role there is.
 _CONSOLE_ROLE = "console"
@@ -206,17 +212,23 @@ def _parameters_apply(root: str) -> None:
     switches.switches_apply(switches.parameters_load(root))
 
 
-# Takes the engine lock of the root until exit or `exec`, which closes it.
+# Waits for the root's engine lock, held until exit or `exec`, which closes it.
 def _lock_take(root: str) -> None:
     from internationalization import i18n
 
     path = os.path.join(root, _LOCK_NAME)
     descriptor = os.open(path, os.O_RDWR | os.O_CREAT, _LOCK_MODE)
-    try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError as error:
-        os.close(descriptor)
-        raise RuntimeError(i18n("bootstrap.lock_held", path)) from error
+    deadline = time.monotonic() + _LOCK_WAIT_SECONDS
+    while True:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError as error:
+            if time.monotonic() >= deadline:
+                os.close(descriptor)
+                message = i18n("bootstrap.lock_held", path)
+                raise RuntimeError(message) from error
+        time.sleep(_LOCK_POLL_SECONDS)
 
 
 # Returns the main loop file: the stock one, or in debug mode a named one.

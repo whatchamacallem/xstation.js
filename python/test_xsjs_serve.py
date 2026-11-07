@@ -11,13 +11,12 @@
 # by SIGKILL past the wait, and its refusals. A test that blocks the signals
 # gives them back at its end. Last the program whole, in a forked child by
 # runpy, which builds the page with the real tsc, so that a count reaches every
-# line of the module. The program ended by SIGKILL, or by SIGHUP's default
-# action, stops nothing itself, so that the port it printed going shows that
-# the kernel told ttyd. The port is polled, not ttyd's pid, as an orphan may
-# stay a zombie for a moment.
+# line of the module: its stop at a signal and its refusal. The program ended
+# with no chance to stop ttyd is the suite of test_xsjs_serve_death.py, which
+# takes ProgramCase from here.
 
 import contextlib, filecmp, harness, os, re, runpy, signal, socket, switches
-import sys, tempfile, time, traceback, unittest, xsjs_serve
+import sys, tempfile, traceback, unittest, xsjs_serve
 from typing import Any, NoReturn, cast
 
 # The checkout's top directory, above this file's `python/`.
@@ -242,6 +241,20 @@ class TestRoot(ScratchCase):
             self.assertFalse(os.path.exists(path), path)
         self.assertEqual(switches.parameters_load(self.root), parameters)
 
+    # A second making removes an earlier run's log and keeps the databases.
+    def test_log_removed(self) -> None:
+        self.root_ready(False)
+        database, _ = self.run_earlier()
+        names: list[str] = gold_value("verbose_names")
+        logs = [os.path.join(self.root, name) for name in names]
+        for path in logs:
+            self.file_write(path, gold_value("verbose_text"))
+        self.root_ready(False)
+        for path in logs:
+            self.assertFalse(os.path.exists(path), path)
+        with open(database, encoding="utf-8") as file:
+            self.assertEqual(file.read(), gold_value("database_text"))
+
     # Fresh removes the whole root first, what the making keeps included.
     def test_fresh_removed(self) -> None:
         self.root_ready(False)
@@ -428,36 +441,3 @@ class TestProgram(ProgramCase):
         self.assertEqual(
             os.waitstatus_to_exitcode(status), gold_value("usage_code")
         )
-
-
-# The program ended with no chance to stop ttyd, which the kernel then ends.
-class TestParentDeath(ProgramCase):
-    # Returns once the port refuses a connection, failing past the gold's wait.
-    def port_gone(self, port: int) -> None:
-        end = time.monotonic() + gold_value("gone_seconds")
-        while True:
-            try:
-                with socket.create_connection((self.host, port)):
-                    pass
-            except ConnectionRefusedError:
-                return
-            if time.monotonic() >= end:
-                self.fail(f"port {port} still serves: {self.log_read()}")
-            time.sleep(gold_value("poll_seconds"))
-
-    # Ends the serving program by the signal, then waits for its port to go.
-    def death_check(self, number: int) -> None:
-        pid, reader = self.program_start(["--port", "0", "--root", self.root])
-        port = self.port_read(reader)
-        os.kill(pid, number)
-        status = os.waitpid(pid, 0)[1]
-        self.assertEqual(os.waitstatus_to_exitcode(status), -number)
-        self.port_gone(port)
-
-    # SIGKILL runs no line of the program, and ttyd ends all the same.
-    def test_death_killed(self) -> None:
-        self.death_check(signal.SIGKILL)
-
-    # The program installs no hangup handler, so SIGHUP ends it as abruptly.
-    def test_death_hangup(self) -> None:
-        self.death_check(signal.SIGHUP)

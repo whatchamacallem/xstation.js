@@ -1,4 +1,5 @@
 {
+  "bad_inputs": ["7", "word", ""],
   "buttons": [
     "Accept",
     "Deny",
@@ -183,14 +184,87 @@
       "fragment": "ai receives from server: {\"0\":{\"type\":\"db.sync\"",
       "jslb": "\"databases\":[\"_files\",\"_preferences\",\"_settings\",\"metaverse\"]",
       "thread": "ai"
+    },
+    {
+      "fragment": "ai submits to ui: {\"0\":{\"type\":\"media.store\"",
+      "jslb": "\"k\":\"/metaverse/image/hyperposition\"}<blob \"n\"=1>",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ui dispatches from ai: {\"0\":{\"type\":\"media.store\"",
+      "jslb": "\"k\":\"/metaverse/image/hyperposition\"}<blob \"n\"=1>",
+      "thread": "ui"
+    },
+    {
+      "fragment": "ui submits to media: {\"0\":{\"type\":\"media.store\"",
+      "jslb": "\"k\":\"/metaverse/image/hyperposition\"}<blob \"n\"=1>",
+      "thread": "ui"
+    },
+    {
+      "fragment": "ui receives from media: {\"0\":{\"type\":\"media.store\"",
+      "jslb": "\"k\":\"/metaverse/image/hyperposition\",\"size\":102",
+      "thread": "ui"
+    },
+    {
+      "fragment": "ui wakes ui.media_reply with the replies to ",
+      "jslb": "\"k\":\"/metaverse/image/hyperposition\",\"size\":102",
+      "thread": "ui"
+    },
+    {
+      "fragment": "ui replies to ai: {\"0\":{\"type\":\"media.store\"",
+      "jslb": "\"k\":\"/metaverse/image/hyperposition\",\"size\":102",
+      "thread": "ui"
+    },
+    {
+      "fragment": "ai receives from ui: {\"0\":{\"type\":\"media.store\"",
+      "jslb": "\"k\":\"/metaverse/image/hyperposition\",\"size\":102",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ai wakes engine.stored with the replies to ",
+      "jslb": "\"k\":\"/metaverse/image/hyperposition\",\"size\":102",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ai submits to ui: {\"0\":{\"type\":\"render\"",
+      "jslb": "\"image\":\"/metaverse/image/hyperposition\"",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ui dispatches from ai: {\"0\":{\"type\":\"render\"",
+      "jslb": "\"image\":\"/metaverse/image/hyperposition\"",
+      "thread": "ui"
+    },
+    {
+      "fragment": "ai dispatches from ui: {\"0\":{\"type\":\"ai.say\"",
+      "jslb": "\"text\":\"7\"",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ai dispatches from ui: {\"0\":{\"type\":\"ai.say\"",
+      "jslb": "\"text\":\"word\"",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ai dispatches from ui: {\"0\":{\"type\":\"ai.say\"",
+      "jslb": "\"text\":\"\"",
+      "thread": "ai"
+    },
+    {
+      "fragment": "ai replies to ui: {\"0\":{\"type\":\"ai.say\"",
+      "jslb": "\"subtitle\":\"That is not one of the choices. 1, 2, 3 or 0, when you are quite ready.\"",
+      "thread": "ai"
     }
   ],
   "note_db": "metaverse",
   "note_key": "demo/note",
   "note_text": "Patient presses numbers. Prognosis: tedious.",
+  "otherwise": "That is not one of the choices. 1, 2, 3 or 0, when you are quite ready.",
   "overlay_received": "< ",
   "overlay_sent": "> ",
   "permit_text": "browser.console_run asks to run with {\"text\":\"echo hyperposition\",\"timeout_seconds\":30}.",
+  "picture_colours": ["0 0 0 255"],
+  "picture_size": 4,
   "poll_seconds": 0.1,
   "remark": "How can I help you?",
   "root_debug": true,

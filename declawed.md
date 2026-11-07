@@ -85,6 +85,10 @@ command only to name the log.
   fails loud with a call stack or exit with the right Unix error code.
 - Any error is a hard error, reported immediately, first failure only - no
   script collects failures, tallies of failures.
+- Bad user input is an exception to the fail early and fail entirely design.
+  User error interacting with the web page is not an exception class error,
+  instead it is expected and designed for: the page answers it as a normal
+  part of its work, with no throw and no fault screen.
 - A cascading failure is described by chaining nested `cause` entries, so
   that one JSLB object holds every error. The key is always the full name
   `cause`, never `c`: only the headers have single letter names.
@@ -407,9 +411,14 @@ maintainer. You have permission to update this file and fix errors.
 - `ts/*.d.ts`: the public surface of each TypeScript module. A module is one
   frozen object named after it, so a file is one `declare namespace`.
 - tsc and the API text: ts/tsconfig.test.json and ts/tsconfig.node.json name
-  API/ts/lines.d.ts alone, with no glob. Every other API/ts file repeats a
+  API/ts/lines.d.ts alone, with no glob, as every other API/ts file repeats a
   namespace ts/ implements, so listing it beside the code would declare its
-  functions twice, and no build type checks it.
+  functions twice. ts/tsconfig.api.json names every file of API/ts and no code,
+  and page_build.api_check compiles it, so the API text is proved against
+  itself and never against the code.
+- ts/tsconfig.api.json: extends ts/tsconfig.json, sets noEmit alone, and lists
+  every file of API/ts by name. No config of the chain may set skipLibCheck, or
+  tsc checks no .d.ts file.
 - `ts/lines.d.ts`: the wire API, the payload of every JSLB line type, one
   interface each.
 - `sql/substrate.sql`: DDL created on first use in every database the
@@ -430,17 +439,25 @@ maintainer. You have permission to update this file and fix errors.
   bundle cannot read `python/seed/`.
 - `ts/test_setting_test_engine_image.json`: holds the scene with an image and
   the script of that block; the rest of its seed is test_engine's gold.
+- `python/seed/hyperposition.bmp`: the hyperposition's image, 4 px by 4 px,
+  black, 24 bits, 102 bytes, under overflow_bytes, so its row holds it inline.
+- `python/seed/hyperposition.json`: the scene in its encoded form, the image's
+  ref at header key 1 and `{"$ref": 1}` at `image`.
 - `python/seed/provider_script.json`: the analyst's table: `start` and `menu`
-  hold the inputs 0 to 3 alike; `after_render`, `after_note`, `after_console`
-  and `after_output` hold no inputs and one after_tools each, since a node
-  holds one after_tools.
+  hold the inputs 0 to 3 and one `otherwise` alike; `after_render`,
+  `after_note`, `after_console` and `after_output` hold no inputs and one
+  after_tools each, since a node holds one after_tools; `after_console` also
+  holds `after_holds`, `hyperposition`, and `after_lacks`.
 - analyst's texts: the seed's, repeated in `start` and `menu`, pinned by the
   golds of the C block and the demo test and not by
   `python/test_setting_test_main_loop.json`, whose `analyst` key pins the tool
-  names, the note's ref and the console command and timeout.
+  names, the note's ref, the console command and timeout, the nodes and texts
+  of `after_holds` and the calls of an input whose results lack it.
 - TestAnalyst: the coherence test of the seed's table in
-  `python/test_main_loop.py`, which walks it as the scripted provider does,
-  against the browser tools of API/mcp/tools.json and the gold's `analyst`.
+  `python/test_main_loop.py`, which walks it as the scripted provider does, by
+  `after_tools` and by `after_lacks`, against the browser tools of
+  API/mcp/tools.json and the gold's `analyst`, and requires `otherwise` on
+  every node with replies and `after_lacks` wherever `after_holds` is.
 - `<root>/parameters.json`: debug mode and the console's verbose level, which
   are parameters of a root and not settings, by `python/switches.pyi`.
 
@@ -528,7 +545,7 @@ render ui-ai AI->UI 0 Empty
 media.fetch ui-ai AI->UI 0 MediaReply + 1
 media.store ui-ai AI->UI 1 MediaReply
 permit.ask ui-ai AI->UI 0 PermitAnswer
-console.show ui-ai AI->UI 0 Empty, once tty 0 is open
+console.show ui-ai AI->UI 0 Empty, once tty 0 opens when idle, else at once
 console.open ui-ai UI->AI 0 ConsoleOpenReply
 console.input ui-ai UI->AI 1 push, to the writer
 console.output ui-ai AI->UI 1 push
@@ -635,6 +652,8 @@ fault realm REALM->DRIVER 0 push; fails the block
   header, the UTF-8 bytes of its payload's JSON text and a JSON list of its
   blob sizes. The fit is the bytes of a full-name verbose.put holding the entry
   {at, text}, the sum queue.entry_fits makes of an empty one's and the entry's.
+- full log: a log that reaches blob_max still fails the server, and the cure is
+  a new serve, which costs the old record and no database.
 
 ## Bad numbers
 
@@ -666,17 +685,33 @@ fault realm REALM->DRIVER 0 push; fails the block
   parameters.json by switches.parameters_load, and sets its switches by
   switches.switches_apply, so that every module and child reads the root's.
   Debug mode is switches.debug.
-- bootstrap engine order: pty to raw mode; take the root's engine.lock; read
-  settings and parameters; open the root's log; have the main loop file
-  prepare the root; write tap.start with switches.switches_get(), in full
-  names in debug mode; read the Empty reply to 101 a byte at a time; run the
-  main loop.
+- bootstrap engine order: pty to raw mode; take the root's engine.lock, by the
+  bootstrap lock wait; read settings and parameters; open the root's log; have
+  the main loop file prepare the root; write tap.start with
+  switches.switches_get(), in full names in debug mode; read the Empty reply to
+  101 a byte at a time; run the main loop.
+- bootstrap lock wait: _lock_take tries the root's engine.lock every
+  _LOCK_POLL_SECONDS, 0.01, until _LOCK_WAIT_SECONDS, 5, the length of
+  engine_wait_seconds, then closes the descriptor and raises
+  bootstrap.lock_held from the last BlockingIOError. The wait and the try are
+  both constants of python/bootstrap.py, as the lock comes before the settings.
+  A reload takes the lock once the old engine has gone.
+- bootstrap lock hangup: SIGHUP keeps its default through the wait, so a hangup
+  ends the run there with no error line.
+- second connection: a second engine on one root waits the 5 s, then writes its
+  one error line, so a second tab shows the fault screen 5 s late.
 - bootstrap imports: the modules beside it are imported inside the functions
   that use them, after their bytecode has been sent to build/.
 - bootstrap debug log: traces tap.start whole, by jslb.line_render, as
   bootstrap.start_submit, and its own error line as bootstrap.line_error.
 - main_loop: bootstrap.py has opened the log before loop_prepare or loop_run
   runs.
+- main_loop seed: _seed_read reads the bootstrap script, the image and the two
+  documents first, so an absent file raises FileNotFoundError before any of
+  them is written. The script's row of _files goes first, then one transaction
+  runs the DDL, writes the row image/hyperposition of metaverse from
+  python/seed/hyperposition.bmp, the two documents, and the rows player, world
+  and scene.
 - ttyd worker order: error overlay; the page's first message; the wire; the
   platform, setting globals test_sqlite3 and test_pool, cleared at start, and
   test_slots, files cleared at start that no cache holds; the test cache,
@@ -891,6 +926,9 @@ fault realm REALM->DRIVER 0 push; fails the block
   and kv_get throws substrate.file_lost.
 - kv_put of the digest a row holds: keeps the row, its cache file written
   first, so a lost file comes back.
+- doc_put: takes a body already encoded: doc_decode only checks it, the row is
+  its canonical JSON, and a plain reference string in a body stays plain, so a
+  seed document writes its refs at key 1 on.
 - turn compaction: browser only, inside turn_append when a user turn finds
   compact_turns of them, and by turn_compact, which the AI's scripts call
   through engine.store. Nothing of a compaction crosses the wire.
@@ -993,16 +1031,18 @@ fault realm REALM->DRIVER 0 push; fails the block
   timeout, from where the last read of the turn ended, or from the turn's
   start in a turn that waits. A read whose output ends with the prompt sends
   console.idle to the writer, which posts it to the UI.
-- console.show: shows the view as ctrl 0 does, then answers Empty once tty 0
-  is open: at once when open_is(), else, when the shown view open_wanted(),
-  through open_request(), whose sleep the handler takes over with the wake
-  ui.console_shown, which runs open_done.
+- console.show: shows the view as ctrl 0 does; when the shown view
+  open_wanted(), it answers Empty through open_request(), whose sleep the
+  handler takes over with the wake ui.console_shown, which runs open_done; any
+  other view answers Empty at once, as tty 0's writer holds the AI's lines
+  until dash's prompt.
 - view reopen: it asks for tty 0 and its close, and asks again once tty 0 has
   ended.
 - view hidden: keeps its scrollback, colours and features.
 - view fit: the rows fit the height above the band, the element after the
   container, at each show and whenever the page or the band changes size while
-  shown, so every row is seen without scrolling.
+  shown, so every row is seen without scrolling; a height below one row leaves
+  one row.
 - view keys: while the AI's command runs, from console.busy to console.idle,
   the view takes no keystrokes, and the person watches.
 - held line: printable text and Tab join it, Backspace removes its last
@@ -1078,6 +1118,9 @@ fault realm REALM->DRIVER 0 push; fails the block
   itself unless made with another as its far end. Each of two linked ports is
   held by one queue, so a line posted at one end runs on the other queue
   within the post. A port already linked cannot be linked again.
+- TaskQueue synchronous mode: a line that arrives while no drain runs is run
+  in that event, so a port's later answer, as media.MediaPort's after
+  createImageBitmap, works on a synchronous queue.
 - dispatch: handlers are registered by line type and version.
 - test_integrate_queue: its queue has a real sink by verbose.sink_set, and
   verbose.put goes to server, whose handler keeps the traced case's timeline
@@ -1106,7 +1149,30 @@ fault realm REALM->DRIVER 0 push; fails the block
   value over overflow_bytes, and the media port demands bytes in memory, so
   both render paths read it by cache_read on store.sink().
 - tool failure: a tool that throws, before or after it submitted a request,
-  fails the server as mcp.d.ts says.
+  fails the server as mcp.d.ts says; a permit denial and the console tools'
+  refusal outside debug mode are `isError` results the tool returns, and fail
+  nothing.
+- console tools off: outside debug mode console_run, console_write and
+  console_read return the `isError` result holding tools_browser.debug_off, the
+  form of a permit denial, asking no permit and showing no console, so mcp's
+  tool_run keeps no failure and the turn goes on.
+- script otherwise: a string the node's replies does not hold, or that is no
+  decimal integer, takes the node's otherwise; with none it throws
+  provider_script.input_invalid for a text that is no integer and
+  provider_script.input_unknown for an integer, which stay for a test's own
+  table. A content that is not a string is refused in every table.
+- script after_holds: on a node holding it, tool results are answered by
+  after_tools only when every result of the reply holds the text, else by
+  after_lacks, whose tool calls move on as after_tools' do. A result whose
+  content is not a string throws provider_script.field_invalid.
+- script after pair: a node holding one of after_holds and after_lacks and not
+  the other throws provider_script.after_unpaired when tool results reach it.
+- box closing: the DOM port closes the box in its submit and click listeners,
+  before the queue's next step, so that a second Enter or click cannot start a
+  second turn.
+- box bound: engine.page_run sets the box's maxLength to line_max over 8, so
+  that a paste past it is cut and the turn it says fits one line at JSON's 6
+  bytes a character at worst.
 - MCP Python methods: answers initialize, ping, tools/list and tools/call and
   takes notifications/initialized, for the revision in _PROTOCOL_VERSION, with
   the capability tools only.
@@ -1155,15 +1221,32 @@ fault realm REALM->DRIVER 0 push; fails the block
   rewrites that file as the strict line, then `var test_vectors = ...;`, `var
   test_gold = ...;`, then the bundle with the strings table in place. Returns
   its path. Run as `node node.js BLOCK [--failfast]`.
-- tsc output: both builds compile through one function that keeps it off
-  stdout, the driver's TAP stream. A failed compile raises, tsc's output in
-  its cause.
+- tsc output: both builds and api_check compile through tsc_run, which keeps it
+  off stdout, the driver's TAP stream. A failed compile raises, tsc's output in
+  its cause, and a PATH with no tsc raises FileNotFoundError.
+- api_check: tsc_run on ts/tsconfig.api.json. No page build calls it;
+  test_posix.py does, last. In the default run that is among the checks after
+  the stream, so a mismatch does not stop the code's blocks; a full run meets
+  it first in test_test_posix_formatters, in the Python unit phase. No other
+  unit suite compiles the real API text, and test_page_build reaches api_check
+  in a forked child with no tsc on PATH.
+- tsc_run: runs tsc --project CONFIG with the options given. bundle_compile
+  gives --outFile, which a noEmit project must not get, and a test gives it a
+  scratch project, as api_check takes no config.
+- tsc exit code: 1 for a failed compile under noEmitOnError, 2 under noEmit, by
+  tsc 5.2.2.
 - gold_read: takes the folder of the gold files, and both builds pass ts/, so
   that a test can give it a bad file in a scratch directory.
 - test_page_build_tsc: builds each template in a forked child through
   page_build.main, a pipe as its stdout, in place of a started python3, so
   that the count sees the lines of page_build and main; the child ends by
   SIGKILL, and a build that failed leaves no page.
+- TestApiConfig: the class of python/test_page_build.py that reads
+  ts/tsconfig.api.json with no tsc: its files exactly API/ts's, noEmit its only
+  option, no skipLibCheck in its base.
+- TestCheck: the class of python/test_page_build_tsc.py that runs tsc_run on a
+  scratch .d.ts project extending the real base with noEmit: one that compiles
+  writes nothing, one naming an undeclared type raises with code 2.
 
 ## ttyd_build
 
@@ -1232,10 +1315,25 @@ fault realm REALM->DRIVER 0 push; fails the block
 - serve root: `~/.cache/xsjs/root` unless --root says otherwise, a relative
   --root made absolute before use, made as the start script makes one but
   without ttyd. Each run makes python/, i18n/, the files of
-  powershell.root_files, the page and parameters.json anew and keeps every
-  other file, so the databases persist.
+  powershell.root_files, the page and parameters.json anew, removes the log,
+  and keeps every other file, so the databases persist.
 - serve fresh: --fresh removes the whole root first when one exists, and
-  removes nothing otherwise.
+  removes nothing when none does.
+- serve new record: root_make removes `_verbose.sqlite`,
+  `_verbose.sqlite-wal` and `_verbose.sqlite-shm` when they exist, by
+  _VERBOSE_NAMES of xsjs_serve.py, after --fresh's removal and before anything
+  else of the root is made, so each serve starts a new record and the last
+  serve's stays readable by xsjs_log.py until the next start.
+- serve record scope: only root_make removes the log. A page load within one
+  serve adds to the same log, and the start script and the roots the tests
+  make for themselves keep theirs.
+- _VERBOSE_NAMES: repeats verbose.py's private _FILE_NAME with SQLite's -wal
+  and -shm suffixes, as xsjs_log.py and the wire and browser tests repeat the
+  name.
+- second serve on a live root: root_make runs before ttyd binds, so a second
+  start removes the live server's log even when it then fails on the port.
+  That server goes on writing to the removed file with no error, and its
+  record is lost.
 - ttyd arguments: the start script's, on 127.0.0.1 port 5769 by the settings:
   --port N, default powershell.linux_port; --interface powershell.bind_address;
   --writable; --check-origin; --terminal-type powershell.terminal_type; --index
@@ -1273,12 +1371,26 @@ fault realm REALM->DRIVER 0 push; fails the block
   ends before its stop raises xsjs_serve.ttyd_ended.
 - test_xsjs_serve: the serve program's unit suite. It runs the real ttyd and
   the program whole in a forked child by runpy, so that the count reaches
-  every line.
-- TestParentDeath: the forked program, serving through the real ttyd, is ended
-  by SIGKILL and by SIGHUP's default action, and the port it printed stops
-  accepting within the gold's gone_seconds. It polls the port and not the pid,
-  as an orphan may stay a zombie for a moment. Each test builds the page with
-  the real tsc, as the program does.
+  every line. Its ProgramCase, the forked program, serves
+  test_xsjs_serve_death too, with the gold's address_pattern and page_text,
+  which stay here as gold_value reads this module's id.
+- test_log_removed: the test of TestRoot in python/test_xsjs_serve.py that
+  plain files under the gold's verbose_names go at a second making with fresh
+  false and the database stays. test_rest_kept shows a root with no log works.
+- TestParentDeath: the class of test_xsjs_serve_death: the forked program,
+  serving through the real ttyd, is ended by SIGKILL and by SIGHUP's default
+  action, and the port it printed stops accepting within the gold's
+  gone_seconds. It polls the port and not the pid, as an orphan may stay a
+  zombie for a moment. Each test builds the page with the real tsc, as the
+  program does.
+- test_xsjs_serve_death: the suite of TestParentDeath, labelled test-all for
+  its two real page builds, directly after test_xsjs_serve in the Python unit
+  list, so that ttyd's death with its parent is proved only in a full run. It
+  imports test_xsjs_serve for ProgramCase, and its gold holds gone_seconds and
+  poll_seconds alone.
+- test_xsjs_serve_death count: its _COUNTED row counts it for xsjs_serve.py, so
+  a test-all count checks that module after it and a default count after
+  test_xsjs_serve. No line of the module is reached by that suite alone.
 - test_integrate_xsjs_serve: starts the program as a person does on port 0,
   fetches ttyd's token, stops it by SIGTERM and checks the exit code and the
   log.
@@ -1301,6 +1413,9 @@ fault realm REALM->DRIVER 0 push; fails the block
 - xsjs_log follow: prints what the file holds, then polls every 0.05 s on one
   read only connection until SIGINT, whose handler, installed by log_run, exits
   130, so it also ends a run started in the background.
+- xsjs_log follow across a serve: a follow left running when a new serve starts
+  stays on the removed file and prints nothing more, with no error, until
+  SIGINT.
 - xsjs_log exit codes: 0 after a plain print, 130 at SIGINT in follow, 2 for
   arguments the parser refuses, 1 for a raised error.
 - lines_read: the module function of the log, which the demo test's log rung
@@ -1429,9 +1544,9 @@ fault realm REALM->DRIVER 0 push; fails the block
   in no phase, and --module refuses them.
 - test_posix.py: the checks of the whitelisted files: UTF-8 with no non-ASCII
   outside _NON_ASCII_ALLOWED; the comment rules; then the formatters of
-  reformat.py in a test-all run; then the linters of their rows.
-  reformat_table.json gives each extension its comment lexer, codec, checker,
-  formatter and linter. --anthropic does none of this.
+  reformat.py in a test-all run; then the linters of their rows; last
+  page_build.api_check. reformat_table.json gives each extension its comment
+  lexer, codec, checker, formatter and linter. --anthropic does none of this.
 - synchronization audit: test_posix.py fails a ts/*.ts file outside
   _SYNCHRONIZATION_MODULES that uses await, .then(, new Promise, Atomics or
   SharedArrayBuffer outside its comments and literals.
@@ -1462,17 +1577,34 @@ fault realm REALM->DRIVER 0 push; fails the block
 - reply_closed test: test_bootstrap reaches bootstrap.reply_closed with a main
   loop whose loop_prepare puts a pipe nothing writes to on descriptor 0, since
   a hangup ends the engine by SIGHUP before its read returns.
+- lock_wait_seconds: of test_bootstrap's gold, repeats bootstrap.py's private
+  constant, as a test does not import it. test_lock_refused checks the error
+  line came no sooner, and no test catches a wait made longer.
+- test_lock_waited: a real child holds the lock for the gold's
+  lock_held_seconds while the engine writes nothing, then the lock is freed and
+  the first line follows.
+- test_lock_hangup: a hangup while a real child holds the lock ends the run by
+  SIGHUP.
+- _lock_free: ends the holder by SIGKILL and not by closing release alone, as
+  EngineChild's fork keeps a copy of that pipe end while the run lives.
+- test_bootstrap run time: TestDriverHangup of test_integrate_bootstrap runs
+  the whole suite again, so the lock's wait is paid twice in the default run.
 - restart exec test: a forked child of `python/test_engine_system.py` sets
   sys.orig_argv and calls system_restart, so the exec's lines count; the `-c`
   program it starts writes the child's ending and kills itself.
-- seed refusal test: test_main_loop.py reaches main_loop.seed_invalid through a
-  symbolic link to main_loop.py in ROOT/python beside a copy of the seed with a
-  bad document, loaded by runpy.run_path in a forked child; the module's seed
-  directory follows the link and the counter counts the child's lines under the
-  real path.
+- seed refusal test: test_main_loop.py reaches main_loop.seed_invalid and an
+  absent seed file through a symbolic link to main_loop.py in ROOT/python
+  beside a copy of the seed with a bad document or a file removed, loaded by
+  runpy.run_path in a forked child; the module's seed directory follows the
+  link and the counter counts the child's lines under the real path.
 - test_test_posix_formatters: also runs test_posix.py whole as a program in a
   forked child, as the unit suite runs under --anthropic and the cloud
   environment runs no checks, so that the count reaches main and its last line.
+  That run compiles the API text, so a test-all run meets an API failure here,
+  before the TypeScript blocks.
+- test_posix suites: test_test_posix and test_test_posix_formatters sit in the
+  layer after page_build's suites, and test_integrate_test_posix after
+  test_integrate_page_build's layer, as main imports page_build.
 
 ## Blocks
 
@@ -1543,9 +1675,25 @@ fault realm REALM->DRIVER 0 push; fails the block
   on a queue of its own, as the program's handlers register once per thread; a
   case reads it through the probe engine_probe.refusal.
 - test_integrate_engine: group C, on the stock root, the engine worker on the
-  real wire and tty 0, the main thread a scripted UI with no DOM. Each
-  overlay.line holding every part of a mark of the gold's wire sends the
-  test's end that mark's line, so a case pins the wire's lines among the UI's.
+  real wire and tty 0, the main thread a scripted UI on a synchronous queue,
+  whose `render`, `media.store` and `ui.media_reply` are the real handlers of
+  page.handlers_register, on a real media.MediaPort and real elements, its
+  permit.ask and console.show scripted. Each overlay.line holding every part
+  of a mark of the gold's wire sends the test's end that mark's line, so a case
+  pins the wire's lines among the UI's.
+- C block picture: once the first render's reply has gone through the near
+  port, the test's end gets the line test_integrate_engine.first_painted: the
+  canvas's hidden, width and height and the distinct `r g b a` texts of its
+  pixels by getImageData.
+- C block permits: the gold's permit_choices answers each permit.ask by its
+  number, so the first is accepted and the second denied; the scripted
+  console.show opens tty 0 every time, so a second Accept is not a case of the
+  block.
+- C block marks: every turn.append rendering holds the scene's ref, so a part
+  of a mark must not be a word of the ref; wire_result_3 holds the tool's
+  output as `hyperposition\\n`, escaped twice in the rendering.
+- C block ceilings: the seconds of the cases sum to 110, below module_seconds,
+  so that a case's own diagnostic comes before the block's timer.
 - wire mcp lines: only the server client's handshake crosses the wire, since
   the seed's table calls browser tools alone; a turn's mcp lines stay in the
   worker.
@@ -1714,13 +1862,23 @@ fault realm REALM->DRIVER 0 push; fails the block
   and labelled, through a root and ttyd made by xsjs_serve's functions. Exit
   0, 1 at the first failed check, naming its rung, 130 at ctrl C, or 128 plus
   the signal's number at SIGHUP or SIGTERM.
-- demo rungs: served, choice 1, choice 3, log and left are smoke-test; reload,
-  choice 2, console and overlay are test-all; they run in the order served,
-  reload, choice 1, choice 3, choice 2, console, overlay, log, left.
+- demo rungs: served, choice 1, choice 3, bad input, log and left are
+  smoke-test; reload, choice 2, console and overlay are test-all; they run in
+  the order served, reload, choice 1, choice 3, bad input, choice 2, console,
+  overlay, log, left.
+- demo served: _STATE_SCRIPT reads the canvas on the page, and the served rung
+  requires it shown, picture_size wide and high and of picture_colours alone;
+  rung_choice_render requires it hidden after the first render tool call.
 - demo reload: loads the page again at once after the served rung and waits
-  for its first render, the proof of the engine worker's boot file wait.
-- demo typing: the box is clicked once, at choice 1, and every later choice is
-  typed with no click, so that the run proves typing goes on after a turn.
+  for its first render, the proof of the engine worker's boot file wait and,
+  when the old server has not yet exited, of the bootstrap lock wait.
+- demo typing: the box is clicked once, at choice 1, with the picture shown, on
+  the band that paints above the canvas, and every later input is typed with
+  no click, so that the run proves typing goes on after a turn.
+- demo bad input: `7`, `word` and an empty line typed in turn, each waiting for
+  the `otherwise` text with the box enabled and focused; the band's text
+  repeats, so the log table's rows prove each line reached the worker; choice 1
+  ends the rung, as choice 2 would let the next rung pass with no turn.
 - demo root: one debug root, `build/test_demo-*/root`, with verbose false
   whatever the run's switch, as browser.console_run needs debug mode. It goes
   in the left rung and stays after a failure.
@@ -1738,8 +1896,10 @@ fault realm REALM->DRIVER 0 push; fails the block
   TtydServer.signal_wait; the run still exits 1.
 - demo log table: each row of log in the gold is a thread, a fragment given to
   xsjs_log.lines_read as its grep, and a jslb text one of those entries must
-  hold, one per lane and direction, from choices 1 and 3 and the page load
-  only.
+  hold, one per lane and direction, from choices 1 and 3, the bad input rung
+  and the page load, the first render's image on ui-ai and ui-media included.
+  No fragment holds an id, as a reload makes two loads and either may have
+  written a row.
 - rung labels: each root and rung is smoke-test or test-all. A smoke-test
   run skips the test-all rungs and starts nothing for a root with none, and
   a mislabel fails the run.

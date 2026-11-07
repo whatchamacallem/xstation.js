@@ -11,9 +11,9 @@
 // end shows its subtitle and opens the box again, the focus in it each time,
 // a permit request shows its buttons and a click answers it, and ctrl 0 shows
 // the console, which takes the focus from the box, then hides it, which gives
-// an open box the focus back. The cases also send lines of types of the
-// topology's own, whose handlers read the DOM back and act as the player does,
-// through DOM events.
+// an open box the focus back, and the box holds what `line_max` bounds. The
+// cases also send lines of types of the topology's own, whose handlers read
+// the DOM back and act as the player does, through DOM events.
 // The program's handlers register once on a thread, so its refusal of a page
 // without its elements is taken first, before they exist, on a queue of its
 // own, and a case reads it.
@@ -26,6 +26,7 @@ namespace test_engine_page {
     probe_prefix: "engine_probe.",
     refusal_type: "engine_probe.refusal",
     band_type: "engine_probe.band",
+    box_type: "engine_probe.box",
     image_type: "engine_probe.image",
     permit_type: "engine_probe.permit",
     submit_type: "engine_probe.submit",
@@ -101,6 +102,10 @@ namespace test_engine_page {
         // A person's keys reach the box when it is open and holds the focus.
         input_focused: !input.disabled && document.activeElement === input,
       }),
+    );
+    // The most the box takes, which cuts a paste too long for one line.
+    probe_add(constants.box_type, (line) =>
+      dispatch.reply_make(line, { max_length: input.maxLength }),
     );
     // With the image hidden, what shows above the band is the page's colour.
     probe_add(constants.image_type, (line) =>

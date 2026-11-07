@@ -364,7 +364,7 @@ declare namespace lines {
     digit: number;
   }
 
-  // console.show: shows the console view as ctrl 0 does, answered when open.
+  // console.show: shows the console view as ctrl 0 does, tty 0 asked for.
   interface ConsoleShow {}
 
   // The reply to console.open: the token ttyd gave for tty 0.

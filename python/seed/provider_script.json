@@ -2,6 +2,10 @@
   "start": "start",
   "nodes": {
     "start": {
+      "otherwise": {
+        "content": "That is not one of the choices. 1, 2, 3 or 0, when you are quite ready.",
+        "next": "menu"
+      },
       "replies": {
         "0": {
           "content": "Nothing at all, then. How restful. Do take your time.",
@@ -60,6 +64,10 @@
       }
     },
     "menu": {
+      "otherwise": {
+        "content": "That is not one of the choices. 1, 2, 3 or 0, when you are quite ready.",
+        "next": "menu"
+      },
       "replies": {
         "0": {
           "content": "Nothing at all, then. How restful. Do take your time.",
@@ -132,6 +140,11 @@
       "replies": {}
     },
     "after_console": {
+      "after_holds": "hyperposition",
+      "after_lacks": {
+        "content": "The console stayed shut: you refused it, it was not served with --debug, or it took too long. I shall try to bear it.",
+        "next": "menu"
+      },
       "after_tools": {
         "content": null,
         "next": "after_output",

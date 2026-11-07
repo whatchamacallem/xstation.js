@@ -1,5 +1,10 @@
 {
   "chunk_bytes": 1000,
+  "image": {
+    "file": "hyperposition.bmp",
+    "key": "image/hyperposition",
+    "ref": "/metaverse/image/hyperposition"
+  },
   "lines": {
     "create_castle": {
       "0": {

@@ -26,6 +26,9 @@ namespace engine {
     media_setting: "media_db_bytes",
     timeout_setting: "provider.timeout_seconds",
     ring_setting: "verbose_ring",
+    line_setting: "line_max",
+    // The bytes of a line per character of the box, past JSON's 6 at worst.
+    text_bytes: 8,
     // The identities of the browser's server and of both clients.
     server_name: "xsjs-browser",
     client_name: "hyperposition-engine",
@@ -322,6 +325,9 @@ namespace engine {
     const permit = element_find(constants.permit_id);
     const debug = element_find(constants.debug_id);
     const overlays = element_find(constants.overlays_id);
+    // A paste past this is cut by the box, so the turn it says fits one line.
+    const line_max = settings.settings_get(constants.line_setting) as number;
+    input.maxLength = Math.floor(line_max / constants.text_bytes);
     const images = new media.MediaPort(
       settings.settings_get(constants.media_setting) as number,
       settings.settings_get(constants.timeout_setting) as number,

@@ -52,6 +52,13 @@ _SEED_NAME = "seed"
 # The name of the serve program's root, under the start script's folder.
 _ROOT_NAME = "root"
 
+# The root's log and the files SQLite keeps beside it, which each run removes.
+_VERBOSE_NAMES = (
+    "_verbose.sqlite",
+    "_verbose.sqlite-wal",
+    "_verbose.sqlite-shm",
+)
+
 # The engine page's template, in `html/`.
 _PAGE_TEMPLATE = "engine"
 
@@ -194,7 +201,7 @@ def page_ready(values: dict[str, Any]) -> str:
     return os.path.join(_BUILD_PATH, page_name)
 
 
-# Makes the root from the built page, `fresh` removing any root there first.
+# Makes the root from the built page: its log goes, or with `fresh` all of it.
 def root_make(
     values: dict[str, Any],
     page: str,
@@ -207,6 +214,10 @@ def root_make(
     powershell: dict[str, Any] = values["powershell"]
     if fresh and os.path.exists(root):
         shutil.rmtree(root)
+    for name in _VERBOSE_NAMES:
+        path = os.path.join(root, name)
+        if os.path.exists(path):
+            os.remove(path)
     python_path = os.path.join(root, _ROOT_PYTHON)
     strings_path = os.path.join(root, _ROOT_STRINGS)
     # The copies of earlier runs go, so the root holds this checkout's only.

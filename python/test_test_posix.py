@@ -16,7 +16,7 @@
 # synchronization token outside the exempt modules is refused with its message
 # too, the audit's own check and its list of paths take what each test gives
 # them, and bytes that are not UTF-8 are refused. No test reaches the formatter
-# step or main, which call into category and reformat.
+# step or main, which call into category, page_build and reformat.
 
 import os, tempfile, test_posix, unittest
 

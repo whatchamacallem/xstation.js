@@ -9,12 +9,12 @@
 # runs, then drives chrome-headless-shell over DevTools as a person would:
 # clicks and keys reach the page as input events, and every reading is of the
 # page's elements. The analyst is the seed's scripted table, and no real AI
-# provider is contacted. Each rung runs under a timer and is labelled
-# smoke-test or test-all, and a mislabel fails the run. PNGs of the states go
-# to build/test_demo/, which each run empties. The root goes once the run
-# passes and stays after a failure, with a PNG of the failed rung.
-#
-# With --hold a failed rung leaves the page, keeps ttyd serving the root,
+# provider is contacted. A person's error, an input the table does not hold,
+# ends in her answer in the band, by the bad input rung. Each rung runs under
+# a timer and is labelled smoke-test or test-all, and a mislabel fails the run.
+# PNGs of the states go to build/test_demo/, which each run empties. The root
+# goes once the run passes and stays after a failure, with a PNG of the failed
+# rung. With --hold a failed rung leaves the page, keeps ttyd serving the root,
 # prints the address and waits for ctrl C, so that a person opens the failed
 # state in a browser, which a fresh load restores from the server. Its timers,
 # window size, texts and log table are in its gold, python.test_demo.
@@ -125,11 +125,26 @@ _STATE_SCRIPT = r"""(() => {
   const terminal = document.querySelector("#debug .xterm");
   const rows = document.querySelector("#debug .xterm-rows");
   const overlay = document.querySelector("#overlays pre");
+  const image = document.querySelector("#image");
+  const pixels = image
+    .getContext("2d")
+    .getImageData(0, 0, image.width, image.height).data;
+  const colours = new Set();
+  for (let at = 0; at < pixels.length; at += 4) {
+    colours.add(pixels.subarray(at, at + 4).join(" "));
+  }
   return {
     fault: null,
     subtitle: document.querySelector("#subtitle").textContent,
-    image_hidden: document.querySelector("#image").hidden,
-    input: { ...place(input), disabled: input.disabled },
+    image_hidden: image.hidden,
+    image_width: image.width,
+    image_height: image.height,
+    image_colours: [...colours],
+    input: {
+      ...place(input),
+      disabled: input.disabled,
+      focused: document.activeElement === input,
+    },
     permit_texts: Array.from(
       permit.querySelectorAll("p"),
       (text) => text.textContent,
@@ -430,14 +445,25 @@ def rung_served(run: DemoRun) -> str:
     run.browser.page_open(address)
     remark: str = gold_value("remark")
     run.band_wait(remark)
-    if not run.state_read()["image_hidden"]:
+    size: int = gold_value("picture_size")
+    colours: list[str] = gold_value("picture_colours")
+    state = run.state_read()
+    picture = (
+        state["image_hidden"],
+        state["image_width"],
+        state["image_height"],
+        state["image_colours"],
+    )
+    if picture != (False, size, size, colours):
         raise CheckFailed(
-            "the picture shows, where the hyperposition names no image"
+            f"the picture's hidden, width, height and colours are {picture},"
+            f" where it should show, {size} by {size}, all of {colours}"
         )
     png = run.picture_save("served")
     return (
         f"{address} loaded and its first render shows {remark!r} in the band,"
-        f" the box enabled and the picture hidden; PNG {png}"
+        f" the box enabled and the picture shown, {size} by {size}, all of"
+        f" {colours}; PNG {png}"
     )
 
 
@@ -457,8 +483,14 @@ def rung_reload(run: DemoRun) -> str:
 def rung_choice_render(run: DemoRun) -> str:
     run.box_click()
     text = choice_take(run, "1")
+    # The table's render names no image, so the first one hides the picture.
+    if not run.state_read()["image_hidden"]:
+        raise CheckFailed("the picture shows after a render that names none")
     png = run.picture_save("choice_1")
-    return f"typing 1 ended with {text!r} in the band; PNG {png}"
+    return (
+        f"typing 1 ended with {text!r} in the band, the picture hidden;"
+        f" PNG {png}"
+    )
 
 
 # Typing 3 asks the permit, and Accept runs the command in dash in view.
@@ -491,6 +523,32 @@ def rung_choice_console(run: DemoRun) -> str:
         f"typing 3 showed {permit!r} with the buttons {labels}; Accept showed"
         f" the console view, whose rows hold {prompt!r} and {output!r}, and"
         f" {text!r} ended in the band; PNG {png}"
+    )
+
+
+# Types what the table does not hold and waits for the box to come back.
+def input_refuse(run: DemoRun, line: str) -> None:
+    text: str = gold_value("otherwise")
+    run.line_type(line)
+    run.state_wait(
+        f"{text!r} in the band after {line!r}, the box enabled and focused",
+        lambda state: state["subtitle"] == text
+        and not state["input"]["disabled"]
+        and state["input"]["focused"],
+    )
+
+
+# Each input the table does not hold is answered, and a choice then still is.
+def rung_refused(run: DemoRun) -> str:
+    inputs: list[str] = gold_value("bad_inputs")
+    for line in inputs:
+        input_refuse(run, line)
+    # Not choice 2, whose rung would then find its text in the band at once.
+    text = choice_take(run, "1")
+    return (
+        f"typing each of {inputs} ended with the analyst's answer in the"
+        " band, the box enabled and focused, and typing 1 then ended with"
+        f" {text!r}"
     )
 
 
@@ -610,6 +668,7 @@ def rungs_climb(run: DemoRun) -> None:
     log.rung_run("reload", _TEST_ALL, lambda: rung_reload(run))
     log.rung_run("choice 1", _SMOKE_TEST, lambda: rung_choice_render(run))
     log.rung_run("choice 3", _SMOKE_TEST, lambda: rung_choice_console(run))
+    log.rung_run("bad input", _SMOKE_TEST, lambda: rung_refused(run))
     log.rung_run("choice 2", _TEST_ALL, lambda: rung_choice_note(run))
     log.rung_run("console", _TEST_ALL, lambda: rung_console(run))
     log.rung_run("overlay", _TEST_ALL, lambda: rung_overlay(run))

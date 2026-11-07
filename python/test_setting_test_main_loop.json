@@ -1,6 +1,9 @@
 {
   "analyst": {
     "end_node": "menu",
+    "holding": {
+      "after_console": "hyperposition"
+    },
     "input_nodes": ["menu", "start"],
     "inputs": {
       "0": [],
@@ -46,10 +49,29 @@
         ]
       ]
     },
+    "lacking": {
+      "3": [
+        [
+          {
+            "arguments": {
+              "text": "echo hyperposition",
+              "timeout_seconds": 30
+            },
+            "name": "browser.console_run"
+          }
+        ]
+      ]
+    },
     "start_node": "start"
   },
   "at_sample": 1762500000000,
   "chunk_bytes": 1000,
+  "image": {
+    "file": "hyperposition.bmp",
+    "key": "image/hyperposition",
+    "ref": "/metaverse/image/hyperposition",
+    "size": 102
+  },
   "line_small": 100,
   "lines": {
     "browser_error": {
@@ -346,6 +368,7 @@
     "main_loop_serve_failed_stream": "The server failed while serving the engine tty: The stream failed between its pushes.",
     "main_loop_serve_failed_type": "The server failed while serving the engine tty: The line header has no type string.",
     "main_loop_serve_failed_unknown": "The server failed while serving the engine tty: No handler is registered for type no.such version 0.",
+    "seed_absent": "[Errno 2] No such file or directory: '{0}'",
     "stream_fault": "The stream failed between its pushes.",
     "verbose_put_entry": "kept"
   }

@@ -284,7 +284,10 @@
   },
   "texts": {
     "provider_script_after_missing": "The script node bare has no reply after tool results.",
+    "provider_script_after_unpaired_holds": "The script node lone_holds holds one of after_holds and after_lacks without the other.",
+    "provider_script_after_unpaired_lacks": "The script node lone_lacks holds one of after_holds and after_lacks without the other.",
     "provider_script_blobs_refused": "The http.request line carries blobs, which the scripted provider refuses.",
+    "provider_script_field_invalid_content": "The request field json.messages[4].content is missing or is not valid for the scripted provider.",
     "provider_script_field_invalid_json": "The request field json is missing or is not valid for the scripted provider.",
     "provider_script_field_invalid_message": "The request field json.messages[0] is missing or is not valid for the scripted provider.",
     "provider_script_field_invalid_messages": "The request field json.messages is missing or is not valid for the scripted provider.",

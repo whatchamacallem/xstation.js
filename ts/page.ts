@@ -73,7 +73,6 @@ namespace page {
     view_toggle(): boolean;
     view_show(): void;
     open_wanted(): boolean;
-    open_is(): boolean;
     open_request(): dispatch.Sleep;
     open_done(wake: lines.Line): void;
     close_done(wake: lines.Line): void;
@@ -264,11 +263,13 @@ namespace page {
       this.receiver = fn;
     }
 
-    // Takes the text the player submits and empties the input.
+    // Takes the text the player submits, empties the input and closes it.
     private text_take(event: SubmitEvent): void {
       event.preventDefault();
       const text = this.input.value;
       this.input.value = "";
+      // Closed here, as a second Enter may come before the queue's next step.
+      this.input.disabled = true;
       this.receiver_call(line_build(constants.input_type, { text }));
     }
 
@@ -288,6 +289,7 @@ namespace page {
       const top = (box.height - canvas.height * scale) / 2;
       const x = Math.floor((event.clientX - box.left - left) / scale);
       const y = Math.floor((event.clientY - box.top - top) / scale);
+      this.input.disabled = true;
       this.receiver_call(line_build(constants.input_type, { x, y }));
     }
 
@@ -448,15 +450,13 @@ namespace page {
       return view.open_wanted() ? view.open_request() : undefined;
     }
 
-    // Shows the console, answered at once when open, else once it opens.
+    // Shows the console, answered once it opens when idle, else at once.
     show_take(line: lines.Line): lines.Line | dispatch.Sleep {
       const { view } = this.#parts;
       view.view_show();
-      if (view.open_is()) {
-        return dispatch.reply_make(line, {});
-      }
+      // While ctrl 0 opens it, tty 0's writer holds the AI's lines for dash.
       if (!view.open_wanted()) {
-        throw new Error(i18n("page.console_busy"));
+        return dispatch.reply_make(line, {});
       }
       const sleep = view.open_request();
       const state: RelayState = { request: line };

@@ -37,6 +37,8 @@
   "hangup_bytes": 1048576,
   "blocked_seconds": 10,
   "poll_seconds": 0.01,
+  "lock_wait_seconds": 5,
+  "lock_held_seconds": 0.25,
   "texts": {
     "bootstrap_line_error": "server reports to ai: {0}",
     "bootstrap_lock_held": "Another engine holds the lock {0}.",

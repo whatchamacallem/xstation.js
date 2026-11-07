@@ -8,10 +8,10 @@
 // ctrl 0 hides the console.
 //
 // `console.show`, a request of the AI worker, shows the console view as ctrl 0
-// does, then answers once tty 0 is open. A view that is opening or closing
-// cannot answer and throws `page.console_busy`. `console.busy` and
-// `console.idle`, pushes of the AI worker around its command, hold and free
-// the view's keys.
+// does. An idle view asks for tty 0 and answers once it opens; any other view
+// answers at once, as tty 0's writer holds the AI's lines until dash's prompt.
+// `console.busy` and `console.idle`, pushes of the AI worker around its
+// command, hold and free the view's keys.
 //
 // A worker's `fault` line shows the fault screen, its stack followed by each
 // cause's message and stack, then the page terminates the worker, which has
@@ -37,7 +37,6 @@ declare namespace page {
     view_toggle(): boolean;
     view_show(): void;
     open_wanted(): boolean;
-    open_is(): boolean;
     open_request(): dispatch.Sleep;
     open_done(wake: lines.Line): void;
     close_done(wake: lines.Line): void;
