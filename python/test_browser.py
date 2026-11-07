@@ -16,7 +16,7 @@
 # the main thread through the probe kit, a stub HTTP server of this process and
 # the server. A fault the headless page's realm reports that no rung waited for
 # fails the run. PNGs of the surveyed states go to build/test_browser/. Each
-# root and rung is labelled smoke-test or normal-test, and a mislabel fails the
+# root and rung is labelled smoke-test or test-all, and a mislabel fails the
 # run. It imports the standard library and the infrastructure for testing only.
 
 import argparse, base64, contextlib, fcntl, hashlib, http.server, json, os, re
@@ -2766,7 +2766,7 @@ def rungs_locked(session: PageSession) -> None:
         fcntl.flock(file.fileno(), fcntl.LOCK_EX)
         session.log.rung_run(
             "stage 5: error before the first line",
-            "normal-test",
+            "test-all",
             lambda: rung_error_first(session),
         )
 
@@ -2933,22 +2933,22 @@ def rungs_suites(session: PageSession) -> None:
         "stage 8: fresh root", "smoke-test", lambda: rung_fresh_root(session)
     )
     log.rung_run(
-        "stage 5: verbose ring", "normal-test", lambda: rung_ring(session)
+        "stage 5: verbose ring", "test-all", lambda: rung_ring(session)
     )
     log.rung_run(
-        "stage 5: verbose sink", "normal-test", lambda: rung_sink(session)
+        "stage 5: verbose sink", "test-all", lambda: rung_sink(session)
     )
     log.rung_run(
-        "stage 8: long tasks", "normal-test", lambda: rung_long(session)
+        "stage 8: long tasks", "test-all", lambda: rung_long(session)
     )
     log.rung_run(
         "stage 5: traced synchronous load found",
-        "normal-test",
+        "test-all",
         lambda: rung_blocking_control(session),
     )
     log.rung_run(
         "stage 5: no synchronous load on the UI thread",
-        "normal-test",
+        "test-all",
         lambda: rung_blocking_none(session),
         suites,
     )
@@ -2958,16 +2958,16 @@ def rungs_suites(session: PageSession) -> None:
 def rungs_faults(session: PageSession) -> None:
     log = session.log
     log.rung_run(
-        "stage 0: thrown error", "normal-test", lambda: rung_thrown(session)
+        "stage 0: thrown error", "test-all", lambda: rung_thrown(session)
     )
     log.rung_run(
-        "stage 0: first fault only", "normal-test", lambda: rung_first(session)
+        "stage 0: first fault only", "test-all", lambda: rung_first(session)
     )
     log.rung_run(
-        "stage 0: reload", "normal-test", lambda: rung_reload(session)
+        "stage 0: reload", "test-all", lambda: rung_reload(session)
     )
     log.rung_run(
-        "stage 0: rejection", "normal-test", lambda: rung_rejection(session)
+        "stage 0: rejection", "test-all", lambda: rung_rejection(session)
     )
     resources: list[tuple[str, str, dict[str, str], str]] = [
         ("script", "script", {"src": "/rung-missing.js"}, "src"),
@@ -2983,12 +2983,12 @@ def rungs_faults(session: PageSession) -> None:
         due = f'{_RESOURCE_FAILURE}{tag} {address}="{attributes[address]}"'
         log.rung_run(
             f"stage 0: failing {name}",
-            "normal-test",
+            "test-all",
             lambda: rung_resource(session, tag, attributes, due),
         )
     log.rung_run(
         "stage 0: failing with neither address",
-        "normal-test",
+        "test-all",
         lambda: rung_resource(
             session,
             "img",
@@ -2998,7 +2998,7 @@ def rungs_faults(session: PageSession) -> None:
     )
     log.rung_run(
         "stage 0: failing object",
-        "normal-test",
+        "test-all",
         lambda: rung_resource(
             session,
             "object",
@@ -3008,7 +3008,7 @@ def rungs_faults(session: PageSession) -> None:
     )
     log.rung_run(
         "stage 0: failing SVG image",
-        "normal-test",
+        "test-all",
         lambda: rung_svg(session, "/rung-missing-svg.png"),
     )
 
@@ -3019,95 +3019,95 @@ def rungs_probe(session: PageSession, context: RunContext) -> None:
     stub = stub_ready(context)
     log.rung_run(
         "stage 5: wire first line",
-        "normal-test",
+        "test-all",
         lambda: rung_first_line(session),
     )
     log.rung_run(
         "stage 5: blob_max plus one refused",
-        "normal-test",
+        "test-all",
         lambda: rung_over(session),
         gold_value("window_seconds"),
     )
     log.rung_run(
-        "stage 5: wire_close", "normal-test", lambda: rung_close(session)
+        "stage 5: wire_close", "test-all", lambda: rung_close(session)
     )
     log.rung_run(
         "stage 5: error line then close",
-        "normal-test",
+        "test-all",
         lambda: rung_error(session),
     )
     log.rung_run(
-        "stage 5: http post", "normal-test", lambda: rung_post(session, stub)
+        "stage 5: http post", "test-all", lambda: rung_post(session, stub)
     )
     log.rung_run(
-        "stage 5: http preflight", "normal-test", lambda: rung_preflight(stub)
+        "stage 5: http preflight", "test-all", lambda: rung_preflight(stub)
     )
     log.rung_run(
         "stage 5: http stalled body",
-        "normal-test",
+        "test-all",
         lambda: rung_stall(session, stub),
     )
     log.rung_run(
         "stage 5: http one line per request",
-        "normal-test",
+        "test-all",
         lambda: rung_single(session, stub),
     )
     log.rung_run(
         "stage 5: http out of order",
-        "normal-test",
+        "test-all",
         lambda: rung_order(session, stub),
     )
     log.rung_run(
         "stage 5: http get with a body",
-        "normal-test",
+        "test-all",
         lambda: rung_body(session, stub),
     )
     log.rung_run(
         "stage 5: http port in a worker",
-        "normal-test",
+        "test-all",
         lambda: rung_worker(session, stub),
     )
     log.rung_run(
         "stage 5: queue two replies",
-        "normal-test",
+        "test-all",
         lambda: rung_pair(session, stub),
     )
     log.rung_run(
         "stage 5: http throwing receiver",
-        "normal-test",
+        "test-all",
         lambda: rung_receiver(session, stub),
     )
     log.rung_run(
         "stage 5: close without error line",
-        "normal-test",
+        "test-all",
         lambda: rung_silent(session),
     )
     log.rung_run(
         "stage 5: queue handler throws",
-        "normal-test",
+        "test-all",
         lambda: rung_handler(session),
     )
     log.rung_run(
         "stage 7: console open, close, exit, open",
-        "normal-test",
+        "test-all",
         lambda: rung_cycle(session),
     )
     waits = _WIRE_SECONDS + gold_value("rung_seconds")
     log.rung_run(
         "stage 5: wire token timer",
-        "normal-test",
+        "test-all",
         lambda: rung_token(session),
         waits,
     )
     log.rung_run(
         "stage 5: wire open timer",
-        "normal-test",
+        "test-all",
         lambda: rung_opening(session, stub),
         waits,
     )
     log.rung_run(
         "stage 7: console closed before open",
-        "normal-test",
+        "test-all",
         lambda: rung_closing(session, stub),
     )
 
@@ -3116,7 +3116,7 @@ def rungs_probe(session: PageSession, context: RunContext) -> None:
 def rungs_stalled(session: PageSession) -> None:
     session.log.rung_run(
         "stage 5: wire first line timer",
-        "normal-test",
+        "test-all",
         lambda: rung_stalled(session),
         _WIRE_SECONDS + gold_value("rung_seconds"),
     )
@@ -3126,7 +3126,7 @@ def rungs_stalled(session: PageSession) -> None:
 def rungs_credential(session: PageSession) -> None:
     session.log.rung_run(
         "stage 7: token with a credential",
-        "normal-test",
+        "test-all",
         lambda: rung_credential(session),
     )
 
@@ -3135,13 +3135,13 @@ def rungs_credential(session: PageSession) -> None:
 def rungs_echo(session: PageSession) -> None:
     session.log.rung_run(
         "stage 5: wire drain poll",
-        "normal-test",
+        "test-all",
         lambda: rung_drain_poll(session),
         gold_value("echo_seconds"),
     )
     session.log.rung_run(
         "stage 5: wire drain timer",
-        "normal-test",
+        "test-all",
         lambda: rung_drain_timer(session),
         _DRAIN_SECONDS + gold_value("rung_seconds"),
     )
@@ -3152,12 +3152,12 @@ def rungs_release(session: PageSession) -> None:
     log = session.log
     log.rung_run(
         "stage 5: release runs nothing",
-        "normal-test",
+        "test-all",
         lambda: rung_gating(session),
     )
     log.rung_run(
         "stage 7: console role refused",
-        "normal-test",
+        "test-all",
         lambda: rung_refused_role(session),
     )
 
@@ -3247,7 +3247,7 @@ def stages_run(log: RungLog, work: str) -> None:
         session_run(
             context,
             "faults",
-            "normal-test",
+            "test-all",
             _TTYD_PAGE,
             {},
             ServerExtras(*_EXTRAS_NONE),
@@ -3256,13 +3256,13 @@ def stages_run(log: RungLog, work: str) -> None:
         )
         log.rung_run(
             "stage 5: stub reachable",
-            "normal-test",
+            "test-all",
             lambda: rung_reachable(context),
         )
         session_run(
             context,
             "probe",
-            "normal-test",
+            "test-all",
             _HEADLESS_PAGE,
             {},
             ServerExtras(*_EXTRAS_NONE),
@@ -3272,7 +3272,7 @@ def stages_run(log: RungLog, work: str) -> None:
         session_run(
             context,
             "credential",
-            "normal-test",
+            "test-all",
             _HEADLESS_PAGE,
             {},
             ServerExtras((_CREDENTIAL_OPTION, _CREDENTIAL), ()),
@@ -3282,7 +3282,7 @@ def stages_run(log: RungLog, work: str) -> None:
         session_run(
             context,
             "echo",
-            "normal-test",
+            "test-all",
             _HEADLESS_PAGE,
             {"debug": True},
             ServerExtras((), (_LOOP_OPTION, _ECHO_LOOP_NAME)),
@@ -3292,7 +3292,7 @@ def stages_run(log: RungLog, work: str) -> None:
         session_run(
             context,
             "stalled",
-            "normal-test",
+            "test-all",
             _TTYD_PAGE,
             {"debug": True},
             ServerExtras((), (_LOOP_OPTION, _STALL_LOOP_NAME)),
@@ -3302,7 +3302,7 @@ def stages_run(log: RungLog, work: str) -> None:
         session_run(
             context,
             "release",
-            "normal-test",
+            "test-all",
             _TTYD_PAGE,
             {"debug": False},
             ServerExtras(*_EXTRAS_NONE),
@@ -3312,7 +3312,7 @@ def stages_run(log: RungLog, work: str) -> None:
         session_run(
             context,
             "locked",
-            "normal-test",
+            "test-all",
             _TTYD_PAGE,
             {},
             ServerExtras(*_EXTRAS_NONE),

@@ -17,7 +17,7 @@
 #
 # The test command has to be run as admin:
 # Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-# .\powershell\test_powershell.ps1 [--smoke-test | --normal-test]
+# .\powershell\test_powershell.ps1 [--test-all]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
     'PSAvoidUsingWriteHost', '',
     Justification = 'Coloured headings for the person running it.')]
@@ -25,7 +25,7 @@ param()
 
 . (Join-Path $PSScriptRoot 'xsjs_util.ps1')
 
-# Read `$args`, not `param()`: PowerShell takes `--smoke-test` for a parameter.
+# Read `$args`, not `param()`: PowerShell takes `--test-all` for a parameter.
 $arguments_ = $args
 
 # The project's top directory. Each Script is relative to it.
@@ -54,11 +54,12 @@ $lifecycle_ = @(
     @{ Script = 'xsjs_status.ps1'; Expect = $i18n_.status_stopped }
 )
 
-# Returns the category option, `--smoke-test` if none, or throws usage.
+# Returns the category option as words, none if not given, or throws usage.
 function _test_powershell_get_category {
-    if ($arguments_.Count -eq 0) { return '--smoke-test' }
-    $known_ = $arguments_[0] -cin '--smoke-test', '--normal-test'
-    if ($arguments_.Count -eq 1 -and $known_) { return $arguments_[0] }
+    if ($arguments_.Count -eq 0) { return @() }
+    if ($arguments_.Count -eq 1 -and $arguments_[0] -ceq '--test-all') {
+        return @($arguments_[0])
+    }
     throw ($i18n_.test_usage -f $script_name_)
 }
 
@@ -148,7 +149,7 @@ function _test_powershell_main {
 
     $script_name_ = Split-Path -Leaf $PSCommandPath
     $log_path_ = xsjs_util_open_log $PSCommandPath
-    $category_ = _test_powershell_get_category
+    $category_ = @(_test_powershell_get_category)
     xsjs_util_step_check_administrator
 
     # Lint in a PowerShell of its own: see `test_lint.ps1`.
@@ -165,7 +166,8 @@ function _test_powershell_main {
     }
 
     xsjs_util_write_log_section $i18n_.done
-    $message_ = $i18n_.test_passed -f $category_
+    $command_ = (@('python/test_all.py') + $category_) -join ' '
+    $message_ = $i18n_.test_passed -f $command_
     xsjs_util_write_log $message_
     Write-Host "`n$message_" -ForegroundColor Green
 }

@@ -49,10 +49,10 @@ _LIMITS = [1, 2]
 _SMOKE_TEST = "smoke-test"
 
 # The label and category of every other suite.
-_NORMAL_TEST = "normal-test"
+_TEST_ALL = "test-all"
 
 # The refusal of the category `all`, which is neither of the two.
-_ALL_REFUSED = "the category 'all' is neither smoke-test nor normal-test"
+_ALL_REFUSED = "the category 'all' is neither smoke-test nor test-all"
 
 # The mark that exempts a statement and the block its first line opens.
 _MARK = "# pragma: no cover"
@@ -253,29 +253,23 @@ class TestHarness(unittest.TestCase):
         self.assertEqual(harness.gold_copy(), self.gold)
 
 
-# The two options, at most one, and `smoke-test` when neither is given.
+# The one option, `--test-all`, and `smoke-test` when it is not given.
 class TestOptions(unittest.TestCase):
     # No option gives `smoke-test`.
     def test_default_smoke(self) -> None:
         parsed = parser_make().parse_args([])
         self.assertEqual(parsed.category, _SMOKE_TEST)
 
-    # The option `--smoke-test` gives `smoke-test`.
-    def test_smoke_given(self) -> None:
-        parsed = parser_make().parse_args(["--smoke-test"])
-        self.assertEqual(parsed.category, _SMOKE_TEST)
-
-    # The option `--normal-test` gives `normal-test`.
+    # The option `--test-all` gives `test-all`.
     def test_normal_given(self) -> None:
-        parsed = parser_make().parse_args(["--normal-test"])
-        self.assertEqual(parsed.category, _NORMAL_TEST)
+        parsed = parser_make().parse_args(["--test-all"])
+        self.assertEqual(parsed.category, _TEST_ALL)
 
-    # Both options together exit with the usage code 2.
-    def test_both_refused(self) -> None:
-        arguments = ["--smoke-test", "--normal-test"]
+    # The default's name is no option: `--smoke-test` exits with the code 2.
+    def test_smoke_refused(self) -> None:
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit) as caught:
-                parser_make().parse_args(arguments)
+                parser_make().parse_args(["--smoke-test"])
         self.assertEqual(caught.exception.code, 2)
 
     # An option of neither name, though the start of one, exits with code 2.
@@ -286,23 +280,47 @@ class TestOptions(unittest.TestCase):
         self.assertEqual(caught.exception.code, 2)
 
 
+# The words of a category's option for a command line.
+class TestOptionWords(unittest.TestCase):
+    # A `smoke-test` run has no option word.
+    def test_smoke_none(self) -> None:
+        self.assertEqual(category.option_words(_SMOKE_TEST), [])
+
+    # A `test-all` run has its one option.
+    def test_normal_option(self) -> None:
+        self.assertEqual(category.option_words(_TEST_ALL), ["--test-all"])
+
+    # The words parse back to their category.
+    def test_words_parsed(self) -> None:
+        for chosen in (_SMOKE_TEST, _TEST_ALL):
+            words = category.option_words(chosen)
+            parsed = parser_make().parse_args(words)
+            self.assertEqual(parsed.category, chosen, chosen)
+
+    # A category other than the two raises.
+    def test_category_refused(self) -> None:
+        with self.assertRaises(ValueError) as caught:
+            category.option_words("all")
+        self.assertEqual(caught.exception.args, (_ALL_REFUSED,))
+
+
 # Which suites a run of each category runs, and the strings it refuses.
 class TestSelection(unittest.TestCase):
     # A `smoke-test` suite runs in a run of either category.
     def test_smoke_runs(self) -> None:
-        for chosen in (_SMOKE_TEST, _NORMAL_TEST):
+        for chosen in (_SMOKE_TEST, _TEST_ALL):
             self.assertTrue(category.suite_runs(_SMOKE_TEST, chosen), chosen)
 
-    # A `normal-test` suite runs in a `normal-test` run only.
+    # A `test-all` suite runs in a `test-all` run only.
     def test_normal_runs(self) -> None:
-        self.assertTrue(category.suite_runs(_NORMAL_TEST, _NORMAL_TEST))
-        self.assertFalse(category.suite_runs(_NORMAL_TEST, _SMOKE_TEST))
+        self.assertTrue(category.suite_runs(_TEST_ALL, _TEST_ALL))
+        self.assertFalse(category.suite_runs(_TEST_ALL, _SMOKE_TEST))
 
     # A label other than the two raises.
     def test_label_refused(self) -> None:
         with self.assertRaises(ValueError) as caught:
             category.suite_runs("smoke", _SMOKE_TEST)
-        expected = "the label 'smoke' is neither smoke-test nor normal-test"
+        expected = "the label 'smoke' is neither smoke-test nor test-all"
         self.assertEqual(caught.exception.args, (expected,))
 
     # A category other than the two raises.
@@ -321,9 +339,9 @@ class TestLimit(unittest.TestCase):
         self.assertEqual(limit, expected)
         self.assertIs(type(limit), float)
 
-    # A `normal-test` run has no limit of its own.
+    # A `test-all` run has no limit of its own.
     def test_normal_unlimited(self) -> None:
-        self.assertIsNone(category.limit_seconds(_NORMAL_TEST))
+        self.assertIsNone(category.limit_seconds(_TEST_ALL))
 
     # A category other than the two raises.
     def test_category_refused(self) -> None:
@@ -379,35 +397,35 @@ class TestAlarm(unittest.TestCase):
 
 # The labels of the roots and rungs, checked as a runner reaches them.
 class TestLabelBook(unittest.TestCase):
-    # A `smoke-test` run leaves a `normal-test` root out.
+    # A `smoke-test` run leaves a `test-all` root out.
     def test_root_skipped(self) -> None:
         book = category.LabelBook(_SMOKE_TEST)
-        self.assertFalse(book.root_enter("r", _NORMAL_TEST))
+        self.assertFalse(book.root_enter("r", _TEST_ALL))
 
     # A `smoke-test` run of a `smoke-test` root runs its `smoke-test` rungs.
     def test_rungs_chosen(self) -> None:
         book = category.LabelBook(_SMOKE_TEST)
         self.assertTrue(book.root_enter("r", _SMOKE_TEST))
         self.assertTrue(book.rung_enter("a", _SMOKE_TEST))
-        self.assertFalse(book.rung_enter("b", _NORMAL_TEST))
+        self.assertFalse(book.rung_enter("b", _TEST_ALL))
         book.root_leave()
 
-    # A `normal-test` run runs a `normal-test` root and its rungs.
+    # A `test-all` run runs a `test-all` root and its rungs.
     def test_normal_all(self) -> None:
-        book = category.LabelBook(_NORMAL_TEST)
-        self.assertTrue(book.root_enter("r", _NORMAL_TEST))
-        self.assertTrue(book.rung_enter("b", _NORMAL_TEST))
+        book = category.LabelBook(_TEST_ALL)
+        self.assertTrue(book.root_enter("r", _TEST_ALL))
+        self.assertTrue(book.rung_enter("b", _TEST_ALL))
         book.root_leave()
 
-    # A `smoke-test` rung in a `normal-test` root raises.
+    # A `smoke-test` rung in a `test-all` root raises.
     def test_smoke_hidden(self) -> None:
-        book = category.LabelBook(_NORMAL_TEST)
-        self.assertTrue(book.root_enter("r", _NORMAL_TEST))
+        book = category.LabelBook(_TEST_ALL)
+        self.assertTrue(book.root_enter("r", _TEST_ALL))
         with self.assertRaises(RuntimeError) as caught:
             book.rung_enter("x", _SMOKE_TEST)
         expected = (
             "the rung 'x' is labelled smoke-test in the root 'r', labelled"
-            " normal-test, which a smoke-test run never starts"
+            " test-all, which a smoke-test run never starts"
         )
         self.assertEqual(caught.exception.args, (expected,))
 
@@ -417,10 +435,10 @@ class TestLabelBook(unittest.TestCase):
             "the root 'r' is labelled smoke-test and holds no rung labelled"
             " smoke-test"
         )
-        for chosen in (_SMOKE_TEST, _NORMAL_TEST):
+        for chosen in (_SMOKE_TEST, _TEST_ALL):
             book = category.LabelBook(chosen)
             self.assertTrue(book.root_enter("r", _SMOKE_TEST), chosen)
-            book.rung_enter("b", _NORMAL_TEST)
+            book.rung_enter("b", _TEST_ALL)
             with self.assertRaises(RuntimeError) as caught:
                 book.root_leave()
             self.assertEqual(caught.exception.args, (expected,), chosen)
@@ -428,23 +446,23 @@ class TestLabelBook(unittest.TestCase):
     # A rung outside any root runs as its label says and raises nothing.
     def test_outside_root(self) -> None:
         smoke = category.LabelBook(_SMOKE_TEST)
-        self.assertFalse(smoke.rung_enter("s", _NORMAL_TEST))
-        normal = category.LabelBook(_NORMAL_TEST)
-        self.assertTrue(normal.rung_enter("s", _NORMAL_TEST))
+        self.assertFalse(smoke.rung_enter("s", _TEST_ALL))
+        normal = category.LabelBook(_TEST_ALL)
+        self.assertTrue(normal.rung_enter("s", _TEST_ALL))
 
     # A root entered while another root runs raises.
     def test_root_nested(self) -> None:
-        book = category.LabelBook(_NORMAL_TEST)
-        self.assertTrue(book.root_enter("r", _NORMAL_TEST))
+        book = category.LabelBook(_TEST_ALL)
+        self.assertTrue(book.root_enter("r", _TEST_ALL))
         with self.assertRaises(RuntimeError) as caught:
-            book.root_enter("q", _NORMAL_TEST)
+            book.root_enter("q", _TEST_ALL)
         expected = "the root 'q' is entered inside the root 'r'"
         self.assertEqual(caught.exception.args, (expected,))
 
     # Leaving when no root runs, as after a root left out, raises.
     def test_leave_outside(self) -> None:
         book = category.LabelBook(_SMOKE_TEST)
-        self.assertFalse(book.root_enter("r", _NORMAL_TEST))
+        self.assertFalse(book.root_enter("r", _TEST_ALL))
         with self.assertRaises(RuntimeError) as caught:
             book.root_leave()
         expected = "no root that runs is left to leave"

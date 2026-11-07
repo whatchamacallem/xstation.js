@@ -65,16 +65,16 @@ _HALF_DIGIT = 0.05
 # The milliseconds in a second.
 _MILLISECONDS = 1000
 
-# A `tap.run` in short names: `normal-test`, failfast, 1 failure, 2 suites.
+# A `tap.run` in short names: `test-all`, failfast, 1 failure, 2 suites.
 _RUN_SHORT = (
-    b'{"0":{"t":"tap.run","i":1},"category":"normal-test","failfast":true,'
+    b'{"0":{"t":"tap.run","i":1},"category":"test-all","failfast":true,'
     b'"failures":1,"modules":["test_tap_producer","failing_suite"]}\r'
 )
 
 # The words of the command the driver gets for that request.
 _WORDS_SHORT = [
     "--stream",
-    "--normal-test",
+    "--test-all",
     "--failfast",
     "--failures",
     "1",
@@ -93,7 +93,6 @@ _RUN_FULL = (
 # The words of the command the driver gets for that request.
 _WORDS_FULL = [
     "--stream",
-    "--smoke-test",
     "--failures",
     "0",
     "--module",
@@ -102,14 +101,14 @@ _WORDS_FULL = [
 
 # A `tap.run` of the failing suite that expects none of its failures.
 _RUN_FAILED = (
-    b'{"0":{"t":"tap.run","i":2},"category":"normal-test",'
+    b'{"0":{"t":"tap.run","i":2},"category":"test-all",'
     b'"failfast":false,"failures":0,"modules":["failing_suite"]}\r'
 )
 
 # The words of the command the driver gets for that request.
 _WORDS_FAILED = [
     "--stream",
-    "--normal-test",
+    "--test-all",
     "--failures",
     "0",
     "--module",

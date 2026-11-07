@@ -10,7 +10,7 @@
 # and answered by the real codec of `jslb` with the limits the real
 # `settings` reads, each running the real driver, test_all.py, as a
 # program: a small suite in a smoke-test run, then failing_suite, the suite
-# that fails by design, in a normal-test run that expects the failures the
+# that fails by design, in a test-all run that expects the failures the
 # gold measured for it. The lines each run pushes come before its reply,
 # and the TAP consumer reads them as one stream, well formed, with those
 # failures, so that each reply's exit code is the driver's pass. The child
@@ -35,7 +35,7 @@ _GOLD_ID = "python.test_integrate_tap_loop"
 # A size chosen by its writer: the most the test reads from the pipe.
 _READ_BYTES: int = harness.gold_get(f"{_GOLD_ID}.read_bytes")
 
-# The failing tests of `failing_suite` in a `normal-test` run, as measured.
+# The failing tests of `failing_suite` in a `test-all` run, as measured.
 _FAILING_FAILURES: int = harness.gold_get(f"{_GOLD_ID}.failing_failures")
 
 # How a child ends when the loop returns at the end of its input.
@@ -173,7 +173,7 @@ class TestRuns(unittest.TestCase):
     # Each run pushes its stream, then replies the driver's pass.
     def test_runs_served(self) -> None:
         first = _run_make(1, "smoke-test", 0, _SUITE_SMALL)
-        second = _run_make(2, "normal-test", _FAILING_FAILURES, _SUITE_FAILING)
+        second = _run_make(2, "test-all", _FAILING_FAILURES, _SUITE_FAILING)
         ending, lines = self.serve_read(first + second)
         self.assertEqual(ending, _ENDING_RETURNED)
         runs = self.runs_split(lines)

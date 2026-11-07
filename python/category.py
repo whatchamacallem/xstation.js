@@ -3,15 +3,16 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # The two categories of test suite that the runners share: smoke-test, the
-# important suites that fit in 3 minutes in all, and normal-test, the others.
-# It holds the options --smoke-test and --normal-test that choose the category
-# of a run, smoke-test when neither is given; whether a suite of a label runs
-# in a run of a category, a smoke-test suite in both and a normal-test suite in
-# a normal-test run only; the seconds a run may take, the driver's gold
+# important suites that fit in 3 minutes in all, and test-all, the others.
+# It holds the one option --test-all that chooses the category of a run,
+# smoke-test without it, and the words of a category's option for a command
+# line, none for smoke-test; whether a suite of a label runs in a run of a
+# category, a smoke-test suite in both and a test-all suite in a test-all run
+# only; the seconds a run may take, the driver's gold
 # python.test_all.smoke_seconds for a smoke-test run; the alarm of a suite, its
 # own seconds or the run's deadline, whichever comes first; and LabelBook,
 # which checks as a runner reaches them that a root labelled smoke-test holds a
-# rung labelled smoke-test and that a root labelled normal-test holds none. A
+# rung labelled smoke-test and that a root labelled test-all holds none. A
 # label or category other than the two strings raises.
 
 import argparse, harness
@@ -20,43 +21,43 @@ import argparse, harness
 _SMOKE_TEST = "smoke-test"
 
 # The label of every other suite, and the category that runs both labels.
-_NORMAL_TEST = "normal-test"
+_TEST_ALL = "test-all"
 
 # The two labels, which are also the two categories.
-_LABELS = (_SMOKE_TEST, _NORMAL_TEST)
+_LABELS = (_SMOKE_TEST, _TEST_ALL)
 
 # The driver's gold of the seconds a `smoke-test` run may take in all.
 _SMOKE_ID = "python.test_all.smoke_seconds"
 
 
-# Adds `--smoke-test` or `--normal-test` as `category`, `smoke-test` if none.
+# Adds `--test-all` as `category`, `smoke-test` without it.
 def options_add(parser: argparse.ArgumentParser) -> None:
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument(
-        f"--{_SMOKE_TEST}",
+    parser.add_argument(
+        f"--{_TEST_ALL}",
         action="store_const",
-        const=_SMOKE_TEST,
+        const=_TEST_ALL,
+        default=_SMOKE_TEST,
         dest="category",
-        help="run the suites labelled smoke-test, the default",
+        help="run the suites of both labels, not the smoke-test suites alone",
     )
-    group.add_argument(
-        f"--{_NORMAL_TEST}",
-        action="store_const",
-        const=_NORMAL_TEST,
-        dest="category",
-        help="run the suites of both labels",
-    )
-    parser.set_defaults(category=_SMOKE_TEST)
+
+
+# The words of a category's option for a command line, none for `smoke-test`.
+def option_words(category: str) -> list[str]:
+    _category_check(category)
+    if category == _SMOKE_TEST:
+        return []
+    return [f"--{_TEST_ALL}"]
 
 
 # Whether a label's suite runs in a category's run. Other strings raise.
 def suite_runs(label: str, category: str) -> bool:
     if label not in _LABELS:
         raise ValueError(
-            f"the label {label!r} is neither {_SMOKE_TEST} nor {_NORMAL_TEST}"
+            f"the label {label!r} is neither {_SMOKE_TEST} nor {_TEST_ALL}"
         )
     _category_check(category)
-    return label == _SMOKE_TEST or category == _NORMAL_TEST
+    return label == _SMOKE_TEST or category == _TEST_ALL
 
 
 # A run's seconds: the driver's `smoke_seconds` for `smoke-test`, else None.
@@ -109,14 +110,14 @@ class LabelBook:
             self._reached = False
         return runs
 
-    # Whether it runs, raising for a `smoke-test` rung in a `normal-test` root.
+    # Whether it runs, raising for a `smoke-test` rung in a `test-all` root.
     def rung_enter(self, rung: str, label: str) -> bool:
         runs = suite_runs(label, self._category)
         if label == _SMOKE_TEST:
-            if self._label == _NORMAL_TEST:
+            if self._label == _TEST_ALL:
                 raise RuntimeError(
                     f"the rung {rung!r} is labelled {_SMOKE_TEST} in the root"
-                    f" {self._root!r}, labelled {_NORMAL_TEST}, which a"
+                    f" {self._root!r}, labelled {_TEST_ALL}, which a"
                     f" {_SMOKE_TEST} run never starts"
                 )
             self._reached = True
@@ -140,5 +141,5 @@ def _category_check(category: str) -> None:
     if category not in _LABELS:
         raise ValueError(
             f"the category {category!r} is neither {_SMOKE_TEST} nor"
-            f" {_NORMAL_TEST}"
+            f" {_TEST_ALL}"
         )

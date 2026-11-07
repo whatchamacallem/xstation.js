@@ -15,8 +15,9 @@
 # cascade logged after bootstrap's trace. Each child writes how its run
 # ended to a file, then kills itself. The lines and texts are the gold's.
 
-import bootstrap, contextlib, errno, harness, json, os, pty, signal, sqlite3
-import switches, sys, tempfile, traceback, unittest
+import bootstrap, contextlib, errno, functools, harness, json, os, pty
+import signal, sqlite3, subprocess, switches, sys, tempfile, traceback
+import unittest
 from typing import Any, NamedTuple
 
 # The checkout's top directory, above this file's `python/`.
@@ -57,6 +58,12 @@ _KILLED = -signal.SIGKILL
 
 # The exit code of a child the hangup ended.
 _HUNG_UP = -signal.SIGHUP
+
+# The test driver, which this suite runs as a program.
+_DRIVER_PATH = os.path.join(_ROOT_PATH, "python", "test_all.py")
+
+# A suite whose forked children the hangup must end.
+_HANGUP_SUITE = "test_bootstrap"
 
 
 # A scratch directory and its root.
@@ -276,3 +283,26 @@ class TestStock(unittest.TestCase):
             error["cause"]["stack"],
         ]
         self.assertEqual(_log_read(made.root), _server_lines(texts))
+
+
+# The driver's children end by the hangup, however the driver was started.
+class TestDriverHangup(unittest.TestCase):
+    # A driver started with the hangup ignored still passes the suite.
+    def test_hangup_restored(self) -> None:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                _DRIVER_PATH,
+                "--stream",
+                "--module",
+                _HANGUP_SUITE,
+            ],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            preexec_fn=functools.partial(
+                signal.signal, signal.SIGHUP, signal.SIG_IGN
+            ),
+        )
+        self.assertEqual(completed.returncode, 0, completed.stdout)

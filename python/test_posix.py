@@ -5,7 +5,7 @@
 #
 # Checks the characters and comments of the whitelisted files, audits every
 # ts/*.ts file other than the _SYNCHRONIZATION_MODULES for synchronization
-# tokens, formats the files in a normal-test run, then lints them. A PowerShell
+# tokens, formats the files in a test-all run, then lints them. A PowerShell
 # file, formatted on Windows, has only its characters and comments checked.
 #
 # A file's header, the comment at its top, runs to at most _HEADER_LIMIT lines.
@@ -117,7 +117,7 @@ _POWERSHELL_SINGLE = re.compile(r"'(?:[^']|'')*'")
 _POWERSHELL_TOKEN_BREAK = " \t\n;|&(){},"
 
 # The label of the reformatting, which a `smoke-test` run leaves out.
-_REFORMAT_LABEL = "normal-test"
+_REFORMAT_LABEL = "test-all"
 
 # A shell here document's start: `<<`, `-` to strip tabs, a quote, its word.
 _SHELL_HEREDOC = re.compile(r"<<(-?)[ \t]*(['\"]?)(\w+)\2")
@@ -265,7 +265,7 @@ def end_find(path: str, text: str, i: int, needle: str) -> int:
     return end + len(needle)
 
 
-# Formats in a `normal-test` run, and does nothing in a `smoke-test` run.
+# Formats in a `test-all` run, and does nothing in a `smoke-test` run.
 def formatter_run(paths: list[str], chosen: str) -> None:
     import category, reformat
 
@@ -643,7 +643,7 @@ def main(arguments: list[str]) -> None:
         description="Check the characters and comments of the files"
         " reformat_whitelist.txt lists, audit the ts/*.ts files for"
         " synchronization tokens, then format the files of the linux rows"
-        " of reformat_table.json in a normal-test run, and lint them."
+        " of reformat_table.json in a test-all run, and lint them."
     )
     category.options_add(parser)
     switches.options_add(parser)

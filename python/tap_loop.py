@@ -50,6 +50,9 @@ _MODULE_OPTION = "--module"
 # The driver's option that gives the failing tests the run expects.
 _FAILURES_OPTION = "--failures"
 
+# The driver's default category, which no option of its names.
+_SMOKE_TEST = "smoke-test"
+
 # The byte that ends each line of the driver's stdout.
 _NEWLINE = b"\n"
 
@@ -108,7 +111,8 @@ def _command_make(
     category: str, failfast: bool, failures: int, modules: list[str]
 ) -> list[str]:
     command = [sys.executable, _DRIVER_PATH, _STREAM_OPTION]
-    command.append("--" + category)
+    if category != _SMOKE_TEST:
+        command.append("--" + category)
     if failfast:
         command.append(_FAILFAST_OPTION)
     command += [_FAILURES_OPTION, str(failures)]

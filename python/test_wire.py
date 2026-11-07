@@ -16,8 +16,7 @@
 # held until this file, having read the point before it, releases it on a
 # BroadcastChannel of the page's origin. After each server's end it waits until
 # the server is reaped, its /proc entry gone. Each root and rung is labelled
-# smoke-test or normal-test, and a mislabel fails the run. That ttyd 1.7.7
-# accepts a first message without a size is from memory, owed to testing.
+# smoke-test or test-all, and a mislabel fails the run.
 
 import argparse, contextlib, hashlib, json, os, pathlib, re, select, shutil
 import signal, sqlite3, subprocess, sys, tempfile, time, types
@@ -79,14 +78,14 @@ _STOCK_ARGS: tuple[str, ...] = ()
 _SMOKE_TEST = "smoke-test"
 
 # The label of every other rung.
-_NORMAL_TEST = "normal-test"
+_TEST_ALL = "test-all"
 
 # The echo root's rungs and their labels, in the order they run.
 _ECHO_RUNGS = (
     ("first", _SMOKE_TEST),
     ("echo", _SMOKE_TEST),
     ("control", _SMOKE_TEST),
-    ("fit", _NORMAL_TEST),
+    ("fit", _TEST_ALL),
 )
 
 # The stock root's rungs and their labels, in the order they run.

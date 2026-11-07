@@ -513,7 +513,7 @@ class TestSuites(ScratchCase):
     def test_failures_relayed(self) -> None:
         failures: int = _gold_value("failing.failures")
         started = time.perf_counter()
-        code, lines = self.failing_relay("root", "normal-test", failures)
+        code, lines = self.failing_relay("root", "test-all", failures)
         limit = (time.perf_counter() - started) * _MILLISECONDS + _HALF_DIGIT
         self.assertEqual(code, 0)
         stats = tap_consumer.TapStats(*_gold_value("failing.stats"))
@@ -531,7 +531,7 @@ class TestSuites(ScratchCase):
             ("fewer", failures - 1),
             ("more", failures + 1),
         ):
-            code, lines = self.failing_relay(name, "normal-test", expected)
+            code, lines = self.failing_relay(name, "test-all", expected)
             self.assertEqual(code, _EXIT_FAILED, name)
             self.assertEqual(_stats_read(lines).failed, failures, name)
 

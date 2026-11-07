@@ -8,12 +8,12 @@
 # runs in a forked child whose stdout and stderr go to a scratch file under
 # build/, so that nothing it prints reaches the stream. A smoke-test run,
 # given a Python file that ruff would change, prints nothing and leaves the
-# file as it is; a normal-test run, given PowerShell files, which the Linux
+# file as it is; a test-all run, given PowerShell files, which the Linux
 # rows of reformat_table.json leave to Windows, prints nothing and formats.
 # With no program on PATH, which a linter could not start from, main returns
 # and prints nothing when given --anthropic, and when test_all.py has turned
 # the switch on before calling it. Under the switch test_all.py leaves the
-# suites that start formatters out of a normal-test run, and --module refuses
+# suites that start formatters out of a test-all run, and --module refuses
 # them, while without it the run takes them.
 
 import argparse, functools, os, signal, switches, sys, tempfile, test_all
@@ -30,7 +30,7 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 _SMOKE_TEST = "smoke-test"
 
 # The category that does the reformatting.
-_NORMAL_TEST = "normal-test"
+_TEST_ALL = "test-all"
 
 # The PowerShell files the step is given, which no Linux row formats.
 _WINDOWS_NAMES = ["a.ps1", "a.psd1"]
@@ -54,9 +54,9 @@ def text_read(path: str) -> str:
         return file.read()
 
 
-# Has the test driver choose the named suite of a `normal-test` run.
+# Has the test driver choose the named suite of a `test-all` run.
 def module_choose(name: str) -> None:
-    test_all.modules_chosen(argparse.ArgumentParser(), [name], _NORMAL_TEST)
+    test_all.modules_chosen(argparse.ArgumentParser(), [name], _TEST_ALL)
 
 
 # In the forked child: runs the work, output to a file, writes its ending.
@@ -129,10 +129,10 @@ class TestFormatterStep(ChildCase):
         self.assertEqual(output, "")
         self.assertEqual(text_read(path), _PYTHON_RAW)
 
-    # A `normal-test` run formats with no command and prints nothing.
+    # A `test-all` run formats with no command and prints nothing.
     def test_normal_formatted(self) -> None:
         paths = [self.file_write(name, "") for name in _WINDOWS_NAMES]
-        ending, output = self.step_run(_NORMAL_TEST, paths)
+        ending, output = self.step_run(_TEST_ALL, paths)
         self.assertEqual(ending, _ENDING_RETURNED)
         self.assertEqual(output, "")
 
@@ -160,7 +160,7 @@ class TestAnthropicSwitch(ChildCase):
             switches.options_add(parser)
             switches.switches_set(parser.parse_args(["--anthropic"]))
             os.environ["PATH"] = self.scratch
-            test_posix.main([f"--{_SMOKE_TEST}"])
+            test_posix.main([])
 
         ending, output = self.child_run(work)
         self.assertEqual(ending, _ENDING_RETURNED)
@@ -181,11 +181,11 @@ class TestDriverSuites(ChildCase):
 
         return self.child_run(switched)
 
-    # Returns what a child prints of the suites of a `normal-test` run.
+    # Returns what a child prints of the suites of a `test-all` run.
     def suites_chosen(self, anthropic: bool) -> str:
         def work() -> None:
             parser = argparse.ArgumentParser()
-            modules = test_all.modules_chosen(parser, [], _NORMAL_TEST)
+            modules = test_all.modules_chosen(parser, [], _TEST_ALL)
             names = [name for name, _ in modules]
             print(*(name for name in _FORMATTER_SUITES if name in names))
 
@@ -193,11 +193,11 @@ class TestDriverSuites(ChildCase):
         self.assertEqual(ending, _ENDING_RETURNED)
         return output
 
-    # Under the switch, a `normal-test` run takes no suite of a formatter.
+    # Under the switch, a `test-all` run takes no suite of a formatter.
     def test_formatters_left(self) -> None:
         self.assertEqual(self.suites_chosen(True), "\n")
 
-    # Without the switch, a `normal-test` run takes them.
+    # Without the switch, a `test-all` run takes them.
     def test_formatters_taken(self) -> None:
         expected = " ".join(_FORMATTER_SUITES) + "\n"
         self.assertEqual(self.suites_chosen(False), expected)
@@ -208,5 +208,5 @@ class TestDriverSuites(ChildCase):
             work = functools.partial(module_choose, name)
             ending, output = self.switch_run(True, work)
             self.assertTrue(ending.endswith(_ENDING_REFUSED), ending)
-            expected = f"--module {name} is not a suite of this {_NORMAL_TEST}"
+            expected = f"--module {name} is not a suite of this {_TEST_ALL}"
             self.assertIn(expected, output)

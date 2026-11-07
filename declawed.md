@@ -159,6 +159,8 @@ command only to name the log.
 
 ### Formatting
 
+- Ignore reformatting entirely, unless something observed is expected to
+  be reformatted. Always work on formatting last, after testing.
 - The source formatters may need to run twice to be stable. Alert the user
   if they are not.
 - The formatters do not have to run except before a commit, and that run
@@ -195,7 +197,7 @@ command only to name the log.
 
 ### Testing
 
-- Define 2 categories of test suite `smoke-test` and `normal-test`. Have
+- Define 2 categories of test suite `smoke-test` and `test-all`. Have
   `test_posix.sh` run by default whatever important test suites fit in 3
   minutes by labelling those `smoke-test` and running only them unless asked
   to run the normal tests too.
@@ -217,6 +219,12 @@ command only to name the log.
   script, a double, a mock or anything else. It is the primary exception to
   the ban on mock test objects: the test suites must run without an AI API
   endpoint, since an AI API endpoint is non-deterministic.
+- A real AI provider is never tried as part of a testing run: no run,
+  suite, check or demo contacts one, and the only AI any of them uses is
+  the scripted AI. The maintainer gets the question of when a real
+  provider will first be tried in every status report, and it is not to
+  be asked: the maintainer tries one by hand, outside every run, once the
+  service passes non-trivial integration tests.
 - ttyd's ends are asynchronous by its design: the close of its socket, the
   end of the process behind it and the output around them come in no fixed
   order relative to the lines that asked for them. This is a known limitation
@@ -236,6 +244,11 @@ command only to name the log.
 - Testing ps1 is never a requirement for testing in a POSIX environment.
   The POSIX environment is tested to stand alone, not to depend on ps1.
 - WSL is never a blocker for the POSIX environment.
+- The current environment, Ubuntu under WSL2 on the maintainer's machine,
+  is the only environment of interest. Do not ask when another platform,
+  such as Docker, the cloud container, Linux off WSL or Windows, will be
+  fixed or proven: another environment matters only when a change would
+  break it, and then the change is the subject, not the platform.
 
 ### Remaining Rules
 
@@ -366,9 +379,9 @@ are unresolved in a postmortem at the end.
 This section was not written by the maintainer. No code was written by the
 maintainer. You have permission to update this file and fix errors.
 
-- `grep -n NAME API/README.md` finds a rule. Each rule is one line that names
+- `grep -n NAME declawed.md` finds a rule. Each rule is one line that names
   its subject, so the match is the whole rule.
-- `sed -n '/^## Store/,/^## /p' API/README.md` reads one section. A section
+- `sed -n '/^## Store/,/^## /p' declawed.md` reads one section. A section
   stands alone.
 - `grep -rn NAME API/` adds the top comment of each file of `API/ts` and
   `API/python`, which holds that module's main rules. This file holds the
@@ -983,13 +996,13 @@ fault realm REALM->DRIVER 0 push; fails the block
 
 ## test_all
 
-- test_all: `python3 python/test_all.py [--smoke-test | --normal-test]
-  [--failfast] [--stream] [--module NAME]... [--failures N] [--tty]
-  [--coverage] [--anthropic] [--debug] [--verbose]`. It refuses to start as
-  root. Standard library only.
-- --smoke-test: the default: runs the suites labelled smoke-test. category.py
-  holds the labels and options. The first failing test ends the stream.
-- --normal-test: runs the suites of both labels.
+- test_all: `python3 python/test_all.py [--test-all] [--failfast] [--stream]
+  [--module NAME]... [--failures N] [--tty] [--coverage] [--anthropic]
+  [--debug] [--verbose]`. It refuses to start as root. Standard library only.
+- no category option: runs the suites labelled smoke-test. category.py holds
+  the labels and the one option, and its option_words gives a category's
+  option for a command line, none for smoke-test.
+- --test-all: runs the suites of both labels.
 - --failfast: the first failing test ends the stream.
 - --stream: ends the run once the stream is checked, before the checks after
   it, and writes nothing to stdout but the stream.
@@ -1014,6 +1027,8 @@ fault realm REALM->DRIVER 0 push; fails the block
   suite that starts a formatter, and --module refuses those.
 - --verbose output: `"test_posix.py: smoke-test, <s> s"` after those checks, and
   `"the <category> run took <s> s"` at the end of a passing run.
+- hangup: main sets SIGHUP to its default first, as the suites expect a hangup
+  to end a forked child, so a run under nohup passes.
 - run start: before the first block, outside every timer, third_party_fetch.py
   fetches each pinned file not in place and ttyd_build.py builds ttyd. A
   failure fails the run there.
@@ -1028,7 +1043,7 @@ fault realm REALM->DRIVER 0 push; fails the block
   driver's gold. A smoke-test run has python.test_all.smoke_seconds in all:
   each alarm ends at that deadline at the latest, a deadline passed before a
   suite starts raises at once, and passing it fails naming the suite. A
-  normal-test run has no limit of its own.
+  test-all run has no limit of its own.
 - phases, in order: Python `unit test_<module>.py`; test_tap_pair.py then
   Python integration `test_integrate_<module>.py`; Python stdio suites, which
   start bootstrap.py or mcp_stdio.py; group A unit `test_<module>.ts`;
@@ -1043,7 +1058,7 @@ fault realm REALM->DRIVER 0 push; fails the block
   in no phase, and --module refuses them.
 - test_posix.py: the checks of the whitelisted files: UTF-8 with no non-ASCII
   outside _NON_ASCII_ALLOWED; the comment rules; then the formatters of
-  reformat.py in a normal-test run; then the linters of their rows.
+  reformat.py in a test-all run; then the linters of their rows.
   reformat_table.json gives each extension its comment lexer, codec, checker,
   formatter and linter. --anthropic does none of this.
 - synchronization audit: test_posix.py fails a ts/*.ts file outside
@@ -1193,9 +1208,9 @@ fault realm REALM->DRIVER 0 push; fails the block
   writes tap.start and reads its reply as for any main loop. loop_prepare
   reads the settings for the decoder's limits and the name form.
 - tap_loop loop_run: decodes each line, refuses any reply, and serves tap.run
-  alone, by `python3 test_all.py --stream` with the category, --failfast when
-  asked, --failures, and --module for each suite named, its input empty. A
-  blob is refused. A failure writes one error line and exits 1.
+  alone, by `python3 test_all.py --stream` with --test-all for that category,
+  --failfast when asked, --failures, and --module for each suite named, its
+  input empty. A blob is refused. A failure writes one error line and exits 1.
 - tap.line of tap_loop: the language python, in the name form of the parameter
   debug.
 - document_stats: returns the points a document's blocks plan, how many
@@ -1211,10 +1226,10 @@ fault realm REALM->DRIVER 0 push; fails the block
 
 ## Rungs
 
-- test_wire.py: `python3 python/test_wire.py [--smoke-test | --normal-test]
-  [--anthropic] [--debug] [--verbose]`. A TAP run: the producer is
-  ts/test_wire_rungs.ts in the page, and this file is the consumer. Exit 0, or
-  1 at the first failed check, naming its rung.
+- test_wire.py: `python3 python/test_wire.py [--test-all] [--anthropic]
+  [--debug] [--verbose]`. A TAP run: the producer is ts/test_wire_rungs.ts in
+  the page, and this file is the consumer. Exit 0, or 1 at the first failed
+  check, naming its rung.
 - wire roots: echo, stock and restart, each with its own ttyd, page copy and
   load of the page. The copy's gold, by page_build.page_copy, has
   typescript.test_all.run "wire" and typescript.test_wire_rungs naming the
@@ -1241,15 +1256,15 @@ fault realm REALM->DRIVER 0 push; fails the block
 - held rung: a rung named in held_rungs, restart, waits until the driver posts
   its name on release_channel, a BroadcastChannel of the page's origin, so
   that the driver reads the server before it execs.
-- test_browser.py: `python3 python/test_browser.py [--smoke-test |
-  --normal-test] [--anthropic] [--debug] [--verbose]`. Drives
-  chrome-headless-shell by devtools.LinuxPipe, rung by rung, each under a
-  timer and named by the stage of the plan it proves.
+- test_browser.py: `python3 python/test_browser.py [--test-all] [--anthropic]
+  [--debug] [--verbose]`. Drives chrome-headless-shell by devtools.LinuxPipe,
+  rung by rung, each under a timer and named by the stage of the plan it
+  proves.
 - browser roots: the suites root runs the ttyd page's bring up over TAP. The
   probe, credential and echo roots serve the headless page. Others serve the
   ttyd page. Roots are removed once the run passes and kept after a failure.
-- rung labels: each root and rung is smoke-test or normal-test. A smoke-test
-  run skips the normal-test rungs and starts nothing for a root with none, and
+- rung labels: each root and rung is smoke-test or test-all. A smoke-test
+  run skips the test-all rungs and starts nothing for a root with none, and
   a mislabel fails the run.
 - rung gold: test_wire and test_browser read their timers, sizes and texts
   from python.test_wire and python.test_browser.

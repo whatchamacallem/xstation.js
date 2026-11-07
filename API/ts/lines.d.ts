@@ -1,8 +1,6 @@
 // The payloads of the JSLB line types, each interface below the payload of one
 // type, the wire API. A line is one JSON object: header 0, blob headers 1 to
 // b, the payload in every other key. A field at its default is not written.
-// The table of each type's lane, direction, blobs and reply is under Line
-// types in API/README.md.
 
 declare namespace lines {
   // Header 0: `t` type, `v` version, `i` id, `r` reply, `k` key, `b` blobs.
@@ -223,7 +221,7 @@ declare namespace lines {
 
   // tap.run: only `tap_loop.py` serves it, each line of the run a push.
   interface TapRun {
-    category: "smoke-test" | "normal-test";
+    category: "smoke-test" | "test-all";
     failfast: boolean;
     // The failing tests the run expects: it passes only with exactly these.
     failures: number;

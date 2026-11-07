@@ -5,7 +5,7 @@
 # Tests the formatter step of test_posix.py with the real formatters of
 # reformat_table.json, ruff among them. The step runs in a forked child whose
 # stdout and stderr go to a scratch file under build/, so that no formatter
-# writes to the stream. A normal-test run formats a Python file with ruff
+# writes to the stream. A test-all run formats a Python file with ruff
 # and prints nothing.
 
 import functools, os, signal, sys, tempfile, test_posix, traceback, unittest
@@ -18,7 +18,7 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
 # The category that does the reformatting.
-_NORMAL_TEST = "normal-test"
+_TEST_ALL = "test-all"
 
 # Python that ruff changes.
 _PYTHON_RAW = "x=1\n"
@@ -98,10 +98,10 @@ class TestFormatterStep(ChildCase):
         work = functools.partial(test_posix.formatter_run, [path], chosen)
         return self.child_run(work)
 
-    # A `normal-test` run formats the file and prints nothing.
+    # A `test-all` run formats the file and prints nothing.
     def test_normal_formatted(self) -> None:
         path = self.file_write("b.py", _PYTHON_RAW)
-        ending, output = self.step_run(_NORMAL_TEST, path)
+        ending, output = self.step_run(_TEST_ALL, path)
         self.assertEqual(ending, _ENDING_RETURNED)
         self.assertEqual(output, "")
         self.assertEqual(text_read(path), _PYTHON_FORMATTED)

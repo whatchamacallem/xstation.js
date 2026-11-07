@@ -4,7 +4,7 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # The one runner of every test suite, by category: smoke-test runs the
-# important suites that fit in 3 minutes, normal-test the suites of both
+# important suites that fit in 3 minutes, test-all the suites of both
 # labels. Every suite and block is one block of one TAP stream on stdout, read
 # by the consumer as it is written, so nothing else writes to stdout during the
 # stream.
@@ -56,7 +56,7 @@ _MODULES: list[tuple[str, str]] = [
     ("test_tap_producer", "smoke-test"),
     ("test_internationalization", "smoke-test"),
     ("test_reformat", "smoke-test"),
-    ("test_reformat_formatters", "normal-test"),
+    ("test_reformat_formatters", "test-all"),
     ("test_test", "smoke-test"),
     ("test_jslb", "smoke-test"),
     ("test_switches", "smoke-test"),
@@ -67,7 +67,7 @@ _MODULES: list[tuple[str, str]] = [
     ("test_substrate", "smoke-test"),
     ("test_substrate_limit", "smoke-test"),
     ("test_test_posix", "smoke-test"),
-    ("test_test_posix_formatters", "normal-test"),
+    ("test_test_posix_formatters", "test-all"),
     ("test_verbose", "smoke-test"),
     ("test_devtools_chrome", "smoke-test"),
     ("test_dispatch", "smoke-test"),
@@ -197,7 +197,7 @@ _C_INTEGRATION: list[tuple[str, str]] = [
 
 # The last phase, the Python suite of the tool that opens the whole page.
 _WHOLE_PAGE: list[tuple[str, str]] = [
-    ("test_integrate_xsjs_screenshot", "normal-test"),
+    ("test_integrate_xsjs_screenshot", "test-all"),
 ]
 
 # Every suite and block of a run, in the phases of the order above.
@@ -1173,6 +1173,8 @@ def signal_exit(number: int, frame: types.FrameType | None) -> None:
 
 # Runs the modules of the category, checks the stream, then runs the rest.
 def main(arguments: list[str]) -> int:
+    # The suites expect a hangup to end a child, even in a run under `nohup`.
+    signal.signal(signal.SIGHUP, signal.SIG_DFL)
     import line_coverage
 
     # With `--coverage`, counting precedes project imports, so that they count.
@@ -1276,6 +1278,7 @@ def main(arguments: list[str]) -> int:
         )
     if verdict or parsed.stream:
         return verdict
+    words = category.option_words(chosen)
     posix_label = "smoke-test"
     if category.suite_runs(posix_label, chosen):
         import test_posix
@@ -1284,7 +1287,7 @@ def main(arguments: list[str]) -> int:
         timer_start(
             category.alarm_plan("test_posix.py", None, limit, begun - started)
         )
-        test_posix.main([f"--{chosen}"])
+        test_posix.main(words)
         timer_stop()
         seconds = time.monotonic() - begun
         if switches.verbose:
@@ -1293,7 +1296,7 @@ def main(arguments: list[str]) -> int:
 
     elapsed = time.monotonic() - started
     timer_start(category.alarm_plan("test_wire.py", None, limit, elapsed))
-    code = test_wire.main([f"--{chosen}"])
+    code = test_wire.main(words)
     timer_stop()
     if code:
         return code
@@ -1301,7 +1304,7 @@ def main(arguments: list[str]) -> int:
 
     elapsed = time.monotonic() - started
     timer_start(category.alarm_plan("test_browser.py", None, limit, elapsed))
-    code = test_browser.main([f"--{chosen}"])
+    code = test_browser.main(words)
     timer_stop()
     if code:
         return code
