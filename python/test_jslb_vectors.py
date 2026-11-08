@@ -246,6 +246,8 @@ class TestVectors(test_jslb.ScratchCase):
                     self.assertEqual(plain, messages, name)
                     renders = [jslb.line_render(line) for line in lines]
                     self.assertEqual(renders, sidecar["render"], name)
+                    forms = [jslb.line_json(line) for line in lines]
+                    self.assertEqual(forms, sidecar["json"], name)
 
     # Each error vector gives its lines, then its fault, however it is fed.
     def test_vectors_error(self) -> None:
@@ -270,3 +272,5 @@ class TestVectors(test_jslb.ScratchCase):
                 self.assertEqual(plain, messages, name)
                 renders = [jslb.line_render(line) for line in lines]
                 self.assertEqual(renders, sidecar["render"], name)
+                forms = [jslb.line_json(line) for line in lines]
+                self.assertEqual(forms, sidecar["json"], name)

@@ -567,23 +567,19 @@
             "name": "console_read"
           },
           {
-            "description": "The last lines of a thread's verbose ring: ui, ai or server. count is a maximum, as a reply holds the newest lines that fit below line_max.",
+            "description": "The end of the audit, the server's one document of every JSLB line in debug mode, laid out for a person: its newest whole entries, oldest first. count is a maximum, as a reply holds the newest entries that fit below line_max. Debug mode only.",
             "inputSchema": {
               "properties": {
                 "count": {
                   "type": "integer"
-                },
-                "thread": {
-                  "type": "string"
                 }
               },
               "required": [
-                "thread",
                 "count"
               ],
               "type": "object"
             },
-            "name": "verbose_tail"
+            "name": "audit_tail"
           }
         ]
       }

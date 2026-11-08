@@ -7,6 +7,14 @@
   },
   "kept_value": "kept value",
   "lines": {
+    "audit_note": {
+      "0": {
+        "type": "audit.note"
+      },
+      "at": 1,
+      "text": "first",
+      "thread": "ui"
+    },
     "browser_error": {
       "0": {
         "type": "error"
@@ -143,6 +151,42 @@
         }
       }
     },
+    "ping": {
+      "0": {
+        "id": 102,
+        "type": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "ping"
+    },
+    "ping_reply": {
+      "0": {
+        "reply": 102,
+        "type": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "result": {}
+    },
+    "ping_short": {
+      "0": {
+        "i": 102,
+        "t": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "ping"
+    },
+    "ping_short_reply": {
+      "0": {
+        "r": 102,
+        "t": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "result": {}
+    },
     "put_kept": {
       "0": {
         "blobs": 1,
@@ -275,41 +319,6 @@
       "jsonrpc": "2.0",
       "method": "notifications/initialized"
     },
-    "tail_short": {
-      "0": {
-        "i": 102,
-        "t": "verbose.tail"
-      },
-      "count": 10,
-      "thread": "ui"
-    },
-    "tail_short_reply": {
-      "0": {
-        "r": 102,
-        "t": "verbose.tail"
-      },
-      "lines": []
-    },
-    "tail_ui": {
-      "0": {
-        "id": 102,
-        "type": "verbose.tail"
-      },
-      "count": 10,
-      "thread": "ui"
-    },
-    "tail_ui_reply": {
-      "0": {
-        "reply": 102,
-        "type": "verbose.tail"
-      },
-      "lines": [
-        {
-          "at": 1,
-          "text": "first"
-        }
-      ]
-    },
     "tap_line": {
       "0": {
         "type": "tap.line"
@@ -333,18 +342,6 @@
         "id": 102,
         "type": "no.such"
       }
-    },
-    "verbose_put": {
-      "0": {
-        "type": "verbose.put"
-      },
-      "lines": [
-        {
-          "at": 1,
-          "text": "first"
-        }
-      ],
-      "thread": "ui"
     }
   },
   "poll_seconds": 0.01,
@@ -355,10 +352,10 @@
     "bail_out": "Bail out! boom",
     "bootstrap_reply_unexpected": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"reply\":101,\"type\":\"hello\"}}",
     "dispatch_handler_unknown": "No handler is registered for type no.such version 0.",
-    "engine_tap_browser_cause": "caused by: first",
-    "engine_tap_browser_failed": "The browser failed: boom",
-    "failed_prefix": "The server failed",
+    "error_type": "\"type\": \"error\"",
     "module_refused": "argument --module: invalid choice: 'test_no_such'",
-    "name_invalid": "The name ../a.py is not a plain file name that ends in .py and does not start with a dot."
+    "name_invalid": "The name ../a.py is not a plain file name that ends in .py and does not start with a dot.",
+    "note_label": "note of ui",
+    "received_label": "ai to server"
   }
 }

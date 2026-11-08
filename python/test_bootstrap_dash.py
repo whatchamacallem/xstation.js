@@ -10,11 +10,11 @@
 # that no echo of the input holds them. SIGTERM goes to the sandbox the console
 # role forked, found by its parent pid in /proc. A heredoc of binary bytes
 # comes back as the pty's output processing changes it, so that a connection
-# that is not binary fails.
+# that is not binary fails. The shell's start and exit are notes of console in
+# the root's audit, read back by `audit.entries_read`, and no log is opened.
 
-import base64, bootstrap, contextlib, errno, harness, json, os, pty, select
-import shlex, signal, sqlite3, switches, sys, tempfile, termios, time
-import traceback, unittest
+import audit, base64, bootstrap, errno, harness, json, os, pty, select, shlex
+import signal, switches, sys, tempfile, termios, time, traceback, unittest
 from typing import NamedTuple
 
 # The checkout's top directory, above this file's `python/`.
@@ -32,7 +32,7 @@ _READ_BYTES: int = harness.gold_get(f"{_GOLD_ID}.read_bytes")
 # The seconds a wait for dash's prompt takes before it fails, its bytes shown.
 _PROMPT_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.prompt_seconds")
 
-# The test's own copy of the console's shell, as the log names it.
+# The test's own copy of the console's shell, as the audit names it.
 _DASH_ARGV: list[str] = harness.gold_get(f"{_GOLD_ID}.argv")
 
 # The test's own copy of the shell's verbose form.
@@ -115,10 +115,10 @@ _SIGNAL_BASE = 128
 # The console role's code once SIGTERM from outside ended its sandbox.
 _TERMINATED_CODE: int = harness.gold_get(f"{_GOLD_ID}.terminated.code")
 
-# The code `verbose.exec` logs for that sandbox, minus the signal.
+# The code `verbose.exec` notes for that sandbox, minus the signal.
 _TERMINATED_EXEC: int = harness.gold_get(f"{_GOLD_ID}.terminated.exec_code")
 
-# The parameter verbose whose level logs the shell's start and exit only.
+# The parameter verbose whose level notes the shell's start and exit only.
 _LOGGED_VERBOSE = False
 
 # The directory of the processes, each under its pid.
@@ -130,14 +130,8 @@ _STATUS_NAME = "status"
 # The start of the line of that file which holds the parent's pid.
 _PPID_FIELD = b"PPid:"
 
-# The file in the root that holds the log.
+# The file in the root that holds the log, which no debug run opens.
 _LOG_NAME = "_verbose.sqlite"
-
-# The query of the thread and text of each line of the log, in order.
-_LOG_QUERY = "SELECT thread, text FROM line ORDER BY seq"
-
-# The thread the server's own lines are stored under in the log.
-_SERVER_THREAD = "server"
 
 # The file in its scratch directory a child writes how its run ended to.
 _ENDING_NAME = "ending.txt"
@@ -191,24 +185,22 @@ def _heredoc_typed(payload: bytes) -> bytes:
     return bytes(typed)
 
 
-# The log lines of the shell's run and of its exit with the code.
-def _exec_lines(argv: list[str], code: int) -> list[tuple[str, str]]:
+# The audit's notes of the shell's run and of its exit with the code.
+def _exec_entries(argv: list[str], code: int) -> list[tuple[str, str]]:
     command = shlex.join(argv)
+    label = _text_get("audit_console")
     return [
-        (_SERVER_THREAD, _text_get("verbose_exec_run", command)),
-        (_SERVER_THREAD, _text_get("verbose_exec_exit", command, str(code))),
+        (label, "  " + _text_get("verbose_exec_run", command)),
+        (label, "  " + _text_get("verbose_exec_exit", command, str(code))),
     ]
 
 
-# The thread and text of each line of the root's log, which must be open.
-def _log_read(root: str) -> list[tuple[str, str]]:
-    path = os.path.join(root, _LOG_NAME)
-    if not os.path.isfile(path):
-        raise AssertionError(f"the log was never opened: {path}")
-    with contextlib.closing(sqlite3.connect(path)) as connection:
-        cursor = connection.execute(_LOG_QUERY)
-        rows: list[tuple[str, str]] = cursor.fetchall()
-    return rows
+# The label and body of each entry of the root's audit, with no log beside.
+def _audit_read(case: unittest.TestCase, root: str) -> list[tuple[str, str]]:
+    case.assertFalse(os.path.exists(os.path.join(root, _LOG_NAME)))
+    entries = audit.entries_read(root)
+    case.assertEqual({entry.start for entry in entries}, {1})
+    return [(entry.label, entry.body) for entry in entries]
 
 
 # Makes a debug scratch root with the checkout's settings, `verbose` given.
@@ -375,17 +367,17 @@ class TestConsole(unittest.TestCase):
 
     # Dash runs at the level of the parameter verbose, and its verbose form.
     def test_console_level(self) -> None:
-        logged: list[tuple[bool, list[tuple[str, str]]]] = [
-            (False, _exec_lines(_DASH_ARGV, 0)),
-            (True, _exec_lines(_DASH_VERBOSE, 0)),
+        noted: list[tuple[bool, list[tuple[str, str]]]] = [
+            (False, _exec_entries(_DASH_ARGV, 0)),
+            (True, _exec_entries(_DASH_VERBOSE, 0)),
         ]
-        for verbose, expected in logged:
+        for verbose, expected in noted:
             made = _root_make(self, verbose)
             child = ConsoleChild(self, made)
             child.prompt_wait()
             child.bytes_write(_EXIT_COMMAND)
             self.assertEqual(child.run_end(), repr(0))
-            self.assertEqual(_log_read(made.root), expected)
+            self.assertEqual(_audit_read(self, made.root), expected)
 
     # A dash a signal ended gives its sandbox's code, 128 plus the signal.
     def test_console_signal(self) -> None:
@@ -396,15 +388,15 @@ class TestConsole(unittest.TestCase):
         code = _SIGNAL_BASE + signal.SIGKILL
         self.assertEqual(child.run_end(), repr(code))
 
-    # SIGTERM from outside to the sandbox gives 128 plus it, and is logged.
+    # SIGTERM from outside to the sandbox gives 128 plus it, and is noted.
     def test_console_terminated(self) -> None:
         made = _root_make(self, _LOGGED_VERBOSE)
         child = ConsoleChild(self, made)
         child.prompt_wait()
         os.kill(child.sandbox_find(), signal.SIGTERM)
         self.assertEqual(child.run_end(), repr(_TERMINATED_CODE))
-        expected = _exec_lines(_DASH_ARGV, _TERMINATED_EXEC)
-        self.assertEqual(_log_read(made.root), expected)
+        expected = _exec_entries(_DASH_ARGV, _TERMINATED_EXEC)
+        self.assertEqual(_audit_read(self, made.root), expected)
 
     # A heredoc of binary bytes to `cat` comes back as the pty prints them.
     def test_console_binary(self) -> None:

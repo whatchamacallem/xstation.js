@@ -2,76 +2,59 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// The read only debug overlays of ttys 1 and up: one `pre` for each tty
-// holding its last rendered lines, newest last, hidden until toggled. A shown
-// overlay's newest line is kept at the bottom of the view of the element that
-// scrolls it, the container or one above it.
+// The read only debug overlays of ttys 1 and up: one `pre` for each tty,
+// hidden until toggled, holding a text only while it is shown and emptied at
+// each hide. A shown overlay's end is kept at the bottom of the view of the
+// element that scrolls it, the container or one above it.
 namespace overlay {
-  // The constants of this module.
-  const constants = Object.freeze({
-    ring_minimum: 1,
-    line_separator: "\n",
-  });
-
-  // The `pre` of one tty and the lines it shows, oldest first.
-  interface OverlayEntry {
-    pre: HTMLPreElement;
-    lines: string[];
-  }
-
-  // The overlays inside a container, each keeping the last lines of a tty.
+  // The overlays inside a container, each the `pre` of a tty.
   export class Overlay {
     private container: HTMLElement;
-    private ring: number;
-    private entries = new Map<number, OverlayEntry>();
+    private entries = new Map<number, HTMLPreElement>();
 
-    // Takes the container the overlays go in and the lines kept for each tty.
-    constructor(container: HTMLElement, ring: number) {
-      if (!Number.isInteger(ring) || ring < constants.ring_minimum) {
-        throw new Error(i18n("overlay.ring_invalid", ring));
-      }
+    // Takes the container the overlays go in.
+    constructor(container: HTMLElement) {
       this.container = container;
-      this.ring = ring;
     }
 
-    // Appends a rendered line to the ring of a tty and rewrites its `pre`.
-    line_add(tty: number, text: string): void {
-      const entry = this.entry_get(tty);
-      entry.lines.push(text);
-      if (entry.lines.length > this.ring) {
-        entry.lines.shift();
+    // Shows the `pre` of a tty when hidden, hides and empties it when shown.
+    overlay_toggle(tty: number): boolean {
+      const pre = this.entry_get(tty);
+      pre.hidden = !pre.hidden;
+      if (pre.hidden) {
+        pre.textContent = "";
+      } else {
+        this.end_show(pre);
       }
-      entry.pre.textContent = entry.lines.join(constants.line_separator);
-      this.end_show(entry.pre);
+      return !pre.hidden;
     }
 
-    // Shows the `pre` of a tty when it is hidden and hides it when shown.
-    overlay_toggle(tty: number): void {
-      const entry = this.entry_get(tty);
-      entry.pre.hidden = !entry.pre.hidden;
-      this.end_show(entry.pre);
+    // Shows a text in the shown `pre` of a tty, its end in view.
+    text_show(tty: number, text: string): void {
+      const pre = this.entry_get(tty);
+      // Hidden before the text came, the overlay keeps nothing.
+      if (pre.hidden) {
+        return;
+      }
+      pre.textContent = text;
+      this.end_show(pre);
     }
 
     // Scrolls whatever scrolls a shown `pre` so that it ends at the bottom.
     private end_show(pre: HTMLPreElement): void {
-      // A hidden `pre` shows no line, and the toggle that shows it scrolls.
-      if (pre.hidden) {
-        return;
-      }
       pre.scrollIntoView({ block: "end" });
     }
 
-    // The entry of a tty, made hidden in the container on first use.
-    private entry_get(tty: number): OverlayEntry {
-      let entry = this.entries.get(tty);
-      if (entry === undefined) {
-        const pre = this.container.ownerDocument.createElement("pre");
+    // The `pre` of a tty, made hidden in the container on first use.
+    private entry_get(tty: number): HTMLPreElement {
+      let pre = this.entries.get(tty);
+      if (pre === undefined) {
+        pre = this.container.ownerDocument.createElement("pre");
         pre.hidden = true;
         this.container.append(pre);
-        entry = { pre, lines: [] };
-        this.entries.set(tty, entry);
+        this.entries.set(tty, pre);
       }
-      return entry;
+      return pre;
     }
   }
 }

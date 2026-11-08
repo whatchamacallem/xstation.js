@@ -103,10 +103,28 @@
       "send": ["key_2"]
     },
     {
-      "expect": ["overlays_19_reply"],
-      "name": "overlay_lined",
+      "expect": ["audit_tail_5"],
+      "name": "audit_keyed",
       "seconds": 10,
-      "send": ["overlay_line", "overlays_19"]
+      "send": ["key_1"]
+    },
+    {
+      "expect": ["overlays_19_reply"],
+      "name": "audit_shown",
+      "seconds": 10,
+      "send": ["audit_tail_5_reply", "overlays_19"]
+    },
+    {
+      "expect": [],
+      "name": "audit_unkeyed",
+      "seconds": 0.2,
+      "send": ["key_1"]
+    },
+    {
+      "expect": ["overlays_21_reply"],
+      "name": "audit_hidden",
+      "seconds": 10,
+      "send": ["overlays_21"]
     },
     {
       "expect": ["fetch_20_reply"],
@@ -116,6 +134,20 @@
     }
   ],
   "lines": {
+    "audit_tail_5": {
+      "0": {
+        "id": 5,
+        "type": "audit.tail"
+      },
+      "count": 1000
+    },
+    "audit_tail_5_reply": {
+      "0": {
+        "reply": 5,
+        "type": "audit.tail"
+      },
+      "text": "---- 16:49:00.123, ui to ai\n{\n  \"0\": {\n    \"type\": \"ai.say\"\n  }\n}\n\n"
+    },
     "band_11": {
       "0": {
         "id": 11,
@@ -270,18 +302,17 @@
       "pixels": "c21b35e3f28e676cedf24c13575a7346682e101a2d26aad9598d0cdbcee9ee3b",
       "width": 2
     },
+    "key_1": {
+      "0": {
+        "type": "page_probe.key"
+      },
+      "digit": 1
+    },
     "key_2": {
       "0": {
         "type": "page_probe.key"
       },
       "digit": 2
-    },
-    "overlay_line": {
-      "0": {
-        "type": "overlay.line"
-      },
-      "text": "> x",
-      "tty": 1
     },
     "overlays_19": {
       "0": {
@@ -300,8 +331,30 @@
           "text": ""
         },
         {
+          "hidden": false,
+          "text": "---- 16:49:00.123, ui to ai\n{\n  \"0\": {\n    \"type\": \"ai.say\"\n  }\n}\n\n"
+        }
+      ]
+    },
+    "overlays_21": {
+      "0": {
+        "id": 21,
+        "type": "page_probe.overlays"
+      }
+    },
+    "overlays_21_reply": {
+      "0": {
+        "reply": 21,
+        "type": "page_probe.overlays"
+      },
+      "overlays": [
+        {
+          "hidden": false,
+          "text": ""
+        },
+        {
           "hidden": true,
-          "text": "> x"
+          "text": ""
         }
       ]
     },

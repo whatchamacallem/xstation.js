@@ -4,9 +4,9 @@
 //
 // The line cases of the UI thread's handlers on the page: the lines of the AI
 // worker that `page.handlers_register` serves, a render, a kept image, a
-// permit, the player's turns, the overlays' keys and lines and a fetched
-// image, each answered on a real queue of the UI thread whose lane to the AI
-// worker is the test's end. Every part is real: the DOM port on the page's
+// permit, the player's turns, the overlays' keys, the audit's end shown and
+// emptied, and a fetched image, each answered on a real queue of the UI
+// thread whose lane to the AI worker is the test's end. Every part is real: the DOM port on the page's
 // elements, which takes the player's text, clicks, keys and choices, the media
 // port, which decodes the gold's image and downloads one from the driver's
 // HTTP server, which serves this page too, the console view and the overlays.
@@ -40,8 +40,6 @@ namespace test_integrate_page {
     frame_width: 1000,
     frame_height: 400,
     band_height: 50,
-    // The lines each overlay keeps, its writer's choice.
-    ring_lines: 3,
     // The media cache's budget and a download's seconds, their writer's.
     media_budget: 1000000,
     media_seconds: 10,
@@ -231,7 +229,7 @@ namespace test_integrate_page {
         permit: elements.permit,
         images,
         view: new console_view.ConsoleView(console_area, tasks),
-        overlays: new overlay.Overlay(elements.overlays, constants.ring_lines),
+        overlays: new overlay.Overlay(elements.overlays),
         debug: switches.debug_on(),
       },
       dispatch.handler_register,

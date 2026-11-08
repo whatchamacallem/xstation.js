@@ -5,10 +5,13 @@
 #
 # The platform services around the main loop, the command ttyd runs.
 # API/python/bootstrap.pyi holds its roles. Its error line goes in full names,
-# since it may come before the settings, and once the log is open the
-# exception's message, then in debug mode that line's rendering, is logged
-# before that line is written. The modules beside this file are imported inside
-# the functions that use them, after their bytecode has been sent to build/.
+# since it may come before the settings. Once a role has opened them, in debug
+# mode the engine role records that line in the audit before it is written;
+# otherwise the exception's message is logged first, outside debug mode in
+# `_verbose.sqlite` and in the console role as a note of console in the
+# audit, as no line of the audit holds it. The modules beside this file are
+# imported inside the functions that use them, after their bytecode has been
+# sent to build/.
 
 import argparse, fcntl, importlib.machinery, importlib.util, os, signal, sys
 import termios, time, traceback, tty, types
@@ -56,6 +59,9 @@ _LOCK_POLL_SECONDS = 0.01
 
 # The role that runs the console, the only role there is.
 _CONSOLE_ROLE = "console"
+
+# The name of the engine, the run with no role, in the audit's start heading.
+_ENGINE_ROLE = "engine"
 
 # The Python before dash that gives it the pty as its controlling terminal.
 _TERMINAL_STEP = "; ".join(
@@ -280,10 +286,9 @@ def _bytes_write(data: bytes) -> None:
         view = view[written:]
 
 
-# Traces `tap.start` in debug mode, then writes it in `full` names.
+# Records `tap.start` in debug mode, then writes it in `full` names.
 def _first_write(loaded: dict[str, Any], full: bool) -> None:
-    import jslb, switches, verbose
-    from internationalization import i18n
+    import audit, jslb, switches
 
     header = jslb.header_make(_FIRST_TYPE, id=_FIRST_ID, full=full)
     payload: dict[str, Any] = {
@@ -292,13 +297,13 @@ def _first_write(loaded: dict[str, Any], full: bool) -> None:
     }
     line = jslb.line_make(header, [], **payload)
     if switches.debug:
-        verbose.log(i18n("bootstrap.start_submit", jslb.line_render(line)))
+        audit.line_sent(line)
     _bytes_write(_text_bytes(jslb.line_encode(line)))
 
 
-# Reads the reply to `tap.start` a byte at a time, taking no byte after it.
+# Reads the reply to `tap.start` a byte at a time, recorded in debug mode.
 def _reply_read(loaded: dict[str, Any]) -> None:
-    import jslb
+    import audit, jslb, switches
     from internationalization import i18n
 
     # Refuses a blob large enough to stream, as the reply carries none.
@@ -321,6 +326,8 @@ def _reply_read(loaded: dict[str, Any]) -> None:
         # Feeding nothing raises at once a fault the decoder held back.
         decoder.bytes_feed(b"")
     (line,) = lines
+    if switches.debug:
+        audit.line_received(line)
     header: jslb.Object = line[0]
     reply = jslb.field_get(header, "reply")
     if (
@@ -336,19 +343,24 @@ def _reply_read(loaded: dict[str, Any]) -> None:
         )
 
 
-# Opens the root's log, then runs `serve`, logging and writing any failure.
+# Opens the audit in debug mode, else the log, runs `serve`, writes a failure.
 def _logged_run(
-    root: str, loaded: dict[str, Any], serve: Callable[[], int]
+    root: str, loaded: dict[str, Any], role: str, serve: Callable[[], int]
 ) -> int:
-    import verbose
+    import audit, switches, verbose
     from internationalization import i18n
 
-    verbose.log_open(root, loaded["verbose_ring"], loaded["blob_max"])
+    if switches.debug:
+        audit.audit_open(root, loaded["blob_max"], role)
+    else:
+        verbose.log_open(root, loaded["blob_max"])
     try:
         return serve()
     except Exception as error:
-        verbose.log(i18n("bootstrap.run_failed", str(error)))
-        _error_write(error, True)
+        recorded = switches.debug and role == _ENGINE_ROLE
+        if not recorded:
+            verbose.log(i18n("bootstrap.run_failed", str(error)))
+        _error_write(error, recorded)
         return _EXIT_FAILURE
 
 
@@ -374,7 +386,10 @@ def _engine_run(root: str, main_loop: str | None) -> int:
     loaded = _settings_read(root)
     _parameters_apply(root)
     return _logged_run(
-        root, loaded, lambda: _engine_serve(root, main_loop, loaded)
+        root,
+        loaded,
+        _ENGINE_ROLE,
+        lambda: _engine_serve(root, main_loop, loaded),
     )
 
 
@@ -418,7 +433,7 @@ def _console_run(root: str, loaded: dict[str, Any]) -> int:
     if not switches.debug:
         return _EXIT_FAILURE
     level = _LEVEL_VERBOSE if switches.verbose else _LEVEL_PLAIN
-    return _logged_run(root, loaded, lambda: _dash_run(level))
+    return _logged_run(root, loaded, _CONSOLE_ROLE, lambda: _dash_run(level))
 
 
 # The cascade of an exception, by the rule of `dispatch.cause_make`.
@@ -436,15 +451,14 @@ def _cause_make(error: BaseException) -> dict[str, Any]:
     return cascade
 
 
-# Writes the one `error` line, full names, no `r`, traced when the log is open.
-def _error_write(error: Exception, log_open: bool) -> None:
-    import jslb, switches, verbose
-    from internationalization import i18n
+# Writes the one `error` line, full names, no `r`, recorded first if asked.
+def _error_write(error: Exception, recorded: bool) -> None:
+    import audit, jslb
 
     header = jslb.header_make(_ERROR_TYPE, full=True)
     line = jslb.line_make(header, [], **_cause_make(error))
-    if log_open and switches.debug:
-        verbose.log(i18n("bootstrap.line_error", jslb.line_render(line)))
+    if recorded:
+        audit.line_sent(line)
     data = _text_bytes(jslb.line_encode(line))
     # A hangup from here on cannot end the run, which exits 1 itself.
     signal.signal(signal.SIGHUP, signal.SIG_IGN)

@@ -3,14 +3,17 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests xsjs_log.py as a program, as a person starts it, on a log the real
-# `verbose` writes in a scratch root in `build/`, each text rendered by the
-# real `jslb` under the real strings of the page's and the server's timeline
-# lines: the whole timeline, each option, a root given relative to the working
-# directory, a root with no log, a refused option, a reader that leaves, and a
-# follow of a log the server holds open, which SIGINT ends. The texts expected
-# are the gold's.
+# `verbose` writes outside debug mode in a scratch root in `build/`, the texts
+# a server logs as it fails, each under the real strings of the browser's and
+# the main loop's failures, a line in one rendered by the real `jslb`: the
+# whole timeline, each option, a root given relative to the working
+# directory, a root with no log, a refused option, a reader that leaves, and
+# a follow of a log the server holds open, which SIGINT ends. The texts
+# expected are the gold's, each `{n}` the time of the log's row `n`, which
+# the test reads by SQL of its own.
 
-import harness, jslb, os, signal, subprocess, sys, tempfile, unittest, verbose
+import contextlib, harness, jslb, os, signal, sqlite3, subprocess, switches
+import sys, tempfile, unittest, verbose
 from internationalization import i18n
 from typing import Any, IO, cast
 
@@ -29,9 +32,11 @@ _PROGRAM_PATH = os.path.join(_ROOT_PATH, "python", "xsjs_log.py")
 # The file in the root that holds the lines.
 _FILE_NAME = "_verbose.sqlite"
 
-# The ring and the largest file of the log, as the checkout sets them.
-_RING: int = harness.setting_get("verbose_ring")
+# The largest file of the log, as the checkout sets it.
 _BLOB_MAX: int = harness.setting_get("blob_max")
+
+# The statement that reads the time of each row of the log, in order.
+_TIMES_SELECT = "SELECT at FROM line ORDER BY seq"
 
 # The exit code of a program whose exception reached the top.
 _RAISED_CODE = 1
@@ -42,57 +47,39 @@ _INTERRUPTED_CODE: int = harness.gold_get(f"{_GOLD_ID}.interrupted_code")
 # The exit code of arguments the parser refuses.
 _USAGE_CODE: int = harness.gold_get(f"{_GOLD_ID}.usage_code")
 
-# The times of the page's lines, in the order they are written.
-_SAY_AT = 10
-_DISPATCH_AT = 20
-_PUT_AT = 30
-
-# The lines the server itself writes in the log.
-_SERVER_LINES = 2
-
 
 # A value of this module's gold.
 def _gold_value(name: str) -> Any:
     return harness.gold_get(f"{_GOLD_ID}.{name}")
 
 
-# Writes a turn to the open log, as the page and the server note its lines.
-def _turn_write() -> None:
-    say = jslb.line_render(
-        jslb.line_make(
-            jslb.header_make("ai.say", id=102, full=True), [], text="1"
-        )
+# Writes the failures to the open log, as a server without debug mode logs.
+def _failures_write() -> None:
+    texts: dict[str, str] = _gold_value("texts")
+    verbose.log(i18n("engine_tap.browser_failed", texts["browser"]))
+    verbose.log(texts["stack"])
+    reply = jslb.line_make(
+        jslb.header_make("kv.put", reply=102, full=True),
+        [jslb.blob_make(b"note")],
+        ref="/metaverse/demo/note",
     )
-    put = jslb.line_render(
-        jslb.line_make(
-            jslb.header_make("kv.put", full=True),
-            [jslb.blob_make(b"note")],
-            ref="/metaverse/demo/note",
-        )
-    )
-    submitted = i18n("queue.submit", "ui", "ai", say)
-    verbose.lines_put("ui", [verbose.LogLine(_SAY_AT, submitted)])
-    dispatched = i18n("queue.dispatch", "ai", "ui", say)
-    notified = i18n("queue.notify", "ai", "server", put)
-    verbose.lines_put(
-        "ai",
-        [
-            verbose.LogLine(_DISPATCH_AT, dispatched),
-            verbose.LogLine(_PUT_AT, notified),
-        ],
-    )
-    verbose.log(i18n("main_loop.line_dispatch", put))
-    verbose.log(i18n("main_loop.serve_failed", _gold_value("texts.failure")))
+    refused = i18n("main_loop.reply_unknown", jslb.line_render(reply))
+    verbose.log(i18n("main_loop.serve_failed", refused))
 
 
-# The lines the program prints of the turn, the server's with their times.
-def _printed_expected() -> list[str]:
-    printed: list[str] = []
-    for text in _gold_value("printed"):
-        for index, line in enumerate(verbose.history_get(_SERVER_LINES)):
-            text = text.replace("{" + str(index) + "}", str(line.at))
-        printed.append(text)
-    return printed
+# The time of each row of the root's log, in order, read by SQL of its own.
+def _times_read(root: str) -> list[int]:
+    path = os.path.join(root, _FILE_NAME)
+    with contextlib.closing(sqlite3.connect(path)) as connection:
+        rows: list[tuple[int]] = connection.execute(_TIMES_SELECT).fetchall()
+    return [at for (at,) in rows]
+
+
+# The text with each `{n}` the time of the root's row `n`.
+def _times_filled(root: str, text: str) -> str:
+    for index, at in enumerate(_times_read(root)):
+        text = text.replace("{" + str(index) + "}", str(at))
+    return text
 
 
 # Runs the program to its end in the directory, the root given as named.
@@ -111,18 +98,22 @@ def _program_run(
 
 # Each test runs the program on a turn's log in a root of its own.
 class TestProgram(unittest.TestCase):
-    # Writes the turn and closes the log, as a server that ended leaves it.
+    # Writes the failures and closes the log, as a server that ended does.
     def setUp(self) -> None:
         os.makedirs(_BUILD_PATH, exist_ok=True)
         self.root = self.enterContext(
             tempfile.TemporaryDirectory(dir=_BUILD_PATH)
         )
-        verbose.log_open(self.root, _RING, _BLOB_MAX)
+        saved = switches.switches_get()
+        self.addCleanup(switches.switches_apply, saved)
+        switches.switches_apply({**saved, "debug": False})
+        verbose.log_open(self.root, _BLOB_MAX)
         try:
-            _turn_write()
-            self.printed = _printed_expected()
+            _failures_write()
         finally:
             verbose.log_close()
+        printed: list[str] = _gold_value("printed")
+        self.printed = [_times_filled(self.root, text) for text in printed]
 
     # Raises unless the program ended with 0, printing the lines and no error.
     def printed_check(
@@ -167,7 +158,7 @@ class TestProgram(unittest.TestCase):
 
     # A reader that leaves, as `head` does, ends the program with no error.
     def test_reader_left(self) -> None:
-        verbose.log_open(self.root, _RING, _BLOB_MAX)
+        verbose.log_open(self.root, _BLOB_MAX)
         self.addCleanup(verbose.log_close)
         later: dict[str, Any] = _gold_value("later")
         with subprocess.Popen(
@@ -182,8 +173,7 @@ class TestProgram(unittest.TestCase):
                 for _ in self.printed:
                     output.readline()
                 output.close()
-                line = verbose.LogLine(later["at"], later["text"])
-                verbose.lines_put("ui", [line])
+                verbose.log(later["text"])
                 errors = cast(IO[str], program.stderr).read()
                 program.wait()
             finally:
@@ -193,7 +183,7 @@ class TestProgram(unittest.TestCase):
 
     # A follow prints the held lines, a new line of the open log, and ends.
     def test_follow_live(self) -> None:
-        verbose.log_open(self.root, _RING, _BLOB_MAX)
+        verbose.log_open(self.root, _BLOB_MAX)
         self.addCleanup(verbose.log_close)
         later: dict[str, Any] = _gold_value("later")
         with subprocess.Popen(
@@ -209,10 +199,10 @@ class TestProgram(unittest.TestCase):
                     output.readline().removesuffix("\n") for _ in self.printed
                 ]
                 self.assertEqual(held, self.printed)
-                line = verbose.LogLine(later["at"], later["text"])
-                verbose.lines_put("ui", [line])
+                verbose.log(later["text"])
                 printed = output.readline().removesuffix("\n")
-                self.assertEqual(printed, later["printed"])
+                expected = _times_filled(self.root, later["printed"])
+                self.assertEqual(printed, expected)
                 program.send_signal(signal.SIGINT)
                 rest, errors = program.communicate()
             finally:

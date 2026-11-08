@@ -4,9 +4,7 @@
 //
 // The AI worker once the boot has handed over its objects.
 // API/ts/worker_ai.d.ts holds its rules. `tap_start` runs once per worker, so
-// each of its pieces is a function of its own, for the unit suites. The
-// overlay's note runs on the engine page alone, by `TapParts.overlay`, as a
-// test page registers no handler of `overlay.line`.
+// each of its pieces is a function of its own, for the unit suites.
 
 namespace worker_ai {
   // The owners, settings, line types and numbers of the worker.
@@ -16,7 +14,6 @@ namespace worker_ai {
     server_owner: "server" as const,
     console_owner: "console" as const,
     synchronous_setting: "queue_synchronous",
-    line_setting: "line_max",
     settings_type: "settings.set",
     put_type: "settings.put",
     open_type: "console.open",
@@ -35,14 +32,13 @@ namespace worker_ai {
     // The command byte of ttyd's input messages, and the end of a line.
     input_command: "0",
     line_end: "\n",
-    overlay_type: "overlay.line",
-    verbose_type: "verbose.put",
+    tail_type: "audit.tail",
+    tail_wake: "worker.tail_reply",
     error_type: "error",
     fault_type: "fault",
     opened_type: "worker.console_opened",
     put_wake: "worker.settings_put",
     handler_version: 0,
-    wire_tty: 1,
   });
 
   // Registers the handler of one line type and version, as dispatch does.
@@ -62,8 +58,6 @@ namespace worker_ai {
     end: ServerEnd;
     ui: MessagePort;
     console: wire.ConsolePort | undefined;
-    // Whether the `WireTap` notes through `note_make`: the engine page alone.
-    overlay: boolean;
   }
 
   // What a relay's wake keeps: the request it owes the reply to.
@@ -78,29 +72,6 @@ namespace worker_ai {
   ): lines.Line {
     const header = jslb.header_make(type, { full: settings.names_full() });
     return jslb.line_make(header, [], payload);
-  }
-
-  // The note of a line: its rendering if it fits a verbose entry, else sizes.
-  function note_text(
-    line: lines.Line,
-    rendered: string,
-    sized: string,
-  ): string {
-    const text = i18n(rendered, jslb.line_render(line));
-    const line_max = settings.settings_get(constants.line_setting) as number;
-    if (queue.entry_fits(constants.thread, text, line_max)) {
-      return text;
-    }
-    const header = utility.json_text(line[0]);
-    const payload = utility.json_text(jslb.payload_of(line));
-    const blobs = jslb.headers_of(line).slice(1) as lines.BlobHeader[];
-    const sizes = blobs.map((blob) => jslb.field_get(blob, "size"));
-    return i18n(
-      sized,
-      header,
-      utility.utf8_encode(payload).length,
-      utility.json_text(sizes),
-    );
   }
 
   // The owner table of the AI thread.
@@ -120,51 +91,11 @@ namespace worker_ai {
       "console.exit": "ui",
       "console.busy": "ui",
       "console.idle": "ui",
-      "verbose.": "server",
+      "audit.": "server",
+      "audit.tail": "ai",
       "tap.": "server",
       fault: "ai",
     };
-  }
-
-  // A port that logs each line it carries both ways, then passes it on.
-  export class WireTap implements queue.Port {
-    private readonly inner: queue.Port;
-    private readonly note: (text: string) => void;
-
-    // Takes the port it wraps and what takes the text of each line.
-    constructor(inner: queue.Port, note: (text: string) => void) {
-      this.inner = inner;
-      this.note = note;
-    }
-
-    // Notes the line as sent unless it forwards the log, then posts it.
-    line_post(line: lines.Line, transfer: ArrayBuffer[]): void {
-      // Noted, a `verbose.put` would be forwarded and noted again, forever.
-      if (jslb.field_get(line[0], "type") !== constants.verbose_type) {
-        this.note(
-          note_text(
-            line,
-            "worker_ai.overlay_sent",
-            "worker_ai.overlay_sent_sized",
-          ),
-        );
-      }
-      this.inner.line_post(line, transfer);
-    }
-
-    // Notes each line received before the receiver takes it.
-    line_receive(fn: (line: lines.Line) => void): void {
-      this.inner.line_receive((line: lines.Line) => {
-        this.note(
-          note_text(
-            line,
-            "worker_ai.overlay_received",
-            "worker_ai.overlay_received_sized",
-          ),
-        );
-        fn(line);
-      });
-    }
   }
 
   // How the AI's turn stands: none, waiting for tty 0, lapsed or on.
@@ -451,19 +382,25 @@ namespace worker_ai {
     register(constants.put_wake, version, () => undefined);
   }
 
-  // What takes each rendered line of the wire: tty 1's overlay, then `log`.
-  export function note_make(
+  // Relays the UI's `audit.tail` to the server and its reply back.
+  export function tail_register(
     tasks: queue.TaskQueue,
-    log: (text: string) => void,
-  ): (text: string) => void {
-    return (text: string) => {
-      const line = line_build(constants.overlay_type, {
-        tty: constants.wire_tty,
-        text,
-      });
-      tasks.line_notify(line, constants.ui_owner);
-      log(text);
-    };
+    register: HandlerRegister,
+  ): void {
+    const version = constants.handler_version;
+    // Asks the server for the end of the audit and sleeps on it.
+    register(constants.tail_type, version, (line) => {
+      const copy = line_build(constants.tail_type, jslb.payload_of(line));
+      const id = tasks.task_submit(copy, constants.server_owner);
+      const state: RelayState = { request: line };
+      return dispatch.task_sleep(state, [id], constants.tail_wake);
+    });
+    // Answers the UI with the server's text.
+    register(constants.tail_wake, version, (line) => {
+      const { request } = line.state as RelayState;
+      const replies = line.replies as lines.Line[];
+      return dispatch.reply_make(request, jslb.payload_of(replies[0]));
+    });
   }
 
   // Synchronous mode, from `queue_synchronous`, which needs debug mode.
@@ -524,18 +461,14 @@ namespace worker_ai {
       owners_make(),
       synchronous_read(settings.settings_get, switches.debug_on),
     );
-    tasks.sink_attach(
-      verbose.sink_set,
-      settings.settings_get,
-      switches.debug_on,
-    );
+    tasks.limit_attach(settings.settings_get);
+    if (switches.debug_on()) {
+      tasks.audit_attach();
+    }
     tasks.port_add(constants.ui_owner, new queue.ThreadPort(parts.ui));
-    const note = parts.overlay ? note_make(tasks, verbose.log) : verbose.log;
-    const server: queue.Port = switches.debug_on()
-      ? new WireTap(parts.server, note)
-      : parts.server;
-    tasks.port_add(constants.server_owner, server);
+    tasks.port_add(constants.server_owner, parts.server);
     settings_register(tasks, dispatch.handler_register, payload.settings);
+    tail_register(tasks, dispatch.handler_register);
     settings.sender_register((put: lines.SettingsPut) => {
       const line = line_build(constants.put_type, { settings: put.settings });
       tasks.line_notify(line, constants.thread);
@@ -553,7 +486,11 @@ namespace worker_ai {
     };
     const set = line_build(constants.settings_type, notice);
     tasks.line_notify(set, constants.ui_owner);
-    server.line_post(dispatch.reply_make(parts.first, {}), []);
+    parts.server.line_post(dispatch.reply_make(parts.first, {}), []);
+    // The engine role reads the Empty reply first and alone.
+    if (switches.debug_on()) {
+      tasks.audit_open();
+    }
     run(tasks);
   }
 }

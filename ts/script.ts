@@ -5,13 +5,13 @@
 // The AI's scripts: a script is the text of the KV row
 // `/_files/script/<name>.js`, run inside the calling task by
 // `new Function("engine", "args", text)`. `engine` is a frozen object of
-// `store`, `verbose.log` and `i18n`, where `store` is a frozen object of the
+// `store`, `log` and `i18n`, where `store` is a frozen object of the
 // store's routine methods bound to the store: the operations of the tools,
 // `turn_compact` and `transaction_run`, and not `db_open`, `db_close`,
 // `kv_check`, `db_snapshot`, `db_restore`, `sink` or `handlers_register`,
 // which would expose the store beyond routine queries. A run returns the
-// value, or the exception with its stack, and the verbose lines the run
-// wrote. With `trace`, as `script_debug` runs it, each call of `store` is
+// value, or the exception with its stack, and the lines the run logged,
+// kept in the result alone. With `trace`, as `script_debug` runs it, each call of `store` is
 // traced first.
 
 namespace script {
@@ -38,12 +38,18 @@ namespace script {
     ] as const),
   });
 
+  // One line a run logged: milliseconds since the epoch and its text.
+  export interface LogLine {
+    at: number;
+    text: string;
+  }
+
   // What a run returned: the value or the exception, and the lines it wrote.
   export interface ScriptResult {
     value?: unknown;
     error?: string;
     stack?: string;
-    lines: lines.VerboseLine[];
+    lines: LogLine[];
   }
 
   // The store's routine methods a script may call, bound to the store.
@@ -140,10 +146,9 @@ namespace script {
   ): ScriptResult {
     const ref = constants.script_prefix + name + constants.script_suffix;
     const text = value_text(store, ref);
-    const kept: lines.VerboseLine[] = [];
-    // Logs on the thread and keeps every line for the result.
+    const kept: LogLine[] = [];
+    // Keeps every line for the result, its one record.
     const line_write = (line_text: string): void => {
-      verbose.log(line_text);
       kept.push({ at: utility.time_now(), text: line_text });
     };
     const routine = store_routine(store);

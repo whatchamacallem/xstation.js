@@ -30,6 +30,9 @@ namespace jslb {
   // A frozen table from names to names.
   type NameTable = { readonly [name: string]: string };
 
+  // What bytes in a value become: refused, a tag of the render, the marker.
+  type BytesForm = "refused" | "tagged" | "marked";
+
   // The name tables, the limits and the patterns of the format.
   const constants = Object.freeze({
     // The short line header field names and their full forms.
@@ -265,7 +268,7 @@ namespace jslb {
   // Returns the JSON bytes ending in CR, then each blob's `d` as it is.
   export function line_encode(line: Line): (Uint8Array | string)[] {
     const sizes = line_check(line, false);
-    const text = line_text(line, sizes.length, false) + "\r";
+    const text = line_text(line, sizes.length, "refused") + "\r";
     const pieces: (Uint8Array | string)[] = [utility.utf8_encode(text)];
     for (let number = 1; number <= sizes.length; number += 1) {
       const size = sizes[number - 1];
@@ -293,7 +296,12 @@ namespace jslb {
     for (let number = 1; number <= count; number += 1) {
       tags += `<blob "n"=${number}>`;
     }
-    return line_text(line, count, true) + tags;
+    return line_text(line, count, "tagged") + tags;
+  }
+
+  // The JSON text `line_encode` writes, any bytes `[bytes omitted: N]`.
+  export function line_json(line: Line): string {
+    return line_text(line, line_check(line, false).length, "marked");
   }
 
   // Parses a JSON text by the decoder's number rules, any JSON value.
@@ -423,11 +431,11 @@ namespace jslb {
     return sizes;
   }
 
-  // Returns the JSON text of a line with `count` blobs, bytes tagged if asked.
+  // Returns the JSON text of a line with `count` blobs, bytes in the form asked.
   function line_text(
     line: { [key: string]: unknown },
     count: number,
-    tagged: boolean,
+    form: BytesForm,
   ): string {
     const sent: { [key: string]: unknown } = { ...line };
     for (let number = 1; number <= count; number += 1) {
@@ -436,11 +444,11 @@ namespace jslb {
         Object.entries(header).filter(([name]) => name !== "d"),
       );
     }
-    return json_write(sent, tagged);
+    return json_write(sent, form);
   }
 
   // Returns the JSON text of a value, integer keys first, numbers checked.
-  function json_write(value: unknown, tagged: boolean): string {
+  function json_write(value: unknown, form: BytesForm): string {
     if (value === null || typeof value === "boolean") {
       return String(value);
     }
@@ -455,7 +463,7 @@ namespace jslb {
     }
     if (Array.isArray(value)) {
       const items: readonly unknown[] = value;
-      const texts = Array.from(items, (item) => json_write(item, tagged));
+      const texts = Array.from(items, (item) => json_write(item, form));
       return `[${texts.join(",")}]`;
     }
     if (object_plain(value)) {
@@ -464,12 +472,15 @@ namespace jslb {
       const numbers = keys.filter((key) => constants.number_key.test(key));
       const names = keys.filter((key) => !constants.number_key.test(key));
       const members = [...numbers.sort(key_compare), ...names].map(
-        (key) => `${text_write(key)}:${json_write(object[key], tagged)}`,
+        (key) => `${text_write(key)}:${json_write(object[key], form)}`,
       );
       return `{${members.join(",")}}`;
     }
-    if (tagged && value instanceof Uint8Array) {
+    if (form === "tagged" && value instanceof Uint8Array) {
       return `<bytes "size"=${value.length}>`;
+    }
+    if (form === "marked" && value instanceof Uint8Array) {
+      return text_write(i18n("audit.bytes_omitted", value.length));
     }
     throw new Error(
       i18n("jslb.value_refused", Object.prototype.toString.call(value)),

@@ -5,17 +5,18 @@
 # Tests the echo main loop in forked children over pipes, with roots in
 # `build/` whose settings are the checkout's with the gold's sizes and whose
 # parameters are the run's with debug true, which a serving child sets as
-# `bootstrap.py` does, and its error texts against the gold. Each child writes how its work
-# ended to a file, or to stderr with the failure when that write fails, then
-# kills itself whatever happened, so the handlers it registers never reach
-# another test. The browser's `error` line goes to the real `engine_tap`, which
-# logs its cascade in the root's log, opened first by the child, through
-# `echo_loop`, as `bootstrap.py` opens it, and ends the root's TAP file with a
-# bail out, both read from the root. A page thread's `verbose.put` goes to the
-# real `engine_verbose`, which writes its lines to that same log.
+# `bootstrap.py` does, and its error texts against the gold. Each child writes
+# how its work ended to a file, or to stderr with the failure when that write
+# fails, then kills itself whatever happened, so the handlers it registers
+# never reach another test. The child opens the root's audit first, as
+# `bootstrap.py` opens it in debug mode. The browser's `error` line goes to
+# the real `engine_tap`, which ends the root's TAP file with a bail out and
+# logs nothing in debug mode, and the echo loop records no line of its own,
+# so the audit holds no entry. A page thread's `audit.note` goes to the real
+# `engine_audit`, which writes it into that same audit.
 
-import contextlib, echo_loop, functools, harness, json, os, signal, sqlite3
-import switches, sys, tempfile, traceback, unittest
+import audit, echo_loop, functools, harness, json, os, signal, switches, sys
+import tempfile, traceback, unittest
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
@@ -63,23 +64,17 @@ _TAP_LINE = (
     b'{"0":{"t":"tap.line"},"language":"typescript","text":"ok 1 - x"}\r'
 )
 
-# The page thread whose lines the `verbose.put` push carries.
-_PAGE_THREAD = "ai"
+# The indent of each line of a note's body.
+_NOTE_INDENT = "  "
 
-# Its lines, each a time and a text, in the order the push holds them.
-_PAGE_LINES = ((1, "the first line of the page"), (2, "the second line"))
+# The text of a page thread's note.
+_NOTE_TEXT = "the note of the page"
 
-# A `verbose.put` push of that thread's lines, as the page sends in debug.
-_VERBOSE_PUT = (
-    json.dumps(
-        {
-            "0": {"t": "verbose.put"},
-            "thread": _PAGE_THREAD,
-            "lines": [{"at": at, "text": text} for at, text in _PAGE_LINES],
-        },
-        separators=(",", ":"),
-    ).encode("utf-8")
-    + b"\r"
+# An `audit.note` push of the page thread `ai`, as the page sends in debug.
+_AUDIT_NOTE = (
+    b'{"0":{"t":"audit.note"},"thread":"ai","at":1,"text":"'
+    + _NOTE_TEXT.encode("utf-8")
+    + b'"}\r'
 )
 
 # The TAP file of the TypeScript stream in a root.
@@ -96,12 +91,6 @@ _BAIL_LINE = "Bail out! page fault\n"
 
 # The log of the server in a root, as `verbose` names it.
 _LOG_NAME = "_verbose.sqlite"
-
-# The query of the thread and text of each line of the log, in order.
-_LOG_QUERY = "SELECT thread, text FROM line ORDER BY seq"
-
-# The thread the server's own lines are stored under in the log.
-_SERVER_THREAD = "server"
 
 
 # A text of this module's gold.
@@ -189,24 +178,18 @@ def _echo_serve(root: str, read_fd: int, write_fd: int) -> str:
     return _ENDING_RETURNED
 
 
-# Child: opens the root's log as `bootstrap.py` does, echoes pipes to the end.
-def _logged_serve(root: str, read_fd: int, write_fd: int) -> str:
+# Child: opens the root's audit as `bootstrap.py` does, echoes to the end.
+def _audited_serve(root: str, read_fd: int, write_fd: int) -> str:
     path = os.path.join(root, "settings.json")
     with open(path, encoding="utf-8") as file:
         values: dict[str, Any] = json.load(file)
-    echo_loop.engine_tap.verbose.log_open(
-        root, values["verbose_ring"], values["blob_max"]
-    )
+    audit.audit_open(root, values["blob_max"], "engine")
     return _echo_serve(root, read_fd, write_fd)
 
 
-# The thread and text of each line of the root's log, in order.
-def _log_read(root: str) -> list[tuple[str, str]]:
-    path = os.path.join(root, _LOG_NAME)
-    with contextlib.closing(sqlite3.connect(path)) as connection:
-        cursor = connection.execute(_LOG_QUERY)
-        rows: list[tuple[str, str]] = cursor.fetchall()
-    return rows
+# The label and body of each entry of the root's audit, in order.
+def _audit_read(root: str) -> list[tuple[str, str]]:
+    return [(entry.label, entry.body) for entry in audit.entries_read(root)]
 
 
 # Gives each test a scratch root in `build/` whose settings stream small.
@@ -349,29 +332,23 @@ class TestEcho(ScratchCase):
         with open(path, encoding="utf-8") as file:
             self.assertEqual(file.read(), "ok 1 - x\n")
 
-    # The browser's `error` line is logged and bailed out, then exit 1.
+    # The browser's `error` line is bailed out, then exit 1, nothing logged.
     def test_browser_error(self) -> None:
-        work = functools.partial(_logged_serve, self.root)
+        work = functools.partial(_audited_serve, self.root)
         ending, output = self.child_run(work, _BROWSER_ERROR)
         self.assertEqual(ending, _ENDING_FAILED)
         self.assertEqual(output, b"")
         path = os.path.join(self.root, _TAP_FILE)
         with open(path, encoding="utf-8") as file:
             self.assertEqual(file.read(), _BAIL_LINE)
-        texts = [
-            _text_get("engine_tap_browser_failed"),
-            "at page",
-            _text_get("engine_tap_browser_cause"),
-            "at first",
-        ]
-        expected = [(_SERVER_THREAD, text) for text in texts]
-        self.assertEqual(_log_read(self.root), expected)
+        self.assertEqual(_audit_read(self.root), [])
+        self.assertFalse(os.path.exists(os.path.join(self.root, _LOG_NAME)))
 
-    # A page thread's `verbose.put` is written to the log, nothing written.
-    def test_verbose_put(self) -> None:
-        work = functools.partial(_logged_serve, self.root)
-        ending, output = self.child_run(work, _VERBOSE_PUT)
+    # A page thread's `audit.note` is a note of the audit, nothing written.
+    def test_audit_note(self) -> None:
+        work = functools.partial(_audited_serve, self.root)
+        ending, output = self.child_run(work, _AUDIT_NOTE)
         self.assertEqual(ending, _ENDING_RETURNED)
         self.assertEqual(output, b"")
-        expected = [(_PAGE_THREAD, text) for _, text in _PAGE_LINES]
-        self.assertEqual(_log_read(self.root), expected)
+        note = (_text_get("audit_note_label"), _NOTE_INDENT + _NOTE_TEXT)
+        self.assertEqual(_audit_read(self.root), [note])

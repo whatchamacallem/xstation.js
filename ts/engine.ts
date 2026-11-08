@@ -25,7 +25,6 @@ namespace engine {
     compact_setting: "turn_compact_turns",
     media_setting: "media_db_bytes",
     timeout_setting: "provider.timeout_seconds",
-    ring_setting: "verbose_ring",
     line_setting: "line_max",
     // The bytes of a line per character of the box, past JSON's 6 at worst.
     text_bytes: 8,
@@ -343,10 +342,7 @@ namespace engine {
         permit,
         images,
         view: new console_view.ConsoleView(debug, tasks),
-        overlays: new overlay.Overlay(
-          overlays,
-          settings.settings_get(constants.ring_setting) as number,
-        ),
+        overlays: new overlay.Overlay(overlays),
         debug: switches.debug_on(),
       },
       dispatch.handler_register,

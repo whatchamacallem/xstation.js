@@ -74,6 +74,7 @@
     "exec_code": -15
   },
   "texts": {
+    "audit_console": "note of console",
     "verbose_exec_exit": "`{0}` exited with code {1}.",
     "verbose_exec_run": "Running `{0}`."
   }

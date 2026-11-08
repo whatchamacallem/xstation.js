@@ -102,7 +102,8 @@ namespace test_tools_browser {
       "render",
       "permit.ask",
     ]),
-    server_types: Object.freeze(["verbose.tail"]),
+    // Answered by the server's port, as the realm's bring up holds the type.
+    tail_type: "audit.tail",
     // The pushes of the store, which the server's far end keeps.
     push_types: Object.freeze([
       "db.create",
@@ -251,7 +252,7 @@ namespace test_tools_browser {
   }
 
   // The text of each line, which leaves out the time.
-  function lines_shown(kept: lines.VerboseLine[]): string[] {
+  function lines_shown(kept: script.LogLine[]): string[] {
     return kept.map((line) => line.text);
   }
 
@@ -303,6 +304,31 @@ namespace test_tools_browser {
     return far_tasks;
   }
 
+  // The server's end: a tail answered at once, any other line the far queue's.
+  class ServerPort implements queue.Port {
+    #near = new queue.LocalPort();
+    #receiver: ((line: lines.Line) => void) | undefined = undefined;
+
+    // The port the far queue holds, linked to this one.
+    far_end(): queue.LocalPort {
+      return new queue.LocalPort(this.#near);
+    }
+
+    line_post(line: lines.Line, transfer: ArrayBuffer[]): void {
+      const type = jslb.field_get(line[0], "type");
+      if (type !== constants.tail_type) {
+        this.#near.line_post(line, transfer);
+        return;
+      }
+      (this.#receiver as (line: lines.Line) => void)(far_answer(line));
+    }
+
+    line_receive(fn: (line: lines.Line) => void): void {
+      this.#receiver = fn;
+      this.#near.line_receive(fn);
+    }
+  }
+
   // The owner table of a far queue: each of its types its own.
   function owners_of(
     thread: queue.ThreadName,
@@ -314,11 +340,7 @@ namespace test_tools_browser {
   // Registers the far ends' answers and keepers, the test's own functions.
   function far_register(): void {
     const version = constants.handler_version;
-    const types = [
-      ...constants.http_types,
-      ...constants.ui_types,
-      ...constants.server_types,
-    ];
+    const types = [...constants.http_types, ...constants.ui_types];
     for (const type of types) {
       dispatch.handler_register(type, version, far_answer);
     }
@@ -366,17 +388,19 @@ namespace test_tools_browser {
     const { http_thread, ui_thread, server_thread } = constants;
     far_join(tasks, http_thread, owners_of(http_thread, constants.http_types));
     far_join(tasks, ui_thread, owners_of(ui_thread, constants.ui_types));
-    const service = far_join(
-      tasks,
+    const service = new queue.TaskQueue(
       server_thread,
       owners_of(server_thread, [
-        ...constants.server_types,
         ...constants.push_types,
         constants.call_type,
         constants.list_type,
         constants.answer_type,
       ]),
+      true,
     );
+    const server_port = new ServerPort();
+    tasks.port_add(server_thread, server_port);
+    service.port_add(constants.thread, server_port.far_end());
     far_register();
     const store = new substrate.Store(
       test_sqlite3,
@@ -1007,28 +1031,35 @@ namespace test_tools_browser {
     }
   }
 
-  // The verbose tail, the one verbose tool, as the runtime has no level.
-  export class TestVerbose extends ToolCase {
-    // No tool sets a verbose level, and the server refuses a call of one.
-    test_level_gone(): void {
-      const names = this.tools_listed().map((tool) => tool.name);
-      this.assertFalse(names.includes("verbose_level"));
-      this.assertTrue(names.includes("verbose_tail"));
-      const error = this.failure_of("verbose_level", {});
-      this.assertEqual(error.message, gold_text("mcp_tool_unknown"));
-    }
-
-    // The tail is asked of the server and its lines are returned.
+  // The end of the audit, asked of the server, in debug mode alone.
+  export class TestAuditTail extends ToolCase {
+    // The tail is asked of the server and its text is returned.
     test_tail_asked(): void {
       const reply = gold_line("tail_reply");
-      this.reply_script("verbose.tail", reply);
-      const result = this.tool_call("verbose_tail", {
-        thread: "server",
-        count: 5,
+      this.reply_script("audit.tail", reply);
+      const result = this.tool_call("audit_tail", { count: 5 });
+      this.assertEqual(this.text_of(result), reply.text);
+      this.assertEqual(this.got_unmarked(), [gold_line("audit_tail")]);
+    }
+
+    // Outside debug mode it answers an error and asks the server nothing.
+    test_debug_off(): void {
+      debug_mode = false;
+      const result = this.tool_call("audit_tail", { count: 5 });
+      const text = gold_text("tools_browser_debug_off_tail");
+      this.assertEqual(result, {
+        content: [{ type: "text", text }],
+        isError: true,
       });
-      const tail = { lines: reply.lines };
-      this.assertEqual(this.text_of(result), JSON.stringify(tail));
-      this.assertEqual(this.got_unmarked(), [gold_line("verbose_tail")]);
+      this.assertEqual(this.got_unmarked(), []);
+    }
+
+    // No tool of the old log is left, and the server refuses a call of one.
+    test_verbose_gone(): void {
+      const names = this.tools_listed().map((tool) => tool.name);
+      this.assertFalse(names.includes("verbose_tail"));
+      const error = this.failure_of("verbose_tail", {});
+      this.assertEqual(error.message, gold_text("mcp_tool_unknown"));
     }
   }
 

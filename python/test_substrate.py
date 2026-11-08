@@ -8,12 +8,13 @@
 # the setting overflow_bytes, a document read from its cache file, a lost
 # cache file, a put of the digest a row holds, a check beside a file with no
 # _kv table, a kill between a cache file and its row, snapshots and restores
-# with their cache files, some lost, turns, SQL, a trigger's refusal, and
-# transactions over several databases. Each text a refusal is checked against
-# is the gold's.
+# with their cache files, some lost, turns, SQL, a trigger's refusal,
+# transactions over several databases, and the view of a database against the
+# vector dump.json of vectors_make, whole and after a restore that loses
+# values. Each text a refusal is checked against is the gold's.
 
-import harness, hashlib, json, os, resource, signal, sqlite3, substrate
-import tempfile, traceback, unittest
+import harness, hashlib, json, os, re, resource, signal, sqlite3, substrate
+import tempfile, traceback, unittest, vectors_make
 from collections.abc import Callable
 from typing import Any, NoReturn, cast
 
@@ -114,6 +115,12 @@ _WORLD_SQL = (
     "CREATE TABLE world (name TEXT PRIMARY KEY, title TEXT NOT NULL) STRICT"
 )
 
+# The file of the view vector that `vectors_make` writes.
+_DUMP_NAME = "dump.json"
+
+# A key of JSON text that a document holds as an integer: an integer literal.
+_INTEGER_LITERAL = re.compile(r"0|[1-9][0-9]*")
+
 
 # A text of this module's gold.
 def _text_get(name: str) -> str:
@@ -128,8 +135,10 @@ def _root_make(case: unittest.TestCase) -> str:
 
 
 # Makes a store on a root whose databases close when the test ends.
-def _store_make(case: unittest.TestCase, root: str) -> substrate.Store:
-    store = substrate.Store(root, _OVERFLOW_BYTES, _BLOB_MAX)
+def _store_make(
+    case: unittest.TestCase, root: str, overflow_bytes: int = _OVERFLOW_BYTES
+) -> substrate.Store:
+    store = substrate.Store(root, overflow_bytes, _BLOB_MAX)
     case.addCleanup(_store_close, store)
     return store
 
@@ -240,6 +249,55 @@ def _alpha_fill(store: substrate.Store) -> dict[str, bytes]:
     for ref, value in values.items():
         store.kv_put(ref, value)
     return values
+
+
+# The view vector, as `vectors_make` writes it into a scratch folder.
+def _dump_read(case: unittest.TestCase) -> dict[str, Any]:
+    scratch = _root_make(case)
+    vectors_make.vectors_write(scratch)
+    with open(os.path.join(scratch, _DUMP_NAME), encoding="utf-8") as file:
+        dump: dict[str, Any] = json.load(file)
+    return dump
+
+
+# A JSON object from parsed pairs, its integer literal keys made integers.
+def _pairs_keyed(pairs: list[tuple[str, Any]]) -> dict[int | str, Any]:
+    return {
+        (int(key) if _INTEGER_LITERAL.fullmatch(key) else key): item
+        for key, item in pairs
+    }
+
+
+# Applies one operation of the view vector through the store's methods.
+def _operation_apply(
+    store: substrate.Store, operation: dict[str, Any]
+) -> None:
+    match operation["op"]:
+        case "db_create":
+            store.db_create(operation["db"])
+        case "kv_put":
+            store.kv_put(operation["ref"], bytes.fromhex(operation["data"]))
+        case "doc_put":
+            body = json.loads(
+                json.dumps(operation["body"]), object_pairs_hook=_pairs_keyed
+            )
+            store.doc_put(operation["db"], operation["id"], body)
+        case "sql_run":
+            statements = [
+                _statement_make(statement["sql"], *statement["params"])
+                for statement in operation["statements"]
+            ]
+            store.sql_run(operation["db"], statements)
+        case "turn_append":
+            content = _json_text(operation["content"])
+            store.turn_append(operation["scene"], operation["role"], content)
+        case name:
+            raise ValueError(f"the view vector has no operation {name!r}")
+
+
+# A value as the JSON text of it reads back.
+def _json_value(value: object) -> Any:
+    return json.loads(json.dumps(value))
 
 
 # Every statement of the dump of a database file: its schema and its rows.
@@ -1366,6 +1424,73 @@ class TestSnapshot(unittest.TestCase):
         image = store.db_snapshot("alpha")
         kept = _cache_file(root, values["/alpha/two"])
         self.assertEqual(image.files, [kept])
+
+
+# The view of a database, against the vector of `vectors_make` by hand.
+class TestView(unittest.TestCase):
+    # Reads the vector, then applies its operations on a store of its own.
+    def setUp(self) -> None:
+        self.dump = _dump_read(self)
+        self.overflow: int = self.dump["overflow_bytes"]
+        self.view: dict[str, Any] = self.dump["view"]
+        self.db: str = self.view["db"]
+        self.store = _store_make(self, _root_make(self), self.overflow)
+        for operation in self.dump["operations"]:
+            _operation_apply(self.store, operation)
+
+    # The view of the operations' database is the vector's, as a JSON value.
+    def test_view_vector(self) -> None:
+        self.assertEqual(_json_value(self.store.db_view(self.db)), self.view)
+
+    # A restore without the files of the rows over `overflow_bytes` loses them.
+    def test_view_lost(self) -> None:
+        lost = [
+            row["key"]
+            for row in self.view["rows"]
+            if row["size"] > self.overflow
+        ]
+        self.assertTrue(lost)
+        digests = {
+            self.store.kv_get(f"/{self.db}/{key}").sha256.hex() for key in lost
+        }
+        image = self.store.db_snapshot(self.db)
+        files: list[bytes | str] = []
+        for path in image.files:
+            if os.path.basename(path) not in digests:
+                with open(path, "rb") as file:
+                    files.append(file.read())
+        self.assertEqual(len(image.files), len(digests) + len(files))
+        second = _store_make(self, _root_make(self), self.overflow)
+        second.db_restore(self.db, image.data, files)
+        expected = _json_value(self.view)
+        expected["rows"] = [
+            {"key": row["key"], "size": row["size"], "kind": "lost"}
+            if row["key"] in lost
+            else row
+            for row in expected["rows"]
+        ]
+        self.assertEqual(_json_value(second.db_view(self.db)), expected)
+
+    # A restore with no file loses a document's current version, which raises.
+    def test_document_lost(self) -> None:
+        cached = [
+            document["ref"]
+            for document in self.view["documents"]
+            if isinstance(self.store.kv_get(document["ref"]).data, str)
+        ]
+        self.assertTrue(cached)
+        name = self.store.kv_get(cached[0]).sha256.hex()
+        image = self.store.db_snapshot(self.db)
+        second = _store_make(self, _root_make(self), self.overflow)
+        second.db_restore(self.db, image.data, [])
+        message = (
+            _text_get("substrate_file_lost_restored")
+            .replace("{0}", cached[0])
+            .replace("{1}", name)
+        )
+        _error_check(
+            self, LookupError, message, lambda: second.db_view(self.db)
+        )
 
 
 # A kill between a cache file and its row.

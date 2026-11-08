@@ -9,9 +9,9 @@
 #
 # A root is made as the start script makes one: `powershell.runtime_modules`
 # and the seed in `python/`, `i18n/en-US.json`, `powershell.root_files`, the
-# page and `parameters.json`. Each run makes those anew, removes the log,
-# `_verbose.sqlite` and its `-wal` and `-shm` files, so each serve starts a new
-# record, and keeps the rest, so the maintainer's databases persist. The
+# page and `parameters.json`. Each run makes those anew, removes the audit,
+# `_audit.txt`, and the log, `_verbose.sqlite` and its `-wal` and `-shm` files,
+# so each serve starts a new record, and keeps the rest, so the maintainer's databases persist. The
 # root's engine lock means a second connection, as a second tab, waits 5 s,
 # then fails loud on the server and shows the fault screen: one page per root.
 #
@@ -52,7 +52,7 @@ def root_default(values: dict[str, Any]) -> str: ...
 # Builds the engine page from `html/engine.html`. Returns its path in `build/`.
 def page_ready(values: dict[str, Any]) -> str: ...
 
-# Makes the root from the built page: its log goes, or with `fresh` all of it.
+# Makes the root from the built page: its audit and log go, or with `fresh` all.
 def root_make(
     values: dict[str, Any],
     page: str,

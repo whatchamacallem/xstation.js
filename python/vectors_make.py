@@ -13,7 +13,8 @@
 # error sidecar names the slug of the fault that follows its messages.
 # sha256.json checks the hand written SHA-256 of the TypeScript at the edges of
 # its padding, and test_digests.json holds the digests the TypeScript test
-# modules compare with.
+# modules compare with. dump.json holds store operations and the view of their
+# database that both stores' db_view return, written by hand.
 
 import argparse, hashlib, json, os, sys
 from typing import Any, NamedTuple, cast
@@ -131,6 +132,181 @@ _TEST_DIGESTS: dict[str, dict[str, tuple[bytes, int]]] = {
         ),
         "text_wide": (b"\xe4\xb8\xad\xe6\x96\x87\xf0\x9f\x98\x80 text", 0),
     },
+}
+
+# The file of the view vector of both stores, beside the JSLB vectors.
+_DUMP_NAME = "dump.json"
+
+# The `overflow_bytes` of the view vector's stores, its writer's choice, small.
+_DUMP_OVERFLOW = 64
+
+# The database the view vector's operations write.
+_DUMP_DB = "gatehouse"
+
+# A text of 65 bytes, over `_DUMP_OVERFLOW`, which goes to the cache.
+_DUMP_LONG = (
+    "The tide comes in over the moat, and the keeper lifts the bridge."
+)
+
+# The seed's black 4 by 4 bitmap: 54 bytes of headers, then 48 of pixels.
+_DUMP_PICTURE = (
+    b"\x42\x4d\x66\x00\x00\x00\x00\x00\x00\x00\x36\x00\x00\x00"
+    b"\x28\x00\x00\x00\x04\x00\x00\x00\x04\x00\x00\x00\x01\x00\x18\x00"
+    b"\x00\x00\x00\x00\x30\x00\x00\x00\x13\x0b\x00\x00\x13\x0b\x00\x00"
+    b"\x00\x00\x00\x00\x00\x00\x00\x00" + bytes(48)
+)
+
+# The values the view vector puts, each key beside its bytes.
+_DUMP_VALUES = (
+    ("note", b"Tide\tlow\r\nMoat \xe4\xb8\xad\xe6\x96\x87\xf0\x9f\x98\x80"),
+    ("bom", b"\xef\xbb\xbfmarked"),
+    ("nbsp", b"no\xc2\xa0break"),
+    ("c1", b"edge\xc2\x9f"),
+    ("del", b"rub\x7fout"),
+    ("empty", b""),
+    ("raw", b"\xff\xfe\xfd"),
+    ("map", _DUMP_PICTURE),
+    ("long", _DUMP_LONG.encode("utf-8")),
+    ("loose/7", b"no such document"),
+    ("scene/02", b"leading zero"),
+)
+
+# The documents the view vector puts in order, each id beside its body.
+_DUMP_DOCUMENTS: tuple[tuple[str, dict[str, Any]], ...] = (
+    ("scene", {"0": {"t": "scene"}, "subtitle": "The first tide."}),
+    (
+        "scene",
+        {
+            "0": {"t": "scene"},
+            "1": "/gatehouse/map",
+            "subtitle": "The second tide.",
+            "image": {"$ref": 1},
+        },
+    ),
+    ("atlas", {"0": {"t": "atlas", "v": 2}, "regions": ["gate", "moat"]}),
+)
+
+# The statements of the view vector's script, each SQL beside its parameters.
+_DUMP_STATEMENTS: tuple[tuple[str, list[Any]], ...] = (
+    ("CREATE TABLE cell (label TEXT, tide INTEGER, data BLOB)", []),
+    ("INSERT INTO cell VALUES (?, ?, X'00FF10')", ["moat", 3]),
+    ("INSERT INTO cell VALUES (?, NULL, NULL)", ["gate"]),
+    ("CREATE INDEX cell_label ON cell (label)", []),
+    (
+        "CREATE TABLE region (name TEXT PRIMARY KEY, tide REAL) WITHOUT ROWID",
+        [],
+    ),
+    ("INSERT INTO region VALUES (?, ?)", ["moat", 1.5]),
+    ("INSERT INTO region VALUES (?, ?)", ["gate", -2.25]),
+    ("CREATE VIEW tides AS SELECT name, tide FROM region", []),
+    (
+        "CREATE TRIGGER region_kept BEFORE DELETE ON region"
+        " BEGIN SELECT RAISE(ABORT, 'kept'); END",
+        [],
+    ),
+)
+
+# The scene of the view vector's turns.
+_DUMP_SCENE = "/gatehouse/scene/2"
+
+# Store operations: the method in `op`, its arguments, a value's bytes in hex.
+_DUMP_OPERATIONS: list[dict[str, Any]] = [
+    {"op": "db_create", "db": _DUMP_DB},
+    *(
+        {"op": "kv_put", "ref": f"/{_DUMP_DB}/{key}", "data": data.hex()}
+        for key, data in _DUMP_VALUES
+    ),
+    *(
+        {"op": "doc_put", "db": _DUMP_DB, "id": key, "body": body}
+        for key, body in _DUMP_DOCUMENTS
+    ),
+    {
+        "op": "sql_run",
+        "db": _DUMP_DB,
+        "statements": [
+            {"sql": sql, "params": params} for sql, params in _DUMP_STATEMENTS
+        ],
+    },
+    *(
+        {
+            "op": "turn_append",
+            "scene": _DUMP_SCENE,
+            "role": role,
+            "content": {"role": role, "content": content},
+        }
+        for role, content in (("user", "Hello."), ("assistant", "Welcome."))
+    ),
+]
+
+# The view of the database after the operations, as `substrate.DbView`.
+_DUMP_VIEW: dict[str, Any] = {
+    "db": "gatehouse",
+    "rows": [
+        {"key": "bom", "size": 9, "kind": "text", "text": "\ufeffmarked"},
+        {"key": "c1", "size": 6, "kind": "binary"},
+        {"key": "del", "size": 7, "kind": "binary"},
+        {"key": "empty", "size": 0, "kind": "text", "text": ""},
+        {"key": "long", "size": 65, "kind": "text", "text": _DUMP_LONG},
+        {
+            "key": "loose/7",
+            "size": 16,
+            "kind": "text",
+            "text": "no such document",
+        },
+        {"key": "map", "size": 102, "kind": "binary"},
+        {"key": "nbsp", "size": 9, "kind": "text", "text": "no\u00a0break"},
+        {
+            "key": "note",
+            "size": 25,
+            "kind": "text",
+            "text": "Tide\tlow\r\nMoat \u4e2d\u6587\U0001f600",
+        },
+        {"key": "raw", "size": 3, "kind": "binary"},
+        {
+            "key": "scene/02",
+            "size": 12,
+            "kind": "text",
+            "text": "leading zero",
+        },
+    ],
+    "documents": [
+        {
+            "ref": "/gatehouse/atlas/1",
+            "body": {"0": {"t": "atlas", "v": 2}, "regions": ["gate", "moat"]},
+        },
+        {
+            "ref": "/gatehouse/scene/2",
+            "body": {
+                "0": {"t": "scene"},
+                "1": "/gatehouse/map",
+                "subtitle": "The second tide.",
+                "image": {"$ref": 1},
+            },
+        },
+    ],
+    "tables": [
+        {
+            "name": "cell",
+            "columns": ["label", "tide", "data"],
+            "rows": [["moat", 3, {"bytes": 3}], ["gate", None, None]],
+        },
+        {
+            "name": "region",
+            "columns": ["name", "tide"],
+            "rows": [["gate", -2.25], ["moat", 1.5]],
+        },
+    ],
+    "schema": [
+        "CREATE TABLE cell (label TEXT, tide INTEGER, data BLOB)",
+        "CREATE INDEX cell_label ON cell (label)",
+        "CREATE TABLE region (name TEXT PRIMARY KEY, tide REAL) WITHOUT ROWID",
+        "CREATE TRIGGER region_kept BEFORE DELETE ON region"
+        " BEGIN SELECT RAISE(ABORT, 'kept'); END",
+        "CREATE VIEW tides AS SELECT name, tide FROM region",
+    ],
+    "versions_hidden": 1,
+    "turns_hidden": 2,
+    "scenes_hidden": 1,
 }
 
 # Bytecode of `jslb` and of what it imports goes in `build`.
@@ -485,8 +661,8 @@ def _test_digests() -> dict[str, dict[str, dict[str, str]]]:
     return vectors
 
 
-# Writes a file of digest vectors into the directory, keys sorted.
-def _digests_write(directory: str, name: str, vectors: dict[str, Any]) -> None:
+# Writes a JSON file of vectors into the directory, keys sorted.
+def _json_write(directory: str, name: str, vectors: dict[str, Any]) -> None:
     path = os.path.join(directory, name)
     with open(path, "w", encoding="utf-8", newline="\n") as file:
         file.write(json.dumps(vectors, indent=2, sort_keys=True) + "\n")
@@ -513,27 +689,34 @@ def _integral_set(header: dict[str, Any], names: tuple[str, str]) -> None:
             header[name] = int(value)
 
 
-# Returns the rendered form: the JSON text without `d`, then a tag per blob.
-def _message_render(expected: dict[str, Any], count: int) -> str:
+# Returns the JSON form: the JSON text without `d` and its blob bytes.
+def _message_json(expected: dict[str, Any], count: int) -> str:
     sent = dict(expected)
     for number in range(1, count + 1):
         header: dict[str, Any] = expected[str(number)]
         sent[str(number)] = {
             name: value for name, value in header.items() if name != "d"
         }
-    text = json.dumps(sent, ensure_ascii=False, separators=(",", ":"))
+    return json.dumps(sent, ensure_ascii=False, separators=(",", ":"))
+
+
+# Returns the rendered form: the JSON form, then a tag per blob.
+def _message_render(expected: dict[str, Any], count: int) -> str:
     tags = "".join(f'<blob "n"={number}>' for number in range(1, count + 1))
-    return text + tags
+    return _message_json(expected, count) + tags
 
 
-# The messages a decoder returns and their renders, as a sidecar holds them.
+# The messages a decoder returns, their JSON forms and renders, as a sidecar.
 def _messages_expected(messages: list[_EncodedMessage]) -> dict[str, Any]:
     expected = [_message_expected(message) for message in messages]
-    render = [
-        _message_render(item, len(message.blobs))
-        for item, message in zip(expected, messages, strict=True)
+    pairs = list(zip(expected, messages, strict=True))
+    forms = [
+        _message_json(item, len(message.blobs)) for item, message in pairs
     ]
-    return {"messages": expected, "render": render}
+    render = [
+        _message_render(item, len(message.blobs)) for item, message in pairs
+    ]
+    return {"messages": expected, "json": forms, "render": render}
 
 
 # The bytes of the messages, each line followed by its blobs.
@@ -554,7 +737,7 @@ def _vector_write(
         file.write(json.dumps(sidecar, indent=2) + "\n")
 
 
-# Writes the vectors, sidecars and digest vectors to the emptied directory.
+# Writes every vector and sidecar into the emptied directory.
 def vectors_write(directory: str) -> None:
     os.makedirs(directory, exist_ok=True)
     for stale in os.listdir(directory):
@@ -576,8 +759,14 @@ def vectors_write(directory: str) -> None:
         }
         data = _messages_join(vector.before) + vector.fault
         _vector_write(directory, vector.name, data, sidecar)
-    _digests_write(directory, _DIGESTS_NAME, _digest_vectors())
-    _digests_write(directory, _TEST_DIGESTS_NAME, _test_digests())
+    _json_write(directory, _DIGESTS_NAME, _digest_vectors())
+    _json_write(directory, _TEST_DIGESTS_NAME, _test_digests())
+    dump = {
+        "overflow_bytes": _DUMP_OVERFLOW,
+        "operations": _DUMP_OPERATIONS,
+        "view": _DUMP_VIEW,
+    }
+    _json_write(directory, _DUMP_NAME, dump)
 
 
 # Writes each vector, its sidecar and the digest vectors into `build/vectors`.

@@ -17,20 +17,23 @@
         "t": "tap.start"
       }
     },
-    "tail_short": {
+    "ping_short": {
       "0": {
         "i": 102,
-        "t": "verbose.tail"
+        "t": "mcp"
       },
-      "count": 10,
-      "thread": "ui"
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "ping"
     },
-    "tail_short_reply": {
+    "ping_short_reply": {
       "0": {
         "r": 102,
-        "t": "verbose.tail"
+        "t": "mcp"
       },
-      "lines": []
+      "id": 1,
+      "jsonrpc": "2.0",
+      "result": {}
     }
   },
   "read_bytes": 65536,
@@ -40,7 +43,10 @@
   "lock_wait_seconds": 5,
   "lock_held_seconds": 0.25,
   "texts": {
-    "bootstrap_line_error": "server reports to ai: {0}",
+    "audit_blobs_omitted": "[blobs omitted: {0}]",
+    "audit_console": "note of console",
+    "audit_received": "ai to server",
+    "audit_sent": "server to ai",
     "bootstrap_lock_held": "Another engine holds the lock {0}.",
     "bootstrap_loop_missing": "The main loop file {0} does not define loop_run.",
     "bootstrap_main_loop_name_dotted": "The main loop file name .test_loop.py is not a plain file name ending in .py.",
@@ -64,9 +70,7 @@
     "bootstrap_reply_unexpected_reply_true": "The reply to tap.start 101 is not an empty tap.start reply: {\"0\":{\"t\":\"tap.start\",\"r\":true}}",
     "bootstrap_root_outside": "The console's root /usr is not under /home/, which the sandbox hides from dash.",
     "bootstrap_run_failed": "The server failed: {0}",
-    "bootstrap_start_submit": "server submits to ai: {0}",
     "jslb_line_not_json": "The line is not JSON: Expecting value.",
-    "jslb_text_not_json": "The text is not JSON: Expecting value.",
     "switches_parameter_extra": "The parameters file {0} has the parameter verbose_level, which is none of anthropic, debug and verbose.",
     "verbose_exec_run": "Running `bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp --tmpfs /home --tmpfs /mnt --tmpfs /root --unshare-all --new-session --die-with-parent --chdir /tmp python3 -I -c 'import fcntl, os, signal, sys, termios; os.setsid(); fcntl.ioctl(0, termios.TIOCSCTTY, 0); signal.signal(signal.SIGPIPE, signal.SIG_DFL); signal.signal(signal.SIGXFSZ, signal.SIG_DFL); entries = open(\"/proc/self/environ\", \"rb\").read().split(b\"\\0\")[:-1]; given = dict(entry.split(b\"=\", 1) for entry in entries); os.execve(sys.argv[1], sys.argv[1:], given)' /bin/dash`."
   }

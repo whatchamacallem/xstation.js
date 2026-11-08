@@ -49,7 +49,7 @@ _ECHO_REPLY = {
 }
 
 # A notification, which has no id.
-_PUT_NOTIFICATION = b'{"0":{"t":"verbose.put"},"text":"x"}\r'
+_PUT_NOTIFICATION = b'{"0":{"t":"tap.line"},"text":"x"}\r'
 
 # A request whose id the decoder reads as a float.
 _ID_FLOAT = b'{"0":{"t":"kv.get","i":7.0}}\r'
@@ -262,7 +262,7 @@ class TestWire(ChildCase):
     def test_notification_none(self) -> None:
         calls: HandlerCalls = []
         handler = functools.partial(_handler_keep, calls)
-        dispatch.handler_register("verbose.put", 0, handler)
+        dispatch.handler_register("tap.line", 0, handler)
         line = _line_read(_PUT_NOTIFICATION)
         self.assertIsNone(dispatch.line_dispatch(line))
         self.assertEqual(calls, [(line, {"text": "x"})])

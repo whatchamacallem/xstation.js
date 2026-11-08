@@ -82,7 +82,6 @@ namespace test_node {
     test_provider_key: { module: () => test_provider_key },
     test_provider_key_unset: { module: () => test_provider_key_unset },
     test_provider_script: { module: () => test_provider_script },
-    test_verbose: { module: () => test_verbose },
     test_wire: { module: () => test_wire },
     test_queue: { module: () => test_queue },
     test_substrate: { module: () => test_substrate },

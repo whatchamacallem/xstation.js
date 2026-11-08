@@ -3,21 +3,20 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the main loop in forked children over pipes, with roots in `build/`.
-# Each child opens the root's log first, through `main_loop.verbose`, as
-# `bootstrap.py` does. The prepare returns None, and its effects are read
-# from the root's database files: the settings rows, the seeds, the
-# `universe` table and its two triggers. The lines fed to the loop are the
-# gold's, each its JSON text, a CR and its blobs' bytes; the lines it writes
-# are read back the same way and checked against the gold, and the texts of
-# its traces and refusals are the gold's, renderings written out. The
-# browser's commits are pushes the loop applies and answers with nothing.
-# The browser's `error` line is taken by `engine_tap` and the loop exits 1
-# writing nothing, and a handler's `Failure` writes its reply, then the
-# server's own `error` line, in the name form of the parameter `debug`,
-# which each serving child sets from the root's parameters as `bootstrap.py`
-# does. A handler's `dispatch.Stream`, registered through `dispatch` by the
-# child, writes its pushes, then its reply, each traced in full or by its
-# sizes. The analyst's seeded table is walked against the gold and the tools.
+# Each child opens the root's audit in debug mode, else its log, as
+# `bootstrap.py` does. The prepare returns None, and its effects are read from
+# the root's database files: the settings rows, the seeds, the `universe`
+# table and its two triggers. The lines fed to the loop are the gold's, each
+# its JSON text, a CR and its blobs' bytes; the lines it writes are read back
+# the same way and checked against the gold, as are its refusals. Commits are
+# pushes applied and answered with nothing. The browser's `error` line goes
+# to `engine_tap` and the loop exits 1 writing nothing; a handler's `Failure`
+# writes its reply, then the server's own `error` line, in the name form of
+# the parameter `debug`, which each serving child sets from the root's
+# parameters; a `dispatch.Stream` writes its pushes, then its reply. In debug
+# mode the audit records each line read and written, the audit's own never,
+# and no log is made; outside it a failure is logged and no audit is made.
+# The analyst's seeded table is walked against the gold and the tools.
 
 import contextlib, copy, dispatch, functools, harness, hashlib, jslb, json
 import main_loop, os, re, runpy, shutil, signal, sqlite3, switches, tempfile
@@ -149,14 +148,20 @@ _CASTLE_DB = "castle"
 # The database of the server's log, under the root.
 _LOG_DB = "_verbose"
 
+# The file of the server's log in the root.
+_LOG_FILE = _LOG_DB + ".sqlite"
+
+# The file of the audit in the root.
+_AUDIT_FILE = "_audit.txt"
+
+# The role the children open the audit for, as `bootstrap.py` names it.
+_ENGINE_ROLE = "engine"
+
 # The query of the thread and text of each line of the log, in order.
 _LOG_QUERY = "SELECT thread, text FROM line ORDER BY seq"
 
 # The thread the server's own lines are stored under in the log.
 _SERVER_THREAD = "server"
-
-# The thread of the gold's `verbose.put`, whose entry the log stores under it.
-_PAGE_THREAD = "ui"
 
 # The type of the request that a stream answers.
 _STREAM_TYPE = "test.stream"
@@ -170,11 +175,8 @@ _PUSH_TYPE = "test.push"
 # The texts of a stream's pushes, each its blob's bytes too.
 _PUSH_TEXTS: list[str] = harness.gold_get(f"{_GOLD_ID}.push_texts")
 
-# A `line_max` chosen by its writer: no entry of a stream fits under it.
-_LINE_SMALL: int = harness.gold_get(f"{_GOLD_ID}.line_small")
-
-# A clock reading in milliseconds, as wide as every reading of this century.
-_AT_SAMPLE: int = harness.gold_get(f"{_GOLD_ID}.at_sample")
+# The start of the label of a note, whose body is its text indented.
+_NOTE_PREFIX: str = harness.gold_get(f"{_GOLD_ID}.texts.note_prefix")
 
 
 # A copy of a value of this module's gold, which the test may change.
@@ -188,12 +190,18 @@ def _text_get(name: str) -> str:
     return text
 
 
-# The bytes of a gold line on the wire: its JSON text, a CR, then each blob.
-def _line_bytes(name: str, *blobs: bytes) -> bytes:
+# A gold line with the size of each blob given set in its blob header.
+def _line_sized(name: str, *blobs: bytes) -> dict[str, Any]:
     line: dict[str, Any] = _gold_copy(f"lines.{name}")
     size_name = "size" if "type" in line["0"] else "s"
     for number, blob in enumerate(blobs, 1):
         line[str(number)][size_name] = len(blob)
+    return line
+
+
+# The bytes of a gold line on the wire: its JSON text, a CR, then each blob.
+def _line_bytes(name: str, *blobs: bytes) -> bytes:
+    line = _line_sized(name, *blobs)
     text = json.dumps(line, ensure_ascii=False, separators=(",", ":"))
     return b"".join([text.encode("utf-8"), b"\r", *blobs])
 
@@ -306,16 +314,6 @@ def _json_bytes(value: object) -> bytes:
     return text.encode("utf-8")
 
 
-# The bytes of one `verbose.put` of the server holding an entry of the text.
-def _put_bytes(text: str) -> int:
-    put = {
-        "0": {"type": "verbose.put"},
-        "thread": _SERVER_THREAD,
-        "lines": [{"at": _AT_SAMPLE, "text": text}],
-    }
-    return len(_json_bytes(put))
-
-
 # Runs a query on a database file under the root and returns its rows.
 def _rows_read(root: str, db: str, sql: str, *params: object) -> list[Any]:
     path = os.path.join(root, db + ".sqlite")
@@ -363,14 +361,15 @@ def _child_end(
         os.kill(os.getpid(), signal.SIGKILL)
 
 
-# Opens the root's log with the ring of its settings, through `main_loop`.
-def _log_open(root: str) -> None:
+# Opens the root's audit in debug mode, else its log, as `bootstrap.py` does.
+def _record_open(root: str) -> None:
     path = os.path.join(root, "settings.json")
     with open(path, encoding="utf-8") as file:
         values: dict[str, Any] = json.load(file)
-    main_loop.verbose.log_open(
-        root, values["verbose_ring"], values["blob_max"]
-    )
+    if switches.debug:
+        main_loop.audit.audit_open(root, values["blob_max"], _ENGINE_ROLE)
+    else:
+        main_loop.verbose.log_open(root, values["blob_max"])
 
 
 # The thread and text of each line of the root's log, in order.
@@ -379,28 +378,61 @@ def _log_read(root: str) -> list[tuple[str, str]]:
     return rows
 
 
-# The thread and text of the trace of an `error` line, as the loop wrote it.
-def _error_row(line: dict[str, Any]) -> tuple[str, str]:
-    text = _json_bytes(line).decode("utf-8")
-    return (_SERVER_THREAD, _text_get("main_loop_line_error").format(text))
+# Each entry of the root's audit: its label, its JSON or note, then the rest.
+def _audit_read(root: str) -> list[tuple[str, Any, str]]:
+    read: list[tuple[str, Any, str]] = []
+    for entry in main_loop.audit.entries_read(root):
+        if entry.label.startswith(_NOTE_PREFIX):
+            read.append((entry.label, entry.body, ""))
+        else:
+            value, end = json.JSONDecoder().raw_decode(entry.body)
+            read.append((entry.label, value, entry.body[end:]))
+    return read
+
+
+# The entry of a line under the label of the gold: its JSON, no blob's bytes.
+def _line_entry(label: str, line: dict[str, Any]) -> tuple[str, Any, str]:
+    value = dict(line)
+    count = 0
+    while str(count + 1) in value:
+        count += 1
+        blob: dict[str, Any] = value[str(count)]
+        value[str(count)] = {
+            name: field for name, field in blob.items() if name != "d"
+        }
+    rest = ""
+    if count:
+        rest = "\n" + _text_get("blobs_omitted").format(count)
+    return _text_get(label), value, rest
+
+
+# The entry of a note of the console: its label and its text indented.
+def _note_entry(text: str) -> tuple[str, Any, str]:
+    body = _text_get("note_indent") + text
+    return _text_get("label_console"), body, ""
+
+
+# Whether the root holds the file.
+def _file_held(root: str, name: str) -> bool:
+    return os.path.exists(os.path.join(root, name))
 
 
 # The work of a child that prepares the root and says what the prepare gave.
 def _prepare_once(root: str, read_fd: int, write_fd: int) -> str:
-    _log_open(root)
+    _record_open(root)
     return repr(main_loop.loop_prepare(root))
 
 
 # The work of a child that prepares the root by the module run from a link.
 def _prepare_linked(root: str, link: str, read_fd: int, write_fd: int) -> str:
-    _log_open(root)
+    _record_open(root)
     return repr(runpy.run_path(link)["loop_prepare"](root))
 
 
-# The work of a child that prepares the root and serves the pipes to the end.
+# The work of a child that prepares the root and serves the pipes, recorded.
 def _loop_serve(root: str, read_fd: int, write_fd: int) -> str:
     switches.switches_apply(switches.parameters_load(root))
-    _log_open(root)
+    _record_open(root)
     prepared = repr(main_loop.loop_prepare(root))
     main_loop.loop_run(read_fd, write_fd, root)
     return prepared
@@ -418,7 +450,7 @@ def _push_make(text: str, blobs: list[jslb.Object]) -> jslb.Object:
     return jslb.line_make(header, blobs, text=text)
 
 
-# The pushes of a stream, each logged as the loop reaches it.
+# The pushes of a stream, each logged as the loop draws it.
 def _pushes_make() -> Iterator[jslb.Object]:
     for text in _PUSH_TEXTS:
         main_loop.verbose.log(text)
@@ -811,17 +843,11 @@ class TestLoop(ScratchCase):
         self.debug_write(True)
         self.work = functools.partial(_loop_serve, self.root)
 
-    # Writes the root's parameters, the run's with `debug` and `verbose` set.
-    def parameters_set(self, debug: bool, verbose: bool) -> None:
-        parameters = {**switches.switches_get(), "debug": debug}
-        switches.parameters_write(
-            self.root, {**parameters, "verbose": verbose}
-        )
-        self.debug_mode = debug
-
     # Writes the root's parameters, the run's with `debug` set.
     def debug_write(self, debug: bool) -> None:
-        self.parameters_set(debug, switches.verbose)
+        parameters = {**switches.switches_get(), "debug": debug}
+        switches.parameters_write(self.root, parameters)
+        self.debug_mode = debug
 
     # The gold line of an `error` that answers no line, in the debug form.
     def error_name(self) -> str:
@@ -840,6 +866,17 @@ class TestLoop(ScratchCase):
         self.assertEqual(line["message"], message)
         self.assertTrue(line["stack"].endswith(": " + message))
 
+    # Checks the audit's entries, and that the root holds no log.
+    def audit_check(self, expected: list[tuple[str, Any, str]]) -> None:
+        self.assertEqual(_audit_read(self.root), expected)
+        self.assertFalse(_file_held(self.root, _LOG_FILE))
+
+    # Checks the log's texts of the server, and that the root holds no audit.
+    def log_check(self, texts: list[str]) -> None:
+        expected = [(_SERVER_THREAD, text) for text in texts]
+        self.assertEqual(_log_read(self.root), expected)
+        self.assertFalse(_file_held(self.root, _AUDIT_FILE))
+
     # Runs the loop on data it serves to the end, and returns its output.
     def served_read(self, data: bytes) -> list[dict[str, Any]]:
         ending, output = self.child_run(self.work, data)
@@ -852,13 +889,8 @@ class TestLoop(ScratchCase):
         self.assertEqual(ending, _ENDING_FAILED)
         return _lines_read(output)
 
-    # Has the loop serve the two streams, under the `line_max` given.
-    def stream_limit(self, line_max: int) -> None:
-        self.settings_write(
-            overflow_bytes=_OVERFLOW_BYTES,
-            chunk_bytes=_CHUNK_BYTES,
-            line_max=line_max,
-        )
+    # Has the loop serve the two streams.
+    def streams_register(self) -> None:
         self.work = functools.partial(_stream_serve, self.root)
 
     # Checks a sync's pushes: each database's restore, then its file lines.
@@ -940,51 +972,34 @@ class TestLoop(ScratchCase):
         replies = self.failure_read(_line_bytes("unknown_request"))
         message = _text_get("dispatch_handler_unknown")
         self.error_check(replies[0], "error_reply", message)
-        text = _text_get("main_loop_serve_failed_unknown")
-        self.assertEqual(_log_read(self.root), [(_SERVER_THREAD, text)])
+        self.log_check([_text_get("main_loop_serve_failed_unknown")])
 
-    # In debug mode a failure is logged after the trace of its line.
-    def test_failure_traced(self) -> None:
-        self.debug_write(True)
+    # In debug mode the audit holds the line read and the `error`, no message.
+    def test_failure_recorded(self) -> None:
         replies = self.failure_read(_line_bytes("unknown_request"))
         message = _text_get("dispatch_handler_unknown")
         self.error_check(replies[0], "error_reply", message)
-        texts = [
-            _text_get("main_loop_line_dispatch_unknown"),
-            _text_get("main_loop_serve_failed_unknown"),
-        ]
-        expected = [(_SERVER_THREAD, text) for text in texts]
-        expected.append(_error_row(replies[0]))
-        self.assertEqual(_log_read(self.root), expected)
+        self.audit_check(
+            [
+                _line_entry("label_read", _line_sized("unknown_request")),
+                _line_entry("label_written", replies[0]),
+            ]
+        )
 
-    # A fault of the input with no line is logged the same way.
+    # Outside debug mode a fault of the input with no line is logged.
     def test_fault_logged(self) -> None:
+        self.debug_write(False)
         replies = self.failure_read(_BAD_LINE)
         message = _text_get("jslb_no_type")
         self.error_check(replies[0], self.error_name(), message)
-        text = _text_get("main_loop_serve_failed_type")
-        expected = [(_SERVER_THREAD, text), _error_row(replies[0])]
-        self.assertEqual(_log_read(self.root), expected)
+        self.log_check([_text_get("main_loop_serve_failed_type")])
 
-    # An `error` whose entry does not fit is traced as its header and sizes.
-    def test_failure_sized(self) -> None:
-        self.parameters_set(True, False)
-        self.stream_limit(_LINE_SMALL)
-        error = self.failure_read(_line_bytes("fault_request"))[-1]
-        size = len(_json_bytes(_payload_of(error)))
-        sized = _text_get("main_loop_line_error_sized")
-        text = sized.replace("{0}", str(size))
-        self.assertEqual(_log_read(self.root)[-1], (_SERVER_THREAD, text))
-
-    # A `verbose.put` is traced by its sizes, as its entries go to the rows.
-    def test_put_sized(self) -> None:
-        self.parameters_set(True, False)
-        self.assertEqual(self.served_read(_line_bytes("verbose_put")), [])
-        expected = [
-            (_SERVER_THREAD, _text_get("main_loop_line_dispatch_put_sized")),
-            (_PAGE_THREAD, _text_get("verbose_put_entry")),
-        ]
-        self.assertEqual(_log_read(self.root), expected)
+    # In debug mode the audit holds the `error` of a fault with no line.
+    def test_fault_recorded(self) -> None:
+        replies = self.failure_read(_BAD_LINE)
+        message = _text_get("jslb_no_type")
+        self.error_check(replies[0], self.error_name(), message)
+        self.audit_check([_line_entry("label_written", replies[0])])
 
     # An `error` line that answers no line is in full names in debug mode.
     def test_fault_names(self) -> None:
@@ -994,24 +1009,44 @@ class TestLoop(ScratchCase):
                 (error,) = self.failure_read(_BAD_LINE)
                 self.header_check(error, name)
 
-    # In debug mode the log traces each line and reply, at the shell's level 1.
-    def test_trace_logged(self) -> None:
-        self.parameters_set(True, False)
+    # In debug mode the audit holds each line read, then the reply written.
+    def test_lines_recorded(self) -> None:
         replies = self.served_read(_line_bytes("initialize"))
         self.assertEqual(len(replies), 1)
-        texts = [
-            _text_get("main_loop_line_dispatch_mcp"),
-            _text_get("main_loop_line_reply_mcp"),
-        ]
-        expected = [(_SERVER_THREAD, text) for text in texts]
-        self.assertEqual(_log_read(self.root), expected)
+        self.audit_check(
+            [
+                _line_entry("label_read", _line_sized("initialize")),
+                _line_entry("label_written", replies[0]),
+            ]
+        )
 
-    # Outside debug mode nothing is traced, whatever the shell's level.
-    def test_trace_quiet(self) -> None:
-        self.parameters_set(False, True)
+    # A line read with a blob is recorded with its blobs' count, not its bytes.
+    def test_blob_recorded(self) -> None:
+        value = bytes(range(256))
+        self.assertEqual(self.served_read(_line_bytes("put_value", value)), [])
+        entry = _line_entry("label_read", _line_sized("put_value", value))
+        self.audit_check([entry])
+
+    # The audit's own lines, a note and a tail with its reply, are no entries.
+    def test_own_unrecorded(self) -> None:
+        note = _gold_copy("lines.audit_note")
+        data = _line_bytes("audit_note") + _line_bytes("audit_tail")
+        (reply,) = self.served_read(data)
+        expected = _gold_copy("lines.audit_tail_reply")
+        expected["text"] = main_loop.audit.note_text(
+            note["thread"], note["at"], note["text"]
+        )
+        self.assertEqual(reply, expected)
+        label = _NOTE_PREFIX + note["thread"]
+        body = _text_get("note_indent") + note["text"]
+        self.audit_check([(label, body, "")])
+
+    # Outside debug mode nothing is recorded or logged as the loop serves.
+    def test_debug_quiet(self) -> None:
+        self.debug_write(False)
         replies = self.served_read(_line_bytes("initialize"))
         self.assertEqual(len(replies), 1)
-        self.assertEqual(_log_read(self.root), [])
+        self.log_check([])
 
     # A reply, to `tap.start` or to any other id, gets an `error` line, no id.
     def test_reply_unknown(self) -> None:
@@ -1060,10 +1095,9 @@ class TestLoop(ScratchCase):
         message = _text_get("main_loop_not_prepared")
         self.assertEqual(last, f"RuntimeError: {message}")
 
-    # The browser's `error` is logged and bailed out, then exit 1, no answer.
-    def test_browser_error(self) -> None:
-        self.debug_write(False)
-        error = _gold_copy("lines.browser_error")
+    # The browser's `error` is bailed out, then exit 1, no answer.
+    def browser_fail(self) -> dict[str, Any]:
+        error: dict[str, Any] = _gold_copy("lines.browser_error")
         data = _line_bytes("browser_error") + _line_bytes("initialize")
         ending, output = self.child_run(self.work, data)
         self.assertEqual(ending, _ENDING_FAILED)
@@ -1072,14 +1106,24 @@ class TestLoop(ScratchCase):
         bail = "Bail out! " + error["message"] + "\n"
         with open(path, "rb") as file:
             self.assertEqual(file.read(), bail.encode("utf-8"))
+        return error
+
+    # Outside debug mode the browser's `error` is logged with every cause.
+    def test_browser_error(self) -> None:
+        self.debug_write(False)
+        error = self.browser_fail()
         texts = [
             _text_get("engine_tap_browser_failed"),
             error["stack"],
             _text_get("engine_tap_browser_cause"),
             error["cause"]["stack"],
         ]
-        expected = [(_SERVER_THREAD, text) for text in texts]
-        self.assertEqual(_log_read(self.root), expected)
+        self.log_check(texts)
+
+    # In debug mode the browser's `error` is recorded as read, nothing logged.
+    def test_browser_recorded(self) -> None:
+        error = self.browser_fail()
+        self.audit_check([_line_entry("label_read", error)])
 
     # A `Failure` writes its reply, then the server's `error` line, no `r`.
     def test_failure_answered(self) -> None:
@@ -1091,12 +1135,10 @@ class TestLoop(ScratchCase):
         self.assertIs(answer["result"]["isError"], True)
         message = _text_get("engine_system_debug_off_tool")
         self.error_check(error, "error", message)
-        text = _text_get("main_loop_serve_failed_debug")
-        self.assertEqual(_log_read(self.root), [(_SERVER_THREAD, text)])
+        self.log_check([_text_get("main_loop_serve_failed_debug")])
 
     # In debug mode the server's `error` after a `Failure` is in full names.
     def test_failure_full(self) -> None:
-        self.debug_write(True)
         replies = self.failure_read(_line_bytes("call_name_invalid"))
         self.assertEqual(len(replies), 2)
         answer, error = replies
@@ -1104,11 +1146,18 @@ class TestLoop(ScratchCase):
         self.assertIs(answer["result"]["isError"], True)
         message = _text_get("engine_system_name_invalid")
         self.error_check(error, "error_full", message)
+        self.audit_check(
+            [
+                _line_entry("label_read", _line_sized("call_name_invalid")),
+                _line_entry("label_written", answer),
+                _line_entry("label_written", error),
+            ]
+        )
 
-    # A `Stream` writes its pushes in order, then its reply, nothing traced.
+    # A `Stream` writes its pushes in order, then its reply.
     def test_stream_written(self) -> None:
         self.debug_write(False)
-        self.stream_limit(self.values["line_max"])
+        self.streams_register()
         lines = self.served_read(_line_bytes("stream_request"))
         self.assertEqual(len(lines), 3)
         first, second, reply = lines
@@ -1117,71 +1166,36 @@ class TestLoop(ScratchCase):
         self.assertEqual(second["1"].pop("d"), b"second")
         self.assertEqual(second, _gold_copy("lines.stream_push_second"))
         self.assertEqual(reply, _gold_copy("lines.stream_reply"))
-        expected = [(_SERVER_THREAD, text) for text in _PUSH_TEXTS]
-        self.assertEqual(_log_read(self.root), expected)
+        self.log_check(_PUSH_TEXTS)
 
-    # In debug mode each line is traced in full as the loop reaches it.
-    def test_stream_traced(self) -> None:
-        self.parameters_set(True, False)
-        self.stream_limit(self.values["line_max"])
+    # In debug mode each push is recorded as the loop draws it, then the reply.
+    def test_stream_recorded(self) -> None:
+        self.streams_register()
         lines = self.served_read(_line_bytes("stream_request"))
         self.assertEqual(len(lines), 3)
         first, second = _PUSH_TEXTS
-        texts = [
-            _text_get("main_loop_line_dispatch_stream"),
-            first,
-            _text_get("main_loop_line_push_first"),
-            second,
-            _text_get("main_loop_line_push_second"),
-            _text_get("main_loop_line_reply_stream"),
-        ]
-        expected = [(_SERVER_THREAD, text) for text in texts]
-        self.assertEqual(_log_read(self.root), expected)
+        push_first, push_second, reply = lines
+        self.audit_check(
+            [
+                _line_entry("label_read", _line_sized("stream_request")),
+                _note_entry(first),
+                _line_entry("label_written", push_first),
+                _note_entry(second),
+                _line_entry("label_written", push_second),
+                _line_entry("label_written", reply),
+            ]
+        )
 
     # A fault between pushes answers the request with an `error`, no reply.
     def test_stream_fault(self) -> None:
         self.debug_write(False)
-        self.stream_limit(self.values["line_max"])
+        self.streams_register()
         lines = self.failure_read(_line_bytes("fault_request"))
         self.assertEqual(len(lines), 2)
         push, error = lines
         self.assertEqual(push, _gold_copy("lines.fault_push"))
         self.error_check(error, "error_reply", _text_get("stream_fault"))
-        text = _text_get("main_loop_serve_failed_stream")
-        self.assertEqual(_log_read(self.root), [(_SERVER_THREAD, text)])
-
-    # Each line past the limit is traced as its header and sizes.
-    def test_trace_sized(self) -> None:
-        self.parameters_set(True, False)
-        self.stream_limit(_LINE_SMALL)
-        lines = self.served_read(_line_bytes("stream_blob", b"bytes"))
-        self.assertEqual(len(lines), 3)
-        first, second = _PUSH_TEXTS
-        texts = [
-            _text_get("main_loop_line_dispatch_sized"),
-            first,
-            _text_get("main_loop_line_push_first_sized"),
-            second,
-            _text_get("main_loop_line_push_second_sized"),
-            _text_get("main_loop_line_reply_sized"),
-        ]
-        expected = [(_SERVER_THREAD, text) for text in texts]
-        self.assertEqual(_log_read(self.root), expected)
-
-    # An entry whose `verbose.put` stays below `line_max` is rendered.
-    def test_entry_fits(self) -> None:
-        text = _text_get("main_loop_line_dispatch_stream")
-        self.stream_limit(_put_bytes(text) + 1)
-        self.served_read(_line_bytes("stream_request"))
-        self.assertEqual(_log_read(self.root)[0], (_SERVER_THREAD, text))
-
-    # An entry whose `verbose.put` reaches `line_max` is logged by its sizes.
-    def test_entry_over(self) -> None:
-        text = _text_get("main_loop_line_dispatch_stream")
-        self.stream_limit(_put_bytes(text))
-        self.served_read(_line_bytes("stream_request"))
-        sized = _text_get("main_loop_line_dispatch_stream_sized")
-        self.assertEqual(_log_read(self.root)[0], (_SERVER_THREAD, sized))
+        self.log_check([_text_get("main_loop_serve_failed_stream")])
 
     # `db.sync` restores each database in name order, then names them.
     def test_sync_served(self) -> None:

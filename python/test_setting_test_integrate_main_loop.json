@@ -6,6 +6,14 @@
     "ref": "/metaverse/image/hyperposition"
   },
   "lines": {
+    "audit_note": {
+      "0": {
+        "t": "audit.note"
+      },
+      "at": 1762500000000,
+      "text": "noted",
+      "thread": "ai"
+    },
     "create_castle": {
       "0": {
         "t": "db.create"
@@ -177,43 +185,31 @@
         "metaverse"
       ]
     },
-    "tail_server": {
-      "0": {
-        "i": 1,
-        "t": "verbose.tail"
-      },
-      "count": 10,
-      "thread": "server"
-    },
-    "tail_server_reply": {
-      "0": {
-        "r": 1,
-        "t": "verbose.tail"
-      }
-    },
-    "tail_ui": {
+    "tail_all": {
       "0": {
         "i": 2,
-        "t": "verbose.tail"
+        "t": "audit.tail"
       },
-      "count": 10,
-      "thread": "ui"
+      "count": 10
     },
-    "tail_ui_reply": {
+    "tail_all_reply": {
       "0": {
         "r": 2,
-        "t": "verbose.tail"
+        "t": "audit.tail"
+      }
+    },
+    "tail_one": {
+      "0": {
+        "i": 1,
+        "t": "audit.tail"
       },
-      "lines": [
-        {
-          "at": 1,
-          "text": "first"
-        },
-        {
-          "at": 2,
-          "text": "second"
-        }
-      ]
+      "count": 1
+    },
+    "tail_one_reply": {
+      "0": {
+        "r": 1,
+        "t": "audit.tail"
+      }
     },
     "tap_line": {
       "0": {
@@ -249,36 +245,16 @@
       },
       "role": "user",
       "scene": "/castle/note/1"
-    },
-    "verbose_put": {
-      "0": {
-        "t": "verbose.put"
-      },
-      "lines": [
-        {
-          "at": 1,
-          "text": "first"
-        },
-        {
-          "at": 2,
-          "text": "second"
-        }
-      ],
-      "thread": "ui"
     }
   },
   "overflow_bytes": 4096,
   "read_bytes": 65536,
   "ring": 999,
   "texts": {
+    "blobs_omitted": "[blobs omitted: {0}]",
     "engine_system_debug_off_line": "source.put needs debug mode, and the parameter debug is false.",
-    "main_loop_line_dispatch_big": "server dispatches from ai: {\"0\":{\"b\":1,\"k\":\"/castle/big\",\"t\":\"kv.put\"},\"1\":{\"s\":SIZE,\"sha256\":\"DIGEST\"}}<blob \"n\"=1>",
-    "main_loop_line_dispatch_create": "server dispatches from ai: {\"0\":{\"t\":\"db.create\"},\"db\":\"castle\"}",
-    "main_loop_line_dispatch_put": "server dispatches from ai: {\"0\":{\"b\":1,\"k\":\"/castle/kept\",\"t\":\"kv.put\"},\"1\":{\"s\":10}}<blob \"n\"=1>",
-    "main_loop_line_dispatch_sync": "server dispatches from ai: {\"0\":{\"i\":1,\"t\":\"db.sync\"}}",
-    "main_loop_line_dispatch_tail": "server dispatches from ai: {\"0\":{\"i\":1,\"t\":\"verbose.tail\"},\"count\":10,\"thread\":\"server\"}",
-    "main_loop_line_push_file": "server pushes to ai: {\"0\":{\"type\":\"db.file\",\"blobs\":1},\"1\":{\"size\":SIZE},\"db\":\"NAME\"}<blob \"n\"=1>",
-    "main_loop_line_push_restore": "server pushes to ai: {\"0\":{\"type\":\"db.restore\",\"blobs\":1},\"1\":{\"size\":SIZE},\"db\":\"NAME\",\"files\":COUNT}<blob \"n\"=1>",
-    "main_loop_line_reply_sync": "server replies to ai: {\"0\":{\"t\":\"db.sync\",\"r\":1},\"databases\":[\"_files\",\"_preferences\",\"_settings\",\"castle\",\"metaverse\"]}"
+    "label_read": "ai to server",
+    "label_written": "server to ai",
+    "note_prefix": "note of "
   }
 }

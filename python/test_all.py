@@ -59,26 +59,27 @@ _MODULES: list[tuple[str, str]] = [
     ("test_reformat_formatters", "test-all"),
     ("test_test", "smoke-test"),
     ("test_jslb", "smoke-test"),
+    ("test_audit", "smoke-test"),
     ("test_switches", "smoke-test"),
     ("test_third_party_fetch", "smoke-test"),
     ("test_devtools", "smoke-test"),
     ("test_local_http", "smoke-test"),
     ("test_stall_loop", "smoke-test"),
+    ("test_vectors_make", "smoke-test"),
     ("test_substrate", "smoke-test"),
     ("test_substrate_limit", "smoke-test"),
     ("test_verbose", "smoke-test"),
     ("test_devtools_chrome", "smoke-test"),
     ("test_dispatch", "smoke-test"),
     ("test_settings", "smoke-test"),
-    ("test_vectors_make", "smoke-test"),
     ("test_xsjs_log", "smoke-test"),
+    ("test_engine_audit", "smoke-test"),
     ("test_engine_db", "smoke-test"),
     ("test_engine_doc", "smoke-test"),
     ("test_engine_kv", "smoke-test"),
     ("test_engine_sql", "smoke-test"),
     ("test_engine_tap", "smoke-test"),
     ("test_engine_turn", "smoke-test"),
-    ("test_engine_verbose", "smoke-test"),
     ("test_jslb_vectors", "smoke-test"),
     ("test_mcp", "smoke-test"),
     ("test_page_build", "smoke-test"),
@@ -109,7 +110,6 @@ _MODULES: list[tuple[str, str]] = [
     ("test_integrate_engine_sql", "smoke-test"),
     ("test_integrate_engine_tap", "smoke-test"),
     ("test_integrate_engine_turn", "smoke-test"),
-    ("test_integrate_engine_verbose", "smoke-test"),
     ("test_integrate_mcp", "smoke-test"),
     ("test_integrate_page_build", "smoke-test"),
     ("test_integrate_tap_loop", "smoke-test"),
@@ -143,7 +143,6 @@ _A_UNIT: list[tuple[str, str]] = [
     ("test_provider_key.ts", "smoke-test"),
     ("test_provider_key_unset.ts", "smoke-test"),
     ("test_provider_script.ts", "smoke-test"),
-    ("test_verbose.ts", "smoke-test"),
     ("test_wire.ts", "smoke-test"),
     ("test_queue.ts", "smoke-test"),
     ("test_substrate.ts", "smoke-test"),
@@ -312,8 +311,9 @@ _BINDING_NAME = "realm_line"
 # The page whose load ends a realm, its page and its worker.
 _BLANK_URL = "about:blank"
 
-# The push that carries a worker block's verbose entries.
-_VERBOSE_TYPE = "verbose.put"
+# The pushes that carry a worker block's records and notes of the audit.
+_RECORD_TYPE = "audit.line"
+_NOTE_TYPE = "audit.note"
 
 # The push a worker block sends toward the UI thread, which none takes there.
 _NOTICE_TYPE = "settings.set"
@@ -718,7 +718,26 @@ class PageLane:
                 self.line_take(line)
         self.calls += 1
 
-    # Logs a verbose entry, relays a TAP line, and refuses any other line.
+    # Writes a record or a note of the audit into the log, laid out.
+    def audit_write(self, line: jslb.Object) -> None:
+        import audit, jslb
+
+        payload = jslb.payload_of(line)
+        if jslb.field_get(line[0], "type") == _RECORD_TYPE:
+            data: bytes = jslb.field_get(line[1], "data")
+            text = audit.record_text(
+                payload["sender"],
+                payload["receiver"],
+                payload["at"],
+                data.decode("utf-8"),
+            )
+        else:
+            text = audit.note_text(
+                payload["thread"], payload["at"], payload["text"]
+            )
+        self._log.write(text.encode("utf-8"))
+
+    # Logs the audit, relays a TAP line, refuses the rest.
     def line_take(self, line: jslb.Object) -> None:
         import jslb, tap_consumer
 
@@ -726,10 +745,8 @@ class PageLane:
         # The notice of the settings is the UI thread's, which no block runs.
         if kind == _NOTICE_TYPE:
             return
-        if kind == _VERBOSE_TYPE:
-            payload = jslb.payload_of(line)
-            for entry in payload["lines"]:
-                self.log_write(payload["thread"], entry["text"])
+        if kind in (_RECORD_TYPE, _NOTE_TYPE):
+            self.audit_write(line)
         elif not self._replied:
             reply_check(line)
             self._replied = True

@@ -2,16 +2,19 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests the log program on logs that the server's own functions write, in a
-# scratch root in `build/`: each log reads back as stored and in order, whether
-# the server holds it open or has ended; the filters of both readings; the
-# printed form of an entry; a follow that reads what the file holds, then each
-# line as it is written, by this process and by another that waits first; the
-# refused arguments; a follow that SIGINT ends in a forked child; and the
-# program run as a script. The lines, the cases and the texts are the gold's.
+# Tests the log program on logs that the server's own `verbose` writes
+# outside debug mode, in a scratch root in `build/`, beside rows of the page
+# threads `ui` and `ai`, which no server function writes any more, put by the
+# test's own SQL into the same table: each log reads back as stored and in
+# order, whether the server holds it open or has ended; the filters of both
+# readings; the printed form of an entry; a follow that reads what the file
+# holds, then each line as it is written, by this process and by another that
+# waits first; the refused arguments; a follow that SIGINT ends in a forked
+# child; and the program run as a script. The lines, the cases and the texts
+# are the gold's.
 
-import contextlib, harness, io, itertools, os, runpy, signal, sys, tempfile
-import time, traceback, unittest, verbose, xsjs_log
+import contextlib, harness, io, itertools, os, runpy, signal, sqlite3
+import switches, sys, tempfile, time, traceback, unittest, verbose, xsjs_log
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -33,9 +36,14 @@ _FILE_NAME = "_verbose.sqlite"
 # The thread that a line from the server itself is stored under.
 _SERVER_THREAD = "server"
 
-# The ring and the largest file of the log, as the checkout sets them.
-_RING: int = harness.setting_get("verbose_ring")
+# The largest file of the log, as the checkout sets it.
 _BLOB_MAX: int = harness.setting_get("blob_max")
+
+# The statement that stores a row of a page thread in the log's table.
+_PAGE_INSERT = "INSERT INTO line (at, thread, text) VALUES (?, ?, ?)"
+
+# The statement that reads the times of the server's rows, in order.
+_SERVER_SELECT = "SELECT at FROM line WHERE thread = 'server' ORDER BY seq"
 
 # The exit code of a follow that SIGINT ended.
 _INTERRUPTED_CODE: int = harness.gold_get(f"{_GOLD_ID}.interrupted_code")
@@ -55,22 +63,36 @@ def _gold_value(name: str) -> Any:
     return harness.gold_get(f"{_GOLD_ID}.{name}")
 
 
-# Writes the gold's log to the open log and returns its entries, in order.
-def _log_write() -> list[xsjs_log.LogEntry]:
+# Writes rows of a page thread to the root's log by a connection of its own.
+def _page_put(root: str, thread: str, lines: list[tuple[int, str]]) -> None:
+    path = os.path.join(root, _FILE_NAME)
+    rows = [(at, thread, text) for at, text in lines]
+    with contextlib.closing(sqlite3.connect(path)) as connection:
+        with connection:
+            connection.executemany(_PAGE_INSERT, rows)
+
+
+# The time of each row of the server in the root's log, in order.
+def _server_times(root: str) -> list[int]:
+    path = os.path.join(root, _FILE_NAME)
+    with contextlib.closing(sqlite3.connect(path)) as connection:
+        rows: list[tuple[int]] = connection.execute(_SERVER_SELECT).fetchall()
+    return [at for (at,) in rows]
+
+
+# Writes the gold's log to the root's open log, returns its entries in order.
+def _log_write(root: str) -> list[xsjs_log.LogEntry]:
     rows: list[tuple[int, str, str]] = []
     for write in _gold_value("log.page_writes"):
         thread: str = write["thread"]
-        lines = [
-            verbose.LogLine(line["at"], line["text"])
-            for line in write["lines"]
-        ]
-        verbose.lines_put(thread, lines)
-        rows.extend((line.at, thread, line.text) for line in lines)
+        lines = [(line["at"], line["text"]) for line in write["lines"]]
+        _page_put(root, thread, lines)
+        rows.extend((at, thread, text) for at, text in lines)
     texts: list[str] = _gold_value("log.server_texts")
     for text in texts:
         verbose.log(text)
-    server = verbose.history_get(len(texts))
-    rows.extend((line.at, _SERVER_THREAD, line.text) for line in server)
+    times = _server_times(root)[-len(texts) :]
+    rows.extend((at, _SERVER_THREAD, text) for at, text in zip(times, texts))
     return [xsjs_log.LogEntry(seq, *row) for seq, row in enumerate(rows, 1)]
 
 
@@ -96,7 +118,7 @@ def _run_printed(arguments: list[str]) -> tuple[int, list[str]]:
 def _later_write(root: str) -> None:
     try:
         time.sleep(_WRITE_SECONDS)
-        verbose.log_open(root, _RING, _BLOB_MAX)
+        verbose.log_open(root, _BLOB_MAX)
         verbose.log(_LATER_TEXT)
     except BaseException:
         # The parent's follow waits on, so the failure goes to stderr.
@@ -151,23 +173,26 @@ def _follow_interrupted(root: str, count: int) -> tuple[list[str], int]:
 
 # Gives each test an empty root in a scratch directory of `build/`.
 class RootCase(unittest.TestCase):
-    # Makes the root, which goes when the test ends.
+    # Makes the root, which goes when the test ends, outside debug mode.
     def setUp(self) -> None:
         os.makedirs(_BUILD_PATH, exist_ok=True)
         self.root = self.enterContext(
             tempfile.TemporaryDirectory(dir=_BUILD_PATH)
         )
+        saved = switches.switches_get()
+        self.addCleanup(switches.switches_apply, saved)
+        switches.switches_apply({**saved, "debug": False})
 
     # Opens the root's log until the test ends, as a running server holds it.
     def log_ready(self) -> None:
-        verbose.log_open(self.root, _RING, _BLOB_MAX)
+        verbose.log_open(self.root, _BLOB_MAX)
         self.addCleanup(verbose.log_close)
 
     # Writes the gold's log and closes it, as a server that ended leaves it.
     def log_ended(self) -> list[xsjs_log.LogEntry]:
-        verbose.log_open(self.root, _RING, _BLOB_MAX)
+        verbose.log_open(self.root, _BLOB_MAX)
         try:
-            return _log_write()
+            return _log_write(self.root)
         finally:
             verbose.log_close()
 
@@ -182,7 +207,7 @@ class TestRead(RootCase):
     # A log the server holds open reads the same, each line once it is written.
     def test_log_open(self) -> None:
         self.log_ready()
-        entries = _log_write()
+        entries = _log_write(self.root)
         self.assertEqual(xsjs_log.lines_read(self.root), entries)
         verbose.log(_LATER_TEXT)
         last = xsjs_log.lines_read(self.root)[-1]
@@ -258,33 +283,31 @@ class TestFollow(RootCase):
     # The lines held come first, then each line as it is written.
     def test_lines_followed(self) -> None:
         self.log_ready()
-        entries = _log_write()
+        entries = _log_write(self.root)
         followed = xsjs_log.lines_follow(self.root)
         held = list(itertools.islice(followed, len(entries)))
         self.assertEqual(held, entries)
         verbose.log(_LATER_TEXT)
-        (line,) = verbose.history_get(1)
+        at = _server_times(self.root)[-1]
         seq = len(entries) + 1
-        expected = xsjs_log.LogEntry(seq, line.at, _SERVER_THREAD, line.text)
+        expected = xsjs_log.LogEntry(seq, at, _SERVER_THREAD, _LATER_TEXT)
         self.assertEqual(next(followed), expected)
-        page = verbose.LogLine(60, "page line")
-        verbose.lines_put("ui", [page])
-        expected = xsjs_log.LogEntry(seq + 1, page.at, "ui", page.text)
+        _page_put(self.root, "ui", [(60, "page line")])
+        expected = xsjs_log.LogEntry(seq + 1, 60, "ui", "page line")
         self.assertEqual(next(followed), expected)
 
     # A line written later that fails a filter is passed over.
     def test_later_filtered(self) -> None:
         self.log_ready()
-        entries = _log_write()
+        entries = _log_write(self.root)
         passing = [entry for entry in entries if entry.thread == "ai"]
         followed = xsjs_log.lines_follow(self.root, thread="ai")
         held = list(itertools.islice(followed, len(passing)))
         self.assertEqual(held, passing)
         verbose.log(_LATER_TEXT)
-        page = verbose.LogLine(70, "page line")
-        verbose.lines_put("ai", [page])
+        _page_put(self.root, "ai", [(70, "page line")])
         seq = len(entries) + 2
-        expected = xsjs_log.LogEntry(seq, page.at, "ai", page.text)
+        expected = xsjs_log.LogEntry(seq, 70, "ai", "page line")
         self.assertEqual(next(followed), expected)
 
     # A line another process writes while the follow waits is read as it comes.

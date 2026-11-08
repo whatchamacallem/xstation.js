@@ -38,7 +38,7 @@ namespace test_headless {
     error_type: "error",
     fault_type: "fault",
     notice_type: "settings.set",
-    verbose_type: "verbose.put",
+    audit_prefix: "audit.",
     // The notices of a block of `workers`: a case's start, a worker's ready.
     start_type: "test_headless.worker_start",
     ready_type: "test_headless.worker_ready",
@@ -455,10 +455,10 @@ namespace test_headless {
       (this.#ended as () => void)();
     }
 
-    // A line of the server lane, to the test's end but a `verbose.put`.
+    // A line of the server lane, to the test's end but the record's lines.
     #lane_take(line: lines.Line): void {
       const type = type_of(line);
-      if (type === constants.verbose_type) {
+      if (String(type).startsWith(constants.audit_prefix)) {
         line_write(line);
         return;
       }

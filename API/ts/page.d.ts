@@ -5,13 +5,9 @@
 // itself, in every mode and outside any task, so it may notify but not submit.
 // The box takes the focus each time it opens: at the first render and at each
 // turn's end, as a disabled box loses the focus. An open box takes it too when
-// ctrl 0 hides the console.
-//
-// `console.show`, a request of the AI worker, shows the console view as ctrl 0
-// does. An idle view asks for tty 0 and answers once it opens; any other view
-// answers at once, as tty 0's writer holds the AI's lines until dash's prompt.
-// `console.busy` and `console.idle`, pushes of the AI worker around its
-// command, hold and free the view's keys.
+// ctrl 0 hides the console. In debug mode the person's text `0` first
+// notifies `db.dump` to the worker, then submits its turn, and ctrl 1 shows
+// the end of the audit, asked of the server by `audit.tail` at each show.
 //
 // A worker's `fault` line shows the fault screen, its stack followed by each
 // cause's message and stack, then the page terminates the worker, which has
@@ -48,8 +44,8 @@ declare namespace page {
 
   // The overlays as the handlers drive them.
   interface OverlayControl {
-    line_add(tty: number, text: string): void;
-    overlay_toggle(tty: number): void;
+    text_show(tty: number, text: string): void;
+    overlay_toggle(tty: number): boolean;
   }
 
   // What the UI handlers work with: the queue, the elements and the parts.

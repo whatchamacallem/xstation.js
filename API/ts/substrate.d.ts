@@ -136,6 +136,39 @@ declare namespace substrate {
     files: string[];
   }
 
+  // A row of a view: its key and size, and its text unless it has none.
+  interface ViewRow {
+    key: string;
+    size: number;
+    kind: "text" | "binary" | "lost";
+    text?: string;
+  }
+
+  // The current version of a document: its ref and its encoded body.
+  interface ViewDocument {
+    ref: lines.DocRef;
+    body: lines.Document;
+  }
+
+  // A table of the scripts: its columns and its rows in order.
+  interface ViewTable {
+    name: string;
+    columns: string[];
+    rows: unknown[][];
+  }
+
+  // A database as the AI's tools show it, its history counted.
+  interface DbView {
+    db: string;
+    rows: ViewRow[];
+    documents: ViewDocument[];
+    tables: ViewTable[];
+    schema: string[];
+    versions_hidden: number;
+    turns_hidden: number;
+    scenes_hidden: number;
+  }
+
   // What the store gives each committed operation to: the thread's queue.
   interface Notifier {
     line_notify(line: lines.Line, owner?: queue.ThreadName): void;
@@ -215,6 +248,8 @@ declare namespace substrate {
       data: Uint8Array | string,
       files: (Uint8Array | string)[],
     ): void;
+    // The view of one database, from its rows, heads, tables and cache.
+    db_view(db: string): DbView;
     transaction_run<T>(fn: () => T): T;
     // The streaming sink of the decoder: the cache this store was given.
     sink(): jslb.BlobSink;

@@ -11,12 +11,13 @@
 # <root>/tap/typescript.tap, and this file reads it as it grows.
 #
 # Around the streams it makes the checks only this process can make: ttyd's
-# resident size and its end when killed, the stock server's database files, log
-# and exit, and the restart server's pid kept by the exec. The restart rung is
-# held until this file, having read the point before it, releases it on a
-# BroadcastChannel of the page's origin. After each server's end it waits until
-# the server is reaped, its /proc entry gone. Each root and rung is labelled
-# smoke-test or test-all, and a mislabel fails the run.
+# resident size and its end when killed, the stock server's database files,
+# audit and exit, and the restart server's pid kept by the exec. The restart
+# rung is held until this file, having read the point before it, releases it
+# on a BroadcastChannel of the page's origin. After each server's end it waits
+# until the server is reaped, its /proc entry gone. Each root and rung is
+# labelled smoke-test or test-all, and a mislabel fails the run. The servers'
+# ends are read in each root's audit, as the roots run in debug mode.
 
 import argparse, contextlib, hashlib, json, os, pathlib, re, select, shutil
 import signal, sqlite3, subprocess, sys, tempfile, time, types
@@ -94,7 +95,7 @@ _STOCK_RUNGS = (
     ("mcp", _SMOKE_TEST),
     ("sync", _SMOKE_TEST),
     ("commits", _SMOKE_TEST),
-    ("verbose", _SMOKE_TEST),
+    ("audit", _SMOKE_TEST),
     ("console", _SMOKE_TEST),
     ("lines", _SMOKE_TEST),
     ("unknown", _SMOKE_TEST),
@@ -115,9 +116,9 @@ _BUFFER_OPTION = "--srv-buf-size"
 # The file under a root that the server appends the TypeScript stream to.
 _TAP_PATH = os.path.join("tap", "typescript.tap")
 
-# The server's log under a root, and the query of its texts in order.
-_LOG_NAME = "_verbose.sqlite"
-_LOG_QUERY = "SELECT text FROM line ORDER BY seq"
+# The labels of the audit's entries of a line the server read and wrote.
+_READ_LABEL = "ai to server"
+_WRITTEN_LABEL = "server to ai"
 
 # ttyd's first log line, with its version and that of libwebsockets.
 _VERSION_PATTERN = re.compile(r" N: (ttyd \S+ \(libwebsockets \S+\))$")
@@ -661,31 +662,27 @@ def database_open(root: str, name: str) -> sqlite3.Connection:
     return sqlite3.connect(f"{uri}?mode=ro", uri=True)
 
 
-# Returns the texts of the server's log, in order.
-def log_texts(root: str) -> list[str]:
-    with contextlib.closing(database_open(root, _LOG_NAME)) as connection:
-        rows: list[tuple[str]] = connection.execute(_LOG_QUERY).fetchall()
-    return [row[0] for row in rows]
+# Returns the lines of the root's audit under the label, in order.
+def audit_lines(root: str, label: str) -> list[dict[str, Any]]:
+    import audit
+
+    found: list[dict[str, Any]] = []
+    for entry in audit.entries_read(root):
+        if entry.label == label:
+            # The body is the line's JSON, then the count of its blobs if any.
+            line, _ = json.JSONDecoder().raw_decode(entry.body)
+            found.append(line)
+    return found
 
 
-# Returns the log text that holds every one of the parts, failing if none.
-def log_find(root: str, parts: list[str], what: str) -> str:
-    for text in log_texts(root):
-        if all(part in text for part in parts):
-            return text
-    raise CheckFailed(f"{what}: no line of the server's log holds {parts}")
-
-
-# Returns the line the server's log names in the text, which holds no blob.
-def line_named(root: str, unexpected: str, what: str) -> dict[str, Any]:
-    refused = unexpected.replace("{0}", "")
-    text = log_find(root, [refused], what)
-    rendered = text[text.index(refused) + len(refused) :]
-    line, end = json.JSONDecoder().raw_decode(rendered)
-    if end != len(rendered):
-        raise CheckFailed(f"{what}: the line {rendered!r} holds blobs")
-    named: dict[str, Any] = line
-    return named
+# Returns the message of the first `error` line of the label starting so.
+def error_find(root: str, label: str, start: str, what: str) -> str:
+    for line in audit_lines(root, label):
+        message = str(line.get("message"))
+        kind = line["0"].get("type")
+        if kind == _REFUSAL_TYPE and message.startswith(start):
+            return message
+    raise CheckFailed(f"{what}: no {label} error starts {start!r}")
 
 
 # Returns the page's fault screen once written, waiting under the rung's timer.
@@ -923,10 +920,11 @@ def root_stock(
         exit_check(ttyd, pid, "ttyd's log of the server's end")
         reaped = reaped_wait(ttyd, pid)
         message: str = gold_value("texts.dispatch_handler_unknown")
-        log_find(root, [message], "the server's log of the unknown push")
+        what = "the audit's error line of the unknown push"
+        error_find(root, _WRITTEN_LABEL, message, what)
         applied = commits_check(root)
         log.step_print(
-            f"pid {pid} logged {message!r} and exited with code"
+            f"pid {pid} wrote {message!r} and exited with code"
             f" {_PROGRAM_FAILED} as ttyd logged, reaped {reaped:.3f} s after"
             f" the log; {applied}"
         )
@@ -949,21 +947,20 @@ def root_restart(
         reaped = reaped_wait(ttyd, pid)
         unexpected: str = gold_value("texts.bootstrap_reply_unexpected")
         twice: str = gold_value("texts.wire_start_twice")
-        what = "the server's log of the reply to its second first line"
-        line = line_named(root, unexpected, what)
-        kind = line["0"]["type"]
-        if kind != _REFUSAL_TYPE or line["message"] != twice:
-            raise CheckFailed(
-                f"{what}: it names {line}, not the page's refusal"
-            )
+        what = "the audit's reply to the second first line"
+        refusal = error_find(root, _READ_LABEL, twice, what)
+        if refusal != twice:
+            raise CheckFailed(f"{what}: it says {refusal!r}, not {twice!r}")
+        refused = unexpected.replace("{0}", "")
+        error_find(root, _WRITTEN_LABEL, refused, "the audit's error line")
         fault = fault_wait(browser, ttyd, "the page's fault screen")
         if fault.split("\n", 1)[0] != twice:
             raise CheckFailed(
                 f"the page's fault screen shows {fault!r}, not {twice!r}"
             )
         log.step_print(
-            f"the server execed in place as pid {pid}, then logged"
-            f" {unexpected.replace('{0}', '')!r} naming the page's refusal and"
+            f"the server execed in place as pid {pid}, then recorded the"
+            f" page's refusal and wrote {refused!r} and"
             f" exited with code {_PROGRAM_FAILED} as ttyd logged, reaped"
             f" {reaped:.3f} s after the log; the page's fault screen shows"
             f" {twice!r}"

@@ -2,13 +2,13 @@
   "cases": [
     {
       "expect": [
+        "first_store",
+        "first_render",
         "wire_initialize",
         "wire_initialize_reply",
         "wire_initialized",
         "wire_list",
         "wire_list_reply",
-        "first_store",
-        "first_render",
         "first_painted"
       ],
       "name": "first_render",
@@ -17,8 +17,8 @@
     },
     {
       "expect": [
-        "wire_user_1",
         "render_1",
+        "wire_user_1",
         "wire_asked_1",
         "wire_result_1",
         "wire_answer_1",
@@ -30,15 +30,15 @@
     },
     {
       "expect": [
-        "wire_user_3",
         "permit_ask",
         "console_show",
         "console_busy",
         "dash_reached",
         "console_idle",
+        "render_output",
+        "wire_user_3",
         "wire_asked_3",
         "wire_result_3",
-        "render_output",
         "wire_asked_output",
         "wire_result_output",
         "wire_answer_3",
@@ -74,8 +74,8 @@
     },
     {
       "expect": [
-        "wire_user_3",
         "permit_denied",
+        "wire_user_3",
         "wire_asked_3",
         "wire_denied",
         "wire_lacks",
@@ -87,8 +87,8 @@
     },
     {
       "expect": [
-        "wire_user_1",
         "render_again",
+        "wire_user_1",
         "wire_asked_1",
         "wire_result_1",
         "wire_answer_1",
@@ -97,6 +97,19 @@
       "name": "choice_1_again",
       "seconds": 5,
       "send": ["say_again"]
+    },
+    {
+      "expect": [
+        "wire_dump",
+        "wire_dump_browser",
+        "wire_dump_server",
+        "wire_user_0",
+        "wire_answer_0",
+        "say_0_reply"
+      ],
+      "name": "dumped",
+      "seconds": 5,
+      "send": ["dump", "say_0"]
     }
   ],
   "columns": 120,
@@ -130,13 +143,18 @@
     },
     "console_show": {
       "0": {
-        "id": 15,
+        "id": 17,
         "type": "console.show"
       }
     },
     "dash_reached": {
       "0": {
         "type": "test_integrate_engine.dash_reached"
+      }
+    },
+    "dump": {
+      "0": {
+        "type": "db.dump"
       }
     },
     "first_painted": {
@@ -171,7 +189,7 @@
     },
     "permit_ask": {
       "0": {
-        "id": 14,
+        "id": 16,
         "type": "permit.ask"
       },
       "input": {
@@ -183,7 +201,7 @@
     },
     "permit_denied": {
       "0": {
-        "id": 28,
+        "id": 35,
         "type": "permit.ask"
       },
       "input": {
@@ -195,7 +213,7 @@
     },
     "render_1": {
       "0": {
-        "id": 10,
+        "id": 11,
         "type": "render"
       },
       "scene": "/metaverse/hyperposition/1",
@@ -203,7 +221,7 @@
     },
     "render_again": {
       "0": {
-        "id": 32,
+        "id": 40,
         "type": "render"
       },
       "scene": "/metaverse/hyperposition/1",
@@ -211,11 +229,27 @@
     },
     "render_output": {
       "0": {
-        "id": 20,
+        "id": 22,
         "type": "render"
       },
       "scene": "/metaverse/hyperposition/1",
       "subtitle": "hyperposition"
+    },
+    "say_0": {
+      "0": {
+        "id": 1009,
+        "type": "ai.say"
+      },
+      "text": "0"
+    },
+    "say_0_reply": {
+      "0": {
+        "reply": 1009,
+        "type": "ai.say"
+      },
+      "scene": "/metaverse/hyperposition/1",
+      "subtitle": "Nothing at all, then. How restful. Do take your time.",
+      "turn": 28
     },
     "say_1": {
       "0": {
@@ -329,6 +363,11 @@
       "subtitle": "That is not one of the choices. 1, 2, 3 or 0, when you are quite ready.",
       "turn": 14
     },
+    "wire_answer_0": {
+      "0": {
+        "type": "test_integrate_engine.wire_answer_0"
+      }
+    },
     "wire_answer_1": {
       "0": {
         "type": "test_integrate_engine.wire_answer_1"
@@ -357,6 +396,21 @@
     "wire_denied": {
       "0": {
         "type": "test_integrate_engine.wire_denied"
+      }
+    },
+    "wire_dump": {
+      "0": {
+        "type": "test_integrate_engine.wire_dump"
+      }
+    },
+    "wire_dump_browser": {
+      "0": {
+        "type": "test_integrate_engine.wire_dump_browser"
+      }
+    },
+    "wire_dump_server": {
+      "0": {
+        "type": "test_integrate_engine.wire_dump_server"
       }
     },
     "wire_initialize": {
@@ -409,6 +463,11 @@
         "type": "test_integrate_engine.wire_result_output"
       }
     },
+    "wire_user_0": {
+      "0": {
+        "type": "test_integrate_engine.wire_user_0"
+      }
+    },
     "wire_user_1": {
       "0": {
         "type": "test_integrate_engine.wire_user_1"
@@ -428,111 +487,155 @@
   "wire": [
     {
       "line": "wire_initialize",
-      "parts": ["> {\"0\":{\"type\":\"mcp\"", "\"method\":\"initialize\""]
+      "label": "ai to server",
+      "parts": ["\"type\": \"mcp\"", "\"method\": \"initialize\""]
     },
     {
       "line": "wire_initialize_reply",
-      "parts": ["< {\"0\":", "\"serverInfo\""]
+      "label": "server to ai",
+      "parts": ["\"type\": \"mcp\"", "\"serverInfo\""]
     },
     {
       "line": "wire_initialized",
+      "label": "ai to server",
       "parts": [
-        "> {\"0\":{\"type\":\"mcp\"",
-        "\"method\":\"notifications/initialized\""
+        "\"type\": \"mcp\"",
+        "\"method\": \"notifications/initialized\""
       ]
     },
     {
       "line": "wire_list",
-      "parts": ["> {\"0\":{\"type\":\"mcp\"", "\"method\":\"tools/list\""]
+      "label": "ai to server",
+      "parts": ["\"type\": \"mcp\"", "\"method\": \"tools/list\""]
     },
     {
       "line": "wire_list_reply",
-      "parts": ["< {\"0\":", "\"name\":\"source_put\""]
+      "label": "server to ai",
+      "parts": ["\"type\": \"mcp\"", "\"name\": \"source_put\""]
     },
     {
       "line": "wire_user_1",
+      "label": "ai to server",
       "parts": [
-        "> {\"0\":{\"type\":\"turn.append\"}",
-        "\"role\":\"user\"",
-        "\"content\":\"1\""
+        "\"type\": \"turn.append\"",
+        "\"role\": \"user\"",
+        "\"content\": \"1\""
       ]
     },
     {
       "line": "wire_asked_1",
-      "parts": ["> {\"0\":{\"type\":\"turn.append\"}", "\"id\":\"call_1\""]
+      "label": "ai to server",
+      "parts": ["\"type\": \"turn.append\"", "\"id\": \"call_1\""]
     },
     {
       "line": "wire_result_1",
-      "parts": [
-        "> {\"0\":{\"type\":\"turn.append\"}",
-        "\"tool_call_id\":\"call_1\""
-      ]
+      "label": "ai to server",
+      "parts": ["\"type\": \"turn.append\"", "\"tool_call_id\": \"call_1\""]
     },
     {
       "line": "wire_answer_1",
+      "label": "ai to server",
       "parts": [
-        "> {\"0\":{\"type\":\"turn.append\"}",
-        "\"content\":\"There. Words on a black page. I trained for years for this.\""
+        "\"type\": \"turn.append\"",
+        "\"content\": \"There. Words on a black page. I trained for years for this.\""
       ]
     },
     {
       "line": "wire_user_3",
+      "label": "ai to server",
       "parts": [
-        "> {\"0\":{\"type\":\"turn.append\"}",
-        "\"role\":\"user\"",
-        "\"content\":\"3\""
+        "\"type\": \"turn.append\"",
+        "\"role\": \"user\"",
+        "\"content\": \"3\""
       ]
     },
     {
       "line": "wire_asked_3",
-      "parts": ["> {\"0\":{\"type\":\"turn.append\"}", "\"id\":\"call_4\""]
+      "label": "ai to server",
+      "parts": ["\"type\": \"turn.append\"", "\"id\": \"call_4\""]
     },
     {
       "line": "wire_result_3",
+      "label": "ai to server",
       "parts": [
-        "> {\"0\":{\"type\":\"turn.append\"}",
-        "\"tool_call_id\":\"call_4\"",
+        "\"type\": \"turn.append\"",
+        "\"tool_call_id\": \"call_4\"",
         "hyperposition\\\\n"
       ]
     },
     {
       "line": "wire_asked_output",
-      "parts": ["> {\"0\":{\"type\":\"turn.append\"}", "\"id\":\"call_5\""]
+      "label": "ai to server",
+      "parts": ["\"type\": \"turn.append\"", "\"id\": \"call_5\""]
     },
     {
       "line": "wire_result_output",
-      "parts": [
-        "> {\"0\":{\"type\":\"turn.append\"}",
-        "\"tool_call_id\":\"call_5\""
-      ]
+      "label": "ai to server",
+      "parts": ["\"type\": \"turn.append\"", "\"tool_call_id\": \"call_5\""]
     },
     {
       "line": "wire_answer_3",
+      "label": "ai to server",
       "parts": [
-        "> {\"0\":{\"type\":\"turn.append\"}",
-        "\"content\":\"It said hyperposition, as one could have guessed. Anything else?\""
+        "\"type\": \"turn.append\"",
+        "\"content\": \"It said hyperposition, as one could have guessed. Anything else?\""
       ]
     },
     {
       "line": "wire_otherwise",
+      "label": "ai to server",
       "parts": [
-        "> {\"0\":{\"type\":\"turn.append\"}",
-        "\"content\":\"That is not one of the choices. 1, 2, 3 or 0, when you are quite ready.\""
+        "\"type\": \"turn.append\"",
+        "\"content\": \"That is not one of the choices. 1, 2, 3 or 0, when you are quite ready.\""
       ]
     },
     {
       "line": "wire_denied",
+      "label": "ai to server",
       "parts": [
-        "> {\"0\":{\"type\":\"turn.append\"}",
-        "\"tool_call_id\":\"call_4\"",
+        "\"type\": \"turn.append\"",
+        "\"tool_call_id\": \"call_4\"",
         "The player denied the tool browser.console_run."
       ]
     },
     {
       "line": "wire_lacks",
+      "label": "ai to server",
       "parts": [
-        "> {\"0\":{\"type\":\"turn.append\"}",
-        "\"content\":\"The console stayed shut: you refused it, it was not served with --debug, or it took too long. I shall try to bear it.\""
+        "\"type\": \"turn.append\"",
+        "\"content\": \"The console stayed shut: you refused it, it was not served with --debug, or it took too long. I shall try to bear it.\""
+      ]
+    },
+    {
+      "line": "wire_dump",
+      "label": "ai to server",
+      "parts": ["\"type\": \"db.dump\"", "[blobs omitted: 1]"]
+    },
+    {
+      "line": "wire_dump_browser",
+      "label": "databases of the browser",
+      "parts": ["  database metaverse", "/metaverse/hyperposition/1"]
+    },
+    {
+      "line": "wire_dump_server",
+      "label": "databases of the server",
+      "parts": ["  database metaverse", "/metaverse/hyperposition/1"]
+    },
+    {
+      "line": "wire_user_0",
+      "label": "ai to server",
+      "parts": [
+        "\"type\": \"turn.append\"",
+        "\"role\": \"user\"",
+        "\"content\": \"0\""
+      ]
+    },
+    {
+      "line": "wire_answer_0",
+      "label": "ai to server",
+      "parts": [
+        "\"type\": \"turn.append\"",
+        "\"content\": \"Nothing at all, then. How restful. Do take your time.\""
       ]
     }
   ]

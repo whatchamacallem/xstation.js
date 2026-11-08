@@ -2,18 +2,20 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# The server's verbose log: a ring of the latest lines and the `_verbose`
-# database in the root that holds every line the moment it is logged, with no
-# level, held to `blob_max` bytes by `PRAGMA max_page_count` over its
-# `page_size`, so that a line that needs a page past it fails with SQLite's
-# `SQLITE_FULL`, raised and never caught; and the shell's runner, the one
-# place the engine starts an external program, whose levels are the only
-# verbose levels the server has and whose input and output it passes through
-# at every level. It depends on no other engine module but the strings.
+# The server's verbose log and the shell's runner. Outside debug mode the log
+# is the `_verbose` database in the root that holds every line the moment it
+# is logged, with no level, held to `blob_max` bytes by `PRAGMA
+# max_page_count` over its `page_size`, so that a line that needs a page past
+# it fails with SQLite's `SQLITE_FULL`, raised and never caught. In debug mode
+# no role opens it, and a line logged is a note of the console role in the
+# audit, as the console's start and end of dash are the only lines a server
+# logs there. The shell's runner is the one place the engine starts an
+# external program, whose levels are the only verbose levels the server has
+# and whose input and output it passes through at every level. It depends on
+# no other engine module but the audit, the switches and the strings.
 
-import collections, os, shlex, sqlite3, subprocess, sys, time
+import audit, os, shlex, sqlite3, subprocess, switches, sys, time
 from internationalization import i18n
-from typing import NamedTuple
 
 # The file in the root that holds the lines.
 _FILE_NAME = "_verbose.sqlite"
@@ -24,8 +26,8 @@ _LEVEL_MAX = 2
 # The thread that a line from the server itself is stored under.
 _SERVER_THREAD = "server"
 
-# The threads of the page, whose lines reach the server from the page.
-_PAGE_THREADS = ("ui", "ai")
+# The thread of the audit's note that a line logged in debug mode becomes.
+_CONSOLE_THREAD = "console"
 
 # How many nanoseconds the clock counts in a millisecond.
 _NANOSECONDS_PER_MILLISECOND = 1_000_000
@@ -51,23 +53,11 @@ CREATE TABLE line (
 # The statement that stores one line.
 _LINE_INSERT = "INSERT INTO line (at, thread, text) VALUES (?, ?, ?)"
 
-# The statement that reads the newest lines of one thread, newest first.
-_TAIL_SELECT = (
-    "SELECT at, text FROM line WHERE thread = ? ORDER BY seq DESC LIMIT ?"
-)
-
-
-# One line: milliseconds since the epoch and its text.
-class LogLine(NamedTuple):
-    at: int
-    text: str
-
 
 # The state of the log, which is empty until the log is opened.
 class _LogState:
-    # Starts with no ring and no file.
+    # Starts with no file.
     def __init__(self) -> None:
-        self.ring: collections.deque[LogLine] | None = None
         self.connection: sqlite3.Connection | None = None
 
 
@@ -81,18 +71,17 @@ def _level_check(level: int) -> None:
         raise ValueError(i18n("verbose.level_invalid", level, _LEVEL_MAX))
 
 
-# Returns the file and the ring, and raises before the log is opened.
-def _open_get() -> tuple[sqlite3.Connection, collections.deque[LogLine]]:
-    if _STATE.connection is None or _STATE.ring is None:
+# Returns the file, and raises before the log is opened.
+def _open_get() -> sqlite3.Connection:
+    if _STATE.connection is None:
         raise RuntimeError(i18n("verbose.not_open"))
-    return _STATE.connection, _STATE.ring
+    return _STATE.connection
 
 
-# Opens the root's `_verbose.sqlite`, held to `blob_max` bytes, an empty ring.
-def log_open(root: str, ring: int, blob_max: int) -> None:
+# Opens the root's `_verbose.sqlite`, held to `blob_max` bytes.
+def log_open(root: str, blob_max: int) -> None:
     if _STATE.connection is not None:
         raise RuntimeError(i18n("verbose.open_twice"))
-    lines = collections.deque[LogLine](maxlen=ring)
     connection = sqlite3.connect(os.path.join(root, _FILE_NAME))
     page_size = connection.execute("PRAGMA page_size").fetchone()[0]
     connection.execute(f"PRAGMA max_page_count = {blob_max // page_size}")
@@ -100,59 +89,24 @@ def log_open(root: str, ring: int, blob_max: int) -> None:
         connection.execute(pragma)
     if connection.execute(_TABLE_FIND).fetchone() is None:
         connection.execute(_LINE_DDL)
-    _STATE.ring = lines
     _STATE.connection = connection
 
 
 # Closes the file and returns the log to its state before it was opened.
 def log_close() -> None:
-    connection, _ = _open_get()
-    connection.close()
-    _STATE.ring = None
+    _open_get().close()
     _STATE.connection = None
 
 
-# Writes a line to `_verbose` and the ring, `SQLITE_FULL` past `blob_max`.
+# Writes a line to `_verbose`, in debug mode a note of console in the audit.
 def log(text: str) -> None:
-    connection, ring = _open_get()
     at = time.time_ns() // _NANOSECONDS_PER_MILLISECOND
-    line = LogLine(at, text)
+    if switches.debug:
+        audit.note_put(_CONSOLE_THREAD, at, text)
+        return
+    connection = _open_get()
     with connection:
-        connection.execute(_LINE_INSERT, (line.at, _SERVER_THREAD, line.text))
-    ring.append(line)
-
-
-# The last `count` lines of the ring, oldest first.
-def history_get(count: int) -> list[LogLine]:
-    if count < 0:
-        raise ValueError(i18n("verbose.count_invalid", count))
-    _, ring = _open_get()
-    lines = list(ring)
-    return lines[max(0, len(lines) - count) :]
-
-
-# Writes the lines of the page thread `ui` or `ai` to `_verbose` as one batch.
-def lines_put(thread: str, lines: list[LogLine]) -> None:
-    if thread not in _PAGE_THREADS:
-        raise ValueError(i18n("verbose.thread_unknown", thread))
-    connection, _ = _open_get()
-    with connection:
-        connection.executemany(
-            _LINE_INSERT, [(line.at, thread, line.text) for line in lines]
-        )
-
-
-# The last `count` lines of the page thread `ui` or `ai`, oldest first.
-def tail_get(thread: str, count: int) -> list[LogLine]:
-    if thread not in _PAGE_THREADS:
-        raise ValueError(i18n("verbose.thread_unknown", thread))
-    if count < 0:
-        raise ValueError(i18n("verbose.count_invalid", count))
-    connection, _ = _open_get()
-    rows: list[tuple[int, str]] = connection.execute(
-        _TAIL_SELECT, (thread, count)
-    ).fetchall()
-    return [LogLine(at, text) for at, text in reversed(rows)]
+        connection.execute(_LINE_INSERT, (at, _SERVER_THREAD, text))
 
 
 # Runs the program on this process's input and output, after a flush of both.

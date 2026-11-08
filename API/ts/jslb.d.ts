@@ -10,8 +10,9 @@
 // the infinities, `jslb.number_refused`, inside the same layer.
 //
 // Bytes nested in a value, as a BLOB column of a `sql.run` reply, have no JSON
-// text: `line_encode` refuses them, and `line_render` writes each as a tag of
-// its size, for the debug record.
+// text: `line_encode` refuses them, `line_render` writes each as a tag of its
+// size, and `line_json`, the audit's text of a line, as the JSON string
+// `[bytes omitted: N]`.
 //
 // A fault met while a fault is being handled, as a `sink_close` that throws
 // while the decoder shuts a stream after a fault, is thrown with the first
@@ -72,6 +73,9 @@ declare namespace jslb {
 
   // The JSON text, any bytes `<bytes "size"=N>`, then `<blob "n"=K>` per blob.
   function line_render(line: Line): string;
+
+  // The JSON text `line_encode` writes, any bytes `[bytes omitted: N]`.
+  function line_json(line: Line): string;
 
   // Parses a JSON text by the decoder's number rules. Throws `WireError`.
   function json_decode(text: string): unknown;

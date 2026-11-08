@@ -40,8 +40,6 @@ namespace test_console_open {
     input_selector: ".xterm-helper-textarea",
     // The height of the band under the console, its writer's choice.
     band_height: 50,
-    // The lines each overlay keeps, its writer's choice.
-    ring_lines: 3,
     // The media cache's budget and a download's seconds, their writer's.
     media_budget: 1000000,
     media_seconds: 10,
@@ -226,7 +224,6 @@ namespace test_console_open {
         view,
         overlays: new overlay.Overlay(
           container.lastElementChild as HTMLElement,
-          constants.ring_lines,
         ),
         debug: switches.debug_on(),
       },

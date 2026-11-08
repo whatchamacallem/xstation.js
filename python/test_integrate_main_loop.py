@@ -4,19 +4,19 @@
 #
 # Tests the main loop serving every engine it registers, each line type but
 # `system.restart`, which execs, in forked children over pipes, with roots in
-# `build/`. Each child opens the root's log first, through
-# `main_loop.verbose`, as `bootstrap.py` does, then prepares the root and
-# serves the pipes. The page's commits are pushes applied and answered by
-# nothing, read back from the root's database files; a `tap.line` of the
-# TypeScript stream is appended to its file; the server's MCP server
-# answers `initialize`, and `tools/list` with the tools of
-# API/mcp/tools.json; `verbose.tail` gives the server's ring and the page's
-# lines; `settings.put` and `source.put` write the root's files in debug
+# `build/`. Each child opens the root's audit in debug mode, else its log, as
+# `bootstrap.py` does, then prepares the root and serves the pipes. The page's
+# commits are pushes applied and answered by nothing, read back from the
+# root's database files; a `tap.line` of the TypeScript stream is appended to
+# its file; the server's MCP server answers `initialize`, and `tools/list`
+# with the tools of API/mcp/tools.json; `audit.tail` gives the audit's newest
+# entries; `settings.put` and `source.put` write the root's files in debug
 # mode and are refused with the parameter debug false, which each child sets
 # from the root's parameters as `bootstrap.py` does; and `db.sync` streams
-# every database whole, each line logged in full. The lines fed to the loop
-# are the gold's, each its JSON text, a CR and its blobs' bytes, and the lines
-# it writes are read back the same way and checked against the gold.
+# every database whole, each line recorded in the audit with no blob's bytes.
+# The lines fed to the loop are the gold's, each its JSON text, a CR and its
+# blobs' bytes, and the lines it writes are read back the same way and
+# checked against the gold.
 
 import contextlib, copy, functools, harness, hashlib, json, main_loop, os, re
 import signal, sqlite3, switches, tempfile, traceback, unittest
@@ -92,14 +92,17 @@ _KEPT_VALUE = b"kept value"
 # The value the sync tests keep in a cache file, over `_OVERFLOW_BYTES`.
 _BIG_VALUE = bytes(index % 256 for index in range(_OVERFLOW_BYTES * 2 + 1))
 
-# The database of the server's log, under the root.
-_LOG_DB = "_verbose"
+# The file of the server's log in the root.
+_LOG_FILE = "_verbose.sqlite"
 
-# The query of the thread and text of each line of the log, in order.
-_LOG_QUERY = "SELECT thread, text FROM line ORDER BY seq"
+# The file of the audit in the root.
+_AUDIT_FILE = "_audit.txt"
 
-# The thread the server's own lines are stored under in the log.
-_SERVER_THREAD = "server"
+# The role the children open the audit for, as `bootstrap.py` names it.
+_ENGINE_ROLE = "engine"
+
+# The start of the label of a note, whose body is its text indented.
+_NOTE_PREFIX: str = harness.gold_get(f"{_GOLD_ID}.texts.note_prefix")
 
 
 # A copy of a value of this module's gold, which the test may change.
@@ -169,15 +172,6 @@ def _sync_bytes() -> bytes:
     return b"".join(lines)
 
 
-# The text logged for a push read back, the gold's with its values set.
-def _push_text(line: dict[str, Any]) -> str:
-    name = "restore" if "files" in line else "file"
-    text = _text_get(f"main_loop_line_push_{name}")
-    text = text.replace("SIZE", str(line["1"]["size"]))
-    text = text.replace("NAME", line["db"])
-    return text.replace("COUNT", str(line.get("files")))
-
-
 # The result of `tools/list`: each server tool of the API file, no permit.
 def _list_result() -> dict[str, Any]:
     with open(_TOOLS_PATH, encoding="utf-8") as file:
@@ -241,20 +235,49 @@ def _child_end(
         os.kill(os.getpid(), signal.SIGKILL)
 
 
-# Opens the root's log with the ring of its settings, through `main_loop`.
-def _log_open(root: str) -> None:
+# Opens the root's audit in debug mode, else its log, as `bootstrap.py` does.
+def _record_open(root: str) -> None:
     path = os.path.join(root, "settings.json")
     with open(path, encoding="utf-8") as file:
         values: dict[str, Any] = json.load(file)
-    main_loop.verbose.log_open(
-        root, values["verbose_ring"], values["blob_max"]
-    )
+    if switches.debug:
+        main_loop.audit.audit_open(root, values["blob_max"], _ENGINE_ROLE)
+    else:
+        main_loop.verbose.log_open(root, values["blob_max"])
+
+
+# Each entry of the root's audit: its label, its JSON or note, then the rest.
+def _audit_read(root: str) -> list[tuple[str, Any, str]]:
+    read: list[tuple[str, Any, str]] = []
+    for entry in main_loop.audit.entries_read(root):
+        if entry.label.startswith(_NOTE_PREFIX):
+            read.append((entry.label, entry.body, ""))
+        else:
+            value, end = json.JSONDecoder().raw_decode(entry.body)
+            read.append((entry.label, value, entry.body[end:]))
+    return read
+
+
+# The entry of a line under the label of the gold: its JSON, no blob's bytes.
+def _line_entry(label: str, line: dict[str, Any]) -> tuple[str, Any, str]:
+    value = dict(line)
+    count = 0
+    while str(count + 1) in value:
+        count += 1
+        blob: dict[str, Any] = value[str(count)]
+        value[str(count)] = {
+            name: field for name, field in blob.items() if name != "d"
+        }
+    rest = ""
+    if count:
+        rest = "\n" + _text_get("blobs_omitted").format(count)
+    return _text_get(label), value, rest
 
 
 # Child: the root's parameters set, as `bootstrap.py` sets them, then serves.
 def _loop_serve(root: str, read_fd: int, write_fd: int) -> str:
     switches.switches_apply(switches.parameters_load(root))
-    _log_open(root)
+    _record_open(root)
     prepared = repr(main_loop.loop_prepare(root))
     main_loop.loop_run(read_fd, write_fd, root)
     return prepared
@@ -392,21 +415,32 @@ class TestEngines(ScratchCase):
         expected["result"] = _list_result()
         self.assertEqual(second, expected)
 
-    # `verbose.tail` gives the server's ring, its own trace, and the page's.
-    def test_verbose_tail(self) -> None:
-        self.debug_write(True)
+    # `audit.tail` gives the audit's newest entries, a line read among them.
+    def test_audit_tail(self) -> None:
+        note = _gold_copy("lines.audit_note")
         lines = [
-            _line_bytes("tail_server"),
-            _line_bytes("verbose_put"),
-            _line_bytes("tail_ui"),
+            _line_bytes("create_castle"),
+            _line_bytes("audit_note"),
+            _line_bytes("tail_one"),
+            _line_bytes("tail_all"),
         ]
         replies = self.served_read(b"".join(lines))
         self.assertEqual(len(replies), 2)
-        server, page = replies
-        self.header_check(server, "tail_server_reply")
-        texts = [entry["text"] for entry in server["lines"]]
-        self.assertEqual(texts, [_text_get("main_loop_line_dispatch_tail")])
-        self.assertEqual(page, _gold_copy("lines.tail_ui_reply"))
+        one, every = replies
+        noted = main_loop.audit.note_text(
+            note["thread"], note["at"], note["text"]
+        )
+        expected = {**_gold_copy("lines.tail_one_reply"), "text": noted}
+        self.assertEqual(one, expected)
+        self.header_check(every, "tail_all_reply")
+        path = os.path.join(self.root, _AUDIT_FILE)
+        with open(path, encoding="utf-8") as file:
+            document = file.read()
+        # The entries follow the document's one start heading and its blank.
+        self.assertEqual(every["text"], document.split("\n\n", 1)[1])
+        labels = [entry[0] for entry in _audit_read(self.root)]
+        read = _text_get("label_read")
+        self.assertEqual(labels, [read, _NOTE_PREFIX + note["thread"]])
 
     # Debug on: `source.put` writes a loop, `settings.put` settings, answered.
     def test_debug_served(self) -> None:
@@ -475,19 +509,23 @@ class TestEngines(ScratchCase):
         self.assertEqual(scene["1"], _SEED_IMAGE["ref"])
         self.assertEqual(scene["image"], {"$ref": 1})
 
-    # A sync's lines are logged in order, in full, with no blob's bytes.
-    def test_sync_traced(self) -> None:
-        lines = self.served_read(_sync_bytes())
-        big = _text_get("main_loop_line_dispatch_big")
-        big = big.replace("SIZE", str(len(_BIG_VALUE)))
-        big = big.replace("DIGEST", hashlib.sha256(_BIG_VALUE).hexdigest())
-        texts = [
-            _text_get("main_loop_line_dispatch_create"),
-            _text_get("main_loop_line_dispatch_put"),
-            big,
-            _text_get("main_loop_line_dispatch_sync"),
-            *[_push_text(line) for line in lines[:-1]],
-            _text_get("main_loop_line_reply_sync"),
+    # A sync's lines are recorded in order, in full, with no blob's bytes.
+    def test_sync_recorded(self) -> None:
+        create = _gold_copy("lines.create_castle")
+        kept = _gold_copy("lines.put_kept")
+        big = _gold_copy("lines.put_big")
+        sync = _gold_copy("lines.sync")
+        data = [
+            _wire_bytes(create),
+            _wire_bytes(kept, _KEPT_VALUE),
+            _wire_bytes(big, _BIG_VALUE),
+            _wire_bytes(sync),
         ]
-        rows = _rows_read(self.root, _LOG_DB, _LOG_QUERY)
-        self.assertEqual(rows, [(_SERVER_THREAD, text) for text in texts])
+        lines = self.served_read(b"".join(data))
+        # The sink that streams the blob adds its digest to its header.
+        big["1"]["sha256"] = hashlib.sha256(_BIG_VALUE).hexdigest()
+        read = [create, kept, big, sync]
+        expected = [_line_entry("label_read", line) for line in read]
+        expected += [_line_entry("label_written", line) for line in lines]
+        self.assertEqual(_audit_read(self.root), expected)
+        self.assertFalse(os.path.exists(os.path.join(self.root, _LOG_FILE)))

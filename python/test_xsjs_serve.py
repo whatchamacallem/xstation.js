@@ -241,7 +241,7 @@ class TestRoot(ScratchCase):
             self.assertFalse(os.path.exists(path), path)
         self.assertEqual(switches.parameters_load(self.root), parameters)
 
-    # A second making removes an earlier run's log and keeps the databases.
+    # A second making removes an earlier run's audit and log, keeps databases.
     def test_log_removed(self) -> None:
         self.root_ready(False)
         database, _ = self.run_earlier()

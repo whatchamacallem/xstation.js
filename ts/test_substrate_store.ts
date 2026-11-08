@@ -10,7 +10,8 @@
 // its gold, read through the harness with the `overflow_bytes` and
 // `turn_compact_turns` of `settings.json`. Each digest and its input are one
 // entry of `test_digests.json` in `test_vectors`, under
-// `test_substrate_store`.
+// `test_substrate_store`. The view of a database is compared with the vector
+// `dump.json` of `test_vectors`, whole and after a restore that loses values.
 namespace test_substrate_store {
   // The initialized sqlite3.wasm module, a global the bring up sets.
   declare const test_sqlite3: substrate.SqliteModule;
@@ -42,6 +43,8 @@ namespace test_substrate_store {
     root_prefix: "/test_substrate/",
     // The file of the digest vectors of the test modules.
     digests_name: "test_digests.json",
+    // The file of the view vector of the stores.
+    dump_name: "dump.json",
     // The hyperposition scene, whose conversation the turn tests append to.
     scene: "/metaverse/hyperposition/1",
     // The subtitle of the arrival scene the castle turn builds.
@@ -89,6 +92,13 @@ namespace test_substrate_store {
   interface DigestVector {
     data: string;
     sha256: string;
+  }
+
+  // The view vector: its stores' `overflow_bytes`, operations and view.
+  interface DumpVector {
+    overflow_bytes: number;
+    operations: { [name: string]: unknown }[];
+    view: substrate.DbView;
   }
 
   // This module's entries of the digest vectors, read at their first use.
@@ -189,15 +199,77 @@ namespace test_substrate_store {
       throw new Error(`${constants.digests_name} has no entry ${name}`);
     }
     const entry = entries[name];
-    if (!/^(?:[0-9a-f]{2})*$/.test(entry.data)) {
-      throw new Error(`the input of the digest entry ${name} is not hex`);
+    const owner = `the input of the digest entry ${name}`;
+    return { data: bytes_hex(entry.data, owner), sha256: entry.sha256 };
+  }
+
+  // The bytes lowercase hex text spells, the owner named when it is not hex.
+  function bytes_hex(hex: string, owner: string): Uint8Array {
+    if (!/^(?:[0-9a-f]{2})*$/.test(hex)) {
+      throw new Error(`${owner} is not hex`);
     }
-    const data = new Uint8Array(entry.data.length / 2);
+    const data = new Uint8Array(hex.length / 2);
     for (let index = 0; index < data.length; index += 1) {
-      const pair = entry.data.slice(2 * index, 2 * index + 2);
+      const pair = hex.slice(2 * index, 2 * index + 2);
       data[index] = Number.parseInt(pair, 16);
     }
-    return { data, sha256: entry.sha256 };
+    return data;
+  }
+
+  // The view vector of `test_vectors`.
+  function dump_read(): DumpVector {
+    const name = constants.dump_name;
+    if (!Object.hasOwn(test_vectors, name)) {
+      throw new Error(`test_vectors has no file ${name}`);
+    }
+    const file = utility.base64_decode(test_vectors[name]);
+    return JSON.parse(utility.utf8_decode(file)) as DumpVector;
+  }
+
+  // A value as the JSON text of it reads back.
+  function json_value(value: unknown): unknown {
+    return JSON.parse(utility.json_text(value));
+  }
+
+  // Applies one operation of the view vector through the store's methods.
+  function operation_apply(
+    store: substrate.Store,
+    operation: { [name: string]: unknown },
+  ): void {
+    switch (operation.op) {
+      case "db_create":
+        store.db_create(operation.db as string);
+        break;
+      case "kv_put": {
+        const ref = operation.ref as string;
+        store.kv_put(ref, bytes_hex(operation.data as string, ref));
+        break;
+      }
+      case "doc_put":
+        store.doc_put(
+          operation.db as string,
+          operation.id as string,
+          operation.body as lines.Document,
+        );
+        break;
+      case "sql_run":
+        store.sql_run(
+          operation.db as string,
+          operation.statements as lines.SqlStatement[],
+        );
+        break;
+      case "turn_append":
+        store.turn_append(
+          operation.scene as string,
+          operation.role as provider.Role,
+          operation.content as provider.ChatMessage,
+        );
+        break;
+      default:
+        throw new Error(
+          `the view vector has no operation ${String(operation.op)}`,
+        );
+    }
   }
 
   // The `overflow_bytes` of `settings.json`, which the test stores take.
@@ -569,6 +641,16 @@ namespace test_substrate_store {
       cache: substrate.CacheFiles,
       compact_turns = harness.setting_get("turn_compact_turns") as number,
     ): substrate.Store {
+      return this.store_built(root, cache, overflow_get(), compact_turns);
+    }
+
+    // A store of its own `overflow_bytes` and threshold, each push kept.
+    store_built(
+      root: string,
+      cache: substrate.CacheFiles,
+      overflow_bytes: number,
+      compact_turns: number,
+    ): substrate.Store {
       const pushed: lines.Line[] = [];
       const far = new queue.LocalPort();
       far.line_receive((line) => {
@@ -584,7 +666,7 @@ namespace test_substrate_store {
         this.pool_get(),
         cache,
         root,
-        overflow_get(),
+        overflow_bytes,
         blob_get(),
         compact_turns,
         tasks,
@@ -1882,6 +1964,90 @@ namespace test_substrate_store {
     }
   }
 
+  // The view vector, and the cache and store its operations were applied on.
+  interface ViewBench {
+    dump: DumpVector;
+    cache: substrate.CacheFiles;
+    store: substrate.Store;
+  }
+
+  // The view of a database, against the vector of `vectors_make` by hand.
+  export class TestView extends StoreCase {
+    // A store of the vector's `overflow_bytes` on a new root.
+    store_sized(
+      cache: substrate.CacheFiles,
+      overflow_bytes: number,
+    ): substrate.Store {
+      return this.store_built(
+        this.root_make(),
+        cache,
+        overflow_bytes,
+        harness.setting_get("turn_compact_turns") as number,
+      );
+    }
+
+    // The vector's operations applied on a store of a new root and cache.
+    bench_make(): ViewBench {
+      const dump = dump_read();
+      const cache = this.cache_make();
+      const store = this.store_sized(cache, dump.overflow_bytes);
+      for (const operation of dump.operations) {
+        operation_apply(store, operation);
+      }
+      return { dump, cache, store };
+    }
+
+    // The view of the operations' database is the vector's, as a JSON value.
+    test_view_vector(): void {
+      const { dump, store } = this.bench_make();
+      this.assertEqual(json_value(store.db_view(dump.view.db)), dump.view);
+    }
+
+    // A restore without the files of rows over `overflow_bytes` loses them.
+    test_view_lost(): void {
+      const { dump, cache, store } = this.bench_make();
+      const { view, overflow_bytes } = dump;
+      const lost = view.rows
+        .filter((row) => row.size > overflow_bytes)
+        .map((row) => row.key);
+      this.assertTrue(lost.length > 0);
+      const digests = new Set(
+        lost.map((key) => store.kv_get(`/${view.db}/${key}`).sha256),
+      );
+      const image = store.db_snapshot(view.db);
+      const files = image.files
+        .filter((name) => !digests.has(name))
+        .map((name) => cache.cache_read(name, 0, blob_get()));
+      this.assertEqual(image.files.length, digests.size + files.length);
+      const second = this.store_sized(this.cache_make(), overflow_bytes);
+      second.db_restore(view.db, image.data, files);
+      const expected = json_value(view) as substrate.DbView;
+      expected.rows = expected.rows.map((row) =>
+        lost.includes(row.key)
+          ? { key: row.key, size: row.size, kind: "lost" }
+          : row,
+      );
+      this.assertEqual(json_value(second.db_view(view.db)), expected);
+    }
+
+    // A restore with no file loses a document's current version, which throws.
+    test_document_lost(): void {
+      const { dump, store } = this.bench_make();
+      const view = dump.view;
+      const cached = view.documents
+        .map((document) => document.ref)
+        .filter((ref) => typeof store.kv_get(ref).data === "string");
+      this.assertTrue(cached.length > 0);
+      const name = store.kv_get(cached[0]).sha256;
+      const image = store.db_snapshot(view.db);
+      const second = this.store_sized(this.cache_make(), dump.overflow_bytes);
+      second.db_restore(view.db, image.data, []);
+      this.raised_assert(lost_text(cached[0], name), () =>
+        second.db_view(view.db),
+      );
+    }
+  }
+
   // The push of each committed operation: its line, its owner, its timing.
   export class TestPush extends StoreCase {
     // A create and a drop each push the database's name at once.
@@ -2030,6 +2196,7 @@ namespace test_substrate_store {
       this.assertEqual([...table.keys()].sort(), [
         "db.create",
         "db.drop",
+        "db.dump",
         "db.file",
         "db.restore",
         "doc.head",
@@ -2041,6 +2208,27 @@ namespace test_substrate_store {
         "sql.run",
         "turn.append",
       ]);
+    }
+
+    // `db.dump` pushes every database's view to the server, in name order.
+    test_dump_pushed(): void {
+      const store = this.store_fresh();
+      const table = this.handlers_get(store);
+      store.db_create("beta");
+      store.db_create("alpha");
+      store.kv_put("/alpha/note", utility.utf8_encode("hi"));
+      this.pushes_taken(store);
+      this.push_give(
+        table,
+        jslb.line_make(jslb.header_make("db.dump"), [], {}),
+      );
+      const [dump, ...rest] = this.pushes_taken(store);
+      this.assertEqual(rest, []);
+      this.assertEqual(type_pushed(dump), "db.dump");
+      const data = (dump[1] as lines.BlobHeader).d as Uint8Array;
+      const views = JSON.parse(utility.utf8_decode(data));
+      const expected = ["alpha", "beta"].map((name) => store.db_view(name));
+      this.assertEqual(views, json_value(expected));
     }
 
     // `kv.put` and `kv.get` answer with the known digest and the bytes.

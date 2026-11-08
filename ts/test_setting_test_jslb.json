@@ -11,6 +11,7 @@
     "jslb_blobs_mismatch_over": "The line header counts 2 blobs but the line has 1 blob headers.",
     "jslb_blobs_preset": "The header already counts its blobs, which line_make sets.",
     "jslb_both_name_forms": "The line mixes short and full header names.",
+    "jslb_bytes_marked": "{\"0\":{\"t\":\"echo\"},\"rows\":[[1,{\"b\":\"[bytes omitted: 3]\"}]]}",
     "jslb_bytes_tag": "{\"0\":{\"t\":\"echo\"},\"rows\":[[1,<bytes \"size\"=3>]]}",
     "jslb_field_missing_s": "The header has no s, which is required.",
     "jslb_field_missing_type": "The header has no type, which is required.",

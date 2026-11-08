@@ -12,11 +12,12 @@
 // from the server's database to the canvas. A permit takes the gold's choice
 // of its number, and `console.show` opens tty 0 as the shown view does.
 //
-// The wire is read on the UI lane, each `overlay.line` one line of tty 1 as
-// the `WireTap` rendered it. A rendering that holds every part of a mark of
-// the gold's `wire` sends the test's end the mark's line, so a case pins the
-// order of the wire's lines among the UI's. The `mcp` lines of the wire are
-// the server client's handshake, as the seed's table calls browser tools only.
+// A case's last line, the first picture or a turn's reply, waits while the
+// scripted UI asks `audit.tail` through the worker's relay. Each entry of the
+// tail after the last tail's that has the label and every part of a mark of the
+// gold's `wire` sends the test's end the mark's line, in the audit's order, so
+// a case pins the wire's lines end to end on the real server. A case dumps both
+// sides' databases as the text 0 does, and the tail holds both dumps.
 
 namespace test_integrate_engine {
   // The gold, the threads, the settings, the line types and handlers' version.
@@ -27,7 +28,14 @@ namespace test_integrate_engine {
     media_owner: "media" as const,
     media_setting: "media_db_bytes",
     timeout_setting: "provider.timeout_seconds",
-    ring_setting: "verbose_ring",
+    tail_setting: "verbose_ring",
+    tail_type: "audit.tail",
+    say_type: "ai.say",
+    click_type: "ai.click",
+    // The id of the first `audit.tail`, above every id the gold's lines hold.
+    tail_first_id: 1101,
+    // The mark that starts each entry of the audit.
+    entry_mark: "---- ",
     render_type: "render",
     store_type: "media.store",
     media_wake: "ui.media_reply",
@@ -37,7 +45,6 @@ namespace test_integrate_engine {
     open_type: "console.open",
     input_type: "console.input",
     output_type: "console.output",
-    overlay_type: "overlay.line",
     notice_type: "settings.set",
     painted_type: "test_integrate_engine.first_painted",
     handler_version: 0,
@@ -45,9 +52,10 @@ namespace test_integrate_engine {
     pixel_bytes: 4,
   });
 
-  // A mark of the gold: the line it sends, the parts a rendering must hold.
+  // A mark of the gold: the line it sends, the label and parts of its entry.
   interface WireMark {
     line: string;
+    label: string;
     parts: string[];
   }
 
@@ -125,10 +133,7 @@ namespace test_integrate_engine {
       permit,
       images,
       view: new console_view.ConsoleView(debug, tasks),
-      overlays: new overlay.Overlay(
-        overlays,
-        harness.setting_get(constants.ring_setting) as number,
-      ),
+      overlays: new overlay.Overlay(overlays),
       debug: switches.debug_on(),
     };
   }
@@ -183,6 +188,21 @@ namespace test_integrate_engine {
     return { near, canvas: parts.canvas };
   }
 
+  // The entries of the audit's text, each its heading and body, no blank end.
+  function entries_of(text: string): string[] {
+    const pieces = text.split(`\n${constants.entry_mark}`);
+    const entries = pieces.map((piece, index) =>
+      (index === 0 ? piece : constants.entry_mark + piece).replace(/\n+$/, ""),
+    );
+    return entries.filter((entry) => entry !== "");
+  }
+
+  // The label of an entry, its heading after the time.
+  function label_of(entry: string): string {
+    const heading = entry.slice(0, entry.indexOf("\n"));
+    return heading.slice(heading.indexOf(", ") + 2);
+  }
+
   // Joins the test's end and the scripted UI to the worker's UI lane.
   function lanes_join(
     end: queue.ThreadPort,
@@ -197,15 +217,49 @@ namespace test_integrate_engine {
     let output: string | undefined = "";
     // Whether the test's end has been told what the first render painted.
     let painted = false;
-    // Sends the test's end the line of the mark a line of the wire fits.
+    // The case's last line, held while the audit's end is asked.
+    let held: lines.Line | undefined = undefined;
+    // The id of the last `audit.tail`, and the last entry its reply held.
+    let tail_id = constants.tail_first_id - 1;
+    let seen: string | undefined = undefined;
+    // Holds the case's last line and asks the server for the audit's end.
+    const tail_ask = (last: lines.Line): void => {
+      held = last;
+      tail_id += 1;
+      const header = jslb.header_make(constants.tail_type, {
+        id: tail_id,
+        full: settings.names_full(),
+      });
+      const count = harness.setting_get(constants.tail_setting);
+      ui.line_post(jslb.line_make(header, [], { count }), []);
+    };
+    // Sends the marks of the tail's new entries in order, then the held line.
     const wire_take = (line: lines.Line): void => {
-      const text = jslb.payload_of(line).text as string;
-      const mark = marks.find(({ parts }) =>
-        parts.every((part) => text.includes(part)),
-      );
-      if (mark !== undefined) {
-        end.line_post(gold_value(`lines.${mark.line}`) as lines.Line, []);
+      const entries = entries_of(jslb.payload_of(line).text as string);
+      const after = seen === undefined ? 0 : entries.lastIndexOf(seen) + 1;
+      if (after === 0 && seen !== undefined) {
+        throw new Error(`The audit's end lost the entry ${seen}`);
       }
+      for (const entry of entries.slice(after)) {
+        const mark = marks.find(
+          ({ label, parts }) =>
+            label_of(entry) === label &&
+            parts.every((part) => entry.includes(part)),
+        );
+        if (mark !== undefined) {
+          end.line_post(gold_value(`lines.${mark.line}`) as lines.Line, []);
+        }
+      }
+      seen = entries[entries.length - 1];
+      end.line_post(held as lines.Line, []);
+      held = undefined;
+    };
+    // A turn's reply ends its case.
+    const turn_ended = (line: lines.Line): boolean => {
+      const type = type_of(line);
+      const turn =
+        type === constants.say_type || type === constants.click_type;
+      return turn && jslb.field_get(line[0], "reply") !== undefined;
     };
     // Tells the test's end once the command's output has come from dash.
     const output_take = (line: lines.Line): void => {
@@ -231,14 +285,16 @@ namespace test_integrate_engine {
       ui.line_post(line, []);
       if (!painted && type_of(line) === constants.render_type) {
         painted = true;
-        end.line_post(painted_line(canvas), []);
+        tail_ask(painted_line(canvas));
       }
     });
     // `settings.set`, `console.output` and an open's reply are not compared.
     ui.line_receive((line) => {
       const type = type_of(line);
-      if (type === constants.overlay_type) {
+      if (type === constants.tail_type) {
         wire_take(line);
+      } else if (turn_ended(line)) {
+        tail_ask(line);
       } else if (type === constants.output_type) {
         output_take(line);
       } else if (type === constants.open_type) {

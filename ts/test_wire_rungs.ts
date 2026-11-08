@@ -39,8 +39,9 @@ namespace test_wire_rungs {
     first_id: 101,
     first_keys: Object.freeze(["settings", "switches"]),
     echo_type: "echo",
-    tail_type: "verbose.tail",
-    tail_thread: "server",
+    tail_type: "audit.tail",
+    record_type: "audit.line",
+    note_type: "audit.note",
     sync_type: "db.sync",
     restore_type: "db.restore",
     file_type: "db.file",
@@ -298,7 +299,7 @@ namespace test_wire_rungs {
         mcp: () => this.#mcp_run(),
         sync: () => this.#sync_run(),
         commits: () => this.#commits_run(),
-        verbose: () => this.#verbose_run(),
+        audit: () => this.#audit_run(),
         console: () => this.#console_run(),
         lines: () => this.#lines_run(),
         unknown: () => this.#unknown_run(),
@@ -310,7 +311,7 @@ namespace test_wire_rungs {
         initialize: (rung, replies) => this.#initialize_take(rung, replies),
         call: (rung, replies) => this.#call_take(rung, replies),
         sync: (rung, replies) => this.#sync_take(rung, replies),
-        verbose: (rung, replies) => this.#verbose_take(rung, replies),
+        audit: (rung, replies) => this.#audit_take(rung, replies),
         restart: (rung, replies) => this.#restart_take(rung, replies),
       };
       this.#names = this.#names_check(names);
@@ -649,36 +650,44 @@ namespace test_wire_rungs {
       return this.#pass("commits");
     }
 
-    // verbose: `verbose.tail` of the server's lines.
-    #verbose_run(): dispatch.Sleep {
-      const line = line_build(constants.tail_type, [], {
-        thread: constants.tail_thread,
-        count: gold_value("verbose_count"),
-      });
-      return this.#submit("verbose", "verbose", line);
+    // audit: a record and a note of the rung's own, then the audit's end.
+    #audit_run(): dispatch.Sleep {
+      const at = gold_value("audit_at");
+      const text = utility.json_text(gold_value("audit_line"));
+      const blob = jslb.blob_make(utility.utf8_encode(text));
+      const record = { sender: "ui", receiver: "ai", at };
+      const note = { thread: "ai", at, text: gold_value("audit_note") };
+      for (const line of [
+        line_build(constants.record_type, [blob], record),
+        line_build(constants.note_type, [], note),
+      ]) {
+        this.#tasks.line_notify(line, constants.server_owner);
+      }
+      const count = gold_value("audit_count");
+      const tail = line_build(constants.tail_type, [], { count });
+      return this.#submit("audit", "audit", tail);
     }
 
-    // The tail: only `lines`, at most the count, each a time and a text.
-    #verbose_take(rung: string, replies: lines.Line[]): undefined {
+    // The end: only `text`, the record laid out, then the note under it.
+    #audit_take(rung: string, replies: lines.Line[]): undefined {
       const reply = this.#reply_one(replies, constants.tail_type);
       const payload = jslb.payload_of(reply);
       const keys = utility.json_text(Object.keys(payload));
-      check(keys === '["lines"]', `the tail's payload has the keys ${keys}`);
-      const found = payload.lines;
-      const count = gold_value("verbose_count") as number;
-      check(
-        Array.isArray(found) && found.length <= count,
-        `the tail's lines are not a list of at most ${count}`,
+      check(keys === '["text"]', `the tail's payload has the keys ${keys}`);
+      const text = payload.text as string;
+      const body = (gold_value("audit_body") as string[]).join("\n");
+      const record = text.indexOf(`, ui to ai\n${body}\n\n`);
+      const note = text.indexOf(
+        `, note of ai\n  ${gold_value("audit_note")}\n\n`,
       );
-      for (const entry of found as { at: unknown; text: unknown }[]) {
-        check(
-          typeof entry === "object" &&
-            entry !== null &&
-            typeof entry.at === "number" &&
-            typeof entry.text === "string",
-          `the tail's line ${utility.json_text(entry)} lacks a time or text`,
-        );
-      }
+      check(
+        record >= 0,
+        `the tail ${utility.json_text(text)} lacks the record`,
+      );
+      check(
+        note > record,
+        `the tail ${utility.json_text(text)} lacks the note`,
+      );
       return this.#pass(rung);
     }
 

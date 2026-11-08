@@ -5,10 +5,10 @@
 // The line cases of the AI worker's bring up: `worker_ai.tap_start` in a fresh
 // worker as `boot.headless_worker` runs it, seen from the headless page's main
 // thread, a realm whose dispatch table holds none of the worker's handlers.
-// Every line of the server's lane goes to the test's end, but each
-// `verbose.put`, which goes to the driver uncompared, as its entries hold
-// clock readings. A request also goes to the scripted server, a second real
-// queue of thread `server`. The UI channel's `settings.set`, whose payload is
+// Every line of the server's lane goes to the test's end, but each line of
+// the audit, which goes to the driver uncompared, as its entries hold clock
+// readings. A request also goes to the scripted server, a second real queue of
+// thread `server`. The UI channel's `settings.set`, whose payload is
 // the whole of `tap.start`, is compared with the first line by value. Lines of
 // two channels keep no order between them, so no case expects lines of both.
 // The UI `fault` case is last, as the worker then closes itself.
@@ -20,7 +20,7 @@ namespace test_integrate_worker_ai {
     worker_thread: "ai" as const,
     put_type: "settings.put",
     notice_type: "settings.set",
-    verbose_type: "verbose.put",
+    audit_prefix: "audit.",
     reply_id: "typescript.test_integrate_worker_ai.lines.settings_put_reply",
     handler_version: 0,
   });
@@ -113,7 +113,8 @@ namespace test_integrate_worker_ai {
       server_port.line_post(line, []);
     });
     server_port.line_receive((line) => {
-      if (type_of(line) === constants.verbose_type) {
+      const type = String(type_of(line));
+      if (type.startsWith(constants.audit_prefix)) {
         relay(line);
         return;
       }

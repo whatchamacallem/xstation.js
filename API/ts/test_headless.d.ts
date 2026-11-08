@@ -14,7 +14,7 @@
 // `{clear}` with `wait_seconds` too when `clear` is false: the junction ends
 // the case before's worker and brings up a fresh one. Its other lines are held
 // until the worker sends `test_headless.worker_ready`. Every line of the
-// server lane goes to the test's end but `verbose.put`, and every line of the
+// server lane goes to the test's end but the audit's, and every line of the
 // UI channel but `settings.set`, which go to the driver. A `fault` line that
 // differs from the worker's `error` line, or has none by the worker's end,
 // goes to the driver, which fails the block.

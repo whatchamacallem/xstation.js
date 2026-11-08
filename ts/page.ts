@@ -46,7 +46,13 @@ namespace page {
     busy_type: "console.busy",
     idle_type: "console.idle",
     show_type: "console.show",
-    overlay_type: "overlay.line",
+    tail_type: "audit.tail",
+    tail_wake: "ui.audit_tail",
+    dump_type: "db.dump",
+    // The text that dumps both sides' databases before its turn, debug mode.
+    dump_text: "0",
+    audit_digit: 1,
+    ring_setting: "verbose_ring",
     handler_version: 0,
     choices: Object.freeze(["accept", "deny", "always"]),
     // The state of a turn's sleep: the input, enabled again when it ends.
@@ -84,8 +90,8 @@ namespace page {
 
   // The overlays as the handlers drive them.
   export interface OverlayControl {
-    line_add(tty: number, text: string): void;
-    overlay_toggle(tty: number): void;
+    text_show(tty: number, text: string): void;
+    overlay_toggle(tty: number): boolean;
   }
 
   // What the UI handlers work with: the queue, the elements and the parts.
@@ -119,7 +125,6 @@ namespace page {
       render: "ui",
       "media.": "ui",
       "permit.": "ui",
-      "overlay.": "ui",
       "console.": "ai",
       "console.output": "ui",
       "console.exit": "ui",
@@ -128,7 +133,7 @@ namespace page {
       "console.show": "ui",
       "ai.": "ai",
       "settings.put": "ai",
-      "verbose.": "ai",
+      "audit.": "ai",
       "tap.": "ai",
       "kv.": "ai",
       "doc.": "ai",
@@ -405,10 +410,16 @@ namespace page {
       });
     }
 
-    // Starts a turn with the player's text or click and closes the input.
+    // Starts a turn with the player's text or click, the text 0 dumping first.
     input_take(line: lines.Line): dispatch.Sleep {
-      const { tasks, input } = this.#parts;
+      const { tasks, input, debug } = this.#parts;
       const said = jslb.payload_of(line) as unknown as lines.UiInput;
+      if (debug && said.text === constants.dump_text) {
+        tasks.line_notify(
+          line_build(constants.dump_type, {}),
+          constants.ai_owner,
+        );
+      }
       const turn =
         said.text === undefined
           ? line_build(constants.click_type, { x: said.x, y: said.y })
@@ -430,17 +441,23 @@ namespace page {
       return undefined;
     }
 
-    // In debug mode toggles an overlay or the console, which asks for tty 0.
+    // In debug mode toggles an overlay, ctrl 1's asked of the server, or tty 0.
     key_take(line: lines.Line): dispatch.Sleep | undefined {
-      const { debug, view, overlays, input } = this.#parts;
+      const { debug, view, overlays, input, tasks } = this.#parts;
       const digit = jslb.payload_of(line).digit as number;
       // Outside debug mode the page gates the console and the overlays.
       if (!debug) {
         return undefined;
       }
       if (digit !== constants.console_digit) {
-        overlays.overlay_toggle(digit);
-        return undefined;
+        const shown = overlays.overlay_toggle(digit);
+        if (!shown || digit !== constants.audit_digit) {
+          return undefined;
+        }
+        const count = settings.settings_get(constants.ring_setting);
+        const tail = line_build(constants.tail_type, { count });
+        const id = tasks.task_submit(tail, constants.ai_owner);
+        return dispatch.task_sleep(null, [id], constants.tail_wake);
       }
       // A hidden console leaves the focus nowhere, so an open box takes it.
       if (!view.view_toggle() && !input.disabled) {
@@ -507,10 +524,11 @@ namespace page {
       return undefined;
     }
 
-    // Adds a rendered line to the overlay of its tty.
-    overlay_take(line: lines.Line): undefined {
-      const shown = jslb.payload_of(line) as unknown as lines.OverlayLine;
-      this.#parts.overlays.line_add(shown.tty, shown.text);
+    // Shows the end of the audit the server sent, while its overlay is shown.
+    tail_done(wake: lines.Line): undefined {
+      const [reply] = wake.replies as lines.Line[];
+      const tail = jslb.payload_of(reply) as unknown as lines.AuditTailReply;
+      this.#parts.overlays.text_show(constants.audit_digit, tail.text);
       return undefined;
     }
   }
@@ -561,9 +579,7 @@ namespace page {
     register(constants.exit_type, version, () => handlers.exit_take());
     register(constants.busy_type, version, () => handlers.busy_take());
     register(constants.idle_type, version, () => handlers.idle_take());
-    register(constants.overlay_type, version, (line) =>
-      handlers.overlay_take(line),
-    );
+    register(constants.tail_wake, version, (line) => handlers.tail_done(line));
   }
 
   // The stack of a fault followed by each cause's message and stack in turn.
@@ -637,12 +653,12 @@ namespace page {
       owners_make(),
       synchronous,
     );
-    tasks.sink_attach(
-      verbose.sink_set,
-      settings.settings_get,
-      switches.debug_on,
-    );
+    tasks.limit_attach(settings.settings_get);
     tasks.port_add(constants.ai_owner, new queue.ThreadPort(port));
+    if (switches.debug_on()) {
+      tasks.audit_attach();
+      tasks.audit_open();
+    }
     settings.sender_register((put: lines.SettingsPut) => {
       const line = line_build(constants.put_type, { settings: put.settings });
       tasks.line_notify(line, constants.ai_owner);

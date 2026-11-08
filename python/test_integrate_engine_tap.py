@@ -10,13 +10,13 @@
 # dispatcher, nothing written; a `tap.line` sent as a request appended, then
 # refused by the dispatcher for the reply it never gets; and the browser's
 # `error` line read by the decoder, its cascade of decoded objects handed to
-# `error_take` as the main loop hands it, logged in the root's real log and
-# read back from `_verbose`, and the bail out line ending the TypeScript
-# file. Each child writes how its work ended to a file, or to stderr when
-# that write fails, then kills itself.
+# `error_take` as the main loop hands it, outside debug mode, logged in the
+# root's real log and read back from `_verbose`, and the bail out line ending
+# the TypeScript file. Each child writes how its work ended to a file, or to
+# stderr when that write fails, then kills itself.
 
 import contextlib, engine_tap, functools, harness, json, os, signal, sqlite3
-import sys, tempfile, traceback, unittest
+import switches, sys, tempfile, traceback, unittest
 from collections.abc import Callable
 from typing import Any, NoReturn
 
@@ -33,9 +33,6 @@ _GOLD_ID = "python.test_integrate_engine_tap"
 _LINE_MAX: int = harness.setting_get("line_max")
 _BLOB_MAX: int = harness.setting_get("blob_max")
 _OVERFLOW_BYTES: int = harness.setting_get("overflow_bytes")
-
-# The lines the ring of a child's log holds, as the checkout sets it.
-_RING: int = harness.setting_get("verbose_ring")
 
 # The TAP lines of a run of two modules, in the shape the runner writes.
 _RUN_LINES = (
@@ -130,9 +127,10 @@ def _lines_serve(root: str, data: bytes) -> list[object]:
     ]
 
 
-# Child: opens the log, registers, hands `error_take` an `error`'s cascade.
+# Child: opens the log outside debug mode, hands `error_take` a cascade.
 def _failure_serve(root: str, data: bytes) -> None:
-    engine_tap.verbose.log_open(root, _RING, _BLOB_MAX)
+    switches.switches_apply({**switches.switches_get(), "debug": False})
+    engine_tap.verbose.log_open(root, _BLOB_MAX)
     engine_tap.handlers_register(root)
     (line,) = _lines_decode(data)
     payload = engine_tap.jslb.payload_of(line)

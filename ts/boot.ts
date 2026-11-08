@@ -67,7 +67,6 @@ namespace boot {
     platform: () => Promise<PoolParts>;
     cache_directory: string;
     cache_count: number;
-    overlay: boolean;
   }
 
   // What every start of the headless worker holds.
@@ -270,20 +269,18 @@ namespace boot {
     }
   }
 
-  // The test worker's platform, its wire's lines kept off the overlay.
+  // The test worker's platform.
   const test_plan = Object.freeze<WorkerPlan>({
     platform: () => platform_open(true),
     cache_directory: constants.test_cache_directory,
     cache_count: constants.test_slot_count,
-    overlay: false,
   });
 
-  // The engine worker's platform, its wire's lines shown on the overlay.
+  // The engine worker's platform.
   const engine_plan = Object.freeze<WorkerPlan>({
     platform: engine_open,
     cache_directory: constants.engine_cache_directory,
     cache_count: constants.engine_slot_count,
-    overlay: true,
   });
 
   // Opens the wire, and at `tap.start` readies the plan's platform and runs.
@@ -314,7 +311,6 @@ namespace boot {
             end: (line, done) => port.wire_end(line, done),
             ui: message.port,
             console: new wire.ConsolePort(base_url),
-            overlay: plan.overlay,
           };
           worker_ai.tap_start(parts, (tasks) => run(tasks, start));
         }),
@@ -347,7 +343,6 @@ namespace boot {
         ui: message.ui,
         // The headless page has no ttyd, so no tty 0.
         console: undefined,
-        overlay: false,
       };
       worker_ai.tap_start(parts, (tasks) => run(tasks, start));
     });

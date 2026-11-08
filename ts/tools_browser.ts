@@ -66,7 +66,8 @@ namespace tools_browser {
     permit_type: "permit.ask",
     write_type: "console.write",
     read_type: "console.read",
-    tail_type: "verbose.tail",
+    tail_type: "audit.tail",
+    tail_tool: "audit_tail",
     show_type: "console.show",
     busy_type: "console.busy",
     idle_type: "console.idle",
@@ -263,18 +264,18 @@ namespace tools_browser {
         _meta: { xsjs: { permit: true } },
       },
       {
-        name: "verbose_tail",
+        name: "audit_tail",
         description:
-          "The last lines of a thread's verbose ring: ui, ai or server." +
-          " count is a maximum, as a reply holds the newest lines that fit" +
-          " below line_max.",
+          "The end of the audit, the server's one document of every JSLB" +
+          " line in debug mode, laid out for a person: its newest whole" +
+          " entries, oldest first. count is a maximum, as a reply holds" +
+          " the newest entries that fit below line_max. Debug mode only.",
         inputSchema: {
           type: "object",
           properties: {
-            thread: { type: "string" },
             count: { type: "integer" },
           },
-          required: ["thread", "count"],
+          required: ["count"],
         },
       },
     ]),
@@ -639,12 +640,13 @@ namespace tools_browser {
           },
           args,
         ),
-      // Asks the server for the last lines of a thread and sleeps on them.
-      verbose_tail: (args) => {
-        const tail = line_build(constants.tail_type, {
-          thread: args.thread,
-          count: args.count,
-        });
+      // Asks the server for the end of the audit and sleeps on it.
+      audit_tail: (args) => {
+        if (!context.debug_on()) {
+          const name = constants.tool_prefix + constants.tail_tool;
+          return result_refused(i18n("tools_browser.debug_off", name));
+        }
+        const tail = line_build(constants.tail_type, { count: args.count });
         return context.request_sleep(
           tail,
           constants.server_owner,
@@ -750,9 +752,9 @@ namespace tools_browser {
         }
         return result_json({ output, timed_out });
       },
-      // Returns the lines the server sent.
+      // Returns the text the server sent.
       [constants.tail_wake]: (_state, replies) =>
-        result_json({ lines: reply_payload(replies).lines }),
+        result_text(reply_payload(replies).text as string),
     };
   }
 

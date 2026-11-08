@@ -196,6 +196,11 @@ def line_encode(line: Object) -> Iterator[bytes | str]:
     return iter(pieces)
 
 
+# The JSON text `line_encode` writes before the blob bytes, the CR left off.
+def line_json(line: Object) -> str:
+    return _line_text(line, len(_line_check(line, False)))
+
+
 # The JSON text of a line followed by one `<blob "n"=K>` tag per blob.
 def line_render(line: Object) -> str:
     count = len(_line_check(line, False))

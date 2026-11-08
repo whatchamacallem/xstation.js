@@ -18,8 +18,6 @@ namespace test_page {
     greeting: "How can I help you?",
     // The thread of the page's queue.
     thread: "ui" as const,
-    // The lines each overlay keeps, its writer's choice.
-    ring_lines: 3,
     // The media cache's budget and a download's seconds, their writer's.
     media_budget: 1000000,
     media_seconds: 10,
@@ -143,7 +141,7 @@ namespace test_page {
       this.assertEqual(owners["render"], "ui");
       this.assertEqual(owners["ui."], "ui");
       this.assertEqual(owners["dom."], "dom");
-      this.assertEqual(owners["verbose."], "ai");
+      this.assertEqual(owners["audit."], "ai");
       this.assertFalse(Object.hasOwn(owners, "boot."));
     }
 
@@ -424,7 +422,7 @@ namespace test_page {
         permit: elements.permit,
         images,
         view,
-        overlays: new overlay.Overlay(overlays, constants.ring_lines),
+        overlays: new overlay.Overlay(overlays),
         debug,
       },
       (type, _version, fn) => dispatch.handler_register(type, version, fn),
@@ -475,6 +473,45 @@ namespace test_page {
         gold_line("console_open_request"),
         gold_line("console_show_7_reply"),
       ]);
+    }
+
+    // In debug mode the text 0 asks for the dumps first, then is said.
+    test_dump_zero(): void {
+      const rig = this.rig_new(true);
+      const said = version_set(gold_line("ui_input_zero"), rig.version);
+      rig.dom.port.line_post(said, []);
+      this.assertEqual(rig.ai.came, [
+        gold_line("db_dump"),
+        gold_line("ai_say_zero"),
+      ]);
+    }
+
+    // Another text, or 0 outside debug mode, is said alone.
+    test_dump_other(): void {
+      const rig = this.rig_new(true);
+      const one = version_set(gold_line("ui_input_one"), rig.version);
+      rig.dom.port.line_post(one, []);
+      this.assertEqual(rig.ai.came, [gold_line("ai_say_one")]);
+      const plain = this.rig_new(false);
+      const zero = version_set(gold_line("ui_input_zero"), plain.version);
+      plain.dom.port.line_post(zero, []);
+      this.assertEqual(plain.ai.came, [gold_line("ai_say_zero")]);
+    }
+
+    // ctrl 1 asks for the audit's end as it shows, and not as it hides.
+    test_tail_asked(): void {
+      const rig = this.rig_new(true);
+      for (const name of ["control_key_1", "control_key_1", "control_key_2"]) {
+        rig.dom.port.line_post(version_set(gold_line(name), rig.version), []);
+      }
+      const asked = gold_line("audit_tail");
+      asked.count = harness.setting_get("verbose_ring");
+      this.assertEqual(rig.ai.came, [asked]);
+      const pres = Array.from(rig.overlays.children) as HTMLElement[];
+      this.assertEqual(
+        pres.map((pre) => pre.hidden),
+        [true, false],
+      );
     }
 
     // Outside debug mode the keys toggle nothing and ask for nothing.

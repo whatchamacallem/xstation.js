@@ -18,8 +18,6 @@ namespace test_worker_ai {
   const constants = Object.freeze({
     // A `blob_max` a test puts, a value chosen by its writer.
     put_blob_max: 7,
-    // The bytes of the payload of `{"text": ""}`, around the text.
-    text_payload_bytes: 11,
   });
 
   // An object of fields by name.
@@ -185,7 +183,8 @@ namespace test_worker_ai {
         "console.exit": "ui",
         "console.busy": "ui",
         "console.idle": "ui",
-        "verbose.": "server",
+        "audit.": "server",
+        "audit.tail": "ai",
         "tap.": "server",
         fault: "ai",
       });
@@ -211,140 +210,7 @@ namespace test_worker_ai {
     }
   }
 
-  // The tap that notes the wire's lines, whole or by their sizes.
-  export class TestWireTap extends unittest.TestCase {
-    // Each line is noted as sent or received and passes unchanged.
-    test_both_ways(): void {
-      const inner = new queue.LocalPort();
-      const far = end_link(inner);
-      const notes: string[] = [];
-      const tap = new worker_ai.WireTap(inner, (text) => {
-        notes.push(text);
-      });
-      const sent = gold_line("kv_list_first");
-      tap.line_post(sent, []);
-      this.assertTrue(far.came[0] === sent);
-      const taken: lines.Line[] = [];
-      tap.line_receive((line) => {
-        taken.push(line);
-      });
-      const received = gold_line("kv_list_reply");
-      far.port.line_post(received, []);
-      this.assertTrue(taken[0] === received);
-      this.assertEqual(notes, [
-        gold_text("worker_ai_overlay_sent_first"),
-        gold_text("worker_ai_overlay_received"),
-      ]);
-    }
-
-    // A line whose rendering would not fit a verbose entry is noted by sizes.
-    test_sizes_noted(): void {
-      const inner = new queue.LocalPort();
-      const far = end_link(inner);
-      const notes: string[] = [];
-      const tap = new worker_ai.WireTap(inner, (text) => {
-        notes.push(text);
-      });
-      const line_max = harness.setting_get("line_max") as number;
-      // A line of a payload text of `line_max` characters and a blob of 3.
-      const sized = (): lines.Line => {
-        const line = gold_line("kv_put_sized");
-        line.text = "x".repeat(line_max);
-        Object.assign(line[1] as lines.BlobHeader, { d: new Uint8Array(3) });
-        return line;
-      };
-      const sent = sized();
-      tap.line_post(sent, []);
-      this.assertTrue(far.came[0] === sent);
-      const taken: lines.Line[] = [];
-      tap.line_receive((line) => {
-        taken.push(line);
-      });
-      const received = sized();
-      far.port.line_post(received, []);
-      this.assertTrue(taken[0] === received);
-      const payload = String(line_max + constants.text_payload_bytes);
-      this.assertEqual(notes, [
-        gold_text("worker_ai_overlay_sent_sized").replaceAll("{1}", payload),
-        gold_text("worker_ai_overlay_received_sized").replaceAll(
-          "{1}",
-          payload,
-        ),
-      ]);
-    }
-
-    // The page's view forwarded as `verbose.put` passes and is not noted.
-    test_forward_unshown(): void {
-      const inner = new queue.LocalPort();
-      const far = end_link(inner);
-      const notes: string[] = [];
-      const tap = new worker_ai.WireTap(inner, (text) => {
-        notes.push(text);
-      });
-      for (const name of ["verbose_put_full", "verbose_put"]) {
-        const put = gold_line(name);
-        tap.line_post(put, []);
-        this.assertTrue(far.came[far.came.length - 1] === put);
-      }
-      const sent = gold_line("kv_list_second");
-      tap.line_post(sent, []);
-      this.assertEqual(far.came.length, 3);
-      this.assertEqual(notes, [gold_text("worker_ai_overlay_sent_second")]);
-    }
-
-    // A note goes to the overlay of tty 1 on the UI and to the log.
-    test_note_logged(): void {
-      const tasks = tasks_make();
-      const ui = lane_make(tasks, "ui");
-      const logged: string[] = [];
-      const note = worker_ai.note_make(tasks, (text) => {
-        logged.push(text);
-      });
-      const text = gold_text("worker_ai_overlay_sent_empty");
-      note(text);
-      this.assertEqual(ui.came.length, 1);
-      const [shown] = ui.came;
-      const expected = gold_line("overlay_line");
-      expected.text = text;
-      this.assertEqual(shown, expected);
-      this.assertEqual(full_of(shown), switches.debug_on());
-      this.assertEqual(logged, [text]);
-    }
-
-    // A tap on the overlay's note, as on the engine page, shows and logs.
-    test_overlay_noted(): void {
-      const tasks = tasks_make();
-      const ui = lane_make(tasks, "ui");
-      const logged: string[] = [];
-      const note = worker_ai.note_make(tasks, (text) => {
-        logged.push(text);
-      });
-      const inner = new queue.LocalPort();
-      const far = end_link(inner);
-      const tap = new worker_ai.WireTap(inner, note);
-      const taken: lines.Line[] = [];
-      tap.line_receive((line) => {
-        taken.push(line);
-      });
-      const sent = gold_line("kv_list_first");
-      tap.line_post(sent, []);
-      this.assertTrue(far.came[0] === sent);
-      const received = gold_line("kv_list_reply");
-      far.port.line_post(received, []);
-      this.assertTrue(taken[0] === received);
-      const texts = [
-        gold_text("worker_ai_overlay_sent_first"),
-        gold_text("worker_ai_overlay_received"),
-      ];
-      this.assertEqual(logged, texts);
-      this.assertEqual(
-        ui.came,
-        texts.map((text) => ({ ...gold_line("overlay_line"), text })),
-      );
-    }
-  }
-
-  // The relays of the UI's console close and of the settings.
+  // The relays of the UI's console close, of the settings and of the tail.
   export class TestRelays extends unittest.TestCase {
     // The UI's close closes the console port once and is answered at once.
     test_console_closed(): void {
@@ -390,6 +256,31 @@ namespace test_worker_ai {
       this.assertEqual(kept, [expected]);
       this.assertEqual(full_of(kept[0]), switches.debug_on());
       this.assertEqual(ui.came, []);
+      this.assertEqual(tasks.depth(), 0);
+    }
+
+    // The UI's `audit.tail` goes to the server, and its text comes back.
+    test_tail_relayed(): void {
+      const tasks = tasks_make();
+      const ui = lane_make(tasks, "ui");
+      const near = new queue.LocalPort();
+      const server = new queue.LocalPort(near);
+      const kept: lines.Line[] = [];
+      // The server's end: it keeps the request and answers it with the gold.
+      server.line_receive((line) => {
+        kept.push(line);
+        const reply = gold_line("audit_tail_reply");
+        server.line_post(
+          dispatch.reply_make(line, jslb.payload_of(reply)),
+          [],
+        );
+      });
+      tasks.port_add("server", near);
+      worker_ai.tail_register(tasks, dispatch.handler_register);
+      ui.port.line_post(gold_line("audit_tail_request"), []);
+      this.assertEqual(kept, [gold_line("audit_tail_copy")]);
+      this.assertEqual(full_of(kept[0]), switches.debug_on());
+      this.assertEqual(ui.came, [gold_line("audit_tail_answer")]);
       this.assertEqual(tasks.depth(), 0);
     }
   }
@@ -646,15 +537,14 @@ namespace test_worker_ai {
       this.assertTrue(Object.isFrozen(worker_ai));
       this.assertEqual(Object.keys(worker_ai).sort(), [
         "ConsoleWriter",
-        "WireTap",
         "console_attach",
         "console_register",
         "error_send",
         "fault_register",
-        "note_make",
         "owners_make",
         "settings_register",
         "synchronous_read",
+        "tail_register",
         "tap_start",
       ]);
     }

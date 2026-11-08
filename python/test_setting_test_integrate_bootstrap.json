@@ -23,18 +23,35 @@
         "type": "tap.start"
       }
     },
-    "tail_server": {
+    "ping": {
       "0": {
         "i": 1,
-        "t": "verbose.tail"
+        "t": "mcp"
       },
-      "count": 10,
-      "thread": "server"
+      "id": 1,
+      "jsonrpc": "2.0",
+      "method": "ping"
     },
-    "tail_server_reply": {
+    "ping_reply": {
       "0": {
         "r": 1,
-        "t": "verbose.tail"
+        "t": "mcp"
+      },
+      "id": 1,
+      "jsonrpc": "2.0",
+      "result": {}
+    },
+    "tail": {
+      "0": {
+        "i": 2,
+        "t": "audit.tail"
+      },
+      "count": 10
+    },
+    "tail_reply": {
+      "0": {
+        "r": 2,
+        "t": "audit.tail"
       }
     },
     "unknown_request": {
@@ -46,13 +63,8 @@
   },
   "read_bytes": 65536,
   "texts": {
-    "bootstrap_start_submit": "server submits to ai: {0}",
-    "dispatch_handler_unknown": "No handler is registered for type no.such version 0.",
-    "engine_tap_browser_cause": "caused by: first",
-    "engine_tap_browser_failed": "The browser failed: boom",
-    "main_loop_line_dispatch_tail": "server dispatches from ai: {\"0\":{\"i\":1,\"t\":\"verbose.tail\"},\"count\":10,\"thread\":\"server\"}",
-    "main_loop_line_dispatch_unknown": "server dispatches from ai: {\"0\":{\"i\":1,\"t\":\"no.such\"}}",
-    "main_loop_line_error": "server reports to ai: {0}",
-    "main_loop_serve_failed_unknown": "The server failed while serving the engine tty: No handler is registered for type no.such version 0."
+    "audit_received": "ai to server",
+    "audit_sent": "server to ai",
+    "dispatch_handler_unknown": "No handler is registered for type no.such version 0."
   }
 }

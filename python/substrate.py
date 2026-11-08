@@ -83,6 +83,59 @@ _DIGITS = re.compile(r"[0-9]+")
 # The names of the strings the schema's triggers raise.
 _TRIGGER_NAMES = ("agent.content_ambiguous",)
 
+# The `_kv` rows that are versions of documents, each saying if it is current.
+_VIEW_VERSIONS = (
+    "WITH stems AS (SELECT key, rtrim(key, '0123456789') AS stem FROM _kv),"
+    " versions AS (SELECT s.key AS key,"
+    " s.key = h.id || '/' || h.version AS current"
+    " FROM stems AS s JOIN _head AS h"
+    " ON h.id = substr(s.stem, 1, length(s.stem) - 1)"
+    " WHERE substr(s.stem, -1) = '/' AND s.key <> s.stem"
+    " AND substr(s.key, length(s.stem) + 1) NOT GLOB '0?*') "
+)
+
+# The rows of a view: every `_kv` row but the versions of documents, by key.
+_VIEW_ROWS = (
+    _VIEW_VERSIONS + "SELECT key, size, sha256, data FROM _kv"
+    " WHERE key NOT IN (SELECT key FROM versions) ORDER BY key"
+)
+
+# The count of the versions of documents that are not the current ones.
+_VIEW_HIDDEN = (
+    _VIEW_VERSIONS + "SELECT COUNT(*) FROM versions WHERE NOT current"
+)
+
+# The key of the current version of each document, by id.
+_VIEW_HEADS = "SELECT id || '/' || version FROM _head ORDER BY id"
+
+# The count of the turns and of the scenes they belong to.
+_VIEW_TURNS = "SELECT COUNT(*), COUNT(DISTINCT scene) FROM _turn"
+
+# The tables but the store's own, `?1`, and SQLite's, by name, with `wr`.
+_VIEW_TABLES = (
+    "SELECT s.name, l.wr FROM sqlite_schema AS s JOIN pragma_table_list AS l"
+    " ON l.schema = 'main' AND l.name = s.name WHERE s.type = 'table'"
+    " AND s.name NOT IN (SELECT value FROM json_each(?1))"
+    " AND s.name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY s.name"
+)
+
+# The columns of the table ?1 by `cid`, each with its place in the key.
+_VIEW_COLUMNS = (
+    "SELECT name, pk FROM pragma_table_info(?1, 'main') ORDER BY cid"
+)
+
+# The SQL of each object but the store's own tables, `?1`, and SQLite's.
+_VIEW_SCHEMA = (
+    "SELECT sql FROM sqlite_schema WHERE sql IS NOT NULL"
+    " AND NOT (type = 'table' AND name IN (SELECT value FROM json_each(?1)))"
+    " AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY name, type"
+)
+
+# A control character but tab, newline and return, or a byte not `UTF-8`.
+_BINARY_CHARACTER = re.compile(
+    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\udc80-\udcff]"
+)
+
 
 # A `_kv` row without its data.
 class KvRow(NamedTuple):
@@ -268,6 +321,44 @@ def _refs_restore(value: Any, refs: list[str]) -> Any:
     if isinstance(value, list):
         return [_refs_restore(item, refs) for item in cast(list[Any], value)]
     return value
+
+
+# A name as an SQL identifier, in double quotes.
+def _name_quote(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
+# The text of strict `UTF-8` bytes with no control but tab and line ends.
+def _text_shown(data: bytes) -> str | None:
+    text = data.decode("utf-8", "surrogateescape")
+    if _BINARY_CHARACTER.search(text) is not None:
+        return None
+    return text
+
+
+# A cell of a view's table: a BLOB as the object of its size, else as read.
+def _cell_view(cell: object) -> object:
+    if isinstance(cell, bytes):
+        return {"bytes": len(cell)}
+    return cell
+
+
+# A table of a view: its columns by `cid`, its rows by rowid or by its key.
+def _table_view(
+    connection: sqlite3.Connection, name: str, keyed: int
+) -> dict[str, object]:
+    info = connection.execute(_VIEW_COLUMNS, (name,)).fetchall()
+    columns: list[str] = [column for column, _ in info]
+    order = "rowid"
+    if keyed:
+        keys = sorted((place, column) for column, place in info if place > 0)
+        order = ", ".join(_name_quote(column) for _, column in keys)
+    selected = ", ".join(_name_quote(column) for column in columns)
+    cursor = connection.execute(
+        f"SELECT {selected} FROM main.{_name_quote(name)} ORDER BY {order}"
+    )
+    rows = [[_cell_view(cell) for cell in row] for row in cursor.fetchall()]
+    return {"name": name, "columns": columns, "rows": rows}
 
 
 # The URI that opens a database file with the query's mode.
@@ -630,6 +721,41 @@ class Store:
             self._cache_store(sha256, entry)
         self.db_open(db)
 
+    # The JSON value of `substrate.DbView` of API/ts for one database.
+    def db_view(self, db: str) -> dict[str, object]:
+        connection = self._connection_get(db)
+        own = json.dumps(sorted(_SCHEMA_TABLES))
+        rows = [
+            self._row_view(key, size, sha256, data)
+            for key, size, sha256, data in connection.execute(
+                _VIEW_ROWS
+            ).fetchall()
+        ]
+        heads = connection.execute(_VIEW_HEADS).fetchall()
+        documents: list[dict[str, object]] = []
+        for (key,) in heads:
+            ref = f"/{db}/{key}"
+            documents.append({"ref": ref, "body": self.doc_get(ref)})
+        tables = [
+            _table_view(connection, name, keyed)
+            for name, keyed in connection.execute(
+                _VIEW_TABLES, (own,)
+            ).fetchall()
+        ]
+        schema = [sql for (sql,) in connection.execute(_VIEW_SCHEMA, (own,))]
+        versions = connection.execute(_VIEW_HIDDEN).fetchone()[0]
+        turns, scenes = connection.execute(_VIEW_TURNS).fetchone()
+        return {
+            "db": db,
+            "rows": rows,
+            "documents": documents,
+            "tables": tables,
+            "schema": schema,
+            "versions_hidden": versions,
+            "turns_hidden": turns,
+            "scenes_hidden": scenes,
+        }
+
     # Runs `fn` inside `BEGIN IMMEDIATE`: commit on return, rollback on raise.
     def transaction_run(self, fn: Callable[[], Any]) -> Any:
         if self._joined is not None:
@@ -740,6 +866,25 @@ class Store:
                 os.remove(os.path.join(self._cache, name))
             except FileNotFoundError:
                 pass
+
+    # A row of a view: lost when its cache file is not held, else its kind.
+    def _row_view(
+        self, key: str, size: int, sha256: bytes, data: bytes | None
+    ) -> dict[str, object]:
+        row: dict[str, object] = {"key": key, "size": size}
+        if data is None:
+            path = self._cache_path(sha256)
+            if not os.path.isfile(path):
+                row["kind"] = "lost"
+                return row
+            data = _value_read(path)
+        text = _text_shown(data)
+        if text is None:
+            row["kind"] = "binary"
+        else:
+            row["kind"] = "text"
+            row["text"] = text
+        return row
 
     # Writes a row, its cache file first. A row of the same digest stays.
     def _row_write(

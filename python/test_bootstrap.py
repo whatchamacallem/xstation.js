@@ -7,12 +7,14 @@
 # the other side of the pty. The test main loop files, named by `--main-loop`
 # in debug mode, write their calls to files in the root; with no `--main-loop`
 # the stock main_loop.py answers a request. Each child writes how its run ended
-# to a file, then kills itself, so that the lock, the log and the loaded main
-# loop never reach another test.
+# to a file, then kills itself, so that the lock, the log, the audit and the
+# loaded main loop never reach another test. In debug mode a run's record is
+# the root's audit, read back by `audit.entries_read`, and outside debug mode
+# the root's log, `_verbose.sqlite`.
 
-import bootstrap, contextlib, errno, fcntl, harness, json, os, pty, resource
-import runpy, select, signal, sqlite3, switches, sys, tempfile, termios, time
-import traceback, unittest
+import audit, bootstrap, contextlib, errno, fcntl, harness, json, os, pty
+import resource, runpy, select, signal, sqlite3, switches, sys, tempfile
+import termios, time, traceback, unittest
 from typing import Any, NamedTuple
 
 # The checkout's top directory, above this file's `python/`.
@@ -87,6 +89,12 @@ _LOG_QUERY = "SELECT thread, text FROM line ORDER BY seq"
 
 # The thread the server's own lines are stored under in the log.
 _SERVER_THREAD = "server"
+
+# The file in the root that holds the audit.
+_AUDIT_NAME = "_audit.txt"
+
+# The header fields that count a line's blobs, short and full.
+_BLOB_FIELDS = ("b", "blobs")
 
 # The file name the test main loops are written under in the root.
 _LOOP_NAME = "test_loop.py"
@@ -268,21 +276,44 @@ def _line_bytes(name: str) -> bytes:
     return text.encode("utf-8") + b"\r"
 
 
-# The log line of the trace of `tap.start`, read back whole, in debug mode.
-def _trace_line(first: dict[str, Any]) -> tuple[str, str]:
-    text = json.dumps(first, ensure_ascii=False, separators=(",", ":"))
-    return (_SERVER_THREAD, _text_get("bootstrap_start_submit", text))
-
-
 # The log line of a failure with the message.
 def _failure_line(message: str) -> tuple[str, str]:
     return (_SERVER_THREAD, _text_get("bootstrap_run_failed", message))
 
 
-# The log line of the trace of an `error` line, as the pty gave it.
-def _error_line(line: dict[str, Any]) -> tuple[str, str]:
-    text = json.dumps(line, ensure_ascii=False, separators=(",", ":"))
-    return (_SERVER_THREAD, _text_get("bootstrap_line_error", text))
+# The label and body of the audit's entry of a line, laid out by `json`.
+def _record_entry(label: str, line: dict[str, Any]) -> tuple[str, str]:
+    body = json.dumps(line, ensure_ascii=False, indent=2)
+    blobs = 0
+    for field in _BLOB_FIELDS:
+        if field in line["0"]:
+            blobs = line["0"][field]
+    if blobs:
+        body += "\n" + _text_get("audit_blobs_omitted", str(blobs))
+    return (_text_get(label), body)
+
+
+# The entry of a line the run wrote, as the pty gave it.
+def _sent_entry(line: dict[str, Any]) -> tuple[str, str]:
+    return _record_entry("audit_sent", line)
+
+
+# The entry of a line the run read, its bytes as the test wrote them.
+def _received_entry(given: bytes) -> tuple[str, str]:
+    text, _, _ = given.partition(b"\r")
+    return _record_entry("audit_received", json.loads(text))
+
+
+# The entry of a note of console of the text, indented as the audit does.
+def _console_entry(text: str) -> tuple[str, str]:
+    return (_text_get("audit_console"), "  " + text)
+
+
+# The label and body of each entry of the root's audit, after one start.
+def _audit_read(case: unittest.TestCase, root: str) -> list[tuple[str, str]]:
+    entries = audit.entries_read(root)
+    case.assertEqual({entry.start for entry in entries}, {1})
+    return [(entry.label, entry.body) for entry in entries]
 
 
 # The thread and text of each line of the root's log, which must be open.
@@ -299,6 +330,17 @@ def _log_read(root: str) -> list[tuple[str, str]]:
 # Checks the run never opened the root's log.
 def _log_absent(case: unittest.TestCase, root: str) -> None:
     case.assertFalse(os.path.exists(os.path.join(root, _LOG_NAME)))
+
+
+# Checks the run never opened the root's audit.
+def _audit_absent(case: unittest.TestCase, root: str) -> None:
+    case.assertFalse(os.path.exists(os.path.join(root, _AUDIT_NAME)))
+
+
+# Checks the run opened neither the root's log nor its audit.
+def _records_absent(case: unittest.TestCase, root: str) -> None:
+    _log_absent(case, root)
+    _audit_absent(case, root)
 
 
 # Makes a scratch root: the checkout's settings, `debug` set.
@@ -603,7 +645,7 @@ class TestArguments(unittest.TestCase):
             self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
             self.assertTrue(child.raw_get())
             _raised_check(self, line, "argparse.ArgumentError")
-            _log_absent(self, made.root)
+            _records_absent(self, made.root)
 
     # A repeated `--root` or `--main-loop` is refused after raw mode.
     def test_option_repeated(self) -> None:
@@ -666,7 +708,7 @@ class TestLock(unittest.TestCase):
         self.assertEqual(line["stack"].count("Traceback"), 1)
         prepared = os.path.join(made.root, _PREPARE_NAME)
         self.assertFalse(os.path.exists(prepared))
-        _log_absent(self, made.root)
+        _records_absent(self, made.root)
         self.assertEqual(_lock_tried(made.root), b"taken")
 
     # A lock freed within the wait is taken, and the first line then comes.
@@ -739,8 +781,8 @@ class TestFirst(unittest.TestCase):
         self.assertEqual(first["settings"], made.settings)
         self.assertEqual(list(first["settings"]), list(made.settings))
         self.assertEqual(first["switches"], made.parameters)
-        child.bytes_write(_REPLY_SHORT + _line_bytes("tail_short"))
-        self.assertEqual(child.line_read(), _line_get("tail_short_reply"))
+        child.bytes_write(_REPLY_SHORT + _line_bytes("ping_short"))
+        self.assertEqual(child.line_read(), _line_get("ping_short_reply"))
         self.assertEqual(child.hangup(), _HUNG_UP)
 
     # In debug mode `tap.start` has full names and no gold.
@@ -775,9 +817,13 @@ class TestFirst(unittest.TestCase):
 
 # Tests the reply to `tap.start`, which must be the empty reply in either form.
 class TestReply(unittest.TestCase):
-    # Writes the reply, checks `tap.start`, the error line, no loop run.
+    # Writes the reply, checks the error line, no loop run, and the audit.
     def refusal_check(
-        self, made: ScratchRoot, given: bytes, expected: str
+        self,
+        made: ScratchRoot,
+        given: bytes,
+        expected: str,
+        received: list[tuple[str, str]],
     ) -> None:
         _loop_write(made.root, _LOOP_TEXT)
         argv = _engine_argv(made.root)
@@ -790,21 +836,24 @@ class TestReply(unittest.TestCase):
         self.assertEqual(_error_check(self, line), expected)
         self.assertFalse(os.path.exists(os.path.join(made.root, _RUN_NAME)))
         self.assertEqual(
-            _log_read(made.root),
-            [_trace_line(first), _failure_line(expected), _error_line(line)],
+            _audit_read(self, made.root),
+            [_sent_entry(first), *received, _sent_entry(line)],
         )
+        _log_absent(self, made.root)
 
-    # Each reply that is not the empty reply is refused, showing what came.
+    # Each reply that is not the empty reply is refused, recorded as it came.
     def test_reply_wrong(self) -> None:
         for given, case in _REPLIES_WRONG:
             expected = _text_get(f"bootstrap_reply_unexpected_{case}")
-            self.refusal_check(_root_make(self, True), given, expected)
+            received = [_received_entry(given)]
+            made = _root_make(self, True)
+            self.refusal_check(made, given, expected, received)
 
-    # A reply that is not JSON is refused by the decoder.
+    # A reply that is not JSON is refused by the decoder, never recorded.
     def test_reply_garbled(self) -> None:
         expected = _text_get("jslb_line_not_json")
         given = _GARBLED_TEXT.encode("utf-8") + b"\r"
-        self.refusal_check(_root_make(self, True), given, expected)
+        self.refusal_check(_root_make(self, True), given, expected, [])
 
     # Short replies, in either field order, to a full `tap.start` are taken.
     def test_reply_accepted(self) -> None:
@@ -830,9 +879,9 @@ class TestReply(unittest.TestCase):
         reply = {"0": header, "1": {"s": size}}
         given = json.dumps(reply, separators=(",", ":")).encode() + b"\r"
         expected = _text_get("bootstrap_reply_blob", str(size))
-        self.refusal_check(made, given, expected)
+        self.refusal_check(made, given, expected, [])
 
-    # An input that ends before the reply is logged, then one error line.
+    # An input that ends before the reply is one error line, both recorded.
     def test_reply_closed(self) -> None:
         made = _root_make(self, True)
         _loop_write(made.root, _LOOP_ENDED)
@@ -845,9 +894,10 @@ class TestReply(unittest.TestCase):
         expected = _text_get("bootstrap_reply_closed")
         self.assertEqual(_raised_check(self, line, "EOFError"), expected)
         self.assertEqual(
-            _log_read(made.root),
-            [_trace_line(first), _failure_line(expected), _error_line(line)],
+            _audit_read(self, made.root),
+            [_sent_entry(first), _sent_entry(line)],
         )
+        _log_absent(self, made.root)
 
 
 # Tests the choice and the loading of the main loop file.
@@ -913,9 +963,9 @@ class TestConsole(unittest.TestCase):
         child = EngineChild(self, made, argv, _CONSOLE_ENVIRONMENT)
         self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
         self.assertFalse(child.raw_get())
-        _log_absent(self, made.root)
+        _records_absent(self, made.root)
 
-    # A sandbox denied a process is logged, one error line, exit 1, never raw.
+    # A sandbox denied a process is noted, one error line, exit 1, never raw.
     def test_console_failed(self) -> None:
         made = _verbose_write(_root_make(self, True), False)
         argv = ["--root", made.root, "console"]
@@ -927,11 +977,10 @@ class TestConsole(unittest.TestCase):
         self.assertFalse(child.raw_get())
         message = _raised_check(self, line, "BlockingIOError")
         self.assertTrue(message.startswith(_SPAWN_REFUSED), message)
-        started = (_SERVER_THREAD, _text_get("verbose_exec_run"))
-        self.assertEqual(
-            _log_read(made.root),
-            [started, _failure_line(message), _error_line(line)],
-        )
+        started = _console_entry(_text_get("verbose_exec_run"))
+        failed = _console_entry(_text_get("bootstrap_run_failed", message))
+        self.assertEqual(_audit_read(self, made.root), [started, failed])
+        _log_absent(self, made.root)
 
     # A root outside `/home/`, which dash's sandbox hides, is refused first.
     def test_console_outside(self) -> None:
@@ -944,7 +993,7 @@ class TestConsole(unittest.TestCase):
         self.assertEqual(
             _error_check(self, line), _text_get("bootstrap_root_outside")
         )
-        _log_absent(self, made.root)
+        _records_absent(self, made.root)
 
     # The console role with `--main-loop` is refused, raw, before any shell.
     def test_console_loop(self) -> None:
@@ -957,7 +1006,7 @@ class TestConsole(unittest.TestCase):
         self.assertEqual(
             _error_check(self, line), _text_get("bootstrap_main_loop_refused")
         )
-        _log_absent(self, made.root)
+        _records_absent(self, made.root)
 
 
 # Tests the error line, which `jslb` encodes in full names.
@@ -975,9 +1024,9 @@ class TestError(unittest.TestCase):
         message = _raised_check(self, line, "FileNotFoundError")
         self.assertIn(path, message)
         self.assertEqual(list(line), ["0", "message", "stack"])
-        _log_absent(self, made.root)
+        _records_absent(self, made.root)
 
-    # Outside debug mode the error line is in full names and is not logged.
+    # Outside debug mode the error line is in full names, its message logged.
     def test_error_full(self) -> None:
         made = _root_make(self, False)
         _loop_write(made.root, _LOOP_TEXT)
@@ -988,6 +1037,7 @@ class TestError(unittest.TestCase):
         self.assertEqual(line["0"], _line_get("error")["0"])
         message = line["message"]
         self.assertEqual(_log_read(made.root), [_failure_line(message)])
+        _audit_absent(self, made.root)
 
 
 # Tests the root's parameters, which set the switches of the run.
@@ -1034,7 +1084,7 @@ class TestParameters(unittest.TestCase):
         self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
         expected = _text_get("switches_parameter_extra", path)
         self.assertEqual(_raised_check(self, line, "ValueError"), expected)
-        _log_absent(self, made.root)
+        _records_absent(self, made.root)
 
     # A root with no parameters file is refused, naming the file.
     def test_parameters_missing(self) -> None:
@@ -1046,7 +1096,7 @@ class TestParameters(unittest.TestCase):
         self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
         message = _raised_check(self, line, "FileNotFoundError")
         self.assertIn(path, message)
-        _log_absent(self, made.root)
+        _records_absent(self, made.root)
 
 
 # Returns the state `/proc/PID/stat` gives the process, after its name.
@@ -1079,10 +1129,10 @@ class TestHangup(unittest.TestCase):
         self.assertIn(repr(role), message)
 
 
-# Tests the lines the engine role writes to the root's log.
-class TestLog(unittest.TestCase):
-    # In debug mode the log traces `tap.start`, whatever the shell's level.
-    def test_first_traced(self) -> None:
+# Tests the record the engine role keeps: the audit or the root's log.
+class TestRecord(unittest.TestCase):
+    # In debug mode the audit holds `tap.start` and its reply, and no log.
+    def test_first_recorded(self) -> None:
         for verbose in (False, True):
             made = _verbose_write(_root_make(self, True), verbose)
             _loop_write(made.root, _LOOP_TEXT)
@@ -1091,19 +1141,24 @@ class TestLog(unittest.TestCase):
             first = child.line_read()
             child.bytes_write(_REPLY_FULL + _AFTER_REPLY)
             self.assertEqual(child.run_end(), (_ENDING_SERVED, b""))
-            self.assertEqual(_log_read(made.root), [_trace_line(first)])
+            self.assertEqual(
+                _audit_read(self, made.root),
+                [_sent_entry(first), _received_entry(_REPLY_FULL)],
+            )
+            _log_absent(self, made.root)
 
-    # Outside debug mode a run that does not fail logs nothing, at any level.
+    # Outside debug mode a run that does not fail logs nothing, no audit.
     def test_first_quiet(self) -> None:
         for verbose in (False, True):
             made = _verbose_write(_root_make(self, False), verbose)
             argv = ["--root", made.root]
             child = EngineChild(self, made, argv, _ENGINE_ENVIRONMENT)
             child.line_read()
-            child.bytes_write(_REPLY_SHORT + _line_bytes("tail_short"))
-            self.assertEqual(child.line_read(), _line_get("tail_short_reply"))
+            child.bytes_write(_REPLY_SHORT + _line_bytes("ping_short"))
+            self.assertEqual(child.line_read(), _line_get("ping_short_reply"))
             self.assertEqual(child.hangup(), _HUNG_UP)
             self.assertEqual(_log_read(made.root), [])
+            _audit_absent(self, made.root)
 
 
 # Tests the file run as a program, which is how ttyd starts it.

@@ -14,10 +14,10 @@
 // `provider.json` and, from its environment, which the serve program and ttyd
 // pass on, the variable the settings name, `XSJS_PROVIDER_KEY`. When
 // `provider.scripted` is false it pushes this line at once after the Empty
-// reply to `tap.start`, before the program sends anything. The wire's tap and
-// the server's log write it as its header only. The worker's handler sets the
-// key in the provider door, keeps the three names for the agent and the image
-// tool, and the `http` owner becomes the HTTP port with `timeout_seconds`.
+// reply to `tap.start`, before the program sends anything. The audit writes it
+// as its header only. The worker's handler sets the key in the provider door,
+// keeps the three names for the agent and the image tool, and the `http` owner
+// becomes the HTTP port with `timeout_seconds`.
 
 declare namespace lines {
   // Header 0: `t` type, `v` version, `i` id, `r` reply, `k` key, `b` blobs.
@@ -201,26 +201,32 @@ declare namespace lines {
     results: SqlResult[];
   }
 
-  interface VerboseLine {
+  // audit.line: a page thread's record of a line, its JSON text as blob 1.
+  interface AuditLine {
+    sender: queue.ThreadName;
+    receiver: queue.ThreadName;
+    at: number;
+  }
+
+  // audit.note: a page thread's note of what no line says, a task's sleep.
+  interface AuditNote {
+    thread: "ui" | "ai";
     at: number;
     text: string;
   }
 
-  interface VerbosePut {
-    thread: "ui" | "ai";
-    lines: VerboseLine[];
-  }
-
-  // verbose.tail: `count` is a maximum, as the reply stays below `line_max`.
-  interface VerboseTail {
-    thread: "ui" | "ai" | "server";
+  // audit.tail: the audit's newest entries, `count` a maximum, debug mode.
+  interface AuditTail {
     count: number;
   }
 
-  // The newest of those lines that fit, oldest first.
-  interface VerboseTailReply {
-    lines: VerboseLine[];
+  // The newest whole entries that fit one reply below `line_max`, in order.
+  interface AuditTailReply {
+    text: string;
   }
+
+  // db.dump: no payload, and on the wire blob 1 is the browser's views as JSON.
+  interface DbDump {}
 
   // tap.line: one line of the page's TAP stream, or of a `tap.run`'s.
   interface TapLine {
@@ -397,12 +403,6 @@ declare namespace lines {
 
   // console.busy and console.idle: the view takes no keys between the two.
   interface ConsoleTurn {}
-
-  // overlay.line: one rendered line of tty `tty` for the UI's ring.
-  interface OverlayLine {
-    tty: number;
-    text: string;
-  }
 
   // fault: a failure of a thread that stops it, its cascade under `cause`.
   interface Fault {

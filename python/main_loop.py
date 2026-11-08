@@ -12,17 +12,16 @@
 # the page waits for, since the page never closes on a failure. A
 # `dispatch.Failure` writes its reply, then fails with its error, whose `error`
 # line has no `r`, as its request is answered. A `dispatch.Stream` writes its
-# pushes in order, then its reply. A failure always logs its message, then
-# writes one `error` line with its cascade, in the name form of the line it
-# answers, else of the parameter `debug`, and exits 1. In debug mode each line
-# dispatched, push, reply and `error` is logged by `jslb.line_render`, or by
-# its sizes past one `verbose.put` below `line_max`, as a `verbose.put`
-# dispatched is, its entries being rows, and never by its blob bytes.
+# pushes in order, then its reply. A failure writes one `error` line with its
+# cascade, in the name form of the line it answers, else of the parameter
+# `debug`, and exits 1, its message logged first outside debug mode. In debug
+# mode the audit records each line read before it is dispatched, and each
+# push, reply and `error` before it is written, the audit's own lines never.
 
-import dispatch, engine_db, engine_doc, engine_kv, engine_mcp, engine_sql
-import engine_system, engine_tap, engine_turn, engine_verbose, functools, jslb
-import json, mcp, os, re, select, settings, substrate, switches, time, uuid
-import verbose
+import audit, dispatch, engine_audit, engine_db, engine_doc, engine_kv
+import engine_mcp, engine_sql, engine_system, engine_tap, engine_turn
+import functools, jslb, json, mcp, os, re, select, settings, substrate
+import switches, uuid, verbose
 from internationalization import i18n
 from typing import Any, NamedTuple, NoReturn, cast
 
@@ -132,15 +131,6 @@ _UNIVERSE_FIND = (
 # The line type of the browser's failure.
 _ERROR_TYPE = "error"
 
-# The line type that holds a thread's log entries, the measure of an entry.
-_VERBOSE_TYPE = "verbose.put"
-
-# The thread the server's log entries are stored under.
-_SERVER_THREAD = "server"
-
-# How many nanoseconds the clock counts in a millisecond.
-_NANOSECONDS_PER_MILLISECOND = 1_000_000
-
 # The name the server's MCP server gives in its `serverInfo`.
 _SERVER_NAME = "xsjs-server"
 
@@ -165,12 +155,11 @@ class _SeedFiles(NamedTuple):
     image: bytes
 
 
-# Where the loop writes, its chunk, and what its trace needs.
+# Where the loop writes, its chunk, and whether the audit records its lines.
 class _LoopOutput(NamedTuple):
     write_fd: int
     chunk: int
     debug: bool
-    line_max: int
 
 
 # The state of the module, which is empty until `loop_prepare` runs.
@@ -305,7 +294,7 @@ def _handlers_register(
     engine_db.handlers_register(store)
     engine_turn.handlers_register(store)
     engine_sql.handlers_register(store)
-    engine_verbose.handlers_register(debug, line_max)
+    engine_audit.handlers_register(debug, line_max, store)
     engine_tap.handlers_register(root)
     engine_system.handlers_register(root, debug)
     server = mcp.Server(_SERVER_NAME, _SERVER_VERSION)
@@ -342,97 +331,49 @@ def _line_write(line: jslb.Object, output: _LoopOutput) -> None:
             _file_copy(piece, output.write_fd, output.chunk)
 
 
-# Whether an entry of the text fits one `verbose.put` below `line_max`.
-def _entry_fits(text: str, line_max: int) -> bool:
-    at = time.time_ns() // _NANOSECONDS_PER_MILLISECOND
-    header = jslb.header_make(_VERBOSE_TYPE, full=True)
-    entries = [{"at": at, "text": text}]
-    put = jslb.line_make(header, [], thread=_SERVER_THREAD, lines=entries)
-    return len(jslb.line_render(put).encode("utf-8")) < line_max
-
-
-# The text of a line's header and the sizes of its payload and blobs.
-def _sizes_text(line: jslb.Object, sized: str) -> str:
-    payload = _json_text(jslb.payload_of(line)).encode("utf-8")
-    blobs = cast(list[jslb.Object], jslb.headers_of(line)[1:])
-    sizes = [jslb.field_get(blob, "size") for blob in blobs]
-    return i18n(sized, _json_text(line[0]), len(payload), _json_text(sizes))
-
-
-# Logs a line in debug mode: its rendering, or its sizes past one entry.
-def _line_trace(
-    line: jslb.Object, rendered: str, sized: str, output: _LoopOutput
-) -> None:
+# Writes a push, a reply or an `error` line, recorded first in debug mode.
+def _answer_write(answer: jslb.Object, output: _LoopOutput) -> None:
     if output.debug:
-        text = i18n(rendered, jslb.line_render(line))
-        if not _entry_fits(text, output.line_max):
-            text = _sizes_text(line, sized)
-        verbose.log(text)
+        audit.line_sent(answer)
+    _line_write(answer, output)
 
 
-# Traces a line dispatched: a `verbose.put`, whose rows hold it, by its sizes.
-def _dispatch_trace(line: jslb.Object, output: _LoopOutput) -> None:
-    sized = "main_loop.line_dispatch_sized"
-    if jslb.field_get(line[0], "type") != _VERBOSE_TYPE:
-        _line_trace(line, "main_loop.line_dispatch", sized, output)
-    elif output.debug:
-        verbose.log(_sizes_text(line, sized))
-
-
-# Writes a reply, traced in debug mode.
-def _reply_write(reply: jslb.Object, output: _LoopOutput) -> None:
-    _line_trace(
-        reply, "main_loop.line_reply", "main_loop.line_reply_sized", output
-    )
-    _line_write(reply, output)
-
-
-# Writes a push of a stream, traced in debug mode.
-def _push_write(push: jslb.Object, output: _LoopOutput) -> None:
-    _line_trace(
-        push, "main_loop.line_push", "main_loop.line_push_sized", output
-    )
-    _line_write(push, output)
-
-
-# Logs the message of a failure, traces and writes its `error` line, exits 1.
+# Writes the `error` line of a failure and exits 1, logged outside debug mode.
 def _failure_exit(
     line: jslb.Object | None, error: BaseException, output: _LoopOutput
 ) -> NoReturn:
-    verbose.log(i18n("main_loop.serve_failed", str(error)))
-    failure = dispatch.error_make(line, error, output.debug)
-    _line_trace(
-        failure, "main_loop.line_error", "main_loop.line_error_sized", output
-    )
-    _line_write(failure, output)
+    if not output.debug:
+        verbose.log(i18n("main_loop.serve_failed", str(error)))
+    _answer_write(dispatch.error_make(line, error, output.debug), output)
     raise SystemExit(_EXIT_FAILED) from error
 
 
-# Refuses a reply, dispatches the rest, and traces each line in debug mode.
+# Refuses a reply, dispatches the rest, and records each line in debug mode.
 def _line_serve(line: jslb.Object, output: _LoopOutput) -> None:
+    if output.debug:
+        audit.line_received(line)
     # The server awaits no reply, as the one to `tap.start` was bootstrap's.
     if jslb.field_get(line[0], "reply") is not None:
         raise LookupError(
             i18n("main_loop.reply_unknown", jslb.line_render(line))
         )
     if jslb.field_get(line[0], "type") == _ERROR_TYPE:
-        # The browser's failure: logged, its stream bailed out, no answer.
+        # The browser's failure: its stream bailed out, no answer.
         payload = jslb.payload_of(line)
         cause = payload["cause"] if "cause" in payload else None
         engine_tap.error_take(payload["message"], payload["stack"], cause)
         raise SystemExit(_EXIT_FAILED)
-    _dispatch_trace(line, output)
     result = dispatch.line_dispatch(line)
     if isinstance(result, dispatch.Failure):
-        _reply_write(result.reply, output)
+        _answer_write(result.reply, output)
         # The request is answered, so the failure is the server's own.
         _failure_exit(None, result.error, output)
     if isinstance(result, dispatch.Stream):
         for push in result.pushes:
-            _push_write(push, output)
-        _reply_write(result.reply, output)
+            _answer_write(push, output)
+        _answer_write(result.reply, output)
     elif result is not None:
-        _reply_write(result, output)
+        _answer_write(result, output)
 
 
 # Serves the lines one read finished, then feeds no bytes to raise a fault.
@@ -457,10 +398,8 @@ def loop_run(read_fd: int, write_fd: int, root: str) -> None:
     if prepared is None:
         raise RuntimeError(i18n("main_loop.not_prepared"))
     values = prepared.values
-    output = _LoopOutput(
-        write_fd, values["chunk_bytes"], switches.debug, values["line_max"]
-    )
-    _handlers_register(prepared.store, root, output.debug, output.line_max)
+    output = _LoopOutput(write_fd, values["chunk_bytes"], switches.debug)
+    _handlers_register(prepared.store, root, output.debug, values["line_max"])
     decoder = jslb.LineDecoder(
         values["line_max"],
         values["blob_max"],

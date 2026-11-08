@@ -1,0 +1,61 @@
+{
+  "record_line": {
+    "0": {"type": "kv.put", "blobs": 1},
+    "1": {"size": 3},
+    "key": "note",
+    "db": "metaverse"
+  },
+  "record_body": [
+    "{",
+    "  \"0\": {",
+    "    \"type\": \"kv.put\",",
+    "    \"blobs\": 1",
+    "  },",
+    "  \"1\": {",
+    "    \"size\": 3",
+    "  },",
+    "  \"key\": \"note\",",
+    "  \"db\": \"metaverse\"",
+    "}",
+    "[blobs omitted: 1]"
+  ],
+  "note_text": "sleeps on 4 until ai.model_reply",
+  "tail_notes": ["first note", "second note", "third note"],
+  "views": [
+    {
+      "db": "beta",
+      "rows": [{"key": "note", "size": 2, "kind": "text", "text": "yo"}],
+      "documents": [],
+      "tables": [],
+      "schema": [],
+      "versions_hidden": 0,
+      "turns_hidden": 0,
+      "scenes_hidden": 0
+    }
+  ],
+  "browser_body": [
+    "  database beta",
+    "    rows: 1",
+    "      note, 2 bytes",
+    "        yo",
+    "    documents: 0",
+    "    tables: 0",
+    "    schema: 0",
+    "    not shown: older document versions: 0, turns: 0, scenes with turns: 0"
+  ],
+  "server_body": [
+    "  database alpha",
+    "    rows: 1",
+    "      note, 2 bytes",
+    "        hi",
+    "    documents: 0",
+    "    tables: 0",
+    "    schema: 0",
+    "    not shown: older document versions: 0, turns: 0, scenes with turns: 0"
+  ],
+  "texts": {
+    "blob_missing": "The line audit.line carries no blob 1.",
+    "handler_unknown": "No handler is registered for type audit.note version 0.",
+    "not_registered": "The audit's handlers were called before they were registered."
+  }
+}

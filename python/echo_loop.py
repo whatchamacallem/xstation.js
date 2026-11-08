@@ -11,16 +11,16 @@
 # refuses any reply. The browser's `error` line, its failure, goes to
 # `engine_tap.error_take`, then the loop exits 1 with nothing written back:
 # the browser waits for the server to end, which ttyd's close of the socket
-# gives it. A `tap.line` is appended through `engine_tap`; the page's
-# `verbose.put` and `verbose.tail` are served through `engine_verbose`, as
-# the stock main loop serves them, since the page sends its threads' lines
-# in debug mode; and an `echo` is answered with the payload of its request
-# and the bytes of each of its blobs, a blob over overflow_bytes going
-# through a file in the root's cache directory both ways. A failure of its
-# own writes one error line and exits 1, as the stock main loop does.
+# gives it. A `tap.line` is appended through `engine_tap`; the page's debug
+# lines `audit.line`, `audit.note`, `audit.tail` and `db.dump` are served by
+# `engine_audit` on a store of no database, as the stock main loop serves
+# them; and an `echo` is answered with the payload of its request and the
+# bytes of each of its blobs, a blob over overflow_bytes going through a file
+# in the root's cache directory both ways. A failure of its own writes one
+# error line and exits 1, as the stock main loop does.
 
-import dispatch, engine_tap, engine_verbose, functools, jslb, os, select
-import settings, switches, uuid
+import dispatch, engine_audit, engine_tap, functools, jslb, os, select
+import settings, substrate, switches, uuid
 from internationalization import i18n
 from typing import Any, NoReturn, cast
 
@@ -125,7 +125,7 @@ def _bytes_serve(
                         i18n("echo_loop.reply_unknown", rendered)
                     )
                 if jslb.field_get(line[0], "type") == _ERROR_TYPE:
-                    # The browser failed: logged, the TAP file ended, exit 1.
+                    # The browser failed: the TAP file ended, exit 1.
                     payload = jslb.payload_of(line)
                     engine_tap.error_take(
                         payload["message"],
@@ -146,7 +146,8 @@ def loop_run(read_fd: int, write_fd: int, root: str) -> None:
     values = cast(dict[str, Any], _STATE.values)
     dispatch.handler_register(_ECHO_TYPE, _ECHO_VERSION, echo_reply)
     engine_tap.handlers_register(root)
-    engine_verbose.handlers_register(switches.debug, values["line_max"])
+    store = substrate.Store(root, values["overflow_bytes"], values["blob_max"])
+    engine_audit.handlers_register(switches.debug, values["line_max"], store)
     decoder = jslb.LineDecoder(
         values["line_max"],
         values["blob_max"],

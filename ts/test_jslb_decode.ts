@@ -57,10 +57,11 @@ namespace test_jslb_decode {
     overflow_bytes: number;
   }
 
-  // A sidecar: its limits, messages, renders, and fault or `canonical`.
+  // A sidecar: its limits, messages, JSON forms, renders, fault or canonical.
   interface VectorSidecar {
     limits: VectorLimits;
     messages: unknown[];
+    json: string[];
     render: string[];
     canonical?: boolean;
     error?: string;
@@ -1195,6 +1196,8 @@ namespace test_jslb_decode {
             this.assertEqual(JSON.stringify(plain), messages, name);
             const renders = found.map((line) => jslb.line_render(line));
             this.assertEqual(renders, sidecar.render, name);
+            const forms = found.map((line) => jslb.line_json(line));
+            this.assertEqual(forms, sidecar.json, name);
           }
         }
       }
@@ -1231,6 +1234,8 @@ namespace test_jslb_decode {
           this.assertEqual(JSON.stringify(plain), messages, name);
           const renders = found.map((line) => jslb.line_render(line));
           this.assertEqual(renders, sidecar.render, name);
+          const forms = found.map((line) => jslb.line_json(line));
+          this.assertEqual(forms, sidecar.json, name);
         }
       }
     }

@@ -1,0 +1,144 @@
+{
+  "at_local": [2026, 11, 7, 16, 49, 0],
+  "at_milliseconds": 123,
+  "time_text": "16:49:00.123",
+  "start_pattern": "^==== (engine|console) started, \\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{3}, process (\\d+) ====$",
+  "blob_line": {
+    "0": {"type": "kv.put", "blobs": 1},
+    "1": {"size": 3},
+    "key": "note",
+    "db": "metaverse"
+  },
+  "blob_body": [
+    "{",
+    "  \"0\": {",
+    "    \"type\": \"kv.put\",",
+    "    \"blobs\": 1",
+    "  },",
+    "  \"1\": {",
+    "    \"size\": 3",
+    "  },",
+    "  \"key\": \"note\",",
+    "  \"db\": \"metaverse\"",
+    "}",
+    "[blobs omitted: 1]"
+  ],
+  "plain_line": {
+    "0": {"t": "ai.say", "i": 7},
+    "text": "naïve 1"
+  },
+  "plain_body": [
+    "{",
+    "  \"0\": {",
+    "    \"t\": \"ai.say\",",
+    "    \"i\": 7",
+    "  },",
+    "  \"text\": \"naïve 1\"",
+    "}"
+  ],
+  "record_label": "ui to ai",
+  "received_label": "ai to server",
+  "sent_label": "server to ai",
+  "note_text": "sleeps on 4, 5 until ai.model_reply\nsecond line",
+  "note_label": "note of ai",
+  "note_body": ["  sleeps on 4, 5 until ai.model_reply", "  second line"],
+  "own_line": {"0": {"type": "audit.note"}, "thread": "ui", "at": 1, "text": "x"},
+  "dump_title": "databases of the browser",
+  "views": [
+    {
+      "db": "beta",
+      "rows": [
+        {"key": "big", "size": 2000, "kind": "lost"},
+        {"key": "image", "size": 3, "kind": "binary"},
+        {"key": "note", "size": 5, "kind": "text", "text": "hi\n\nyo"}
+      ],
+      "documents": [
+        {
+          "ref": "/beta/scene/2",
+          "body": {
+            "0": {"type": "scene"},
+            "subtitle": "x",
+            "1": "/beta/image",
+            "image": {"$ref": 1},
+            "exits": [{"to": "north", "by": "gate"}]
+          }
+        }
+      ],
+      "tables": [
+        {"name": "t", "columns": ["a", "b"], "rows": [[1, {"bytes": 4}], [null, "x"]]}
+      ],
+      "schema": [
+        "CREATE TABLE t (a, b)",
+        "CREATE TRIGGER t_insert AFTER INSERT ON t\nBEGIN\n    SELECT 1;\nEND"
+      ],
+      "versions_hidden": 1,
+      "turns_hidden": 2,
+      "scenes_hidden": 1
+    },
+    {
+      "db": "alpha",
+      "rows": [],
+      "documents": [],
+      "tables": [],
+      "schema": [],
+      "versions_hidden": 0,
+      "turns_hidden": 0,
+      "scenes_hidden": 0
+    }
+  ],
+  "dump_body": [
+    "  database alpha",
+    "    rows: 0",
+    "    documents: 0",
+    "    tables: 0",
+    "    schema: 0",
+    "    not shown: older document versions: 0, turns: 0, scenes with turns: 0",
+    "  database beta",
+    "    rows: 3",
+    "      big, 2000 bytes",
+    "        The value big names a cache file this store does not hold.",
+    "      image, 3 bytes",
+    "        [bytes omitted: 3]",
+    "      note, 5 bytes",
+    "        hi",
+    "",
+    "        yo",
+    "    documents: 1",
+    "      /beta/scene/2",
+    "        {",
+    "          \"0\": {",
+    "            \"type\": \"scene\"",
+    "          },",
+    "          \"1\": \"/beta/image\",",
+    "          \"exits\": [",
+    "            {",
+    "              \"by\": \"gate\",",
+    "              \"to\": \"north\"",
+    "            }",
+    "          ],",
+    "          \"image\": {",
+    "            \"$ref\": 1",
+    "          },",
+    "          \"subtitle\": \"x\"",
+    "        }",
+    "    tables: 1",
+    "      t: a, b",
+    "        [1, \"[bytes omitted: 4]\"]",
+    "        [null, \"x\"]",
+    "    schema: 2",
+    "      CREATE TABLE t (a, b)",
+    "      CREATE TRIGGER t_insert AFTER INSERT ON t",
+    "      BEGIN",
+    "          SELECT 1;",
+    "      END",
+    "    not shown: older document versions: 1, turns: 2, scenes with turns: 1"
+  ],
+  "full_blob_max": 200,
+  "texts": {
+    "audit_full": "The audit {0} holds {1} bytes, and an entry of {2} bytes would pass blob_max, {3} bytes.",
+    "audit_not_open": "The audit was used before it was opened.",
+    "audit_open_twice": "The audit is already open."
+  },
+  "process_entries": 300,
+  "hard_entries": 3
+}

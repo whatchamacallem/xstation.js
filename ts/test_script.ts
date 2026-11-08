@@ -126,7 +126,7 @@ namespace test_script {
   }
 
   // The text of each line, which leaves out the time.
-  function lines_shown(kept: lines.VerboseLine[]): string[] {
+  function lines_shown(kept: script.LogLine[]): string[] {
     return kept.map((line) => line.text);
   }
 

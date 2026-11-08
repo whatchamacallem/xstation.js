@@ -1,7 +1,7 @@
 // The AI worker once the boot has handed over its objects. `tap_start` calls
 // `run` in every mode, at once after the Empty reply and outside any task, so
-// it may notify but not submit. In debug mode the server's port is a
-// `WireTap`, which logs each line it carries but a `verbose.put`.
+// it may notify but not submit. In debug mode its audit opens once the Empty
+// reply, which the engine role reads first and alone, is out.
 //
 // The `ConsoleWriter` is tty 0's one writer, one command line at a time. It
 // knows tty 0 concluded when its output ends with the prompt `$ `, and running
@@ -37,19 +37,10 @@ declare namespace worker_ai {
     end: ServerEnd;
     ui: MessagePort;
     console: wire.ConsolePort | undefined;
-    // Whether the `WireTap` notes through `note_make`: the engine page alone.
-    overlay: boolean;
   }
 
   // The owner table of the AI thread.
   function owners_make(): queue.OwnerTable;
-
-  // The port that logs each line it carries both ways, then passes it on.
-  class WireTap implements queue.Port {
-    constructor(inner: queue.Port, note: (text: string) => void);
-    line_post(line: lines.Line, transfer: ArrayBuffer[]): void;
-    line_receive(fn: (line: lines.Line) => void): void;
-  }
 
   // Synchronous mode, from `queue_synchronous`, which needs debug mode.
   function synchronous_read(
@@ -62,6 +53,12 @@ declare namespace worker_ai {
     tasks: queue.TaskQueue,
     register: HandlerRegister,
     live: settings.Settings,
+  ): void;
+
+  // Relays the UI's `audit.tail` to the server and its reply back.
+  function tail_register(
+    tasks: queue.TaskQueue,
+    register: HandlerRegister,
   ): void;
 
   // tty 0's one writer: the AI's lines cut at newlines, the view's held.
@@ -84,12 +81,6 @@ declare namespace worker_ai {
     register: HandlerRegister,
     close: () => void,
   ): void;
-
-  // What takes each rendered line: an `overlay.line` of tty 1, then `log`.
-  function note_make(
-    tasks: queue.TaskQueue,
-    log: (text: string) => void,
-  ): (text: string) => void;
 
   // Sends the cascade as an `error` line by `end`, which calls `done`.
   function error_send(

@@ -526,6 +526,28 @@ namespace test_jslb {
     }
   }
 
+  // Tests `line_json`, the audit's text of a line.
+  export class TestJson extends unittest.TestCase {
+    // The JSON text the encoder writes, its CR and blob bytes left off.
+    test_json_blobs(): void {
+      const blobs = [jslb.blob_make(bytes_of("ab"), "k")];
+      const header = jslb.header_make("echo", { id: 1 });
+      const line = jslb.line_make(header, blobs, { n: 1 });
+      const encoded = utility.utf8_decode(
+        jslb.line_encode(line)[0] as Uint8Array,
+      );
+      this.assertEqual(jslb.line_json(line) + "\r", encoded);
+    }
+
+    // Bytes nested in a value become the marker of their size.
+    test_json_bytes(): void {
+      const header = jslb.header_make("echo");
+      const bytes = new Uint8Array(3);
+      const line = jslb.line_make(header, [], { rows: [[1, { b: bytes }]] });
+      this.assertEqual(jslb.line_json(line), gold_text("jslb_bytes_marked"));
+    }
+  }
+
   // Tests `json_decode`, the decoder's number rules on any JSON text.
   export class TestJsonDecode extends RefusalCase {
     // Any JSON value is returned, an array and a bare number too.
@@ -616,6 +638,7 @@ namespace test_jslb {
         "headers_of",
         "json_decode",
         "line_encode",
+        "line_json",
         "line_make",
         "line_render",
         "payload_of",

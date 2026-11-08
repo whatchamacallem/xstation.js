@@ -9,9 +9,9 @@
 # failing_suite.py, which fails by design. The lines sent and expected, the
 # texts, the suites run and the failing suite's counts are this module's gold.
 
-import contextlib, copy, harness, hashlib, jslb, json, os, shutil, signal
-import sqlite3, subprocess, switches, sys, tap_consumer, tap_tty, tempfile
-import time, unittest
+import audit, contextlib, copy, harness, hashlib, jslb, json, os, shutil
+import signal, sqlite3, subprocess, switches, sys, tap_consumer, tap_tty
+import tempfile, time, unittest
 from typing import Any, NoReturn
 
 # The checkout's top directory, above this file's `python/`.
@@ -74,8 +74,11 @@ _HALF_DIGIT = 0.05
 # The milliseconds in a second.
 _MILLISECONDS = 1000
 
-# The root's log, a database of its own.
-_LOG_DB = "_verbose"
+# The root's log, which a debug root never makes.
+_LOG_FILE = "_verbose.sqlite"
+
+# The root's audit, which the engine of a debug root opens past raw mode.
+_AUDIT_FILE = "_audit.txt"
 
 # The query of the hash and the value of one key.
 _VALUE_QUERY = "SELECT sha256, data FROM _kv WHERE key = ?"
@@ -91,15 +94,6 @@ _TURNS_QUERY = "SELECT scene, n, role, content FROM _turn ORDER BY n"
 
 # The query of the table the `sql.run` line makes.
 _TABLE_QUERY = "SELECT x FROM t"
-
-# The query of the lines of the log.
-_LOG_QUERY = "SELECT thread, text FROM line ORDER BY seq"
-
-# The query that finds the log's table, a row once the engine opened it.
-_LOG_FIND = "SELECT name FROM sqlite_schema WHERE type = 'table'"
-
-# The thread the server's own lines are stored under in the log.
-_SERVER_THREAD = "server"
 
 # The exit code of a hangup, minus the number of the signal that ended it.
 _HUNG_UP = -signal.SIGHUP
@@ -236,22 +230,20 @@ class ScratchCase(unittest.TestCase):
         ) as file:
             return file.read()
 
-    # The lines of the root's log, each its thread and its text.
-    def log_read(self) -> list[tuple[str, str]]:
-        rows: list[tuple[str, str]] = _rows_read(
-            self.root, _LOG_DB, _LOG_QUERY
-        )
-        return rows
+    # The label and body of each entry of the root's audit, with no log.
+    def audit_read(self) -> list[tuple[str, str]]:
+        log = os.path.join(self.root, _LOG_FILE)
+        self.assertFalse(os.path.exists(log), log)
+        entries = audit.entries_read(self.root)
+        return [(entry.label, entry.body) for entry in entries]
 
-    # Waits until the engine has opened the root's log, past its raw mode.
-    def log_wait(self) -> None:
-        path = os.path.join(self.root, _LOG_DB + ".sqlite")
+    # Waits until the engine has opened the root's audit, past its raw mode.
+    def audit_wait(self) -> None:
+        path = os.path.join(self.root, _AUDIT_FILE)
         deadline = time.monotonic() + _CHILD_SECONDS
-        while not (
-            os.path.exists(path) and _rows_read(self.root, _LOG_DB, _LOG_FIND)
-        ):
+        while not (os.path.exists(path) and os.path.getsize(path) > 0):
             if time.monotonic() > deadline:
-                raise AssertionError(f"no log in {_CHILD_SECONDS} s: {path}")
+                raise AssertionError(f"no audit in {_CHILD_SECONDS} s: {path}")
             time.sleep(_POLL_SECONDS)
 
 
@@ -265,9 +257,9 @@ class TestStock(ScratchCase):
         self.assertEqual(first["settings"], values)
         self.assertEqual(first["switches"], self.parameters)
         self.assertEqual(sorted(first), ["0", "settings", "switches"])
-        engine.bytes_write(_line_bytes("tail_ui"))
+        engine.bytes_write(_line_bytes("ping"))
         reply = _plain(engine.line_read())
-        self.assertEqual(reply, {**_line_get("tail_ui_reply"), "lines": []})
+        self.assertEqual(reply, _line_get("ping_reply"))
         self.assertEqual(engine.hangup(), _HUNG_UP)
         for name in _FIXED_DBS:
             path = os.path.join(self.root, name + ".sqlite")
@@ -286,9 +278,9 @@ class TestStock(ScratchCase):
                 "switches": self.parameters,
             },
         )
-        engine.bytes_write(_line_bytes("tail_short"))
+        engine.bytes_write(_line_bytes("ping_short"))
         reply = _plain(engine.line_read())
-        self.assertEqual(reply, _line_get("tail_short_reply"))
+        self.assertEqual(reply, _line_get("ping_short_reply"))
         self.assertEqual(engine.hangup(), _HUNG_UP)
 
     # A reply to the first line that is not the empty reply is refused.
@@ -314,13 +306,16 @@ class TestStock(ScratchCase):
             _line_bytes("doc_note"),
             _line_bytes("turn_note"),
             _line_bytes("sql_castle"),
-            _line_bytes("verbose_put"),
+            _line_bytes("audit_note"),
             _line_bytes("tap_line"),
-            _line_bytes("tail_ui"),
+            _line_bytes("ping"),
         ]
         engine.bytes_write(b"".join(pushes))
         reply = _plain(engine.line_read())
-        self.assertEqual(reply, _line_get("tail_ui_reply"))
+        self.assertEqual(reply, _line_get("ping_reply"))
+        note = _line_get("audit_note")
+        entry = (_text_get("note_label"), "  " + note["text"])
+        self.assertIn(entry, self.audit_read())
         rows = _rows_read(self.root, _CASTLE_DB, _VALUE_QUERY, _KEPT_KEY)
         self.assertEqual([data for _, data in rows], [kept.encode("utf-8")])
         rows = _rows_read(self.root, _FILES_DB, _KEY_QUERY, _PROVIDER_KEY)
@@ -386,16 +381,10 @@ class TestStock(ScratchCase):
             engine.line_read()
         self.assertEqual(engine.hangup(), _EXIT_FAILED)
         self.assertEqual(self.tap_read(), _text_get("bail_out") + "\n")
-        error = _line_get("browser_error")
-        texts = [
-            _text_get("engine_tap_browser_failed"),
-            error["stack"],
-            _text_get("engine_tap_browser_cause"),
-            error["cause"]["stack"],
-        ]
-        # The cascade is logged last, after the trace of the first line.
-        cascade = [(_SERVER_THREAD, text) for text in texts]
-        self.assertEqual(self.log_read()[-len(cascade) :], cascade)
+        # The audit records the error line last, as read, and nothing logs.
+        label, body = self.audit_read()[-1]
+        self.assertEqual(label, _text_get("received_label"))
+        self.assertEqual(json.loads(body), _line_get("browser_error"))
 
     # A handler's `Failure` writes its reply, then the server's error line.
     def test_failure_answered(self) -> None:
@@ -424,11 +413,10 @@ class TestStock(ScratchCase):
         values = self.root_make(True, None)
         engine = self.engine_run(values, None)
         self.start_answer(engine, True)
-        engine.bytes_write(_line_bytes("tail_ui"))
+        engine.bytes_write(_line_bytes("ping"))
         self.assertEqual(engine.hangup(), _HUNG_UP)
-        prefix = _text_get("failed_prefix")
-        for thread, text in self.log_read():
-            self.assertFalse(text.startswith(prefix), (thread, text))
+        for label, body in self.audit_read():
+            self.assertNotIn(_text_get("error_type"), body, label)
 
     # `mcp_stdio.py` serves the same root while the engine runs on it.
     def test_stdio_beside(self) -> None:
@@ -458,21 +446,21 @@ class TestStock(ScratchCase):
         )
         path = os.path.join(self.root, _LOOP_DIRECTORY, arguments["name"])
         self.assertEqual(_bytes_read(path), source)
-        engine.bytes_write(_line_bytes("tail_ui"))
+        engine.bytes_write(_line_bytes("ping"))
         reply = _plain(engine.line_read())
-        self.assertEqual(reply, {**_line_get("tail_ui_reply"), "lines": []})
+        self.assertEqual(reply, _line_get("ping_reply"))
         self.assertEqual(engine.hangup(), _HUNG_UP)
 
 
 # Tests the stall main loop on the tty: the hangup of a silent engine.
 class TestStall(ScratchCase):
-    # The engine that never writes its first line ends by SIGHUP, unlogged.
+    # The engine that never writes its first line ends by SIGHUP, unrecorded.
     def test_stall_hangup(self) -> None:
         values = self.root_make(True, _STALL_NAME)
         engine = self.engine_run(values, _STALL_NAME)
-        self.log_wait()
+        self.audit_wait()
         self.assertEqual(engine.hangup(), _HUNG_UP)
-        self.assertEqual(self.log_read(), [])
+        self.assertEqual(self.audit_read(), [])
 
 
 # Tests the TAP suite server on the tty: a stream relayed, a suite refused.

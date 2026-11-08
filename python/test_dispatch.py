@@ -391,19 +391,19 @@ class TestDispatch(ChildCase):
     # A notification whose handler returns nothing returns nothing.
     @_child_run
     def test_notification_none(self) -> None:
-        dispatch.handler_register("verbose.put", 0, _handler_make([]))
-        line = _gold_value("lines.verbose_put_text")
+        dispatch.handler_register("tap.line", 0, _handler_make([]))
+        line = _gold_value("lines.tap_line_text")
         self.assertIsNone(dispatch.line_dispatch(line))
 
     # A notification whose handler returns a reply raises.
     @_child_run
     def test_notification_reply(self) -> None:
-        reply = _gold_value("lines.verbose_put")
-        dispatch.handler_register("verbose.put", 0, _handler_make([], reply))
+        reply = _gold_value("lines.tap_line")
+        dispatch.handler_register("tap.line", 0, _handler_make([], reply))
         self.dispatch_check(
             ValueError,
-            _text_get("dispatch_notification_replied_verbose"),
-            _gold_value("lines.verbose_put"),
+            _text_get("dispatch_notification_replied_tap"),
+            _gold_value("lines.tap_line"),
         )
 
     # A request's `Failure` is returned, its reply given `r` as a reply is.
@@ -547,7 +547,7 @@ class TestError(unittest.TestCase):
 
     # The error line of a notification has no `r`.
     def test_notification_error(self) -> None:
-        notification = _gold_value("lines.verbose_put")
+        notification = _gold_value("lines.tap_line")
         error = _error_raise()
         error_line = dispatch.error_make(notification, error, False)
         expected = _error_expected("error", _entry_of(error))

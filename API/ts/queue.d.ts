@@ -10,14 +10,13 @@
 // own message is kept. An `error` line stops a queue with `queue.error_line`,
 // the line's `cause` entries rebuilt as Errors: the sender's whole cascade.
 //
-// In debug mode each timeline line, a submit, dispatch, notify, forward, reply,
-// receive, sleep or wake, holds its line by `jslb.line_render`, blob bytes
-// never shown; outside debug mode no line is rendered. A sleep holds the line
-// its handler ran. A wake line renders as its header, then as its payload each
-// reply, a space before each: its state is a task's memory on no lane, which
-// the renderer may refuse. Past `entry_fits`, `queue.line_sized` stands for the
-// rendering: the header and the sizes of the payload and blobs. It masks the
-// `Authorization` of `http.request` and the `token` of a `console.open` reply.
+// The audit, attached in debug mode alone: before each line it sends but to
+// the server, and each it receives from a port that is no queue, `http`,
+// `media`, `console` or `dom`, it posts an `audit.line` to the owner of
+// `audit.`, its blob the line's `jslb.line_json` with the `Authorization` of
+// `http.request` and the `token` of a `console.open` reply masked; at each
+// sleep an `audit.note` of the replies' ids and the wake's type. Neither is
+// posted before `audit_open`, and the audit's own lines are never recorded.
 
 declare namespace queue {
   // The owners a line can have: the threads, the server and the ports.
@@ -51,27 +50,6 @@ declare namespace queue {
   // The blob bytes a held line counts: its blobs whose `d` is bytes.
   function line_bytes(line: lines.Line): number;
 
-  // Whether a verbose line of the text fits one `verbose.put` of the thread.
-  function entry_fits(
-    thread: "ui" | "ai",
-    text: string,
-    line_max: number,
-  ): boolean;
-
-  // The verbose lines of a thread waiting to go out as `verbose.put` lines.
-  class VerboseBatch {
-    // Takes the thread, the reader of the settings and that of debug mode.
-    constructor(
-      thread: ThreadName,
-      settings_get: (id: string) => unknown,
-      debug_on: () => boolean,
-    );
-    // Keeps a line in debug mode while no batch is going out.
-    line_add(line: lines.VerboseLine): void;
-    // Posts the kept lines in order as `verbose.put` lines below `line_max`.
-    batch_send(post: (line: lines.Line) => void): void;
-  }
-
   class TaskQueue {
     // `synchronous` runs every task held before the next input is read.
     constructor(thread: ThreadName, owners: OwnerTable, synchronous: boolean);
@@ -85,11 +63,11 @@ declare namespace queue {
     line_forward(line: lines.Line): void;
     // The number of tasks waiting, running and sleeping.
     depth(): number;
-    // Installs the verbose sink, its settings and the reader of debug mode.
-    sink_attach(
-      sink_set: (fn: (line: lines.VerboseLine) => void) => void,
-      settings_get: (id: string) => unknown,
-      debug_on: () => boolean,
-    ): void;
+    // Installs the reader of the settings whose `blob_max` bounds what it holds.
+    limit_attach(settings_get: (id: string) => unknown): void;
+    // Records and notes as the header says, held until `audit_open`.
+    audit_attach(): void;
+    // Posts the held records and notes in order, and each later one at once.
+    audit_open(): void;
   }
 }

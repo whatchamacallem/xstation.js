@@ -53,6 +53,46 @@ namespace substrate {
     trigger_names: Object.freeze<readonly string[]>([
       "agent.content_ambiguous",
     ]),
+    // The `_kv` rows that are versions of documents, each saying if current.
+    view_versions:
+      "WITH stems AS (SELECT key, rtrim(key, '0123456789') AS stem" +
+      " FROM _kv)," +
+      " versions AS (SELECT s.key AS key," +
+      " s.key = h.id || '/' || h.version AS current" +
+      " FROM stems AS s JOIN _head AS h" +
+      " ON h.id = substr(s.stem, 1, length(s.stem) - 1)" +
+      " WHERE substr(s.stem, -1) = '/' AND s.key <> s.stem" +
+      " AND substr(s.key, length(s.stem) + 1) NOT GLOB '0?*') ",
+    // After those versions, every `_kv` row but the versions, by key.
+    view_rows:
+      "SELECT key, size, sha256, data FROM _kv" +
+      " WHERE key NOT IN (SELECT key FROM versions) ORDER BY key",
+    // After those versions, the count of those that are not the current.
+    view_hidden: "SELECT COUNT(*) FROM versions WHERE NOT current",
+    // The key of the current version of each document, by id.
+    view_heads: "SELECT id || '/' || version FROM _head ORDER BY id",
+    // The count of the turns and of the scenes they belong to.
+    view_turns: "SELECT COUNT(*), COUNT(DISTINCT scene) FROM _turn",
+    // The tables but the store's own, `?1`, and SQLite's, by name, with `wr`.
+    view_tables:
+      "SELECT s.name, l.wr FROM sqlite_schema AS s" +
+      " JOIN pragma_table_list AS l" +
+      " ON l.schema = 'main' AND l.name = s.name WHERE s.type = 'table'" +
+      " AND s.name NOT IN (SELECT value FROM json_each(?1))" +
+      " AND s.name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY s.name",
+    // The columns of the table `?1` by `cid`, each with its place in the key.
+    view_columns:
+      "SELECT name, pk FROM pragma_table_info(?1, 'main') ORDER BY cid",
+    // The SQL of each object but the store's own tables, `?1`, and SQLite's.
+    view_schema:
+      "SELECT sql FROM sqlite_schema WHERE sql IS NOT NULL" +
+      " AND NOT (type = 'table'" +
+      " AND name IN (SELECT value FROM json_each(?1)))" +
+      " AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY name, type",
+    // A control character but tab, newline and return.
+    control_character: /[\u{0}-\u{8}\u{b}\u{c}\u{e}-\u{1f}\u{7f}-\u{9f}]/u,
+    // The `UTF-8` decoder of a view's rows: bytes not `UTF-8` become `U+FFFD`.
+    view_decoder: new TextDecoder("utf-8", { ignoreBOM: true }),
     // The smallest magnitude Python's `repr` writes in fixed notation.
     fixed_min: 1e-4,
     // A database name, a C identifier.
@@ -82,6 +122,8 @@ namespace substrate {
     sink_prefix: "sink/",
     // The owner the push of each committed operation goes to.
     push_owner: "server" as const,
+    // The push of the views of every database, for the audit.
+    dump_type: "db.dump",
   });
 
   // A file of the cache held open for synchronous access, as OPFS gives it.
@@ -201,6 +243,39 @@ namespace substrate {
   export interface DbImage {
     data: Uint8Array;
     files: string[];
+  }
+
+  // A row of a view: its key and size, and its text unless it has none.
+  export interface ViewRow {
+    key: string;
+    size: number;
+    kind: "text" | "binary" | "lost";
+    text?: string;
+  }
+
+  // The current version of a document: its ref and its encoded body.
+  export interface ViewDocument {
+    ref: lines.DocRef;
+    body: lines.Document;
+  }
+
+  // A table of the scripts: its columns and its rows in order.
+  export interface ViewTable {
+    name: string;
+    columns: string[];
+    rows: unknown[][];
+  }
+
+  // A database as the AI's tools show it, its history counted.
+  export interface DbView {
+    db: string;
+    rows: ViewRow[];
+    documents: ViewDocument[];
+    tables: ViewTable[];
+    schema: string[];
+    versions_hidden: number;
+    turns_hidden: number;
+    scenes_hidden: number;
   }
 
   // What the store gives each committed operation to: the thread's queue.
@@ -683,6 +758,51 @@ namespace substrate {
       throw new Error(i18n("substrate.statement_many", saved.length, sql));
     }
     return { columns, rows, changes: database.changes(true) - before };
+  }
+
+  // A name as an SQL identifier, in double quotes.
+  function name_quote(name: string): string {
+    return `"${name.replaceAll('"', '""')}"`;
+  }
+
+  // The text of strict `UTF-8` bytes with no control but tab and line ends.
+  function text_shown(data: Uint8Array): string | undefined {
+    const text = constants.view_decoder.decode(data);
+    const encoded = utility.utf8_encode(text);
+    const same =
+      encoded.length === data.length &&
+      encoded.every((byte, index) => byte === data[index]);
+    if (!same || constants.control_character.test(text)) {
+      return undefined;
+    }
+    return text;
+  }
+
+  // A cell of a view's table: a BLOB as the object of its size, else as read.
+  function cell_view(cell: unknown): unknown {
+    return cell instanceof Uint8Array ? { bytes: cell.length } : cell;
+  }
+
+  // A table of a view: its columns by `cid`, its rows by rowid or by its key.
+  function table_view(
+    database: SqliteDatabase,
+    name: string,
+    keyed: boolean,
+  ): ViewTable {
+    const info = rows_select(database, constants.view_columns, [name]);
+    const columns = info.map((row) => row[0] as string);
+    const keys = info
+      .filter((row) => (row[1] as number) > 0)
+      .sort((first, second) => (first[1] as number) - (second[1] as number))
+      .map((row) => name_quote(row[0] as string));
+    const order = keyed ? keys.join(", ") : "rowid";
+    const selected = columns.map((column) => name_quote(column)).join(", ");
+    const rows = rows_select(
+      database,
+      `SELECT ${selected} FROM main.${name_quote(name)} ORDER BY ${order}`,
+      [],
+    );
+    return { name, columns, rows: rows.map((row) => row.map(cell_view)) };
   }
 
   // The payload of a line read as the shape its type gives it.
@@ -1294,6 +1414,45 @@ namespace substrate {
       }
     }
 
+    // The view of one database, from its rows, heads, tables and cache.
+    db_view(db: string): DbView {
+      const database = this.#connection_get(db);
+      const own = utility.json_text(constants.schema_tables);
+      const versions = constants.view_versions;
+      const rows = rows_select(
+        database,
+        versions + constants.view_rows,
+        [],
+      ).map((row) => this.#row_view(row));
+      const heads = rows_select(database, constants.view_heads, []);
+      const documents = heads.map((row) => {
+        const ref = `/${db}/${row[0] as string}`;
+        return { ref, body: this.doc_get(ref) };
+      });
+      const tables = rows_select(database, constants.view_tables, [own]).map(
+        (row) => table_view(database, row[0] as string, row[1] === 1),
+      );
+      const schema = rows_select(database, constants.view_schema, [own]).map(
+        (row) => row[0] as string,
+      );
+      const hidden = select_number(database, versions + constants.view_hidden);
+      const [turns, scenes] = rows_select(
+        database,
+        constants.view_turns,
+        [],
+      )[0] as [number, number];
+      return {
+        db,
+        rows,
+        documents,
+        tables,
+        schema,
+        versions_hidden: hidden,
+        turns_hidden: turns,
+        scenes_hidden: scenes,
+      };
+    }
+
     // Runs `fn` in one transaction: commit on return, roll back on a throw.
     transaction_run<T>(fn: () => T): T {
       if (this.#joined !== undefined) {
@@ -1739,6 +1898,25 @@ namespace substrate {
       return named;
     }
 
+    // A row of a view: lost when its cache file is not held, else its kind.
+    #row_view(row: unknown[]): ViewRow {
+      const [key, size, sha256, data] = row as [
+        string,
+        number,
+        Uint8Array,
+        Uint8Array | null,
+      ];
+      const hex = hex_of(sha256);
+      if (data === null && !this.#slots.name_held(hex)) {
+        return { key, size, kind: "lost" };
+      }
+      const text = text_shown(data ?? this.#slots.handle_bytes(hex));
+      if (text === undefined) {
+        return { key, size, kind: "binary" };
+      }
+      return { key, size, kind: "text", text };
+    }
+
     // The bytes of a value, read from the cache when it is held there.
     #value_bytes(value: KvValue): Uint8Array {
       return typeof value.data === "string"
@@ -1837,6 +2015,19 @@ namespace substrate {
             this.#restore_wait = undefined;
             this.db_restore(db, waiting.data, waiting.files);
           }
+          return undefined;
+        },
+        // Sends the view of every database, in name order, to the server.
+        "db.dump": () => {
+          const names = [...this.db_list()].sort();
+          const views = names.map((name) => this.db_view(name));
+          const header = jslb.header_make(constants.dump_type, {
+            full: settings.names_full(),
+          });
+          const text = utility.json_text(views);
+          const blob = jslb.blob_make(utility.utf8_encode(text));
+          const dump = jslb.line_make(header, [blob], {});
+          this.#tasks.line_notify(dump, constants.push_owner);
           return undefined;
         },
       };

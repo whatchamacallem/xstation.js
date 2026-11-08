@@ -3,24 +3,24 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# The demo test, which proves the engine page is ready for a person to view.
-# It makes a fresh debug root in build/test_demo-*/root and serves it through
-# the functions of xsjs_serve.py, so that what it proves is what the maintainer
-# runs, then drives chrome-headless-shell over DevTools as a person would:
-# clicks and keys reach the page as input events, and every reading is of the
-# page's elements. The analyst is the seed's scripted table, and no real AI
-# provider is contacted. A person's error, an input the table does not hold,
-# ends in her answer in the band, by the bad input rung. Each rung runs under
-# a timer and is labelled smoke-test or test-all, and a mislabel fails the run.
-# PNGs of the states go to build/test_demo/, which each run empties. The root
-# goes once the run passes and stays after a failure, with a PNG of the failed
-# rung. With --hold a failed rung leaves the page, keeps ttyd serving the root,
-# prints the address and waits for ctrl C, so that a person opens the failed
-# state in a browser, which a fresh load restores from the server. Its timers,
-# window size, texts and log table are in its gold, python.test_demo.
+# The demo test, which proves the engine page is ready for a person to view. It
+# serves a fresh debug root in build/test_demo-*/root through the functions of
+# xsjs_serve.py, as the maintainer serves one, and drives chrome-headless-shell
+# over DevTools as a person would: clicks and keys are input events, and every
+# reading is of the page's elements. The analyst is the seed's scripted table,
+# and no real AI provider is contacted. A person's error, an input the table
+# does not hold, ends in her answer in the band. Each rung runs under a timer
+# and is labelled smoke-test or test-all, and a mislabel fails the run. PNGs of
+# the states, a failed rung's among them, go to build/test_demo/, which each
+# run empties, and the root's audit as audit.txt when the page is left or a
+# rung fails. The root goes once the run passes and stays after a failure. With
+# --hold a failed rung leaves the page, keeps ttyd serving the root, prints the
+# address and waits for ctrl C, so that a person opens the failed state, which
+# a fresh load restores. Its timers, window size, texts and audit table are in
+# its gold, python.test_demo.
 
-import argparse, contextlib, os, shutil, signal, sqlite3, sys, tempfile, time
-import types
+import argparse, contextlib, json, os, re, shutil, signal, sqlite3, sys
+import tempfile, time, types
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING, cast
 
@@ -103,8 +103,24 @@ _CTRL_MODIFIER = 2
 # The digit of ctrl that toggles the console view.
 _CONSOLE_DIGIT = 0
 
-# The digit of ctrl that toggles the overlay of tty 1, the wire's.
+# The digit of ctrl that toggles the overlay of tty 1, the audit's end.
 _OVERLAY_DIGIT = 1
+
+# The root's audit, and its copy beside the PNGs.
+_AUDIT_NAME = "_audit.txt"
+_AUDIT_COPY = os.path.join(_PICTURE_PATH, "audit.txt")
+
+# The heading of each start of the engine role in the audit.
+_ENGINE_START = "==== engine started, "
+
+# The labels of the notes that only sleeps make, the page threads'.
+_SLEEP_LABELS = ("note of ui", "note of ai")
+
+# The text that follows a line's JSON in its entry when it carries blobs.
+_BLOBS_PATTERN = re.compile(r"\n\[blobs omitted: \d+\]")
+
+# A document listed in a dump: its database and id, then its version.
+_DOCUMENT_PATTERN = re.compile(r"^      (/[^/\s]+/[^/\s]+)/\d+$", re.MULTILINE)
 
 # The page as a person sees it, or its fault screen alone, as one JSON value.
 _STATE_SCRIPT = r"""(() => {
@@ -162,6 +178,7 @@ _STATE_SCRIPT = r"""(() => {
       overlay !== null && place(overlay).shown
         ? overlay.textContent.split("\n")
         : [],
+    overlay_text: overlay === null ? "" : overlay.textContent,
   };
 })()
 """
@@ -266,6 +283,8 @@ class DemoRun:
         script: str = values["powershell"]["bootstrap_script"]
         self.bootstrap = os.path.join(self.root, "python", script)
         self.ttyd: xsjs_serve.TtydServer | None = None
+        # The loads of the page, each a start of the engine in the audit.
+        self.loads = 0
 
     # Sleeps one poll, failing the rung once it has run out of its seconds.
     def poll_sleep(self, what: str) -> None:
@@ -352,10 +371,13 @@ class DemoRun:
         self.browser.screenshot_save(path)
         return path
 
-    # Saves the failed rung's PNG and, when asked, serves its root on.
+    # Saves the failed rung's PNG and audit, and when asked serves the root.
     def failure_take(self, failure: Exception, hold: bool) -> None:
         log = self.log
         log.timer_renew()
+        # A run that failed before the server started has no audit to copy.
+        if os.path.exists(os.path.join(self.root, _AUDIT_NAME)):
+            audit_copy(self.root)
         self.picture_save(_FAILED_PREFIX + log.rung.replace(" ", "_"))
         if hold and self.ttyd is not None:
             print(f"error: {log.rung}: {failure}", file=sys.stderr, flush=True)
@@ -416,6 +438,55 @@ def note_read(root: str) -> bytes | None:
     return None if row is None else cast(bytes, row[0])
 
 
+# Copies the root's audit beside the PNGs and returns the copy's path.
+def audit_copy(root: str) -> str:
+    shutil.copyfile(os.path.join(root, _AUDIT_NAME), _AUDIT_COPY)
+    return _AUDIT_COPY
+
+
+# The line of a line entry's body, which is its JSON, then its blobs counted.
+def body_line(entry: Any) -> dict[str, Any]:
+    try:
+        line, end = json.JSONDecoder().raw_decode(entry.body)
+    except json.JSONDecodeError as error:
+        raise CheckFailed(
+            f"the entry {entry.label} at {entry.time} holds no JSON:"
+            f" {entry.body!r}"
+        ) from error
+    rest = entry.body[end:]
+    if rest and _BLOBS_PATTERN.fullmatch(rest) is None:
+        raise CheckFailed(
+            f"the entry {entry.label} at {entry.time} ends {rest!r}"
+        )
+    return cast(dict[str, Any], line)
+
+
+# Whether an entry fits a row of the gold: its label, type or words, fragment.
+def entry_fits(entry: Any, row: dict[str, str]) -> bool:
+    if entry.label != row["label"]:
+        return False
+    if "type" in row and body_line(entry)["0"].get("type") != row["type"]:
+        return False
+    if "words" in row and row["words"] not in entry.body:
+        return False
+    return row.get("fragment", "") in entry.body
+
+
+# The bodies of the entries that fit the rows in their order, else None.
+def entries_ordered(root: str, rows: list[dict[str, str]]) -> list[str] | None:
+    import audit
+
+    bodies: list[str] = []
+    entries = iter(audit.entries_read(root))
+    for row in rows:
+        fitting = (entry for entry in entries if entry_fits(entry, row))
+        entry = next(fitting, None)
+        if entry is None:
+            return None
+        bodies.append(entry.body)
+    return bodies
+
+
 # Types a number and waits for the analyst's text of it in the band.
 def choice_take(run: DemoRun, number: str) -> str:
     text: str = gold_value(f"choices.{number}")
@@ -443,6 +514,7 @@ def rung_served(run: DemoRun) -> str:
         signal.pthread_sigmask(signal.SIG_SETMASK, held)
     address = run.ttyd.address_get()
     run.browser.page_open(address)
+    run.loads += 1
     remark: str = gold_value("remark")
     run.band_wait(remark)
     size: int = gold_value("picture_size")
@@ -472,6 +544,7 @@ def rung_reload(run: DemoRun) -> str:
     address = cast("xsjs_serve.TtydServer", run.ttyd).address_get()
     remark: str = gold_value("remark")
     run.browser.page_open(address)
+    run.loads += 1
     run.band_wait(remark)
     return (
         f"{address} loaded again at once and its first render shows"
@@ -574,7 +647,7 @@ def rung_choice_note(run: DemoRun) -> str:
     )
 
 
-# ctrl 0 hides and shows the view, and a command typed in it runs.
+# ctrl 0 hides and shows the view, a command runs in it, ctrl 0 hides it again.
 def rung_console(run: DemoRun) -> str:
     command: str = gold_value("hello_command")
     output: str = gold_value("hello_output")
@@ -591,59 +664,122 @@ def rung_console(run: DemoRun) -> str:
         f"the row {output!r}", lambda state: output in state["rows"]
     )
     png = run.picture_save("console")
+    run.control_press(_CONSOLE_DIGIT)
+    run.state_wait(
+        "the console view hidden and the box focused",
+        lambda state: not state["console_shown"] and state["input"]["focused"],
+    )
     return (
-        f"ctrl 0 hid the view and showed it again, and {command!r} typed in"
-        f" its terminal showed the row {output!r}; PNG {png}"
+        f"ctrl 0 hid the view and showed it again, {command!r} typed in its"
+        f" terminal showed the row {output!r}, and ctrl 0 hid it, the box"
+        f" taking the focus; PNG {png}"
     )
 
 
-# ctrl 1 shows the wire overlay with a sent and a received line, then hides it.
+# ctrl 1 shows the audit's end with the last turn, then hides and empties it.
 def rung_overlay(run: DemoRun) -> str:
-    sent: str = gold_value("overlay_sent")
-    received: str = gold_value("overlay_received")
+    fragments: list[str] = gold_value("overlay_fragments")
     run.control_press(_OVERLAY_DIGIT)
     state = run.state_wait(
-        f"the wire overlay with lines starting {sent!r} and {received!r}",
-        lambda state: (
-            any(line.startswith(sent) for line in state["overlay_lines"])
-            and any(
-                line.startswith(received) for line in state["overlay_lines"]
-            )
+        f"the audit's end on the overlay, holding {fragments}",
+        lambda state: all(
+            any(fragment in line for line in state["overlay_lines"])
+            for fragment in fragments
         ),
     )
     png = run.picture_save("overlay")
     run.control_press(_OVERLAY_DIGIT)
     run.state_wait(
-        "the wire overlay hidden", lambda state: not state["overlay_lines"]
+        "the overlay hidden and holding no text",
+        lambda state: (
+            not state["overlay_lines"] and state["overlay_text"] == ""
+        ),
     )
     return (
-        f"ctrl 1 showed the wire overlay, {len(state['overlay_lines'])} lines"
-        f" with a sent and a received one, and hid it; PNG {png}"
+        f"ctrl 1 showed the audit's end, {len(state['overlay_lines'])} lines"
+        f" holding {fragments}, and hid it, its text gone; PNG {png}"
     )
 
 
-# The log tool's function reads each fragment of the gold's table.
-def rung_log(run: DemoRun) -> str:
-    import xsjs_log
+# Typing 0 ends with its answer, and the audit holds both sides' dumps.
+def rung_dump(run: DemoRun) -> str:
+    text: str = gold_value("choices.0")
+    run.line_type("0")
+    run.state_wait(
+        f"{text!r} in the band, the box enabled and focused",
+        lambda state: (
+            state["subtitle"] == text
+            and not state["input"]["disabled"]
+            and state["input"]["focused"]
+        ),
+    )
+    rows: list[dict[str, str]] = gold_value("dump_entries")
+    while (bodies := entries_ordered(run.root, rows)) is None:
+        run.poll_sleep(f"the audit's entries {rows} of the input 0")
+    browser, server = bodies[2], bodies[3]
+    if browser != server:
+        raise CheckFailed(
+            f"the browser's dump {browser!r} differs from the server's"
+            f" {server!r}"
+        )
+    fragments: list[str] = gold_value("dump_fragments")
+    missing = [fragment for fragment in fragments if fragment not in browser]
+    if missing:
+        raise CheckFailed(f"the dumps lack {missing}: {browser!r}")
+    documents = _DOCUMENT_PATTERN.findall(browser)
+    if len(documents) != len(set(documents)):
+        raise CheckFailed(f"the dumps list an older version: {documents}")
+    return (
+        f"typing 0 ended with {text!r} in the band, the box enabled and"
+        f" focused, and the audit holds the input's {len(rows)} entries in"
+        f" order, the two dumps the same text, holding {fragments}, and"
+        f" {len(documents)} documents each of its current version alone"
+    )
 
-    rows: list[dict[str, str]] = gold_value("log")
-    for row in rows:
-        thread, fragment, jslb = row["thread"], row["fragment"], row["jslb"]
-        while not any(
-            jslb in entry.text
-            for entry in xsjs_log.lines_read(
-                run.root, thread=thread, grep=fragment
-            )
-        ):
-            run.poll_sleep(
-                f"a line of thread {thread} in the log holding {fragment!r}"
-                f" and {jslb!r}"
-            )
-    return f"the log holds the {len(rows)} fragments of the gold's table"
+
+# The audit holds the gold's table, no line of its own and notes of sleeps.
+def rung_audit(run: DemoRun) -> str:
+    import audit
+
+    rows: list[dict[str, str]] = gold_value("audit")
+    while missing := [
+        row
+        for row in rows
+        if not any(
+            entry_fits(entry, row) for entry in audit.entries_read(run.root)
+        )
+    ]:
+        run.poll_sleep(f"the audit's entries of {missing}")
+    entries = audit.entries_read(run.root)
+    sleep: str = gold_value("sleep_note")
+    for entry in entries:
+        if entry.label in _SLEEP_LABELS:
+            if not entry.body.startswith(sleep):
+                raise CheckFailed(f"a note is not of a sleep: {entry}")
+        elif entry.label.startswith("note of ") or " to " not in entry.label:
+            continue
+        elif str(body_line(entry)["0"].get("type")).startswith("audit."):
+            raise CheckFailed(f"the audit records its own line: {entry}")
+    with open(os.path.join(run.root, _AUDIT_NAME), encoding="utf-8") as file:
+        starts = sum(
+            line.startswith(_ENGINE_START) for line in file.read().split("\n")
+        )
+    if starts != run.loads:
+        raise CheckFailed(
+            f"the audit holds {starts} starts of the engine for"
+            f" {run.loads} loads"
+        )
+    return (
+        f"the audit's {len(entries)} entries hold the {len(rows)} rows of the"
+        f" gold's table, every line's body JSON, no line of the audit's own,"
+        f" each note of a page thread a sleep, and {starts} starts of the"
+        f" engine, one per load"
+    )
 
 
 # Leaving the page ends the server, then ttyd stops and the root goes.
 def rung_left(run: DemoRun) -> str:
+    copy = audit_copy(run.root)
     ttyd = cast("xsjs_serve.TtydServer", run.ttyd)
     programs = programs_find(ttyd.pid, run.bootstrap)
     if not programs:
@@ -658,8 +794,9 @@ def rung_left(run: DemoRun) -> str:
         raise CheckFailed(f"ttyd stopped with code {code}, not {due}")
     shutil.rmtree(run.work)
     return (
-        f"{_BLANK_URL} ended the page, the programs {programs} under ttyd"
-        f" ended, ttyd stopped with code {code} and the root went"
+        f"the audit was copied to {copy}, {_BLANK_URL} ended the page, the"
+        f" programs {programs} under ttyd ended, ttyd stopped with code"
+        f" {code} and the root went"
     )
 
 
@@ -680,7 +817,8 @@ def rungs_climb(run: DemoRun) -> None:
     log.rung_run("choice 2", _TEST_ALL, lambda: rung_choice_note(run))
     log.rung_run("console", _TEST_ALL, lambda: rung_console(run))
     log.rung_run("overlay", _TEST_ALL, lambda: rung_overlay(run))
-    log.rung_run("log", _SMOKE_TEST, lambda: rung_log(run))
+    log.rung_run("dump", _SMOKE_TEST, lambda: rung_dump(run))
+    log.rung_run("audit", _SMOKE_TEST, lambda: rung_audit(run))
     log.rung_run("left", _SMOKE_TEST, lambda: rung_left(run))
     log.book.root_leave()
 

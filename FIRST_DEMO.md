@@ -35,7 +35,7 @@ Each answer goes through the MCP tools and ends in the band:
 | 1 | Shows a subtitle through the `render` tool, then answers in text | The MCP request and result, the render on the UI lane, the turn's rows to the server |
 | 2 | Writes a note under the metaverse with `kv_put`, reads it back with `kv_get`, then answers | The same, plus the `kv.put` commit over the wire, which the server's database then holds |
 | 3 | Asks to run `echo hyperposition` in the console with `console_run`, then shows the output | The permit request with its Accept, Deny and Always Allow buttons, the console shown, dash in its sandbox, the output read back |
-| 0 | Answers in text, calling no tool | The provider request and reply only |
+| 0 | Answers in text, calling no tool; in debug mode both sides' databases go into the audit first, by AUDIT_PLAN.md | The provider request and reply, and in debug mode `db.dump` |
 
 The choices are the same at every step, so they can be taken in any order and
 as often as wanted. Any input the table does not hold, another number, a word,
@@ -49,14 +49,15 @@ asked and no console shows. After a Deny no console shows. In both the analyst
 says so honestly in the band, and the turn ends normally.
 
 1.5. ctrl 0 shows the console, dash in the bubblewrap sandbox, where the
-maintainer types too; ctrl 0 again hides it. ctrl 1 shows the overlay of the
-wire, every line sent and received on tty 1, rendered.
+maintainer types too; ctrl 0 again hides it. ctrl 1 shows the end of the
+audit, by AUDIT_PLAN.md.
 
-1.6. Everything that crossed any lane is in the root's `_verbose.sqlite`.
-`python3 python/xsjs_log.py ~/.cache/xsjs/root` prints the timeline, every
-line's full JSLB, from both threads of the page and from the server. The record
-belongs to one serve: each start of the serve program begins a new log, and the
-last serve's stays readable until then.
+1.6. In debug mode everything that crossed any lane is in the root's audit,
+by AUDIT_PLAN.md: `less ~/.cache/xsjs/root/_audit.txt` reads every JSLB line
+once, laid out for a person, from both threads of the page and from the server,
+with each task's sleep and the console's start and end. The record belongs to
+one serve: each start of the serve program begins a new audit, and the last
+serve's stays readable until then.
 
 1.7. Before 1.1, `python3 python/test_demo.py` proves the page is ready: it
 serves a fresh root the same way, drives chrome-headless-shell through DevTools
@@ -132,8 +133,8 @@ file in brackets for reference only.
 | R3 numbered choices | The scripted provider takes the decimal text of one integer as the player's message and walks a table of nodes (`ts/provider_script.ts`); the DOM port turns the box's text into `ui.input` and the UI handler into `ai.say` | The seed script is empty: one node with no replies (`python/seed/provider_script.json`). Nothing adds the scripted port to the worker's queue |
 | R4 end to end | Every lane is built and tested: DOM, UI thread, AI worker, provider port, MCP client and server, store, wire, ttyd, server store; the agent integration test runs a whole turn on real parts behind a test's own far ends | The same parts joined on the real page, with the real server at the far end |
 | R5 MCP talk | The `render` tool shows a subtitle; the agent runs every tool call of a reply and stores the reply with its results | A script that calls `render` and the other tools |
-| R6 log every line | In debug mode the wire's tap logs each wire line in full; each queue logs every submit, dispatch, notify, forward, reply, receive, sleep and wake; the server logs each dispatch and reply; the page's lines reach the server's `_verbose.sqlite` as `verbose.put` batches | The queues and the server log only the header of a line, so the ui-ai, provider, MCP, console, DOM and media lanes are recorded as types and ids, not as JSLB |
-| R7 scrutinize | The browser test reads `_verbose.sqlite` for its own checks; the `verbose_tail` tool reads a thread's ring | A program that prints the timeline for a person, with filters and a follow mode |
+| R6 log every line | In debug mode the wire's tap logs each wire line in full; each queue logs every submit, dispatch, notify, forward, reply, receive, sleep and wake; the server logs each dispatch and reply; the page's lines reach the server's `_verbose.sqlite` as `verbose.put` batches | The queues and the server log only the header of a line, so the ui-ai, provider, MCP, console, DOM and media lanes are recorded as types and ids, not as JSLB. The maintainer's R14 and R16 of AUDIT_PLAN.md replace it with the audit |
+| R7 scrutinize | The browser test reads `_verbose.sqlite` for its own checks; the `verbose_tail` tool reads a thread's ring | A program that prints the timeline for a person, with filters and a follow mode. The maintainer's R14 and R16 of AUDIT_PLAN.md replace it with the audit |
 | R8 consoles | The console view, tty 0, the console role's sandboxed dash, the writer, the console tools behind permits and the ctrl 0 and ctrl 1 keys, all tested in group C | The console on the real page, in the demo and its test |
 | R9, R11 DevTools | The DevTools client and the pipe to chrome-headless-shell (`python/devtools.py`), used by the driver, the browser test and the screenshot suite | A driver of the demo |
 | R10 debug stories | The fault screen with cascades, the overlays, the console, the verbose rings, the trace of synchronous loads, the pause of a worker in the debugger | Section 4.8 names each story and what it is for |
@@ -361,6 +362,10 @@ so it follows `after_tools`.
 
 ### 4.5. Every line on every lane, recorded
 
+AUDIT_PLAN.md replaces this section: the timeline, the wire tap, the overlay of
+tty 1 and `_verbose.sqlite` in debug mode are gone, and the audit,
+`_audit.txt`, records each line once.
+
 4.5.1. The lanes a turn crosses: ui-dom, ui-media, ui-ai, the worker's own
 lines to itself, the `mcp` lines between the agent and the browser's MCP
 server, ai-http to the scripted provider, ai-console to tty 0, ai-server over
@@ -492,19 +497,21 @@ from inside the AI endpoint is not among them.
    state in `build/test_demo/`, or the first failed rung by name, its picture,
    the kept root and, with `--hold`, the page served for a look.
 2. Serve it: `python3 python/xsjs_serve.py --debug`, the address, ttyd's log on
-   stderr, ctrl C to stop. Each start begins a new log, which is also the cure
-   for a log that has filled.
-3. Read the timeline: `python3 python/xsjs_log.py ROOT`, every line of every
-   lane in the order the server took them, filtered by thread, type or text,
-   or followed as it grows. This is the one record of a serve, readable until
-   the next start of the serve program removes it: what the UI thread sent the
-   worker, what the worker asked the provider, what the provider answered,
-   each tool call and result, each commit, each reply.
-4. On the page: ctrl 1 shows the wire overlay; ctrl 0 shows the console,
+   stderr, ctrl C to stop. Each start begins a new audit, which is also the
+   cure for an audit that has filled.
+3. Read the audit, by AUDIT_PLAN.md: `less ~/.cache/xsjs/root/_audit.txt`, or
+   `build/test_demo/audit.txt` after a demo test, every line of every lane
+   once, each task's sleep and the console's start and end, laid out for a
+   person, in the order the server learned of it; `tail -f` follows it; typing
+   0 adds both sides' databases at that moment. This is the one record of a
+   serve, readable until the next start of the serve program removes it: what
+   the UI thread sent the worker, what the worker asked the provider, what the
+   provider answered, each tool call and result, each commit, each reply.
+4. On the page: ctrl 1 shows the end of the audit; ctrl 0 shows the console,
    where the maintainer or the AI runs commands in the sandboxed dash; a fault
    replaces the screen with its message, its stack and each cause's, with a
-   Reload, and the same cascade is in the server's log.
-5. From the AI's side: the `verbose_tail` tool reads a thread's ring, the
+   Reload, and the same cascade is in the audit's `error` line.
+5. From the AI's side: the `audit_tail` tool reads the end of the audit, the
    `script_debug` tool traces every store call of a script, and `console_run`
    runs a command behind the permit.
 6. From DevTools by hand: a scratch driver through the DevTools client opens
@@ -803,7 +810,7 @@ only the new `api_match.py` had two lines, which a test then reached, and
 | R4 end to end | D | 4.1 to 4.4, 5.3 |
 | R5 the fake AI talks through MCP | D | 4.4 |
 | R6 log all the JSLB | B | 4.5.2: a line whose entry would not fit one `verbose.put` below `line_max` is recorded as its header and sizes, as the wire's tap does today, since the page's lines leave the browser only as `verbose.put` lines under `line_max` |
-| R7 scrutinize | D | 4.5.4, 4.8 |
+| R7 scrutinize | D | 4.5.4, 4.8. The maintainer's R14 and R16 of AUDIT_PLAN.md replace it with the audit |
 | R8 consoles in the smoke test | D | 4.4 choice 3, 4.7 |
 | R9 debug through DevTools | D | 4.7, 4.8 |
 | R10 best debug stories | D | 4.8 |

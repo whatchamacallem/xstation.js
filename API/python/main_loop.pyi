@@ -11,13 +11,12 @@
 # close the page waits for. A `dispatch.Failure` writes its reply, then fails
 # with its error, whose `error` line has no `r`, as its request is answered.
 # A `dispatch.Stream` writes its pushes in order, then its reply. A failure
-# logs its message, writes one `error` line with its cascade, in the name form
-# of the line it answers, else of the parameter `debug`, and exits 1. In debug
-# mode `jslb.line_render` logs each line dispatched, push, reply and `error`,
-# never its blob bytes, as `main_loop.line_dispatch`, `line_push`, `line_reply`
-# and `line_error`. An entry past one `verbose.put` of thread `server` below
-# `line_max` is logged by their `_sized` strings: its header, payload size and
-# blob sizes, as a `verbose.put` dispatched is.
+# writes one `error` line with its cascade, in the name form of the line it
+# answers, else of the parameter `debug`, and exits 1; outside debug mode it
+# logs its message first. In debug mode the audit records each line read, as
+# `ai to server`, before it is dispatched, and each push, reply and `error`,
+# as `server to ai`, before it is written; the audit's own lines, every type
+# under `audit.`, are never recorded.
 
 # Prepares the root once, before the first line.
 def loop_prepare(root: str) -> None: ...

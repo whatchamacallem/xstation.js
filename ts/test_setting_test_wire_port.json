@@ -40,9 +40,9 @@
         "t": "mcp"
       }
     },
-    "notice_verbose_put": {
+    "notice_tap_line": {
       "0": {
-        "t": "verbose.put"
+        "t": "tap.line"
       }
     },
     "put": {
@@ -82,7 +82,7 @@
     "wire_line_over_posted": "The mcp line of {1} bytes is over the line_max of 64.",
     "wire_message_empty": "ttyd sent an empty message.",
     "wire_open_twice": "The socket ws://127.0.0.1:7681/ws is open or opening already.",
-    "wire_post_early": "Cannot post verbose.put before tap.start has arrived.",
+    "wire_post_early": "Cannot post tap.line before tap.start has arrived.",
     "wire_receiver_missing_start": "A tap.start line arrived with no receiver set.",
     "wire_receiver_twice_close": "close_receive was called twice.",
     "wire_receiver_twice_first": "first_receive was called twice.",

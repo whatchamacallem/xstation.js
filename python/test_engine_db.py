@@ -46,9 +46,6 @@ _OVERFLOW_BYTES: int = harness.setting_get("overflow_bytes")
 # The largest database file the store lets grow, the checkout's setting.
 _BLOB_MAX: int = harness.setting_get("blob_max")
 
-# The lines of the log's ring, the checkout's setting.
-_RING: int = harness.setting_get("verbose_ring")
-
 # The databases of a sync, made out of name order.
 _SYNC_MADE = ("keep", "castle", "_files")
 
@@ -398,7 +395,7 @@ class TestSync(ScratchCase):
     # In the child: the log's file refuses the store and goes unnamed.
     def log_check(self) -> None:
         store = self.store_register()
-        verbose.log_open(self.root, _RING, _BLOB_MAX)
+        verbose.log_open(self.root, _BLOB_MAX)
         line = _gold_value("lines.create_log")
         self.assertTrue(os.path.isfile(self.database_path(line["db"])))
         with self.assertRaises(FileExistsError):

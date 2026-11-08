@@ -252,6 +252,7 @@ namespace test_substrate {
           "db_open",
           "db_restore",
           "db_snapshot",
+          "db_view",
           "doc_get",
           "doc_head",
           "doc_put",

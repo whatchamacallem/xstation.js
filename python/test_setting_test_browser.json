@@ -38,10 +38,8 @@
   "texts": {
     "bootstrap_lock_held": "Another engine holds the lock {0}.",
     "dispatch_handler_unknown": "No handler is registered for type rung.unknown version 0.",
-    "engine_tap_browser_failed": "The browser failed: {0}",
     "http_fetch_failed": "The request to {0} failed: {1}",
     "http_timeout_expired": "The request to {0} did not finish within 2 seconds.",
-    "verbose_sink_twice": "A sink is already set for the verbose lines of this thread.",
     "wire_blobs_over": "The blobs of the kv.put line come to {1} bytes, over the blob_max of {2}.",
     "wire_close_silent": "connection closed with code 1006 and no error line",
     "wire_error_first": "The server sent an error before tap.start: Another engine holds the lock {0}.\n{1}",

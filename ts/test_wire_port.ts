@@ -274,7 +274,7 @@ namespace test_wire_port {
     test_post_early(): void {
       const port = port_make();
       const message = message_thrown(this, () =>
-        port.line_post(gold_line("notice_verbose_put"), []),
+        port.line_post(gold_line("notice_tap_line"), []),
       );
       this.assertEqual(message, gold_text("wire_post_early"));
     }
@@ -488,7 +488,7 @@ namespace test_wire_port {
         port.line_post(gold_line("restart"), []),
       );
       this.assertEqual(message, gold_text("wire_socket_missing_wire"));
-      port.line_post(gold_line("notice_verbose_put"), []);
+      port.line_post(gold_line("notice_tap_line"), []);
     }
   }
 

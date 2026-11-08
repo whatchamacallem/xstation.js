@@ -10,22 +10,25 @@ namespace queue {
   // The names and settings this module reads and writes.
   const constants = Object.freeze({
     error_type: "error",
-    verbose_type: "verbose.put",
     type_field: "type",
     id_field: "id",
     reply_field: "reply",
     id_short: "i",
     full_marker: "type",
-    size_field: "size",
-    line_setting: "line_max",
     limit_setting: "blob_max",
-    reply_gap: " ",
-    // The two credentials the timeline never holds, and what shows for them.
+    // The two credentials the audit never holds, and what shows for them.
     http_type: "http.request",
     key_header: "Authorization",
     open_type: "console.open",
     token_field: "token",
     mask_text: "<masked>",
+    // The audit's own lines, never recorded, and the owners that are no queue.
+    audit_prefix: "audit.",
+    audit_line: "audit.line",
+    audit_note: "audit.note",
+    server_owner: "server",
+    port_owners: Object.freeze(["http", "media", "console", "dom"]),
+    id_gap: ", ",
   });
 
   // The owners a line can have: the threads, the server and the ports.
@@ -66,6 +69,12 @@ namespace queue {
   // The handler run in progress: the requests it submitted, by id.
   interface HandlerRun {
     submitted: Map<number, ThreadName>;
+  }
+
+  // The audit of a queue: whether it posts, and the lines held until it does.
+  interface AuditRecord {
+    open: boolean;
+    held: lines.Line[];
   }
 
   // A line held to run, the port it came on, what a wake owes, its bytes.
@@ -113,11 +122,6 @@ namespace queue {
     return utility.json_text(line[0]);
   }
 
-  // The bytes of the JSON text of a value in `UTF-8`.
-  function json_bytes(value: unknown): number {
-    return utility.utf8_encode(utility.json_text(value)).length;
-  }
-
   // Says whether a handler result is a sleep, by its three fields.
   function sleep_is(result: object): result is dispatch.Sleep {
     return "state" in result && "wait_ids" in result && "then_type" in result;
@@ -157,7 +161,7 @@ namespace queue {
       : holder;
   }
 
-  // The line the timeline renders, a copy when a credential of it is masked.
+  // The line the audit records, a copy when a credential of it is masked.
   function line_masked(line: lines.Line): lines.Line {
     const type = type_of(line[0]);
     if (type === constants.open_type) {
@@ -173,37 +177,6 @@ namespace queue {
     return line;
   }
 
-  // The rendering of a line, of a wake its header, then each of its replies.
-  function line_rendered(line: lines.Line, wake: boolean): string {
-    if (!wake) {
-      return jslb.line_render(line_masked(line));
-    }
-    const replies = line.replies as lines.Line[];
-    const rendered = replies.map((reply) =>
-      jslb.line_render(line_masked(reply)),
-    );
-    return [header_text(line), ...rendered].join(constants.reply_gap);
-  }
-
-  // A line's header and the sizes of its payload and blobs, a wake's replies'.
-  function line_sized(line: lines.Line, wake: boolean): string {
-    const counted = wake ? (line.replies as lines.Line[]) : [line];
-    const sizes: unknown[] = [];
-    let payload = 0;
-    for (const item of counted) {
-      payload += json_bytes(jslb.payload_of(item));
-      for (const blob of blobs_of(item)) {
-        sizes.push(jslb.field_get(blob, constants.size_field));
-      }
-    }
-    return i18n(
-      "queue.line_sized",
-      header_text(line),
-      payload,
-      utility.json_text(sizes),
-    );
-  }
-
   // The blob bytes a held line counts: its blobs whose `d` is bytes.
   export function line_bytes(line: lines.Line): number {
     let bytes = 0;
@@ -214,31 +187,6 @@ namespace queue {
       }
     }
     return bytes;
-  }
-
-  // A `verbose.put` of the thread holding the lines given, in full names.
-  function put_make(
-    thread: "ui" | "ai",
-    entries: lines.VerboseLine[],
-  ): lines.Line {
-    const header = jslb.header_make(constants.verbose_type, { full: true });
-    return jslb.line_make(header, [], { thread, lines: entries });
-  }
-
-  // Whether an entry of `size` in an `empty` `verbose.put` is under `line_max`.
-  function alone_fits(empty: number, size: number, line_max: number): boolean {
-    return empty + size < line_max;
-  }
-
-  // Whether a verbose line of the text fits one `verbose.put` of the thread.
-  export function entry_fits(
-    thread: "ui" | "ai",
-    text: string,
-    line_max: number,
-  ): boolean {
-    const empty = json_bytes(put_make(thread, []));
-    const size = json_bytes({ at: utility.time_now(), text });
-    return alone_fits(empty, size, line_max);
   }
 
   // The bytes of the blobs of a line that are held in memory.
@@ -361,82 +309,6 @@ namespace queue {
     }
   }
 
-  // The verbose lines of a thread waiting to go out as `verbose.put` lines.
-  export class VerboseBatch {
-    private readonly thread: "ui" | "ai";
-    private readonly settings_get: (id: string) => unknown;
-    private readonly debug_on: () => boolean;
-    private kept: lines.VerboseLine[] = [];
-    private sending = false;
-
-    // Takes the thread, `ui` or `ai`, and the readers of settings and mode.
-    constructor(
-      thread: ThreadName,
-      settings_get: (id: string) => unknown,
-      debug_on: () => boolean,
-    ) {
-      if (thread !== "ui" && thread !== "ai") {
-        throw new Error(i18n("queue.sink_thread", thread));
-      }
-      this.thread = thread;
-      this.settings_get = settings_get;
-      this.debug_on = debug_on;
-    }
-
-    // Keeps a line while forwarding is on and no batch is going out.
-    line_add(line: lines.VerboseLine): void {
-      if (!this.sending && this.forward_on()) {
-        this.kept.push(line);
-      }
-    }
-
-    // Posts the kept lines in order as `verbose.put` lines below `line_max`.
-    batch_send(post: (line: lines.Line) => void): void {
-      if (this.kept.length === 0) {
-        return;
-      }
-      const groups = this.groups_split();
-      this.kept = [];
-      this.sending = true;
-      for (const group of groups) {
-        post(put_make(this.thread, group));
-      }
-      this.sending = false;
-    }
-
-    // Whether debug mode is on, which alone turns forwarding on.
-    private forward_on(): boolean {
-      return this.debug_on();
-    }
-
-    // Splits the kept lines into groups whose `verbose.put` fits `line_max`.
-    private groups_split(): lines.VerboseLine[][] {
-      const limit = this.settings_get(constants.line_setting) as number;
-      const empty = json_bytes(put_make(this.thread, []));
-      const groups: lines.VerboseLine[][] = [];
-      let group: lines.VerboseLine[] = [];
-      // The bytes of the group's line: the empty line, each entry, the commas.
-      let bytes = empty;
-      for (const entry of this.kept) {
-        const size = json_bytes(entry);
-        if (!alone_fits(empty, size, limit)) {
-          throw new Error(
-            i18n("queue.entry_over", this.thread, empty + size, limit),
-          );
-        }
-        if (group.length > 0 && bytes + 1 + size >= limit) {
-          groups.push(group);
-          group = [];
-          bytes = empty;
-        }
-        bytes += group.length > 0 ? size + 1 : size;
-        group.push(entry);
-      }
-      groups.push(group);
-      return groups;
-    }
-  }
-
   // The task manager of one thread: one line at a time, sleeps and wakes.
   export class TaskQueue {
     private readonly thread: ThreadName;
@@ -453,9 +325,8 @@ namespace queue {
     private draining = false;
     private scheduled = false;
     private current: HandlerRun | undefined;
-    private batch: VerboseBatch | undefined;
     private settings_get: ((id: string) => unknown) | undefined;
-    private debug_on: (() => boolean) | undefined;
+    private audit: AuditRecord | undefined;
     private fault: Error | undefined;
 
     // Takes the thread, its owner table and the mode, and adds its own port.
@@ -499,9 +370,6 @@ namespace queue {
         : constants.id_short;
       Object.assign(header, { [name]: id });
       run.submitted.set(id, target);
-      this.log_write(line, false, (text) =>
-        i18n("queue.submit", this.thread, target, text),
-      );
       this.line_send(target, blobs_move(line));
       return id;
     }
@@ -514,9 +382,6 @@ namespace queue {
         throw new Error(i18n("queue.notify_marked", header_text(line)));
       }
       const target = owner ?? this.owner_find(type);
-      this.log_write(line, false, (text) =>
-        i18n("queue.notify", this.thread, target, text),
-      );
       this.line_send(target, blobs_move(line));
     }
 
@@ -534,9 +399,6 @@ namespace queue {
           i18n("queue.forward_marked", this.thread, header_text(line)),
         );
       }
-      this.log_write(line, false, (text) =>
-        i18n("queue.forward", this.thread, owner, text),
-      );
       this.line_send(owner, line);
     }
 
@@ -546,25 +408,90 @@ namespace queue {
       return this.local.length + this.inbox.length + running + this.sleeping;
     }
 
-    // Installs the verbose sink, its settings and the reader of debug mode.
-    sink_attach(
-      sink_set: (fn: (line: lines.VerboseLine) => void) => void,
-      settings_get: (id: string) => unknown,
-      debug_on: () => boolean,
-    ): void {
-      if (this.batch !== undefined) {
-        throw new Error(i18n("queue.sink_twice", this.thread));
+    // Installs the reader of the settings whose `blob_max` bounds what it holds.
+    limit_attach(settings_get: (id: string) => unknown): void {
+      if (this.settings_get !== undefined) {
+        throw new Error(i18n("queue.limit_twice", this.thread));
       }
-      if (this.owner_find(constants.verbose_type) === this.thread) {
-        throw new Error(i18n("queue.sink_owner", this.thread));
-      }
-      const batch = new VerboseBatch(this.thread, settings_get, debug_on);
-      sink_set((line: lines.VerboseLine) => {
-        batch.line_add(line);
-      });
-      this.batch = batch;
       this.settings_get = settings_get;
-      this.debug_on = debug_on;
+    }
+
+    // Records lines and notes sleeps as API/ts/queue.d.ts says, held.
+    audit_attach(): void {
+      if (this.audit !== undefined) {
+        throw new Error(i18n("queue.audit_twice", this.thread));
+      }
+      if (this.owner_find(constants.audit_line) === this.thread) {
+        throw new Error(i18n("queue.audit_owner", this.thread));
+      }
+      this.audit = { open: false, held: [] };
+    }
+
+    // Posts the held records and notes in order, and each later one at once.
+    audit_open(): void {
+      const audit = this.audit;
+      if (audit === undefined || audit.open) {
+        throw new Error(i18n("queue.audit_closed", this.thread));
+      }
+      audit.open = true;
+      for (const line of audit.held.splice(0)) {
+        this.audit_post(line);
+      }
+    }
+
+    // Posts a line of the audit on the port of its owner, or holds it.
+    private audit_post(line: lines.Line): void {
+      const audit = this.audit as AuditRecord;
+      if (!audit.open) {
+        audit.held.push(line);
+        return;
+      }
+      const owner = this.owner_find(constants.audit_line);
+      const port = this.ports.get(owner);
+      if (port === undefined) {
+        throw new Error(i18n("queue.port_missing", this.thread, owner));
+      }
+      port.line_post(line, buffers_of(arrays_of(line)));
+    }
+
+    // Records a line between two owners, its credentials masked, if audited.
+    private record_make(
+      sender: ThreadName,
+      receiver: ThreadName,
+      line: lines.Line,
+    ): void {
+      if (
+        this.audit === undefined ||
+        type_of(line[0]).startsWith(constants.audit_prefix)
+      ) {
+        return;
+      }
+      const text = jslb.line_json(line_masked(line));
+      const header = jslb.header_make(constants.audit_line, {
+        full: settings.names_full(),
+      });
+      const blob = jslb.blob_make(utility.utf8_encode(text));
+      const at = utility.time_now();
+      this.audit_post(
+        jslb.line_make(header, [blob], { sender, receiver, at }),
+      );
+    }
+
+    // Notes a sleep by the ids of its replies and the type of its wake.
+    private sleep_note(sleep: dispatch.Sleep): void {
+      if (this.audit === undefined) {
+        return;
+      }
+      const ids = sleep.wait_ids.join(constants.id_gap);
+      const header = jslb.header_make(constants.audit_note, {
+        full: settings.names_full(),
+      });
+      const payload = {
+        thread: this.thread,
+        at: utility.time_now(),
+        text: i18n("queue.sleep_note", ids, sleep.then_type),
+      };
+      this.audit_post(jslb.line_make(header, [], payload));
     }
 
     // The owner of a type: the thread of its longest matching prefix.
@@ -590,16 +517,31 @@ namespace queue {
       if (port === undefined) {
         throw new Error(i18n("queue.port_missing", this.thread, thread));
       }
+      if (thread !== constants.server_owner) {
+        this.record_make(this.thread, thread, line);
+      }
       port.line_post(line, buffers_of(arrays_of(line)));
     }
 
     // Counts and holds a line that came on a port and starts the tasks.
     private line_arrive(from: ThreadName, line: lines.Line): void {
       this.fault_check();
+      if (constants.port_owners.includes(from)) {
+        this.audit_take(from, line);
+      }
       const bytes = this.hold_take(line);
       const item = { line, from, wake: false, owed: undefined, bytes };
       this.item_push(item, from === this.thread);
       this.run_start();
+    }
+
+    // Records a line a port sent, a fault stopping the queue.
+    private audit_take(from: ThreadName, line: lines.Line): void {
+      try {
+        this.record_make(from, this.thread, line);
+      } catch (error) {
+        this.fault_stop(error);
+      }
     }
 
     // Counts the blob bytes of a line to hold, a fault when past `blob_max`.
@@ -690,11 +632,10 @@ namespace queue {
       return this.local.shift() ?? this.inbox.shift();
     }
 
-    // Runs one item, then sends the verbose batch, unsent after a fault.
+    // Runs one item, a throw stopping the queue.
     private item_run(item: HeldItem): void {
       try {
         this.item_route(item);
-        this.batch_flush();
       } catch (error) {
         this.fault_stop(error);
       }
@@ -770,9 +711,6 @@ namespace queue {
       owed: OwedRequest | undefined,
       wake: boolean,
     ): void {
-      this.log_write(line, wake, (text) =>
-        i18n("queue.dispatch", this.thread, from, text),
-      );
       const run: HandlerRun = { submitted: new Map<number, ThreadName>() };
       this.current = run;
       const result = dispatch.line_dispatch(line);
@@ -878,15 +816,7 @@ namespace queue {
         this.pending.set(id, { owner, sleep: record });
       }
       this.sleeping += 1;
-      this.log_write(line, wake, (text) =>
-        i18n(
-          "queue.sleep",
-          this.thread,
-          utility.json_text(sleep.wait_ids),
-          sleep.then_type,
-          text,
-        ),
-      );
+      this.sleep_note(sleep);
       if (record.count === 0) {
         this.wake_start(record);
       }
@@ -906,9 +836,6 @@ namespace queue {
         );
       }
       this.pending.delete(reply);
-      this.log_write(line, false, (text) =>
-        i18n("queue.reply_received", this.thread, from, text),
-      );
       const sleep = request.sleep;
       sleep.replies.set(reply, line);
       sleep.bytes += bytes;
@@ -923,21 +850,11 @@ namespace queue {
       const entries = [...sleep.replies.entries()].sort(
         (first, second) => first[0] - second[0],
       );
-      const ids = entries.map((entry) => entry[0]);
       const replies = entries.map((entry) => entry[1]);
       const header = jslb.header_make(sleep.then_type, {
         full: settings.names_full(),
       });
       const line = jslb.line_make(header, [], { state: sleep.state, replies });
-      this.log_write(line, true, (text) =>
-        i18n(
-          "queue.wake",
-          this.thread,
-          sleep.then_type,
-          utility.json_text(ids),
-          text,
-        ),
-      );
       const item = {
         line,
         from: this.thread,
@@ -970,49 +887,7 @@ namespace queue {
           ),
         );
       }
-      const target = owed.from;
-      this.log_write(reply, false, (text) =>
-        i18n("queue.reply", this.thread, target, text),
-      );
-      this.line_send(target, reply);
-    }
-
-    // Sends the verbose lines kept since the last task, once a sink is in.
-    private batch_flush(): void {
-      const batch = this.batch;
-      if (batch !== undefined) {
-        batch.batch_send((line: lines.Line) => {
-          this.line_notify(line);
-        });
-      }
-    }
-
-    // Writes one line of the thread's timeline once the sink is in, in debug.
-    private log_write(
-      line: lines.Line,
-      wake: boolean,
-      fill: (text: string) => string,
-    ): void {
-      const debug_on = this.debug_on;
-      if (debug_on !== undefined && debug_on()) {
-        verbose.log(this.note_make(line, wake, fill));
-      }
-    }
-
-    // A timeline line holding the rendering if its entry fits, else the sizes.
-    private note_make(
-      line: lines.Line,
-      wake: boolean,
-      fill: (text: string) => string,
-    ): string {
-      const text = fill(line_rendered(line, wake));
-      const settings_get = this.settings_get as (id: string) => unknown;
-      const line_max = settings_get(constants.line_setting) as number;
-      // A sink is in, and `VerboseBatch` refuses every other thread.
-      if (entry_fits(this.thread as "ui" | "ai", text, line_max)) {
-        return text;
-      }
-      return fill(line_sized(line, wake));
+      this.line_send(owed.from, reply);
     }
   }
 }

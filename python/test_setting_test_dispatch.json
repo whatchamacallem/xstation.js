@@ -221,14 +221,14 @@
         "metaverse"
       ]
     },
-    "verbose_put": {
+    "tap_line": {
       "0": {
-        "t": "verbose.put"
+        "t": "tap.line"
       }
     },
-    "verbose_put_text": {
+    "tap_line_text": {
       "0": {
-        "t": "verbose.put"
+        "t": "tap.line"
       },
       "text": "x"
     }
@@ -245,7 +245,7 @@
     "dispatch_id_refused_zero": "The line of type kv.get has the id 0, which is not an integer of at least 1.",
     "dispatch_notification_replied_mcp": "The handler for type mcp version 0 returned a reply to a line with no id.",
     "dispatch_notification_replied_sync": "The handler for type db.sync version 0 returned a reply to a line with no id.",
-    "dispatch_notification_replied_verbose": "The handler for type verbose.put version 0 returned a reply to a line with no id.",
+    "dispatch_notification_replied_tap": "The handler for type tap.line version 0 returned a reply to a line with no id.",
     "dispatch_request_unanswered": "The handler for type kv.get version 0 returned no reply to the request with id 7.",
     "dispatch_version_refused_bool": "The line of type kv.get has the version True, which is not an integer.",
     "dispatch_version_refused_float": "The line of type kv.get has the version 1.0, which is not an integer.",

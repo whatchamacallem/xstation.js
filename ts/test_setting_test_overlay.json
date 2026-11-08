@@ -1,12 +1,5 @@
 {
   "container_height": 100,
   "container_width": 400,
-  "tall_count": 50,
-  "texts": {
-    "overlay_ring_invalid_fraction": "The overlay ring 1.5 is not a whole number from 1 up.",
-    "overlay_ring_invalid_infinity": "The overlay ring Infinity is not a whole number from 1 up.",
-    "overlay_ring_invalid_nan": "The overlay ring NaN is not a whole number from 1 up.",
-    "overlay_ring_invalid_negative": "The overlay ring -1 is not a whole number from 1 up.",
-    "overlay_ring_invalid_zero": "The overlay ring 0 is not a whole number from 1 up."
-  }
+  "tall_count": 50
 }

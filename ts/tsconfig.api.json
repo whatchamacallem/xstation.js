@@ -33,7 +33,6 @@
     "../API/ts/ui_strings.d.ts",
     "../API/ts/unittest.d.ts",
     "../API/ts/utility.d.ts",
-    "../API/ts/verbose.d.ts",
     "../API/ts/wire.d.ts",
     "../API/ts/worker_ai.d.ts"
   ]

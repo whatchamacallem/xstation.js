@@ -8,11 +8,12 @@
 # leaves every line before it on disk. Any other language is refused: the
 # Python stream, the one `tap.run` runs, crosses the other way. When the
 # browser fails, the main loop gives its `error` line to `error_take`, which
-# logs the cascade and ends the TypeScript stream with a `Bail out!` line,
-# so the TAP results are written out whole, before the main loop exits 1
-# without an answer.
+# ends the TypeScript stream with a `Bail out!` line, so the TAP results are
+# written out whole, before the main loop exits 1 without an answer. Outside
+# debug mode it logs the cascade first; in debug mode it logs nothing, as the
+# stock main loop records the line in the audit as it reads it.
 
-import dispatch, jslb, os, verbose
+import dispatch, jslb, os, switches, verbose
 from internationalization import i18n
 from typing import cast
 
@@ -73,17 +74,18 @@ def tap_line(line: jslb.Object, *, language: str, text: str) -> None:
     _text_append(language, text)
 
 
-# Logs the browser's failure, every cause, then appends `Bail out!` to it.
+# Appends `Bail out!` of the browser's failure, logged outside debug mode.
 def error_take(
     message: str, stack: str, cause: dict[str, object] | None
 ) -> None:
-    verbose.log(i18n("engine_tap.browser_failed", message))
-    verbose.log(stack)
-    inner = cause
-    while inner is not None:
-        verbose.log(i18n("engine_tap.browser_cause", inner["message"]))
-        verbose.log(cast(str, inner["stack"]))
-        inner = cast(dict[str, object] | None, inner.get("cause"))
+    if not switches.debug:
+        verbose.log(i18n("engine_tap.browser_failed", message))
+        verbose.log(stack)
+        inner = cause
+        while inner is not None:
+            verbose.log(i18n("engine_tap.browser_cause", inner["message"]))
+            verbose.log(cast(str, inner["stack"]))
+            inner = cast(dict[str, object] | None, inner.get("cause"))
     reason = message
     for mark in _LINE_BREAKS:
         reason = reason.replace(mark, " ")

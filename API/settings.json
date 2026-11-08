@@ -41,6 +41,7 @@
     "runtime_modules": [
       "internationalization",
       "jslb",
+      "audit",
       "verbose",
       "switches",
       "settings",
@@ -53,7 +54,7 @@
       "engine_db",
       "engine_turn",
       "engine_sql",
-      "engine_verbose",
+      "engine_audit",
       "engine_tap",
       "engine_mcp",
       "engine_system",

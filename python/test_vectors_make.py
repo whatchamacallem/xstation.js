@@ -8,7 +8,8 @@
 # two vectors at the edge of blob_max, the six number vectors, the digest
 # vectors, inputs of 55, 56 and 64 bytes each beside its SHA-256 digest, and
 # the TypeScript test modules' digests, filed under the names of the blocks
-# that read them, each input in lowercase hex beside its SHA-256 digest. Then
+# that read them, each input in lowercase hex beside its SHA-256 digest, and
+# the view vector, each row of its view a value its operations put. Then
 # the file run as a program through runpy, in a forked child that writes how
 # it ended to a file under build/, then kills itself: build/vectors then holds
 # what vectors_write makes, and a file an earlier run left there is gone.
@@ -39,6 +40,24 @@ _DIGEST_INPUTS = {"sha256_55": 55, "sha256_56": 56, "sha256_64": 64}
 
 # The file of the TypeScript test modules' digests, read by name.
 _TEST_DIGESTS_NAME = "test_digests.json"
+
+# The file of the view vector of the stores, read by name.
+_DUMP_NAME = "dump.json"
+
+# The fields of a database's view, as `substrate.DbView` names them.
+_VIEW_FIELDS = [
+    "db",
+    "documents",
+    "rows",
+    "scenes_hidden",
+    "schema",
+    "tables",
+    "turns_hidden",
+    "versions_hidden",
+]
+
+# The kinds of a row of a view.
+_ROW_KINDS = {"binary", "lost", "text"}
 
 # The TypeScript blocks that read those digests, each under its own name.
 _DIGEST_BLOCKS = (
@@ -107,6 +126,7 @@ class TestVectorsWrite(unittest.TestCase):
             sidecars = names_ending(scratch, ".json")
             sidecars.remove(_DIGESTS_NAME.removesuffix(".json"))
             sidecars.remove(_TEST_DIGESTS_NAME.removesuffix(".json"))
+            sidecars.remove(_DUMP_NAME.removesuffix(".json"))
             count = len(os.listdir(scratch))
             errors: set[bool] = set()
             for name in sidecars:
@@ -114,7 +134,7 @@ class TestVectorsWrite(unittest.TestCase):
                 with open(path, encoding="utf-8") as file:
                     errors.add("error" in json.load(file))
         self.assertEqual(vectors, sidecars)
-        self.assertEqual(count, 2 * len(vectors) + 2)
+        self.assertEqual(count, 2 * len(vectors) + 3)
         self.assertEqual(errors, {False, True})
 
     # Each input has its size and its digest, both in lowercase hex.
@@ -152,6 +172,36 @@ class TestVectorsWrite(unittest.TestCase):
                 digest = hashlib.sha256(data).hexdigest()
                 self.assertEqual(entry["sha256"], digest, name)
                 self.assertEqual(len(entry["sha256"]), 64, name)
+
+    # Each row of the view names a value the operations put, its size theirs.
+    def test_dump_written(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
+            vectors_make.vectors_write(scratch)
+            path = os.path.join(scratch, _DUMP_NAME)
+            with open(path, encoding="utf-8") as file:
+                dump: dict[str, Any] = json.load(file)
+        self.assertEqual(
+            sorted(dump), ["operations", "overflow_bytes", "view"]
+        )
+        view: dict[str, Any] = dump["view"]
+        self.assertEqual(sorted(view), _VIEW_FIELDS)
+        values: dict[str, bytes] = {}
+        for operation in dump["operations"]:
+            if operation["op"] == "kv_put":
+                data = bytes.fromhex(operation["data"])
+                self.assertEqual(operation["data"], data.hex())
+                values[operation["ref"].removeprefix(f"/{view['db']}/")] = data
+        self.assertEqual(sorted(values), [row["key"] for row in view["rows"]])
+        for row in view["rows"]:
+            self.assertIn(row["kind"], _ROW_KINDS, row["key"])
+            data = values[row["key"]]
+            self.assertEqual(row["size"], len(data), row["key"])
+            if row["kind"] == "text":
+                self.assertEqual(row["text"].encode("utf-8"), data)
+            else:
+                self.assertNotIn("text", row)
+        sizes = [row["size"] for row in view["rows"]]
+        self.assertGreater(max(sizes), dump["overflow_bytes"])
 
     # Each number vector is the line of its token alone, within `line_max`.
     def test_numbers_written(self) -> None:

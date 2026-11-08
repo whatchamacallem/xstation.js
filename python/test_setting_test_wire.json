@@ -4,6 +4,34 @@
   "root_verbose": false,
   "rung_seconds": 120,
   "rungs": {
+    "audit_at": 1793990940123,
+    "audit_body": [
+      "{",
+      "  \"0\": {",
+      "    \"type\": \"kv.put\",",
+      "    \"blobs\": 1",
+      "  },",
+      "  \"1\": {",
+      "    \"size\": 3",
+      "  },",
+      "  \"key\": \"note\",",
+      "  \"db\": \"metaverse\"",
+      "}",
+      "[blobs omitted: 1]"
+    ],
+    "audit_count": 10,
+    "audit_line": {
+      "0": {
+        "type": "kv.put",
+        "blobs": 1
+      },
+      "1": {
+        "size": 3
+      },
+      "key": "note",
+      "db": "metaverse"
+    },
+    "audit_note": "noted by the audit rung",
     "commits": [
       {
         "payload": {
@@ -107,8 +135,7 @@
     "restart_after": "# posted after system.restart, which the port holds",
     "restart_name": "echo_loop.py",
     "sync_databases": ["_files", "_preferences", "_settings", "metaverse"],
-    "unknown_type": "wire.unknown",
-    "verbose_count": 10
+    "unknown_type": "wire.unknown"
   },
   "stop_seconds": 5,
   "texts": {

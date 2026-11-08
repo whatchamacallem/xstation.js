@@ -4,7 +4,7 @@
 // line, built in the form `settings.names_full()` picks, with the key in the
 // `Authorization` header, which the caller submits to the HTTP port or to
 // the scripted port and sleeps on. The key stays in this module's memory and
-// on the line, and the queue's timeline masks it out of the debug record.
+// on the line, and the queue's audit masks it out of the debug record.
 
 declare namespace provider {
   type Role = "system" | "user" | "assistant" | "tool";

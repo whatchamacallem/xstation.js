@@ -8,16 +8,18 @@
 # a blob over overflow_bytes, and `tap.line` pushes between them, served in
 # turn through the real `dispatch`, the real codec of `jslb`, the settings
 # the real `settings` reads, and the real `engine_tap`, which appends to the
-# root's TAP file and logs in the root's log of the real `verbose`, opened
-# first by the child as `bootstrap.py` opens it. The input ends with the
-# browser's `error` line or with a line of no handler, after the echoes are
-# written. The output is read from the pipe, and the TAP file, the log and
-# the cache from the root. Each child writes how its work ended to a file,
-# or to stderr with the failure when that write fails, then kills itself
-# whatever happened, so the handlers it registers never reach another test.
+# root's TAP file. The child runs in debug mode, the one the echo loop is
+# served in, with the root's audit of the real `audit` opened first as
+# `bootstrap.py` opens it, so `engine_tap` logs nothing and the echo loop
+# records no line of its own. The input ends with the browser's `error` line
+# or with a line of no handler, after the echoes are written. The output is
+# read from the pipe, and the TAP file, the audit and the cache from the
+# root. Each child writes how its work ended to a file, or to stderr with the
+# failure when that write fails, then kills itself whatever happened, so the
+# handlers it registers never reach another test.
 
-import contextlib, echo_loop, functools, harness, json, os, signal, sqlite3
-import sys, tempfile, traceback, unittest, verbose
+import audit, echo_loop, functools, harness, json, os, signal, switches, sys
+import tempfile, traceback, unittest
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
@@ -71,12 +73,6 @@ _CACHE_DIRECTORY = "cache"
 
 # The log of the server in a root, as `verbose` names it.
 _LOG_NAME = "_verbose.sqlite"
-
-# The query of the thread and text of each line of the log, in order.
-_LOG_QUERY = "SELECT thread, text FROM line ORDER BY seq"
-
-# The thread the server's own lines are stored under in the log.
-_SERVER_THREAD = "server"
 
 
 # A text of this module's gold.
@@ -133,13 +129,9 @@ def _pipe_drain(fd: int) -> bytes:
     return bytes(data)
 
 
-# The thread and text of each line of the root's log, in order.
-def _log_read(root: str) -> list[tuple[str, str]]:
-    path = os.path.join(root, _LOG_NAME)
-    with contextlib.closing(sqlite3.connect(path)) as connection:
-        cursor = connection.execute(_LOG_QUERY)
-        rows: list[tuple[str, str]] = cursor.fetchall()
-    return rows
+# The label and body of each entry of the root's audit, in order.
+def _audit_read(root: str) -> list[tuple[str, str]]:
+    return [(entry.label, entry.body) for entry in audit.entries_read(root)]
 
 
 # In the forked child: runs the work, writes how it ended, kills itself.
@@ -166,12 +158,13 @@ def _child_end(
         os.kill(os.getpid(), signal.SIGKILL)
 
 
-# Child: opens the log as `bootstrap.py` does, prepares the root, serves pipes.
+# Child: debug mode and the audit as `bootstrap.py` sets them, then serves.
 def _session_serve(root: str, read_fd: int, write_fd: int) -> str:
     path = os.path.join(root, "settings.json")
     with open(path, encoding="utf-8") as file:
         values: dict[str, Any] = json.load(file)
-    verbose.log_open(root, values["verbose_ring"], values["blob_max"])
+    switches.switches_apply({**switches.switches_get(), "debug": True})
+    audit.audit_open(root, values["blob_max"], "engine")
     echo_loop.loop_prepare(root)
     echo_loop.loop_run(read_fd, write_fd, root)
     return _ENDING_RETURNED
@@ -243,7 +236,7 @@ class ScratchCase(unittest.TestCase):
 
 # Sessions served by the loop and every module it calls into.
 class TestSession(ScratchCase):
-    # Echo, push, fail: echoes out, pushes, bail in TAP, logged, blob cached.
+    # Echo, push, fail: echoes out, pushes, bail in TAP, blob cached, no log.
     def test_session_served(self) -> None:
         first = [b"abc", bytes(range(256))]
         streamed = [bytes(index % 256 for index in range(_STREAMED_BYTES))]
@@ -264,14 +257,8 @@ class TestSession(ScratchCase):
         self.echo_check(lines[1], 2, streamed)
         tap = "".join(text + "\n" for text in [*pushed, _BAIL_LINE])
         self.assertEqual(self.tap_read(), tap)
-        texts = [
-            _text_get("engine_tap_browser_failed"),
-            "at page",
-            _text_get("engine_tap_browser_cause"),
-            "at first",
-        ]
-        expected = [(_SERVER_THREAD, text) for text in texts]
-        self.assertEqual(_log_read(self.root), expected)
+        self.assertEqual(_audit_read(self.root), [])
+        self.assertFalse(os.path.exists(os.path.join(self.root, _LOG_NAME)))
         cache = os.path.join(self.root, _CACHE_DIRECTORY)
         self.assertEqual(len(os.listdir(cache)), 1)
 
@@ -290,4 +277,5 @@ class TestSession(ScratchCase):
         self.assertEqual(error["message"], message)
         self.assertEqual(blobs, [])
         self.assertEqual(self.tap_read(), pushed + "\n")
-        self.assertEqual(_log_read(self.root), [])
+        self.assertEqual(_audit_read(self.root), [])
+        self.assertFalse(os.path.exists(os.path.join(self.root, _LOG_NAME)))

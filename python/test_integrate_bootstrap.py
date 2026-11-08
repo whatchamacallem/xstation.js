@@ -7,17 +7,16 @@
 # controlling tty, stdin, stdout and stderr are a new pty of `pty.openpty`,
 # as ttyd runs it, on a debug root in build/ whose settings are the
 # checkout's and whose parameters are the run's with debug true, and the
-# test plays the page on the other side of the pty. Bootstrap's trace of
-# `tap.start` and the main loop's trace of a line share the one ring that
-# `verbose.tail` reads; a failure of the main loop is logged once and
-# writes its one error line, with nothing from bootstrap after it; and the
-# page's error line ends the TypeScript stream and the run, unanswered, its
-# cascade logged after bootstrap's trace. Each child writes how its run
-# ended to a file, then kills itself. The lines and texts are the gold's.
+# test plays the page on the other side of the pty. Bootstrap's records of
+# `tap.start` and its reply and the main loop's records of a line share the
+# one audit that `audit.tail` reads; a failure of the main loop writes its
+# one error line, recorded once, with nothing from bootstrap after it; and
+# the page's error line, recorded as it is read, ends the TypeScript stream
+# and the run, unanswered. No run opens the log. Each child writes how its
+# run ended to a file, then kills itself. The lines and texts are the gold's.
 
-import bootstrap, contextlib, errno, functools, harness, json, os, pty
-import signal, sqlite3, subprocess, switches, sys, tempfile, traceback
-import unittest
+import audit, bootstrap, errno, functools, harness, json, os, pty, signal
+import subprocess, switches, sys, tempfile, traceback, unittest
 from typing import Any, NamedTuple
 
 # The checkout's top directory, above this file's `python/`.
@@ -35,14 +34,11 @@ _READ_BYTES: int = harness.gold_get(f"{_GOLD_ID}.read_bytes")
 # The reply to `tap.start` in full names.
 _REPLY_FULL = b'{"0":{"type":"tap.start","reply":101}}\r'
 
-# The file in the root that holds the log.
+# The file in the root that holds the log, which no debug run opens.
 _LOG_NAME = "_verbose.sqlite"
 
-# The query of the thread and text of each line of the log, in order.
-_LOG_QUERY = "SELECT thread, text FROM line ORDER BY seq"
-
-# The thread the server's own lines are stored under in the log.
-_SERVER_THREAD = "server"
+# The file in the root that holds the audit.
+_AUDIT_NAME = "_audit.txt"
 
 # The TAP file of the TypeScript stream in a root.
 _TAP_FILE = os.path.join("tap", "typescript.tap")
@@ -91,26 +87,25 @@ def _line_bytes(name: str) -> bytes:
     return text.encode("utf-8") + b"\r"
 
 
-# The gold text of a log line that holds the whole of a line read back.
-def _line_text(name: str, line: dict[str, Any]) -> str:
-    text = json.dumps(line, ensure_ascii=False, separators=(",", ":"))
-    return _text_get(name).format(text)
+# The audit's entry of a line the run wrote, as the pty gave it.
+def _sent_entry(line: dict[str, Any]) -> tuple[str, str]:
+    body = json.dumps(line, ensure_ascii=False, indent=2)
+    return (_text_get("audit_sent"), body)
 
 
-# The log lines of the texts, each of the server's thread.
-def _server_lines(texts: list[str]) -> list[tuple[str, str]]:
-    return [(_SERVER_THREAD, text) for text in texts]
+# The audit's entry of a line the run read, its bytes as the test wrote them.
+def _received_entry(given: bytes) -> tuple[str, str]:
+    text, _, _ = given.partition(b"\r")
+    body = json.dumps(json.loads(text), ensure_ascii=False, indent=2)
+    return (_text_get("audit_received"), body)
 
 
-# The thread and text of each line of the root's log, which must be open.
-def _log_read(root: str) -> list[tuple[str, str]]:
-    path = os.path.join(root, _LOG_NAME)
-    if not os.path.isfile(path):
-        raise AssertionError(f"the log was never opened: {path}")
-    with contextlib.closing(sqlite3.connect(path)) as connection:
-        cursor = connection.execute(_LOG_QUERY)
-        rows: list[tuple[str, str]] = cursor.fetchall()
-    return rows
+# The label and body of each entry of the root's audit, with no log beside.
+def _audit_read(case: unittest.TestCase, root: str) -> list[tuple[str, str]]:
+    case.assertFalse(os.path.exists(os.path.join(root, _LOG_NAME)))
+    entries = audit.entries_read(root)
+    case.assertEqual({entry.start for entry in entries}, {1})
+    return [(entry.label, entry.body) for entry in entries]
 
 
 # Makes a debug scratch root: the checkout's settings, the run's parameters.
@@ -242,21 +237,29 @@ class TestStock(unittest.TestCase):
         child.bytes_write(_REPLY_FULL)
         return made, child, first
 
-    # `verbose.tail` reads bootstrap's `tap.start` trace, then the main loop's.
-    def test_ring_shared(self) -> None:
-        _, child, first = self.engine_start()
-        child.bytes_write(_line_bytes("tail_server"))
+    # `audit.tail` reads bootstrap's records, then the main loop's, unrecorded.
+    def test_tail_shared(self) -> None:
+        made, child, first = self.engine_start()
+        child.bytes_write(_line_bytes("ping"))
+        pinged = child.line_read()
+        self.assertEqual(pinged, _line_get("ping_reply"))
+        child.bytes_write(_line_bytes("tail"))
         reply = child.line_read()
-        self.assertEqual(reply["0"], _line_get("tail_server_reply")["0"])
-        texts = [entry["text"] for entry in reply["lines"]]
+        self.assertEqual(reply["0"], _line_get("tail_reply")["0"])
+        path = os.path.join(made.root, _AUDIT_NAME)
+        with open(path, encoding="utf-8") as file:
+            _, _, entries = file.read().partition("\n\n")
+        self.assertEqual(reply["text"], entries)
         expected = [
-            _line_text("bootstrap_start_submit", first),
-            _text_get("main_loop_line_dispatch_tail"),
+            _sent_entry(first),
+            _received_entry(_REPLY_FULL),
+            _received_entry(_line_bytes("ping")),
+            _sent_entry(pinged),
         ]
-        self.assertEqual(texts, expected)
+        self.assertEqual(_audit_read(self, made.root), expected)
         self.assertEqual(child.hangup(), _HUNG_UP)
 
-    # A loop failure logs once, writes one error line, bootstrap adds nothing.
+    # A loop failure records one error line, and bootstrap adds nothing.
     def test_failure_once(self) -> None:
         made, child, first = self.engine_start()
         child.bytes_write(_line_bytes("unknown_request"))
@@ -265,15 +268,15 @@ class TestStock(unittest.TestCase):
         self.assertEqual(error["0"], _line_get("error_reply")["0"])
         message = _text_get("dispatch_handler_unknown")
         self.assertEqual(error["message"], message)
-        texts = [
-            _line_text("bootstrap_start_submit", first),
-            _text_get("main_loop_line_dispatch_unknown"),
-            _text_get("main_loop_serve_failed_unknown"),
-            _line_text("main_loop_line_error", error),
+        expected = [
+            _sent_entry(first),
+            _received_entry(_REPLY_FULL),
+            _received_entry(_line_bytes("unknown_request")),
+            _sent_entry(error),
         ]
-        self.assertEqual(_log_read(made.root), _server_lines(texts))
+        self.assertEqual(_audit_read(self, made.root), expected)
 
-    # A page error ends the TAP file and run unanswered, cascade logged last.
+    # A page error, recorded as read, ends the TAP file and run unanswered.
     def test_page_failed(self) -> None:
         made, child, first = self.engine_start()
         child.bytes_write(_line_bytes("browser_error"))
@@ -282,14 +285,12 @@ class TestStock(unittest.TestCase):
         path = os.path.join(made.root, _TAP_FILE)
         with open(path, encoding="utf-8") as file:
             self.assertEqual(file.read(), f"Bail out! {error['message']}\n")
-        texts: list[str] = [
-            _line_text("bootstrap_start_submit", first),
-            _text_get("engine_tap_browser_failed"),
-            error["stack"],
-            _text_get("engine_tap_browser_cause"),
-            error["cause"]["stack"],
+        expected = [
+            _sent_entry(first),
+            _received_entry(_REPLY_FULL),
+            _received_entry(_line_bytes("browser_error")),
         ]
-        self.assertEqual(_log_read(made.root), _server_lines(texts))
+        self.assertEqual(_audit_read(self, made.root), expected)
 
 
 # The driver's children end by the hangup, however the driver was started.

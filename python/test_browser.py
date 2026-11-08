@@ -17,7 +17,7 @@
 # the server. A fault the headless page's realm reports that no rung waited for
 # fails the run. PNGs of the surveyed states go to build/test_browser/. Each
 # root and rung is labelled smoke-test or test-all, and a mislabel fails the
-# run. It imports the standard library and the infrastructure for testing only.
+# run. It imports the standard library, the testing infrastructure and audit.
 
 import argparse, base64, contextlib, fcntl, hashlib, http.server, json, os, re
 import select, shutil, signal, sqlite3, subprocess, sys, tempfile, threading
@@ -84,9 +84,6 @@ _LOOP_OPTION = "--main-loop"
 
 # The extension of a database file under the root.
 _DB_EXTENSION = ".sqlite"
-
-# The log's database file in the root, which only the server writes.
-_VERBOSE_FILE = "_verbose.sqlite"
 
 # The file of the root whose lock one engine at a time holds.
 _LOCK_FILE = "engine.lock"
@@ -321,8 +318,11 @@ _INPUT_KIND = "0"
 # The whole seconds wire.ts waits for its socket to send its buffered bytes.
 _DRAIN_SECONDS = 120
 
-# The thread under which the server keeps the lines it logs itself.
-_SERVER_THREAD = "server"
+# The label of the audit's entry of a wire line the server read.
+_RECEIVED_LABEL = "ai to server"
+
+# The type of the line that carries a failure.
+_ERROR_TYPE = "error"
 
 # The first byte of a ttyd message of program output.
 _OUTPUT_KIND = 0x30
@@ -502,10 +502,6 @@ _PROBE_KIT = r"""(() => {
     error_overlay.overlay_show(message, "");
     return document.querySelectorAll("pre").length;
   };
-  probe.history_get = () =>
-    verbose.history_get(settings.settings_get("verbose_ring"));
-  probe.sink_twice = () =>
-    probe.thrown_message(() => verbose.sink_set(() => undefined));
   probe.line_of = (type, payload) =>
     jslb.line_make(jslb.header_make(type), [], payload);
   probe.worker_source = (code) => {
@@ -683,13 +679,6 @@ class StubRequest(NamedTuple):
     path: str
     headers: dict[str, str]
     body: bytes
-
-
-# One line of the server's log of a page thread, in the order it was kept.
-class VerboseRow(NamedTuple):
-    seq: int
-    at: int
-    text: str
 
 
 # What a root adds to ttyd's options and to its command.
@@ -1674,19 +1663,31 @@ def value_read(session: PageSession, ref: str) -> bytes | None:
     return data
 
 
-# The lines the server keeps of a thread, in the order it kept them.
-def verbose_read(session: PageSession, thread: str) -> list[VerboseRow]:
-    path = os.path.join(session.root, _VERBOSE_FILE)
-    connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    try:
-        rows = connection.execute(
-            "SELECT seq, at, text FROM line WHERE thread = ? ORDER BY seq",
-            (thread,),
-        ).fetchall()
-    finally:
-        with failure_held():
-            connection.close()
-    return [VerboseRow(int(a), int(b), str(c)) for a, b, c in rows]
+# The message of the `error` line the audit holds as the server's last read.
+def error_received(session: PageSession) -> str:
+    import audit
+
+    received = [
+        entry
+        for entry in audit.entries_read(session.root)
+        if entry.label == _RECEIVED_LABEL
+    ]
+    if not received:
+        raise CheckFailed(
+            f"the audit of {session.root} holds no {_RECEIVED_LABEL!r} entry"
+        )
+    last = received[-1]
+    # The body is the line's JSON text, then a count of its blobs if any.
+    line, _ = json.JSONDecoder().raw_decode(last.body)
+    header = json_object(json_object(line)["0"])
+    kind = header["type"] if "type" in header else header["t"]
+    if kind != _ERROR_TYPE:
+        raise CheckFailed(
+            f"the last {_RECEIVED_LABEL!r} entry of the audit of"
+            f" {session.root}, at {last.time}, is not an {_ERROR_TYPE!r}"
+            f" line:\n{last.body}"
+        )
+    return cast(str, json_object(line)["message"])
 
 
 # The TAP documents of the file's whole lines, each from its version line.
@@ -1811,7 +1812,7 @@ def bail_read(path: str, begin: int) -> str | None:
     return None
 
 
-# The server took the browser's failure: logged, the TAP file bailed, exit 1.
+# The server took the browser's failure: recorded, the TAP file bailed, exit 1.
 def bail_check(session: PageSession, begin: int, text: str) -> str:
     path = os.path.join(session.root, _TAP_FILE)
     message = server_wait(
@@ -1824,19 +1825,14 @@ def bail_check(session: PageSession, begin: int, text: str) -> str:
             f"{path} ends with the bail out {message!r}, where {text!r} was"
             " due in it"
         )
-    logged = text_fill("engine_tap_browser_failed", {0: message})
-    server_wait(
-        session,
-        f"the server's log line {logged!r}",
-        lambda: next(
-            (
-                row
-                for row in verbose_read(session, _SERVER_THREAD)
-                if row.text == logged
-            ),
-            None,
-        ),
-    )
+    # The server records the line it read before it writes the bail out.
+    recorded = error_received(session)
+    if recorded != message:
+        raise CheckFailed(
+            f"the audit's last {_RECEIVED_LABEL!r} entry is the"
+            f" {_ERROR_TYPE!r} line of {recorded!r}, where the bail out's"
+            f" {message!r} was due"
+        )
     _, ended = session.ttyd.line_wait(
         _ENDED_PATTERN, "the server's end", session.mark
     )
@@ -1927,8 +1923,9 @@ def rung_thrown(session: PageSession) -> str:
     return (
         f"an error thrown after both streams ended showed {_THROWN_MESSAGE!r}"
         " with its stack in the pre that replaced the document; the stop"
-        " function sent it through the worker to the server, which logged it,"
-        f" ended the TAP file with the bail out {message!r} and exited with"
+        " function sent it through the worker to the server, which recorded"
+        " its error line in the audit as the last line it read, ended the TAP"
+        f" file with the bail out {message!r} and exited with"
         f" code 1; PNG {png}"
     )
 
@@ -2563,29 +2560,6 @@ def png_size(png: bytes) -> tuple[int, int]:
     return int.from_bytes(png[16:20]), int.from_bytes(png[20:24])
 
 
-# The live verbose ring of the UI holds its lines, each an at and a text.
-def rung_ring(session: PageSession) -> str:
-    ring = json_list(session.probe_call("history_get"))
-    size: int = session.values["verbose_ring"]
-    fields = {"at", "text"}
-    other = [line for line in ring if set(json_object(line)) != fields]
-    if not ring or len(ring) > size or other:
-        raise CheckFailed(f"the UI's ring holds {len(ring)} lines: {ring}")
-    return (
-        f"the UI's verbose singleton holds {len(ring)} lines of at most"
-        f" verbose_ring {size}, each with the fields at and text alone"
-    )
-
-
-# The queue installed the live verbose sink, so a second one is refused.
-def rung_sink(session: PageSession) -> str:
-    message = session.probe_call("sink_twice")
-    due = text_fill("verbose_sink_twice", {})
-    if message != due:
-        raise CheckFailed(f"sink_set threw {message!r}, not {due!r}")
-    return f"a second sink_set on the live verbose threw {due!r}"
-
-
 # The long tasks the UI thread ran since the observer started.
 def rung_long(session: PageSession) -> str:
     durations = [
@@ -2931,12 +2905,6 @@ def rungs_suites(session: PageSession) -> None:
     )
     log.rung_run(
         "stage 8: fresh root", "smoke-test", lambda: rung_fresh_root(session)
-    )
-    log.rung_run(
-        "stage 5: verbose ring", "test-all", lambda: rung_ring(session)
-    )
-    log.rung_run(
-        "stage 5: verbose sink", "test-all", lambda: rung_sink(session)
     )
     log.rung_run("stage 8: long tasks", "test-all", lambda: rung_long(session))
     log.rung_run(

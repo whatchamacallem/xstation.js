@@ -3,8 +3,6 @@
   "overflow_bytes": 4096,
   "read_bytes": 65536,
   "texts": {
-    "dispatch_handler_unknown": "No handler is registered for type no.such version 0.",
-    "engine_tap_browser_cause": "caused by: first fault",
-    "engine_tap_browser_failed": "The browser failed: page fault"
+    "dispatch_handler_unknown": "No handler is registered for type no.such version 0."
   }
 }
