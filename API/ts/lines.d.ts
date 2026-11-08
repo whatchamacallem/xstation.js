@@ -3,9 +3,9 @@
 // b, the payload in every other key. A field at its default is not written.
 //
 // The browser pulls the databases by `db.sync`, so a suite sending none sees
-// no new line. The server answers with the whole of every database it holds
-// but its own `_verbose`: for each in name order its `db.restore` line and its
-// `db.file` lines, then `DbSyncReply`, which names them in that order. The
+// no new line. The server answers with the whole of every database it holds:
+// for each in name order its `db.restore` line and its `db.file` lines, then
+// `DbSyncReply`, which names them in that order. The
 // browser's queue runs the pushes in order, before the reply, so the task that
 // wakes on the reply finds every database restored and checks the list against
 // its own. No count and no end marker is needed: the reply is the end.
@@ -225,8 +225,11 @@ declare namespace lines {
     text: string;
   }
 
-  // db.dump: no payload, and on the wire blob 1 is the browser's views as JSON.
-  interface DbDump {}
+  // audit.dump: no payload. On the wire blob 1 is the browser's views as JSON.
+  interface AuditDump {}
+
+  // audit.overlay: no payload. ctrl 1, from a listener, run by the UI thread.
+  interface AuditOverlay {}
 
   // tap.line: one line of the page's TAP stream, or of a `tap.run`'s.
   interface TapLine {
@@ -365,7 +368,7 @@ declare namespace lines {
     y?: number;
   }
 
-  // `ui.control_key`: a digit typed with the control key, from a listener.
+  // `ui.control_key`: a digit but 1 typed with control, from a listener.
   interface UiControlKey {
     digit: number;
   }

@@ -15,7 +15,7 @@
 // left: its first line from the page is then the `error` line of `wire_end`,
 // refusing its `tap.start`. A fault while the port takes a message leaves the
 // socket open for the worker's report. `wire_end` never closes the socket: the
-// server ends it by its exit once it has logged the failure. Its wait runs
+// server ends it by its exit once it has read the failure. Its wait runs
 // under the drain timer, whose expiry is a fault met while a fault is
 // reported.
 

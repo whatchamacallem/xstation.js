@@ -5,6 +5,7 @@
   "texts": {
     "audit_note_label": "note of ai",
     "dispatch_handler_unknown": "No handler is registered for type no.such version 0.",
+    "dispatch_handler_unknown_tap": "No handler is registered for type tap.line version 0.",
     "echo_loop_input_partial": "The engine input ended inside a message.",
     "echo_loop_reply_unknown": "The line {\"0\":{\"t\":\"echo\",\"r\":1}} replies to no request the server sent."
   }

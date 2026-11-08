@@ -123,7 +123,7 @@ namespace substrate {
     // The owner the push of each committed operation goes to.
     push_owner: "server" as const,
     // The push of the views of every database, for the audit.
-    dump_type: "db.dump",
+    dump_type: "audit.dump",
   });
 
   // A file of the cache held open for synchronous access, as OPFS gives it.
@@ -2018,7 +2018,7 @@ namespace substrate {
           return undefined;
         },
         // Sends the view of every database, in name order, to the server.
-        "db.dump": () => {
+        "audit.dump": () => {
           const names = [...this.db_list()].sort();
           const views = names.map((name) => this.db_view(name));
           const header = jslb.header_make(constants.dump_type, {

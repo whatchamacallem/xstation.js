@@ -5,7 +5,7 @@
 // that reply and its tool results together in one transaction and submits
 // the next provider request. A reply with no tool calls is stored and ends
 // the turn with `TurnEnd`. No stored call lacks its result. In debug mode
-// the queue log is the transcript of the turn. Nothing measures the
+// the audit is the transcript of the turn. Nothing measures the
 // databases: no request carries their sizes, and the loop reads no setting.
 // A tool call's arguments are read by `jslb.json_decode`.
 //

@@ -1,7 +1,7 @@
 // The read only debug overlays of ttys 1 and up on the UI thread: a `pre` per
 // tty, ctrl n toggling tty n. ctrl 1 shows the end of the audit, which the
 // page asks of the server at each show by `audit.tail`, its count the setting
-// `verbose_ring`; each hide empties the `pre`, so the page holds the text
+// `audit_entries`; each hide empties the `pre`, so the page holds the text
 // only while it is shown, and a text that comes after the hide is dropped. A
 // shown overlay's end is kept at the bottom of the view of the element that
 // scrolls it, the container or one above it, as `debug` on the engine page.

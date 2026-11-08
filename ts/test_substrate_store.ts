@@ -2194,9 +2194,9 @@ namespace test_substrate_store {
     test_types_registered(): void {
       const table = this.handlers_get(this.store_fresh());
       this.assertEqual([...table.keys()].sort(), [
+        "audit.dump",
         "db.create",
         "db.drop",
-        "db.dump",
         "db.file",
         "db.restore",
         "doc.head",
@@ -2210,7 +2210,7 @@ namespace test_substrate_store {
       ]);
     }
 
-    // `db.dump` pushes every database's view to the server, in name order.
+    // `audit.dump` pushes every database's view to the server, in name order.
     test_dump_pushed(): void {
       const store = this.store_fresh();
       const table = this.handlers_get(store);
@@ -2220,11 +2220,11 @@ namespace test_substrate_store {
       this.pushes_taken(store);
       this.push_give(
         table,
-        jslb.line_make(jslb.header_make("db.dump"), [], {}),
+        jslb.line_make(jslb.header_make("audit.dump"), [], {}),
       );
       const [dump, ...rest] = this.pushes_taken(store);
       this.assertEqual(rest, []);
-      this.assertEqual(type_pushed(dump), "db.dump");
+      this.assertEqual(type_pushed(dump), "audit.dump");
       const data = (dump[1] as lines.BlobHeader).d as Uint8Array;
       const views = JSON.parse(utility.utf8_decode(data));
       const expected = ["alpha", "beta"].map((name) => store.db_view(name));

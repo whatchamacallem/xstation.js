@@ -5,13 +5,12 @@
 #
 # The platform services around the main loop, the command ttyd runs.
 # API/python/bootstrap.pyi holds its roles. Its error line goes in full names,
-# since it may come before the settings. Once a role has opened them, in debug
-# mode the engine role records that line in the audit before it is written;
-# otherwise the exception's message is logged first, outside debug mode in
-# `_verbose.sqlite` and in the console role as a note of console in the
-# audit, as no line of the audit holds it. The modules beside this file are
-# imported inside the functions that use them, after their bytecode has been
-# sent to build/.
+# since it may come before the settings. In debug mode the engine role records
+# that line in the audit before it is written, and the console role, which runs
+# in debug mode alone, writes the exception's message as a note of console, as
+# no line of the audit holds it. Outside debug mode nothing but that line is
+# written. The modules beside this file are imported inside the functions that
+# use them, after their bytecode has been sent to build/.
 
 import argparse, fcntl, importlib.machinery, importlib.util, os, signal, sys
 import termios, time, traceback, tty, types
@@ -343,8 +342,8 @@ def _reply_read(loaded: dict[str, Any]) -> None:
         )
 
 
-# Opens the audit in debug mode, else the log, runs `serve`, writes a failure.
-def _logged_run(
+# Opens the audit in debug mode, runs `serve`, writes a failure's `error` line.
+def _audited_run(
     root: str, loaded: dict[str, Any], role: str, serve: Callable[[], int]
 ) -> int:
     import audit, switches, verbose
@@ -352,15 +351,12 @@ def _logged_run(
 
     if switches.debug:
         audit.audit_open(root, loaded["blob_max"], role)
-    else:
-        verbose.log_open(root, loaded["blob_max"])
     try:
         return serve()
     except Exception as error:
-        recorded = switches.debug and role == _ENGINE_ROLE
-        if not recorded:
-            verbose.log(i18n("bootstrap.run_failed", str(error)))
-        _error_write(error, recorded)
+        if role == _CONSOLE_ROLE:
+            verbose.console_note(i18n("bootstrap.run_failed", str(error)))
+        _error_write(error, switches.debug and role == _ENGINE_ROLE)
         return _EXIT_FAILURE
 
 
@@ -379,13 +375,13 @@ def _engine_serve(
     return 0
 
 
-# Runs the engine: raw mode, the lock, the settings, then with the log open.
+# Runs the engine: raw mode, the lock, the settings, then the audited serve.
 def _engine_run(root: str, main_loop: str | None) -> int:
     tty.setraw(_READ_FD, termios.TCSANOW)
     _lock_take(root)
     loaded = _settings_read(root)
     _parameters_apply(root)
-    return _logged_run(
+    return _audited_run(
         root,
         loaded,
         _ENGINE_ROLE,
@@ -433,7 +429,7 @@ def _console_run(root: str, loaded: dict[str, Any]) -> int:
     if not switches.debug:
         return _EXIT_FAILURE
     level = _LEVEL_VERBOSE if switches.verbose else _LEVEL_PLAIN
-    return _logged_run(root, loaded, _CONSOLE_ROLE, lambda: _dash_run(level))
+    return _audited_run(root, loaded, _CONSOLE_ROLE, lambda: _dash_run(level))
 
 
 # The cascade of an exception, by the rule of `dispatch.cause_make`.

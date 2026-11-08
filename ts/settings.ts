@@ -21,7 +21,7 @@ namespace settings {
   // The shape of settings.json, sent in `tap.start` unmodified.
   export interface Settings {
     queue_synchronous: boolean;
-    verbose_ring: number;
+    audit_entries: number;
     line_max: number;
     blob_max: number;
     overflow_bytes: number;
@@ -60,6 +60,7 @@ namespace settings {
       poll_milliseconds: number;
       output_width: number;
       root_files: string[];
+      root_records: string[];
       runtime_modules: string[];
       build_tools: { [tool: string]: string };
       build_headers: { [header: string]: string };

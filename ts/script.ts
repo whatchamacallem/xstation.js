@@ -5,14 +5,14 @@
 // The AI's scripts: a script is the text of the KV row
 // `/_files/script/<name>.js`, run inside the calling task by
 // `new Function("engine", "args", text)`. `engine` is a frozen object of
-// `store`, `log` and `i18n`, where `store` is a frozen object of the
+// `store` and `i18n`, where `store` is a frozen object of the
 // store's routine methods bound to the store: the operations of the tools,
 // `turn_compact` and `transaction_run`, and not `db_open`, `db_close`,
 // `kv_check`, `db_snapshot`, `db_restore`, `sink` or `handlers_register`,
 // which would expose the store beyond routine queries. A run returns the
-// value, or the exception with its stack, and the lines the run logged,
-// kept in the result alone. With `trace`, as `script_debug` runs it, each call of `store` is
-// traced first.
+// value, or the exception with its stack. With `trace`, as `script_debug`
+// runs it, each call of `store` is traced first, and the trace is one more
+// field of the result, which is that tool's result and no record.
 
 namespace script {
   // The row of a script and the names of the store's routine methods.
@@ -38,18 +38,18 @@ namespace script {
     ] as const),
   });
 
-  // One line a run logged: milliseconds since the epoch and its text.
-  export interface LogLine {
+  // One traced call of `store`: milliseconds since the epoch and its text.
+  export interface TraceLine {
     at: number;
     text: string;
   }
 
-  // What a run returned: the value or the exception, and the lines it wrote.
+  // What a run returned: the value or the exception, and a traced run's trace.
   export interface ScriptResult {
     value?: unknown;
     error?: string;
     stack?: string;
-    lines: LogLine[];
+    trace?: TraceLine[];
   }
 
   // The store's routine methods a script may call, bound to the store.
@@ -72,10 +72,9 @@ namespace script {
     | "transaction_run"
   >;
 
-  // The frozen object a script gets as `engine`: the store, the log, `i18n`.
+  // The frozen object a script gets as `engine`: the store and `i18n`.
   export interface Engine {
     store: ScriptStore;
-    log(text: string): void;
     i18n(name: string, ...args: unknown[]): string;
   }
 
@@ -121,16 +120,14 @@ namespace script {
     return Object.freeze(routine) as unknown as ScriptStore;
   }
 
-  // The same methods, each writing its trace line before it runs.
-  function store_traced(
-    store: ScriptStore,
-    line_write: (text: string) => void,
-  ): ScriptStore {
+  // The same methods, each keeping its trace line before it runs.
+  function store_traced(store: ScriptStore, kept: TraceLine[]): ScriptStore {
     const traced: { [name: string]: MethodCall } = {};
     for (const name of constants.store_methods) {
       const method = Reflect.get(store, name) as MethodCall;
       traced[name] = (...values: unknown[]): unknown => {
-        line_write(i18n("script.trace_call", name, arguments_text(values)));
+        const text = i18n("script.trace_call", name, arguments_text(values));
+        kept.push({ at: utility.time_now(), text });
         return method(...values);
       };
     }
@@ -146,26 +143,20 @@ namespace script {
   ): ScriptResult {
     const ref = constants.script_prefix + name + constants.script_suffix;
     const text = value_text(store, ref);
-    const kept: LogLine[] = [];
-    // Keeps every line for the result, its one record.
-    const line_write = (line_text: string): void => {
-      kept.push({ at: utility.time_now(), text: line_text });
-    };
+    const kept: TraceLine[] = [];
     const routine = store_routine(store);
-    const door = trace ? store_traced(routine, line_write) : routine;
-    const engine: Engine = Object.freeze({
-      store: door,
-      log: line_write,
-      i18n,
-    });
+    const door = trace ? store_traced(routine, kept) : routine;
+    const engine: Engine = Object.freeze({ store: door, i18n });
+    // A plain run's result holds no trace at all.
+    const traced = trace ? { trace: kept } : {};
     try {
       const body = new Function("engine", "args", text);
       const value: unknown = body(engine, args);
       // A value JSON cannot carry is the run's exception, not the tool's.
       utility.json_text({ value });
-      return { value, lines: kept };
+      return { value, ...traced };
     } catch (thrown) {
-      return { ...thrown_fields(thrown), lines: kept };
+      return { ...thrown_fields(thrown), ...traced };
     }
   }
 }

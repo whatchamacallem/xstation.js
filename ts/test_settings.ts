@@ -26,7 +26,7 @@ namespace test_settings {
   function settings_copy(): settings.Settings {
     return {
       queue_synchronous: setting_copy("queue_synchronous") as boolean,
-      verbose_ring: setting_copy("verbose_ring") as number,
+      audit_entries: setting_copy("audit_entries") as number,
       line_max: setting_copy("line_max") as number,
       blob_max: setting_copy("blob_max") as number,
       overflow_bytes: setting_copy("overflow_bytes") as number,

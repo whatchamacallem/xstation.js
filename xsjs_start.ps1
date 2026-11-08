@@ -38,6 +38,9 @@ $runtime_modules_ = (
 $provider_key_name_ = xsjs_util_get_setting $settings_json_ 'provider.variable'
 # The checkout's files that every root holds, beside ttyd and the page.
 $root_files_ = xsjs_util_get_setting $settings_json_ 'powershell.root_files'
+# The records of a debug serve in a root, which no later serve may keep.
+$root_records_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.root_records')
 # The file of the root that holds the parameters of the server's run.
 $parameters_file_ = (
     xsjs_util_get_setting $settings_json_ 'powershell.parameters_file')
@@ -132,8 +135,10 @@ function _xsjs_start_copy_files ([string[]]$sources_, [string]$target_) {
 function _xsjs_start_step_install_server {
     xsjs_util_write_log_section $i18n_.install_server
     $folders_ = "$linux_path_/python", "$linux_path_/i18n"
-    # The copies of earlier runs go, so the root holds this checkout's only.
-    xsjs_util_invoke_native { wsl -e rm -rf @folders_ }
+    $records_ = @($root_records_ | ForEach-Object { "$linux_path_/$_" })
+    $removed_ = $folders_ + $records_
+    # The copies and records of earlier runs go, the checkout's only staying.
+    xsjs_util_invoke_native { wsl -e rm -rf @removed_ }
     if ($LASTEXITCODE -ne 0) {
         throw ($i18n_.bootstrap_not_installed -f $linux_path_)
     }

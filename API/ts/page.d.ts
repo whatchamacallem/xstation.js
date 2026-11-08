@@ -6,8 +6,11 @@
 // The box takes the focus each time it opens: at the first render and at each
 // turn's end, as a disabled box loses the focus. An open box takes it too when
 // ctrl 0 hides the console. In debug mode the person's text `0` first
-// notifies `db.dump` to the worker, then submits its turn, and ctrl 1 shows
-// the end of the audit, asked of the server by `audit.tail` at each show.
+// notifies `audit.dump` to the worker, then submits its turn, and ctrl 1
+// shows the audit's end, asked of the server by `audit.tail` at each show. The
+// DOM port posts that key as `audit.overlay`, which this thread owns and no
+// record holds, as it is the audit's own operation. Every other digit is a
+// `ui.control_key`.
 //
 // A worker's `fault` line shows the fault screen, its stack followed by each
 // cause's message and stack, then the page terminates the worker, which has
@@ -70,7 +73,7 @@ declare namespace page {
   // The fault a message of the worker carries, which must be a `fault` line.
   function fault_read(data: unknown): lines.Fault;
 
-  // The DOM port: listeners post `ui.input` and `ui.control_key` lines.
+  // The DOM port: listeners post `ui.input`, `ui.control_key`, `audit.overlay`.
   class DomPort implements queue.Port {
     constructor(container: HTMLElement);
     line_post(line: lines.Line, transfer: ArrayBuffer[]): void;

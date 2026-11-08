@@ -185,6 +185,7 @@ namespace test_worker_ai {
         "console.idle": "ui",
         "audit.": "server",
         "audit.tail": "ai",
+        "audit.dump": "ai",
         "tap.": "server",
         fault: "ai",
       });

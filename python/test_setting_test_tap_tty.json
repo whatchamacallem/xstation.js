@@ -1,5 +1,6 @@
 {
   "child_seconds": 30,
+  "entries": 999,
   "failing": {
     "failures": 4,
     "stats": [7, 2, 4, 1, true],
@@ -345,7 +346,6 @@
     }
   },
   "poll_seconds": 0.01,
-  "ring": 999,
   "suites": ["test_tap_producer"],
   "texts": {
     "bail_failfast": "Bail out! failfast",

@@ -1363,6 +1363,31 @@ namespace test_queue {
       );
     }
 
+    // A sleep on a wake under `audit.` is not noted, and wakes on this queue.
+    test_audit_sleep_own(): void {
+      const to_ui = type_fresh();
+      const wake = `audit.${type_fresh()}`;
+      const woken: lines.Line[] = [];
+      dispatch.handler_register(wake, 0, (line) => {
+        woken.push(line);
+        return undefined;
+      });
+      const bench = bench_audited({ [to_ui]: "ui" });
+      const start = handler_fresh(() => {
+        const id = bench.tasks.task_submit(line_build(to_ui));
+        return sleep_build("sleep_null", wake, [id]);
+      });
+      bench.tasks.audit_open();
+      bench.ui.line_post(line_build(start), []);
+      const [asked] = bench.carried.filter(({ lane }) => lane === "ui");
+      bench.ui.line_post(reply_gold(asked.line, "bare"), []);
+      this.assertEqual(woken.length, 1);
+      const types = carried_read(bench.carried).map((text) =>
+        text.split(" ").slice(0, 3).join(" "),
+      );
+      this.assertEqual(types, ["server audit.line ai", `ui ${to_ui}`]);
+    }
+
     // The audit's own lines are never recorded, sent or forwarded.
     test_audit_own(): void {
       const bench = bench_audited({});

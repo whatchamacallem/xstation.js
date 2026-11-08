@@ -10,17 +10,14 @@
 # is absent, each line on disk the moment it is handled, a language other
 # than typescript refused, python among them, and a write that the limit of
 # the file size cuts short refused, which only an unbuffered write shows.
-# Then `error_take`, outside debug mode on the root's real log: the browser's
-# cascade logged in its order, outermost first, read back from `_verbose`
-# against the gold's texts; in debug mode with nothing open, as it logs
-# nothing; and the bail out line appended to the TypeScript stream with the
-# line breaks of its message replaced, read back from the file. The
-# registration is read from the dispatcher, which refuses a second one of
-# the type. Each child sets debug mode itself, writes how its work ended to a
-# file, or to stderr when that write fails, then kills itself.
+# Then `error_take`: the bail out line appended to the TypeScript stream with
+# the line breaks of its message replaced, read back from the file. The
+# registration is read from the dispatcher, which refuses a second one of the
+# type. Each child writes how its work ended to a file, or to stderr when that
+# write fails, then kills itself.
 
-import contextlib, engine_tap, functools, harness, json, os, re, resource
-import signal, sqlite3, switches, sys, tempfile, traceback, unittest
+import engine_tap, functools, harness, json, os, re, resource, signal, sys
+import tempfile, traceback, unittest
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -61,7 +58,7 @@ _LANGUAGES_REFUSED = (
     ("../typescript", "path"),
 )
 
-# TypeScript file size before a write the limit cuts, chosen above log writes.
+# The size of the TypeScript file before a write the limit cuts.
 _FILL_BYTES: int = harness.gold_get(f"{_GOLD_ID}.fill_bytes")
 
 # The bytes a write cut short writes: the limit is this far past the fill.
@@ -70,33 +67,11 @@ _SHORT_BYTES = 1
 # Text with a character of two bytes and one of three bytes in `UTF-8`.
 _WIDE_TEXT = "ok 1 - caf" + chr(0xE9) + " " + chr(0x4E2D)
 
-# A cascade of the browser below its latest failure: two causes, nested.
-_CAUSE: dict[str, object] = {
-    "message": "inner",
-    "stack": "Error: inner\n    at b",
-    "cause": {"message": "first", "stack": "Error: first\n    at c"},
-}
-
 # The latest failure's message, with each kind of line break in it.
 _MESSAGE = "boom\nnext\r\nlast"
 
-# The latest failure's stack.
-_STACK = "Error: boom\n    at a"
-
 # The bail out line of `_MESSAGE`, each line break a space.
 _BAIL_LINE = "Bail out! boom next  last"
-
-# The `blob_max` of the settings, the largest log file.
-_BLOB_MAX: int = harness.setting_get("blob_max")
-
-# The file of the root's log.
-_LOG_FILE = "_verbose.sqlite"
-
-# The query of the thread and text of each line of the log, in order.
-_LOG_QUERY = "SELECT thread, text FROM line ORDER BY seq"
-
-# The thread the server's own lines are stored under in the log.
-_SERVER_THREAD = "server"
 
 # The file in the scratch directory that a child writes how it ended to.
 _ENDING_NAME = "ending.json"
@@ -161,14 +136,6 @@ def _fill_make(root: str) -> str:
     return path
 
 
-# The thread and text of each line of the root's log, in order.
-def _log_read(root: str) -> list[tuple[str, str]]:
-    path = os.path.join(root, _LOG_FILE)
-    with contextlib.closing(sqlite3.connect(path)) as connection:
-        rows: list[tuple[str, str]] = connection.execute(_LOG_QUERY).fetchall()
-    return rows
-
-
 # The work of a child: registers on the root, then handles each text's line.
 def _lines_handle(root: str, texts: tuple[str, ...]) -> list[Any]:
     engine_tap.handlers_register(root)
@@ -196,33 +163,12 @@ def _language_handle(root: str, language: str) -> Any:
     return _handler_call(engine_tap.tap_line, line)
 
 
-# Sets debug mode in a child, which ends with it.
-def _debug_set(debug: bool) -> None:
-    switches.switches_apply({**switches.switches_get(), "debug": debug})
-
-
-# Child: sets debug mode, opens the log outside it, takes the failure.
-def _failure_take(
-    root: str,
-    debug: bool,
-    texts: tuple[str, ...],
-    message: str,
-    cause: dict[str, object] | None,
-) -> None:
-    _debug_set(debug)
-    if not debug:
-        engine_tap.verbose.log_open(root, _BLOB_MAX)
+# The work of a child: registers, handles each text's line, takes the failure.
+def _failure_take(root: str, texts: tuple[str, ...], message: str) -> None:
     engine_tap.handlers_register(root)
     for text in texts:
         _handler_call(engine_tap.tap_line, _tap_line(text))
-    engine_tap.error_take(message, _STACK, cause)
-
-
-# In a child: opens the root's log, then takes a failure before registering.
-def _failure_early(root: str) -> None:
-    _debug_set(False)
-    engine_tap.verbose.log_open(root, _BLOB_MAX)
-    engine_tap.error_take("boom", _STACK, None)
+    engine_tap.error_take(message)
 
 
 # The work of a child: registers, then registers the handler's type again.
@@ -369,49 +315,18 @@ class TestAppend(ScratchCase):
 
 # Tests the browser's failure taken by the server.
 class TestErrorTake(ScratchCase):
-    # The message, the stack, then each cause outermost first, one line each.
-    def test_cascade_logged(self) -> None:
-        work = functools.partial(
-            _failure_take, self.root, False, (), _MESSAGE, _CAUSE
-        )
-        self.assertIsNone(self.child_value(work))
-        texts = [
-            _text_get("engine_tap_browser_failed_breaks"),
-            _STACK,
-            _text_get("engine_tap_browser_cause_inner"),
-            "Error: inner\n    at b",
-            _text_get("engine_tap_browser_cause_first"),
-            "Error: first\n    at c",
-        ]
-        expected = [(_SERVER_THREAD, text) for text in texts]
-        self.assertEqual(_log_read(self.root), expected)
-
-    # With no cause only the message and the stack are logged.
-    def test_cause_absent(self) -> None:
-        work = functools.partial(
-            _failure_take, self.root, False, (), "boom", None
-        )
-        self.child_value(work)
-        texts = [_text_get("engine_tap_browser_failed_boom"), _STACK]
-        expected = [(_SERVER_THREAD, text) for text in texts]
-        self.assertEqual(_log_read(self.root), expected)
-
     # The bail out ends the stream's file, its message on one line.
     def test_bail_appended(self) -> None:
         texts = _RUN_LINES[:4]
-        work = functools.partial(
-            _failure_take, self.root, False, texts, _MESSAGE, _CAUSE
-        )
-        self.child_value(work)
+        work = functools.partial(_failure_take, self.root, texts, _MESSAGE)
+        self.assertIsNone(self.child_value(work))
         expected = "".join(text + "\n" for text in texts + (_BAIL_LINE,))
         path = _tap_path(self.root, _LANGUAGE)
         self.assertEqual(_file_read(path), expected.encode("utf-8"))
 
     # Before any line of the stream, the bail out makes the file alone.
     def test_bail_first(self) -> None:
-        work = functools.partial(
-            _failure_take, self.root, False, (), "boom", None
-        )
+        work = functools.partial(_failure_take, self.root, (), "boom")
         self.child_value(work)
         path = _tap_path(self.root, _LANGUAGE)
         self.assertEqual(_file_read(path), b"Bail out! boom\n")
@@ -422,38 +337,19 @@ class TestErrorTake(ScratchCase):
         path = _fill_make(self.root)
         message = _text_get("engine_tap_write_short_bail")
         message = message.replace("{2}", path)
-        work = functools.partial(
-            _failure_take, self.root, False, (), "boom", None
-        )
+        work = functools.partial(_failure_take, self.root, (), "boom")
         limited = functools.partial(_limited_run, work)
         self.child_raise(limited, OSError, message)
         self.assertEqual(_file_read(path)[_FILL_BYTES:], b"B")
-        texts = [_text_get("engine_tap_browser_failed_boom"), _STACK]
-        expected = [(_SERVER_THREAD, text) for text in texts]
-        self.assertEqual(_log_read(self.root), expected)
 
-    # In debug mode nothing is logged, nothing opened, and the bail out ends.
-    def test_debug_quiet(self) -> None:
-        texts = _RUN_LINES[:4]
-        work = functools.partial(
-            _failure_take, self.root, True, texts, _MESSAGE, _CAUSE
-        )
-        self.assertIsNone(self.child_value(work))
-        expected = "".join(text + "\n" for text in texts + (_BAIL_LINE,))
-        path = _tap_path(self.root, _LANGUAGE)
-        self.assertEqual(_file_read(path), expected.encode("utf-8"))
-        self.assertFalse(os.path.exists(os.path.join(self.root, _LOG_FILE)))
-
-    # Called before the registration it logs the failure, then raises.
+    # Called before the registration it raises and writes nothing.
     def test_take_early(self) -> None:
         self.child_raise(
-            functools.partial(_failure_early, self.root),
+            functools.partial(engine_tap.error_take, "boom"),
             RuntimeError,
             _text_get("engine_tap_not_registered"),
         )
-        texts = [_text_get("engine_tap_browser_failed_boom"), _STACK]
-        expected = [(_SERVER_THREAD, text) for text in texts]
-        self.assertEqual(_log_read(self.root), expected)
+        self.assertEqual(os.listdir(self.root), [])
 
 
 # Tests the registration and what the handler refuses.

@@ -5,17 +5,19 @@
 // The line cases of the UI thread's handlers on the page: the lines of the AI
 // worker that `page.handlers_register` serves, a render, a kept image, a
 // permit, the player's turns, the overlays' keys, the audit's end shown and
-// emptied, and a fetched image, each answered on a real queue of the UI
-// thread whose lane to the AI worker is the test's end. Every part is real: the DOM port on the page's
-// elements, which takes the player's text, clicks, keys and choices, the media
-// port, which decodes the gold's image and downloads one from the driver's
-// HTTP server, which serves this page too, the console view and the overlays.
-// The cases also send lines of types of the topology's own, whose handlers
-// read the DOM back, the band, the image's pixels, the permit area and the
-// overlays, and act as the player does, through DOM events: text submitted, a
-// click on a pixel of the image, a key with control and a permit button
-// clicked. A line that another line's handling sends on is answered after the
-// handling, so the case that reads what it changed comes after a wait.
+// emptied by ctrl 1, whose `audit.overlay` runs here and sends the lane only
+// its `audit.tail`, and a fetched image, each answered on a real queue of the
+// UI thread whose lane to the AI worker is the test's end. Every part is real:
+// the DOM port on the page's elements, which takes the player's text, clicks,
+// keys and choices, the media port, which decodes the gold's image and
+// downloads one from the driver's HTTP server, which serves this page too, the
+// console view and the overlays. The cases also send lines of types of the
+// topology's own, whose handlers read the DOM back, the band, the image's
+// pixels, the permit area and the overlays, and act as the player does, through
+// DOM events: text submitted, a click on a pixel of the image, a key with
+// control and a permit button clicked. A line that another line's handling
+// sends on is answered after the handling, so the case that reads what it
+// changed comes after a wait.
 namespace test_integrate_page {
   // The threads, the types of the topology's own and the page's elements.
   const constants = Object.freeze({

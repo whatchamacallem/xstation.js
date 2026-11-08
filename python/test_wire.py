@@ -85,7 +85,10 @@ _TEST_ALL = "test-all"
 _ECHO_RUNGS = (
     ("first", _SMOKE_TEST),
     ("echo", _SMOKE_TEST),
+    ("extensions", _SMOKE_TEST),
     ("control", _SMOKE_TEST),
+    ("repeat", _SMOKE_TEST),
+    ("repeated", _SMOKE_TEST),
     ("fit", _TEST_ALL),
 )
 

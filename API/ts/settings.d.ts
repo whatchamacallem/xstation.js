@@ -8,7 +8,7 @@
 // It bounds the blob bytes of one message in all, each cache file, and the
 // blob bytes a queue and the wire's frame queue hold in memory, a blob
 // streamed to a cache file counting nothing. `line_max` bounds the JSON text
-// of one line without its blobs, and so a verbose entry. A blob over
+// of one line without its blobs. A blob over
 // `overflow_bytes` streams to a cache file as it arrives. `chunk_bytes` is one
 // input frame of the wire and one read of the server. `srv_buf_size` is ttyd's
 // receive chunk, for the start script's ttyd and the tests' alike. The first
@@ -22,7 +22,7 @@
 declare namespace settings {
   interface Settings {
     queue_synchronous: boolean;
-    verbose_ring: number;
+    audit_entries: number;
     line_max: number;
     blob_max: number;
     overflow_bytes: number;
@@ -60,6 +60,7 @@ declare namespace settings {
       poll_milliseconds: number;
       output_width: number;
       root_files: string[];
+      root_records: string[];
       runtime_modules: string[];
       build_tools: { [tool: string]: string };
       build_headers: { [header: string]: string };

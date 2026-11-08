@@ -1,4 +1,5 @@
 {
   "gone_seconds": 5,
-  "poll_seconds": 0.05
+  "poll_seconds": 0.05,
+  "token_path": "/token"
 }

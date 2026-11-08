@@ -12,10 +12,10 @@
 # start coerced the C locale. The role refuses a root that is not under
 # `/home/`, which the sandbox replaces with an empty tmpfs, so dash never sees
 # the root and nothing it writes outlives it.
-# In debug mode a role opens the root's audit, else `_verbose.sqlite`, and the
-# engine role records `tap.start`, its reply and its own `error` line there. A
-# failure writes one `error` line, its cascade under `cause`, its message
-# logged first when no record holds it, a note of console in the console role,
-# and exits 1. Just before that line it ignores SIGHUP, so that the hangup of
-# ttyd's close cannot end it while it is written.
+# In debug mode a role opens the root's audit, and the engine role records
+# `tap.start`, its reply and its own `error` line there. A failure writes one
+# `error` line, its cascade under `cause`, its message a note of console first
+# in the console role, and exits 1; outside debug mode nothing else is written.
+# Just before that line it ignores SIGHUP, so that the hangup of ttyd's close
+# cannot end it while it is written.
 def bootstrap_run(argv: list[str]) -> int: ...

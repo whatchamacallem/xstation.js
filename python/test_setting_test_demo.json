@@ -156,6 +156,7 @@
       "words": "until ai.model_reply"
     }
   ],
+  "audit_wake_note": "until audit.",
   "bad_inputs": ["7", "word", ""],
   "buttons": [
     "Accept",
@@ -171,8 +172,6 @@
   "console_output": "hyperposition",
   "console_prompt": "$",
   "dump_entries": [
-    {"label": "ui to ai", "type": "db.dump"},
-    {"label": "ai to server", "type": "db.dump", "fragment": "[blobs omitted: 1]"},
     {"label": "databases of the browser"},
     {"label": "databases of the server"},
     {"label": "ui to ai", "type": "ai.say", "fragment": "\"text\": \"0\""}
@@ -197,6 +196,13 @@
   "permit_text": "browser.console_run asks to run with {\"text\":\"echo hyperposition\",\"timeout_seconds\":30}.",
   "picture_colours": ["0 0 0 255"],
   "picture_size": 4,
+  "plain_absent": ["_audit.txt", "_verbose*", "tap"],
+  "plain_debug": false,
+  "plain_fragments": [
+    "started process, pid: ",
+    "process killed with signal 1, pid: "
+  ],
+  "plain_port": " N:  Listening on port: {0}\n",
   "poll_seconds": 0.1,
   "remark": "How can I help you?",
   "root_debug": true,

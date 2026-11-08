@@ -10,10 +10,6 @@
   },
   "texts": {
     "dispatch_handler_twice": "A handler is already registered for type tap.line version 0.",
-    "engine_tap_browser_cause_first": "caused by: first",
-    "engine_tap_browser_cause_inner": "caused by: inner",
-    "engine_tap_browser_failed_boom": "The browser failed: boom",
-    "engine_tap_browser_failed_breaks": "The browser failed: boom\nnext\r\nlast",
     "engine_tap_language_unknown_capital": "The TAP language TypeScript is not typescript, the one stream that crosses the wire.",
     "engine_tap_language_unknown_empty": "The TAP language  is not typescript, the one stream that crosses the wire.",
     "engine_tap_language_unknown_path": "The TAP language ../typescript is not typescript, the one stream that crosses the wire.",

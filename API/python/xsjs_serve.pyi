@@ -1,25 +1,27 @@
 # `python3 python/xsjs_serve.py [--anthropic] [--debug] [--verbose] [--port N]
 # [--root PATH] [--fresh]`, standard library only, the POSIX start that stands
 # alone from the Windows scripts. `serve_run` builds the engine page, makes the
-# root and serves it through ttyd, prints the address alone on stdout and keeps
-# serving until SIGINT or SIGTERM, when it stops ttyd's process group and exits
-# with ttyd's code. ttyd's log goes to stderr as it comes. The demo test makes
-# its roots and starts its ttyd through these functions, so that what it proves
-# is what the maintainer runs. `values` is the checkout's settings throughout.
+# root and serves it through ttyd, and keeps serving until SIGINT or SIGTERM,
+# when it stops ttyd's process group and exits with ttyd's code. Its stdout is
+# the server's output in both modes: ttyd's log as it comes, which holds the
+# port, each connection and each engine's start and exit, and the address once
+# ttyd names its port. A reader of it that leaves ends the program by SIGPIPE
+# at the next log line, and ttyd follows. A caller inside a test gives
+# `TtydServer` stderr or a file, as stdout may be a TAP stream.
 #
 # A root is made as the start script makes one: `powershell.runtime_modules`
 # and the seed in `python/`, `i18n/en-US.json`, `powershell.root_files`, the
-# page and `parameters.json`. Each run makes those anew, removes the audit,
-# `_audit.txt`, and the log, `_verbose.sqlite` and its `-wal` and `-shm` files,
-# so each serve starts a new record, and keeps the rest, so the maintainer's databases persist. The
-# root's engine lock means a second connection, as a second tab, waits 5 s,
-# then fails loud on the server and shows the fault screen: one page per root.
+# page and `parameters.json`. Each run makes those anew, removes the files and
+# directories of `powershell.root_records`, so that no record outlives its
+# serve, and keeps the rest, so the maintainer's databases persist.
 #
 # ttyd is the one the project built, in a session of its own, so that ctrl C
 # reaches this program alone. A ttyd not built raises `xsjs_serve.ttyd_missing`
 # and a ttyd that ends before its stop raises `xsjs_serve.ttyd_ended`.
 
 from typing import Any
+
+# `values` is the checkout's settings throughout.
 
 # ttyd takes SIGTERM when the thread that started it dies, by any signal.
 
@@ -31,13 +33,13 @@ from typing import Any
 class TtydServer:
     pid: int
     port: int
-    # Starts ttyd and returns once its log names the port it listens on.
+    # Starts ttyd, its log copied to `log_fd`, returns once it names its port.
     def __init__(
-        self, values: dict[str, Any], root: str, port: int
+        self, values: dict[str, Any], root: str, port: int, log_fd: int
     ) -> None: ...
-    # Copies the log to stderr up to the port's line. Returns the port.
+    # Copies the log up to the port's line. Returns the port.
     def port_read(self) -> int: ...
-    # Copies the rest of the log to stderr, leaving the signals to the waiter.
+    # Copies the rest of the log, leaving the signals to the waiter.
     def log_copy(self) -> None: ...
     # The page's address on this ttyd, `http://localhost:PORT/`.
     def address_get(self) -> str: ...
@@ -52,7 +54,7 @@ def root_default(values: dict[str, Any]) -> str: ...
 # Builds the engine page from `html/engine.html`. Returns its path in `build/`.
 def page_ready(values: dict[str, Any]) -> str: ...
 
-# Makes the root from the built page: its audit and log go, or with `fresh` all.
+# Makes the root from the built page: its audit goes, with `fresh` all of it.
 def root_make(
     values: dict[str, Any],
     page: str,

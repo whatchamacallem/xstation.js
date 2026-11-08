@@ -2,20 +2,19 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# The server's end of the TAP run: each `tap.line`, a line of the TypeScript
-# stream, the one that crosses the wire, is appended to
-# `<root>/tap/typescript.tap` the moment it arrives, unbuffered, so a hang
-# leaves every line before it on disk. Any other language is refused: the
-# Python stream, the one `tap.run` runs, crosses the other way. When the
-# browser fails, the main loop gives its `error` line to `error_take`, which
-# ends the TypeScript stream with a `Bail out!` line, so the TAP results are
-# written out whole, before the main loop exits 1 without an answer. Outside
-# debug mode it logs the cascade first; in debug mode it logs nothing, as the
-# stock main loop records the line in the audit as it reads it.
+# The server's end of the TAP run, in debug mode alone, by the main loops that
+# use it: each `tap.line`, a line of the TypeScript stream, the one that
+# crosses the wire, is appended to `<root>/tap/typescript.tap` the moment it
+# arrives, unbuffered, so a hang leaves every line before it on disk. Any other
+# language is refused: the Python stream, the one `tap.run` runs, crosses the
+# other way. When the browser fails, the main loop gives the message of its
+# `error` line to `error_take`, which ends the TypeScript stream with a `Bail
+# out!` line, so the TAP results are written out whole, before the main loop
+# exits 1 without an answer. The stock main loop has recorded the whole line in
+# the audit by then.
 
-import dispatch, jslb, os, switches, verbose
+import dispatch, jslb, os
 from internationalization import i18n
-from typing import cast
 
 # The languages whose TAP streams the server keeps: the one that crosses.
 _LANGUAGES = ("typescript",)
@@ -74,18 +73,8 @@ def tap_line(line: jslb.Object, *, language: str, text: str) -> None:
     _text_append(language, text)
 
 
-# Appends `Bail out!` of the browser's failure, logged outside debug mode.
-def error_take(
-    message: str, stack: str, cause: dict[str, object] | None
-) -> None:
-    if not switches.debug:
-        verbose.log(i18n("engine_tap.browser_failed", message))
-        verbose.log(stack)
-        inner = cause
-        while inner is not None:
-            verbose.log(i18n("engine_tap.browser_cause", inner["message"]))
-            verbose.log(cast(str, inner["stack"]))
-            inner = cast(dict[str, object] | None, inner.get("cause"))
+# Appends `Bail out!` with the message of the browser's failure.
+def error_take(message: str) -> None:
     reason = message
     for mark in _LINE_BREAKS:
         reason = reason.replace(mark, " ")

@@ -10,7 +10,7 @@
 //
 // In the AI worker an uncaught fault runs the report function with the thrown
 // value and a `done` callback: the worker sends the `error` line to the
-// server, which logs it and ends the wire by its exit, and then calls `done`,
+// server, which reads it and ends the wire by its exit, and then calls `done`,
 // which posts the `fault` line to the page. With no report function yet
 // registered the `fault` line is posted at once. A fault met while the report
 // waits, as the expiry of the wire's drain timer, posts its `fault` line at

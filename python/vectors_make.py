@@ -101,7 +101,6 @@ _TEST_DIGESTS: dict[str, dict[str, tuple[bytes, int]]] = {
             b'  {sql: "UPDATE region SET tide = tide + ? WHERE name = ?",\n'
             b'    params: [args.hours, "castle_gatehouse"]},\n'
             b"]);\n"
-            b'engine.log(1, "tide advanced by " + args.hours);\n'
             b"return {changes: results[0].changes};\n",
             0,
         ),
@@ -126,7 +125,6 @@ _TEST_DIGESTS: dict[str, dict[str, tuple[bytes, int]]] = {
             b'  {sql: "UPDATE region SET tide = tide + ? WHERE name = ?",\n'
             b'    params: [args.hours, "castle_gatehouse"]},\n'
             b"]);\n"
-            b'engine.log("tide advanced by " + args.hours);\n'
             b"return {changes: results[0].changes};\n",
             0,
         ),

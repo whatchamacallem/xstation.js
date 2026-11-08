@@ -49,9 +49,6 @@
     "bail_out": "Bail out! page fault",
     "dispatch_handler_unknown": "No handler is registered for type tap.line version 1.",
     "dispatch_request_unanswered": "The handler for type tap.line version 0 returned no reply to the request with id 5.",
-    "engine_tap_browser_cause_first": "caused by: first fault",
-    "engine_tap_browser_cause_second": "caused by: second fault",
-    "engine_tap_browser_failed": "The browser failed: page fault",
     "engine_tap_language_unknown": "The TAP language python is not typescript, the one stream that crosses the wire."
   }
 }

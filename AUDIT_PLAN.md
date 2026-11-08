@@ -2,9 +2,10 @@
 
 The audit is of the demo of FIRST_DEMO.md, served with `--debug`, on this
 machine, and nowhere else. Everything in this plan exists in debug mode only.
-Outside it no line is recorded, no database is dumped, 0 is the analyst's
-plain answer as today, and the server's own log of its failures stays in
-`_verbose.sqlite`. No real AI provider is contacted, by the rule.
+Outside it no line is recorded, no database is dumped and 0 is the analyst's
+plain answer as today; section 8 removes the server's old log of its failures,
+and with it every mention of `_verbose.sqlite` and `xsjs_log.py` below. No real
+AI provider is contacted, by the rule.
 
 The audit is one text document per serve, written by the server: every JSLB
 line of the demo, each exchange once, in the order the server learned of it,
@@ -942,3 +943,150 @@ which stage 5.6 writes into that file.
 
 No requirement is class A or B. Every question of the plan's earlier versions
 is answered, R13 to R18, and none is open.
+
+## 8. The maintainer's change of 2026-11-08: no record outside debug mode
+
+The maintainer's words are T1 of `tmp/tasks_08_1057.md`. This section replaces
+every sentence above that keeps `_verbose.sqlite` or `xsjs_log.py`: the opening
+paragraph, 1.2, 4.2.3's last paragraph, 4.5's "What stays" and 4.9.
+
+### 8.1. What goes
+
+1. `_verbose.sqlite`, `API/sql/verbose.sql`, and `verbose.log_open`,
+   `verbose.log_close` and the module's SQLite code.
+2. `python/xsjs_log.py`, `API/python/xsjs_log.pyi`, its two suites and their
+   golds.
+3. Every failure text the server logged outside debug mode:
+   `main_loop.serve_failed`, `bootstrap.run_failed` in the engine role,
+   `engine_tap.browser_failed` and `engine_tap.browser_cause`. Each failure
+   still writes its `error` line, which the fault screen shows, and still exits
+   1, which ttyd's log shows.
+4. `<root>/tap/` outside debug mode. `engine_tap.handlers_register` runs in
+   debug mode alone, as `engine_audit`'s does, and the main loop and the echo
+   loop call `engine_tap.error_take` in debug mode alone. Outside it a `tap.line`
+   is an unknown line, as no page sends one there, and a browser's `error` line
+   ends the server with nothing written.
+5. A script's log: `engine.log` of `ts/script.ts`. A run returns its value or
+   its exception. `script_debug` still returns its trace of `store` calls, as
+   that is the tool's result and no record.
+6. The name of the log wherever a thing outlives it: the setting `verbose_ring`
+   becomes `audit_entries`, as the overlay's count of the audit's entries;
+   comments that say a line is logged or verbose say what they now mean.
+
+Outside debug mode a root ends up holding its databases, its cache, its lock and
+the files the serve program copied, and nothing that records a run.
+
+### 8.2. What stays
+
+1. `python/verbose.py` as the shell's runner alone: `verbose.exec` with its
+   levels. Its start and end of dash are notes of console in the audit, as the
+   console role runs in debug mode alone. `verbose.log` becomes
+   `verbose.console_note(text)`, which writes that note; the console role's own
+   failure uses it too, as its `error` line goes to tty 0 and no audit line holds
+   it.
+2. The switch `--verbose`, the console's shell level.
+3. The audit, written by the server alone, on the debug flag alone. There is no
+   other control of it.
+
+### 8.3. The server's output
+
+`python/xsjs_serve.py` writes everything on its stdout: ttyd's log as it comes,
+and the address once ttyd names its port. So `TtydServer` takes the descriptor
+its log goes to, `TtydServer(values, root, port, log_fd)`: the serve program
+gives stdout, and a caller inside a test gives stderr or a file, as stdout may be
+a TAP stream. This output is the server's verbose log in both modes. It holds no
+JSLB. It holds the port, each connection, each engine's start with its pid and
+each engine's exit with its code, which is the rudimentary debugging asked for.
+The Windows start's `ttyd.log` holds the same lines.
+
+Deferred, with its design kept whole: the engine's failure text on that output.
+The engine cannot write there today. Its descriptors 0, 1 and 2 are the pty, which
+is the wire; ttyd's `uv_disable_stdio_inheritance` closes every other descriptor
+across the exec; and `/proc/PPID/fd/2` works under the serve program but refuses
+with EACCES under the Windows runner, whose pipes are root's. The design: a further
+patch of ttyd's `pty_spawn` duplicates its stderr before `forkpty` and, in the
+child, places the copy at a fixed descriptor, 3, with close-on-exec off; `verbose`
+writes a failure's text there outside debug mode, before the `error` line; the
+console role closes it before the sandbox; a test's engine child is given a pipe
+at 3. The cost is a C patch, a rebuild of ttyd and a pipe in each engine test.
+
+### 8.4. The audit's own operation is never audited
+
+Everything of the audit's operation has a type under `audit.`, and nothing under
+`audit.` is recorded or noted:
+
+1. `db.dump` becomes `audit.dump` on both lanes, with `engine_audit.audit_dump`,
+   so it is skipped as `audit.line` and `audit.tail` are. In the UI thread `audit.`
+   goes to ai. In the worker it goes to server, but for `audit.tail` and
+   `audit.dump`, which the worker takes itself.
+2. The wakes of the tail move under the prefix: `ui.audit_tail` becomes
+   `audit.tail_shown`, `worker.tail_reply` becomes `audit.tail_relayed` and
+   `tools.tail_reply` becomes `audit.tail_tool`.
+3. `queue.sleep_note` notes no sleep whose wake is under `audit.`.
+
+What is left in the document about the audit is the AI's own call of its tool
+`audit_tail`, as `mcp` lines of its turn. A tool result feeds the next model
+request, so no mask of the `mcp` line alone could keep that text out, and the seed's
+table never calls the tool. This goes to the maintainer as a question, with
+removing the tool as the other choice.
+
+### 8.5. What the tests leave
+
+1. `python3 python/test_demo.py --debug`, and `./test_posix.sh --debug` through it,
+   leaves the audit at `build/test_demo/audit.txt` after a pass. Without `--debug`
+   the demo's root is still a debug root, as its rungs need one, and its audit goes
+   with the root when the run passes. A failed rung copies the audit either way,
+   and the root stays, for the diagnosis.
+2. A new smoke-test rung of the demo test, `plain`, serves a root with debug false
+   through `xsjs_serve.root_make` and `xsjs_serve.TtydServer`, its log going to
+   `build/test_demo/server.txt`, loads the page, plays choice 1 and 0 and leaves. It
+   requires that the root holds no `_audit.txt`, no `_verbose*` and no `tap`, and
+   that the output holds the gold's fragments of the port, the engine's start and
+   its exit, waited for since ttyd's ends keep no order. `server.txt` stays, as it
+   is the server's output.
+3. Every test of a root outside debug mode that read `_verbose.sqlite` reads the
+   `error` line and the exit code instead, and requires that no record file exists.
+
+### 8.6. Requirements of T1, by class
+
+All are class D once this section is built, but for two that are class B:
+
+1. Class B: "verbose server logs useful for rudimentary debugging" is met by
+   ttyd's log, with no engine failure text, by 8.3.
+2. Class B: "the operation of the auditing system is never audited" leaves the AI's
+   own `audit_tail` call in the document, by 8.4.
+
+Both go to the maintainer as questions in the postmortem.
+
+### 8.7. What a reading review of the built change added
+
+1. Ctrl 1 opens the audit's overlay, so its key is the audit's own operation, yet it
+   was recorded as a `ui.control_key` from the DOM port. The DOM port posts it as
+   `audit.overlay`, with no payload, which the UI thread owns and handles, so 8.4's
+   rule covers it. Every other digit stays `ui.control_key`.
+2. A record of a debug serve must not outlive it into a serve without `--debug`, and
+   `<root>/tap/` did. The setting `powershell.root_records` names `_audit.txt` and
+   `tap`, which both `xsjs_serve.root_make` and `xsjs_start.ps1` remove at each start.
+   A root's old `_verbose.sqlite` needs no code, as this machine's is gone.
+3. As stdout carries ttyd's log, a reader of it can leave, as `xsjs_serve.py | grep -m1
+   http` does. The program sets SIGPIPE to its default in its `__main__` statement
+   alone, so the next log line ends it, and ttyd follows by the parent's death signal,
+   rather than the copier dying with the program still serving.
+4. `switches.verbose_on` has no caller in the web app and goes. The switches' `verbose`
+   key stays, as `tap.start` carries all three.
+
+### 8.8. The AI's tool `audit_tail` goes
+
+The maintainer's choice of 2026-11-08, T2 of `tmp/tasks_08_1057.md`. This replaces
+8.4's last paragraph and 4.6.2, and moves 8.6's item 2 to class C, withdrawn in
+favour of the rule; 8.6's item 1 is class C too, as the maintainer took its default.
+R8's "its end for the overlay and the AI" is now its end for the overlay alone.
+
+1. The tool `audit_tail` goes from `ts/tools_browser.ts`, API/mcp/tools.json, the seed's
+   prompt and every gold that lists the tools, with its wake `audit.tail_tool`, its
+   refusal outside debug mode and its suite.
+2. The line `audit.tail` stays, with `engine_audit.audit_tail` and the worker's relay, as
+   ctrl 1's overlay asks it and the engine's integration block pins the wire through it.
+3. So no path is left by which the audit's text returns to the audit: the AI cannot read
+   it, and the overlay's text stays in the page. The maintainer and development agents
+   read the file.

@@ -28,7 +28,7 @@ namespace test_integrate_engine {
     media_owner: "media" as const,
     media_setting: "media_db_bytes",
     timeout_setting: "provider.timeout_seconds",
-    tail_setting: "verbose_ring",
+    tail_setting: "audit_entries",
     tail_type: "audit.tail",
     say_type: "ai.say",
     click_type: "ai.click",
@@ -241,6 +241,7 @@ namespace test_integrate_engine {
         throw new Error(`The audit's end lost the entry ${seen}`);
       }
       for (const entry of entries.slice(after)) {
+        // A mark no case expects, the audit's own operation, fails its case.
         const mark = marks.find(
           ({ label, parts }) =>
             label_of(entry) === label &&

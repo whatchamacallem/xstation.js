@@ -28,7 +28,7 @@ namespace test_page {
     // The members of `settings.json`, each read by the harness.
     settings_names: Object.freeze([
       "queue_synchronous",
-      "verbose_ring",
+      "audit_entries",
       "line_max",
       "blob_max",
       "overflow_bytes",
@@ -142,6 +142,7 @@ namespace test_page {
       this.assertEqual(owners["ui."], "ui");
       this.assertEqual(owners["dom."], "dom");
       this.assertEqual(owners["audit."], "ai");
+      this.assertEqual(owners["audit.overlay"], "ui");
       this.assertFalse(Object.hasOwn(owners, "boot."));
     }
 
@@ -273,6 +274,25 @@ namespace test_page {
       this.assertEqual(received, [gold_line("ui_control_key_3")]);
     }
 
+    // Control with 1 is posted as the audit's own line, with no payload.
+    test_overlay_key(): void {
+      const elements = this.elements_get();
+      const port = new page.DomPort(elements.container);
+      const received: lines.Line[] = [];
+      port.line_receive((line) => {
+        received.push(line);
+      });
+      const key = new KeyboardEvent("keydown", {
+        key: "1",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      elements.input.dispatchEvent(key);
+      this.assertTrue(key.defaultPrevented);
+      this.assertEqual(received, [gold_line("ui_audit_overlay")]);
+    }
+
     // A `dom.choice` shows its buttons and answers with the one clicked.
     test_choice_answered(): void {
       const elements = this.elements_get();
@@ -360,6 +380,7 @@ namespace test_page {
   // The page's handlers at a version of their own, their queue and parts.
   interface PageRig {
     version: number;
+    tasks: queue.TaskQueue;
     ai: LaneEnd;
     dom: LaneEnd;
     frame: HTMLElement;
@@ -427,7 +448,16 @@ namespace test_page {
       },
       (type, _version, fn) => dispatch.handler_register(type, version, fn),
     );
-    return { version, ai, dom, frame, console: console_area, overlays, view };
+    return {
+      version,
+      tasks,
+      ai,
+      dom,
+      frame,
+      console: console_area,
+      overlays,
+      view,
+    };
   }
 
   // The checks of the handlers that throw or stay silent within the call.
@@ -481,7 +511,7 @@ namespace test_page {
       const said = version_set(gold_line("ui_input_zero"), rig.version);
       rig.dom.port.line_post(said, []);
       this.assertEqual(rig.ai.came, [
-        gold_line("db_dump"),
+        gold_line("audit_dump"),
         gold_line("ai_say_zero"),
       ]);
     }
@@ -501,11 +531,11 @@ namespace test_page {
     // ctrl 1 asks for the audit's end as it shows, and not as it hides.
     test_tail_asked(): void {
       const rig = this.rig_new(true);
-      for (const name of ["control_key_1", "control_key_1", "control_key_2"]) {
+      for (const name of ["audit_overlay", "audit_overlay", "control_key_2"]) {
         rig.dom.port.line_post(version_set(gold_line(name), rig.version), []);
       }
       const asked = gold_line("audit_tail");
-      asked.count = harness.setting_get("verbose_ring");
+      asked.count = harness.setting_get("audit_entries");
       this.assertEqual(rig.ai.came, [asked]);
       const pres = Array.from(rig.overlays.children) as HTMLElement[];
       this.assertEqual(
@@ -514,10 +544,41 @@ namespace test_page {
       );
     }
 
+    // ctrl 1 runs here, neither recorded nor forwarded, and ctrl 2 is recorded.
+    test_overlay_unrecorded(): void {
+      const elements = this.elements_get();
+      const rig = this.rig_new(true);
+      rig.tasks.audit_attach();
+      rig.tasks.audit_open();
+      const port = new page.DomPort(elements.container);
+      port.line_receive((line) => {
+        rig.dom.port.line_post(version_set(line, rig.version), []);
+      });
+      const press = (key: string): void => {
+        const event = { key, ctrlKey: true, bubbles: true, cancelable: true };
+        elements.input.dispatchEvent(new KeyboardEvent("keydown", event));
+      };
+      press("1");
+      const asked = gold_line("audit_tail");
+      asked.count = harness.setting_get("audit_entries");
+      this.assertEqual(rig.ai.came, [asked]);
+      const pres = Array.from(rig.overlays.children) as HTMLElement[];
+      this.assertEqual(
+        pres.map((pre) => pre.hidden),
+        [false],
+      );
+      press("2");
+      this.assertEqual(rig.ai.came.length, 2);
+      const { 0: header, ...record } = rig.ai.came[1];
+      this.assertEqual(jslb.field_get(header, "type"), "audit.line");
+      this.assertEqual(record.sender, "dom");
+      this.assertEqual(record.receiver, "ui");
+    }
+
     // Outside debug mode the keys toggle nothing and ask for nothing.
     test_keys_gated(): void {
       const rig = this.rig_new(false);
-      for (const name of ["control_key_0", "control_key_1"]) {
+      for (const name of ["control_key_0", "audit_overlay"]) {
         rig.dom.port.line_post(version_set(gold_line(name), rig.version), []);
       }
       this.assertEqual(rig.ai.came.length, 0);

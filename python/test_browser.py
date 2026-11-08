@@ -2745,7 +2745,7 @@ def rungs_locked(session: PageSession) -> None:
         )
 
 
-# Random bytes the page keeps for echoes, which ttyd's deflate can't shrink.
+# Random bytes the page keeps for echoes.
 def noise_make(session: PageSession, size: int) -> bytes:
     text = cast(str, session.probe_call("noise_make", size))
     return base64.b64decode(text, validate=True)

@@ -3,20 +3,20 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the main loop in forked children over pipes, with roots in `build/`.
-# Each child opens the root's audit in debug mode, else its log, as
-# `bootstrap.py` does. The prepare returns None, and its effects are read from
-# the root's database files: the settings rows, the seeds, the `universe`
-# table and its two triggers. The lines fed to the loop are the gold's, each
+# Each child opens the root's audit in debug mode, as `bootstrap.py` does. The
+# prepare returns None, and its effects are read from the root's database
+# files: the settings rows, the seeds, the `universe` table and its two
+# triggers. The lines fed to the loop are the gold's, each
 # its JSON text, a CR and its blobs' bytes; the lines it writes are read back
 # the same way and checked against the gold, as are its refusals. Commits are
 # pushes applied and answered with nothing. The browser's `error` line goes
-# to `engine_tap` and the loop exits 1 writing nothing; a handler's `Failure`
-# writes its reply, then the server's own `error` line, in the name form of
-# the parameter `debug`, which each serving child sets from the root's
-# parameters; a `dispatch.Stream` writes its pushes, then its reply. In debug
-# mode the audit records each line read and written, the audit's own never,
-# and no log is made; outside it a failure is logged and no audit is made.
-# The analyst's seeded table is walked against the gold and the tools.
+# to `engine_tap` in debug mode and the loop exits 1 writing nothing; a
+# handler's `Failure` writes its reply, then the server's own `error` line, in
+# the name form of the parameter `debug`, which each serving child sets from
+# the root's parameters; a `dispatch.Stream` writes its pushes, then its reply.
+# In debug mode the audit records each line read and written, the audit's own
+# never; outside it the root ends up holding no audit, log or TAP file. The
+# analyst's seeded table is walked against the gold and the tools.
 
 import contextlib, copy, dispatch, functools, harness, hashlib, jslb, json
 import main_loop, os, re, runpy, shutil, signal, sqlite3, switches, tempfile
@@ -145,23 +145,21 @@ _BAD_LINE = b'{"0":{"i":3}}\r'
 # The database the reopening test makes.
 _CASTLE_DB = "castle"
 
-# The database of the server's log, under the root.
-_LOG_DB = "_verbose"
-
-# The file of the server's log in the root.
-_LOG_FILE = _LOG_DB + ".sqlite"
+# The start of the names of the log's files, which no root holds.
+_LOG_PREFIX = "_verbose"
 
 # The file of the audit in the root.
 _AUDIT_FILE = "_audit.txt"
 
+# The directory of the TAP files in the root.
+_TAP_DIRECTORY = "tap"
+
+# The thread and the time of the note a push of a stream makes.
+_NOTE_THREAD = "console"
+_NOTE_AT = 1
+
 # The role the children open the audit for, as `bootstrap.py` names it.
 _ENGINE_ROLE = "engine"
-
-# The query of the thread and text of each line of the log, in order.
-_LOG_QUERY = "SELECT thread, text FROM line ORDER BY seq"
-
-# The thread the server's own lines are stored under in the log.
-_SERVER_THREAD = "server"
 
 # The type of the request that a stream answers.
 _STREAM_TYPE = "test.stream"
@@ -361,21 +359,13 @@ def _child_end(
         os.kill(os.getpid(), signal.SIGKILL)
 
 
-# Opens the root's audit in debug mode, else its log, as `bootstrap.py` does.
+# Opens the root's audit in debug mode, as `bootstrap.py` does.
 def _record_open(root: str) -> None:
-    path = os.path.join(root, "settings.json")
-    with open(path, encoding="utf-8") as file:
-        values: dict[str, Any] = json.load(file)
     if switches.debug:
+        path = os.path.join(root, "settings.json")
+        with open(path, encoding="utf-8") as file:
+            values: dict[str, Any] = json.load(file)
         main_loop.audit.audit_open(root, values["blob_max"], _ENGINE_ROLE)
-    else:
-        main_loop.verbose.log_open(root, values["blob_max"])
-
-
-# The thread and text of each line of the root's log, in order.
-def _log_read(root: str) -> list[tuple[str, str]]:
-    rows: list[tuple[str, str]] = _rows_read(root, _LOG_DB, _LOG_QUERY)
-    return rows
 
 
 # Each entry of the root's audit: its label, its JSON or note, then the rest.
@@ -412,11 +402,6 @@ def _note_entry(text: str) -> tuple[str, Any, str]:
     return _text_get("label_console"), body, ""
 
 
-# Whether the root holds the file.
-def _file_held(root: str, name: str) -> bool:
-    return os.path.exists(os.path.join(root, name))
-
-
 # The work of a child that prepares the root and says what the prepare gave.
 def _prepare_once(root: str, read_fd: int, write_fd: int) -> str:
     _record_open(root)
@@ -450,10 +435,11 @@ def _push_make(text: str, blobs: list[jslb.Object]) -> jslb.Object:
     return jslb.line_make(header, blobs, text=text)
 
 
-# The pushes of a stream, each logged as the loop draws it.
+# The pushes of a stream, each noted in debug mode as the loop draws it.
 def _pushes_make() -> Iterator[jslb.Object]:
     for text in _PUSH_TEXTS:
-        main_loop.verbose.log(text)
+        if switches.debug:
+            main_loop.audit.note_put(_NOTE_THREAD, _NOTE_AT, text)
         yield _push_make(text, [jslb.blob_make(text.encode("utf-8"))])
 
 
@@ -632,12 +618,12 @@ class TestPrepare(ScratchCase):
         values = self.settings_write()
         self.prepare_run()
         before = _rows_snapshot(self.root)
-        ring = values["verbose_ring"] + 1
-        self.settings_write(verbose_ring=ring)
+        entries = values["audit_entries"] + 1
+        self.settings_write(audit_entries=entries)
         self.prepare_run()
         after = _rows_snapshot(self.root)
-        stored = _value_read(self.root, "_settings", "verbose_ring")
-        self.assertEqual(stored, _json_bytes(ring))
+        stored = _value_read(self.root, "_settings", "audit_entries")
+        self.assertEqual(stored, _json_bytes(entries))
         for db in _FIXED_DBS:
             if db != "_settings":
                 self.assertEqual(after[db], before[db], db)
@@ -866,16 +852,17 @@ class TestLoop(ScratchCase):
         self.assertEqual(line["message"], message)
         self.assertTrue(line["stack"].endswith(": " + message))
 
-    # Checks the audit's entries, and that the root holds no log.
+    # Checks the audit's entries.
     def audit_check(self, expected: list[tuple[str, Any, str]]) -> None:
         self.assertEqual(_audit_read(self.root), expected)
-        self.assertFalse(_file_held(self.root, _LOG_FILE))
 
-    # Checks the log's texts of the server, and that the root holds no audit.
-    def log_check(self, texts: list[str]) -> None:
-        expected = [(_SERVER_THREAD, text) for text in texts]
-        self.assertEqual(_log_read(self.root), expected)
-        self.assertFalse(_file_held(self.root, _AUDIT_FILE))
+    # Checks that the root holds nothing that records a run.
+    def records_absent(self) -> None:
+        names = os.listdir(self.root)
+        self.assertNotIn(_AUDIT_FILE, names)
+        self.assertNotIn(_TAP_DIRECTORY, names)
+        logs = [name for name in names if name.startswith(_LOG_PREFIX)]
+        self.assertEqual(logs, [])
 
     # Runs the loop on data it serves to the end, and returns its output.
     def served_read(self, data: bytes) -> list[dict[str, Any]]:
@@ -966,13 +953,13 @@ class TestLoop(ScratchCase):
         rows = _rows_read(self.root, "metaverse", _VALUE_QUERY, "later")
         self.assertEqual(rows, [])
 
-    # Outside debug mode a failure's message is logged, its `error` line sent.
-    def test_failure_logged(self) -> None:
+    # Outside debug mode a failure sends its `error` line, recording nothing.
+    def test_failure_unrecorded(self) -> None:
         self.debug_write(False)
         replies = self.failure_read(_line_bytes("unknown_request"))
         message = _text_get("dispatch_handler_unknown")
         self.error_check(replies[0], "error_reply", message)
-        self.log_check([_text_get("main_loop_serve_failed_unknown")])
+        self.records_absent()
 
     # In debug mode the audit holds the line read and the `error`, no message.
     def test_failure_recorded(self) -> None:
@@ -986,13 +973,13 @@ class TestLoop(ScratchCase):
             ]
         )
 
-    # Outside debug mode a fault of the input with no line is logged.
-    def test_fault_logged(self) -> None:
+    # Outside debug mode a fault of the input with no line records nothing.
+    def test_fault_unrecorded(self) -> None:
         self.debug_write(False)
         replies = self.failure_read(_BAD_LINE)
         message = _text_get("jslb_no_type")
         self.error_check(replies[0], self.error_name(), message)
-        self.log_check([_text_get("main_loop_serve_failed_type")])
+        self.records_absent()
 
     # In debug mode the audit holds the `error` of a fault with no line.
     def test_fault_recorded(self) -> None:
@@ -1041,12 +1028,21 @@ class TestLoop(ScratchCase):
         body = _text_get("note_indent") + note["text"]
         self.audit_check([(label, body, "")])
 
-    # Outside debug mode nothing is recorded or logged as the loop serves.
+    # Outside debug mode nothing is recorded as the loop serves.
     def test_debug_quiet(self) -> None:
         self.debug_write(False)
         replies = self.served_read(_line_bytes("initialize"))
         self.assertEqual(len(replies), 1)
-        self.log_check([])
+        self.records_absent()
+
+    # Outside debug mode a `tap.line` is a line of no handler, its text unkept.
+    def test_tap_unknown(self) -> None:
+        self.debug_write(False)
+        replies = self.failure_read(_line_bytes("tap_line"))
+        self.assertEqual(len(replies), 1)
+        message = _text_get("dispatch_handler_unknown_tap")
+        self.error_check(replies[0], "error", message)
+        self.records_absent()
 
     # A reply, to `tap.start` or to any other id, gets an `error` line, no id.
     def test_reply_unknown(self) -> None:
@@ -1095,34 +1091,27 @@ class TestLoop(ScratchCase):
         message = _text_get("main_loop_not_prepared")
         self.assertEqual(last, f"RuntimeError: {message}")
 
-    # The browser's `error` is bailed out, then exit 1, no answer.
-    def browser_fail(self) -> dict[str, Any]:
-        error: dict[str, Any] = _gold_copy("lines.browser_error")
+    # Runs the loop on the browser's `error` and a later line: exit 1, silent.
+    def browser_fail(self) -> None:
         data = _line_bytes("browser_error") + _line_bytes("initialize")
         ending, output = self.child_run(self.work, data)
         self.assertEqual(ending, _ENDING_FAILED)
         self.assertEqual(output, b"")
-        path = os.path.join(self.root, "tap", "typescript.tap")
+
+    # Outside debug mode the browser's `error` ends the loop, nothing recorded.
+    def test_browser_error(self) -> None:
+        self.debug_write(False)
+        self.browser_fail()
+        self.records_absent()
+
+    # In debug mode the browser's `error` is recorded as read, and bailed out.
+    def test_browser_recorded(self) -> None:
+        self.browser_fail()
+        error = _gold_copy("lines.browser_error")
+        path = os.path.join(self.root, _TAP_DIRECTORY, "typescript.tap")
         bail = "Bail out! " + error["message"] + "\n"
         with open(path, "rb") as file:
             self.assertEqual(file.read(), bail.encode("utf-8"))
-        return error
-
-    # Outside debug mode the browser's `error` is logged with every cause.
-    def test_browser_error(self) -> None:
-        self.debug_write(False)
-        error = self.browser_fail()
-        texts = [
-            _text_get("engine_tap_browser_failed"),
-            error["stack"],
-            _text_get("engine_tap_browser_cause"),
-            error["cause"]["stack"],
-        ]
-        self.log_check(texts)
-
-    # In debug mode the browser's `error` is recorded as read, nothing logged.
-    def test_browser_recorded(self) -> None:
-        error = self.browser_fail()
         self.audit_check([_line_entry("label_read", error)])
 
     # A `Failure` writes its reply, then the server's `error` line, no `r`.
@@ -1135,7 +1124,7 @@ class TestLoop(ScratchCase):
         self.assertIs(answer["result"]["isError"], True)
         message = _text_get("engine_system_debug_off_tool")
         self.error_check(error, "error", message)
-        self.log_check([_text_get("main_loop_serve_failed_debug")])
+        self.records_absent()
 
     # In debug mode the server's `error` after a `Failure` is in full names.
     def test_failure_full(self) -> None:
@@ -1166,7 +1155,7 @@ class TestLoop(ScratchCase):
         self.assertEqual(second["1"].pop("d"), b"second")
         self.assertEqual(second, _gold_copy("lines.stream_push_second"))
         self.assertEqual(reply, _gold_copy("lines.stream_reply"))
-        self.log_check(_PUSH_TEXTS)
+        self.records_absent()
 
     # In debug mode each push is recorded as the loop draws it, then the reply.
     def test_stream_recorded(self) -> None:
@@ -1195,7 +1184,7 @@ class TestLoop(ScratchCase):
         push, error = lines
         self.assertEqual(push, _gold_copy("lines.fault_push"))
         self.error_check(error, "error_reply", _text_get("stream_fault"))
-        self.log_check([_text_get("main_loop_serve_failed_stream")])
+        self.records_absent()
 
     # `db.sync` restores each database in name order, then names them.
     def test_sync_served(self) -> None:

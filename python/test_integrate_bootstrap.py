@@ -12,8 +12,8 @@
 # one audit that `audit.tail` reads; a failure of the main loop writes its
 # one error line, recorded once, with nothing from bootstrap after it; and
 # the page's error line, recorded as it is read, ends the TypeScript stream
-# and the run, unanswered. No run opens the log. Each child writes how its
-# run ended to a file, then kills itself. The lines and texts are the gold's.
+# and the run, unanswered. Each child writes how its run ended to a file, then
+# kills itself. The lines and texts are the gold's.
 
 import audit, bootstrap, errno, functools, harness, json, os, pty, signal
 import subprocess, switches, sys, tempfile, traceback, unittest
@@ -33,9 +33,6 @@ _READ_BYTES: int = harness.gold_get(f"{_GOLD_ID}.read_bytes")
 
 # The reply to `tap.start` in full names.
 _REPLY_FULL = b'{"0":{"type":"tap.start","reply":101}}\r'
-
-# The file in the root that holds the log, which no debug run opens.
-_LOG_NAME = "_verbose.sqlite"
 
 # The file in the root that holds the audit.
 _AUDIT_NAME = "_audit.txt"
@@ -100,9 +97,8 @@ def _received_entry(given: bytes) -> tuple[str, str]:
     return (_text_get("audit_received"), body)
 
 
-# The label and body of each entry of the root's audit, with no log beside.
+# The label and body of each entry of the root's audit, after one start.
 def _audit_read(case: unittest.TestCase, root: str) -> list[tuple[str, str]]:
-    case.assertFalse(os.path.exists(os.path.join(root, _LOG_NAME)))
     entries = audit.entries_read(root)
     case.assertEqual({entry.start for entry in entries}, {1})
     return [(entry.label, entry.body) for entry in entries]

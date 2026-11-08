@@ -9,18 +9,18 @@
 # over DevTools as a person would: clicks and keys are input events, and every
 # reading is of the page's elements. The analyst is the seed's scripted table,
 # and no real AI provider is contacted. A person's error, an input the table
-# does not hold, ends in her answer in the band. Each rung runs under a timer
-# and is labelled smoke-test or test-all, and a mislabel fails the run. PNGs of
-# the states, a failed rung's among them, go to build/test_demo/, which each
-# run empties, and the root's audit as audit.txt when the page is left or a
-# rung fails. The root goes once the run passes and stays after a failure. With
-# --hold a failed rung leaves the page, keeps ttyd serving the root, prints the
-# address and waits for ctrl C, so that a person opens the failed state, which
-# a fresh load restores. Its timers, window size, texts and audit table are in
-# its gold, python.test_demo.
+# does not hold, ends in her answer in the band. Each rung has a timer and a
+# label, smoke-test or test-all, and a mislabel fails the run. The last rung
+# serves a second root, debug false, that must record nothing, its ttyd's log
+# in server.txt. build/test_demo/, emptied at each run, keeps that, the PNGs of
+# the states, and audit.txt after a failed rung or under --debug. The roots go
+# once the run passes. With --hold a failed rung leaves the page, keeps ttyd
+# serving its root, prints the address and waits for ctrl C, so that a person
+# opens the failed state, which a fresh load restores. Its timers, window size,
+# texts and audit table are in its gold, python.test_demo.
 
-import argparse, contextlib, json, os, re, shutil, signal, sqlite3, sys
-import tempfile, time, types
+import argparse, contextlib, fnmatch, json, os, re, shutil, signal, sqlite3
+import sys, tempfile, time, types
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING, cast
 
@@ -34,20 +34,26 @@ _PYTHON_PATH = os.path.dirname(os.path.abspath(__file__))
 # The checkout, which holds the `python` directory.
 _CHECKOUT_PATH = os.path.dirname(_PYTHON_PATH)
 
-# The build directory: the page, the run's root, the PNGs and bytecode.
+# The build directory: the page, the run's roots, the PNGs and bytecode.
 _BUILD_PATH = os.path.join(_CHECKOUT_PATH, "build")
 
 # The id of this driver's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_demo"
 
-# The start of the name of the directory each run makes and keeps its root in.
+# The start of the name of the directory each run makes and keeps its roots in.
 _WORK_PREFIX = "test_demo-"
 
 # The name of the root in that directory, and of the root in the label book.
 _ROOT_NAME = "root"
 
-# The directory the PNGs of the states go to, kept after the run.
+# The name of the root outside debug mode there and in the label book.
+_PLAIN_NAME = "plain"
+
+# The directory of the PNGs of the states and the logs, kept after the run.
 _PICTURE_PATH = os.path.join(_BUILD_PATH, "test_demo")
+
+# The file the log of the plain rung's ttyd goes to, kept after the run.
+_SERVER_PATH = os.path.join(_PICTURE_PATH, "server.txt")
 
 # The start of the name of the PNG of a failed rung.
 _FAILED_PREFIX = "failed_"
@@ -105,6 +111,9 @@ _CONSOLE_DIGIT = 0
 
 # The digit of ctrl that toggles the overlay of tty 1, the audit's end.
 _OVERLAY_DIGIT = 1
+
+# The line of every other digit of ctrl, the one that never holds that digit.
+_KEY_TYPE = "ui.control_key"
 
 # The root's audit, and its copy beside the PNGs.
 _AUDIT_NAME = "_audit.txt"
@@ -267,24 +276,43 @@ class RungLog:
 
 # The browser, the root and the ttyd of the run, and what a person does.
 class DemoRun:
-    # Takes the browser, the log, the settings and the directory of the root.
+    # Takes the browser, log, settings, roots' directory and plain rung's log.
     def __init__(
         self,
         browser: devtools.Browser,
         log: RungLog,
         values: dict[str, Any],
         work: str,
+        server_fd: int,
     ) -> None:
         self.browser = browser
         self.log = log
         self.values = values
         self.work = work
+        self.server_fd = server_fd
         self.root = os.path.join(work, _ROOT_NAME)
-        script: str = values["powershell"]["bootstrap_script"]
-        self.bootstrap = os.path.join(self.root, "python", script)
+        self.bootstrap = self.bootstrap_path(self.root)
+        # The built page, which both roots copy, once the served rung built it.
+        self.page: str | None = None
         self.ttyd: xsjs_serve.TtydServer | None = None
         # The loads of the page, each a start of the engine in the audit.
         self.loads = 0
+
+    # The `bootstrap.py` of a root, which ttyd's children run.
+    def bootstrap_path(self, root: str) -> str:
+        script: str = self.values["powershell"]["bootstrap_script"]
+        return os.path.join(root, "python", script)
+
+    # Starts ttyd on a root, a stop signal waiting until `self.ttyd` is set.
+    def server_start(self, root: str, log_fd: int) -> xsjs_serve.TtydServer:
+        import xsjs_serve
+
+        held = signal.pthread_sigmask(signal.SIG_BLOCK, _STOP_SIGNALS)
+        try:
+            self.ttyd = xsjs_serve.TtydServer(self.values, root, 0, log_fd)
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, held)
+        return self.ttyd
 
     # Sleeps one poll, failing the rung once it has run out of its seconds.
     def poll_sleep(self, what: str) -> None:
@@ -438,10 +466,56 @@ def note_read(root: str) -> bytes | None:
     return None if row is None else cast(bytes, row[0])
 
 
-# Copies the root's audit beside the PNGs and returns the copy's path.
-def audit_copy(root: str) -> str:
+# Copies the root's audit beside the PNGs.
+def audit_copy(root: str) -> None:
     shutil.copyfile(os.path.join(root, _AUDIT_NAME), _AUDIT_COPY)
-    return _AUDIT_COPY
+
+
+# The parameters of a root of this run, its debug mode as given.
+def parameters_make(debug: bool) -> dict[str, bool]:
+    import switches
+
+    return {
+        **switches.switches_get(),
+        "debug": debug,
+        "verbose": gold_value("root_verbose"),
+    }
+
+
+# Leaves the page, waits for the end of the programs under ttyd, returns them.
+def page_leave(
+    run: DemoRun, ttyd: xsjs_serve.TtydServer, bootstrap: str
+) -> list[int]:
+    programs = programs_find(ttyd.pid, bootstrap)
+    if not programs:
+        raise CheckFailed(f"no child of ttyd runs {bootstrap}")
+    run.browser.page_open(_BLANK_URL)
+    while programs_find(ttyd.pid, bootstrap):
+        run.poll_sleep(f"the end of {bootstrap} under ttyd")
+    return programs
+
+
+# Stops ttyd, leaving no failure to stop it again, and checks its exit code.
+def server_finish(run: DemoRun, ttyd: xsjs_serve.TtydServer) -> int:
+    run.ttyd = None
+    code = ttyd.server_stop()
+    due: int = gold_value("ttyd_code")
+    if code != due:
+        raise CheckFailed(f"ttyd stopped with code {code}, not {due}")
+    return code
+
+
+# Waits for each fragment in the log of the plain rung's ttyd, in any order.
+def fragments_wait(run: DemoRun, fragments: list[str]) -> None:
+    while True:
+        with open(_SERVER_PATH, "rb") as file:
+            text = file.read()
+        missing = [
+            fragment for fragment in fragments if fragment.encode() not in text
+        ]
+        if not missing:
+            return
+        run.poll_sleep(f"{missing} in {_SERVER_PATH}, holding {text!r}")
 
 
 # The line of a line entry's body, which is its JSON, then its blobs counted.
@@ -497,22 +571,13 @@ def choice_take(run: DemoRun, number: str) -> str:
 
 # The page builds, the root is made, ttyd answers and the first render shows.
 def rung_served(run: DemoRun) -> str:
-    import switches, xsjs_serve
+    import xsjs_serve
 
-    page = xsjs_serve.page_ready(run.values)
-    parameters = {
-        **switches.switches_get(),
-        "debug": gold_value("root_debug"),
-        "verbose": gold_value("root_verbose"),
-    }
-    xsjs_serve.root_make(run.values, page, run.root, parameters, True)
-    # A stop signal waits until `run.ttyd` is set, so that the stop finds ttyd.
-    held = signal.pthread_sigmask(signal.SIG_BLOCK, _STOP_SIGNALS)
-    try:
-        run.ttyd = xsjs_serve.TtydServer(run.values, run.root, 0)
-    finally:
-        signal.pthread_sigmask(signal.SIG_SETMASK, held)
-    address = run.ttyd.address_get()
+    run.page = xsjs_serve.page_ready(run.values)
+    parameters = parameters_make(gold_value("root_debug"))
+    xsjs_serve.root_make(run.values, run.page, run.root, parameters, True)
+    ttyd = run.server_start(run.root, sys.stderr.fileno())
+    address = ttyd.address_get()
     run.browser.page_open(address)
     run.loads += 1
     remark: str = gold_value("remark")
@@ -716,7 +781,7 @@ def rung_dump(run: DemoRun) -> str:
     rows: list[dict[str, str]] = gold_value("dump_entries")
     while (bodies := entries_ordered(run.root, rows)) is None:
         run.poll_sleep(f"the audit's entries {rows} of the input 0")
-    browser, server = bodies[2], bodies[3]
+    browser, server = bodies[0], bodies[1]
     if browser != server:
         raise CheckFailed(
             f"the browser's dump {browser!r} differs from the server's"
@@ -752,14 +817,22 @@ def rung_audit(run: DemoRun) -> str:
         run.poll_sleep(f"the audit's entries of {missing}")
     entries = audit.entries_read(run.root)
     sleep: str = gold_value("sleep_note")
+    own_wake: str = gold_value("audit_wake_note")
     for entry in entries:
         if entry.label in _SLEEP_LABELS:
             if not entry.body.startswith(sleep):
                 raise CheckFailed(f"a note is not of a sleep: {entry}")
+            if own_wake in entry.body:
+                raise CheckFailed(f"a note is of the audit's own: {entry}")
         elif entry.label.startswith("note of ") or " to " not in entry.label:
             continue
-        elif str(body_line(entry)["0"].get("type")).startswith("audit."):
-            raise CheckFailed(f"the audit records its own line: {entry}")
+        else:
+            line = body_line(entry)
+            line_type = str(line["0"].get("type"))
+            if line_type.startswith("audit."):
+                raise CheckFailed(f"the audit records its own line: {entry}")
+            if line_type == _KEY_TYPE and line.get("digit") == _OVERLAY_DIGIT:
+                raise CheckFailed(f"the audit records ctrl 1: {entry}")
     with open(os.path.join(run.root, _AUDIT_NAME), encoding="utf-8") as file:
         starts = sum(
             line.startswith(_ENGINE_START) for line in file.read().split("\n")
@@ -772,32 +845,73 @@ def rung_audit(run: DemoRun) -> str:
     return (
         f"the audit's {len(entries)} entries hold the {len(rows)} rows of the"
         f" gold's table, every line's body JSON, no line of the audit's own,"
-        f" each note of a page thread a sleep, and {starts} starts of the"
-        f" engine, one per load"
+        f" each note of a page thread a sleep on no wake of the audit's own,"
+        f" and {starts} starts of the engine, one per load"
     )
 
 
-# Leaving the page ends the server, then ttyd stops and the root goes.
+# Leaving the page ends the server and ttyd stops, `--debug` keeping the audit.
 def rung_left(run: DemoRun) -> str:
-    copy = audit_copy(run.root)
+    import switches
+
+    if switches.debug:
+        audit_copy(run.root)
     ttyd = cast("xsjs_serve.TtydServer", run.ttyd)
-    programs = programs_find(ttyd.pid, run.bootstrap)
-    if not programs:
-        raise CheckFailed(f"no child of ttyd runs {run.bootstrap}")
-    run.browser.page_open(_BLANK_URL)
-    while programs_find(ttyd.pid, run.bootstrap):
-        run.poll_sleep(f"the end of {run.bootstrap} under ttyd")
-    run.ttyd = None
-    code = ttyd.server_stop()
-    due: int = gold_value("ttyd_code")
-    if code != due:
-        raise CheckFailed(f"ttyd stopped with code {code}, not {due}")
-    shutil.rmtree(run.work)
+    programs = page_leave(run, ttyd, run.bootstrap)
+    code = server_finish(run, ttyd)
     return (
-        f"the audit was copied to {copy}, {_BLANK_URL} ended the page, the"
-        f" programs {programs} under ttyd ended, ttyd stopped with code"
-        f" {code} and the root went"
+        f"{_BLANK_URL} ended the page, the programs {programs} under ttyd"
+        f" ended and ttyd stopped with code {code}"
     )
+
+
+# A root outside debug mode serves two turns and ends up holding no record.
+def rung_plain(run: DemoRun) -> str:
+    import xsjs_serve
+
+    root = os.path.join(run.work, _PLAIN_NAME)
+    parameters = parameters_make(gold_value("plain_debug"))
+    page = cast(str, run.page)
+    xsjs_serve.root_make(run.values, page, root, parameters, True)
+    ttyd = run.server_start(root, run.server_fd)
+    run.browser.page_open(ttyd.address_get())
+    run.band_wait(gold_value("remark"))
+    # The first render gives the box the focus, so no click comes first.
+    choices = [choice_take(run, "1"), choice_take(run, "0")]
+    programs = page_leave(run, ttyd, run.bootstrap_path(root))
+    # Wanted before the stop, as ttyd exits with no line of a program's end.
+    fragments: list[str] = [
+        gold_value("plain_port").format(ttyd.port),
+        *gold_value("plain_fragments"),
+    ]
+    fragments_wait(run, fragments)
+    code = server_finish(run, ttyd)
+    names = os.listdir(root)
+    patterns: list[str] = gold_value("plain_absent")
+    records = [
+        name
+        for name in names
+        if any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns)
+    ]
+    if records:
+        raise CheckFailed(f"the root outside debug mode holds {records}")
+    shutil.rmtree(root)
+    return (
+        f"debug false served {choices}, the programs {programs} ended, ttyd"
+        f" stopped with code {code}, {_SERVER_PATH} holds {fragments} and the"
+        f" root held none of {patterns} among {sorted(names)}, then went"
+    )
+
+
+# The run passed: `--debug` has left the audit, and the roots go.
+def run_finish(run: DemoRun) -> None:
+    import switches
+
+    if switches.debug and not (
+        os.path.isfile(_AUDIT_COPY) and os.path.getsize(_AUDIT_COPY) > 0
+    ):
+        raise CheckFailed(f"--debug left no audit at {_AUDIT_COPY}")
+    shutil.rmtree(run.work)
 
 
 # Runs the rungs in the order of the plan, each by its label.
@@ -821,6 +935,10 @@ def rungs_climb(run: DemoRun) -> None:
     log.rung_run("audit", _SMOKE_TEST, lambda: rung_audit(run))
     log.rung_run("left", _SMOKE_TEST, lambda: rung_left(run))
     log.book.root_leave()
+    log.book.root_enter(_PLAIN_NAME, _SMOKE_TEST)
+    log.rung_run("plain", _SMOKE_TEST, lambda: rung_plain(run))
+    log.book.root_leave()
+    run_finish(run)
 
 
 # Runs the rungs in one browser, ttyd stopped whatever ended them.
@@ -832,11 +950,16 @@ def demo_run(log: RungLog, hold: bool) -> None:
         shutil.rmtree(_PICTURE_PATH)
     os.makedirs(_PICTURE_PATH)
     work = tempfile.mkdtemp(prefix=_WORK_PREFIX, dir=_BUILD_PATH)
-    log.line_print(f"the root of this run is in {work} until it passes")
+    log.line_print(f"the roots of this run are in {work} until it passes")
     width, height = gold_value("window_width"), gold_value("window_height")
-    with devtools.Browser(width, height, devtools.LinuxPipe()) as browser:
+    with (
+        devtools.Browser(width, height, devtools.LinuxPipe()) as browser,
+        open(_SERVER_PATH, "wb", buffering=0) as server_log,
+    ):
         log.client_bind(browser.client_get())
-        run = DemoRun(browser, log, harness.settings_copy(), work)
+        run = DemoRun(
+            browser, log, harness.settings_copy(), work, server_log.fileno()
+        )
         try:
             rungs_climb(run)
         except Exception as failure:

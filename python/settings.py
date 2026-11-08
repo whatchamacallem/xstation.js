@@ -27,7 +27,7 @@ _TABLE_NAME = "dict of str to str"
 # The keys of the settings object, each with the type its value must have.
 _SETTING_TYPES: dict[str, object] = {
     "queue_synchronous": bool,
-    "verbose_ring": int,
+    "audit_entries": int,
     "line_max": int,
     "blob_max": int,
     "overflow_bytes": int,
@@ -73,6 +73,7 @@ _POWERSHELL_TYPES: dict[str, object] = {
     "poll_milliseconds": int,
     "output_width": int,
     "root_files": _LIST_TYPE,
+    "root_records": _LIST_TYPE,
     "runtime_modules": _LIST_TYPE,
     "build_tools": _TABLE_TYPE,
     "build_headers": _TABLE_TYPE,

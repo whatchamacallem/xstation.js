@@ -16,7 +16,7 @@
 //
 // Faults: the report function sends an `error` line through the end function,
 // whose callback runs once the server has the line: on the ttyd page once the
-// server, having logged it, has ended the socket. A `fault` line of the UI
+// server, having read it, has ended the socket. A `fault` line of the UI
 // thread goes the same way, and at that callback the worker closes itself.
 
 declare namespace worker_ai {
@@ -39,7 +39,7 @@ declare namespace worker_ai {
     console: wire.ConsolePort | undefined;
   }
 
-  // The owner table of the AI thread.
+  // The AI thread's owner table, which takes `audit.tail` and `audit.dump`.
   function owners_make(): queue.OwnerTable;
 
   // Synchronous mode, from `queue_synchronous`, which needs debug mode.

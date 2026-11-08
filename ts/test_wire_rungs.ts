@@ -49,6 +49,10 @@ namespace test_wire_rungs {
     restart_type: "system.restart",
     open_type: "console.open",
     input_type: "console.input",
+    socket_path: "ws",
+    socket_scheme: "ws:",
+    subprotocol: "tty",
+    close_normal: 1000,
     console_port: "console",
     output_kind: 0x30,
     input_kind: 0x30,
@@ -130,6 +134,15 @@ namespace test_wire_rungs {
       data[index] = index % constants.byte_values;
     }
     return data;
+  }
+
+  // Bytes of the size given, the digests of the numbers, which do not repeat.
+  function bytes_varied(size: number): Uint8Array {
+    let text = "";
+    for (let number = 0; text.length < size; number += 1) {
+      text += utility.sha256_hex(utility.utf8_encode(String(number)));
+    }
+    return utility.utf8_encode(text.slice(0, size));
   }
 
   // A message of ttyd's client: the kind byte, then the text as `UTF-8`.
@@ -293,7 +306,11 @@ namespace test_wire_rungs {
       this.#starts = {
         first: () => this.#first_run(),
         echo: () => this.#echo_run(),
+        extensions: () => this.#extensions_run(),
         control: () => this.#blob_run("control", gold_value("control_bytes")),
+        // The same frame twice, which ended a ttyd that offered compression.
+        repeat: () => this.#repeat_run("repeat"),
+        repeated: () => this.#repeat_run("repeated"),
         fit: () =>
           this.#blob_run("fit", harness.setting_get(constants.blob_setting)),
         mcp: () => this.#mcp_run(),
@@ -508,9 +525,41 @@ namespace test_wire_rungs {
       return this.#pass(rung);
     }
 
+    // extensions: a socket of its own sends nothing, so no program starts.
+    #extensions_run(): undefined {
+      const url = new URL(constants.socket_path, this.#start.base_url);
+      url.protocol = constants.socket_scheme;
+      const socket = new WebSocket(url.href, constants.subprotocol);
+      let negotiated: string | undefined = undefined;
+      socket.addEventListener("open", () => {
+        negotiated = socket.extensions;
+        socket.close(constants.close_normal);
+      });
+      socket.addEventListener("close", () => {
+        this.#guard("extensions", () => {
+          check(
+            negotiated === "",
+            `ttyd negotiated the extensions ${String(negotiated)}`,
+          );
+          return this.#pass("extensions");
+        });
+      });
+      return undefined;
+    }
+
+    // repeat and repeated: the bytes of the gold's size, echoed.
+    #repeat_run(rung: string): dispatch.Sleep {
+      const size = gold_value("repeat_bytes") as number;
+      return this.#blob_echo(rung, bytes_varied(size));
+    }
+
     // control and fit: one blob of the size given, echoed.
     #blob_run(rung: string, size: unknown): dispatch.Sleep {
-      const data = bytes_counted(size as number);
+      return this.#blob_echo(rung, bytes_counted(size as number));
+    }
+
+    // One blob sent as an echo, its size and digest kept for the reply.
+    #blob_echo(rung: string, data: Uint8Array): dispatch.Sleep {
       this.#sent_size = data.length;
       this.#sent_sha256 = utility.sha256_hex(data);
       const line = line_build(constants.echo_type, [jslb.blob_make(data)], {});

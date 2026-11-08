@@ -5,7 +5,7 @@
 // Tests of the switches module: a store's set once and its reads, the values
 // of another shape refused, each thrown text compared to its entry in the gold
 // record, `ts/test_setting_test_switches.json`, and this realm's switches,
-// which its `tap.start` carried, read alike by the module's four readers.
+// which its `tap.start` carried, read alike by the module's three readers.
 
 namespace test_switches {
   // The values a store is given, each its writer's choice.
@@ -91,7 +91,7 @@ namespace test_switches {
 
   // This realm's switches, set from its `tap.start` before the block ran.
   export class TestThread extends unittest.TestCase {
-    // The four readers agree, and a second set throws.
+    // The three readers agree, and a second set throws.
     test_thread_read(): void {
       const value = switches.switches_get();
       this.assertEqual(Object.keys(value).sort(), [
@@ -101,7 +101,6 @@ namespace test_switches {
       ]);
       this.assertEqual(switches.anthropic_on(), value.anthropic);
       this.assertEqual(switches.debug_on(), value.debug);
-      this.assertEqual(switches.verbose_on(), value.verbose);
       const message = message_thrown(this, () =>
         switches.switches_set({ ...value }),
       );

@@ -79,8 +79,6 @@
   "engine_system.main_loop_missing": "The main loop file {0} does not exist.",
   "engine_system.name_invalid": "The name {0} is not a plain file name that ends in .py and does not start with a dot.",
   "engine_system.not_registered": "The system handlers were used before they were registered.",
-  "engine_tap.browser_cause": "caused by: {0}",
-  "engine_tap.browser_failed": "The browser failed: {0}",
   "engine_tap.language_unknown": "The TAP language {0} is not typescript, the one stream that crosses the wire.",
   "engine_tap.not_registered": "The tap.line handler was used before it was registered.",
   "engine_tap.write_short": "Only {0} of the {1} bytes of a TAP line were written to {2}.",
@@ -139,7 +137,6 @@
   "main_loop.not_prepared": "loop_run ran before loop_prepare prepared the root.",
   "main_loop.reply_unknown": "The line {0} replies to no request the server sent.",
   "main_loop.seed_invalid": "The seed file {0} does not hold a JSON object.",
-  "main_loop.serve_failed": "The server failed while serving the engine tty: {0}",
   "mcp.call_params": "The params of tools/call need a name and an object of arguments.",
   "mcp.message_unexpected": "The client was sent {0}, which is not a reply.",
   "mcp.method_unknown": "The method {0} is not served.",
@@ -314,8 +311,6 @@
   "verbose.exec_exit": "`{0}` exited with code {1}.",
   "verbose.exec_run": "Running `{0}`.",
   "verbose.level_invalid": "The shell's verbose level {0} is not a whole number from 0 to {1}.",
-  "verbose.not_open": "The verbose log was used before it was opened.",
-  "verbose.open_twice": "The verbose log is already open.",
   "wire.blobs_over": "The blobs of the {0} line come to {1} bytes, over the blob_max of {2}.",
   "wire.chunk_invalid": "The chunk size {0} is not a whole number of bytes from 2 up.",
   "wire.close_partial": "connection closed with code {0} in the middle of a message and no error line",
@@ -362,7 +357,6 @@
   "worker_ai.busy_twice": "console.busy came while the AI's turn holds tty 0 already.",
   "worker_ai.idle_unheld": "console.idle came while no turn of the AI's holds tty 0.",
   "worker_ai.synchronous_release": "The setting queue_synchronous is true while the parameter debug is false; synchronous mode is debug only.",
-  "xsjs_log.file_missing": "The root has no verbose log at {0}.",
   "xsjs_serve.ttyd_ended": "ttyd ended by itself with code {0} while it served the root {1}.",
   "xsjs_serve.ttyd_missing": "The built ttyd {0} is missing; a run of ./test_posix.sh builds it."
 }

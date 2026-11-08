@@ -58,7 +58,6 @@ namespace tools_browser {
     // The owners the tools submit to, beside the provider's.
     ui_owner: "ui" as const,
     console_owner: "console" as const,
-    server_owner: "server" as const,
     // The line types the tools submit and notify.
     render_type: "render",
     store_type: "media.store",
@@ -66,8 +65,6 @@ namespace tools_browser {
     permit_type: "permit.ask",
     write_type: "console.write",
     read_type: "console.read",
-    tail_type: "audit.tail",
-    tail_tool: "audit_tail",
     show_type: "console.show",
     busy_type: "console.busy",
     idle_type: "console.idle",
@@ -79,7 +76,6 @@ namespace tools_browser {
     render_wake: "tools.render_reply",
     permit_wake: "tools.permit_reply",
     console_wake: "tools.console_reply",
-    tail_wake: "tools.tail_reply",
     show_wake: "tools.show_reply",
     // The tools of this server, in the order `tools/list` lists them.
     tools: Object.freeze<readonly mcp.Tool[]>([
@@ -175,8 +171,7 @@ namespace tools_browser {
         name: "script_run",
         description:
           "Run the script /_files/script/<name>.js with args as a task in" +
-          " this worker. Returns its value or exception and the verbose" +
-          " lines it wrote.",
+          " this worker. Returns its value or exception.",
         inputSchema: {
           type: "object",
           properties: { name: { type: "string" }, args: { type: "object" } },
@@ -186,8 +181,8 @@ namespace tools_browser {
       {
         name: "script_debug",
         description:
-          "Run the script as script_run does, tracing every substrate call" +
-          " it makes first.",
+          "Run the script as script_run does, and return the trace of every" +
+          " substrate call it makes.",
         inputSchema: {
           type: "object",
           properties: { name: { type: "string" }, args: { type: "object" } },
@@ -262,21 +257,6 @@ namespace tools_browser {
           required: ["until", "timeout_seconds"],
         },
         _meta: { xsjs: { permit: true } },
-      },
-      {
-        name: "audit_tail",
-        description:
-          "The end of the audit, the server's one document of every JSLB" +
-          " line in debug mode, laid out for a person: its newest whole" +
-          " entries, oldest first. count is a maximum, as a reply holds" +
-          " the newest entries that fit below line_max. Debug mode only.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            count: { type: "integer" },
-          },
-          required: ["count"],
-        },
       },
     ]),
   });
@@ -640,20 +620,6 @@ namespace tools_browser {
           },
           args,
         ),
-      // Asks the server for the end of the audit and sleeps on it.
-      audit_tail: (args) => {
-        if (!context.debug_on()) {
-          const name = constants.tool_prefix + constants.tail_tool;
-          return result_refused(i18n("tools_browser.debug_off", name));
-        }
-        const tail = line_build(constants.tail_type, { count: args.count });
-        return context.request_sleep(
-          tail,
-          constants.server_owner,
-          {},
-          constants.tail_wake,
-        );
-      },
     };
   }
 
@@ -752,9 +718,6 @@ namespace tools_browser {
         }
         return result_json({ output, timed_out });
       },
-      // Returns the text the server sent.
-      [constants.tail_wake]: (_state, replies) =>
-        result_text(reply_payload(replies).text as string),
     };
   }
 

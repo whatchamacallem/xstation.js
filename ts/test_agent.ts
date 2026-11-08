@@ -124,7 +124,7 @@ namespace test_agent {
     // The result texts of the castle turn's tool calls, in call order.
     bootstrap_result:
       '{"value":{"universe":"castle","world":"castle_world",' +
-      '"region":"castle_gatehouse"},"lines":[]}',
+      '"region":"castle_gatehouse"}}',
     image_result:
       '{"key":"/_files/gatehouse/arrival.png","size":88,"sha256":' +
       '"90b3a753ed6b58ea1033aadd244b2b253bd45e9adb25962a52621120768bb8f0"}',

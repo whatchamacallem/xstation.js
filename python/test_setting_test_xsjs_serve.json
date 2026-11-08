@@ -19,6 +19,8 @@
     "--root",
     "{root}"
   ],
+  "audit_name": "_audit.txt",
+  "audit_text": "an audit of an earlier run\n",
   "database_name": "metaverse.sqlite",
   "database_text": "a database of an earlier run\n",
   "ended_code": 255,
@@ -42,14 +44,9 @@
   "root_sample": "/home/a/root",
   "stale_name": "stale.txt",
   "stopped_code": 0,
+  "tap_file": "typescript.tap",
+  "tap_name": "tap",
   "text_ended": "ttyd ended by itself with code {0} while it served the root {1}.",
   "text_missing": "The built ttyd {0} is missing; a run of ./test_posix.sh builds it.",
-  "usage_code": 2,
-  "verbose_names": [
-    "_audit.txt",
-    "_verbose.sqlite",
-    "_verbose.sqlite-wal",
-    "_verbose.sqlite-shm"
-  ],
-  "verbose_text": "a log of an earlier run\n"
+  "usage_code": 2
 }

@@ -7,14 +7,15 @@
 # the other side of the pty. The test main loop files, named by `--main-loop`
 # in debug mode, write their calls to files in the root; with no `--main-loop`
 # the stock main_loop.py answers a request. Each child writes how its run ended
-# to a file, then kills itself, so that the lock, the log, the audit and the
-# loaded main loop never reach another test. In debug mode a run's record is
-# the root's audit, read back by `audit.entries_read`, and outside debug mode
-# the root's log, `_verbose.sqlite`.
+# to a file, then kills itself, so that the lock, the audit and the loaded main
+# loop never reach another test. In debug mode a run's record is the root's
+# audit, read back by `audit.entries_read`, and outside debug mode a run leaves
+# no record: the root holds no audit, no `_verbose` file and no `tap`
+# directory.
 
-import audit, bootstrap, contextlib, errno, fcntl, harness, json, os, pty
-import resource, runpy, select, signal, sqlite3, switches, sys, tempfile
-import termios, time, traceback, unittest
+import audit, bootstrap, errno, fcntl, harness, json, os, pty, resource, runpy
+import select, signal, switches, sys, tempfile, termios, time, traceback
+import unittest
 from typing import Any, NamedTuple
 
 # The checkout's top directory, above this file's `python/`.
@@ -81,17 +82,14 @@ _OUTSIDE_ROOT = "/usr"
 # The keys of `tap.start` in either mode, in written order.
 _FIRST_KEYS = ["0", "settings", "switches"]
 
-# The file in the root that holds the log.
-_LOG_NAME = "_verbose.sqlite"
-
-# The query of the thread and text of each line of the log, in order.
-_LOG_QUERY = "SELECT thread, text FROM line ORDER BY seq"
-
-# The thread the server's own lines are stored under in the log.
-_SERVER_THREAD = "server"
+# The start of the names of the log's files, which no root holds.
+_LOG_PREFIX = "_verbose"
 
 # The file in the root that holds the audit.
 _AUDIT_NAME = "_audit.txt"
+
+# The directory of the TAP files in the root.
+_TAP_DIRECTORY = "tap"
 
 # The header fields that count a line's blobs, short and full.
 _BLOB_FIELDS = ("b", "blobs")
@@ -276,11 +274,6 @@ def _line_bytes(name: str) -> bytes:
     return text.encode("utf-8") + b"\r"
 
 
-# The log line of a failure with the message.
-def _failure_line(message: str) -> tuple[str, str]:
-    return (_SERVER_THREAD, _text_get("bootstrap_run_failed", message))
-
-
 # The label and body of the audit's entry of a line, laid out by `json`.
 def _record_entry(label: str, line: dict[str, Any]) -> tuple[str, str]:
     body = json.dumps(line, ensure_ascii=False, indent=2)
@@ -316,31 +309,13 @@ def _audit_read(case: unittest.TestCase, root: str) -> list[tuple[str, str]]:
     return [(entry.label, entry.body) for entry in entries]
 
 
-# The thread and text of each line of the root's log, which must be open.
-def _log_read(root: str) -> list[tuple[str, str]]:
-    path = os.path.join(root, _LOG_NAME)
-    if not os.path.isfile(path):
-        raise AssertionError(f"the log was never opened: {path}")
-    with contextlib.closing(sqlite3.connect(path)) as connection:
-        cursor = connection.execute(_LOG_QUERY)
-        rows: list[tuple[str, str]] = cursor.fetchall()
-    return rows
-
-
-# Checks the run never opened the root's log.
-def _log_absent(case: unittest.TestCase, root: str) -> None:
-    case.assertFalse(os.path.exists(os.path.join(root, _LOG_NAME)))
-
-
-# Checks the run never opened the root's audit.
-def _audit_absent(case: unittest.TestCase, root: str) -> None:
-    case.assertFalse(os.path.exists(os.path.join(root, _AUDIT_NAME)))
-
-
-# Checks the run opened neither the root's log nor its audit.
+# Checks that the root holds nothing that records a run.
 def _records_absent(case: unittest.TestCase, root: str) -> None:
-    _log_absent(case, root)
-    _audit_absent(case, root)
+    names = os.listdir(root)
+    case.assertNotIn(_AUDIT_NAME, names)
+    case.assertNotIn(_TAP_DIRECTORY, names)
+    logs = [name for name in names if name.startswith(_LOG_PREFIX)]
+    case.assertEqual(logs, [])
 
 
 # Makes a scratch root: the checkout's settings, `debug` set.
@@ -839,7 +814,6 @@ class TestReply(unittest.TestCase):
             _audit_read(self, made.root),
             [_sent_entry(first), *received, _sent_entry(line)],
         )
-        _log_absent(self, made.root)
 
     # Each reply that is not the empty reply is refused, recorded as it came.
     def test_reply_wrong(self) -> None:
@@ -897,7 +871,6 @@ class TestReply(unittest.TestCase):
             _audit_read(self, made.root),
             [_sent_entry(first), _sent_entry(line)],
         )
-        _log_absent(self, made.root)
 
 
 # Tests the choice and the loading of the main loop file.
@@ -980,7 +953,6 @@ class TestConsole(unittest.TestCase):
         started = _console_entry(_text_get("verbose_exec_run"))
         failed = _console_entry(_text_get("bootstrap_run_failed", message))
         self.assertEqual(_audit_read(self, made.root), [started, failed])
-        _log_absent(self, made.root)
 
     # A root outside `/home/`, which dash's sandbox hides, is refused first.
     def test_console_outside(self) -> None:
@@ -1026,7 +998,7 @@ class TestError(unittest.TestCase):
         self.assertEqual(list(line), ["0", "message", "stack"])
         _records_absent(self, made.root)
 
-    # Outside debug mode the error line is in full names, its message logged.
+    # Outside debug mode the error line is in full names, nothing recorded.
     def test_error_full(self) -> None:
         made = _root_make(self, False)
         _loop_write(made.root, _LOOP_TEXT)
@@ -1035,9 +1007,10 @@ class TestError(unittest.TestCase):
         line = child.line_read()
         self.assertEqual(child.run_end(), (_ENDING_FAILED, b""))
         self.assertEqual(line["0"], _line_get("error")["0"])
-        message = line["message"]
-        self.assertEqual(_log_read(made.root), [_failure_line(message)])
-        _audit_absent(self, made.root)
+        self.assertEqual(
+            line["message"], _text_get("bootstrap_main_loop_refused")
+        )
+        _records_absent(self, made.root)
 
 
 # Tests the root's parameters, which set the switches of the run.
@@ -1073,7 +1046,7 @@ class TestParameters(unittest.TestCase):
             _marker_read(made.root, _PREPARE_NAME), [parameters, variables]
         )
 
-    # A parameters file with a key that names no switch is refused, unlogged.
+    # A parameters file with a key that names no switch is refused, unrecorded.
     def test_parameters_refused(self) -> None:
         made = _root_make(self, True)
         path = os.path.join(made.root, "parameters.json")
@@ -1129,9 +1102,9 @@ class TestHangup(unittest.TestCase):
         self.assertIn(repr(role), message)
 
 
-# Tests the record the engine role keeps: the audit or the root's log.
+# Tests the record the engine role keeps, the audit in debug mode alone.
 class TestRecord(unittest.TestCase):
-    # In debug mode the audit holds `tap.start` and its reply, and no log.
+    # In debug mode the audit holds `tap.start` and its reply.
     def test_first_recorded(self) -> None:
         for verbose in (False, True):
             made = _verbose_write(_root_make(self, True), verbose)
@@ -1145,9 +1118,8 @@ class TestRecord(unittest.TestCase):
                 _audit_read(self, made.root),
                 [_sent_entry(first), _received_entry(_REPLY_FULL)],
             )
-            _log_absent(self, made.root)
 
-    # Outside debug mode a run that does not fail logs nothing, no audit.
+    # Outside debug mode a run that does not fail records nothing.
     def test_first_quiet(self) -> None:
         for verbose in (False, True):
             made = _verbose_write(_root_make(self, False), verbose)
@@ -1157,8 +1129,7 @@ class TestRecord(unittest.TestCase):
             child.bytes_write(_REPLY_SHORT + _line_bytes("ping_short"))
             self.assertEqual(child.line_read(), _line_get("ping_short_reply"))
             self.assertEqual(child.hangup(), _HUNG_UP)
-            self.assertEqual(_log_read(made.root), [])
-            _audit_absent(self, made.root)
+            _records_absent(self, made.root)
 
 
 # Tests the file run as a program, which is how ttyd starts it.

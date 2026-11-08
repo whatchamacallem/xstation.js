@@ -324,6 +324,13 @@
       },
       "databases": ["_files", "_preferences", "_settings", "metaverse"]
     },
+    "tap_line": {
+      "0": {
+        "t": "tap.line"
+      },
+      "language": "typescript",
+      "text": "ok 1 - x"
+    },
     "unknown_request": {
       "0": {
         "i": 1,
@@ -337,10 +344,9 @@
   "texts": {
     "blobs_omitted": "[blobs omitted: {0}]",
     "dispatch_handler_unknown": "No handler is registered for type no.such version 0.",
+    "dispatch_handler_unknown_tap": "No handler is registered for type tap.line version 0.",
     "engine_system_debug_off_tool": "source_put needs debug mode, and the parameter debug is false.",
     "engine_system_name_invalid": "The name ../a.py is not a plain file name that ends in .py and does not start with a dot.",
-    "engine_tap_browser_cause": "caused by: first",
-    "engine_tap_browser_failed": "The browser failed: boom",
     "jslb_no_type": "The line header has no type string.",
     "label_console": "note of console",
     "label_read": "ai to server",
@@ -351,10 +357,6 @@
     "main_loop_reply_unknown_102": "The line {\"0\":{\"r\":102,\"t\":\"mcp\"}} replies to no request the server sent.",
     "main_loop_reply_unknown_2": "The line {\"0\":{\"r\":2,\"t\":\"tap.start\"}} replies to no request the server sent.",
     "main_loop_seed_invalid": "The seed file {0} does not hold a JSON object.",
-    "main_loop_serve_failed_debug": "The server failed while serving the engine tty: source_put needs debug mode, and the parameter debug is false.",
-    "main_loop_serve_failed_stream": "The server failed while serving the engine tty: The stream failed between its pushes.",
-    "main_loop_serve_failed_type": "The server failed while serving the engine tty: The line header has no type string.",
-    "main_loop_serve_failed_unknown": "The server failed while serving the engine tty: No handler is registered for type no.such version 0.",
     "note_indent": "  ",
     "note_prefix": "note of ",
     "seed_absent": "[Errno 2] No such file or directory: '{0}'",

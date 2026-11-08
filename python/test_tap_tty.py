@@ -48,7 +48,7 @@ _STALL_NAME = "stall_loop.py"
 _SUITE_NAME = "tap_loop.py"
 
 # The TAP file of the TypeScript stream in a root.
-_TAP_FILE = os.path.join("tap", "typescript.tap")
+_TAP_FILE = "typescript.tap"
 
 # The fixed databases the stock main loop's prepare creates in a new root.
 _FIXED_DBS = ("_settings", "_preferences", "_files", "metaverse")
@@ -74,11 +74,14 @@ _HALF_DIGIT = 0.05
 # The milliseconds in a second.
 _MILLISECONDS = 1000
 
-# The root's log, which a debug root never makes.
-_LOG_FILE = "_verbose.sqlite"
+# The start of the names of the log's files, which no root holds.
+_LOG_PREFIX = "_verbose"
 
 # The root's audit, which the engine of a debug root opens past raw mode.
 _AUDIT_FILE = "_audit.txt"
+
+# The directory of a root that holds the TAP files, in debug mode alone.
+_TAP_DIRECTORY = "tap"
 
 # The query of the hash and the value of one key.
 _VALUE_QUERY = "SELECT sha256, data FROM _kv WHERE key = ?"
@@ -226,14 +229,21 @@ class ScratchCase(unittest.TestCase):
     # The text of the root's TypeScript TAP file.
     def tap_read(self) -> str:
         with open(
-            os.path.join(self.root, _TAP_FILE), encoding="utf-8"
+            os.path.join(self.root, _TAP_DIRECTORY, _TAP_FILE),
+            encoding="utf-8",
         ) as file:
             return file.read()
 
-    # The label and body of each entry of the root's audit, with no log.
+    # Checks that the root holds nothing that records a run.
+    def records_absent(self) -> None:
+        names = os.listdir(self.root)
+        self.assertNotIn(_AUDIT_FILE, names)
+        self.assertNotIn(_TAP_DIRECTORY, names)
+        logs = [name for name in names if name.startswith(_LOG_PREFIX)]
+        self.assertEqual(logs, [])
+
+    # The label and body of each entry of the root's audit.
     def audit_read(self) -> list[tuple[str, str]]:
-        log = os.path.join(self.root, _LOG_FILE)
-        self.assertFalse(os.path.exists(log), log)
         entries = audit.entries_read(self.root)
         return [(entry.label, entry.body) for entry in entries]
 
@@ -282,6 +292,7 @@ class TestStock(ScratchCase):
         reply = _plain(engine.line_read())
         self.assertEqual(reply, _line_get("ping_short_reply"))
         self.assertEqual(engine.hangup(), _HUNG_UP)
+        self.records_absent()
 
     # A reply to the first line that is not the empty reply is refused.
     def test_reply_refused(self) -> None:
@@ -344,7 +355,7 @@ class TestStock(ScratchCase):
         values = self.root_make(True, None)
         engine = self.engine_run(values, None)
         self.start_answer(engine, True)
-        changed = {**values, "verbose_ring": _gold_value("ring")}
+        changed = {**values, "audit_entries": _gold_value("entries")}
         header = jslb.header_make("settings.put", id=102, full=True)
         engine.line_write(jslb.line_make(header, [], settings=changed))
         reply = _plain(engine.line_read())
@@ -381,10 +392,21 @@ class TestStock(ScratchCase):
             engine.line_read()
         self.assertEqual(engine.hangup(), _EXIT_FAILED)
         self.assertEqual(self.tap_read(), _text_get("bail_out") + "\n")
-        # The audit records the error line last, as read, and nothing logs.
+        # The audit records the error line last, as read.
         label, body = self.audit_read()[-1]
         self.assertEqual(label, _text_get("received_label"))
         self.assertEqual(json.loads(body), _line_get("browser_error"))
+
+    # Outside debug mode the page's error line ends the engine, nothing kept.
+    def test_page_quiet(self) -> None:
+        values = self.root_make(False, None)
+        engine = self.engine_run(values, None)
+        self.start_answer(engine, False)
+        engine.bytes_write(_line_bytes("browser_error"))
+        with self.assertRaises(EOFError):
+            engine.line_read()
+        self.assertEqual(engine.hangup(), _EXIT_FAILED)
+        self.records_absent()
 
     # A handler's `Failure` writes its reply, then the server's error line.
     def test_failure_answered(self) -> None:

@@ -9,14 +9,13 @@
 # order; the type served at version 0 alone; a language refused through the
 # dispatcher, nothing written; a `tap.line` sent as a request appended, then
 # refused by the dispatcher for the reply it never gets; and the browser's
-# `error` line read by the decoder, its cascade of decoded objects handed to
-# `error_take` as the main loop hands it, outside debug mode, logged in the
-# root's real log and read back from `_verbose`, and the bail out line ending
-# the TypeScript file. Each child writes how its work ended to a file, or to
-# stderr when that write fails, then kills itself.
+# `error` line read by the decoder, its message handed to `error_take` as the
+# main loop hands it, the bail out line ending the TypeScript file. Each child
+# writes how its work ended to a file, or to stderr when that write fails, then
+# kills itself.
 
-import contextlib, engine_tap, functools, harness, json, os, signal, sqlite3
-import switches, sys, tempfile, traceback, unittest
+import engine_tap, functools, harness, json, os, signal, sys, tempfile
+import traceback, unittest
 from collections.abc import Callable
 from typing import Any, NoReturn
 
@@ -46,15 +45,6 @@ _RUN_LINES = (
     "    ok 1 - test_one",
     "ok 2 - test_second",
 )
-
-# The file of the root's log.
-_LOG_FILE = "_verbose.sqlite"
-
-# The query of the thread and text of each line of the log, in order.
-_LOG_QUERY = "SELECT thread, text FROM line ORDER BY seq"
-
-# The thread the server's own lines are stored under in the log.
-_SERVER_THREAD = "server"
 
 # The file in the scratch directory that a child writes how it ended to.
 _ENDING_NAME = "ending.json"
@@ -111,14 +101,6 @@ def _file_read(path: str) -> bytes:
         return file.read()
 
 
-# The thread and text of each line of the root's log, in order.
-def _log_read(root: str) -> list[tuple[str, str]]:
-    path = os.path.join(root, _LOG_FILE)
-    with contextlib.closing(sqlite3.connect(path)) as connection:
-        rows: list[tuple[str, str]] = connection.execute(_LOG_QUERY).fetchall()
-    return rows
-
-
 # The work of a child: registers on the root, then serves the bytes' lines.
 def _lines_serve(root: str, data: bytes) -> list[object]:
     engine_tap.handlers_register(root)
@@ -127,16 +109,11 @@ def _lines_serve(root: str, data: bytes) -> list[object]:
     ]
 
 
-# Child: opens the log outside debug mode, hands `error_take` a cascade.
+# The work of a child: registers, hands `error_take` the line's message.
 def _failure_serve(root: str, data: bytes) -> None:
-    switches.switches_apply({**switches.switches_get(), "debug": False})
-    engine_tap.verbose.log_open(root, _BLOB_MAX)
     engine_tap.handlers_register(root)
     (line,) = _lines_decode(data)
-    payload = engine_tap.jslb.payload_of(line)
-    engine_tap.error_take(
-        payload["message"], payload["stack"], payload["cause"]
-    )
+    engine_tap.error_take(engine_tap.jslb.payload_of(line)["message"])
 
 
 # In the forked child: runs the work, writes how it ended, kills itself.
@@ -257,23 +234,12 @@ class TestServe(ScratchCase):
 
 # Tests the browser's `error` line read by the decoder and taken.
 class TestFailure(ScratchCase):
-    # Cascade logged outermost first, then a bail out ends the TypeScript file.
+    # The line's message in a bail out ends the TypeScript file.
     def test_failure_taken(self) -> None:
         work = functools.partial(
             _failure_serve, self.root, _gold_bytes("browser_error")
         )
         self.assertIsNone(self.child_value(work))
-        error = _gold_raw("lines.browser_error")
-        texts = [
-            _text_get("engine_tap_browser_failed"),
-            error["stack"],
-            _text_get("engine_tap_browser_cause_first"),
-            error["cause"]["stack"],
-            _text_get("engine_tap_browser_cause_second"),
-            error["cause"]["cause"]["stack"],
-        ]
-        expected = [(_SERVER_THREAD, text) for text in texts]
-        self.assertEqual(_log_read(self.root), expected)
         bail = _text_get("bail_out") + "\n"
         path = _tap_path(self.root)
         self.assertEqual(_file_read(path), bail.encode("utf-8"))

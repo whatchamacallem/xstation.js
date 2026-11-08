@@ -26,7 +26,7 @@ _API_SETTINGS_PATH = os.path.join(_ROOT_PATH, "API", "settings.json")
 # A good settings object, which each test copies before it damages the copy.
 _GOOD_SETTINGS: dict[str, Any] = {
     "queue_synchronous": False,
-    "verbose_ring": 1000,
+    "audit_entries": 1000,
     "line_max": 1048576,
     "blob_max": 10485760,
     "overflow_bytes": 131072,
@@ -64,6 +64,7 @@ _GOOD_SETTINGS: dict[str, Any] = {
         "poll_milliseconds": 500,
         "output_width": 200,
         "root_files": ["settings.json", "provider.json"],
+        "root_records": ["_audit.txt", "tap"],
         "runtime_modules": [
             "internationalization",
             "jslb",
@@ -83,7 +84,7 @@ _BOOL_PATHS = (
 
 # The paths of the values that are ints.
 _INT_PATHS = (
-    "verbose_ring",
+    "audit_entries",
     "line_max",
     "blob_max",
     "overflow_bytes",
@@ -123,7 +124,11 @@ _STR_PATHS = (
 )
 
 # The paths of the values that are lists of strings.
-_LIST_PATHS = ("powershell.root_files", "powershell.runtime_modules")
+_LIST_PATHS = (
+    "powershell.root_files",
+    "powershell.root_records",
+    "powershell.runtime_modules",
+)
 
 # The paths of the values that are dicts of strings to strings.
 _TABLE_PATHS = ("powershell.build_tools", "powershell.build_headers")

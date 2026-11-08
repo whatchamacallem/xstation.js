@@ -12,8 +12,7 @@
 # `db.sync`, the browser's one pull, answers with a `dispatch.Stream`: the
 # `restore_lines` of every database the store holds, in name order, each built
 # from its snapshot as the main loop reaches it, then the reply `DbSyncReply`,
-# whose `databases` names them in that order. The log's own `_verbose` is not
-# among them, as the store never holds it. The pushes take the name form of
+# whose `databases` names them in that order. The pushes take the name form of
 # the parameter `debug`, since a push answers nothing, and the reply that of
 # the request.
 

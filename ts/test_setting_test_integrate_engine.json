@@ -100,7 +100,6 @@
     },
     {
       "expect": [
-        "wire_dump",
         "wire_dump_browser",
         "wire_dump_server",
         "wire_user_0",
@@ -154,7 +153,7 @@
     },
     "dump": {
       "0": {
-        "type": "db.dump"
+        "type": "audit.dump"
       }
     },
     "first_painted": {
@@ -398,9 +397,9 @@
         "type": "test_integrate_engine.wire_denied"
       }
     },
-    "wire_dump": {
+    "wire_audit_own": {
       "0": {
-        "type": "test_integrate_engine.wire_dump"
+        "type": "test_integrate_engine.wire_audit_own"
       }
     },
     "wire_dump_browser": {
@@ -607,9 +606,14 @@
       ]
     },
     {
-      "line": "wire_dump",
+      "line": "wire_audit_own",
       "label": "ai to server",
-      "parts": ["\"type\": \"db.dump\"", "[blobs omitted: 1]"]
+      "parts": ["\"type\": \"audit."]
+    },
+    {
+      "line": "wire_audit_own",
+      "label": "note of ai",
+      "parts": ["until audit."]
     },
     {
       "line": "wire_dump_browser",

@@ -1,6 +1,6 @@
 {
   "queue_synchronous": false,
-  "verbose_ring": 1000,
+  "audit_entries": 1000,
   "line_max": 1048576,
   "blob_max": 10485760,
   "overflow_bytes": 131072,
@@ -38,6 +38,7 @@
     "poll_milliseconds": 500,
     "output_width": 200,
     "root_files": ["settings.json", "provider.json"],
+    "root_records": ["_audit.txt", "tap"],
     "runtime_modules": [
       "internationalization",
       "jslb",

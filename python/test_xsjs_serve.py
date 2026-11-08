@@ -6,18 +6,19 @@
 # ttyd the driver's bring up built. First the root as the start script makes
 # one: its files, what a second making keeps and replaces, and fresh. Then
 # ttyd's command line against the gold. Then the server on port 0: the port its
-# log names, its session of its own, its log copied to stderr, which each test
-# points at a scratch file, each way it ends, by either signal, by itself and
-# by SIGKILL past the wait, and its refusals. A test that blocks the signals
-# gives them back at its end. Last the program whole, in a forked child by
-# runpy, which builds the page with the real tsc, so that a count reaches every
-# line of the module: its stop at a signal and its refusal. The program ended
-# with no chance to stop ttyd is the suite of test_xsjs_serve_death.py, which
-# takes ProgramCase from here.
+# log names, its session of its own, its log copied to the descriptor each test
+# gives, a scratch file, each way it ends, by either signal, by itself and by
+# SIGKILL past the wait, and its refusals. A test that blocks the signals gives
+# them back at its end. Last the program whole, in a forked child by runpy,
+# which builds the page with the real tsc, so that a count reaches every line
+# of the module: the address and ttyd's log on its stdout, a pipe here, its
+# stop at a signal and its refusal. The program ended with no chance to stop
+# ttyd is the suite of test_xsjs_serve_death.py, which takes ProgramCase from
+# here.
 
 import contextlib, filecmp, harness, os, re, runpy, signal, socket, switches
 import sys, tempfile, traceback, unittest, xsjs_serve
-from typing import Any, NoReturn, cast
+from typing import Any, IO, NoReturn, cast
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -49,13 +50,13 @@ _TTYD_NAME = "ttyd"
 # The name of the page a test writes, in its scratch directory.
 _PAGE_NAME = "page.html"
 
-# The name of the file a test points stderr at.
-_LOG_NAME = "stderr.log"
+# The name of the file a test gives ttyd's log and a program's stderr.
+_LOG_NAME = "server.log"
 
 # The permissions of that file: read and write by its owner.
 _LOG_MODE = 0o600
 
-# The descriptors a forked program prints to and ttyd's log is copied to.
+# The descriptors of a forked program: its output and its failure's trace.
 _STDOUT_FD = 1
 _STDERR_FD = 2
 
@@ -84,11 +85,12 @@ def child_stop(pid: int) -> None:
         os.waitpid(pid, 0)
 
 
-# In the forked child: runs the program whole, its stdout the pipe, and exits.
-def program_child(output: int, arguments: list[str]) -> NoReturn:
+# In the forked child: runs the program, stdout the pipe, stderr the file.
+def program_child(output: int, log_fd: int, arguments: list[str]) -> NoReturn:
     code = _CHILD_FAILED
     try:
         os.dup2(output, _STDOUT_FD)
+        os.dup2(log_fd, _STDERR_FD)
         sys.argv = [_PROGRAM_PATH, *arguments]
         runpy.run_path(_PROGRAM_PATH, run_name="__main__")
     except SystemExit as ended:
@@ -128,9 +130,9 @@ class TestPaths(unittest.TestCase):
                 )
 
 
-# A scratch directory with a page in it, and stderr pointed at a file there.
+# A scratch directory with a page in it, and a file there for ttyd's log.
 class ScratchCase(unittest.TestCase):
-    # Makes the directory, writes the page and points stderr at its file.
+    # Makes the directory, writes the page and opens the file of the log.
     def setUp(self) -> None:
         os.makedirs(_BUILD_PATH, exist_ok=True)
         self.scratch = self.enterContext(
@@ -142,14 +144,12 @@ class ScratchCase(unittest.TestCase):
         with open(self.page, "w", encoding="utf-8") as file:
             file.write(gold_value("page_text"))
         self.log_path = os.path.join(self.scratch, _LOG_NAME)
-        saved = os.dup(_STDERR_FD)
-        self.addCleanup(os.close, saved)
-        self.addCleanup(os.dup2, saved, _STDERR_FD)
-        log = os.open(self.log_path, os.O_WRONLY | os.O_CREAT, _LOG_MODE)
-        os.dup2(log, _STDERR_FD)
-        os.close(log)
+        self.log_fd = os.open(
+            self.log_path, os.O_WRONLY | os.O_CREAT, _LOG_MODE
+        )
+        self.addCleanup(os.close, self.log_fd)
 
-    # What stderr has been given so far.
+    # What the file of the log has been given so far.
     def log_read(self) -> str:
         with open(self.log_path, encoding="utf-8") as file:
             return file.read()
@@ -241,17 +241,20 @@ class TestRoot(ScratchCase):
             self.assertFalse(os.path.exists(path), path)
         self.assertEqual(switches.parameters_load(self.root), parameters)
 
-    # A second making removes an earlier run's audit and log, keeps databases.
-    def test_log_removed(self) -> None:
+    # A second making removes an earlier run's records, a file and a directory.
+    def test_records_removed(self) -> None:
         self.root_ready(False)
         database, _ = self.run_earlier()
-        names: list[str] = gold_value("verbose_names")
-        logs = [os.path.join(self.root, name) for name in names]
-        for path in logs:
-            self.file_write(path, gold_value("verbose_text"))
+        audit = os.path.join(self.root, gold_value("audit_name"))
+        self.file_write(audit, gold_value("audit_text"))
+        tap = os.path.join(self.root, gold_value("tap_name"))
+        os.makedirs(tap)
+        self.file_write(
+            os.path.join(tap, gold_value("tap_file")), gold_value("audit_text")
+        )
         self.root_ready(False)
-        for path in logs:
-            self.assertFalse(os.path.exists(path), path)
+        self.assertFalse(os.path.exists(audit), audit)
+        self.assertFalse(os.path.exists(tap), tap)
         with open(database, encoding="utf-8") as file:
             self.assertEqual(file.read(), gold_value("database_text"))
 
@@ -283,7 +286,7 @@ class TestServer(ScratchCase):
 
     # Starts ttyd, killed at the test's end if the test left it running.
     def server_start(self) -> xsjs_serve.TtydServer:
-        server = xsjs_serve.TtydServer(self.values, self.root, 0)
+        server = xsjs_serve.TtydServer(self.values, self.root, 0, self.log_fd)
         self.addCleanup(group_kill, server.pid)
         return server
 
@@ -309,7 +312,7 @@ class TestServer(ScratchCase):
         with self.assertRaises(ProcessLookupError):
             os.killpg(server.pid, 0)
 
-    # ttyd's log reaches stderr, up to its port's line and after it.
+    # ttyd's log reaches the descriptor given, up to its port's line and after.
     def test_log_copied(self) -> None:
         server = self.server_start()
         port = server.port
@@ -321,7 +324,7 @@ class TestServer(ScratchCase):
     def test_ttyd_missing(self) -> None:
         self.values["powershell"]["ttyd_build"] = self.scratch
         with self.assertRaises(FileNotFoundError) as caught:
-            xsjs_serve.TtydServer(self.values, self.root, 0)
+            xsjs_serve.TtydServer(self.values, self.root, 0, self.log_fd)
         path = os.path.join(self.scratch, _TTYD_NAME)
         self.assertEqual(
             str(caught.exception), gold_value("text_missing").format(path)
@@ -333,7 +336,7 @@ class TestServer(ScratchCase):
             os.path.join(self.root, self.values["powershell"]["engine_page"])
         )
         with self.assertRaises(RuntimeError) as caught:
-            xsjs_serve.TtydServer(self.values, self.root, 0)
+            xsjs_serve.TtydServer(self.values, self.root, 0, self.log_fd)
         self.assertEqual(
             str(caught.exception),
             gold_value("text_ended").format(
@@ -384,38 +387,45 @@ class ProgramCase(ScratchCase):
         super().setUp()
         self.host: str = self.values["powershell"]["bind_address"]
 
-    # Forks the program, returning its pid and the read end of its stdout.
-    def program_start(self, arguments: list[str]) -> tuple[int, int]:
+    # Forks the program, returning its pid and its stdout, open to the end.
+    def program_start(self, arguments: list[str]) -> tuple[int, IO[str]]:
         reader, writer = os.pipe()
         pid = os.fork()
         if pid == 0:
-            program_child(writer, arguments)
+            # A copy of the read end here would keep the pipe open.
+            os.close(reader)
+            program_child(writer, self.log_fd, arguments)
         os.close(writer)
+        output = os.fdopen(reader, encoding="utf-8")
+        self.addCleanup(output.close)
         self.addCleanup(child_stop, pid)
-        return pid, reader
+        return pid, output
 
-    # Returns the port of the address it printed, which takes a connection.
-    def port_read(self, reader: int) -> int:
-        with os.fdopen(reader, encoding="utf-8") as output:
-            address = output.readline()
-        found = re.fullmatch(gold_value("address_pattern"), address)
-        if found is None:
-            self.fail(f"{address!r}: {self.log_read()}")
-        port = int(found.group(1))
-        with socket.create_connection((self.host, port)):
-            pass
-        return port
+    # Reads to the address, and returns its port, which takes a connection.
+    def port_read(self, output: IO[str]) -> int:
+        self.printed = ""
+        while line := output.readline():
+            self.printed += line
+            found = re.fullmatch(gold_value("address_pattern"), line)
+            if found is not None:
+                port = int(found.group(1))
+                with socket.create_connection((self.host, port)):
+                    pass
+                return port
+        self.fail(f"{self.printed!r}: {self.log_read()}")
 
 
 # The program's own ends: its stop at a signal and its refusal.
 class TestProgram(ProgramCase):
-    # It builds the page, makes the root, prints the address, stops at SIGINT.
+    # It builds the page, makes the root, serves on stdout, stops at SIGINT.
     def test_program_served(self) -> None:
-        pid, reader = self.program_start(
+        pid, output = self.program_start(
             ["--debug", "--verbose", "--port", "0", "--root", self.root]
         )
-        port = self.port_read(reader)
+        port = self.port_read(output)
+        self.assertIn(gold_value("log_port").format(port), self.printed)
         os.kill(pid, signal.SIGINT)
+        self.assertIn(gold_value("log_stop"), output.read())
         status = os.waitpid(pid, 0)[1]
         self.assertEqual(
             os.waitstatus_to_exitcode(status),
@@ -435,8 +445,7 @@ class TestProgram(ProgramCase):
 
     # An option the program does not hold ends it before anything is built.
     def test_option_refused(self) -> None:
-        pid, reader = self.program_start(["--refused"])
-        os.close(reader)
+        pid, _ = self.program_start(["--refused"])
         status = os.waitpid(pid, 0)[1]
         self.assertEqual(
             os.waitstatus_to_exitcode(status), gold_value("usage_code")

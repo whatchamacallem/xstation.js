@@ -12,12 +12,6 @@
       },
       "db": "castle"
     },
-    "create_log": {
-      "0": {
-        "t": "db.create"
-      },
-      "db": "_verbose"
-    },
     "create_request": {
       "0": {
         "i": 7,

@@ -14,6 +14,16 @@
       },
       "text": "0"
     },
+    "audit_dump": {
+      "0": {
+        "type": "audit.dump"
+      }
+    },
+    "audit_overlay": {
+      "0": {
+        "t": "audit.overlay"
+      }
+    },
     "audit_tail": {
       "0": {
         "id": 1,
@@ -50,22 +60,11 @@
       },
       "digit": 0
     },
-    "control_key_1": {
-      "0": {
-        "t": "ui.control_key"
-      },
-      "digit": 1
-    },
     "control_key_2": {
       "0": {
         "t": "ui.control_key"
       },
       "digit": 2
-    },
-    "db_dump": {
-      "0": {
-        "type": "db.dump"
-      }
     },
     "dom_choice": {
       "0": {
@@ -128,6 +127,11 @@
     "settings_set": {
       "0": {
         "t": "settings.set"
+      }
+    },
+    "ui_audit_overlay": {
+      "0": {
+        "type": "audit.overlay"
       }
     },
     "ui_control_key_3": {

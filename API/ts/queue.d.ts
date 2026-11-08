@@ -16,7 +16,8 @@
 // `audit.`, its blob the line's `jslb.line_json` with the `Authorization` of
 // `http.request` and the `token` of a `console.open` reply masked; at each
 // sleep an `audit.note` of the replies' ids and the wake's type. Neither is
-// posted before `audit_open`, and the audit's own lines are never recorded.
+// posted before `audit_open`. A type under `audit.` is the audit's own: such
+// a line is never recorded, and a sleep with such a wake is never noted.
 
 declare namespace queue {
   // The owners a line can have: the threads, the server and the ports.

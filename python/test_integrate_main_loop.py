@@ -4,10 +4,10 @@
 #
 # Tests the main loop serving every engine it registers, each line type but
 # `system.restart`, which execs, in forked children over pipes, with roots in
-# `build/`. Each child opens the root's audit in debug mode, else its log, as
-# `bootstrap.py` does, then prepares the root and serves the pipes. The page's
-# commits are pushes applied and answered by nothing, read back from the
-# root's database files; a `tap.line` of the TypeScript stream is appended to
+# `build/`. Each child opens the root's audit in debug mode, as `bootstrap.py`
+# does, then prepares the root and serves the pipes. The page's commits are
+# pushes applied and answered by nothing, read back from the root's database
+# files; a `tap.line` of the TypeScript stream is appended to
 # its file; the server's MCP server answers `initialize`, and `tools/list`
 # with the tools of API/mcp/tools.json; `audit.tail` gives the audit's newest
 # entries; `settings.put` and `source.put` write the root's files in debug
@@ -50,8 +50,8 @@ _CHUNK_BYTES: int = harness.gold_get(f"{_GOLD_ID}.chunk_bytes")
 # A size chosen by its writer: the most the test reads from the pipe.
 _READ_BYTES: int = harness.gold_get(f"{_GOLD_ID}.read_bytes")
 
-# A ring size chosen by its writer, other than the checkout's.
-_RING: int = harness.gold_get(f"{_GOLD_ID}.ring")
+# A count of the audit's entries chosen by its writer, not the checkout's.
+_ENTRIES: int = harness.gold_get(f"{_GOLD_ID}.entries")
 
 # The seeded image: its file, its key in the metaverse and its ref.
 _SEED_IMAGE: dict[str, Any] = harness.gold_get(f"{_GOLD_ID}.image")
@@ -83,20 +83,20 @@ _METAVERSE_DB = "metaverse"
 # The source the `source.put` line carries.
 _SOURCE = b"pass\n"
 
-# The TAP file of the TypeScript stream in a root.
-_TAP_FILE = os.path.join("tap", "typescript.tap")
-
 # The value the sync tests keep in a row of the castle.
 _KEPT_VALUE = b"kept value"
 
 # The value the sync tests keep in a cache file, over `_OVERFLOW_BYTES`.
 _BIG_VALUE = bytes(index % 256 for index in range(_OVERFLOW_BYTES * 2 + 1))
 
-# The file of the server's log in the root.
-_LOG_FILE = "_verbose.sqlite"
+# The start of the names of the log's files, which no root holds.
+_LOG_PREFIX = "_verbose"
 
 # The file of the audit in the root.
 _AUDIT_FILE = "_audit.txt"
+
+# The directory of the TAP files in the root.
+_TAP_DIRECTORY = "tap"
 
 # The role the children open the audit for, as `bootstrap.py` names it.
 _ENGINE_ROLE = "engine"
@@ -235,15 +235,13 @@ def _child_end(
         os.kill(os.getpid(), signal.SIGKILL)
 
 
-# Opens the root's audit in debug mode, else its log, as `bootstrap.py` does.
+# Opens the root's audit in debug mode, as `bootstrap.py` does.
 def _record_open(root: str) -> None:
-    path = os.path.join(root, "settings.json")
-    with open(path, encoding="utf-8") as file:
-        values: dict[str, Any] = json.load(file)
     if switches.debug:
+        path = os.path.join(root, "settings.json")
+        with open(path, encoding="utf-8") as file:
+            values: dict[str, Any] = json.load(file)
         main_loop.audit.audit_open(root, values["blob_max"], _ENGINE_ROLE)
-    else:
-        main_loop.verbose.log_open(root, values["blob_max"])
 
 
 # Each entry of the root's audit: its label, its JSON or note, then the rest.
@@ -330,6 +328,14 @@ class ScratchCase(unittest.TestCase):
         os.remove(path)
         return ending, output
 
+    # Checks that the root holds nothing that records a run.
+    def records_absent(self) -> None:
+        names = os.listdir(self.root)
+        self.assertNotIn(_AUDIT_FILE, names)
+        self.assertNotIn(_TAP_DIRECTORY, names)
+        logs = [name for name in names if name.startswith(_LOG_PREFIX)]
+        self.assertEqual(logs, [])
+
     # Runs the loop on data it serves to the end, and returns its output.
     def served_read(self, data: bytes) -> list[dict[str, Any]]:
         ending, output = self.child_run(data)
@@ -396,7 +402,7 @@ class TestEngines(ScratchCase):
     def test_tap_line(self) -> None:
         self.assertEqual(self.served_read(_line_bytes("tap_line")), [])
         text: str = _gold_copy("lines.tap_line")["text"]
-        path = os.path.join(self.root, _TAP_FILE)
+        path = os.path.join(self.root, _TAP_DIRECTORY, "typescript.tap")
         with open(path, encoding="utf-8") as file:
             self.assertEqual(file.read(), text + "\n")
 
@@ -445,7 +451,7 @@ class TestEngines(ScratchCase):
     # Debug on: `source.put` writes a loop, `settings.put` settings, answered.
     def test_debug_served(self) -> None:
         self.debug_write(True)
-        changed = {**self.values, "verbose_ring": _RING}
+        changed = {**self.values, "audit_entries": _ENTRIES}
         put = _gold_copy("lines.settings_put")
         put["settings"] = changed
         data = _line_bytes("source_put", _SOURCE) + _wire_bytes(put)
@@ -478,6 +484,15 @@ class TestEngines(ScratchCase):
         self.assertTrue(error["stack"].endswith(": " + message))
         directory = os.path.join(self.root, "main_loop")
         self.assertFalse(os.path.exists(directory))
+        self.records_absent()
+
+    # With `debug` false, a whole session leaves no record in the root.
+    def test_session_unrecorded(self) -> None:
+        self.debug_write(False)
+        pushes = _line_bytes("create_castle") + _line_bytes("initialize")
+        replies = self.served_read(pushes)
+        self.assertEqual(replies, [_gold_copy("lines.initialize_reply")])
+        self.records_absent()
 
     # `db.sync` sends every database whole, each with its cache files after it.
     def test_sync_whole(self) -> None:
@@ -528,4 +543,3 @@ class TestEngines(ScratchCase):
         expected = [_line_entry("label_read", line) for line in read]
         expected += [_line_entry("label_written", line) for line in lines]
         self.assertEqual(_audit_read(self.root), expected)
-        self.assertFalse(os.path.exists(os.path.join(self.root, _LOG_FILE)))

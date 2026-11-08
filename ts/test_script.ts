@@ -8,7 +8,7 @@
 // cleared, and a real `queue.TaskQueue` whose server lane ends at the test's
 // own receiver, which keeps the store's pushes. Each test puts its scripts
 // in the store at the ref of the gold: the step script that advances a
-// region's tide, run and traced, every line a run keeps, a script read from
+// region's tide, run and traced, the trace a run keeps, a script read from
 // the cache, the engine object and its store of routine methods, the
 // exceptions a run returns and the errors it throws. The trace texts, the
 // store's refusals and the pushes the runs make are entries of the gold
@@ -26,7 +26,7 @@ namespace test_script {
 
   // The names, texts and calls the tests use.
   const constants = Object.freeze({
-    // The step script, 319 bytes.
+    // The step script, 273 bytes.
     step_script:
       "// Advances the tide by args.hours in the region table" +
       " of the world.\n" +
@@ -34,10 +34,7 @@ namespace test_script {
       '  {sql: "UPDATE region SET tide = tide + ? WHERE name = ?",\n' +
       '    params: [args.hours, "castle_gatehouse"]},\n' +
       "]);\n" +
-      'engine.log("tide advanced by " + args.hours);\n' +
       "return {changes: results[0].changes};\n",
-    // The line the step script logs when it advances the tide by 1.
-    step_line: "tide advanced by 1",
     // The world the step script writes, its region table and its one row.
     world_db: "castle_world",
     region_sql:
@@ -125,9 +122,9 @@ namespace test_script {
     return new TextEncoder().encode(text);
   }
 
-  // The text of each line, which leaves out the time.
-  function lines_shown(kept: script.LogLine[]): string[] {
-    return kept.map((line) => line.text);
+  // The text of each line of a traced run's trace, which leaves out the time.
+  function trace_shown(result: script.ScriptResult): string[] {
+    return (result.trace as script.TraceLine[]).map((line) => line.text);
   }
 
   // The text of the error JSON throws for a value it has no text for.
@@ -247,9 +244,9 @@ namespace test_script {
     }
   }
 
-  // Runs of a script: the value, the kept lines, the trace and the engine.
+  // Runs of a script: the value, the trace and the engine.
   export class TestRun extends ScriptCase {
-    // The step script reads its row, runs its statement, returns and logs.
+    // The step script reads its row, runs its statement and returns.
     test_step_recorded(): void {
       const store = this.store_script("step_tide", constants.step_script);
       this.world_make(store);
@@ -259,54 +256,45 @@ namespace test_script {
         { hours: 1 },
         false,
       );
-      this.assertEqual(Object.keys(result), ["value", "lines"]);
-      this.assertEqual(result.value, { changes: 1 });
-      this.assertEqual(lines_shown(result.lines), [constants.step_line]);
-      this.assertEqual(Object.keys(result.lines[0]), ["at", "text"]);
-      this.assertEqual(typeof result.lines[0].at, "number");
+      this.assertEqual(result, { value: { changes: 1 } });
       this.assertEqual(this.tide_get(store), [[1]]);
       this.assertEqual(this.pushes_taken(store), [
         gold_line("push_sql_run_tide"),
       ]);
     }
 
-    // A traced run traces the call of the store before the script's line.
+    // A traced run keeps the call of the store, with its time.
     test_step_traced(): void {
       const store = this.store_script("step_tide", constants.step_script);
       this.world_make(store);
       const result = script.script_run(store, "step_tide", { hours: 1 }, true);
       this.assertEqual(result.value, { changes: 1 });
-      this.assertEqual(lines_shown(result.lines), [
+      this.assertEqual(trace_shown(result), [
         gold_text("script_trace_call_sql_run"),
-        constants.step_line,
       ]);
+      const [line] = result.trace as script.TraceLine[];
+      this.assertEqual(Object.keys(line), ["at", "text"]);
+      this.assertEqual(typeof line.at, "number");
       this.assertEqual(this.tide_get(store), [[1]]);
     }
 
-    // A run keeps every line it logs, in order, traced or not.
-    test_lines_kept(): void {
+    // A trace keeps every call of the store, in order.
+    test_trace_kept(): void {
       const store = this.store_script(
-        "lines",
-        'engine.log("zero");\n' +
-          'engine.log("one");\n' +
-          'engine.log("two");\n' +
+        "calls",
+        "engine.store.db_list();\n" +
+          'const data = new TextEncoder().encode("abc");\n' +
+          'engine.store.kv_put("/_files/note", data);\n' +
+          "engine.store.db_list();\n" +
           "return null;\n",
       );
-      for (const trace of [false, true]) {
-        const result = script.script_run(store, "lines", {}, trace);
-        this.assertEqual(result.value, null);
-        this.assertEqual(lines_shown(result.lines), ["zero", "one", "two"]);
-      }
-    }
-
-    // A line the script logs to the thread is one of the run's lines.
-    test_thread_logged(): void {
-      const store = this.store_script(
-        "thread",
-        'engine.log("to the thread");\n',
-      );
-      const result = script.script_run(store, "thread", {}, false);
-      this.assertEqual(lines_shown(result.lines), ["to the thread"]);
+      const result = script.script_run(store, "calls", {}, true);
+      this.assertEqual(result.value, null);
+      this.assertEqual(trace_shown(result), [
+        gold_text("script_trace_call_db_list"),
+        gold_text("script_trace_call_kv_put"),
+        gold_text("script_trace_call_db_list"),
+      ]);
     }
 
     // Only a traced run traces the calls of the store.
@@ -316,11 +304,11 @@ namespace test_script {
         "return engine.store.db_list();\n",
       );
       const plain = script.script_run(store, "list", {}, false);
-      this.assertEqual(plain, { value: [files_db()], lines: [] });
+      this.assertEqual(plain, { value: [files_db()] });
       const traced = script.script_run(store, "list", {}, true);
       this.assertEqual(traced.value, [files_db()]);
       const trace = gold_text("script_trace_call_db_list");
-      this.assertEqual(lines_shown(traced.lines), [trace]);
+      this.assertEqual(trace_shown(traced), [trace]);
     }
 
     // A trace shows the bytes an argument holds by their count.
@@ -332,7 +320,7 @@ namespace test_script {
       );
       const result = script.script_run(store, "note", {}, true);
       const trace = gold_text("script_trace_call_kv_put");
-      this.assertEqual(lines_shown(result.lines), [trace]);
+      this.assertEqual(trace_shown(result), [trace]);
       const data = bytes_text("abc");
       this.assertEqual(store.kv_get("/_files/note").data, data);
       this.assertEqual(this.pushes_taken(store), [
@@ -348,7 +336,7 @@ namespace test_script {
       this.assertEqual(result.value, args);
     }
 
-    // The engine is frozen and holds the store, the log and `i18n`.
+    // The engine is frozen and holds the store and `i18n` alone.
     test_engine_frozen(): void {
       const store = this.store_script(
         "engine",
@@ -357,7 +345,7 @@ namespace test_script {
       );
       this.assertEqual(script.script_run(store, "engine", {}, false).value, [
         true,
-        ["store", "log", "i18n"],
+        ["store", "i18n"],
         "function",
       ]);
     }
@@ -405,10 +393,9 @@ namespace test_script {
     test_error_returned(): void {
       const store = this.store_script("far", 'throw new RangeError("far");\n');
       const result = script.script_run(store, "far", {}, false);
-      this.assertEqual(Object.keys(result), ["error", "stack", "lines"]);
+      this.assertEqual(Object.keys(result), ["error", "stack"]);
       this.assertEqual(result.error, "RangeError: far");
       this.assertIn("RangeError: far", result.stack);
-      this.assertEqual(result.lines, []);
     }
 
     // A value that is no `Error` comes back as its text, with no stack.
@@ -416,7 +403,6 @@ namespace test_script {
       const store = this.store_script("plain", 'throw "plain";\n');
       this.assertEqual(script.script_run(store, "plain", {}, false), {
         error: "plain",
-        lines: [],
       });
     }
 
@@ -428,41 +414,34 @@ namespace test_script {
       this.assertFalse("value" in result);
     }
 
-    // The lines logged before the exception are kept.
-    test_lines_before(): void {
+    // The calls traced before the exception are kept.
+    test_trace_before(): void {
       const store = this.store_script(
         "late",
-        'engine.log("before");\nthrow new Error("after");\n',
+        'engine.store.db_list();\nthrow new Error("after");\n',
       );
-      const result = script.script_run(store, "late", {}, false);
+      const result = script.script_run(store, "late", {}, true);
       this.assertEqual(result.error, "Error: after");
-      this.assertEqual(lines_shown(result.lines), ["before"]);
+      const trace = gold_text("script_trace_call_db_list");
+      this.assertEqual(trace_shown(result), [trace]);
     }
 
     // A value JSON cannot carry is the run's exception, not the tool's.
     test_value_uncarried(): void {
-      const store = this.store_script(
-        "uncarried",
-        'engine.log("before");\nreturn BigInt(1);\n',
-      );
+      const store = this.store_script("uncarried", "return BigInt(1);\n");
       const result = script.script_run(store, "uncarried", {}, false);
       this.assertEqual(result.error, refusal_text(BigInt(1)));
       this.assertEqual(typeof result.stack, "string");
       this.assertFalse("value" in result);
-      this.assertEqual(lines_shown(result.lines), ["before"]);
     }
 
     // NaN and the infinities are returned, as no decoder lets them in.
     test_value_unchecked(): void {
       for (const value of ["NaN", "Infinity"]) {
-        const store = this.store_script(
-          "unchecked",
-          `engine.log("before");\nreturn ${value};\n`,
-        );
+        const store = this.store_script("unchecked", `return ${value};\n`);
         const result = script.script_run(store, "unchecked", {}, false);
-        this.assertEqual(Object.keys(result), ["value", "lines"]);
+        this.assertEqual(Object.keys(result), ["value"]);
         this.assertEqual(String(result.value), value);
-        this.assertEqual(lines_shown(result.lines), ["before"]);
       }
     }
 

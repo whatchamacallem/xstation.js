@@ -1,5 +1,6 @@
 {
   "chunk_bytes": 1000,
+  "entries": 999,
   "image": {
     "file": "hyperposition.bmp",
     "key": "image/hyperposition",
@@ -249,7 +250,6 @@
   },
   "overflow_bytes": 4096,
   "read_bytes": 65536,
-  "ring": 999,
   "texts": {
     "blobs_omitted": "[blobs omitted: {0}]",
     "engine_system_debug_off_line": "source.put needs debug mode, and the parameter debug is false.",

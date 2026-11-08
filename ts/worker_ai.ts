@@ -33,7 +33,7 @@ namespace worker_ai {
     input_command: "0",
     line_end: "\n",
     tail_type: "audit.tail",
-    tail_wake: "worker.tail_reply",
+    tail_wake: "audit.tail_relayed",
     error_type: "error",
     fault_type: "fault",
     opened_type: "worker.console_opened",
@@ -93,6 +93,7 @@ namespace worker_ai {
       "console.idle": "ui",
       "audit.": "server",
       "audit.tail": "ai",
+      "audit.dump": "ai",
       "tap.": "server",
       fault: "ai",
     };

@@ -10,9 +10,11 @@
 # process and a ttyd with them blocked would never stop. That start also has
 # the kernel send ttyd SIGTERM when the thread that started it dies, as ttyd's
 # session of its own ties its life to nothing else. A thread copies ttyd's log
-# to stderr, so that a demo test that waits for no signal still shows it. The
-# modules beside this file are imported inside the functions that use them,
-# after their bytecode has been sent to build/.
+# to the descriptor its caller gives, so that a demo test that waits for no
+# signal still shows it; the program gives stdout, and a caller inside a test
+# stderr or a file, as stdout may be a TAP stream. The modules beside this file
+# are imported inside the functions that use them, after their bytecode has
+# been sent to build/.
 
 import argparse, ctypes, os, re, shutil, signal, subprocess, sys, threading
 from typing import Any, IO, cast
@@ -52,14 +54,6 @@ _SEED_NAME = "seed"
 # The name of the serve program's root, under the start script's folder.
 _ROOT_NAME = "root"
 
-# The root's audit, its log and the log's SQLite files, which each run removes.
-_RECORD_NAMES = (
-    "_audit.txt",
-    "_verbose.sqlite",
-    "_verbose.sqlite-wal",
-    "_verbose.sqlite-shm",
-)
-
 # The engine page's template, in `html/`.
 _PAGE_TEMPLATE = "engine"
 
@@ -84,8 +78,8 @@ _STOP_SECONDS = 5
 # The most bytes a read of ttyd's log takes at once.
 _READ_BYTES = 65536
 
-# The descriptor ttyd's log is copied to.
-_STDERR_FD = 2
+# The descriptor the program writes the address and ttyd's log to.
+_STDOUT_FD = 1
 
 # A shell's exit code for a program a signal ended is this plus the signal.
 _SIGNAL_BASE = 128
@@ -102,8 +96,10 @@ sys.pycache_prefix = os.path.join(_BUILD_PATH, "pycache")
 
 # ttyd serving a root, on `port` or, for 0, the port its log then names.
 class TtydServer:
-    # Starts ttyd and returns once its log names the port it listens on.
-    def __init__(self, values: dict[str, Any], root: str, port: int) -> None:
+    # Starts ttyd, its log copied to `log_fd`, returns once it names its port.
+    def __init__(
+        self, values: dict[str, Any], root: str, port: int, log_fd: int
+    ) -> None:
         from internationalization import i18n
 
         arguments = ttyd_arguments(values, root, port)
@@ -112,6 +108,7 @@ class TtydServer:
                 i18n("xsjs_serve.ttyd_missing", arguments[0])
             )
         self._root = root
+        self._log_fd = log_fd
         self._process = subprocess.Popen(
             arguments,
             bufsize=0,
@@ -127,7 +124,7 @@ class TtydServer:
         self._copier = threading.Thread(target=self.log_copy, daemon=True)
         self._copier.start()
 
-    # Copies the log to stderr up to the port's line. Returns the port.
+    # Copies the log up to the port's line. Returns the port.
     def port_read(self) -> int:
         from internationalization import i18n
 
@@ -140,16 +137,16 @@ class TtydServer:
                 raise RuntimeError(
                     i18n("xsjs_serve.ttyd_ended", code, self._root)
                 )
-            os.write(_STDERR_FD, data)
+            os.write(self._log_fd, data)
             seen += data
         return int(found.group(1))
 
-    # Copies the rest of the log to stderr, leaving the signals to the waiter.
+    # Copies the rest of the log, leaving the signals to the waiter.
     def log_copy(self) -> None:
         signal.pthread_sigmask(signal.SIG_BLOCK, _STOP_SIGNALS)
         with self._log:
             while data := self._log.read(_READ_BYTES):
-                os.write(_STDERR_FD, data)
+                os.write(self._log_fd, data)
 
     # The page's address on this ttyd, `http://localhost:PORT/`.
     def address_get(self) -> str:
@@ -202,7 +199,7 @@ def page_ready(values: dict[str, Any]) -> str:
     return os.path.join(_BUILD_PATH, page_name)
 
 
-# Makes the root from the built page, its audit and log gone, all with `fresh`.
+# Makes the root from the built page, its records gone, all of it with `fresh`.
 def root_make(
     values: dict[str, Any],
     page: str,
@@ -215,10 +212,12 @@ def root_make(
     powershell: dict[str, Any] = values["powershell"]
     if fresh and os.path.exists(root):
         shutil.rmtree(root)
-    for name in _RECORD_NAMES:
-        path = os.path.join(root, name)
-        if os.path.exists(path):
-            os.remove(path)
+    for name in powershell["root_records"]:
+        record = os.path.join(root, name)
+        if os.path.isdir(record):
+            shutil.rmtree(record)
+        elif os.path.exists(record):
+            os.remove(record)
     python_path = os.path.join(root, _ROOT_PYTHON)
     strings_path = os.path.join(root, _ROOT_STRINGS)
     # The copies of earlier runs go, so the root holds this checkout's only.
@@ -270,7 +269,8 @@ def serve_run(argv: list[str]) -> int:
     values = settings.settings_load(_SETTINGS_PATH)
     parser = argparse.ArgumentParser(
         description="Build the engine page, make a root and serve it through"
-        " the built ttyd, printing the address, until SIGINT or SIGTERM.",
+        " the built ttyd, printing its log and the address, until SIGINT or"
+        " SIGTERM.",
         allow_abbrev=False,
     )
     parser.add_argument(
@@ -298,9 +298,9 @@ def serve_run(argv: list[str]) -> int:
     page = page_ready(values)
     root_make(values, page, root, switches.switches_get(), parsed.fresh)
     signal.pthread_sigmask(signal.SIG_BLOCK, _STOP_SIGNALS)
-    server = TtydServer(values, root, parsed.port)
+    server = TtydServer(values, root, parsed.port, _STDOUT_FD)
     try:
-        print(server.address_get(), flush=True)
+        os.write(_STDOUT_FD, f"{server.address_get()}\n".encode("utf-8"))
         server.signal_wait()
     finally:
         code = server.server_stop()
@@ -308,4 +308,6 @@ def serve_run(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    # A reader of stdout that leaves ends the program, then ttyd by its parent.
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     sys.exit(serve_run(sys.argv[1:]))

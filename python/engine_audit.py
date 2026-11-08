@@ -67,8 +67,8 @@ def audit_tail(line: jslb.Object, *, count: int) -> jslb.Object:
     return dispatch.reply_make(line, text=audit.tail_read(count, limit))
 
 
-# `db.dump`: the browser's views from blob 1, then the server's own.
-def db_dump(line: jslb.Object) -> None:
+# `audit.dump`: the browser's views from blob 1, then the server's own.
+def audit_dump(line: jslb.Object) -> None:
     _, store = _registered()
     views = cast(list[dict[str, Any]], jslb.json_decode(_blob_text(line)))
     audit.dump_put(i18n("engine_audit.browser_title"), views)
@@ -87,4 +87,4 @@ def handlers_register(
     dispatch.handler_register("audit.line", 0, audit_line)
     dispatch.handler_register("audit.note", 0, audit_note)
     dispatch.handler_register("audit.tail", 0, audit_tail)
-    dispatch.handler_register("db.dump", 0, db_dump)
+    dispatch.handler_register("audit.dump", 0, audit_dump)

@@ -7,21 +7,22 @@
 # `tap.start`, and `loop_run` after it. Any reply is refused, since the server
 # awaits none.
 #
-# An `error` line of the browser goes to `engine_tap.error_take`, after which
-# the loop exits 1 and writes nothing: its exit ends the connection, the close
-# the page waits for, since the page never closes on a failure. A
-# `dispatch.Failure` writes its reply, then fails with its error, whose `error`
-# line has no `r`, as its request is answered. A `dispatch.Stream` writes its
-# pushes in order, then its reply. A failure writes one `error` line with its
-# cascade, in the name form of the line it answers, else of the parameter
-# `debug`, and exits 1, its message logged first outside debug mode. In debug
-# mode the audit records each line read before it is dispatched, and each
-# push, reply and `error` before it is written, the audit's own lines never.
+# An `error` line of the browser goes to `engine_tap.error_take` in debug mode,
+# after which the loop exits 1 and writes nothing: its exit ends the
+# connection, the close the page waits for, since the page never closes on a
+# failure. A `dispatch.Failure` writes its reply, then fails with its error,
+# whose `error` line has no `r`, as its request is answered. A
+# `dispatch.Stream` writes its pushes in order, then its reply. A failure
+# writes one `error` line with its cascade, in the name form of the line it
+# answers, else of the parameter `debug`, and exits 1. In debug mode the audit
+# records each line read before it is dispatched, and each push, reply and
+# `error` before it is written, the audit's own lines never. Outside debug mode
+# nothing records a run.
 
 import audit, dispatch, engine_audit, engine_db, engine_doc, engine_kv
 import engine_mcp, engine_sql, engine_system, engine_tap, engine_turn
 import functools, jslb, json, mcp, os, re, select, settings, substrate
-import switches, uuid, verbose
+import switches, uuid
 from internationalization import i18n
 from typing import Any, NamedTuple, NoReturn, cast
 
@@ -48,9 +49,6 @@ _METAVERSE_DB = "metaverse"
 
 # The fixed databases, opened first and created when their file is missing.
 _DATABASES = (_SETTINGS_DB, _PREFERENCES_DB, _FILES_DB, _METAVERSE_DB)
-
-# The log's own database, which `verbose` opens and the store never does.
-_VERBOSE_DB = "_verbose"
 
 # A database name, a C identifier.
 _C_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -187,7 +185,6 @@ def _databases_found(root: str) -> list[str]:
             extension == _DB_EXTENSION
             and _C_IDENTIFIER.fullmatch(name) is not None
             and name not in _DATABASES
-            and name != _VERBOSE_DB
         ):
             names.append(name)
     return names
@@ -295,7 +292,8 @@ def _handlers_register(
     engine_turn.handlers_register(store)
     engine_sql.handlers_register(store)
     engine_audit.handlers_register(debug, line_max, store)
-    engine_tap.handlers_register(root)
+    if debug:
+        engine_tap.handlers_register(root)
     engine_system.handlers_register(root, debug)
     server = mcp.Server(_SERVER_NAME, _SERVER_VERSION)
     engine_system.tools_register(server, root, debug)
@@ -338,12 +336,10 @@ def _answer_write(answer: jslb.Object, output: _LoopOutput) -> None:
     _line_write(answer, output)
 
 
-# Writes the `error` line of a failure and exits 1, logged outside debug mode.
+# Writes the `error` line of a failure and exits 1.
 def _failure_exit(
     line: jslb.Object | None, error: BaseException, output: _LoopOutput
 ) -> NoReturn:
-    if not output.debug:
-        verbose.log(i18n("main_loop.serve_failed", str(error)))
     _answer_write(dispatch.error_make(line, error, output.debug), output)
     raise SystemExit(_EXIT_FAILED) from error
 
@@ -358,10 +354,9 @@ def _line_serve(line: jslb.Object, output: _LoopOutput) -> None:
             i18n("main_loop.reply_unknown", jslb.line_render(line))
         )
     if jslb.field_get(line[0], "type") == _ERROR_TYPE:
-        # The browser's failure: its stream bailed out, no answer.
-        payload = jslb.payload_of(line)
-        cause = payload["cause"] if "cause" in payload else None
-        engine_tap.error_take(payload["message"], payload["stack"], cause)
+        # The browser's failure, no answer: in debug mode its stream bails out.
+        if output.debug:
+            engine_tap.error_take(jslb.payload_of(line)["message"])
         raise SystemExit(_EXIT_FAILED)
     result = dispatch.line_dispatch(line)
     if isinstance(result, dispatch.Failure):

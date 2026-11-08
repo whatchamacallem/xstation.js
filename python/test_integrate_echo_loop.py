@@ -10,13 +10,13 @@
 # the real `settings` reads, and the real `engine_tap`, which appends to the
 # root's TAP file. The child runs in debug mode, the one the echo loop is
 # served in, with the root's audit of the real `audit` opened first as
-# `bootstrap.py` opens it, so `engine_tap` logs nothing and the echo loop
-# records no line of its own. The input ends with the browser's `error` line
-# or with a line of no handler, after the echoes are written. The output is
-# read from the pipe, and the TAP file, the audit and the cache from the
-# root. Each child writes how its work ended to a file, or to stderr with the
-# failure when that write fails, then kills itself whatever happened, so the
-# handlers it registers never reach another test.
+# `bootstrap.py` opens it, and the echo loop records no line of its own. The
+# input ends with the browser's `error` line or with a line of no handler,
+# after the echoes are written. The output is read from the pipe, and the TAP
+# file, the audit and the cache from the root. Each child writes how its work
+# ended to a file, or to stderr with the failure when that write fails, then
+# kills itself whatever happened, so the handlers it registers never reach
+# another test.
 
 import audit, echo_loop, functools, harness, json, os, signal, switches, sys
 import tempfile, traceback, unittest
@@ -70,9 +70,6 @@ _TAP_FILE = os.path.join("tap", "typescript.tap")
 
 # The directory in a root that holds the blobs over `overflow_bytes`.
 _CACHE_DIRECTORY = "cache"
-
-# The log of the server in a root, as `verbose` names it.
-_LOG_NAME = "_verbose.sqlite"
 
 
 # A text of this module's gold.
@@ -236,7 +233,7 @@ class ScratchCase(unittest.TestCase):
 
 # Sessions served by the loop and every module it calls into.
 class TestSession(ScratchCase):
-    # Echo, push, fail: echoes out, pushes, bail in TAP, blob cached, no log.
+    # Echo, push, fail: echoes out, pushes, bail in TAP, blob cached.
     def test_session_served(self) -> None:
         first = [b"abc", bytes(range(256))]
         streamed = [bytes(index % 256 for index in range(_STREAMED_BYTES))]
@@ -258,11 +255,10 @@ class TestSession(ScratchCase):
         tap = "".join(text + "\n" for text in [*pushed, _BAIL_LINE])
         self.assertEqual(self.tap_read(), tap)
         self.assertEqual(_audit_read(self.root), [])
-        self.assertFalse(os.path.exists(os.path.join(self.root, _LOG_NAME)))
         cache = os.path.join(self.root, _CACHE_DIRECTORY)
         self.assertEqual(len(os.listdir(cache)), 1)
 
-    # Echo, push, unhandled: echo out, `error` by id, push only in TAP, no log.
+    # Echo, push, unhandled: echo out, `error` by id, push only in TAP.
     def test_session_failed(self) -> None:
         first = [b"abc"]
         pushed = "ok 1 - first"
@@ -278,4 +274,3 @@ class TestSession(ScratchCase):
         self.assertEqual(blobs, [])
         self.assertEqual(self.tap_read(), pushed + "\n")
         self.assertEqual(_audit_read(self.root), [])
-        self.assertFalse(os.path.exists(os.path.join(self.root, _LOG_NAME)))

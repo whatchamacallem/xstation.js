@@ -22,7 +22,7 @@ namespace queue {
     open_type: "console.open",
     token_field: "token",
     mask_text: "<masked>",
-    // The audit's own lines, never recorded, and the owners that are no queue.
+    // The audit's own types, never recorded, and the owners that are no queue.
     audit_prefix: "audit.",
     audit_line: "audit.line",
     audit_note: "audit.note",
@@ -117,7 +117,7 @@ namespace queue {
     );
   }
 
-  // The header of a line as JSON text, for the log and for messages.
+  // The header of a line as JSON text, for messages.
   function header_text(line: lines.Line): string {
     return utility.json_text(line[0]);
   }
@@ -477,9 +477,12 @@ namespace queue {
       );
     }
 
-    // Notes a sleep by the ids of its replies and the type of its wake.
+    // Notes a sleep by its replies' ids and its wake, unless the audit's own.
     private sleep_note(sleep: dispatch.Sleep): void {
-      if (this.audit === undefined) {
+      if (
+        this.audit === undefined ||
+        sleep.then_type.startsWith(constants.audit_prefix)
+      ) {
         return;
       }
       const ids = sleep.wait_ids.join(constants.id_gap);

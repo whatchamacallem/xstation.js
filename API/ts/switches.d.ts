@@ -31,7 +31,4 @@ declare namespace switches {
 
   // Whether the run's debug switch is on.
   function debug_on(): boolean;
-
-  // Whether the run's verbose switch is on.
-  function verbose_on(): boolean;
 }

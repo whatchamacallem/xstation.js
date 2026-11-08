@@ -128,6 +128,6 @@ class TestDoor(unittest.TestCase):
 
     # A number that overflows a double is refused at read, by the decoders.
     def test_number_overflow(self) -> None:
-        self.text_write('{"verbose_ring": ' + _OVERFLOW_TOKEN + "}")
+        self.text_write('{"audit_entries": ' + _OVERFLOW_TOKEN + "}")
         error = self.wire_refused()
         self.assertEqual(str(error), _text_fill("jslb_number_overflow"))

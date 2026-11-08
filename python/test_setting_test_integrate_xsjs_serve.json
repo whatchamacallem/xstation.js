@@ -1,6 +1,7 @@
 {
   "address_pattern": "http://localhost:([0-9]+)/\n",
   "log_port": " N:  Listening on port: {0}\n",
+  "log_stop": "received signal: SIGTERM (15), exiting...\n",
   "stopped_code": 0,
   "token_path": "/token",
   "token_reply": {

@@ -6,17 +6,18 @@
 # API/sql/metaverse.sql, the row of the image `seed/hyperposition.bmp`, then
 # the documents. `loop_run` registers the stock handlers and runs the select
 # loop on the pty: it decodes and serves each line, refusing any reply, as the
-# server awaits none. A browser `error` line goes to `engine_tap.error_take`,
-# then the loop exits 1 and writes nothing: its exit ends the connection, the
-# close the page waits for. A `dispatch.Failure` writes its reply, then fails
-# with its error, whose `error` line has no `r`, as its request is answered.
-# A `dispatch.Stream` writes its pushes in order, then its reply. A failure
-# writes one `error` line with its cascade, in the name form of the line it
-# answers, else of the parameter `debug`, and exits 1; outside debug mode it
-# logs its message first. In debug mode the audit records each line read, as
-# `ai to server`, before it is dispatched, and each push, reply and `error`,
-# as `server to ai`, before it is written; the audit's own lines, every type
-# under `audit.`, are never recorded.
+# server awaits none. A browser `error` line goes to `engine_tap.error_take` in
+# debug mode, then the loop exits 1 and writes nothing: its exit ends the
+# connection, the close the page waits for. A `dispatch.Failure` writes its
+# reply, then fails with its error, whose `error` line has no `r`, as its
+# request is answered. A `dispatch.Stream` writes its pushes in order, then its
+# reply. A failure writes one `error` line with its cascade, in the name form
+# of the line it answers, else of the parameter `debug`, and exits 1. In debug
+# mode the audit records each line read, as `ai to server`, before it is
+# dispatched, and each push, reply and `error`, as `server to ai`, before it is
+# written; the audit's own lines, every type under `audit.`, are never
+# recorded. Outside debug mode nothing records a run, and `tap.line` has no
+# handler.
 
 # Prepares the root once, before the first line.
 def loop_prepare(root: str) -> None: ...

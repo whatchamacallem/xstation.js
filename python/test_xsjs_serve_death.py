@@ -8,9 +8,10 @@
 # that this suite runs in a test-all run only. The program ended by SIGKILL, or
 # by SIGHUP's default action, stops nothing itself, so that the port it printed
 # going shows that the kernel told ttyd. The port is polled, not ttyd's pid, as
-# an orphan may stay a zombie for a moment.
+# an orphan may stay a zombie for a moment. A reader of the program's stdout
+# that leaves ends it the same way, by SIGPIPE at ttyd's next log line.
 
-import harness, os, signal, socket, test_xsjs_serve, time
+import harness, http.client, os, signal, socket, test_xsjs_serve, time
 
 # The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_xsjs_serve_death"
@@ -20,6 +21,9 @@ _GONE_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.gone_seconds")
 
 # The wait between two tries of the port.
 _POLL_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.poll_seconds")
+
+# The path whose fetch has ttyd write a log line.
+_TOKEN_PATH: str = harness.gold_get(f"{_GOLD_ID}.token_path")
 
 
 # The program ended with no chance to stop ttyd, which the kernel then ends.
@@ -39,8 +43,8 @@ class TestParentDeath(test_xsjs_serve.ProgramCase):
 
     # Ends the serving program by the signal, then waits for its port to go.
     def death_check(self, number: int) -> None:
-        pid, reader = self.program_start(["--port", "0", "--root", self.root])
-        port = self.port_read(reader)
+        pid, output = self.program_start(["--port", "0", "--root", self.root])
+        port = self.port_read(output)
         os.kill(pid, number)
         status = os.waitpid(pid, 0)[1]
         self.assertEqual(os.waitstatus_to_exitcode(status), -number)
@@ -53,3 +57,16 @@ class TestParentDeath(test_xsjs_serve.ProgramCase):
     # The program installs no hangup handler, so SIGHUP ends it as abruptly.
     def test_death_hangup(self) -> None:
         self.death_check(signal.SIGHUP)
+
+    # A reader of stdout that leaves ends the program at the next log line.
+    def test_death_reader(self) -> None:
+        pid, output = self.program_start(["--port", "0", "--root", self.root])
+        port = self.port_read(output)
+        output.close()
+        connection = http.client.HTTPConnection(self.host, port)
+        self.addCleanup(connection.close)
+        # Its answer stays unread, as it keeps no order with ttyd's end.
+        connection.request("GET", _TOKEN_PATH)
+        self.port_gone(port)
+        status = os.waitpid(pid, 0)[1]
+        self.assertEqual(os.waitstatus_to_exitcode(status), -signal.SIGPIPE)

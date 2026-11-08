@@ -11,7 +11,7 @@
 # role forked, found by its parent pid in /proc. A heredoc of binary bytes
 # comes back as the pty's output processing changes it, so that a connection
 # that is not binary fails. The shell's start and exit are notes of console in
-# the root's audit, read back by `audit.entries_read`, and no log is opened.
+# the root's audit, read back by `audit.entries_read`.
 
 import audit, base64, bootstrap, errno, harness, json, os, pty, select, shlex
 import signal, switches, sys, tempfile, termios, time, traceback, unittest
@@ -119,7 +119,7 @@ _TERMINATED_CODE: int = harness.gold_get(f"{_GOLD_ID}.terminated.code")
 _TERMINATED_EXEC: int = harness.gold_get(f"{_GOLD_ID}.terminated.exec_code")
 
 # The parameter verbose whose level notes the shell's start and exit only.
-_LOGGED_VERBOSE = False
+_NOTED_VERBOSE = False
 
 # The directory of the processes, each under its pid.
 _PROC_PATH = "/proc"
@@ -129,9 +129,6 @@ _STATUS_NAME = "status"
 
 # The start of the line of that file which holds the parent's pid.
 _PPID_FIELD = b"PPid:"
-
-# The file in the root that holds the log, which no debug run opens.
-_LOG_NAME = "_verbose.sqlite"
 
 # The file in its scratch directory a child writes how its run ended to.
 _ENDING_NAME = "ending.txt"
@@ -195,9 +192,8 @@ def _exec_entries(argv: list[str], code: int) -> list[tuple[str, str]]:
     ]
 
 
-# The label and body of each entry of the root's audit, with no log beside.
+# The label and body of each entry of the root's audit, after one start.
 def _audit_read(case: unittest.TestCase, root: str) -> list[tuple[str, str]]:
-    case.assertFalse(os.path.exists(os.path.join(root, _LOG_NAME)))
     entries = audit.entries_read(root)
     case.assertEqual({entry.start for entry in entries}, {1})
     return [(entry.label, entry.body) for entry in entries]
@@ -390,7 +386,7 @@ class TestConsole(unittest.TestCase):
 
     # SIGTERM from outside to the sandbox gives 128 plus it, and is noted.
     def test_console_terminated(self) -> None:
-        made = _root_make(self, _LOGGED_VERBOSE)
+        made = _root_make(self, _NOTED_VERBOSE)
         child = ConsoleChild(self, made)
         child.prompt_wait()
         os.kill(child.sandbox_find(), signal.SIGTERM)

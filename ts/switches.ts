@@ -87,11 +87,6 @@ namespace switches {
   export function debug_on(): boolean {
     return store.value_get().debug;
   }
-
-  // Whether the run's verbose switch is on.
-  export function verbose_on(): boolean {
-    return store.value_get().verbose;
-  }
 }
 
 Object.freeze(switches);

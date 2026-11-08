@@ -35,7 +35,7 @@ Each answer goes through the MCP tools and ends in the band:
 | 1 | Shows a subtitle through the `render` tool, then answers in text | The MCP request and result, the render on the UI lane, the turn's rows to the server |
 | 2 | Writes a note under the metaverse with `kv_put`, reads it back with `kv_get`, then answers | The same, plus the `kv.put` commit over the wire, which the server's database then holds |
 | 3 | Asks to run `echo hyperposition` in the console with `console_run`, then shows the output | The permit request with its Accept, Deny and Always Allow buttons, the console shown, dash in its sandbox, the output read back |
-| 0 | Answers in text, calling no tool; in debug mode both sides' databases go into the audit first, by AUDIT_PLAN.md | The provider request and reply, and in debug mode `db.dump` |
+| 0 | Answers in text, calling no tool; in debug mode both sides' databases go into the audit first, by AUDIT_PLAN.md | The provider request and reply, and in debug mode `audit.dump` |
 
 The choices are the same at every step, so they can be taken in any order and
 as often as wanted. Any input the table does not hold, another number, a word,
@@ -61,7 +61,7 @@ serve's stays readable until then.
 
 1.7. Before 1.1, `python3 python/test_demo.py` proves the page is ready: it
 serves a fresh root the same way, drives chrome-headless-shell through DevTools
-over the steps of 1.3 to 1.6, saves a picture of each, checks the log, leaves
+over the steps of 1.3 to 1.6, saves a picture of each, checks the audit, leaves
 the page and checks the server ended. It is also a check of `./test_posix.sh`.
 
 ## 2. Requirements
@@ -134,7 +134,7 @@ file in brackets for reference only.
 | R4 end to end | Every lane is built and tested: DOM, UI thread, AI worker, provider port, MCP client and server, store, wire, ttyd, server store; the agent integration test runs a whole turn on real parts behind a test's own far ends | The same parts joined on the real page, with the real server at the far end |
 | R5 MCP talk | The `render` tool shows a subtitle; the agent runs every tool call of a reply and stores the reply with its results | A script that calls `render` and the other tools |
 | R6 log every line | In debug mode the wire's tap logs each wire line in full; each queue logs every submit, dispatch, notify, forward, reply, receive, sleep and wake; the server logs each dispatch and reply; the page's lines reach the server's `_verbose.sqlite` as `verbose.put` batches | The queues and the server log only the header of a line, so the ui-ai, provider, MCP, console, DOM and media lanes are recorded as types and ids, not as JSLB. The maintainer's R14 and R16 of AUDIT_PLAN.md replace it with the audit |
-| R7 scrutinize | The browser test reads `_verbose.sqlite` for its own checks; the `verbose_tail` tool reads a thread's ring | A program that prints the timeline for a person, with filters and a follow mode. The maintainer's R14 and R16 of AUDIT_PLAN.md replace it with the audit |
+| R7 scrutinize | The browser test reads `_verbose.sqlite` for its own checks; the `verbose_tail` tool reads a thread's ring | A program that prints the timeline for a person, with filters and a follow mode. The maintainer's R14 and R16 of AUDIT_PLAN.md replace it with the audit, and AUDIT_PLAN.md section 8 removes that program, `xsjs_log.py` |
 | R8 consoles | The console view, tty 0, the console role's sandboxed dash, the writer, the console tools behind permits and the ctrl 0 and ctrl 1 keys, all tested in group C | The console on the real page, in the demo and its test |
 | R9, R11 DevTools | The DevTools client and the pipe to chrome-headless-shell (`python/devtools.py`), used by the driver, the browser test and the screenshot suite | A driver of the demo |
 | R10 debug stories | The fault screen with cascades, the overlays, the console, the verbose rings, the trace of synchronous loads, the pause of a worker in the debugger | Section 4.8 names each story and what it is for |
@@ -158,7 +158,7 @@ and the browser's store applies them. Nothing sends them.
 
 4.1.2. One new request, `db.sync`, on the wire from the AI worker to the
 server, with no blobs and no payload. The server answers it with the whole of
-every database it holds but its own `_verbose`: for each database in name
+every database it holds: for each database in name
 order, its `db.restore` line and its `db.file` lines, then the reply,
 `DbSyncReply`, whose one field `databases` names them in that order. The
 browser's queue runs the pushes in the order they come, before the reply, so
@@ -279,7 +279,7 @@ DOM port as the `dom` owner, which turns the box's text, clicks on the picture
 and ctrl digits into lines and shows the permit buttons; the media port as the
 `media` owner, with the budget `media_db_bytes` and the provider's
 `timeout_seconds` as its timer; the console view on its container; the
-overlays on theirs with the ring `verbose_ring`; then the UI handlers
+overlays on theirs with the count `audit_entries`; then the UI handlers
 registered with those parts. The page's bring up gains `engine_page`, which
 runs its function at `settings.set`, where the test page's waits for
 `ui.tests`.
@@ -364,7 +364,7 @@ so it follows `after_tools`.
 
 AUDIT_PLAN.md replaces this section: the timeline, the wire tap, the overlay of
 tty 1 and `_verbose.sqlite` in debug mode are gone, and the audit,
-`_audit.txt`, records each line once.
+`_audit.txt`, records each line once. AUDIT_PLAN.md section 8 removes `_verbose.sqlite` and `xsjs_log.py`, so that nothing is recorded outside debug mode.
 
 4.5.1. The lanes a turn crosses: ui-dom, ui-media, ui-ai, the worker's own
 lines to itself, the `mcp` lines between the agent and the browser's MCP
@@ -402,24 +402,27 @@ keeps its root.
 
 ### 4.6. The serve program
 
+AUDIT_PLAN.md section 8 removes `_verbose.sqlite` and `xsjs_log.py`, so that nothing is recorded outside debug mode.
+
 4.6.1. `python3 python/xsjs_serve.py [--debug] [--verbose] [--port N] [--root
 PATH] [--fresh]`, standard library only, the POSIX start that stands alone
 from the Windows scripts, as the Testing rules require. It builds the engine
-page, makes the root, which begins a new log, and serves it through ttyd,
-prints the address, and keeps serving until SIGINT or SIGTERM, when it stops
-ttyd's process group and exits with ttyd's code. ttyd's log goes to stderr as
-it comes.
+page, makes the root, which begins a new audit, and serves it through ttyd,
+and keeps serving until SIGINT or SIGTERM, when it stops ttyd's process group
+and exits with ttyd's code. Its stdout holds ttyd's log as it comes and the
+address once ttyd names its port.
 
 4.6.2. The root, `~/.cache/xsjs/root` unless `--root` says otherwise, is made
 as the Windows start script makes one: the server's runtime modules and the
 seed from `python/`, `i18n/en-US.json`, `settings.json`, `provider.json`, the
 page, and `parameters.json` from the switches. It is kept between runs, so the
-maintainer's databases persist; `--fresh` removes it first. The log alone does
-not persist: each run removes `_verbose.sqlite` and its `-wal` and `-shm` files
-when they exist and keeps every other file, so each serve begins a new record,
-and the last serve's stays readable by the log tool until the next start. Only
-a serve does this: a page load within one serve adds to the same log. A log
-that reaches `blob_max` still fails the server, and the cure is a new serve,
+maintainer's databases persist; `--fresh` removes it first. The records alone
+do not persist: each run removes `_audit.txt` and `tap`, by the setting
+`powershell.root_records`, when they exist and keeps every other file, so each
+serve begins a new record, and the last serve's stays readable until the next
+start. Only a start does this: a page load within one serve adds to the same
+audit. An audit that reaches `blob_max` still fails the
+server, and the cure is a new serve,
 which costs the old record and no database. The engine's lock in the root means
 one page per root. The engine role (`python/bootstrap.py`) waits up to 5 s for
 the lock, so a reload that reaches the server before the old one has exited
@@ -440,7 +443,7 @@ module's functions, so what the test proves is what the maintainer runs.
 
 4.7.1. `python3 python/test_demo.py [--test-all]
 [--anthropic] [--debug] [--verbose]`, a check after the stream of the driver,
-after the browser test, with its timers, window size, texts and log table in
+after the browser test, with its timers, window size, texts and audit table in
 its own gold, `python.test_demo`. It drives chrome-headless-shell by the
 project's DevTools client, rung by rung, each under a timer and labelled, a
 picture of each state saved to `build/test_demo/`. The roots go when the run
@@ -451,17 +454,20 @@ passes and stay when it fails.
 | Rung | Label | What it proves |
 |---|---|---|
 | served | smoke-test | The page builds, the root is made, ttyd answers, the page loads, and the first render shows: the band holds the seed's remark, the box is enabled, the picture is shown, 4 by 4, its pixels black. Picture saved |
+| reload | test-all | A second load at once ends in the first render again, which proves the engine worker's boot file wait and, when the old server has not yet exited, the lock's wait |
 | choice 1 | smoke-test | Typing 1 and Enter ends with the analyst's first text in the band, the box enabled again and the picture hidden. Picture saved |
 | choice 3 | smoke-test | Typing 3 shows the permit text and its three buttons; Accept shows the console view; dash's rows hold the prompt and `hyperposition`; the band holds the analyst's text. Picture saved |
 | bad input | smoke-test | Typing a number outside the table, then a word, then an empty line, each ends with the analyst's `otherwise` text in the band and the box enabled and holding the focus; a choice then still answers |
 | choice 2 | test-all | Typing 2 ends with its text; the server's metaverse database holds the note's row, read directly from the file as the browser test reads values |
 | console | test-all | ctrl 0 hides the view and shows it again; `echo hello` typed into the terminal's input shows `hello` in a row. Picture saved |
-| overlay | test-all | ctrl 1 shows the wire overlay holding a sent and a received line; ctrl 1 hides it. Picture saved |
-| log | smoke-test | The root's `_verbose.sqlite` holds each fragment of the gold's table, one per lane and direction a turn crosses, the media lane that the first render's image crosses, and the bad input rung's inputs and answer, with its JSLB; the log tool's function reads them |
-| left | smoke-test | about:blank ends the page; the server's `bootstrap.py` under ttyd ends; ttyd stops; the root goes |
+| overlay | test-all | ctrl 1 shows the audit's end, holding the gold's fragments; ctrl 1 hides it and its text goes. Picture saved |
+| dump | smoke-test | Typing 0 ends with its answer; the audit holds `databases of the browser`, `databases of the server` and the input's `ui to ai` `ai.say`, in that order, and the two dumps are the same text |
+| audit | smoke-test | The root's `_audit.txt` holds each row of the gold's table, one per lane and direction a turn crosses, the media lane that the first render's image crosses, and the bad input rung's inputs and answer, with its JSLB; it holds no line and no sleep of the audit's own, and one start of the engine per load |
+| left | smoke-test | about:blank ends the page; the server's `bootstrap.py` under ttyd ends; ttyd stops |
+| plain | smoke-test | A root with debug false, by AUDIT_PLAN.md section 8, takes the first render and choices 1 and 0, and the page leaves; ttyd's log in `build/test_demo/server.txt` holds the port and the engine's start and end, and the root holds no `_audit.txt`, no `_verbose*` and no `tap`, then goes |
 
 4.7.3. The core rungs are smoke-test so that the default run proves the demo;
-the three test-all rungs keep the default run within its three minutes. The
+the test-all rungs keep the default run within its three minutes. The
 smoke run is about 100 s today, so the budget is measured when the test exists.
 The bad input rung comes after choice 3, so that the rungs before it keep their
 line ids. For the same budget the suite that proves ttyd dies with its parent,
@@ -482,11 +488,11 @@ the whole path of an image, from the server's database to the canvas. Together
 with the wire rung of the sync they are the non-trivial integration tests of
 R13.
 
-4.7.6. No test serves the engine outside debug mode, so that mode stays
-unproven, by the maintainer's choice in R22: the demo runs in debug mode. The
-answer to choice 3 on a root served without `--debug`, in 1.4, is therefore
-proved only below the engine, by the suites of the console tools and the
-scripted provider.
+4.7.6. The demo runs in debug mode, by the maintainer's choice in R22.
+AUDIT_PLAN.md section 8 adds the `plain` rung, which serves one root outside
+debug mode through choices 1 and 0. The answer to choice 3 on a root served
+without `--debug`, in 1.4, is still proved only below the engine, by the suites
+of the console tools and the scripted provider.
 
 ### 4.8. The debug stories
 
@@ -496,12 +502,12 @@ from inside the AI endpoint is not among them.
 1. Prove it: `python3 python/test_demo.py`. Exit 0 with a picture of each
    state in `build/test_demo/`, or the first failed rung by name, its picture,
    the kept root and, with `--hold`, the page served for a look.
-2. Serve it: `python3 python/xsjs_serve.py --debug`, the address, ttyd's log on
-   stderr, ctrl C to stop. Each start begins a new audit, which is also the
+2. Serve it: `python3 python/xsjs_serve.py --debug`, ttyd's log and the address
+   on stdout, ctrl C to stop. Each start begins a new audit, which is also the
    cure for an audit that has filled.
 3. Read the audit, by AUDIT_PLAN.md: `less ~/.cache/xsjs/root/_audit.txt`, or
-   `build/test_demo/audit.txt` after a demo test, every line of every lane
-   once, each task's sleep and the console's start and end, laid out for a
+   `build/test_demo/audit.txt` after a demo test with `--debug` or a failed
+   rung, every line of every lane once, each task's sleep and the console's start and end, laid out for a
    person, in the order the server learned of it; `tail -f` follows it; typing
    0 adds both sides' databases at that moment. This is the one record of a
    serve, readable until the next start of the serve program removes it: what
@@ -511,15 +517,15 @@ from inside the AI endpoint is not among them.
    where the maintainer or the AI runs commands in the sandboxed dash; a fault
    replaces the screen with its message, its stack and each cause's, with a
    Reload, and the same cascade is in the audit's `error` line.
-5. From the AI's side: the `audit_tail` tool reads the end of the audit, the
-   `script_debug` tool traces every store call of a script, and `console_run`
-   runs a command behind the permit.
+5. From the AI's side: the `script_debug` tool traces every store call of a
+   script, and `console_run` runs a command behind the permit. The AI has no
+   tool that reads the audit, by AUDIT_PLAN.md 8.8.
 6. From DevTools by hand: a scratch driver through the DevTools client opens
    the page, reads the band, the box and the permit area by evaluating script
    on the page, follows the console, saves pictures, traces synchronous loads
    on the UI thread and pauses the AI worker in the debugger.
 7. The suites: `--module NAME` runs one suite or block; `--debug` runs the
-   smoke run with every line logged; the TAP streams name the first failure.
+   smoke run and leaves the demo's audit in `build/test_demo/`; the TAP streams name the first failure.
 8. The server alone: `python3 python/test_wire.py` proves the wire, the sync
    among its rungs, with no browser program at all.
 
@@ -574,8 +580,8 @@ environment, which the serve program and ttyd pass on; when `provider.scripted`
 is false it pushes `provider.set`, on the wire from the server to the AI
 worker, no blobs, with `base_url`, `chat_model`, `image_model` and `key`, at
 once after the Empty reply to `tap.start`, before the program sends anything.
-Both the wire's tap and the server's log write that one line as its header
-only. The worker's handler sets the key in the provider door, keeps the three
+The audit writes that one line as its header only, as its masks keep every
+credential out of the document. The worker's handler sets the key in the provider door, keeps the three
 names for the agent and the image tool, and the `http` owner becomes the HTTP
 port with the provider's `timeout_seconds`. The request format against xAI is
 then checked by the maintainer, by hand, with their key, outside every run, by
@@ -724,7 +730,7 @@ only the new `api_match.py` had two lines, which a test then reached, and
    If that is off on the machine, the Windows start script's port proxy is the
    way, and it is outside this plan.
 3. The serve program's root is `~/.cache/xsjs/root`, the Windows start
-   script's folder, kept between runs but for its log, which each run removes;
+   script's folder, kept between runs but for its audit, which each run removes;
    `--fresh` removes the whole root. The tests' roots are under `build/`.
 4. The number is typed in the box. A click on the picture sends its
    coordinates as a turn, which exists and is no choice of the demo: the
@@ -790,7 +796,7 @@ only the new `api_match.py` had two lines, which a test then reached, and
     both ways, compares each stub of `API/python` with its module, each handler
     with its payload in `API/ts/lines.d.ts`, and the browser suites' gold with
     `API/mcp/tools.json` and `API/sql/substrate.sql`; the suites of the store,
-    the log, the seed and the settings hold the real databases and files to
+    the seed and the settings hold the real databases and files to
     `API/sql` and `API/settings.json`. It runs in `python/test_posix.py` after
     the compile of 5.0. What it cannot see, parameter names of TypeScript among
     them, is the section api_match of the rules.

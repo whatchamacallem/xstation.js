@@ -261,7 +261,7 @@ class TestDump(ScratchCase):
             store.db_create("alpha")
             store.kv_put("/alpha/note", b"hi")
             blob = jslb.blob_make(views.encode("utf-8"))
-            dispatch.line_dispatch(_line("db.dump", [blob]))
+            dispatch.line_dispatch(_line("audit.dump", [blob]))
             return _entries(self.root)
 
         self.assertEqual(
@@ -294,7 +294,7 @@ class TestRegister(ScratchCase):
             blob = jslb.blob_make(b"[]")
             for call in (
                 lambda: engine_audit.audit_tail(_tail(1), count=1),
-                lambda: engine_audit.db_dump(_line("db.dump", [blob])),
+                lambda: engine_audit.audit_dump(_line("audit.dump", [blob])),
             ):
                 try:
                     call()

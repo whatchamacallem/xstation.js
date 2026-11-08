@@ -13,13 +13,13 @@
 # both name forms against the gold and the store's own snapshot, one filled
 # to its limit, `blob_max`, among them. The `Stream` of `db.sync` holds those
 # lines in the gold's order, in every pairing of the two name forms, each
-# database built as it is reached, a lost cache file left out and the log's
-# file never named. The dispatcher refuses a second registration of each type
-# at version 0. Making, dropping, snapshotting and restoring a database are
-# the store's own, `test_substrate.py`'s.
+# database built as it is reached and a lost cache file left out. The
+# dispatcher refuses a second registration of each type at version 0. Making,
+# dropping, snapshotting and restoring a database are the store's own,
+# `test_substrate.py`'s.
 
 import dispatch, engine_db, harness, jslb, os, re, signal, sqlite3, substrate
-import switches, sys, tempfile, traceback, unittest, verbose
+import switches, sys, tempfile, traceback, unittest
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -391,24 +391,6 @@ class TestSync(ScratchCase):
     # A cache file the server lost is left out, and the sync goes on.
     def test_file_lost(self) -> None:
         self.child_run(self.lost_check)
-
-    # In the child: the log's file refuses the store and goes unnamed.
-    def log_check(self) -> None:
-        store = self.store_register()
-        verbose.log_open(self.root, _BLOB_MAX)
-        line = _gold_value("lines.create_log")
-        self.assertTrue(os.path.isfile(self.database_path(line["db"])))
-        with self.assertRaises(FileExistsError):
-            _handler_call(engine_db.db_create, line)
-        self.databases_write(store)
-        stream = self.stream_get("sync", False)
-        self.assertEqual(stream.reply, _gold_value("lines.sync_reply"))
-        pushes = list(stream.pushes)
-        self.assertEqual(_lines_order(pushes), _gold_value("sync_order"))
-
-    # The log's `_verbose` is never held by the store, so no line names it.
-    def test_log_unnamed(self) -> None:
-        self.child_run(self.log_check)
 
 
 # Tests the registration.

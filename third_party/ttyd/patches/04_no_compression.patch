@@ -1,0 +1,50 @@
+Subject: [PATCH] offer no websocket compression
+
+With permessage-deflate, a client frame that repeats an earlier frame can
+end ttyd: libwebsockets 4.3.5 fails the assertion `priv->rx.avail_out` at
+extension-permessage-deflate.c:350, after it inflates the frame's trailer,
+and the process aborts with SIGABRT, ending every session it serves. The
+page sees a close with code 1006 and no error line.
+
+Chrome sends such a frame for 8257 bytes whose first 8256 repeat the frame
+before, so that two echo lines of one 8256 byte blob do it on the wire.
+Every length seen to do it is one byte past a multiple of 258, the longest
+match deflate has, such as 3097, 4129, 6193, 8257 and 12385, though not
+every such length does.
+
+Offer neither extension, so that libwebsockets never reaches that code. The
+frames travel uncompressed in both directions, and nothing in the wire
+protocol depends on compression.
+
+---
+ src/server.c | 11 -----------
+ 1 file changed, 11 deletions(-)
+
+diff --git a/src/server.c b/src/server.c
+--- a/src/server.c
++++ b/src/server.c
+@@ -30,14 +30,6 @@
+                                                  {"tty", callback_tty, sizeof(struct pss_tty), 0},
+                                                  {NULL, NULL, 0, 0}};
+ 
+-#ifndef LWS_WITHOUT_EXTENSIONS
+-// websocket extensions
+-static const struct lws_extension extensions[] = {
+-    {"permessage-deflate", lws_extension_callback_pm_deflate, "permessage-deflate"},
+-    {"deflate-frame", lws_extension_callback_pm_deflate, "deflate_frame"},
+-    {NULL, NULL, NULL}};
+-#endif
+-
+ #if LWS_LIBRARY_VERSION_NUMBER >= 4000000
+ static const uint32_t backoff_ms[] = {1000, 2000, 3000, 4000, 5000};
+ static lws_retry_bo_t retry = {
+@@ -324,9 +316,6 @@
+   info.uid = -1;
+   info.max_http_header_pool = 16;
+   info.options = LWS_SERVER_OPTION_LIBUV | LWS_SERVER_OPTION_VALIDATE_UTF8 | LWS_SERVER_OPTION_DISABLE_IPV6;
+-#ifndef LWS_WITHOUT_EXTENSIONS
+-  info.extensions = extensions;
+-#endif
+   info.max_http_header_data = 65535;
+ 
+   int debug_level = LLL_ERR | LLL_WARN | LLL_NOTICE;

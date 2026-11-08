@@ -424,7 +424,7 @@
             "name": "doc_head"
           },
           {
-            "description": "Run the script /_files/script/<name>.js with args as a task in this worker. Returns its value or exception and the verbose lines it wrote.",
+            "description": "Run the script /_files/script/<name>.js with args as a task in this worker. Returns its value or exception.",
             "inputSchema": {
               "properties": {
                 "args": {
@@ -443,7 +443,7 @@
             "name": "script_run"
           },
           {
-            "description": "Run the script as script_run does, tracing every substrate call it makes first.",
+            "description": "Run the script as script_run does, and return the trace of every substrate call it makes.",
             "inputSchema": {
               "properties": {
                 "args": {
@@ -565,21 +565,6 @@
               "type": "object"
             },
             "name": "console_read"
-          },
-          {
-            "description": "The end of the audit, the server's one document of every JSLB line in debug mode, laid out for a person: its newest whole entries, oldest first. count is a maximum, as a reply holds the newest entries that fit below line_max. Debug mode only.",
-            "inputSchema": {
-              "properties": {
-                "count": {
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "count"
-              ],
-              "type": "object"
-            },
-            "name": "audit_tail"
           }
         ]
       }

@@ -5,10 +5,10 @@
 # Tests xsjs_serve.py as a program, as a person starts it, on a root in a
 # scratch directory under build/: it builds the engine page with the real tsc,
 # makes the root and serves it on port 0 through the ttyd the driver's bring up
-# built. It prints the address alone, and ttyd answers that address's token
-# request as it answers the page. SIGTERM then ends ttyd and the program, whose
-# exit code is ttyd's, and ttyd's log is on the program's stderr. No page is
-# opened, so no bootstrap.py runs.
+# built. Its stdout holds ttyd's log and the address once ttyd names its port,
+# and ttyd answers that address's token request as it answers the page. SIGTERM
+# then ends ttyd and the program, whose exit code is ttyd's, with nothing on
+# its stderr. No page is opened, so no bootstrap.py runs.
 
 import harness, http.client, json, os, re, signal, socket, subprocess, sys
 import tempfile, unittest
@@ -43,6 +43,17 @@ def token_fetch(port: int) -> tuple[int, object]:
         connection.close()
 
 
+# Reads the program's stdout to its address. Returns what it read and the port.
+def address_read(process: subprocess.Popen[str]) -> tuple[str, int]:
+    printed = ""
+    while line := cast(IO[str], process.stdout).readline():
+        printed += line
+        found = re.fullmatch(gold_value("address_pattern"), line)
+        if found is not None:
+            return printed, int(found.group(1))
+    raise AssertionError(f"{printed!r}: {process.communicate()[1]}")
+
+
 # The program on a scratch root, serving port 0.
 class TestProgram(unittest.TestCase):
     # Makes the scratch directory and names the root in it.
@@ -70,11 +81,7 @@ class TestProgram(unittest.TestCase):
             text=True,
         ) as process:
             try:
-                address = cast(IO[str], process.stdout).readline()
-                found = re.fullmatch(gold_value("address_pattern"), address)
-                if found is None:
-                    self.fail(f"{address!r}: {process.communicate()[1]}")
-                port = int(found.group(1))
+                printed, port = address_read(process)
                 status, body = token_fetch(port)
                 process.send_signal(signal.SIGTERM)
                 rest, errors = process.communicate()
@@ -83,11 +90,12 @@ class TestProgram(unittest.TestCase):
                 raise
         self.assertEqual(status, gold_value("token_status"))
         self.assertEqual(body, gold_value("token_reply"))
-        self.assertEqual(rest, "")
         self.assertEqual(
             process.returncode, gold_value("stopped_code"), errors
         )
-        self.assertIn(gold_value("log_port").format(port), errors)
+        self.assertEqual(errors, "")
+        self.assertIn(gold_value("log_port").format(port), printed)
+        self.assertIn(gold_value("log_stop"), rest)
         host: str = harness.setting_get("powershell.bind_address")
         with self.assertRaises(ConnectionRefusedError):
             socket.create_connection((host, port))

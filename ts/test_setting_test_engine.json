@@ -284,7 +284,6 @@
     "browser.console_run",
     "browser.console_write",
     "browser.console_read",
-    "browser.audit_tail",
     "server.source_put",
     "server.system_restart"
   ],

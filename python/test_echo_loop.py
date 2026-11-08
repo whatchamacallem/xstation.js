@@ -10,10 +10,11 @@
 # fails, then kills itself whatever happened, so the handlers it registers
 # never reach another test. The child opens the root's audit first, as
 # `bootstrap.py` opens it in debug mode. The browser's `error` line goes to
-# the real `engine_tap`, which ends the root's TAP file with a bail out and
-# logs nothing in debug mode, and the echo loop records no line of its own,
-# so the audit holds no entry. A page thread's `audit.note` goes to the real
-# `engine_audit`, which writes it into that same audit.
+# the real `engine_tap`, which ends the root's TAP file with a bail out, and
+# the echo loop records no line of its own, so the audit holds no entry. A
+# page thread's `audit.note` goes to the real `engine_audit`, which writes it
+# into that same audit. With the parameter debug false the loop holds no TAP
+# handler: the browser's `error` line ends it with nothing written.
 
 import audit, echo_loop, functools, harness, json, os, signal, switches, sys
 import tempfile, traceback, unittest
@@ -89,8 +90,8 @@ _BROWSER_ERROR = (
 # The line that ends the root's TAP file after that line.
 _BAIL_LINE = "Bail out! page fault\n"
 
-# The log of the server in a root, as `verbose` names it.
-_LOG_NAME = "_verbose.sqlite"
+# The directory of a root that holds the TAP files.
+_TAP_DIRECTORY = "tap"
 
 
 # A text of this module's gold.
@@ -254,6 +255,11 @@ class TestPrepare(ScratchCase):
 
 # `loop_run` over pipes: the echoes, a streamed blob, refusals and the end.
 class TestEcho(ScratchCase):
+    # Writes the root's parameters with debug false.
+    def debug_off(self) -> None:
+        parameters = {**switches.switches_get(), "debug": False}
+        switches.parameters_write(self.root, parameters)
+
     # Runs the loop on the data, returns how it ended and the lines written.
     def echo_read(self, data: bytes) -> tuple[str, list[ParsedLine]]:
         work = functools.partial(_echo_serve, self.root)
@@ -332,7 +338,7 @@ class TestEcho(ScratchCase):
         with open(path, encoding="utf-8") as file:
             self.assertEqual(file.read(), "ok 1 - x\n")
 
-    # The browser's `error` line is bailed out, then exit 1, nothing logged.
+    # The browser's `error` line is bailed out, then exit 1, unanswered.
     def test_browser_error(self) -> None:
         work = functools.partial(_audited_serve, self.root)
         ending, output = self.child_run(work, _BROWSER_ERROR)
@@ -342,7 +348,27 @@ class TestEcho(ScratchCase):
         with open(path, encoding="utf-8") as file:
             self.assertEqual(file.read(), _BAIL_LINE)
         self.assertEqual(_audit_read(self.root), [])
-        self.assertFalse(os.path.exists(os.path.join(self.root, _LOG_NAME)))
+
+    # Outside debug mode the browser's `error` is exit 1 with no TAP file.
+    def test_browser_quiet(self) -> None:
+        self.debug_off()
+        ending, lines = self.echo_read(_BROWSER_ERROR)
+        self.assertEqual(ending, _ENDING_FAILED)
+        self.assertEqual(lines, [])
+        self.assertFalse(
+            os.path.exists(os.path.join(self.root, _TAP_DIRECTORY))
+        )
+
+    # Outside debug mode a `tap.line` is a line of no handler.
+    def test_tap_unknown(self) -> None:
+        self.debug_off()
+        ending, lines = self.echo_read(_TAP_LINE)
+        self.assertEqual(ending, _ENDING_FAILED)
+        message = _text_get("dispatch_handler_unknown_tap")
+        self.error_check(lines, {"t": "error"}, message)
+        self.assertFalse(
+            os.path.exists(os.path.join(self.root, _TAP_DIRECTORY))
+        )
 
     # A page thread's `audit.note` is a note of the audit, nothing written.
     def test_audit_note(self) -> None:

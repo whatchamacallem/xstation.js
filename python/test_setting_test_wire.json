@@ -132,6 +132,7 @@
       "name": "source_put"
     },
     "release_channel": "test_wire_rungs",
+    "repeat_bytes": 8256,
     "restart_after": "# posted after system.restart, which the port holds",
     "restart_name": "echo_loop.py",
     "sync_databases": ["_files", "_preferences", "_settings", "metaverse"],

@@ -3,8 +3,8 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // The UI thread. API/ts/page.d.ts holds its rules. Every line it builds takes
-// the form `settings.names_full()` picks, the DOM port's `ui.input` and
-// `ui.control_key` and the page's own `fault` line included.
+// the form `settings.names_full()` picks, the DOM port's `ui.input`,
+// `ui.control_key` and `audit.overlay` and the page's own `fault` included.
 
 namespace page {
   // The owners, ids, line types, settings and texts of the page.
@@ -47,12 +47,13 @@ namespace page {
     idle_type: "console.idle",
     show_type: "console.show",
     tail_type: "audit.tail",
-    tail_wake: "ui.audit_tail",
-    dump_type: "db.dump",
+    tail_wake: "audit.tail_shown",
+    dump_type: "audit.dump",
+    overlay_type: "audit.overlay",
     // The text that dumps both sides' databases before its turn, debug mode.
     dump_text: "0",
     audit_digit: 1,
-    ring_setting: "verbose_ring",
+    entries_setting: "audit_entries",
     handler_version: 0,
     choices: Object.freeze(["accept", "deny", "always"]),
     // The state of a turn's sleep: the input, enabled again when it ends.
@@ -134,6 +135,7 @@ namespace page {
       "ai.": "ai",
       "settings.put": "ai",
       "audit.": "ai",
+      "audit.overlay": "ui",
       "tap.": "ai",
       "kv.": "ai",
       "doc.": "ai",
@@ -306,6 +308,11 @@ namespace page {
       event.preventDefault();
       event.stopPropagation();
       const digit = Number(event.key);
+      // The audit's overlay is the audit's own operation, so it is unrecorded.
+      if (digit === constants.audit_digit) {
+        this.receiver_call(line_build(constants.overlay_type, {}));
+        return;
+      }
       this.receiver_call(line_build(constants.key_type, { digit }));
     }
 
@@ -441,23 +448,17 @@ namespace page {
       return undefined;
     }
 
-    // In debug mode toggles an overlay, ctrl 1's asked of the server, or tty 0.
+    // In debug mode toggles an overlay or tty 0.
     key_take(line: lines.Line): dispatch.Sleep | undefined {
-      const { debug, view, overlays, input, tasks } = this.#parts;
+      const { debug, view, overlays, input } = this.#parts;
       const digit = jslb.payload_of(line).digit as number;
       // Outside debug mode the page gates the console and the overlays.
       if (!debug) {
         return undefined;
       }
       if (digit !== constants.console_digit) {
-        const shown = overlays.overlay_toggle(digit);
-        if (!shown || digit !== constants.audit_digit) {
-          return undefined;
-        }
-        const count = settings.settings_get(constants.ring_setting);
-        const tail = line_build(constants.tail_type, { count });
-        const id = tasks.task_submit(tail, constants.ai_owner);
-        return dispatch.task_sleep(null, [id], constants.tail_wake);
+        overlays.overlay_toggle(digit);
+        return undefined;
       }
       // A hidden console leaves the focus nowhere, so an open box takes it.
       if (!view.view_toggle() && !input.disabled) {
@@ -465,6 +466,18 @@ namespace page {
       }
       // Shown and idle, at first or after its end, the view asks for tty 0.
       return view.open_wanted() ? view.open_request() : undefined;
+    }
+
+    // In debug mode toggles the audit's overlay, its end asked at each show.
+    overlay_take(): dispatch.Sleep | undefined {
+      const { debug, overlays, tasks } = this.#parts;
+      if (!debug || !overlays.overlay_toggle(constants.audit_digit)) {
+        return undefined;
+      }
+      const count = settings.settings_get(constants.entries_setting);
+      const tail = line_build(constants.tail_type, { count });
+      const id = tasks.task_submit(tail, constants.ai_owner);
+      return dispatch.task_sleep(null, [id], constants.tail_wake);
     }
 
     // Shows the console, answered once it opens when idle, else at once.
@@ -563,6 +576,7 @@ namespace page {
     );
     register(constants.turn_wake, version, (line) => handlers.turn_done(line));
     register(constants.key_type, version, (line) => handlers.key_take(line));
+    register(constants.overlay_type, version, () => handlers.overlay_take());
     register(constants.show_type, version, (line) => handlers.show_take(line));
     register(constants.shown_wake, version, (line) =>
       handlers.shown_take(line),
