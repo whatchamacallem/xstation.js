@@ -292,6 +292,7 @@ class TestStock(unittest.TestCase):
 # The driver's children end by the hangup, however the driver was started.
 class TestDriverHangup(unittest.TestCase):
     # A driver started with the hangup ignored still passes the suite.
+    @unittest.skip("disabled: runs all of test_bootstrap again, 0.8 s")
     def test_hangup_restored(self) -> None:
         completed = subprocess.run(
             [

@@ -9,13 +9,26 @@
 # the digest and never prints it, and tsc's output never reaches stdout: a
 # failed compile raises, tsc's output in its cause. SQLite's glue and wasm and
 # xterm.js come from the archives third_party_fetch.py places in third_party/.
+# A compile of the checkout's own project is skipped while its output, or the
+# stamp of a check that writes none, is newer than every file and folder of
+# ts/ and API/ts/: one check for the language, with no dependency of a
+# project on its files tracked. The output takes the time its compile started.
 
 import argparse, base64, hashlib, json, os, re, shutil, subprocess, sys
-import tarfile, zipfile
+import tarfile, time, zipfile
+from collections.abc import Callable
 from typing import Any, IO, cast
 
 # The public name of this module, as its stub declares it.
-__all__ = ["api_check", "node_build", "page_build", "page_copy", "tsc_run"]
+__all__ = [
+    "api_check",
+    "compile_due",
+    "compile_timed",
+    "node_build",
+    "page_build",
+    "page_copy",
+    "tsc_run",
+]
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -49,6 +62,15 @@ _NODE_CONFIG_NAME = "tsconfig.node.json"
 
 # The `tsc` configuration of the API text, which emits nothing.
 _API_CONFIG_NAME = "tsconfig.api.json"
+
+# The stamp a passing check of the API text leaves, dated to its start.
+_API_STAMP = os.path.join(_BUILD_PATH, "api_check.passed")
+
+# The folders of a checkout whose every file and folder each compile reads.
+_SOURCE_FOLDERS = ("ts", os.path.join("API", "ts"))
+
+# The end of the compiled Node bundle's name, beside the bundle node runs.
+_COMPILED_SUFFIX = ".tsc.js"
 
 # The start of the Node bundle: the strict line, `test_vectors`, `test_gold`.
 _NODE_HEAD = '"use strict";\nvar test_vectors = {};\nvar test_gold = {};\n'
@@ -112,9 +134,10 @@ _TSC_SECONDS = 120.0
 sys.pycache_prefix = os.path.join(_BUILD_PATH, "pycache")
 
 
-# Type checks the API text as one project, which proves it against itself.
+# Type checks the API text as one project, unless its stamp is newer.
 def api_check() -> None:
-    tsc_run(os.path.join(_TS_PATH, _API_CONFIG_NAME))
+    config_path = os.path.join(_TS_PATH, _API_CONFIG_NAME)
+    compile_timed(_API_STAMP, lambda: tsc_run(config_path))
 
 
 # Compiles the project of the `tsc` config into the path, returning its text.
@@ -129,6 +152,35 @@ def bundle_path(config_path: str, build_path: str) -> str:
         out_file: str = json.load(config_file)["compilerOptions"]["outFile"]
     named = os.path.join(os.path.dirname(config_path), out_file)
     return os.path.join(build_path, os.path.relpath(named, _BUILD_PATH))
+
+
+# Compiles the checkout's project into the path unless newer, giving its text.
+def bundle_reuse(config_path: str, out_path: str) -> str:
+    compile_timed(
+        out_path, lambda: tsc_run(config_path, "--outFile", out_path)
+    )
+    return text_read(out_path)
+
+
+# Whether the file is absent or no newer than every source of the checkout.
+def compile_due(path: str, root: str = _ROOT_PATH) -> bool:
+    if not os.path.exists(path):
+        return True
+    return sources_newest(root) >= os.stat(path).st_mtime_ns
+
+
+# Runs the work when a compile is due, then dates the file, made if absent.
+def compile_timed(
+    path: str, work: Callable[[], None], root: str = _ROOT_PATH
+) -> None:
+    if compile_due(path, root):
+        begun = time.time_ns()
+        work()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        # Appending writes nothing, so a compiled output keeps its bytes.
+        with open(path, "ab"):
+            pass
+        os.utime(path, ns=(begun, begun))
 
 
 # Raises unless the text can be the raw text of the element, unchanged.
@@ -196,7 +248,8 @@ def node_build(build_path: str) -> str:
     vectors = vectors_build(os.path.join(build_path, _VECTORS_NAME))
     config_path = os.path.join(_TS_PATH, _NODE_CONFIG_NAME)
     path = bundle_path(config_path, build_path)
-    bundle = bundle_compile(config_path, path)
+    compiled = os.path.splitext(path)[0] + _COMPILED_SUFFIX
+    bundle = bundle_reuse(config_path, compiled)
     gold = gold_json(gold_read(_TS_PATH))
     text = _NODE_HEAD.format(vectors, gold) + table_substitute(
         bundle, text_read(_TABLE_PATH)
@@ -211,7 +264,7 @@ def page_build(template: str, name: str) -> str:
     # Read first, so a template `html/` lacks fails before `tsc` starts.
     shell = text_read(os.path.join(_HTML_PATH, template + _PAGE_EXTENSION))
     config_path = os.path.join(_TS_PATH, _CONFIG_NAME)
-    bundle = bundle_compile(config_path, bundle_path(config_path, _BUILD_PATH))
+    bundle = bundle_reuse(config_path, bundle_path(config_path, _BUILD_PATH))
     sqlite_js, sqlite_wasm = zip_read(
         os.path.join(_THIRD_PARTY_PATH, _SQLITE_ARCHIVE),
         [_SQLITE_JS, _SQLITE_WASM],
@@ -261,6 +314,19 @@ def page_write(path: str, page: str) -> str:
     with open(path, "wb") as file:
         file.write(page.encode("utf-8"))
     return file_hash(path)
+
+
+# Returns the newest time of a file or folder of the checkout's sources.
+def sources_newest(root: str) -> int:
+    newest = 0
+    for folder in _SOURCE_FOLDERS:
+        top = os.path.join(root, folder)
+        newest = max(newest, os.stat(top).st_mtime_ns)
+        for parent, folders, names in os.walk(top):
+            for name in folders + names:
+                found = os.stat(os.path.join(parent, name)).st_mtime_ns
+                newest = max(newest, found)
+    return newest
 
 
 # Returns the bundle with its one table identifier replaced by the JSON text.

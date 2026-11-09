@@ -8,12 +8,14 @@
 # read by each test: the path returned, the strict line first, then
 # test_vectors defined as the page defines it, from the vectors written anew
 # into the scratch directory, then test_gold, the TypeScript suites' gold,
-# then the bundle with the strings table in place once. node runs it on stdio: the first line, tap.start with i 101
-# built as bootstrap.py builds it, is answered with an Empty reply, then the
-# TAP stream of the block named comes in tap.line pushes, read by the TAP
-# consumer, and node exits 0; a first line of another type exits 1, with
-# nothing written back. A failed compile of a scratch project raises, tsc's
-# output in its cause.
+# then the bundle with the strings table in place once. tsc compiled it into
+# ts/node.tsc.js, dated to the compile's start, which a second build in the
+# same directory reuses untouched. node runs it on stdio: the first line,
+# tap.start with i 101 built as bootstrap.py builds it, is answered with an
+# Empty reply, then the TAP stream of the block named comes in tap.line
+# pushes, read by the TAP consumer, and node exits 0; a first line of another
+# type exits 1, with nothing written back. A failed compile of a scratch
+# project raises, tsc's output in its cause.
 
 import base64, harness, jslb, json, os, page_build, shutil, subprocess
 import switches, tap_consumer, tempfile, time, unittest
@@ -30,6 +32,9 @@ _TABLE_PATH = os.path.join(_ROOT_PATH, "i18n", "en-US.json")
 
 # Where the bundle goes in a build directory, as the config's `outFile` says.
 _BUNDLE_PLACE = os.path.join("ts", "node.js")
+
+# Where tsc compiles the bundle in a build directory, beside the one node runs.
+_COMPILED_PLACE = os.path.join("ts", "node.tsc.js")
 
 # The folder of the build directory that holds the vectors.
 _VECTORS_NAME = "vectors"
@@ -134,6 +139,8 @@ class TestBundle(unittest.TestCase):
     scratch: str
     path: str
     text: str
+    # The time in nanoseconds before the build.
+    begun: int
 
     # Builds the bundle in a scratch directory under `build`, removed after.
     @classmethod
@@ -142,8 +149,23 @@ class TestBundle(unittest.TestCase):
         scratch = tempfile.TemporaryDirectory(dir=_BUILD_PATH)
         cls.addClassCleanup(scratch.cleanup)
         cls.scratch = scratch.name
+        cls.begun = time.time_ns()
         cls.path = page_build.node_build(scratch.name)
         cls.text = page_build.text_read(cls.path)
+
+    # The compile is dated to its start, before the bundle written after it.
+    def test_compile_dated(self) -> None:
+        compiled = os.stat(os.path.join(self.scratch, _COMPILED_PLACE))
+        self.assertGreaterEqual(compiled.st_mtime_ns, self.begun)
+        self.assertLess(compiled.st_mtime_ns, os.stat(self.path).st_mtime_ns)
+
+    # A second build in the directory reuses the compile, left untouched.
+    def test_compile_reused(self) -> None:
+        compiled = os.path.join(self.scratch, _COMPILED_PLACE)
+        before = os.stat(compiled).st_mtime_ns
+        self.assertEqual(page_build.node_build(self.scratch), self.path)
+        self.assertEqual(os.stat(compiled).st_mtime_ns, before)
+        self.assertEqual(page_build.text_read(self.path), self.text)
 
     # The path returned is the bundle's place in the scratch directory.
     def test_path_returned(self) -> None:

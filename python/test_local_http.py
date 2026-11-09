@@ -3,18 +3,18 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the local HTTP server with the standard library's own client against
-# the real server, on the script of this suite's gold: each path answered
-# with its status line as HTTP/1.0, exactly its headers and its body, to GET
-# and to POST, whose body the server reads and drops; the delay slept while
-# another request is answered; the closed port bound and refusing; the files
-# of a scratch directory under build/ served by path; and each failure of a
-# handler raised in this, the main thread, at once, the first only. Each
-# test starts a server of its own and stops it.
+# the real server, on the script of this suite's gold: each path with no
+# delay answered with its status line as HTTP/1.0, exactly its headers and its
+# body, to GET and to POST, whose body the server reads and drops; the closed
+# port bound and refusing; the files of a scratch directory under build/
+# served by path; and each failure of a handler raised in this, the main
+# thread, at once, the first only. Each test starts a server of its own and
+# stops it. test_local_http_delay, of the test-all run, waits out the delays.
 
-import errno, harness, http.client, local_http, os, select, signal, socket
-import tempfile, time, unittest
+import errno, harness, http.client, local_http, os, signal, socket, tempfile
+import unittest
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
 # The gold of this suite.
 _GOLD_ID = "python.test_local_http"
@@ -37,12 +37,6 @@ _POST_BYTES = 65536
 
 # The HTTP version `http.client` reports for an answer of HTTP/1.0.
 _VERSION_10 = 10
-
-# The path of the script whose answer is delayed.
-_SLOW_PATH = "/slow"
-
-# The path of the script answered while the delayed one waits.
-_FAST_PATH = "/json"
 
 # The page written in the scratch directory, its text and its type.
 _PAGE_NAME = "page.html"
@@ -115,38 +109,27 @@ class ServerCase(unittest.TestCase):
         self.assertEqual(str(cause), text)
 
 
+# Fails unless each path, delayed or not as asked, answers GET and POST.
+def answers_check(case: unittest.TestCase, delayed: bool) -> None:
+    paths: dict[str, dict[str, Any]] = _SCRIPT["paths"]
+    for path, answer in paths.items():
+        if (answer["delay"] > 0) != delayed:
+            continue
+        for method, body in (("GET", None), ("POST", b"x" * _POST_BYTES)):
+            with case.subTest(path=path, method=method):
+                response, read = request_send(method, path, body)
+                case.assertEqual(response.version, _VERSION_10)
+                case.assertEqual(response.status, answer["status"])
+                headers = list(answer["headers"].items())
+                case.assertEqual(response.getheaders(), headers)
+                case.assertEqual(read, answer["body"].encode())
+
+
 # Tests the answers of the script's paths, and of the files served.
 class TestAnswers(ServerCase):
-    # Each path answers GET and POST with its status, headers and body alone.
+    # Each path with no delay answers GET and POST with its status and body.
     def test_paths_answered(self) -> None:
-        paths: dict[str, dict[str, Any]] = _SCRIPT["paths"]
-        for path, answer in paths.items():
-            for method, body in (("GET", None), ("POST", b"x" * _POST_BYTES)):
-                with self.subTest(path=path, method=method):
-                    response, read = request_send(method, path, body)
-                    self.assertEqual(response.version, _VERSION_10)
-                    self.assertEqual(response.status, answer["status"])
-                    headers = list(answer["headers"].items())
-                    self.assertEqual(response.getheaders(), headers)
-                    self.assertEqual(read, answer["body"].encode())
-
-    # A delayed answer is due after its delay, another answered meanwhile.
-    def test_delay_threaded(self) -> None:
-        delay: float = _SCRIPT["paths"][_SLOW_PATH]["delay"]
-        slow = http.client.HTTPConnection(_HOST, _PORT)
-        self.addCleanup(slow.close)
-        begun = time.monotonic()
-        slow.request("GET", _SLOW_PATH)
-        fast = _SCRIPT["paths"][_FAST_PATH]
-        response, read = request_send("GET", _FAST_PATH, None)
-        self.assertEqual(response.status, fast["status"])
-        self.assertEqual(read, fast["body"].encode())
-        waiting = cast(socket.socket, slow.sock)
-        self.assertEqual(select.select([waiting], [], [], 0)[0], [])
-        answer = slow.getresponse()
-        late = _SCRIPT["paths"][_SLOW_PATH]["body"]
-        self.assertEqual(answer.read(), late.encode())
-        self.assertGreaterEqual(time.monotonic() - begun, delay)
+        answers_check(self, False)
 
     # A file of the directory is served at its path, with its type and length.
     def test_file_served(self) -> None:

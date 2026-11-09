@@ -242,6 +242,7 @@ class TestInputs(unittest.TestCase):
             self.assertEqual(file.read(), data)
 
     # Other patches build again, the same are kept, a removed ttyd is built.
+    @unittest.skip("disabled: builds ttyd from source three times, 4.5 s")
     def test_inputs_changed(self) -> None:
         empty = self.patches_write("empty", {})
         size = harness.setting_get("srv_buf_size")

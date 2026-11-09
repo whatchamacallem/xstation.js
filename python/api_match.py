@@ -4,7 +4,9 @@
 #
 # Proves the text of API/ against the code. API/python/api_match.pyi holds the
 # contract. The text and the code are read, never imported, so that a module
-# with a fault at import fails its own suite and not this one.
+# with a fault at import fails its own suite and not this one. text_match
+# compiles only when a source of ts/ or API/ts/ is no older than the stamp
+# the last passing TypeScript match left, by page_build.compile_timed.
 
 import ast, copy, json, os, re, shutil, sys
 from collections.abc import Iterable, Iterator
@@ -49,6 +51,9 @@ _CODE_NAMESPACE = "code"
 
 # The file of the check, which assigns each member both ways.
 _CHECK_NAME = "check.ts"
+
+# The stamp a passing TypeScript match leaves, dated to the match's start.
+_PASSED_NAME = "passed"
 
 # The lines of one pair in the check, and tsc's first error in it.
 _PAIR_LINES = 4
@@ -609,12 +614,20 @@ def gold_match(root: str) -> None:
         )
 
 
-# Runs every match on the checkout at the path.
+# Runs every match on the checkout, the compiles unless its stamp is newer.
 def text_match(root: str) -> None:
-    typescript_match(
-        os.path.join(root, _API_CONFIG),
-        os.path.join(root, _CODE_CONFIG),
-        os.path.join(root, _MATCH_PATH),
+    # Imported here so its bytecode goes under the prefix set above.
+    import page_build
+
+    match_path = os.path.join(root, _MATCH_PATH)
+    page_build.compile_timed(
+        os.path.join(match_path, _PASSED_NAME),
+        lambda: typescript_match(
+            os.path.join(root, _API_CONFIG),
+            os.path.join(root, _CODE_CONFIG),
+            match_path,
+        ),
+        root,
     )
     code_path = os.path.join(root, _CODE_PYTHON_PATH)
     python_match(os.path.join(root, _API_PYTHON_PATH), code_path)

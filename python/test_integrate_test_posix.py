@@ -15,8 +15,9 @@
 # test_all.py has turned the switch on before calling it. Under the switch
 # test_all.py leaves the suites that start formatters out of a test-all run,
 # and --module refuses them, while without it the run takes them. Every suite
-# of a test-all run counts under --coverage for modules that exist, the suite
-# of the store's limit for the store module.
+# of a test-all run counts under --coverage for modules that exist, the
+# store's limit suite for the store. A disabled suite runs only when named by
+# --module, unchecked otherwise. --end-to-end refuses the stream's options.
 
 import argparse, functools, os, signal, switches, sys, tempfile, test_all
 import test_posix, traceback, unittest
@@ -54,6 +55,27 @@ _LIMIT_SUITE = "test_substrate_limit"
 
 # The store module, which that suite counts for.
 _STORE_PATH = os.path.join(_ROOT_PATH, "python", "substrate.py")
+
+# A suite the test driver has disabled, which starts a Chrome for each test.
+_DISABLED_SUITE = "test_devtools_chrome"
+
+# The module that suite counts for.
+_DISABLED_PATH = os.path.join(_ROOT_PATH, "python", "devtools.py")
+
+# The option of the run of the end to end programs alone.
+_END_OPTION = "--end-to-end"
+
+# Options of the stream it refuses, but --coverage, which would count here.
+_STREAM_OPTIONS = [
+    ["--stream"],
+    ["--module", "test_jslb"],
+    ["--failfast"],
+    ["--failures", "1"],
+    ["--tty"],
+]
+
+# What the driver's refusal of those options says.
+_END_REFUSAL = "--end-to-end runs no stream"
 
 
 # Returns the text of the file.
@@ -233,3 +255,37 @@ class TestDriverCounted(unittest.TestCase):
         for name, _ in test_all.modules_chosen(parser, [], _TEST_ALL):
             for path in test_all.paths_counted(name):
                 self.assertTrue(os.path.isfile(path), path)
+
+
+# The suites the test driver has disabled, which run only when named.
+class TestDriverDisabled(unittest.TestCase):
+    # No run takes a disabled suite, and its module is left unchecked.
+    def test_disabled_left(self) -> None:
+        parser = argparse.ArgumentParser()
+        modules = test_all.modules_chosen(parser, [], _TEST_ALL)
+        self.assertNotIn(_DISABLED_SUITE, [name for name, _ in modules])
+        self.assertIn(_DISABLED_PATH, test_all.paths_unchecked(modules))
+
+    # `--module` runs a disabled suite, and its module is then checked.
+    def test_disabled_named(self) -> None:
+        parser = argparse.ArgumentParser()
+        named = [_DISABLED_SUITE]
+        modules = test_all.modules_chosen(parser, named, _TEST_ALL)
+        self.assertEqual([name for name, _ in modules], named)
+        self.assertNotIn(_DISABLED_PATH, test_all.paths_unchecked(modules))
+
+
+# The run of the end to end programs alone, which has no stream.
+class TestDriverEndToEnd(ChildCase):
+    # Each option of the stream is refused before the bring up.
+    def test_stream_refused(self) -> None:
+        for options in _STREAM_OPTIONS:
+            with self.subTest(options=options):
+                arguments = [_END_OPTION, *options]
+
+                def work() -> None:
+                    test_all.main(arguments)
+
+                ending, output = self.child_run(work)
+                self.assertTrue(ending.endswith(_ENDING_REFUSED), ending)
+                self.assertIn(_END_REFUSAL, output)

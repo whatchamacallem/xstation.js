@@ -64,6 +64,7 @@ _MODULES: list[tuple[str, str]] = [
     ("test_third_party_fetch", "smoke-test"),
     ("test_devtools", "smoke-test"),
     ("test_local_http", "smoke-test"),
+    ("test_local_http_delay", "test-all"),
     ("test_stall_loop", "smoke-test"),
     ("test_vectors_make", "smoke-test"),
     ("test_substrate", "smoke-test"),
@@ -153,7 +154,7 @@ _A_UNIT: list[tuple[str, str]] = [
 _A_INTEGRATION: list[tuple[str, str]] = [
     ("test_tap_pair_ts", "smoke-test"),
     ("test_integrate_queue.ts", "smoke-test"),
-    ("test_integrate_http.ts", "smoke-test"),
+    ("test_integrate_http.ts", "test-all"),
     ("test_integrate_mcp.ts", "smoke-test"),
     ("test_integrate_provider_script.ts", "smoke-test"),
 ]
@@ -182,7 +183,7 @@ _B_UNIT: list[tuple[str, str]] = [
 # Group B's integration phase, by the layer of each block.
 _B_INTEGRATION: list[tuple[str, str]] = [
     ("test_integrate_substrate.ts", "smoke-test"),
-    ("test_integrate_media.ts", "smoke-test"),
+    ("test_integrate_media.ts", "test-all"),
     ("test_integrate_worker_ai.ts", "smoke-test"),
     ("test_integrate_console_view.ts", "smoke-test"),
     ("test_substrate_crash.ts", "smoke-test"),
@@ -195,7 +196,7 @@ _B_INTEGRATION: list[tuple[str, str]] = [
 # Group C's integration phase, the blocks whose page ttyd serves, by layer.
 _C_INTEGRATION: list[tuple[str, str]] = [
     ("test_wire_end.ts", "smoke-test"),
-    ("test_integrate_wire.ts", "smoke-test"),
+    ("test_integrate_wire.ts", "test-all"),
     ("test_worker_ai_console.ts", "smoke-test"),
     ("test_tools_browser_console.ts", "smoke-test"),
     ("test_console_open.ts", "smoke-test"),
@@ -343,6 +344,23 @@ _LANGUAGE = "typescript"
 # The most bytes read from a realm's stdout at once.
 _READ_BYTES = 65536
 
+# The suites no run takes unless `--module` names one, each with why.
+_DISABLED: dict[str, str] = {
+    "test_devtools_chrome": "15 s: 25 tests that each start a Chrome of their"
+    " own, 0.2 s at least, and one that waits out the 5 s a Chrome has to"
+    " exit",
+    "test_page_build_tsc": "9 s: three full compiles of the bundle, 2.2 s"
+    " each, and two small ones, 0.8 s each",
+    "test_xsjs_serve_death": "8 s: three tests that each run the serve"
+    " program whole, with a full compile, 2.2 s",
+    "test_integrate_console_view.ts": "6.6 s: 26 of its 55 cases wait a fixed"
+    " 0.2 s or 0.5 s for the terminal to draw",
+    "test_tools_browser_console.ts": "6.6 s: 0.6 s of real commands in dash,"
+    " and five cases that wait out a timeout of 0.5 s to 2 s",
+    "test_console_open.ts": "4.3 s: four cases wait a fixed 0.2 s to 2 s for"
+    " dash's output to draw",
+}
+
 # The later suites, each with what it waits on, which no run takes.
 _LATER: list[tuple[str, str]] = [
     (
@@ -359,6 +377,7 @@ _COUNTED: dict[str, tuple[str, ...]] = {
     "test_devtools_chrome": ("devtools",),
     "test_devtools_powershell": ("devtools_windows",),
     "test_jslb_vectors": ("jslb",),
+    "test_local_http_delay": ("local_http",),
     "test_mcp_stdio_process": (),
     "test_page_build_node": ("page_build",),
     "test_page_build_tsc": ("page_build",),
@@ -446,7 +465,7 @@ def suite_taken(name: str, label: str, chosen: str) -> bool:
     return category.suite_runs(label, chosen)
 
 
-# The suites the run takes: the category's, only those named if any are.
+# The suites the run takes: the category's not disabled, or only those named.
 def modules_chosen(
     parser: argparse.ArgumentParser, named: list[str], chosen: str
 ) -> list[tuple[str, str]]:
@@ -462,7 +481,8 @@ def modules_chosen(
     return [
         (name, label)
         for name, label in listed
-        if suite_taken(name, label, chosen) and (not named or name in named)
+        if suite_taken(name, label, chosen)
+        and (name in named if named else name not in _DISABLED)
     ]
 
 
@@ -477,11 +497,23 @@ def paths_counted(name: str) -> list[str]:
     return [os.path.join(_PYTHON_PATH, module + ".py") for module in modules]
 
 
+# The modules unchecked: those a disabled suite the run lacks counts for.
+def paths_unchecked(modules: list[tuple[str, str]]) -> set[str]:
+    names = {name for name, _ in modules}
+    return {
+        path
+        for name in _DISABLED
+        if name not in names
+        for path in paths_counted(name)
+    }
+
+
 # After suite `index` passes, checks its modules no later suite counts for.
 def coverage_check(
     count: line_coverage.LineCount,
     modules: list[tuple[str, str]],
     index: int,
+    unchecked: set[str],
 ) -> None:
     later = {
         path
@@ -489,7 +521,7 @@ def coverage_check(
         for path in paths_counted(name)
     }
     for path in paths_counted(modules[index][0]):
-        if path not in later:
+        if path not in later and path not in unchecked:
             count.lines_check(path)
 
 
@@ -1121,9 +1153,11 @@ def stream_run(
     servers = ServerPool()
     realms = RealmRunner(runner, stream.reader, servers)
     pages = PageRunner(runner, stream.reader, servers, ttyd)
+    unchecked = paths_unchecked(modules)
     try:
         for index, (name, _) in enumerate(modules):
             failed = stream.reader.failed
+            skipped = stream.reader.skipped
             realm = name in _NODE_BLOCKS
             page = name in _CHROME_BLOCKS
             if realm:
@@ -1153,8 +1187,11 @@ def stream_run(
             # The consumer's count, not the producer's verdict, stops the run.
             if stream.reader.failed > failed:
                 break
+            # A skipped test leaves lines of its suite's modules never run.
+            if stream.reader.skipped > skipped:
+                unchecked.update(paths_counted(name))
             if count is not None:
-                coverage_check(count, modules, index)
+                coverage_check(count, modules, index, unchecked)
         runner.run_end()
     finally:
         try:
@@ -1191,6 +1228,39 @@ def stream_relay(
     sys.stderr.write(errors)
     sys.stderr.flush()
     return code
+
+
+# Runs the end to end programs in order, returning the first code not 0.
+def programs_run(chosen: str, limit: float | None, started: float) -> int:
+    import category, switches, test_wire
+
+    words = category.option_words(chosen)
+    elapsed = time.monotonic() - started
+    timer_start(category.alarm_plan("test_wire.py", None, limit, elapsed))
+    code = test_wire.main(words)
+    timer_stop()
+    if code:
+        return code
+    import test_browser
+
+    elapsed = time.monotonic() - started
+    timer_start(category.alarm_plan("test_browser.py", None, limit, elapsed))
+    code = test_browser.main(words)
+    timer_stop()
+    if code:
+        return code
+    import test_demo
+
+    elapsed = time.monotonic() - started
+    timer_start(category.alarm_plan("test_demo.py", None, limit, elapsed))
+    code = test_demo.main(words)
+    timer_stop()
+    if code:
+        return code
+    elapsed = time.monotonic() - started
+    if switches.verbose:
+        print(f"the {chosen} run took {elapsed:.3f} s", flush=True)
+    return 0
 
 
 # Exits with 128 plus the signal's number, so the blocks stop ttyd.
@@ -1254,6 +1324,13 @@ def main(arguments: list[str]) -> int:
         help="count the lines run, and fail after a unit suite's block at the"
         " first line of its modules never counted as run",
     )
+    parser.add_argument(
+        "--end-to-end",
+        action="store_true",
+        help="run only the end to end programs after the bring up, the wire"
+        " test, the browser test and the demo test: no suite, no block and no"
+        " check of test_posix.py",
+    )
     category.options_add(parser)
     switches.options_add(parser)
     parsed = parser.parse_args(arguments)
@@ -1274,6 +1351,19 @@ def main(arguments: list[str]) -> int:
             "--coverage counts the lines run in this process, and --tty runs"
             " the stream in another"
         )
+    end_to_end: bool = parsed.end_to_end
+    if end_to_end and (
+        failfast
+        or parsed.stream
+        or parsed.module
+        or failures
+        or parsed.tty
+        or count is not None
+    ):
+        parser.error(
+            "--end-to-end runs no stream, so it takes none of --failfast,"
+            " --stream, --module, --failures, --tty and --coverage"
+        )
     modules = modules_chosen(parser, parsed.module, chosen)
     import third_party_fetch, ttyd_build
 
@@ -1282,6 +1372,8 @@ def main(arguments: list[str]) -> int:
     ttyd = ttyd_build.checkout_build()
     started = time.monotonic()
     limit = category.limit_seconds(chosen)
+    if end_to_end:
+        return programs_run(chosen, limit, started)
     stream = StreamWriter([name for name, _ in modules])
     code: int | None = None
     if parsed.tty:
@@ -1319,34 +1411,7 @@ def main(arguments: list[str]) -> int:
         seconds = time.monotonic() - begun
         if switches.verbose:
             print(f"test_posix.py: {posix_label}, {seconds:.3f} s", flush=True)
-    import test_wire
-
-    elapsed = time.monotonic() - started
-    timer_start(category.alarm_plan("test_wire.py", None, limit, elapsed))
-    code = test_wire.main(words)
-    timer_stop()
-    if code:
-        return code
-    import test_browser
-
-    elapsed = time.monotonic() - started
-    timer_start(category.alarm_plan("test_browser.py", None, limit, elapsed))
-    code = test_browser.main(words)
-    timer_stop()
-    if code:
-        return code
-    import test_demo
-
-    elapsed = time.monotonic() - started
-    timer_start(category.alarm_plan("test_demo.py", None, limit, elapsed))
-    code = test_demo.main(words)
-    timer_stop()
-    if code:
-        return code
-    elapsed = time.monotonic() - started
-    if switches.verbose:
-        print(f"the {chosen} run took {elapsed:.3f} s", flush=True)
-    return 0
+    return programs_run(chosen, limit, started)
 
 
 if __name__ == "__main__":

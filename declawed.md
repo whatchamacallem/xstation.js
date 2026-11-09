@@ -205,6 +205,11 @@ command only to name the log.
   `test_posix.sh` run by default whatever important test suites fit in 3
   minutes by labelling those `smoke-test` and running only them unless asked
   to run the normal tests too.
+- After making changes, run the end to end tests alone,
+  `./test_posix.sh --end-to-end`. Any further testing without the
+  maintainer's permission is banned: the default run, the full run, a suite
+  or block named by `--module` and a test program run by itself alike.
+  Permission is asked for as a question.
 - The two official test targets for the whole project are
   `powershell/test_powershell.ps1`, which runs on Windows, and
   `test_posix.sh`, which will later run in Docker. Both call
@@ -1250,19 +1255,38 @@ fault realm REALM->DRIVER 0 push; fails the block
 - page_copy: writes a built page into a root with other gold on the same line,
   for a test that gives a root's page its own gold.
 - node_build: in the build directory given, writes vectors/ anew, has tsc
-  compile ts/tsconfig.node.json into ts/node.js, the config's outFile, and
-  rewrites that file as the strict line, then `var test_vectors = ...;`, `var
-  test_gold = ...;`, then the bundle with the strings table in place. Returns
-  its path. Run as `node node.js BLOCK [--failfast]`.
+  compile ts/tsconfig.node.json into ts/node.tsc.js by compile_timed, beside
+  ts/node.js, the config's outFile, and writes node.js as the strict line,
+  then `var test_vectors = ...;`, `var test_gold = ...;`, then the bundle with
+  the strings table in place. Returns its path. Run as `node node.js BLOCK
+  [--failfast]`.
+- compile check: page_build.compile_timed runs a compile of the checkout's
+  own project only when compile_due: its output, or a stamp for a check that
+  writes none, is absent or no newer than the newest file or folder of ts/ and
+  API/ts/. That is the one check of TypeScript, with no dependency of a
+  project on its files tracked. After the compile the output, made empty if
+  absent, takes the time the compile started, so an edit during it makes the
+  next one due. A failed compile dates nothing, as noEmitOnError keeps the old
+  output.
+- compile sites: page_build's build/ts/test.js, node_build's ts/node.tsc.js,
+  api_check's build/api_check.passed and text_match's
+  build/api_match/passed. test_tap_pair_ts builds the Node bundle into build/,
+  so it reuses the driver's compile; the unit suites of the compile,
+  test_page_build_node and test_page_build_tsc, compile into scratch
+  directories for real.
+- compile check limits: tsc's own version and api_match.py's code are no
+  input, so a new tsc or a changed api_match.py reuses a stamp until a source
+  changes or build/ is removed.
 - tsc output: both builds and api_check compile through tsc_run, which keeps it
   off stdout, the driver's TAP stream. A failed compile raises, tsc's output in
   its cause, and a PATH with no tsc raises FileNotFoundError.
-- api_check: tsc_run on ts/tsconfig.api.json. No page build calls it;
-  test_posix.py does, last. In the default run that is among the checks after
-  the stream, so a mismatch does not stop the code's blocks; a full run meets
-  it first in test_test_posix_formatters, in the Python unit phase. No other
-  unit suite compiles the real API text, and test_page_build reaches api_check
-  in a forked child with no tsc on PATH.
+- api_check: tsc_run on ts/tsconfig.api.json by compile_timed, its stamp
+  build/api_check.passed. No page build calls it; test_posix.py does, last.
+  In the default run that is among the checks after the stream, so a mismatch
+  does not stop the code's blocks; a full run meets it first in
+  test_test_posix_formatters, in the Python unit phase. No other unit suite
+  compiles the real API text, and test_page_build reaches api_check in a
+  forked child with no tsc on PATH, having dated the stamp to 0 first.
 - tsc_run: runs tsc --project CONFIG with the options given. bundle_compile
   gives --outFile, which a noEmit project must not get, and a test gives it a
   scratch project, as api_check takes no config.
@@ -1464,7 +1488,7 @@ fault realm REALM->DRIVER 0 push; fails the block
 
 ## api_match
 
-- api_match.py: proves the text of API/ against the code, read and never imported, so a module with a fault at import fails its own suite and not this one. test_posix.py calls text_match last, after page_build.api_check, so a default run meets a difference after the stream and the cloud run skips it.
+- api_match.py: proves the text of API/ against the code, read and never imported, so a module with a fault at import fails its own suite and not this one. test_posix.py calls text_match last, after page_build.api_check, so a default run meets a difference after the stream and the cloud run skips it. text_match runs typescript_match by page_build.compile_timed, its stamp build/api_match/passed, which typescript_match's removal of that folder takes away first.
 - typescript_match: tsc emits the declarations of the bundle's project into build/api_match/, code_wrap moves them under a namespace `code` with `private` and `#private` members cut, since those make a class nominal and the text never declares them, and one project compiles them beside the API text with a check file. Each pair of the check assigns a member to its twin both ways.
 - typescript_match names: compared first, by names_match on members_read of each side: a member the text holds and the code lacks fails, as does one the code exports and the text lacks, a namespace with `export {};` holding only what says `export`. `function` and `const` are both a value. A class in one side is no interface in the other.
 - typescript_match failure: tsc's first error in check.ts names the member by its line over _PAIR_LINES, and tsc's whole output is the cause. A failure in another file keeps tsc's own error.
@@ -1528,8 +1552,17 @@ fault realm REALM->DRIVER 0 push; fails the block
 ## test_all
 
 - test_all: `python3 python/test_all.py [--test-all] [--failfast] [--stream]
-  [--module NAME]... [--failures N] [--tty] [--coverage] [--anthropic]
-  [--debug] [--verbose]`. It refuses to start as root. Standard library only.
+  [--module NAME]... [--failures N] [--tty] [--coverage] [--end-to-end]
+  [--anthropic] [--debug] [--verbose]`. It refuses to start as root. Standard
+  library only.
+- --end-to-end: the bring up, then the end to end programs alone, the wire
+  test, the browser test and the demo test, in that order, ending at the first
+  failure with its code: no suite, no block, no check of test_posix.py and no
+  line count. With --test-all it adds their test-all rungs. It refuses
+  --failfast, --stream, --module, --failures, --tty and --coverage, as it has
+  no stream, and test_posix.sh gives no --coverage with it. The smoke-test
+  run's deadline holds. TestDriverEndToEnd of
+  python/test_integrate_test_posix.py proves the refusal.
 - no category option: runs the suites labelled smoke-test. category.py holds
   the labels and the one option, and its option_words gives a category's
   option for a command line, none for smoke-test.
@@ -1539,7 +1572,8 @@ fault realm REALM->DRIVER 0 push; fails the block
   it, and writes nothing to stdout but the stream.
 - --module: runs only the suites and blocks it names, once each, in order, each
   one the category runs. It alone runs a suite or block that fails by design,
-  listed apart, so that a run can check that --failures counts right. Without
+  listed apart, so that a run can check that --failures counts right, and it
+  alone runs a disabled suite. Without
   --stream the run goes on to the checks after the stream, the demo test
   included.
 - --failures: exit 1 unless the consumer counted exactly the N failing points
@@ -1557,9 +1591,14 @@ fault realm REALM->DRIVER 0 push; fails the block
   suites and TypeScript blocks count for none. It refuses --tty.
 - line count run: `./test_posix.sh --test-all` passes --coverage to the driver,
   so a full run fails at a module's first line never run. The default run never
-  does, and the tty run stays separate, as --coverage refuses --tty. A count of
+  does, nor a run with --end-to-end, and the tty run stays separate, as
+  --coverage refuses --tty. A count of
   2026-11-07 found every module complete but api_match, whose two lines a test
   then reached.
+- unchecked modules: under --coverage a module is not checked when a disabled
+  suite the run lacks counts for it, by test_all.paths_unchecked, or when a
+  suite that counts for it had a skipped point in the run. Today those are
+  ttyd_build, devtools, page_build, api_match, xsjs_serve and bootstrap.
 - --anthropic, --debug, --verbose: turn on the switches of switches.py here
   and in every process the run starts. Under --anthropic the run takes no
   suite that starts a formatter, and --module refuses those.
@@ -1594,6 +1633,37 @@ fault realm REALM->DRIVER 0 push; fails the block
 - test_test: the one suite of harness.py, category.py and line_coverage.py.
 - later suites: listed apart with the programs they wait on, not yet approved:
   in no phase, and --module refuses them.
+- disabled suites: `_DISABLED` of python/test_all.py, each suite or block with
+  why it ran longer than a second. Each keeps its place and label in the phase
+  lists, no category's run takes it, and `--stream --module NAME` runs it, with
+  --test-all for one labelled test-all. Today: test_devtools_chrome,
+  test_page_build_tsc, test_xsjs_serve_death, test_integrate_console_view.ts,
+  test_tools_browser_console.ts and test_console_open.ts.
+- disabled tests: a slow test of a suite that stays is skipped, by
+  unittest.skip in Python and by skipTest in its class's setUp in TypeScript,
+  its reason starting `disabled:`, so the stream shows a SKIP point. Today:
+  test_inputs_changed of test_ttyd_build, TestCheckout of test_api_match,
+  test_program_served and test_stop_killed of test_xsjs_serve,
+  test_hangup_restored of test_integrate_bootstrap, test_lock_refused,
+  test_lock_waited and test_lock_hangup of test_bootstrap and TestVectors of
+  test_jslb_decode.ts.
+- fixed waits: a test that waits out a fixed time is labelled test-all and
+  runs in no default run. A label is a suite's, so test_integrate_http.ts,
+  test_integrate_media.ts and test_integrate_wire.ts, each holding one such
+  case, are test-all whole; the wire block's case first_sent sits in its chain
+  of cases on one tty 0. test_local_http's tests of the delayed path, the
+  answer of /slow and test_delay_threaded, are the suite
+  test_local_http_delay, so that the unit suite of the HTTP server the blocks
+  use stays in the default run.
+- test_local_http_delay: test-all, beside test_local_http in the Python unit
+  list, on that suite's ServerCase, answers_check and gold, counting for
+  local_http.py by its _COUNTED row; test_local_http's answers_check takes the
+  paths with no delay.
+- ttyd build count: a run builds ttyd in its bring up alone: once when
+  build/ttyd holds no ttyd built from the archive and patches of now, and not
+  at all when it does. No suite builds ttyd: test_inputs_changed, which built
+  it three times in a scratch directory, is skipped, so the build's own lines
+  run only in a bring up that builds.
 - test_posix.py: the checks of the whitelisted files: UTF-8 with no non-ASCII
   outside _NON_ASCII_ALLOWED; the comment rules; then the formatters of
   reformat.py in a test-all run; then the linters of their rows; last
@@ -1640,7 +1710,10 @@ fault realm REALM->DRIVER 0 push; fails the block
 - _lock_free: ends the holder by SIGKILL and not by closing release alone, as
   EngineChild's fork keeps a copy of that pipe end while the run lives.
 - test_bootstrap run time: TestDriverHangup of test_integrate_bootstrap runs
-  the whole suite again, so the lock's wait is paid twice in the default run.
+  the whole suite again, 0.8 s, and is skipped for that. The lock's 5 s wait
+  is paid in no run, as test_lock_refused is skipped too. Inside a whole run
+  each forked engine costs about 25 ms, so the suite's 30 tests left take 0.8 s
+  and the two that hold the lock for lock_held_seconds are skipped as well.
 - restart exec test: a forked child of `python/test_engine_system.py` sets
   sys.orig_argv and calls system_restart, so the exec's lines count; the `-c`
   program it starts writes the child's ending and kills itself.
@@ -1934,6 +2007,18 @@ fault realm REALM->DRIVER 0 push; fails the block
 - browser roots: the suites root runs the ttyd page's bring up over TAP. The
   probe, credential and echo roots serve the headless page. Others serve the
   ttyd page. Roots are removed once the run passes and kept after a failure.
+- disabled rungs: `_DISABLED_RUNGS` of python/test_browser.py, each rung with
+  why it ran longer than a second, which no run takes: the wire token, open,
+  first line and drain timers, each waiting out a 120 s constant of
+  ts/wire.ts; error before the first line, which waits out bootstrap.py's 5 s
+  lock wait; wire drain poll; release runs nothing. `_DISABLED_ROOTS` names
+  the roots whose every rung is disabled, echo, stalled and locked, which no
+  run makes.
+- console role refused: opens the release root's page and waits for its
+  settings itself, as the rung before it, release runs nothing, is disabled.
+- http one line per request: its port's timeout is the gold's late_seconds,
+  0.2, and its window after the late answer late_quiet_seconds, 0.3, so that
+  the rung runs in 0.7 s; the other http rungs keep http_seconds, 2.
 - test_demo.py: `python3 python/test_demo.py [--test-all] [--hold]
   [--anthropic] [--debug] [--verbose]`. Drives chrome-headless-shell by
   devtools.LinuxPipe over the engine page, rung by rung, each under a timer and

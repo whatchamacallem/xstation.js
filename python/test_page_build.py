@@ -5,22 +5,23 @@
 # Tests the parts of page_build.py that start no program but python3 and call
 # into no project module but jslb.py, whose suite has passed: the strings
 # table substitution, the archive member lookup by path suffix, the base64 of
-# the vectors and the wasm, the gold's one line and its copy at another path
-# with other gold, a suite's gold file of no object refused, the markers of
-# the three templates, html/test.html, html/headless.html and
-# html/engine.html, and the check of each piece, the headless template
-# holding the head and the scripts of the test template in their order, its
-# own entry last, and no pre for the TAP stream, the engine template holding
-# those scripts with its own entry last, the body of the engine page's layout
-# and no pre, a template html/ lacks refused with no page written, the
-# command line refusing an option, or a name with no template, before
-# anything is built, run as a python3 child, and the hash of the page written.
-# Forked children, whose lines the count sees, run the script as the program
-# and refuse a PATH with no tsc. The config of the API text lists exactly the
-# files of API/ts and leaves their check on. No test starts tsc.
+# the vectors and the wasm, the gold's one line and its copy with other gold,
+# a suite's gold file of no object refused, the markers of the three
+# templates, html/test.html, html/headless.html and html/engine.html, and the
+# check of each piece, the headless template holding the test template's head
+# and scripts in order, its own entry last, and no pre for the TAP stream, the
+# engine template those scripts, its own entry last, its body's layout and no
+# pre, a template html/ lacks refused with no page written, the command line
+# refusing an option or a name with no template before any build, as a
+# python3 child, and the page's hash. The compile check on a scratch checkout:
+# due with no stamp or a source file or folder as new, its work dated to its
+# start. Forked children, counted, run the script as the program and refuse a
+# PATH with no tsc, the API stamp dated old first. The API config lists
+# exactly the files of API/ts and keeps their check. No test starts tsc.
 
-import base64, hashlib, html.parser, io, json, os, page_build, runpy, signal
-import subprocess, sys, tarfile, tempfile, traceback, unittest, zipfile
+import base64, hashlib, html.parser, io, json, os, page_build, runpy, shutil
+import signal, subprocess, sys, tarfile, tempfile, time, traceback, unittest
+import zipfile
 from collections.abc import Callable
 from typing import Any
 
@@ -32,6 +33,24 @@ _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
 # The page templates.
 _HTML_PATH = os.path.join(_ROOT_PATH, "html")
+
+# The stamp of the API text's check, repeated as a test imports no constant.
+_API_STAMP = os.path.join(_BUILD_PATH, "api_check.passed")
+
+# The folders of a checkout that each compile reads, as page_build has them.
+_SOURCE_FOLDERS = ("ts", os.path.join("API", "ts"))
+
+# The name of a source made in each folder of a scratch checkout.
+_SOURCE_NAME = "a.ts"
+
+# The time in nanoseconds every source of a scratch checkout is given.
+_SOURCE_NS = 10**18
+
+# The bytes a work writes at the stamp's path, as tsc writes a bundle.
+_OUTPUT_BYTES = b"bundle\n"
+
+# The text of a work that fails.
+_FAILED_TEXT = "the work failed"
 
 # The hex digest of the bytes `abc`, the example of `FIPS 180-2`.
 _ABC_SHA256 = (
@@ -232,8 +251,17 @@ def tsc_unfound(folder: str) -> None:
 
 # In a forked child: checks the API text with the folder alone on `PATH`.
 def api_unfound(folder: str) -> None:
+    # A stamp older than every source makes the check due.
+    with open(_API_STAMP, "ab"):
+        pass
+    os.utime(_API_STAMP, ns=(0, 0))
     os.environ["PATH"] = folder
     page_build.api_check()
+
+
+# Dates the file or folder at the path to the time in nanoseconds.
+def time_set(path: str, time_ns: int) -> None:
+    os.utime(path, ns=(time_ns, time_ns))
 
 
 # Returns the object of the `tsc` configuration.
@@ -753,6 +781,115 @@ class TestCompiler(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
             ending = child_run(self, lambda: api_unfound(scratch))
         self.assertTrue(ending.endswith(_TSC_ABSENT), ending)
+
+
+# The timestamp check of a compile, on the sources of a scratch checkout.
+class TestCompileDue(unittest.TestCase):
+    # Makes a scratch checkout, one source in each folder, all of one time.
+    def setUp(self) -> None:
+        os.makedirs(_BUILD_PATH, exist_ok=True)
+        scratch = tempfile.TemporaryDirectory(dir=_BUILD_PATH)
+        self.addCleanup(scratch.cleanup)
+        self.root = scratch.name
+        self.stamp = os.path.join(self.root, "build", "stamp")
+        self.folders = [
+            os.path.join(self.root, folder) for folder in _SOURCE_FOLDERS
+        ]
+        self.sources: list[str] = []
+        for folder in self.folders:
+            os.makedirs(folder)
+            source = os.path.join(folder, _SOURCE_NAME)
+            with open(source, "wb"):
+                pass
+            self.sources.append(source)
+        for path in self.folders + self.sources:
+            time_set(path, _SOURCE_NS)
+
+    # Makes the stamp, empty, of the time given.
+    def stamp_make(self, stamp_ns: int) -> None:
+        os.makedirs(os.path.dirname(self.stamp))
+        with open(self.stamp, "wb"):
+            pass
+        time_set(self.stamp, stamp_ns)
+
+    # With no stamp a compile is due.
+    def test_absent_due(self) -> None:
+        self.assertTrue(page_build.compile_due(self.stamp, self.root))
+
+    # A stamp newer than every source and folder leaves none due.
+    def test_newer_fresh(self) -> None:
+        self.stamp_make(_SOURCE_NS + 1)
+        self.assertFalse(page_build.compile_due(self.stamp, self.root))
+
+    # A stamp of the same time as the newest source makes one due.
+    def test_equal_due(self) -> None:
+        self.stamp_make(_SOURCE_NS)
+        self.assertTrue(page_build.compile_due(self.stamp, self.root))
+
+    # A source of either folder newer than the stamp makes one due.
+    def test_source_due(self) -> None:
+        self.stamp_make(_SOURCE_NS + 1)
+        for source in self.sources:
+            with self.subTest(source=source):
+                time_set(source, _SOURCE_NS + 2)
+                self.assertTrue(page_build.compile_due(self.stamp, self.root))
+                time_set(source, _SOURCE_NS)
+
+    # A folder newer than the stamp, as a file removed leaves it, is due.
+    def test_folder_due(self) -> None:
+        self.stamp_make(_SOURCE_NS + 1)
+        for folder in self.folders:
+            with self.subTest(folder=folder):
+                time_set(folder, _SOURCE_NS + 2)
+                self.assertTrue(page_build.compile_due(self.stamp, self.root))
+                time_set(folder, _SOURCE_NS)
+
+    # A checkout lacking a folder of the sources is refused.
+    def test_folder_refused(self) -> None:
+        self.stamp_make(_SOURCE_NS + 1)
+        shutil.rmtree(self.folders[-1])
+        with self.assertRaises(FileNotFoundError):
+            page_build.compile_due(self.stamp, self.root)
+
+    # A due work runs once, and the stamp it leaves is dated to its start.
+    def test_work_dated(self) -> None:
+        called: list[int] = []
+        before = time.time_ns()
+        page_build.compile_timed(
+            self.stamp, lambda: called.append(time.time_ns()), self.root
+        )
+        self.assertEqual(len(called), 1)
+        dated = os.stat(self.stamp).st_mtime_ns
+        self.assertGreaterEqual(dated, before)
+        self.assertLessEqual(dated, called[0])
+        self.assertEqual(os.path.getsize(self.stamp), 0)
+
+    # A work that writes the file, as tsc a bundle, keeps its bytes.
+    def test_output_kept(self) -> None:
+        def work() -> None:
+            os.makedirs(os.path.dirname(self.stamp))
+            with open(self.stamp, "wb") as file:
+                file.write(_OUTPUT_BYTES)
+
+        page_build.compile_timed(self.stamp, work, self.root)
+        with open(self.stamp, "rb") as file:
+            self.assertEqual(file.read(), _OUTPUT_BYTES)
+
+    # A fresh stamp skips the work and keeps its time.
+    def test_fresh_skipped(self) -> None:
+        self.stamp_make(_SOURCE_NS + 1)
+        page_build.compile_timed(self.stamp, self.fail, self.root)
+        self.assertEqual(os.stat(self.stamp).st_mtime_ns, _SOURCE_NS + 1)
+
+    # A work that raises leaves no stamp, so the next compile is due too.
+    def test_work_failed(self) -> None:
+        def work() -> None:
+            raise RuntimeError(_FAILED_TEXT)
+
+        with self.assertRaises(RuntimeError) as caught:
+            page_build.compile_timed(self.stamp, work, self.root)
+        self.assertEqual(str(caught.exception), _FAILED_TEXT)
+        self.assertFalse(os.path.exists(self.stamp))
 
 
 # The configuration `page_build.api_check` compiles, read and never compiled.

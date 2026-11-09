@@ -14,13 +14,13 @@
 # the consumer counts none.
 
 import harness, jslb, os, page_build, shutil, subprocess, switches
-import tap_consumer, tempfile, time, unittest
+import tap_consumer, time, unittest
 from typing import Any, NamedTuple, NoReturn, cast
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Where the scratch directories go.
+# The build directory, where the Node bundle is built.
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
 # The block the realm runs, which writes the pair runs.
@@ -138,15 +138,13 @@ class TestPair(unittest.TestCase):
     # The seconds node ran, which bound the durations it wrote.
     seconds: float
 
-    # Builds the bundle in a scratch directory under `build`, then runs node.
+    # Builds the bundle in `build`, reusing a newer compile, then runs node.
     @classmethod
     def setUpClass(cls) -> None:
-        os.makedirs(_BUILD_PATH, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
-            path = page_build.node_build(scratch)
-            started = time.perf_counter()
-            cls.completed = realm_run(path)
-            cls.seconds = time.perf_counter() - started
+        path = page_build.node_build(_BUILD_PATH)
+        started = time.perf_counter()
+        cls.completed = realm_run(path)
+        cls.seconds = time.perf_counter() - started
         decoder = jslb.LineDecoder(
             harness.setting_get("line_max"),
             harness.setting_get("blob_max"),

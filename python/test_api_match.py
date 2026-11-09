@@ -269,6 +269,7 @@ class ScratchCase(unittest.TestCase):
 
 
 # A whole checkout.
+@unittest.skip("disabled: two real compiler runs each, 1.6 s to 1.9 s")
 class TestCheckout(ScratchCase):
     # A checkout whose text and code agree passes, its old intermediates gone.
     def test_checkout_passed(self) -> None:

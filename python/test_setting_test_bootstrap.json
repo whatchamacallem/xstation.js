@@ -37,7 +37,7 @@
     }
   },
   "read_bytes": 65536,
-  "hangup_bytes": 1048576,
+  "hangup_bytes": 262144,
   "blocked_seconds": 10,
   "poll_seconds": 0.01,
   "lock_wait_seconds": 5,

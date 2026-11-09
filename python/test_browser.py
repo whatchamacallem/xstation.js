@@ -318,6 +318,24 @@ _INPUT_KIND = "0"
 # The whole seconds wire.ts waits for its socket to send its buffered bytes.
 _DRAIN_SECONDS = 120
 
+# The rungs no run takes, each with why it does not run in under a second.
+_DISABLED_RUNGS: dict[str, str] = {
+    "stage 5: wire token timer": "waits out the 120 s token wait of wire.ts",
+    "stage 5: wire open timer": "waits out the 120 s open wait of wire.ts",
+    "stage 5: wire first line timer": "waits out the 120 s first line wait of"
+    " wire.ts",
+    "stage 5: wire drain timer": "waits out the 120 s drain wait of wire.ts",
+    "stage 5: wire drain poll": "0.8 s to send 10 MiB of echoes through ttyd"
+    " and back, before the 5 s it holds ttyd stopped",
+    "stage 5: release runs nothing": "0.8 s to load the page and its"
+    " settings, before the 5 s window in which nothing may happen",
+    "stage 5: error before the first line": "waits out the 5 s lock wait of"
+    " bootstrap.py",
+}
+
+# The roots no run makes, as every rung of each is disabled.
+_DISABLED_ROOTS = frozenset(("echo", "stalled", "locked"))
+
 # The label of the audit's entry of a wire line the server read.
 _RECEIVED_LABEL = "ai to server"
 
@@ -818,7 +836,7 @@ class RungLog:
         check: Callable[[], str],
         seconds: float | None = None,
     ) -> None:
-        if not self.book.rung_enter(rung, label):
+        if rung in _DISABLED_RUNGS or not self.book.rung_enter(rung, label):
             return
         timer = gold_value("rung_seconds") if seconds is None else seconds
         self.rung_start(rung, timer)
@@ -2225,11 +2243,11 @@ def rung_stall(session: PageSession, stub: StubServer) -> str:
 
 # After a timeout the port gives no second line, though the answer comes late.
 def rung_single(session: PageSession, stub: StubServer) -> str:
-    session.probe_call("http_port", "late", gold_value("http_seconds"))
+    session.probe_call("http_port", "late", gold_value("late_seconds"))
     url = stub.url_make(_LATE_PATH)
     get_send(session, "late", 1, url)
     line = port_lines(session, "late", 1)[0]
-    due = text_fill("http_timeout_expired", {0: url})
+    due = text_fill("http_timeout_expired_late", {0: url})
     if (
         line["header"] != {"t": "error", "r": 1}
         or line["payload"]["message"] != due
@@ -2241,7 +2259,7 @@ def rung_single(session: PageSession, stub: StubServer) -> str:
     )
     get_send(session, "late", 2, stub.url_make(_TEXT_PATH))
     port_lines(session, "late", 2)
-    quiet: float = gold_value("quiet_seconds")
+    quiet: float = gold_value("late_quiet_seconds")
     time.sleep(quiet)
     lines = json_list(session.probe_call("lines_when", "late", 0))
     ids = [json_object(line)["header"]["r"] for line in lines]
@@ -2599,6 +2617,8 @@ def rung_gating(session: PageSession) -> str:
 
 # The console role is refused outside debug mode.
 def rung_refused_role(session: PageSession) -> str:
+    session.page_open()
+    session.probe_wait("the page's settings", "settings_shown")
     mark = len(session.ttyd.lines)
     session.probe_call("console_port", session.url)
     session.probe_call("console_ask", 1)
@@ -3150,7 +3170,7 @@ def session_run(
     body: Callable[[PageSession], None],
 ) -> None:
     log = context.log
-    if not log.book.root_enter(name, label):
+    if name in _DISABLED_ROOTS or not log.book.root_enter(name, label):
         return
     page_ready(context, page)
     made = root_make(context.work, name, page, changed)

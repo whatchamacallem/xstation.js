@@ -7,25 +7,29 @@
 # python/test_all.py from the checkout and exits with its code. Without an
 # option it runs the smoke-test suites, and --test-all runs those of both
 # labels and counts the lines each module's own suites run, by --coverage,
-# which fails at a module's first line never run. The switches --anthropic,
-# for Anthropic's cloud container, --debug and --verbose are passed on, each
-# at most once:
+# which fails at a module's first line never run. --end-to-end runs only the
+# wire, browser and demo tests, with their test-all rungs under --test-all,
+# and counts no line. The switches --anthropic, for Anthropic's cloud
+# container, --debug and --verbose are passed on, each at most once:
 #
-#     ./test_posix.sh [--test-all] [--anthropic] [--debug] [--verbose]
+#     ./test_posix.sh [--test-all] [--end-to-end] [--anthropic] [--debug]
+#         [--verbose]
 
 set -euo pipefail
 
 # Prints the usage line and what the script runs.
 usage_show() {
 	cat <<'EOF2'
-test_posix.sh [--test-all] [--anthropic] [--debug] [--verbose]
+test_posix.sh [--test-all] [--end-to-end] [--anthropic] [--debug] [--verbose]
   Runs python3 python/test_all.py with the options, and --coverage with
-  --test-all.
+  --test-all unless --end-to-end is given.
 EOF2
 }
 
 # The category option passed on, none when the `smoke-test` suites run.
 _OPTION_=()
+# The option of the end to end programs alone, none for the whole run.
+_END_=()
 # The switches passed on, in the order given, each at most once.
 _SWITCHES_=()
 for _ARGUMENT_ in "$@"; do
@@ -35,7 +39,14 @@ for _ARGUMENT_ in "$@"; do
 			usage_show >&2
 			exit 2
 		fi
-		_OPTION_=("$_ARGUMENT_" --coverage)
+		_OPTION_=("$_ARGUMENT_")
+		;;
+	--end-to-end)
+		if [ ${#_END_[@]} -ne 0 ]; then
+			usage_show >&2
+			exit 2
+		fi
+		_END_=("$_ARGUMENT_")
 		;;
 	--anthropic | --debug | --verbose)
 		for _GIVEN_ in "${_SWITCHES_[@]}"; do
@@ -53,7 +64,13 @@ for _ARGUMENT_ in "$@"; do
 	esac
 done
 
+# A whole test-all run counts lines; the end to end programs alone do not.
+if [ ${#_OPTION_[@]} -ne 0 ] && [ ${#_END_[@]} -eq 0 ]; then
+	_OPTION_+=(--coverage)
+fi
+
 _SCRIPT_PATH_=$(readlink -f -- "$0")
 cd -P -- "$(dirname -- "$_SCRIPT_PATH_")"
 
-exec python3 python/test_all.py "${_OPTION_[@]}" "${_SWITCHES_[@]}"
+exec python3 python/test_all.py "${_OPTION_[@]}" "${_END_[@]}" \
+	"${_SWITCHES_[@]}"

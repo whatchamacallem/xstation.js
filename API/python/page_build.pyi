@@ -19,10 +19,19 @@
 # as it does in the worker's source, since the bundle's own is no directive
 # once the vectors precede it.
 
+from collections.abc import Callable
 from typing import Any
 
-# Compiles `ts/tsconfig.api.json`, every file of `API/ts`, emitting nothing.
+# Compiles `ts/tsconfig.api.json` by `compile_timed`, emitting nothing.
 def api_check() -> None: ...
+
+# Whether the file is absent or no newer than every source of the root.
+def compile_due(path: str, root: str = ...) -> bool: ...
+
+# Runs the work when `compile_due`, then dates the file, made, to its start.
+def compile_timed(
+    path: str, work: Callable[[], None], root: str = ...
+) -> None: ...
 
 # Builds the Node bundle in the build directory. Returns the bundle's path.
 def node_build(build_path: str) -> str: ...

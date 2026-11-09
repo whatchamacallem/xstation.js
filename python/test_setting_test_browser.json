@@ -2,6 +2,8 @@
   "echo_seconds": 600,
   "hold_seconds": 120,
   "http_seconds": 2,
+  "late_quiet_seconds": 0.3,
+  "late_seconds": 0.2,
   "lines": {
     "console_open_reply": {
       "0": {
@@ -40,6 +42,7 @@
     "dispatch_handler_unknown": "No handler is registered for type rung.unknown version 0.",
     "http_fetch_failed": "The request to {0} failed: {1}",
     "http_timeout_expired": "The request to {0} did not finish within 2 seconds.",
+    "http_timeout_expired_late": "The request to {0} did not finish within 0.2 seconds.",
     "wire_blobs_over": "The blobs of the kv.put line come to {1} bytes, over the blob_max of {2}.",
     "wire_close_silent": "connection closed with code 1006 and no error line",
     "wire_error_first": "The server sent an error before tap.start: Another engine holds the lock {0}.\n{1}",
