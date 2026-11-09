@@ -18,10 +18,13 @@
     {
       "expect": [
         "render_1",
+        "wire_prompt",
         "wire_user_1",
         "wire_asked_1",
+        "wire_stored",
         "wire_result_1",
         "wire_answer_1",
+        "wire_stored",
         "say_1_reply"
       ],
       "name": "choice_1",
@@ -38,10 +41,13 @@
         "render_output",
         "wire_user_3",
         "wire_asked_3",
+        "wire_stored",
         "wire_result_3",
         "wire_asked_output",
+        "wire_stored",
         "wire_result_output",
         "wire_answer_3",
+        "wire_stored",
         "say_3_reply"
       ],
       "name": "choice_3",
@@ -49,25 +55,25 @@
       "send": ["say_3"]
     },
     {
-      "expect": ["wire_otherwise", "say_number_reply"],
+      "expect": ["wire_otherwise", "wire_stored", "say_number_reply"],
       "name": "bad_number",
       "seconds": 5,
       "send": ["say_number"]
     },
     {
-      "expect": ["wire_otherwise", "say_word_reply"],
+      "expect": ["wire_otherwise", "wire_stored", "say_word_reply"],
       "name": "bad_word",
       "seconds": 5,
       "send": ["say_word"]
     },
     {
-      "expect": ["wire_otherwise", "say_empty_reply"],
+      "expect": ["wire_otherwise", "wire_stored", "say_empty_reply"],
       "name": "bad_empty",
       "seconds": 5,
       "send": ["say_empty"]
     },
     {
-      "expect": ["wire_otherwise", "click_reply"],
+      "expect": ["wire_otherwise", "wire_stored", "click_reply"],
       "name": "bad_click",
       "seconds": 5,
       "send": ["click"]
@@ -77,8 +83,10 @@
         "permit_denied",
         "wire_user_3",
         "wire_asked_3",
+        "wire_stored",
         "wire_denied",
         "wire_lacks",
+        "wire_stored",
         "say_denied_reply"
       ],
       "name": "choice_3_denied",
@@ -90,8 +98,10 @@
         "render_again",
         "wire_user_1",
         "wire_asked_1",
+        "wire_stored",
         "wire_result_1",
         "wire_answer_1",
+        "wire_stored",
         "say_again_reply"
       ],
       "name": "choice_1_again",
@@ -104,6 +114,7 @@
         "wire_dump_server",
         "wire_user_0",
         "wire_answer_0",
+        "wire_stored",
         "say_0_reply"
       ],
       "name": "dumped",
@@ -196,7 +207,7 @@
         "timeout_seconds": 30
       },
       "permit": 1,
-      "tool": "browser.console_run"
+      "tool": "browser_console_run"
     },
     "permit_denied": {
       "0": {
@@ -208,7 +219,7 @@
         "timeout_seconds": 30
       },
       "permit": 2,
-      "tool": "browser.console_run"
+      "tool": "browser_console_run"
     },
     "render_1": {
       "0": {
@@ -462,6 +473,16 @@
         "type": "test_integrate_engine.wire_result_output"
       }
     },
+    "wire_prompt": {
+      "0": {
+        "type": "test_integrate_engine.wire_prompt"
+      }
+    },
+    "wire_stored": {
+      "0": {
+        "type": "test_integrate_engine.wire_stored"
+      }
+    },
     "wire_user_0": {
       "0": {
         "type": "test_integrate_engine.wire_user_0"
@@ -513,6 +534,11 @@
       "parts": ["\"type\": \"mcp\"", "\"name\": \"source_put\""]
     },
     {
+      "line": "wire_prompt",
+      "label": "ai to server",
+      "parts": ["\"type\": \"turn.prompt\"", "\"role\": \"system\""]
+    },
+    {
       "line": "wire_user_1",
       "label": "ai to server",
       "parts": [
@@ -523,21 +549,34 @@
     },
     {
       "line": "wire_asked_1",
-      "label": "ai to server",
-      "parts": ["\"type\": \"turn.append\"", "\"id\": \"call_1\""]
+      "label": "http to ai",
+      "parts": [
+        "\"type\": \"function_call\"",
+        "\"call_id\": \"call_1\"",
+        "\"name\": \"browser_render\""
+      ]
     },
     {
       "line": "wire_result_1",
       "label": "ai to server",
-      "parts": ["\"type\": \"turn.append\"", "\"tool_call_id\": \"call_1\""]
+      "parts": [
+        "\"type\": \"turn.append\"",
+        "\"type\": \"function_call_output\"",
+        "\"call_id\": \"call_1\""
+      ]
     },
     {
       "line": "wire_answer_1",
-      "label": "ai to server",
+      "label": "http to ai",
       "parts": [
-        "\"type\": \"turn.append\"",
-        "\"content\": \"There. Words on a black page. I trained for years for this.\""
+        "\"type\": \"output_text\"",
+        "\"text\": \"There. Words on a black page. I trained for years for this.\""
       ]
+    },
+    {
+      "line": "wire_stored",
+      "label": "ai to server",
+      "parts": ["\"type\": \"turn.append\"", "\"role\": \"assistant\""]
     },
     {
       "line": "wire_user_3",
@@ -550,42 +589,55 @@
     },
     {
       "line": "wire_asked_3",
-      "label": "ai to server",
-      "parts": ["\"type\": \"turn.append\"", "\"id\": \"call_4\""]
+      "label": "http to ai",
+      "parts": [
+        "\"type\": \"function_call\"",
+        "\"call_id\": \"call_4\"",
+        "\"name\": \"browser_console_run\""
+      ]
     },
     {
       "line": "wire_result_3",
       "label": "ai to server",
       "parts": [
         "\"type\": \"turn.append\"",
-        "\"tool_call_id\": \"call_4\"",
+        "\"type\": \"function_call_output\"",
+        "\"call_id\": \"call_4\"",
         "hyperposition\\\\n"
       ]
     },
     {
       "line": "wire_asked_output",
-      "label": "ai to server",
-      "parts": ["\"type\": \"turn.append\"", "\"id\": \"call_5\""]
+      "label": "http to ai",
+      "parts": [
+        "\"type\": \"function_call\"",
+        "\"call_id\": \"call_5\"",
+        "\"name\": \"browser_render\""
+      ]
     },
     {
       "line": "wire_result_output",
       "label": "ai to server",
-      "parts": ["\"type\": \"turn.append\"", "\"tool_call_id\": \"call_5\""]
+      "parts": [
+        "\"type\": \"turn.append\"",
+        "\"type\": \"function_call_output\"",
+        "\"call_id\": \"call_5\""
+      ]
     },
     {
       "line": "wire_answer_3",
-      "label": "ai to server",
+      "label": "http to ai",
       "parts": [
-        "\"type\": \"turn.append\"",
-        "\"content\": \"It said hyperposition, as one could have guessed. Anything else?\""
+        "\"type\": \"output_text\"",
+        "\"text\": \"It said hyperposition, as one could have guessed. Anything else?\""
       ]
     },
     {
       "line": "wire_otherwise",
-      "label": "ai to server",
+      "label": "http to ai",
       "parts": [
-        "\"type\": \"turn.append\"",
-        "\"content\": \"That is not one of the choices. 1, 2, 3 or 0, when you are quite ready.\""
+        "\"type\": \"output_text\"",
+        "\"text\": \"That is not one of the choices. 1, 2, 3 or 0, when you are quite ready.\""
       ]
     },
     {
@@ -593,16 +645,17 @@
       "label": "ai to server",
       "parts": [
         "\"type\": \"turn.append\"",
-        "\"tool_call_id\": \"call_4\"",
-        "The player denied the tool browser.console_run."
+        "\"type\": \"function_call_output\"",
+        "\"call_id\": \"call_4\"",
+        "The player denied the tool browser_console_run."
       ]
     },
     {
       "line": "wire_lacks",
-      "label": "ai to server",
+      "label": "http to ai",
       "parts": [
-        "\"type\": \"turn.append\"",
-        "\"content\": \"The console stayed shut: you refused it, it was not served with --debug, or it took too long. I shall try to bear it.\""
+        "\"type\": \"output_text\"",
+        "\"text\": \"The console stayed shut: you refused it, it was not served with --debug, or it took too long. I shall try to bear it.\""
       ]
     },
     {
@@ -636,10 +689,10 @@
     },
     {
       "line": "wire_answer_0",
-      "label": "ai to server",
+      "label": "http to ai",
       "parts": [
-        "\"type\": \"turn.append\"",
-        "\"content\": \"Nothing at all, then. How restful. Do take your time.\""
+        "\"type\": \"output_text\"",
+        "\"text\": \"Nothing at all, then. How restful. Do take your time.\""
       ]
     }
   ]

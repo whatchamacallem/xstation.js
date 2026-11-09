@@ -268,6 +268,8 @@ namespace test_substrate {
           "turn_append",
           "turn_compact",
           "turn_list",
+          "turn_prompt",
+          "turn_prompted",
         ],
       );
       this.assertEqual(

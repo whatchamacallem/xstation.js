@@ -77,12 +77,9 @@
             "next": "after",
             "tool_calls": [
               {
-                "function": {
-                  "arguments": "{\"image\":\"/_files/test_engine/large\",\"subtitle\":\"Shown by the tool.\"}",
-                  "name": "browser.render"
-                },
-                "id": "call_1",
-                "type": "function"
+                "arguments": "{\"image\":\"/_files/test_engine/large\",\"subtitle\":\"Shown by the tool.\"}",
+                "call_id": "call_1",
+                "name": "browser_render"
               }
             ]
           }

@@ -117,11 +117,12 @@ declare namespace substrate {
     sha256: lines.Sha256;
   }
 
+  // A turn of a scene's log: its number, its role and its input items.
   interface TurnRow {
     scene: lines.DocRef;
     n: number;
     role: provider.Role;
-    content: provider.ChatMessage;
+    content: provider.InputItem[];
   }
 
   interface RefParts {
@@ -234,9 +235,14 @@ declare namespace substrate {
     turn_append(
       scene: lines.DocRef,
       role: provider.Role,
-      content: provider.ChatMessage,
+      content: provider.InputItem[],
     ): lines.TurnAppendReply;
+    // The scene's whole log in order: its system prompt, then its turns.
     turn_list(scene: lines.DocRef): TurnRow[];
+    // Whether the scene's conversation holds its prompt: its row at `n` 0.
+    turn_prompted(scene: lines.DocRef): boolean;
+    // Stores the system prompt before turn 1, a row per message, the last at 0.
+    turn_prompt(scene: lines.DocRef, messages: provider.InputMessage[]): void;
     // Replaces turns 1 to `through` by one summary turn at 1, this side only.
     turn_compact(scene: lines.DocRef, through: number, summary: string): void;
     sql_run(db: string, statements: lines.SqlStatement[]): lines.SqlResult[];

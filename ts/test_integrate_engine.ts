@@ -13,11 +13,11 @@
 // of its number, and `console.show` opens tty 0 as the shown view does.
 //
 // A case's last line, the first picture or a turn's reply, waits while the
-// scripted UI asks `audit.tail` through the worker's relay. Each entry of the
-// tail after the last tail's that has the label and every part of a mark of the
-// gold's `wire` sends the test's end the mark's line, in the audit's order, so
-// a case pins the wire's lines end to end on the real server. A case dumps both
-// sides' databases as the text 0 does, and the tail holds both dumps.
+// scripted UI asks `audit.tail` through the worker's relay. Each new entry of
+// the tail with the label and every part of a mark of the gold's `wire` sends
+// the test's end the mark's line, in the audit's order, so a case pins the
+// wire's lines on the real server: a reply's items in its record `http to ai`,
+// as the commit of its row holds their count, and both sides' dumps.
 
 namespace test_integrate_engine {
   // The gold, the threads, the settings, the line types and handlers' version.

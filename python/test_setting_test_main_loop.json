@@ -11,7 +11,7 @@
         [
           {
             "arguments": {},
-            "name": "browser.render"
+            "name": "browser_render"
           }
         ]
       ],
@@ -21,13 +21,13 @@
             "arguments": {
               "ref": "/metaverse/demo/note"
             },
-            "name": "browser.kv_put"
+            "name": "browser_kv_put"
           },
           {
             "arguments": {
               "ref": "/metaverse/demo/note"
             },
-            "name": "browser.kv_get"
+            "name": "browser_kv_get"
           }
         ]
       ],
@@ -38,13 +38,13 @@
               "text": "echo hyperposition",
               "timeout_seconds": 30
             },
-            "name": "browser.console_run"
+            "name": "browser_console_run"
           }
         ],
         [
           {
             "arguments": {},
-            "name": "browser.render"
+            "name": "browser_render"
           }
         ]
       ]
@@ -57,7 +57,7 @@
               "text": "echo hyperposition",
               "timeout_seconds": 30
             },
-            "name": "browser.console_run"
+            "name": "browser_console_run"
           }
         ]
       ]

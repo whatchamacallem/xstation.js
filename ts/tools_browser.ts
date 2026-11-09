@@ -31,7 +31,7 @@ namespace tools_browser {
   // The names, refs, texts, owners, line types and tools of the tools.
   const constants = Object.freeze({
     // The prefix the agent lists this server's tools under.
-    tool_prefix: "browser.",
+    tool_prefix: "browser_",
     // The console's tools, each run only with the player's permit.
     run_tool: "console_run",
     write_tool: "console_write",

@@ -14,7 +14,9 @@
 # back holds the start it follows from 1, its time as printed, its label, as
 # `ui to ai`, `note of ai` or `databases of the browser`, and its body. A
 # tail's entries are measured as the JSON string of the reply that carries
-# them, and one that does not fit ends the tail, older ones too.
+# them, and one that does not fit ends the tail, older ones too. What a model
+# request, its reply or a commit repeats of what the document shows is written
+# as a count: `line_thin` leaves it out, `line_whole` puts it back.
 
 import jslb
 from typing import Any, NamedTuple
@@ -25,6 +27,23 @@ class AuditEntry(NamedTuple):
     time: str
     label: str
     body: str
+
+# What the document shows: each conversation's items, the tools, the output.
+class ShownLog:
+    # The items by the conversation's ref, `prompt_cache_key` or `scene`.
+    items: dict[str, list[Any]]
+    # The conversation last shown, whose items a new one is compared with.
+    last: str
+    tools: list[Any]
+    # The output of the last model reply.
+    output: list[Any]
+    def __init__(self) -> None: ...
+    def line_thin(
+        self, label: str, kind: str, line: dict[Any, Any]
+    ) -> dict[Any, Any]: ...
+    def line_whole(
+        self, label: str, kind: str, line: dict[Any, Any]
+    ) -> dict[Any, Any]: ...
 
 # Opens the root's document for appending, held to `blob_max`, start heading.
 def audit_open(root: str, blob_max: int, role: str) -> None: ...

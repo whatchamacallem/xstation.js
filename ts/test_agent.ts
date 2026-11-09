@@ -5,16 +5,18 @@
 // Tests of the agent loop on real parts, on a real queue of thread `ai` in
 // synchronous mode, which runs the turn, the client's `mcp` lines and the
 // tools alike. The far ends are second real queues whose handlers are the
-// test's own functions: `http` is the scripted AI, `ui` keeps the image and
-// renders, and `server` keeps the store's pushes.
+// test's own functions: `http` is the scripted AI, which answers each model
+// request with a response of output items and keeps the request to compare
+// whole, `ui` keeps the image and renders, and `server` keeps the pushes.
 //
-// A realm takes one registration of the agent and of the tools, since each
-// registers its line types in the realm's one dispatch table, so the tests
-// share the one bench, built at the first test, and each test starts in the
-// hyperposition: `setUp` drops every database through the store's API, then
-// writes the world, the scene, the analyst's prompt, the universe table and
-// the bootstrap script. In the castle turn the player answers 1 and the
-// analyst builds the castle's gatehouse scene through the tools.
+// A realm takes one registration of the agent and of the tools, so the tests
+// share one bench, built at the first test, and `setUp` drops every database
+// through the store's API and writes the hyperposition again. The agent's
+// chains live as long as the realm, so a page load, which starts with none,
+// cannot be shown here: each test's first request starts a chain as its log
+// is new, and every id of the scripted AI is new in the realm, so no chain of
+// an earlier test fits a later log. In the castle turn the player answers 1
+// and the analyst builds the castle's gatehouse scene through the tools.
 
 namespace test_agent {
   // The initialized sqlite3.wasm module, a global the test page sets.
@@ -30,7 +32,7 @@ namespace test_agent {
   const constants = Object.freeze({
     // The id of this module's gold, in its own `test_setting_` file.
     gold_id: "typescript.test_agent",
-    // A synthetic provider key, which every chat request carries.
+    // A synthetic provider key, which every model request carries.
     key: "xai-SYNTHETIC-KEY",
     // The provider's address and models of a run that is not scripted.
     info: Object.freeze<lines.ProviderInfo>({
@@ -53,8 +55,9 @@ namespace test_agent {
     server_name: "xsjs-browser",
     client_name: "hyperposition-engine",
     version: "0",
-    // The prefix the agent lists the browser's tools under.
+    // The prefix the agent lists the browser's tools under, and its mark.
     prefix: "browser",
+    prefix_mark: "_",
     // The line type of the protocol, and the version of every handler.
     line_type: "mcp",
     handler_version: 0,
@@ -82,12 +85,16 @@ namespace test_agent {
       "kv.delete",
       "doc.put",
       "turn.append",
+      "turn.prompt",
       "sql.run",
     ]),
     // The header fields of an id, which a submit sets, in both forms.
     id_fields: Object.freeze(["i", "id"]),
     // The header fields of the id a reply answers, in both forms.
     reply_fields: Object.freeze(["r", "reply"]),
+    // The ends of the paths of a model request and of an image request.
+    model_path: "/responses",
+    image_path: "/generations",
     // The hyperposition scene, on screen when the castle turn starts.
     scene: "/metaverse/hyperposition/1",
     // The arrival scene the castle turn writes and enters.
@@ -138,17 +145,35 @@ namespace test_agent {
     moat_reply: "Still the moat.",
     // The reply of the model in the test of a click.
     click_reply: "The lights flicker.",
-    // The id of the model's replies.
-    answer_id: "chatcmpl-answer",
+    // The encrypted reasoning every reply of the scripted AI holds.
+    reasoning_text: "weighed",
+    // What every model request asks to be sent: the encrypted reasoning.
+    include_text: "reasoning.encrypted_content",
     // A prompt of the castle universe, for the tests of the system prompt.
     castle_prompt: "The castle is cold, and its keeper is patient.",
     // The reference string the encoded prompt document of the gold holds.
     lore: "/castle/lore",
     // The statement a tool runs to count the turns stored of the scene.
-    count_sql: "SELECT count(*) FROM _turn WHERE scene = ?",
+    count_sql: "SELECT count(*) FROM _turn WHERE scene = ? AND n > 0",
     // The result of that statement while only the player's turn is stored.
     count_result:
       '{"results":[{"columns":["count(*)"],"rows":[[1]],"changes":0}]}',
+    // The result of the read of the value that names the current world.
+    world_result: "metaverse",
+    // The text of a row appended through the store between two turns.
+    noted_text: "A note between turns.",
+    // What a debug mode request holds in place of its tool list.
+    tools_omitted: "DEBUG_MODE_TOOL_LIST_OMITTED",
+    // The fields of a chained request's body, in the order they are sent.
+    body_keys: Object.freeze([
+      "model",
+      "previous_response_id",
+      "input",
+      "tools",
+      "tool_choice",
+      "prompt_cache_key",
+      "include",
+    ]),
     // The line types the agent registers, in its order.
     agent_types: Object.freeze([
       "ai.say",
@@ -160,6 +185,19 @@ namespace test_agent {
 
   // An object of fields by name.
   type FieldTable = { [key: string]: unknown };
+
+  // A call the scripted AI makes: its id, the tool's name and the arguments.
+  interface CallMade {
+    call_id: string;
+    name: string;
+    arguments: string;
+  }
+
+  // A reply of the scripted AI: the response's id and its output items.
+  interface ModelReply {
+    id: string;
+    output: FieldTable[];
+  }
 
   // What the far ends got and gave in one test, and the turns' replies.
   interface FarRecord {
@@ -173,6 +211,8 @@ namespace test_agent {
     readonly asked: number[];
     // The reply each turn ended with, in order.
     readonly answers: lines.Line[];
+    // The replies of the scripted AI that the test scripted, in order.
+    readonly models: ModelReply[];
   }
 
   // The real parts the tests share, built once per realm.
@@ -189,6 +229,17 @@ namespace test_agent {
   // What the far ends got and gave in the test that runs.
   let far: FarRecord = far_fresh();
 
+  // The replies the scripted AI made in the realm, which number their ids.
+  let replies_made = 0;
+
+  // The debug mode the running test answers for itself, if it sets one.
+  let debug_mode: boolean | undefined = undefined;
+
+  // The debug reader of the agent: the test's mode first, else the thread's.
+  function debug_read(): boolean {
+    return debug_mode === undefined ? switches.debug_on() : debug_mode;
+  }
+
   // A record of the far ends with nothing scripted and nothing got.
   function far_fresh(): FarRecord {
     return {
@@ -197,6 +248,7 @@ namespace test_agent {
       pushes: [],
       asked: [],
       answers: [],
+      models: [],
     };
   }
 
@@ -366,6 +418,7 @@ namespace test_agent {
       constants.http_thread,
       constants.info,
       dispatch.handler_register,
+      debug_read,
     );
     return { store, clients, tasks, ui };
   }
@@ -403,169 +456,208 @@ namespace test_agent {
   }
 
   // A call of the named tool with its arguments as JSON text.
-  function call_make(
-    id: string,
-    name: string,
-    text: string,
-  ): provider.ToolCall {
-    return { id, type: "function", function: { name, arguments: text } };
+  function call_make(call_id: string, name: string, text: string): CallMade {
+    return { call_id, name, arguments: text };
   }
 
   // The calls of the castle turn, each with its arguments as JSON text.
-  function calls_recorded(): provider.ToolCall[] {
+  function calls_recorded(): CallMade[] {
     return [
       call_make(
         "call_1",
-        "browser.script_run",
+        "browser_script_run",
         '{"name":"bootstrap","args":{"universe":"castle",' +
           '"title":"The castle","world":"castle_world",' +
           '"region":"castle_gatehouse"}}',
       ),
       call_make(
         "call_2",
-        "browser.image_make",
+        "browser_image_make",
         `{"prompt":"${constants.image_prompt}",` +
           '"key":"gatehouse/arrival.png"}',
       ),
       call_make(
         "call_3",
-        "browser.doc_put",
+        "browser_doc_put",
         '{"db":"castle_gatehouse","id":"scene/arrival","body":' +
           '{"0":{"t":"scene"},"1":"/_files/gatehouse/arrival.png",' +
           `"subtitle":"${constants.subtitle}","image":{"$ref":1}}}`,
       ),
       call_make(
         "call_4",
-        "browser.kv_put",
+        "browser_kv_put",
         '{"ref":"/castle_world/scene",' +
           '"text":"/castle_gatehouse/scene/arrival/1"}',
       ),
       call_make(
         "call_5",
-        "browser.render",
+        "browser_render",
         '{"image":"/_files/gatehouse/arrival.png",' +
           `"subtitle":"${constants.subtitle}"}`,
       ),
     ];
   }
 
-  // The function tools every chat request lists: the browser's, prefixed.
+  // The flat function tools every model request lists: the browser's.
   function functions_recorded(): provider.FunctionTool[] {
     const tools = gold_value("tools") as mcp.Tool[];
     return tools.map((tool: mcp.Tool): provider.FunctionTool => ({
       type: "function",
-      function: {
-        name: `${constants.prefix}.${tool.name}`,
-        description: tool.description,
-        parameters: tool.inputSchema,
-      },
+      name: constants.prefix + constants.prefix_mark + tool.name,
+      description: tool.description,
+      parameters: tool.inputSchema,
     }));
   }
 
   // The system message of the text.
-  function system_said(text: string): provider.ChatMessage {
+  function system_said(text: string): provider.InputMessage {
     return { role: "system", content: text };
   }
 
   // The user message of the text.
-  function user_said(text: string): provider.ChatMessage {
+  function user_said(text: string): provider.InputMessage {
     return { role: "user", content: text };
   }
 
-  // The assistant message that ends a turn with the text.
-  function assistant_said(text: string): provider.ChatMessage {
-    return { role: "assistant", content: text };
+  // The item that answers the call with its output text.
+  function output_of(call: CallMade, text: string): provider.CallOutput {
+    return {
+      type: "function_call_output",
+      call_id: call.call_id,
+      output: text,
+    };
   }
 
-  // The assistant message that makes the calls.
-  function assistant_calls(calls: provider.ToolCall[]): provider.ChatMessage {
-    return { role: "assistant", content: null, tool_calls: calls };
+  // Whether an input item is a system message.
+  function system_held(item: unknown): boolean {
+    return (item as FieldTable).role === "system";
   }
 
-  // The tool message of a call's result.
-  function tool_said(
-    call: provider.ToolCall,
-    text: string,
-  ): provider.ChatMessage {
-    return { role: "tool", tool_call_id: call.id, content: text };
-  }
-
-  // The rounds of the castle turn: the calls, then their results.
-  function rounds_recorded(): provider.ChatMessage[][] {
-    const [bootstrap, image, scene, enter, render] = calls_recorded();
-    return [
-      [
-        assistant_calls([bootstrap]),
-        tool_said(bootstrap, constants.bootstrap_result),
-      ],
-      [assistant_calls([image]), tool_said(image, constants.image_result)],
-      [
-        assistant_calls([scene, enter, render]),
-        tool_said(scene, constants.scene_result),
-        tool_said(enter, constants.enter_result),
-        tool_said(render, constants.render_result),
-      ],
+  // A reply of the scripted AI: its reasoning, its message, then its calls.
+  function reply_made(text: string | null, calls: CallMade[]): ModelReply {
+    replies_made += 1;
+    const made = replies_made;
+    const output: FieldTable[] = [
+      {
+        type: "reasoning",
+        id: `rs_${made}`,
+        summary: [],
+        encrypted_content: constants.reasoning_text,
+        status: "completed",
+      },
     ];
+    if (text !== null) {
+      output.push({
+        type: "message",
+        id: `msg_${made}`,
+        role: "assistant",
+        status: "completed",
+        content: [{ type: "output_text", text, annotations: [] }],
+      });
+    }
+    calls.forEach((call: CallMade, index: number) => {
+      output.push({
+        type: "function_call",
+        id: `fc_${made}_${index + 1}`,
+        call_id: call.call_id,
+        name: call.name,
+        arguments: call.arguments,
+        status: "completed",
+      });
+    });
+    return { id: `resp_${made}`, output };
   }
 
-  // The messages of each chat request of the castle turn, in order.
-  function messages_recorded(): provider.ChatMessage[][] {
+  // The reply of the scripted AI that ends a turn with the text.
+  function text_reply(text: string): ModelReply {
+    return reply_made(text, []);
+  }
+
+  // The reply of the scripted AI that makes the calls.
+  function calls_reply(calls: CallMade[]): ModelReply {
+    return reply_made(null, calls);
+  }
+
+  // The scripted AI's answer frame: a completed response of the reply.
+  function model_frame(reply: ModelReply): lines.Line {
+    const line = gold_line("reply_model");
+    line.json = {
+      id: reply.id,
+      object: "response",
+      model: constants.info.chat_model,
+      status: "completed",
+      output: structuredClone(reply.output),
+    };
+    return line;
+  }
+
+  // The model request of the scene the agent submits, chained when given.
+  function request_expected(
+    scene: lines.DocRef,
+    input: unknown[],
+    chained?: ModelReply,
+  ): lines.Line {
+    const line = gold_line("request_model");
+    const json: FieldTable = { model: constants.info.chat_model };
+    if (chained !== undefined) {
+      json.previous_response_id = chained.id;
+    }
+    json.input = input;
+    json.tools = debug_read() ? constants.tools_omitted : functions_recorded();
+    json.tool_choice = "auto";
+    json.prompt_cache_key = scene;
+    json.include = [constants.include_text];
+    line.json = json;
+    return line;
+  }
+
+  // The model requests of the castle turn, each chained from a reply given.
+  function castle_requests(replies: ModelReply[]): lines.Line[] {
+    const [first, second, third] = replies;
+    const [bootstrap, image, scene, enter, render] = calls_recorded();
     const start = [system_said(constants.analyst), user_said("1")];
-    const [first, second, third] = rounds_recorded();
     return [
-      start,
-      [...start, ...first],
-      [...start, ...first, ...second],
-      [...start, ...first, ...second, ...third],
+      request_expected(constants.scene, start),
+      request_expected(
+        constants.scene,
+        [output_of(bootstrap, constants.bootstrap_result)],
+        first,
+      ),
+      request_expected(
+        constants.scene,
+        [output_of(image, constants.image_result)],
+        second,
+      ),
+      request_expected(
+        constants.scene,
+        [
+          output_of(scene, constants.scene_result),
+          output_of(enter, constants.enter_result),
+          output_of(render, constants.render_result),
+        ],
+        third,
+      ),
     ];
   }
 
-  // The messages the castle turn stores as turns of its scene, in order.
-  function contents_recorded(): provider.ChatMessage[] {
-    return [
-      user_said("1"),
-      ...rounds_recorded().flat(),
-      assistant_said(constants.subtitle),
-    ];
-  }
-
-  // The model's replies of the castle turn, in order.
-  function answers_recorded(): provider.ChatMessage[] {
+  // The rows the castle turn stores, each its number, role and content.
+  function castle_rows(replies: ModelReply[]): unknown[][] {
+    const [first, second, third, last] = replies;
     const [bootstrap, image, scene, enter, render] = calls_recorded();
-    return [
-      assistant_calls([bootstrap]),
-      assistant_calls([image]),
-      assistant_calls([scene, enter, render]),
-      assistant_said(constants.subtitle),
+    const rows: [provider.Role, unknown[]][] = [
+      ["system", [system_said(constants.analyst)]],
+      ["user", [user_said("1")]],
+      ["assistant", first.output],
+      ["tool", [output_of(bootstrap, constants.bootstrap_result)]],
+      ["assistant", second.output],
+      ["tool", [output_of(image, constants.image_result)]],
+      ["assistant", third.output],
+      ["tool", [output_of(scene, constants.scene_result)]],
+      ["tool", [output_of(enter, constants.enter_result)]],
+      ["tool", [output_of(render, constants.render_result)]],
+      ["assistant", last.output],
     ];
-  }
-
-  // A prompt document of the type given that holds the text given.
-  function prompt_doc(type: string, text: unknown): lines.Document {
-    return { 0: { t: type }, text };
-  }
-
-  // The provider's answer frame: a completion of the message.
-  function chat_reply(message: provider.ChatMessage): lines.Line {
-    const line = gold_line("reply_chat");
-    line.json = {
-      id: constants.answer_id,
-      model: constants.info.chat_model,
-      choices: [{ index: 0, message, finish_reason: "stop" }],
-    };
-    return line;
-  }
-
-  // The chat request the agent submits for the messages, on a gold frame.
-  function request_expected(messages: provider.ChatMessage[]): lines.Line {
-    const line = gold_line("request_chat");
-    line.json = {
-      model: constants.info.chat_model,
-      messages,
-      tools: functions_recorded(),
-      tool_choice: "auto",
-    };
-    return line;
+    return rows.map(([role, content], n) => [n, role, content]);
   }
 
   // The image answer of the castle turn, its image the gold's.
@@ -576,11 +668,30 @@ namespace test_agent {
     return line;
   }
 
-  // The contents of the turns of the scene as the store holds them.
-  function contents_of(scene: lines.DocRef): provider.ChatMessage[] {
+  // The `turn.prompt` lines the server's far end got, in order.
+  function prompts_pushed(): lines.Line[] {
+    return far.pushes.filter(
+      (line) => jslb.field_get(line[0], "type") === "turn.prompt",
+    );
+  }
+
+  // The rows of the scene's log as the store holds them: n, role, content.
+  function rows_of(scene: lines.DocRef): unknown[][] {
+    return store_get()
+      .turn_list(scene)
+      .map((row) => [row.n, row.role, row.content]);
+  }
+
+  // The contents of the scene's log as the store holds them.
+  function contents_of(scene: lines.DocRef): provider.InputItem[][] {
     return store_get()
       .turn_list(scene)
       .map((row) => row.content);
+  }
+
+  // A prompt document of the type given that holds the text given.
+  function prompt_doc(type: string, text: unknown): lines.Document {
+    return { 0: { t: type }, text };
   }
 
   // Makes the castle universe's world the current one, its row written.
@@ -610,6 +721,7 @@ namespace test_agent {
 
     // Checks every scripted reply was given.
     tearDown(): void {
+      debug_mode = undefined;
       for (const [type, left] of far.replies) {
         this.assertEqual(left, [], `replies to ${type} were left`);
       }
@@ -625,10 +737,16 @@ namespace test_agent {
       }
     }
 
+    // Scripts the scripted AI's reply to the next request, and keeps it.
+    model_script(reply: ModelReply): void {
+      far.models.push(reply);
+      this.reply_script("http.request", model_frame(reply));
+    }
+
     // Runs a turn of the gold line, the model answering in order, its reply.
-    turn_run(name: string, answers: provider.ChatMessage[]): lines.Line {
-      for (const answer of answers) {
-        this.reply_script("http.request", chat_reply(answer));
+    turn_run(name: string, replies: ModelReply[]): lines.Line {
+      for (const reply of replies) {
+        this.model_script(reply);
       }
       const request = line_without(gold_line(name), constants.id_fields);
       const before = far.answers.length;
@@ -639,16 +757,18 @@ namespace test_agent {
 
     // Runs the castle turn, in which the player answers 1.
     castle_run(): lines.Line {
-      const answers = answers_recorded();
-      for (const answer of answers.slice(0, 2)) {
-        this.reply_script("http.request", chat_reply(answer));
-      }
+      const [bootstrap, image, scene, enter, render] = calls_recorded();
+      this.model_script(calls_reply([bootstrap]));
+      this.model_script(calls_reply([image]));
       this.reply_script("http.request", image_reply());
       // The image tool keeps the picture, and the render sends it again.
       this.reply_script("media.store", gold_line("media_store_reply"));
       this.reply_script("media.store", gold_line("media_store_reply"));
       this.reply_script("render", gold_line("render_reply"));
-      return this.turn_run("say_castle", answers.slice(2));
+      return this.turn_run("say_castle", [
+        calls_reply([scene, enter, render]),
+        text_reply(constants.subtitle),
+      ]);
     }
 
     // Asserts the reply is the gold line's, to the turn the UI asked last.
@@ -662,18 +782,18 @@ namespace test_agent {
       this.assertEqual(reply, expected);
     }
 
-    // The chat requests the scripted AI got, in order, their ids taken off.
-    chats_got(): lines.Line[] {
+    // The model requests the scripted AI got, in order, their ids taken off.
+    models_got(): lines.Line[] {
       return far.got
         .filter((line) => jslb.field_get(line[0], "type") === "http.request")
-        .filter((line) => (line.url as string).endsWith("/chat/completions"))
+        .filter((line) => (line.url as string).endsWith(constants.model_path))
         .map((line) => line_without(line, constants.id_fields));
     }
 
-    // The messages of the chat requests the scripted AI got, in order.
-    messages_got(): provider.ChatMessage[][] {
-      return this.chats_got().map(
-        (line) => (line.json as provider.ChatRequest).messages,
+    // The input of each model request the scripted AI got, in order.
+    inputs_got(): unknown[][] {
+      return this.models_got().map(
+        (line) => (line.json as provider.ModelRequest).input,
       );
     }
 
@@ -693,16 +813,13 @@ namespace test_agent {
 
   // The castle turn: the player answers 1 and the analyst builds a scene.
   export class TestTurnRecorded extends AgentCase {
-    // The four chat requests and the image request are the castle turn's.
+    // The first request holds the log, each later one the call outputs.
     test_requests_recorded(): void {
       this.castle_run();
-      const chats = messages_recorded().map((messages) =>
-        request_expected(messages),
-      );
-      this.assertEqual(this.chats_got(), chats);
+      this.assertEqual(this.models_got(), castle_requests(far.models));
       const images = far.got
         .filter((line) => jslb.field_get(line[0], "type") === "http.request")
-        .filter((line) => (line.url as string).endsWith("/generations"))
+        .filter((line) => (line.url as string).endsWith(constants.image_path))
         .map((line) => line_without(line, constants.id_fields));
       this.assertEqual(images, [gold_line("image_request")]);
     }
@@ -719,7 +836,7 @@ namespace test_agent {
         "metaverse",
       ]);
       const [, , scene] = calls_recorded();
-      const body = (JSON.parse(scene.function.arguments) as FieldTable).body;
+      const body = (JSON.parse(scene.arguments) as FieldTable).body;
       this.assertEqual(store.doc_get(constants.arrival), body);
       const entered = utility.utf8_decode(
         store.kv_get("/castle_world/scene").data as Uint8Array,
@@ -738,19 +855,31 @@ namespace test_agent {
       this.assertEqual(shown, [stored, stored, gold_line("render_arrival")]);
     }
 
-    // Every message of the turn is a turn of the scene, appended in order.
+    // The prompt at 0 as `[message]`, then each reply as sent, each output.
     test_turns_stored(): void {
       this.castle_run();
-      const rows = store_get().turn_list(constants.scene);
-      const expected = contents_recorded();
+      this.assertEqual(rows_of(constants.scene), castle_rows(far.models));
+    }
+
+    // Each turn's row goes to the server as stored, the prompt as messages.
+    test_turns_pushed(): void {
+      this.castle_run();
+      const appended = far.pushes
+        .filter((line) => jslb.field_get(line[0], "type") === "turn.append")
+        .map((line) => jslb.payload_of(line));
+      const rows = castle_rows(far.models).slice(1);
       this.assertEqual(
-        rows.map((row) => [row.scene, row.n, row.role, row.content]),
-        expected.map((message, index) => [
-          constants.scene,
-          index + 1,
-          message.role,
-          message,
-        ]),
+        appended,
+        rows.map(([, role, content]) => ({
+          scene: constants.scene,
+          role,
+          content,
+        })),
+      );
+      const messages = [system_said(constants.analyst)];
+      this.assertEqual(
+        prompts_pushed().map((line) => jslb.payload_of(line)),
+        [{ scene: constants.scene, messages }],
       );
     }
 
@@ -762,17 +891,22 @@ namespace test_agent {
 
   // The turn after the castle turn, in the scene that turn entered.
   export class TestTurnNext extends AgentCase {
-    // The next turn is a new conversation, that of the arrival scene.
+    // The next turn is a new conversation, whose first request is whole.
     test_scene_new(): void {
       this.castle_run();
-      const moat = assistant_said(constants.moat_reply);
+      const moat = text_reply(constants.moat_reply);
       const reply = this.turn_run("say_next", [moat]);
-      const requests = this.messages_got();
-      this.assertEqual(requests[requests.length - 1], [
-        system_said(constants.analyst),
-        user_said("0"),
+      const requests = this.models_got();
+      const start = [system_said(constants.analyst), user_said("0")];
+      this.assertEqual(
+        requests[requests.length - 1],
+        request_expected(constants.arrival, start),
+      );
+      this.assertEqual(rows_of(constants.arrival), [
+        [0, "system", [start[0]]],
+        [1, "user", [start[1]]],
+        [2, "assistant", moat.output],
       ]);
-      this.assertEqual(contents_of(constants.arrival), [user_said("0"), moat]);
       this.reply_assert(reply, "reply_next");
     }
 
@@ -781,102 +915,240 @@ namespace test_agent {
       this.castle_run();
       const doc = prompt_doc("prompt", constants.castle_prompt);
       store_get().doc_put("castle", "prompt", doc);
-      const moat = assistant_said(constants.moat_reply);
+      const moat = text_reply(constants.moat_reply);
       this.turn_run("say_next", [moat]);
-      const requests = this.messages_got();
-      this.assertEqual(requests[requests.length - 1], [
-        system_said(constants.analyst),
-        system_said(constants.castle_prompt),
-        user_said("0"),
+      const requests = this.models_got();
+      const analyst = system_said(constants.analyst);
+      const castle = system_said(constants.castle_prompt);
+      this.assertEqual(
+        requests[requests.length - 1],
+        request_expected(constants.arrival, [analyst, castle, user_said("0")]),
+      );
+      this.assertEqual(rows_of(constants.arrival), [
+        [-1, "system", [analyst]],
+        [0, "system", [castle]],
+        [1, "user", [user_said("0")]],
+        [2, "assistant", moat.output],
       ]);
     }
   }
 
   // Turns with no tool calls and a click.
   export class TestTurnShort extends AgentCase {
-    // A reply with no tool calls ends the turn, in the request's name form.
+    // A reply with no calls ends the turn, in the request's name form.
     test_turn_short(): void {
-      const nothing = assistant_said(constants.nothing_reply);
+      const nothing = text_reply(constants.nothing_reply);
       const reply = this.turn_run("say_full", [nothing]);
-      this.assertEqual(contents_of(constants.scene), [
-        user_said("2"),
-        nothing,
+      const start = [system_said(constants.analyst), user_said("2")];
+      this.assertEqual(rows_of(constants.scene), [
+        [0, "system", [start[0]]],
+        [1, "user", [start[1]]],
+        [2, "assistant", nothing.output],
       ]);
       this.reply_assert(reply, "reply_full");
-      this.assertEqual(this.chats_got(), [
-        request_expected([system_said(constants.analyst), user_said("2")]),
+      this.assertEqual(this.models_got(), [
+        request_expected(constants.scene, start),
       ]);
     }
 
     // A click is told to the model as text, and the reply ends the turn.
     test_click_turn(): void {
-      const message = assistant_said(constants.click_reply);
-      const reply = this.turn_run("click", [message]);
+      const answer = text_reply(constants.click_reply);
+      const reply = this.turn_run("click", [answer]);
       const said = user_said(gold_text("agent_click_text"));
-      this.assertEqual(this.messages_got(), [
-        [system_said(constants.analyst), said],
+      const start = [system_said(constants.analyst), said];
+      this.assertEqual(this.models_got(), [
+        request_expected(constants.scene, start),
       ]);
-      this.assertEqual(contents_of(constants.scene), [said, message]);
+      this.assertEqual(contents_of(constants.scene), [
+        [start[0]],
+        [said],
+        answer.output,
+      ]);
       this.reply_assert(reply, "reply_click");
     }
   }
 
-  // The requests of a scene the store compacted and of one it kept whole.
-  export class TestCompacted extends AgentCase {
-    // A compacted scene goes to the model as listed: its summary, then more.
-    test_request_compacted(): void {
-      const store = store_get();
-      const text = gold_text("substrate_turns_compacted");
-      store.turn_append(constants.scene, "user", user_said("1"));
-      const said = assistant_said(constants.nothing_reply);
-      store.turn_append(constants.scene, "assistant", said);
-      store.turn_compact(constants.scene, 2, text);
-      const nothing = assistant_said(constants.nothing_reply);
-      this.turn_run("say_nothing", [nothing]);
-      this.assertEqual(this.messages_got(), [
-        [system_said(constants.analyst), system_said(text), user_said("2")],
+  // A scene's chain: chained while the log adds rows, else a chain's first.
+  export class TestChain extends AgentCase {
+    // The next turn sends its user item alone, after the last response.
+    test_turn_chained(): void {
+      const first = text_reply(constants.nothing_reply);
+      this.turn_run("say_nothing", [first]);
+      const second = text_reply(constants.moat_reply);
+      this.turn_run("say_again", [second]);
+      const requests = this.models_got();
+      this.assertEqual(requests, [
+        request_expected(constants.scene, [
+          system_said(constants.analyst),
+          user_said("2"),
+        ]),
+        request_expected(constants.scene, [user_said("2")], first),
+      ]);
+      this.assertEqual(Object.keys(requests[1].json as FieldTable), [
+        ...constants.body_keys,
+      ]);
+      this.assertEqual(contents_of(constants.scene), [
+        [system_said(constants.analyst)],
+        [user_said("2")],
+        first.output,
+        [user_said("2")],
+        second.output,
       ]);
     }
 
-    // A scene kept whole goes to the model with every turn it holds.
-    test_request_whole(): void {
-      const nothing = assistant_said(constants.nothing_reply);
-      this.turn_run("say_nothing", [nothing]);
-      this.turn_run("say_again", [nothing]);
-      this.assertEqual(this.messages_got()[1], [
-        system_said(constants.analyst),
-        user_said("2"),
-        nothing,
-        user_said("2"),
-      ]);
-    }
-  }
-
-  // A round of tool calls is stored with its results, after the tools ran.
-  export class TestRounds extends AgentCase {
-    // The reply that calls a tool is stored with its result, after it ran.
-    test_round_stored(): void {
+    // Calls run before their reply is stored, their outputs go chained.
+    test_results_chained(): void {
       const statement = {
         sql: constants.count_sql,
         params: [constants.scene],
       };
       const count = call_make(
         "call_1",
-        "browser.sql_run",
+        "browser_sql_run",
         JSON.stringify({ db: "metaverse", statements: [statement] }),
       );
-      const nothing = assistant_said(constants.nothing_reply);
-      this.turn_run("say_castle", [assistant_calls([count]), nothing]);
-      this.assertEqual(contents_of(constants.scene), [
-        user_said("1"),
-        assistant_calls([count]),
-        tool_said(count, constants.count_result),
-        nothing,
+      const world = call_make(
+        "call_2",
+        "browser_kv_get",
+        '{"ref":"/metaverse/world"}',
+      );
+      const calls = calls_reply([count, world]);
+      const nothing = text_reply(constants.nothing_reply);
+      this.turn_run("say_castle", [calls, nothing]);
+      const outputs = [
+        output_of(count, constants.count_result),
+        output_of(world, constants.world_result),
+      ];
+      this.assertEqual(
+        this.models_got()[1],
+        request_expected(constants.scene, outputs, calls),
+      );
+      this.assertEqual(rows_of(constants.scene), [
+        [0, "system", [system_said(constants.analyst)]],
+        [1, "user", [user_said("1")]],
+        [2, "assistant", calls.output],
+        [3, "tool", [outputs[0]]],
+        [4, "tool", [outputs[1]]],
+        [5, "assistant", nothing.output],
       ]);
+    }
+
+    // Rows a script appends between turns go in the chained request.
+    test_rows_appended(): void {
+      const first = text_reply(constants.nothing_reply);
+      this.turn_run("say_nothing", [first]);
+      const noted = user_said(constants.noted_text);
+      store_get().turn_append(constants.scene, "user", [noted]);
+      this.turn_run("say_again", [text_reply(constants.nothing_reply)]);
+      this.assertEqual(
+        this.models_got()[1],
+        request_expected(constants.scene, [noted, user_said("2")], first),
+      );
+    }
+
+    // A compaction at the threshold makes the next request a chain's first.
+    test_threshold_restart(): void {
+      const store = store_get();
+      const threshold = harness.setting_get(
+        constants.compact_setting,
+      ) as number;
+      // Turns enough that the first turn's reply reaches the threshold.
+      for (let n = 1; n <= threshold - 2; n += 1) {
+        store.turn_append(constants.scene, "user", [user_said(String(n))]);
+      }
+      this.turn_run("say_nothing", [text_reply(constants.nothing_reply)]);
+      this.turn_run("say_again", [text_reply(constants.nothing_reply)]);
+      const summary = gold_text("substrate_turns_compacted_at").replaceAll(
+        "{0}",
+        String(threshold),
+      );
+      const requests = this.models_got();
+      this.assertEqual(requests.length, 2);
+      const first = requests[0].json as FieldTable;
+      this.assertFalse(Object.hasOwn(first, "previous_response_id"));
+      this.assertEqual(
+        requests[1],
+        request_expected(constants.scene, [
+          system_said(constants.analyst),
+          system_said(summary),
+          user_said("2"),
+        ]),
+      );
     }
   }
 
-  // The system prompt `prompt_build` makes from the store.
+  // The tool list a request holds: the text that omits it in debug mode alone.
+  export class TestToolList extends AgentCase {
+    // In debug mode a request holds the omission's text, not the tools.
+    test_tools_omitted(): void {
+      debug_mode = true;
+      this.turn_run("say_nothing", [text_reply(constants.nothing_reply)]);
+      const json = this.models_got()[0].json as FieldTable;
+      this.assertEqual(json.tools, constants.tools_omitted);
+    }
+
+    // Outside debug mode a request lists every tool, flat, as xAI takes it.
+    test_tools_listed(): void {
+      debug_mode = false;
+      this.turn_run("say_nothing", [text_reply(constants.nothing_reply)]);
+      const json = this.models_got()[0].json as FieldTable;
+      this.assertEqual(json.tools, functions_recorded());
+    }
+  }
+
+  // A conversation gets its system prompt once, whatever follows.
+  export class TestPromptOnce extends AgentCase {
+    // One commit before the first turn, and a chain's first alone sends it.
+    test_commit_once(): void {
+      this.castle_run();
+      const types = far.pushes.map((line) => jslb.field_get(line[0], "type"));
+      this.assertEqual(types.slice(0, 2), ["turn.prompt", "turn.append"]);
+      const prompts = prompts_pushed();
+      this.assertEqual(prompts.length, 1);
+      const analyst = system_said(constants.analyst);
+      this.assertEqual(jslb.payload_of(prompts[0]).messages, [analyst]);
+      const [first, ...chained] = this.inputs_got();
+      this.assertEqual(first[0], analyst);
+      this.assertEqual(first.filter(system_held), [analyst]);
+      this.assertEqual(chained.length, 3);
+      for (const input of chained) {
+        this.assertEqual(input.filter(system_held), []);
+      }
+    }
+
+    // A later turn stores no prompt and sends none, and an edit stays unread.
+    test_prompt_kept(): void {
+      this.turn_run("say_nothing", [text_reply(constants.nothing_reply)]);
+      const doc = prompt_doc("prompt", constants.castle_prompt);
+      store_get().doc_put("metaverse", "prompt", doc);
+      this.turn_run("say_again", [text_reply(constants.nothing_reply)]);
+      this.assertEqual(prompts_pushed().length, 1);
+      this.assertEqual(this.inputs_got()[1], [user_said("2")]);
+      this.assertEqual(contents_of(constants.scene)[0], [
+        system_said(constants.analyst),
+      ]);
+    }
+
+    // A compaction between turns restarts the chain, the prompt sent once.
+    test_compaction_kept(): void {
+      this.turn_run("say_nothing", [text_reply(constants.nothing_reply)]);
+      const text = gold_text("substrate_turns_compacted");
+      store_get().turn_compact(constants.scene, 2, text);
+      this.turn_run("say_again", [text_reply(constants.nothing_reply)]);
+      this.assertEqual(prompts_pushed().length, 1);
+      this.assertEqual(
+        this.models_got()[1],
+        request_expected(constants.scene, [
+          system_said(constants.analyst),
+          system_said(text),
+          user_said("2"),
+        ]),
+      );
+    }
+  }
+
+  // The system prompt `prompt_build` makes from the store, its messages.
   export class TestPrompt extends AgentCase {
     // In the hyperposition the system prompt is the analyst's alone.
     test_prompt_analyst(): void {
@@ -1007,6 +1279,7 @@ namespace test_agent {
         (type: string, version: number) => {
           seen.push([type, version]);
         },
+        debug_read,
       );
       this.assertEqual(
         seen,

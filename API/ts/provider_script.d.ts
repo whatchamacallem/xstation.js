@@ -10,13 +10,27 @@
 // text it answers with `after_lacks`, whose tool calls move on as those of
 // `after_tools` do. A node holding one of the two and not the other is a
 // broken table, refused when tool results reach it. Every image request is
-// answered with the image of `image_pattern` as `b64_json`.
+// answered with the image of `image_pattern` as `b64_json`. Once it has chosen
+// a reply it holds the whole request to what xAI expects, refusing the first
+// bad field by `provider_script.field_invalid`. It keeps each response it
+// answered under its id, unless `store` is false, so that a request chained
+// from it is checked against it and one chained from any other id refused.
+// Each reply holds a reasoning item, xAI's echoes of the request, and a `usage`
+// of arithmetic on the context, in characters and never a tokenizer's count.
+// In debug mode, by its reader, it takes `provider.tools_omitted` for tools.
 
 declare namespace provider_script {
+  // A call of the script, which the reply sends as a `function_call` item.
+  interface ScriptCall {
+    call_id: string;
+    name: string;
+    arguments: string;
+  }
+
   interface ScriptReply {
     // What the assistant says, null when it only calls tools.
     content: string | null;
-    tool_calls?: provider.ToolCall[];
+    tool_calls?: ScriptCall[];
     // The node to be in after this reply's tool results arrive.
     next: string;
   }
@@ -40,7 +54,7 @@ declare namespace provider_script {
   }
 
   class ScriptPort implements queue.Port {
-    constructor(script: Script);
+    constructor(script: Script, debug: () => boolean);
     line_post(line: lines.Line, transfer: ArrayBuffer[]): void;
     line_receive(fn: (line: lines.Line) => void): void;
   }

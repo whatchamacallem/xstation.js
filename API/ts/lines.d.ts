@@ -78,7 +78,7 @@ declare namespace lines {
     cause?: ErrorCause;
   }
 
-  // The provider's address and model names, empty in scripted mode.
+  // The provider's address and model names. A scripted run's cannot resolve.
   interface ProviderInfo {
     base_url: string;
     chat_model: string;
@@ -171,14 +171,21 @@ declare namespace lines {
     databases: string[];
   }
 
+  // turn.append: one turn of a scene's log, its input items.
   interface TurnAppend {
     scene: DocRef;
     role: provider.Role;
-    content: provider.ChatMessage;
+    content: provider.InputItem[];
   }
 
   interface TurnAppendReply {
     n: number;
+  }
+
+  // turn.prompt: a conversation's system prompt, stored once before turn 1.
+  interface TurnPrompt {
+    scene: DocRef;
+    messages: provider.InputMessage[];
   }
 
   interface SqlStatement {

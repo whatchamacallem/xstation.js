@@ -418,8 +418,8 @@ maintainer. You have permission to update this file and fix errors.
 ## Map
 
 - Format: Files, Lanes, Line form, Line types, Limits, Bad numbers
-- Behaviour: Bring up, engine, Store, Errors, Console, ttyd protocol, queue,
-  Tools
+- Behaviour: Bring up, engine, Store, Audit record, Errors, Console, ttyd
+  protocol, queue, Tools
 - Build and start: page_build, ttyd_build, vectors_make, xsjs_start,
   xsjs_serve, api_match, devtools, xsjs_screenshot
 - Test: test_all, Blocks, Realms, line_case, TAP, Rungs, audit_read
@@ -469,7 +469,8 @@ maintainer. You have permission to update this file and fix errors.
   hold the inputs 0 to 3 and one `otherwise` alike; `after_render`,
   `after_note`, `after_console` and `after_output` hold no inputs and one
   after_tools each, since a node holds one after_tools; `after_console` also
-  holds `after_holds`, `hyperposition`, and `after_lacks`.
+  holds `after_holds`, `hyperposition`, and `after_lacks`. Each of its 9 calls
+  is a provider_script.ScriptCall, `{arguments, call_id, name}`, all text.
 - analyst's texts: the seed's, repeated in `start` and `menu`, pinned by the
   golds of the C block and the demo test and not by
   `python/test_setting_test_main_loop.json`, whose `analyst` key pins the tool
@@ -479,7 +480,9 @@ maintainer. You have permission to update this file and fix errors.
   `python/test_main_loop.py`, which walks it as the scripted provider does, by
   `after_tools` and by `after_lacks`, against the browser tools of
   API/mcp/tools.json and the gold's `analyst`, and requires `otherwise` on
-  every node with replies and `after_lacks` wherever `after_holds` is.
+  every node with replies and `after_lacks` wherever `after_holds` is. Its
+  test_calls_form requires each call to hold exactly the three text fields of
+  a ScriptCall, so a call left in the chat form fails.
 - `<root>/parameters.json`: debug mode and the console's verbose level, which
   are parameters of a root and not settings, by `python/switches.pyi`.
 - `<root>` outside debug mode: its databases, cache, lock and the files the
@@ -546,6 +549,7 @@ doc.put wire AI->SERVER 0 push, commit
 db.create wire AI->SERVER 0 push, commit
 db.drop wire AI->SERVER 0 push, commit
 turn.append wire AI->SERVER 0 push, commit
+turn.prompt wire AI->SERVER 0 push, commit
 sql.run wire AI->SERVER 0 push, commit
 db.restore wire SERVER->AI 1 push; `files` db.file next
 db.file wire SERVER->AI 1 push
@@ -873,8 +877,10 @@ fault realm REALM->DRIVER 0 push; fails the block
   restored store, so the scripted port is added as the http owner in the task
   that wakes on the sync's reply. The scripted port reads no key and the
   provider door throws without one, so the program sets the fixed text
-  scripted. base_url, chat_model and image_model are empty strings in scripted
-  mode, as the engine role reads neither provider.json nor the key's variable.
+  scripted. The engine role reads neither provider.json nor the key's variable,
+  so the program names base_url https://scripted.invalid/v1, chat_model grok-4.7
+  and image_model grok-imagine-image, so that each request is one xAI would
+  take and none can resolve.
 - engine sync check: engine.synced compares the reply's databases with
   store.db_list() and throws engine.sync_differs when they differ.
 - engine first render: reads the world from /metaverse/world, the scene from
@@ -968,8 +974,81 @@ fault realm REALM->DRIVER 0 push; fails the block
   its canonical JSON, and a plain reference string in a body stays plain, so a
   seed document writes its refs at key 1 on.
 - turn compaction: browser only, inside turn_append when a user turn finds
-  compact_turns of them, and by turn_compact, which the AI's scripts call
-  through engine.store. Nothing of a compaction crosses the wire.
+  compact_turns of them, and by the store's turn_compact. Its summary is one
+  row `[{role, content}]` at n 1, role system. Nothing of a compaction crosses
+  the wire, and the next model request starts a new chain.
+- script compaction: disabled for now, by the maintainer on 2026-11-09:
+  engine.store holds no turn_compact, so no script compacts, and the seed's
+  prompt names none. Compaction by a script is not to be tested yet: no suite,
+  block or rung has a script compact. The store keeps turn_compact, as the
+  threshold compaction shares its private #turns_compact.
+- script compaction return: engine.store gains turn_compact again, with a test
+  in test_agent's TestChain of a script that compacts the scene's first turn
+  within a turn, whose next request restarts with the prompt, the summary, the
+  reply's items, reasoning kept, and the script's output, then chains with the
+  next user item alone; and an answer to turn_compact through calls.
+- turn_compact through calls: a turn_compact through a reply row with calls
+  but not through the rows of their outputs leaves call outputs answering no
+  call at the log's head, after the summary, so the next request, a restart, is
+  refused by the scripted port at `json.input[k].call_id`, and likely by xAI.
+  The threshold compaction cannot do it, as it compacts through the last row
+  and a reply with calls is stored with its outputs. Only a script could, and
+  a script's compaction is disabled, so the store adds no refusal of its own.
+- conversation: the log of one scene, its system prompt then its turns, which
+  turn_list returns whole in both stores. A new scene is a new conversation.
+- turn row: the content of a row of _turn is a JSON array of input items of
+  the Responses API: the player's turn `[{role, content}]`, role user; a reply
+  its output items as the door kept them, reasoning included, role assistant;
+  each call's output a row of its own, `[{type: "function_call_output",
+  call_id, output}]`, role tool; a prompt message `[message]`; the summary.
+  turn.append carries the items, and turn_list in TypeScript parses them.
+- row key order: the browser writes a row by json_canonical, which puts integer
+  keys first and keeps every other key in insertion order, sorting none, so
+  every comparison of rows parses them first. The server, by engine_turn,
+  stores compact JSON in the order the items came, which equals the browser's
+  row while no object holds an integer key.
+- agent chain: agent's TurnLoop keeps in memory, per scene, the id of the last
+  response and utility.json_text of the parsed content of each row its context
+  holds. A request whose log holds more rows than the chain and begins with
+  them sends the items of the rows after them, with previous_response_id; any
+  other deletes the chain and sends every row's items with none.
+- chain restart: a conversation's first call, the first after a page load, as
+  the chains live in memory, and the first after the threshold's compaction,
+  all start a chain by that one comparison.
+- chain kept: once a reply's row is stored the loop reads the log back. When it
+  begins with the request's rows and the next row is the reply's, at the n
+  turn_append returned, the chain becomes the response's id and those rows;
+  otherwise it is deleted, so a log a script changed under the turn restarts
+  the next request. A reply with calls is stored with its outputs in one
+  transaction, so the next request sends the outputs alone.
+- chain deferred: a chain kept across page loads, its response id committed
+  beside the log, and a restart of a chain older than 29 days, as xAI keeps a
+  response 30 days, are written whole in AUDIT_PLAN.md 6.6 and not built.
+- agent prompt: agent's turn_start stores the prompt when the scene holds none,
+  before the player's turn and so before the first model call and the first
+  possible tool call. A chain's first request sends it as the log's leading
+  items and a chained request does not, so it goes once per chain: once per
+  conversation, page load and compaction.
+- prompt edit: an edit of a prompt document reaches the next new conversation,
+  never one that holds its prompt.
+- turn_prompt: stores the prompt's messages as rows of _turn at n 0 and below,
+  each `[message]`, role system, the last at 0, and sends the messages
+  themselves as one turn.prompt push, which the server stores as rows alike. A
+  second prompt of one scene fails on the table's key, `UNIQUE constraint
+  failed`, in both stores.
+- turn_prompted: the flag: whether the scene's row at n 0 exists. As a row of
+  the log it cannot disagree with the text, and it travels with the database in
+  a whole sync, so a reload stores no second prompt. A turn.prompt line lost to
+  a connection loss stores the prompt again after the next load, as the server
+  never held it. The browser's store alone reads it; the server only applies.
+- prompt and turns: the turns count from 1, compaction counts and deletes n > 0
+  alone, and db_view's counts of turns and scenes are of n > 0, so the prompt is
+  in no count and outlives every compaction, and the chain a compaction starts
+  sends the prompt, the summary, then the rows after it.
+- seed prompt: python/seed/prompt.json says nothing the tool list says: the
+  tools' names, prefixes and debug mode reach the model in every model request
+  outside debug mode, chained or not, as the agent sends the tools on each. In
+  debug mode no request lists them, by DEBUG_MODE_TOOL_LIST_OMITTED.
 - store methods: every method is synchronous and runs inside the task that
   called it. The browser's store is given an initialized module, an installed
   pool and open cache files, and waits on nothing.
@@ -985,6 +1064,77 @@ fault realm REALM->DRIVER 0 push; fails the block
 - schema triggers: raise the name of a string of the strings table, as
   agent.content_ambiguous, and the statement throws that string, the SQLite
   error as its cause, __cause__ in Python.
+
+## Audit record
+
+- audit.ShownLog: what the document shows of each conversation: items, a dict
+  of each conversation's input items keyed by its Document-Ref, a model
+  request body's prompt_cache_key or a commit payload's scene; last, the
+  conversation last moved; tools, the tool list last shown; output, the last
+  model reply's output. tools and output are one of each, shared by every
+  conversation. Its line_thin is the writer's and its line_whole the reader's.
+  Each moves the same state, last included, on the same lines in the same
+  order, so the second undoes the first.
+- ShownLog lanes: three are read: `ai to http`, a model request, whose body
+  holds input; `http to ai`, a model reply, whose body holds output; `ai to
+  server`, a turn.prompt or turn.append commit. An image request and its reply
+  hold neither and are written as they are.
+- ShownLog counts: each is measured by comparing values as parsed JSON, so key
+  order does not matter, and never assumed, so a line that differs writes what
+  differs. A count of items compares with its conversation's items, and one of
+  a conversation the document has not shown yet with the items of the one last
+  shown, so a second scene's prompt, the same text, is written as a count and
+  the record holds the prompt once. A move between scenes and back writes
+  nothing again, as each keeps its own items. A line of no count reads as
+  whole, as a document older than it.
+- input_kept: a model request is written with input_kept, always, then input,
+  the rest. With no previous_response_id it counts the leading items equal to
+  the conversation's items from their start, which become the whole input;
+  with one, the largest k whose first k items equal the last k of the
+  conversation's items, which gain the rest.
+- content_kept: a turn.append is written with content_kept, only when above 0,
+  the count of its leading items equal to the held output, then content, the
+  rest; the scene's items gain the whole content. A reply's row so writes
+  content_kept and an empty content, its items being in the reply's `http to
+  ai` record.
+- messages_kept: a turn.prompt is written with messages_kept, always, its
+  leading messages equal to the scene's items from their start, or to those of
+  the conversation last shown when the document has not shown the scene, then
+  messages, the rest, and the scene's items become the messages.
+- tools_kept: a model request's tool list equal to the one shown, and a reply's
+  echo of it, are written as its count. The text DEBUG_MODE_TOOL_LIST_OMITTED is
+  no list, so it is written whole and the list shown stays. A request's tools become those shown; a
+  reply's echo replaces nothing. A tool list that changed is written whole.
+- ShownLog order: as each commit precedes its request on the wire, a request
+  usually writes input_kept alone and an empty input. A chain's restart writes
+  its input from the first item that differs from its conversation's items,
+  so after a compaction the summary, the one item no commit carries, and all
+  after it.
+- ShownLog reload: a process's first record on one of the three lanes reads
+  the document back by line_whole through all three, `http to ai` included, so
+  a page load and a system_restart keep what the last process wrote, each
+  conversation's items and last alike. It parses each entry by
+  jslb.json_decode, as a live record is parsed, so an integer key compares
+  equal after a reload, the body cut at its first `}` at the left margin, as
+  json.dumps indents every inner brace and escapes every newline, so that the
+  blobs line is left out. A record on a lane before audit_open raises
+  audit.not_open and reads nothing. No page thread keeps this state, as each
+  load starts with nothing.
+- record_text: stays whole and keeps no state, for a block's log, which has no
+  document.
+- audit_read whole lines: entries_parse makes each line whole through ShownLog,
+  so ReadEntry.line is the line as sent, ReadEntry.body the entry as written and
+  ReadEntry.kept the count written, input_kept, content_kept or messages_kept.
+  Every count of a model call reads the former. It parses by json, not
+  jslb.json_decode, as line_whole slices by the written counts and compares
+  nothing, so a line's header stays at the text key "0".
+- prompt_recorded: the copies of the system prompt, the content of the first
+  model call's first item, in the written bodies of the three lanes, which
+  --check holds to at most one. A dump is a person's request and holds the
+  prompt document as a row, so it is not counted.
+- audit size: on Chat Completions, chat requests held 86 percent of a long
+  audit before messages_kept, 1185230 of 1373079 bytes in
+  tmp/audit_tools_09_0633.txt.
 
 ## Errors
 
@@ -1198,6 +1348,89 @@ fault realm REALM->DRIVER 0 push; fails the block
 - image bytes: kv_get hands back a cache handle, the digest as text, for a
   value over overflow_bytes, and the media port demands bytes in memory, so
   both render paths read it by cache_read on store.sink().
+- tool name: `prefix_name`, as browser_sql_run, the mark an underscore, since xAI
+  publishes no pattern and OpenAI's, `^[a-zA-Z0-9_-]{1,64}$`, refuses a dot. A
+  prefix holds no underscore, so the first one ends it.
+- DEBUG_MODE_TOOL_LIST_OMITTED: provider.tools_omitted, the text a model
+  request holds at tools in debug mode in place of the tool list, by the
+  maintainer on 2026-11-09. It replaces the 91 percent of the request bytes the
+  tool list was, 247500 of 269797 B in the long audit of AUDIT_PLAN.md 8.10,
+  and the fake's echo of it. agent.handlers_register and
+  provider_script.ScriptPort each take a debug reader, switches.debug_on in the
+  engine. Outside debug mode the list is sent whole, as xAI needs it, and the
+  fake refuses the text at json.tools; in debug mode the fake refuses a list.
+  A debug mode request to xAI itself would be refused, so a hand test against
+  xAI runs outside debug mode, with no audit.
+- model request: `POST {base_url}/responses`, the headers Authorization and
+  Content-Type alone, the body model, previous_response_id when chained, input,
+  tools, DEBUG_MODE_TOOL_LIST_OMITTED in debug mode, tool_choice auto,
+  prompt_cache_key and include, in that order.
+  instructions and store are never sent, so xAI keeps each response, as a chain
+  needs.
+- prompt_cache_key: in the body of every model request, the scene's
+  Document-Ref, by which xAI routes a conversation to the server holding its
+  cache. It replaces the header x-grok-conv-id, which no request sends.
+- reasoning item: include asks for `reasoning.encrypted_content`, and the door
+  keeps each output item as parsed, every field xAI sent, so the reasoning is
+  stored in the reply's row and sent back when a chain restarts with the whole
+  log, keeping the history the cache needs unchanged.
+- model reply: model_response refuses by provider.field_invalid, in order, an
+  id or model not text, a status but completed or incomplete, an output not an
+  array, then per item its type, a reasoning item's id, a message's role and
+  output_text parts, a call's call_id, name and arguments. text_join gives null
+  for an output with no message, which the agent throws as agent.reply_empty.
+- scripted place: the port holds one place in the table, the current node and
+  the calls pending, for the whole port and not per chain, as a place per
+  conversation would send a new scene's first turn to the start node. It moves
+  only once every check has passed.
+- script choice: the last input item picks the reply. Call outputs ending the
+  input take the after path of the pending calls, refused by results_unasked or
+  results_unmatched; any other last item must be a user message with no type,
+  else role_unexpected, naming the item as JSON, then results_pending while
+  calls are pending.
+- scripted port checks: before its choice it refuses the method, a url not
+  text, an unknown path, a body not an object, an input not an array or empty
+  and a last item not an object. After it, so that the script's own refusals
+  keep their texts, it refuses by provider_script.field_invalid the first bad
+  field: url not https; headers absent; Authorization; Content-Type; model;
+  tools, each flat, a name of `^[a-zA-Z0-9_-]{1,64}$`, at most 1000, or in
+  debug mode by its reader DEBUG_MODE_TOOL_LIST_OMITTED alone; tool_choice; prompt_cache_key absent or empty; instructions beside
+  previous_response_id, though alone it passes; a previous_response_id it does
+  not hold; store not a boolean; each input item from the first; last
+  `json.input` for calls still due at its end.
+- scripted input checks: an item with no type is a message of role system or
+  user with text content; a message is the model's, role assistant, of
+  output_text parts; a function_call holds text call_id, name and arguments; no
+  other type but reasoning and function_call_output. A run of the model's
+  items must begin with reasoning, so a reply resent without its reasoning item
+  fails at `.type`, as does any item while calls are due.
+- scripted due calls: a function_call_output must answer the first call still
+  due, else it fails at `.call_id`. A chained request's input starts with the
+  calls of the response it chains from due, a chain's first with none; a run of
+  the model's items makes its calls due once it ends, so a reply of several
+  calls passes.
+- scripted held responses: unless store is false the port keeps each response
+  under its id, its context with the output after it and the output's calls,
+  and a chained request's context is that, then its input. store false keeps
+  none but still moves the key's cache. The port lives in the page, so a load
+  forgets every response, as the agent forgets its chains.
+- scripted ids: `resp_H`, `rs_H`, `msg_H` and `fc_H_K`, K from 1, H the first 16
+  hexadecimal digits of the SHA-256 of the UTF-8 of the canonical text, keys
+  sorted at every depth, of `[prompt_cache_key, context]`. They are arithmetic
+  on the request and differ across loads, where a counter of the port would
+  start again and the audit tool would find one id written twice.
+- scripted reply: output a reasoning item, encrypted_content the text scripted,
+  then a message of one output_text part when the script's content is not
+  null, then each call as a function_call; the body id, object response,
+  model, status completed, output, the echoes tools and tool_choice when the
+  request held them, previous_response_id always, null when absent, and usage.
+- scripted usage: arithmetic on the context, in characters and never tokens, an
+  item's size the length of its canonical text: input_tokens the context's;
+  input_tokens_details.cached_tokens the leading items equal to the last context
+  the port answered under the same prompt_cache_key, its output included;
+  output_tokens the output's; output_tokens_details.reasoning_tokens the
+  reasoning item's, always the first; total_tokens their sum. A load's first
+  call finds nothing cached.
 - tool failure: a tool that throws, before or after it submitted a request,
   fails the server as mcp.d.ts says; a permit denial and the console tools'
   refusal outside debug mode are `isError` results the tool returns, and fail
@@ -1218,8 +1451,8 @@ fault realm REALM->DRIVER 0 push; fails the block
   table. A content that is not a string is refused in every table.
 - script after_holds: on a node holding it, tool results are answered by
   after_tools only when every result of the reply holds the text, else by
-  after_lacks, whose tool calls move on as after_tools' do. A result whose
-  content is not a string throws provider_script.field_invalid.
+  after_lacks, whose tool calls move on as after_tools' do. A call output whose
+  output is not a string throws provider_script.field_invalid.
 - script after pair: a node holding one of after_holds and after_lacks and not
   the other throws provider_script.after_unpaired when tool results reach it.
 - box closing: the DOM port closes the box in its submit and click listeners,
@@ -1841,7 +2074,8 @@ fault realm REALM->DRIVER 0 push; fails the block
   permit.ask and console.show scripted. A case's last line waits while the
   scripted UI asks audit.tail through the worker, and each new entry of the
   tail with the label and parts of a mark of the gold's wire sends the test's
-  end that mark's line first, so a case pins the wire's lines in order.
+  end that mark's line first, so a case pins the wire's lines, and the model
+  replies' `http to ai` records, in order.
 - C block picture: once the first render's reply has gone through the near
   port, the test's end gets the line test_integrate_engine.first_painted: the
   canvas's hidden, width and height and the distinct `r g b a` texts of its
@@ -1854,7 +2088,22 @@ fault realm REALM->DRIVER 0 push; fails the block
   `"key": value` with a space. wire_result_3 holds the tool's output as
   `hyperposition\\n`, escaped twice in the laid out text. A mark may name a
   line no case expects, wire_audit_own, which fails the case whose tail holds
-  the audit's own operation.
+  the audit's own operation. wire_prompt is expected in choice_1 alone, so a
+  second commit of the prompt in a later case fails that case.
+- C block reply marks: as a reply's row commits as content_kept and an empty
+  content, a reply's calls and texts are pinned in its `http to ai` record, by
+  `"type": "function_call"`, call_id and name, or `"type": "output_text"` and
+  text; a result's on `ai to server`, by `"type": "function_call_output"` and
+  call_id; and wire_stored, a turn.append of role assistant, pins each reply
+  row's commit. No part holds a digest id, and no mark pins an `ai to http`
+  request, so the chain and the prompt sent once are proved by the demo alone.
+- digest ids in a gold: no hand written gold pins the fake's H. A unit suite
+  computes the H it expects at run time from a canonical text the test writes
+  literally. A block that compares the fake's replies whole checks one H of 16
+  digits per answer and writes it as sixteen zeros: test_integrate_provider_script
+  in its handlers, which also fill a previous_response_id of `resp_` and zeros
+  with the id of the answer before, and test_agent_faults by its ZeroedPort,
+  each of whose cases asks the model once.
 - C block tail ids: each tail is a request the worker relays to the server,
   which takes one id of the worker's queue, so each later case's worker ids
   move up by one per tail before it, and the gold counts them.
@@ -2058,11 +2307,28 @@ fault realm REALM->DRIVER 0 push; fails the block
   labelled, through roots and ttyd made by xsjs_serve's functions. Exit 0, 1 at
   the first failed check, naming its rung, 130 at ctrl C, or 128 plus the
   signal's number at SIGHUP or SIGTERM.
-- demo rungs: served, choice 1, choice 3, bad input, dump, audit, left and
-  plain are smoke-test; reload, choice 2, console, overlay and the tools rungs
-  are test-all; they run in the order served, reload, choice 1, choice 3, bad
-  input, choice 2, console, overlay, dump, audit, left, plain, then tools
-  served, data, console, again, dump, record and restart.
+- demo rungs: served, choice 1, choice 3, bad input, prompt kept, dump, audit,
+  left and plain are smoke-test; reload, choice 2, console, overlay and the
+  tools rungs are test-all; they run in the order served, reload, choice 1,
+  choice 3, bad input, choice 2, console, overlay, prompt kept, dump, audit,
+  left, plain, then tools served, data, console, again, dump, record and
+  restart.
+- demo prompt kept: loads the page after the turns and types the first bad
+  input, then waits for a model call of the new load with every call answered
+  in the audit read whole by audit_read.entries_parse, and runs the demo
+  conversation check.
+- demo conversation check: test_demo.conversation_check requires one
+  turn.prompt commit, before the first model call, its first message the
+  prompt; a chain started only at a load's first call or after a compaction's
+  summary, each with the prompt as its first item and nowhere else; each
+  chained call naming a reply of its own load, with no system message and
+  exactly the outputs due, in order, or one user message, its reply with some
+  cached tokens; every call of these debug roots sending
+  DEBUG_MODE_TOOL_LIST_OMITTED, the gold's tools_omitted, as its tools; and the
+  prompt once in the written bodies of the three lanes. A load's first call is
+  not held to cached tokens, as the fake lives in the page. The list itself is
+  sent by the plain rung alone, outside debug mode, which the fake checks flat,
+  and test_tools_listed of ts/test_agent.ts proves it lists every tool.
 - demo audit check: the audit rung and the tools record rung wait until each
   request of the audit has its reply, as a page thread's record comes late, then
   run audit_read.failure_check on it. The plain root records nothing, and the
@@ -2072,20 +2338,22 @@ fault realm REALM->DRIVER 0 push; fails the block
   starts, from the chains of the gold's `tools`. Each chain is one input, whose
   calls each take one model call, and a chain of the gold names its list of
   calls, so that 1 and 3 run data_calls and 2 and 4 console_calls with ids of
-  their own. table_make fails when API/mcp/tools.json lists a tool no chain
-  calls, so a new tool cannot miss the rung.
+  their own. Each call is a ScriptCall, its call_id `call_CHAIN_INDEX` and its
+  arguments the JSON text of the gold's. table_make fails when
+  API/mcp/tools.json lists a tool no chain calls, so a new tool cannot miss the
+  rung.
 - demo tools order: 1 runs 17 data calls of 15 tools, whose render shows the
   pattern image_make kept. 2 runs the console's 3, answering each permit by a
   click, Always Allow then Accept then Always Allow; 4 then asks only the one
   not always allowed. 3 takes the conversation to 80 turns, so that 4 compacts
   it first. 0 dumps both sides, which differ in their turns alone, 9 and 88.
-- demo tools record: every model call holds the seed's prompt exactly once, as
-  its first message, with all the tools, and no stored turn holds it or has the
-  role system; the compaction's summary is the second system message of the call
-  after it; each result holds the gold's text under its own id; the audit shows
-  each commit; and the server holds the kept row and the main loop file, not the
-  dropped database. A chat API keeps nothing between calls, so the prompt goes
-  once per model call, and the record shows no call without it.
+- demo tools record: the demo conversation check of its root; the first call
+  to show the compaction's summary starts a chain of the prompt, the summary
+  and the person's text; no turn.append holds the prompt or has the role
+  system, and the browser sent the gold's turns_sent; each result is stored
+  under its own call's id, which comes once, and holds the gold's text; the
+  audit shows each commit; and the server holds the kept row and the main loop
+  file, not the dropped database.
 - demo tools restart: 5 calls system_restart, which ends the page, so it comes
   after the audit's copy. The fault screen holds `wire.start_twice`, the audit
   holds two engine starts of one pid, and ttyd stops with its code.
@@ -2103,7 +2371,7 @@ fault realm REALM->DRIVER 0 push; fails the block
   repeats, so the audit table's rows prove each line reached the worker; choice
   1 ends the rung, as choice 2 would let the next rung pass with no turn.
 - demo root: one debug root, `build/test_demo-*/root`, with verbose false
-  whatever the run's switch, as browser.console_run needs debug mode. It goes
+  whatever the run's switch, as browser_console_run needs debug mode. It goes
   when the run passes, in run_finish and not in the left rung, so a failed
   plain rung keeps it, and it stays after any failure. A second root,
   `build/test_demo-*/plain`, is the plain rung's.
@@ -2127,12 +2395,17 @@ fault realm REALM->DRIVER 0 push; fails the block
   serves the plain root. A rung that fails once its ttyd has stopped holds
   nothing.
 - demo audit table: each row of audit in the gold is a label, a line type or a
-  note's words, and a fragment of an entry's laid out text, one per lane and
-  direction, from choices 1 and 3, the bad input rung and the page load, the
-  masks included. No fragment holds an id or a time, as a reload makes two
-  loads. Every line entry's body parses as JSON, no entry is of a type under
-  `audit.`, no entry is a ui.control_key of digit 1, each note of ui or ai is a
-  sleep and none holds the gold's audit_wake_note, `until audit.`, and the engine
+  note's words, and a fragment of an entry's laid out text, at least one per
+  lane and direction, from choices 1 and 3, the bad input rung and the page
+  load, the masks included. The conversation's lanes add rows of the thin
+  record: on `ai to http` prompt_cache_key, input_kept, a previous_response_id
+  of `resp_` and tools as DEBUG_MODE_TOOL_LIST_OMITTED; on `http to ai` a
+  function_call and cached_tokens;
+  on `ai to server` the turn.prompt and a turn.append's content_kept and
+  function_call_output. No fragment holds an id, a digest or a time, as a
+  reload makes two loads. Every line entry's body parses as JSON, no entry is
+  of a type under `audit.`, no entry is a ui.control_key of digit 1, each note
+  of ui or ai is a sleep and none holds the gold's audit_wake_note, `until audit.`, and the engine
   starts once per load. In the demo test only a test-all run makes such sleeps
   and presses ctrl 1, through the overlay rung, so its smoke run does not prove
   either refusal; the C block's mark wire_audit_own does prove the sleeps' filter,
@@ -2167,9 +2440,22 @@ fault realm REALM->DRIVER 0 push; fails the block
 
 - audit_read.py: `python3 python/audit_read.py PATH [--check]` prints one line
   per entry of an audit document, its line number, seconds from the first entry,
-  gap, lane, type, id or reply and detail, then a summary of the run: entries,
-  inputs, model calls with the copies of the system prompt in each, tools called
-  and not called, commits and dumps. Standard library only.
+  gap, lane, type, id or reply and detail, then a summary of the run: entries
+  and engine starts; inputs; model calls, the chains they started and the
+  copies of the system prompt sent; the copies written in the three lanes; the
+  input tokens served from cache by each reply's usage, with the share; each
+  lane's bytes as sent and as written, both laid out as the document lays out
+  a line; tools called and not called, or when the first model call sent
+  DEBUG_MODE_TOOL_LIST_OMITTED, called and that text; commits and dumps. It is not standard
+  library only: entries_parse imports audit for audit.ShownLog, and audit
+  imports jslb and internationalization, which reads i18n/en-US.json beside
+  the python directory.
+- audit_read model calls: a call is a request whose url ends in `/responses`
+  and whose body holds input, a chain's start when it has no
+  previous_response_id, and a reply an answer whose body holds output, usage
+  required. A call's detail counts its items by kind, the count kept and its
+  chain; a reply's names its id, cached tokens, calls and text. prompt_copies
+  counts the prompt in each call's input, 0 in a chained call.
 - audit_read use: only on an end to end run not expected to fail, as
   `build/test_demo/audit.txt` or `audit_tools.txt` after a run with --debug. The
   wire and browser tests' roots fail on purpose, and a --check of one is right
@@ -2178,8 +2464,25 @@ fault realm REALM->DRIVER 0 push; fails the block
   or fault line; a line of the audit's own type; an HTTP status outside 200 to
   299; an MCP error or isError result; a console read timed out; a credential
   not masked; a note of a program ending with a code not 0; a reply with no
-  request; a request with no reply; a sleep whose reply never came; a model call
-  that holds the first call's system prompt other than once.
+  request; a request with no reply; a sleep whose reply never came; a second
+  turn.prompt of one scene; a chained call naming an id no reply of its engine
+  start holds, sending a system message, or sending other than exactly the
+  outputs answering the calls of the reply it chains from, in order, or after a
+  reply with none exactly one user message; a chain's first call not holding
+  the prompt once, as its first item; the written bodies of the three lanes
+  holding the prompt more than once; an item of the model's output, by its id,
+  written in two bodies of those lanes.
+- audit_read written again: any script compaction inside a turn, whole or
+  partial, makes the next call a restart that writes the reply's items again,
+  ids and all, so --check fails it at its last check: the reply that called
+  the script is stored after the script ran, so its row follows the summary,
+  past where the count from the start stops, and a partial one writes the kept
+  rows' items again too. That is redundancy the check exists to show, not a
+  fault of the tool. No run meets it, as a script's compaction is disabled.
+- audit_read seam: rows appended through the store between turns are sent
+  chained after the chain's rows, and --check fails that call as other than the
+  new items. No run meets it: a script runs inside a turn, where a row it
+  appends lands before the reply's row and so ends the chain.
 - audit_read starts: requests and replies are paired within one start of the
   engine, as a reload's ids start again. A console's start heading is no such
   start, and each is counted against the engine's alone.

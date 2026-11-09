@@ -6,10 +6,11 @@
 // `/_files/script/<name>.js`, run inside the calling task by
 // `new Function("engine", "args", text)`. `engine` is a frozen object of
 // `store` and `i18n`, where `store` is a frozen object of the
-// store's routine methods bound to the store: the operations of the tools,
-// `turn_compact` and `transaction_run`, and not `db_open`, `db_close`,
-// `kv_check`, `db_snapshot`, `db_restore`, `sink` or `handlers_register`,
-// which would expose the store beyond routine queries. A run returns the
+// store's routine methods bound to the store: the operations of the tools
+// and `transaction_run`, and not `db_open`, `db_close`, `kv_check`,
+// `db_snapshot`, `db_restore`, `sink` or `handlers_register`, which would
+// expose the store beyond routine queries, nor `turn_compact`, as a script's
+// compaction is disabled for now. A run returns the
 // value, or the exception with its stack. With `trace`, as `script_debug`
 // runs it, each call of `store` is traced first, and the trace is one more
 // field of the result, which is that tool's result and no record.
@@ -33,7 +34,8 @@ namespace script {
       "doc_head",
       "turn_append",
       "turn_list",
-      "turn_compact",
+      "turn_prompted",
+      "turn_prompt",
       "transaction_run",
     ] as const),
   });
@@ -68,7 +70,8 @@ namespace script {
     | "doc_head"
     | "turn_append"
     | "turn_list"
-    | "turn_compact"
+    | "turn_prompted"
+    | "turn_prompt"
     | "transaction_run"
   >;
 

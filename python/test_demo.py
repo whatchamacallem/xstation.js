@@ -10,18 +10,19 @@
 # reading is of the page's elements. The analyst is a scripted table, and no
 # real AI provider is contacted. Each rung has a timer and a label, smoke-test
 # or test-all, and a mislabel fails the run. One root must hold no unexpected
-# failure, one outside debug mode must record nothing, and in a test-all run one
-# calls every tool the AI is given in one conversation. build/test_demo/,
-# emptied at each run, keeps PNGs of the states, server.txt, and the audits
-# after a failed rung or under --debug. The roots go once the run passes. With
-# --hold a failed rung leaves the page, keeps ttyd serving its root, prints the
-# address and waits for ctrl C, so that a person opens the failed state, which
-# a fresh load restores. Its timers and texts are in its gold, python.test_demo.
+# failure, one outside debug mode must record nothing, and in a test-all run
+# one calls every tool the AI is given in one conversation. Each audit must
+# show the prompt and the log sent once per load or compaction, every other
+# model call sending only what is new. build/test_demo/, emptied at each run,
+# keeps PNGs of the states, server.txt, and the audits after a failed rung or
+# under --debug. The roots go once the run passes. With --hold a failed rung
+# leaves the page and keeps ttyd serving its root for a person, printing the
+# address, until ctrl C. Its timers and texts are its gold, python.test_demo.
 
 import argparse, contextlib, fnmatch, json, os, re, shutil, signal, sqlite3
 import sys, tempfile, time, types
 from collections.abc import Callable
-from typing import Any, TYPE_CHECKING, cast
+from typing import Any, NamedTuple, TYPE_CHECKING, cast
 
 # Only type checks import these here, as the bytecode's place is set below.
 if TYPE_CHECKING:
@@ -136,15 +137,42 @@ _TABLE_PATH = os.path.join("python", "seed", "provider_script.json")
 # The node of the table of every tool that takes each person's input.
 _MENU_NODE = "menu"
 
-# The end of the URL of a chat request.
-_CHAT_PATH = "/chat/completions"
+# The id of the call of a chain's tool of an index, as the table names it.
+_CALL_ID = "call_{0}_{1}"
 
-# The role of a system message and of a tool's result.
+# What joins a server's prefix and a tool's name in the name the AI is given.
+_PREFIX_MARK = "_"
+
+# The field of a model call that holds its tool list.
+_TOOLS_FIELD = "tools"
+
+# The end of the URL of a model call, the Responses API's.
+_MODEL_PATH = "/responses"
+
+# The field of a model call that chains it to the response before it.
+_CHAIN_FIELD = "previous_response_id"
+
+# The roles of a system message, the person's, the model's reply, a result.
 _SYSTEM_ROLE = "system"
+_USER_ROLE = "user"
+_REPLY_ROLE = "assistant"
 _TOOL_ROLE = "tool"
+
+# The types of the model's call of a function and of the output answering it.
+_CALL_TYPE = "function_call"
+_OUTPUT_TYPE = "function_call_output"
 
 # The line that carries a stored turn to the server.
 _TURN_TYPE = "turn.append"
+
+# The lanes of the conversation: the model's calls, its replies, the commits.
+_REQUEST_LANE = "ai to http"
+_REPLY_LANE = "http to ai"
+_COMMIT_LANE = "ai to server"
+_CONVERSATION_LANES = (_REQUEST_LANE, _REPLY_LANE, _COMMIT_LANE)
+
+# The commit that stores a conversation's system prompt.
+_PROMPT_TYPE = "turn.prompt"
 
 # A start heading of the engine, its process's id captured.
 _START_PATTERN = re.compile(
@@ -234,6 +262,14 @@ sys.pycache_prefix = os.path.join(_BUILD_PATH, "pycache")
 # A check that failed, with the measurement that failed it.
 class CheckFailed(Exception):
     pass
+
+
+# A model call of an audit: its start, its line, its body and its reply's body.
+class ModelCall(NamedTuple):
+    start: int
+    number: int
+    body: dict[str, Any]
+    reply: dict[str, Any] | None
 
 
 # A rung's time limit, which fails loud once it has passed.
@@ -506,13 +542,21 @@ def audit_copy(root: str, path: str) -> None:
     shutil.copyfile(os.path.join(root, _AUDIT_NAME), path)
 
 
+# The entries of a root's audit, each line made whole by `audit_read`.
+def entries_whole(root: str) -> list[Any]:
+    import audit_read
+
+    return audit_read.entries_parse(
+        audit_read.document_read(os.path.join(root, _AUDIT_NAME))
+    )
+
+
 # Waits for each request of the root's audit to be answered, then checks it.
 def failures_check(run: DemoRun, root: str) -> int:
     import audit_read
 
-    path = os.path.join(root, _AUDIT_NAME)
     while True:
-        entries = audit_read.entries_parse(audit_read.document_read(path))
+        entries = entries_whole(root)
         opened = audit_read.requests_open(entries)
         if not opened:
             break
@@ -820,6 +864,24 @@ def rung_overlay(run: DemoRun) -> str:
     )
 
 
+# After a load the prompt is not stored again, and goes once with the log.
+def rung_prompt_kept(run: DemoRun) -> str:
+    load = entries_whole(run.root)[-1].start
+    rung_reload(run)
+    line: str = gold_value("bad_inputs")[0]
+    input_refuse(run, line)
+    entries, calls = calls_wait(run, load)
+    started, chained = conversation_check(entries, calls)
+    return (
+        f"a new load answered {line!r} with the log restored: one commit"
+        f" stored the prompt before the first of the {len(calls)} model"
+        f" calls, each listing every tool, the {started} chains' first calls"
+        f" sent it once, as their first item, the {chained} chained calls"
+        " only their new items, each reply finding its context cached, and"
+        " the lanes wrote the prompt once"
+    )
+
+
 # Typing 0 ends with its answer, and the audit holds both sides' dumps.
 def rung_dump(run: DemoRun) -> str:
     text: str = gold_value("choices.0")
@@ -969,7 +1031,7 @@ def tools_listed() -> list[str]:
     with open(_TOOLS_PATH, encoding="utf-8") as file:
         listed: dict[str, Any] = json.load(file)
     return [
-        f"{side}.{tool['name']}"
+        f"{side}{_PREFIX_MARK}{tool['name']}"
         for side, reply in listed.items()
         for tool in reply["result"]["tools"]
     ]
@@ -982,12 +1044,9 @@ def call_reply(chain: str, index: int, call: dict[str, Any]) -> dict[str, Any]:
         "next": f"{chain}_{index}",
         "tool_calls": [
             {
-                "id": f"call_{chain}_{index}",
-                "type": "function",
-                "function": {
-                    "name": call["name"],
-                    "arguments": json.dumps(call["arguments"]),
-                },
+                "call_id": _CALL_ID.format(chain, index),
+                "name": call["name"],
+                "arguments": json.dumps(call["arguments"]),
             }
         ],
     }
@@ -1142,84 +1201,254 @@ def rung_tools_dump(run: DemoRun) -> str:
     )
 
 
-# The chat requests of a root's audit, each line's body read.
-def chats_read(entries: list[Any]) -> list[dict[str, Any]]:
-    lines = [
-        body_line(entry) for entry in entries if entry.label == "ai to http"
-    ]
-    return [line for line in lines if line["url"].endswith(_CHAT_PATH)]
-
-
-# Each model call holds the seed's prompt once, as its first message.
-def prompt_check(chats: list[dict[str, Any]]) -> None:
-    with open(_PROMPT_PATH, encoding="utf-8") as file:
-        prompt: str = json.load(file)["text"]
-    listed = len(tools_listed())
-    for number, chat in enumerate(chats, 1):
-        messages: list[dict[str, Any]] = chat["json"]["messages"]
-        holding = [m for m in messages if prompt in str(m.get("content"))]
-        if len(holding) != 1 or messages[0] is not holding[0]:
-            raise CheckFailed(
-                f"model call {number} holds the system prompt in"
-                f" {len(holding)} messages, not as its first alone"
+# The model calls of an audit's whole entries, each with its reply's body.
+def calls_read(entries: list[Any]) -> list[ModelCall]:
+    answers: dict[tuple[int, object], dict[str, Any]] = {
+        (entry.start, entry.line["0"].get("reply")): entry.line
+        for entry in entries
+        if entry.label == _REPLY_LANE
+    }
+    calls: list[ModelCall] = []
+    for entry in entries:
+        line = entry.line
+        if entry.label == _REQUEST_LANE and line["url"].endswith(_MODEL_PATH):
+            answer = answers.get((entry.start, line["0"].get("id")))
+            reply = None if answer is None else answer["json"]
+            calls.append(
+                ModelCall(entry.start, entry.number, line["json"], reply)
             )
-        tools = len(chat["json"]["tools"])
-        if tools != listed:
-            raise CheckFailed(f"model call {number} lists {tools} tools")
+    return calls
 
 
-# The stored turns the browser sent, which must hold no copy of the prompt.
-def turns_read(entries: list[Any]) -> list[dict[str, Any]]:
+# The whole entries and model calls once a call after the load is answered.
+def calls_wait(run: DemoRun, load: int) -> tuple[list[Any], list[ModelCall]]:
+    while True:
+        entries = entries_whole(run.root)
+        calls = calls_read(entries)
+        answered = all(call.reply is not None for call in calls)
+        if calls and calls[-1].start > load and answered:
+            return entries, calls
+        run.poll_sleep(
+            f"a model call of an engine start after {load} in the audit,"
+            " each call with its reply"
+        )
+
+
+# The seed's system prompt, the text of the document the agent sends.
+def prompt_read() -> str:
     with open(_PROMPT_PATH, encoding="utf-8") as file:
         prompt: str = json.load(file)["text"]
+    return prompt
+
+
+# How many of the items hold the text, escaped as their JSON writes it.
+def text_holders(items: list[dict[str, Any]], text: str) -> int:
+    escaped = json.dumps(text, ensure_ascii=False)[1:-1]
+    return sum(
+        escaped in json.dumps(item, ensure_ascii=False) for item in items
+    )
+
+
+# The kind of an input item: its type, or the role of a message with none.
+def item_kind(item: dict[str, Any]) -> str:
+    return str(item["type"] if "type" in item else item["role"])
+
+
+# One commit stored the conversation's prompt, before the first model call.
+def prompt_stored_check(
+    entries: list[Any], calls: list[ModelCall], prompt: str
+) -> None:
+    stored = [
+        entry
+        for entry in entries
+        if entry.label == _COMMIT_LANE
+        and entry.line["0"].get("type") == _PROMPT_TYPE
+    ]
+    if len(stored) != 1:
+        numbers = [entry.number for entry in stored]
+        raise CheckFailed(
+            f"{len(stored)} prompts were stored, at the lines {numbers}"
+        )
+    entry = stored[0]
+    messages: list[dict[str, Any]] = entry.line["messages"]
+    first = calls[0].number
+    message = {"role": _SYSTEM_ROLE, "content": prompt}
+    if entry.number > first or messages[:1] != [message]:
+        raise CheckFailed(
+            f"the prompt stored at line {entry.number}, the first model call"
+            f" being at line {first}, holds {messages}"
+        )
+
+
+# A chained call sends no system message and only the items its reply left.
+def chained_check(
+    call: ModelCall, output: list[dict[str, Any]] | None
+) -> None:
+    items: list[dict[str, Any]] = call.body["input"]
+    if output is None:
+        raise CheckFailed(
+            f"the model call at line {call.number} chains from"
+            f" {call.body[_CHAIN_FIELD]}, which no reply of its load holds"
+        )
+    if any(item.get("role") == _SYSTEM_ROLE for item in items):
+        raise CheckFailed(
+            f"the chained model call at line {call.number} sends a system"
+            " message"
+        )
+    asked = [item["call_id"] for item in output if item["type"] == _CALL_TYPE]
+    due: list[tuple[str, object]] = [(_OUTPUT_TYPE, ident) for ident in asked]
+    if not asked:
+        due = [(_USER_ROLE, None)]
+    sent = [(item_kind(item), item.get("call_id")) for item in items]
+    if sent != due:
+        raise CheckFailed(
+            f"the chained model call at line {call.number} sends {sent}, not"
+            f" only the new items {due}"
+        )
+    usage = cast(dict[str, Any], call.reply)["usage"]
+    if usage["input_tokens_details"]["cached_tokens"] == 0:
+        raise CheckFailed(
+            f"the reply to the chained model call at line {call.number}"
+            f" found nothing cached: {usage}"
+        )
+
+
+# A chain starts at a load or a compaction, the prompt once and first.
+def chains_check(calls: list[ModelCall], prompt: str) -> tuple[int, int]:
+    message = {"role": _SYSTEM_ROLE, "content": prompt}
+    outputs: dict[tuple[int, object], list[dict[str, Any]]] = {}
+    started = 0
+    for index, call in enumerate(calls):
+        if _CHAIN_FIELD in call.body:
+            output = outputs.get((call.start, call.body[_CHAIN_FIELD]))
+            chained_check(call, output)
+        else:
+            items: list[dict[str, Any]] = call.body["input"]
+            first = index == 0 or calls[index - 1].start != call.start
+            kinds = [item_kind(item) for item in items[:2]]
+            if not first and kinds != [_SYSTEM_ROLE, _SYSTEM_ROLE]:
+                raise CheckFailed(
+                    f"the model call at line {call.number} starts a chain"
+                    " within its load and after no compaction"
+                )
+            if items[0] != message or text_holders(items, prompt) != 1:
+                raise CheckFailed(
+                    f"the model call at line {call.number} starts a chain"
+                    " without the prompt once, as its first item"
+                )
+            started += 1
+        reply = cast(dict[str, Any], call.reply)
+        outputs[(call.start, reply["id"])] = reply["output"]
+    return started, len(calls) - started
+
+
+# Each model call of a debug root sends the omission's text, no tool list.
+def tools_check(calls: list[ModelCall]) -> None:
+    omitted: str = gold_value("tools_omitted")
+    for call in calls:
+        tools = call.body.get(_TOOLS_FIELD)
+        if tools != omitted:
+            raise CheckFailed(
+                f"the model call at line {call.number} sends {tools!r} as its"
+                f" tools, not {omitted!r}"
+            )
+
+
+# The three lanes of the conversation write the prompt once.
+def prompt_once_check(entries: list[Any], prompt: str) -> None:
+    text = json.dumps(prompt, ensure_ascii=False)
+    count = sum(
+        entry.body.count(text)
+        for entry in entries
+        if entry.label in _CONVERSATION_LANES
+    )
+    if count != 1:
+        raise CheckFailed(
+            f"the conversation's three lanes write the prompt {count} times"
+        )
+
+
+# The prompt stored, sent once per chain and written once, and no tool list.
+def conversation_check(
+    entries: list[Any], calls: list[ModelCall]
+) -> tuple[int, int]:
+    prompt = prompt_read()
+    prompt_stored_check(entries, calls, prompt)
+    counts = chains_check(calls, prompt)
+    tools_check(calls)
+    prompt_once_check(entries, prompt)
+    return counts
+
+
+# The stored turns the browser sent, none of the system or holding the prompt.
+def turns_read(entries: list[Any], prompt: str) -> list[dict[str, Any]]:
     turns: list[dict[str, Any]] = []
     for entry in entries:
-        if entry.label == "ai to server":
-            line = body_line(entry)
-            if line["0"].get("type") == _TURN_TYPE:
-                turns.append(line)
-                if prompt in str(line["content"].get("content")):
-                    raise CheckFailed(
-                        f"a stored turn holds the prompt: {entry}"
-                    )
-                if line["role"] == _SYSTEM_ROLE:
-                    raise CheckFailed(f"a system turn was stored: {entry}")
+        line = entry.line
+        if entry.label == _COMMIT_LANE and line["0"].get("type") == _TURN_TYPE:
+            if text_holders(line["content"], prompt):
+                raise CheckFailed(
+                    f"the turn stored at line {entry.number} holds the prompt"
+                )
+            if line["role"] == _SYSTEM_ROLE:
+                raise CheckFailed(
+                    f"a system turn was stored at line {entry.number}"
+                )
+            turns.append(line)
     return turns
 
 
-# Each tool's result is stored under its own id and holds the gold's text.
+# Each result is stored under its own call's id and holds the gold's text.
 def results_check(turns: list[dict[str, Any]]) -> int:
+    named: dict[str, str] = {}
     results: dict[str, str] = {}
     for turn in turns:
-        if turn["role"] == _TOOL_ROLE:
-            call = turn["content"]["tool_call_id"]
-            if call in results:
-                raise CheckFailed(f"the tool call id {call} comes twice")
-            results[call] = turn["content"]["content"]
+        for item in turn["content"]:
+            if turn["role"] == _REPLY_ROLE and item["type"] == _CALL_TYPE:
+                named[item["call_id"]] = item["name"]
+            elif turn["role"] == _TOOL_ROLE:
+                key = item["call_id"]
+                if key in results:
+                    raise CheckFailed(f"the tool call id {key} comes twice")
+                results[key] = item["output"]
     for row in cast(list[dict[str, str]], tools_value("chains")):
         if row["chain"] == "restart":
             continue
         calls: list[dict[str, Any]] = tools_value(row["calls"])
         for index, call in enumerate(calls):
-            found = results[f"call_{row['chain']}_{index}"]
-            if call["holds"] not in found:
+            ident = _CALL_ID.format(row["chain"], index)
+            found = results.get(ident)
+            if (
+                named.get(ident) != call["name"]
+                or found is None
+                or call["holds"] not in found
+            ):
                 raise CheckFailed(
-                    f"{call['name']} of {row['chain']} returned {found!r},"
-                    f" which lacks {call['holds']!r}"
+                    f"the call {ident} named {named.get(ident)!r}, not"
+                    f" {call['name']!r}, or returned {found!r}, which lacks"
+                    f" {call['holds']!r}"
                 )
     return len(results)
 
 
-# A compaction left one call of the prompt, its summary and the person's text.
-def compaction_check(chats: list[dict[str, Any]]) -> None:
+# The first call to show the compaction starts a chain, its summary second.
+def compaction_check(calls: list[ModelCall]) -> int:
     summary: str = tools_value("compact_summary")
-    for chat in chats:
-        messages: list[dict[str, Any]] = chat["json"]["messages"]
-        roles = [message["role"] for message in messages]
-        if roles[:2] == [_SYSTEM_ROLE, _SYSTEM_ROLE] and len(roles) == 3:
-            if summary not in messages[1]["content"]:
-                raise CheckFailed(f"the summary turn is {messages[1]!r}")
-            return
+    for call in calls:
+        items: list[dict[str, Any]] = call.body["input"]
+        if text_holders(items, summary):
+            kinds = [item_kind(item) for item in items]
+            if (
+                _CHAIN_FIELD in call.body
+                or kinds != [_SYSTEM_ROLE, _SYSTEM_ROLE, _USER_ROLE]
+                or not text_holders(items[1:2], summary)
+            ):
+                raise CheckFailed(
+                    "the first model call to show the compaction, at line"
+                    f" {call.number}, sends {kinds}, not a new chain of the"
+                    f" prompt, the summary {summary!r} and the person's text"
+                )
+            return call.number
     raise CheckFailed(f"no model call shows the compaction: {summary!r}")
 
 
@@ -1239,25 +1468,26 @@ def server_check(root: str) -> None:
         raise CheckFailed(f"the server's main loop file holds {written!r}")
 
 
-# The audit shows the prompt sent once per call, every tool's result and commit.
+# The audit shows the prompt once per chain, every tool's result and commit.
 def rung_tools_record(run: DemoRun) -> str:
     import audit, switches
 
     count = failures_check(run, run.root)
-    entries = audit.entries_read(run.root)
-    chats = chats_read(entries)
-    prompt_check(chats)
-    compaction_check(chats)
-    turns = turns_read(entries)
+    entries = entries_whole(run.root)
+    calls = calls_read(entries)
+    started, chained = conversation_check(entries, calls)
+    compacted = compaction_check(calls)
+    turns = turns_read(entries, prompt_read())
     due: int = tools_value("turns_sent")
     if len(turns) != due:
         raise CheckFailed(f"the browser sent {len(turns)} turns, not {due}")
     results = results_check(turns)
     rows: list[dict[str, str]] = tools_value("commits")
+    written = audit.entries_read(run.root)
     missing = [
         row
         for row in rows
-        if not any(entry_fits(entry, row) for entry in entries)
+        if not any(entry_fits(entry, row) for entry in written)
     ]
     if missing:
         raise CheckFailed(f"the audit lacks {missing}")
@@ -1265,11 +1495,15 @@ def rung_tools_record(run: DemoRun) -> str:
     if switches.debug:
         audit_copy(run.root, _TOOLS_COPY)
     return (
-        f"the audit's {count} entries hold no unexpected failure; each of the"
-        f" {len(chats)} model calls holds the system prompt once, as its first"
-        f" message, and none of the {len(turns)} stored turns holds it, past"
-        f" the compaction; {results} tool results hold the gold's texts, and"
-        " the server holds their commits"
+        f"the audit's {count} entries hold no unexpected failure; one commit"
+        f" stored the prompt, the {started} chains' first calls sent it once,"
+        f" as their first item, the one at line {compacted} after the"
+        f" compaction with its summary next, the {chained} chained calls"
+        " only their new items, each reply finding its context cached, all"
+        f" {len(calls)} calls listing every tool, and none of the"
+        f" {len(turns)} stored turns holds it; {results} tool results hold"
+        " the gold's texts under their own calls' ids, and the server holds"
+        " their commits"
     )
 
 
@@ -1328,6 +1562,7 @@ def rungs_climb(run: DemoRun) -> None:
     log.rung_run("choice 2", _TEST_ALL, lambda: rung_choice_note(run))
     log.rung_run("console", _TEST_ALL, lambda: rung_console(run))
     log.rung_run("overlay", _TEST_ALL, lambda: rung_overlay(run))
+    log.rung_run("prompt kept", _SMOKE_TEST, lambda: rung_prompt_kept(run))
     log.rung_run("dump", _SMOKE_TEST, lambda: rung_dump(run))
     log.rung_run("audit", _SMOKE_TEST, lambda: rung_audit(run))
     log.rung_run("left", _SMOKE_TEST, lambda: rung_left(run))

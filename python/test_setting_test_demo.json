@@ -56,7 +56,7 @@
       "type": "render"
     },
     {
-      "fragment": "\"tool\": \"browser.console_run\"",
+      "fragment": "\"tool\": \"browser_console_run\"",
       "label": "ai to ui",
       "type": "permit.ask"
     },
@@ -111,7 +111,22 @@
       "type": "console.output"
     },
     {
+      "fragment": "\"role\": \"system\"",
+      "label": "ai to server",
+      "type": "turn.prompt"
+    },
+    {
       "fragment": "\"role\": \"user\"",
+      "label": "ai to server",
+      "type": "turn.append"
+    },
+    {
+      "fragment": "\"content_kept\": ",
+      "label": "ai to server",
+      "type": "turn.append"
+    },
+    {
+      "fragment": "\"type\": \"function_call_output\"",
       "label": "ai to server",
       "type": "turn.append"
     },
@@ -154,6 +169,36 @@
       "fragment": "  sleeps on ",
       "label": "note of ai",
       "words": "until ai.model_reply"
+    },
+    {
+      "fragment": "\"prompt_cache_key\": \"/metaverse/hyperposition/1\"",
+      "label": "ai to http",
+      "type": "http.request"
+    },
+    {
+      "fragment": "\"input_kept\": ",
+      "label": "ai to http",
+      "type": "http.request"
+    },
+    {
+      "fragment": "\"previous_response_id\": \"resp_",
+      "label": "ai to http",
+      "type": "http.request"
+    },
+    {
+      "fragment": "\"tools\": \"DEBUG_MODE_TOOL_LIST_OMITTED\"",
+      "label": "ai to http",
+      "type": "http.request"
+    },
+    {
+      "fragment": "\"type\": \"function_call\"",
+      "label": "http to ai",
+      "type": "http.request"
+    },
+    {
+      "fragment": "\"cached_tokens\": ",
+      "label": "http to ai",
+      "type": "http.request"
     }
   ],
   "audit_wake_note": "until audit.",
@@ -205,7 +250,7 @@
     "\"text\": \"2\"",
     "\"subtitle\": \"Noted, filed and read back. It was no more interesting the second time.\""
   ],
-  "permit_text": "browser.console_run asks to run with {\"text\":\"echo hyperposition\",\"timeout_seconds\":30}.",
+  "permit_text": "browser_console_run asks to run with {\"text\":\"echo hyperposition\",\"timeout_seconds\":30}.",
   "picture_colours": [
     "0 0 0 255"
   ],
@@ -228,20 +273,21 @@
   "rung_seconds": 120,
   "served_seconds": 240,
   "sleep_note": "  sleeps on ",
+  "tools_omitted": "DEBUG_MODE_TOOL_LIST_OMITTED",
   "ttyd_code": 0,
   "window_height": 720,
   "window_width": 1280,
   "tools": {
     "data_calls": [
       {
-        "name": "browser.db_create",
+        "name": "browser_db_create",
         "arguments": {
           "db": "tour"
         },
         "holds": "{}"
       },
       {
-        "name": "browser.sql_run",
+        "name": "browser_sql_run",
         "arguments": {
           "db": "tour",
           "statements": [
@@ -264,7 +310,7 @@
         "holds": "first line"
       },
       {
-        "name": "browser.kv_put",
+        "name": "browser_kv_put",
         "arguments": {
           "ref": "/tour/note",
           "text": "kept"
@@ -272,14 +318,14 @@
         "holds": "79f076abdd19a752db7267bfff2f9022161d120dea919fdaca2ffdfc24ca8c96"
       },
       {
-        "name": "browser.kv_get",
+        "name": "browser_kv_get",
         "arguments": {
           "ref": "/tour/note"
         },
         "holds": "kept"
       },
       {
-        "name": "browser.kv_list",
+        "name": "browser_kv_list",
         "arguments": {
           "db": "tour",
           "prefix": ""
@@ -287,14 +333,14 @@
         "holds": "note"
       },
       {
-        "name": "browser.kv_delete",
+        "name": "browser_kv_delete",
         "arguments": {
           "ref": "/tour/note"
         },
         "holds": "{}"
       },
       {
-        "name": "browser.doc_put",
+        "name": "browser_doc_put",
         "arguments": {
           "db": "tour",
           "id": "page",
@@ -308,7 +354,7 @@
         "holds": "/tour/page/1"
       },
       {
-        "name": "browser.doc_head",
+        "name": "browser_doc_head",
         "arguments": {
           "db": "tour",
           "id": "page"
@@ -316,14 +362,14 @@
         "holds": "/tour/page/1"
       },
       {
-        "name": "browser.doc_get",
+        "name": "browser_doc_get",
         "arguments": {
           "ref": "/tour/page/1"
         },
         "holds": "\"title\":\"first\""
       },
       {
-        "name": "browser.kv_put",
+        "name": "browser_kv_put",
         "arguments": {
           "ref": "/_files/script/tour.js",
           "text": "const rows = engine.store.kv_list(\"tour\", \"\");\nreturn rows.length + args.a + args.b;\n"
@@ -331,7 +377,7 @@
         "holds": "d466befe355e3fde2cc8c68ed7066c5dc239fac7d4554b15a03341e1412ed15f"
       },
       {
-        "name": "browser.script_run",
+        "name": "browser_script_run",
         "arguments": {
           "name": "tour",
           "args": {
@@ -342,7 +388,7 @@
         "holds": "\"value\":6"
       },
       {
-        "name": "browser.script_debug",
+        "name": "browser_script_debug",
         "arguments": {
           "name": "tour",
           "args": {
@@ -353,7 +399,7 @@
         "holds": "kv_list"
       },
       {
-        "name": "browser.image_make",
+        "name": "browser_image_make",
         "arguments": {
           "prompt": "a test pattern",
           "key": "tour/pattern.png"
@@ -361,7 +407,7 @@
         "holds": "\"key\":\"/_files/tour/pattern.png\""
       },
       {
-        "name": "browser.render",
+        "name": "browser_render",
         "arguments": {
           "image": "/_files/tour/pattern.png",
           "subtitle": "The test pattern."
@@ -369,7 +415,7 @@
         "holds": "{}"
       },
       {
-        "name": "browser.kv_put",
+        "name": "browser_kv_put",
         "arguments": {
           "ref": "/metaverse/tour/kept",
           "text": "Kept on both sides."
@@ -377,14 +423,14 @@
         "holds": "408ecf78ac91a7dc0f449879e575ff0fffaf7108dda13cd10fedc8f9cd8fc053"
       },
       {
-        "name": "browser.db_drop",
+        "name": "browser_db_drop",
         "arguments": {
           "db": "tour"
         },
         "holds": "{}"
       },
       {
-        "name": "server.source_put",
+        "name": "server_source_put",
         "arguments": {
           "name": "tour_loop.py",
           "text": "def loop_prepare(root):\n    pass\n\n\ndef loop_run(read_fd, write_fd, root):\n    pass\n"
@@ -394,7 +440,7 @@
     ],
     "console_calls": [
       {
-        "name": "browser.console_run",
+        "name": "browser_console_run",
         "arguments": {
           "text": "echo tour",
           "timeout_seconds": 30
@@ -402,14 +448,14 @@
         "holds": "tour\\n"
       },
       {
-        "name": "browser.console_write",
+        "name": "browser_console_write",
         "arguments": {
           "text": "echo written\n"
         },
         "holds": "{}"
       },
       {
-        "name": "browser.console_read",
+        "name": "browser_console_read",
         "arguments": {
           "until": "$ ",
           "timeout_seconds": 30
@@ -419,7 +465,7 @@
     ],
     "restart_calls": [
       {
-        "name": "server.system_restart",
+        "name": "server_system_restart",
         "arguments": {
           "main_loop": "tour_loop.py"
         }
@@ -462,21 +508,21 @@
     "permits": {
       "console": [
         [
-          "browser.console_run",
+          "browser_console_run",
           "Always Allow"
         ],
         [
-          "browser.console_write",
+          "browser_console_write",
           "Accept"
         ],
         [
-          "browser.console_read",
+          "browser_console_read",
           "Always Allow"
         ]
       ],
       "console_again": [
         [
-          "browser.console_write",
+          "browser_console_write",
           "Accept"
         ]
       ]
@@ -552,7 +598,7 @@
       {
         "label": "ai to ui",
         "type": "permit.ask",
-        "fragment": "\"tool\": \"browser.console_write\""
+        "fragment": "\"tool\": \"browser_console_write\""
       },
       {
         "label": "ui to ai",

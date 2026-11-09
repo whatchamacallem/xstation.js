@@ -8,15 +8,24 @@
 # did. With --check it then stops at the first unexpected failure and exits 1,
 # so that a person or a test need not look for one by eye. It is for a run that
 # is not expected to fail: the wire and browser tests' roots fail on purpose,
-# and the check would be right to refuse them. Standard library only.
+# and the check would be right to refuse them. A line is read whole, through
+# `audit.ShownLog`, so a model call counts all it sent though the document
+# holds only what was new, and the check then proves that it was new.
 #
 #     python3 python/audit_read.py PATH [--check]
 
-import argparse, collections, fcntl, json, re, sys
+import argparse, collections, fcntl, json, os, re, sys
 from typing import Any, NamedTuple, cast
 
 # The name `argparse` shows, as `sys.argv` may be empty.
 _PROGRAM_NAME = "audit_read.py"
+
+# The folder of the checkout's bytecode.
+_PYCACHE_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "build",
+    "pycache",
+)
 
 # A start heading of the document, which names a process and its start.
 _START_PATTERN = re.compile(r"^==== (.*) ====$")
@@ -67,7 +76,41 @@ _INPUT_TYPE = "ui.input"
 # The lane the browser's commits take to the server.
 _COMMIT_LANE = "ai to server"
 
-# The lines on that lane that are not commits of the store.
+# The commit that stores a conversation's system prompt.
+_PROMPT_TYPE = "turn.prompt"
+
+# The lanes that carry the conversation, which the document writes thin.
+_REQUEST_LANE = "ai to http"
+_REPLY_LANE = "http to ai"
+_CONVERSATION_LANES = (_REQUEST_LANE, _REPLY_LANE, _COMMIT_LANE)
+
+# The end of the url of a model call, the Responses API's.
+_RESPONSES_PATH = "/responses"
+
+# The fields of a thin line that count the items the document already showed.
+_KEPT_FIELDS = ("input_kept", "content_kept", "messages_kept")
+
+# The field of a model call that chains it to the response before it.
+_CHAIN_FIELD = "previous_response_id"
+
+# The field of a model call's body that holds its tool list.
+_TOOLS_FIELD = "tools"
+
+# The item types of the model's output, each of which carries an id.
+_OUTPUT_TYPES = ("reasoning", "message", "function_call")
+
+# The item type of a function call, and of the output that answers it.
+_CALL_TYPE = "function_call"
+_ANSWER_TYPE = "function_call_output"
+
+# The roles of a system message and of the player's message.
+_SYSTEM_ROLE = "system"
+_USER_ROLE = "user"
+
+# The indent of a line's JSON text in the document, by which bytes are counted.
+_JSON_INDENT = 2
+
+# The lines on the commits' lane that are not commits of the store.
 _NOT_COMMITS = (_MCP_TYPE, "tap.start", "db.sync")
 
 # What the record shows for a credential.
@@ -86,7 +129,10 @@ _MINUTE_MILLISECONDS = 60000
 _SECOND_MILLISECONDS = 1000
 
 
-# One entry: where its heading is, its start, time, label, body and line.
+sys.pycache_prefix = _PYCACHE_PATH
+
+
+# One entry: its place, start, time, label, body, whole line, items kept.
 class ReadEntry(NamedTuple):
     number: int
     start: int
@@ -94,6 +140,7 @@ class ReadEntry(NamedTuple):
     label: str
     body: str
     line: dict[str, Any] | None
+    kept: int
 
 
 # A failure the check found, naming the line of the document that shows it.
@@ -129,14 +176,33 @@ def _line_decode(body: str, number: int) -> dict[str, Any]:
     return line
 
 
-# The entry of a heading's parts, its body lines read.
+# The count of items a thin line wrote as kept, 0 for any other line.
+def _kept_of(label: str, line: dict[str, Any]) -> int:
+    fields = line.get("json", {}) if label == _REQUEST_LANE else line
+    for field in _KEPT_FIELDS:
+        if field in fields:
+            return int(fields[field])
+    return 0
+
+
+# The entry of a heading's parts, its body lines read, its line made whole.
 def _entry_make(
-    number: int, start: int, at: int, label: str, lines: list[str]
+    number: int,
+    start: int,
+    at: int,
+    label: str,
+    lines: list[str],
+    shown: Any,
 ) -> ReadEntry:
     body = "\n".join(lines).rstrip("\n")
     is_line = _LANE_MARK in label and not label.startswith(_DUMP_PREFIX)
     line = _line_decode(body, number) if is_line else None
-    return ReadEntry(number, start, at, label, body, line)
+    kept = 0
+    if line is not None:
+        kept = _kept_of(label, line)
+        kind = _field_get(line["0"], "type", "t")
+        line = shown.line_whole(label, "" if kind is None else str(kind), line)
+    return ReadEntry(number, start, at, label, body, line, kept)
 
 
 # The milliseconds of the day of a heading's match.
@@ -152,7 +218,10 @@ def _time_read(found: re.Match[str]) -> int:
 
 # The entries of a document's text in order, a line of no form refused.
 def entries_parse(text: str) -> list[ReadEntry]:
+    import audit
+
     entries: list[ReadEntry] = []
+    shown = audit.ShownLog()
     start = 0
     held: tuple[int, int, str] | None = None
     lines: list[str] = []
@@ -168,7 +237,7 @@ def entries_parse(text: str) -> list[ReadEntry]:
             continue
         if held is not None:
             entries.append(
-                _entry_make(held[0], start, held[1], held[2], lines)
+                _entry_make(held[0], start, held[1], held[2], lines, shown)
             )
         held = None
         lines = []
@@ -177,7 +246,9 @@ def entries_parse(text: str) -> list[ReadEntry]:
         elif cast(re.Match[str], started).group(1).startswith(_ENGINE_START):
             start += 1
     if held is not None:
-        entries.append(_entry_make(held[0], start, held[1], held[2], lines))
+        entries.append(
+            _entry_make(held[0], start, held[1], held[2], lines, shown)
+        )
     return entries
 
 
@@ -207,50 +278,128 @@ def _text_short(value: object) -> str:
     return text[:_DETAIL_MAX] + "..."
 
 
-# The messages of a chat request, none for any other line.
-def messages_of(entry: ReadEntry) -> list[dict[str, Any]]:
+# The body of a model call, a request of the Responses API, or None.
+def _call_body(entry: ReadEntry) -> dict[str, Any] | None:
+    payload = _payload_of(entry)
+    body = payload.get("json")
     if (
         type_of(entry) != _HTTP_TYPE
         or _field_get(_header_of(entry), "reply", "r") is not None
+        or not isinstance(body, dict)
+        or "input" not in body
+        or not str(payload["url"]).endswith(_RESPONSES_PATH)
     ):
-        return []
-    return _payload_of(entry).get("json", {}).get("messages", [])
+        return None
+    return cast(dict[str, Any], body)
 
 
-# The roles of a chat request's messages counted, as one short text.
-def _roles_text(messages: list[dict[str, Any]]) -> str:
-    roles = collections.Counter(str(message["role"]) for message in messages)
-    return " ".join(f"{role}={roles[role]}" for role in sorted(roles))
+# The body of a model reply, an answer that holds an output, or None.
+def _reply_body(entry: ReadEntry) -> dict[str, Any] | None:
+    body = _payload_of(entry).get("json")
+    if (
+        type_of(entry) != _HTTP_TYPE
+        or _field_get(_header_of(entry), "reply", "r") is None
+        or not isinstance(body, dict)
+        or "output" not in body
+    ):
+        return None
+    return cast(dict[str, Any], body)
+
+
+# The model calls of the record in order, each with its body as sent.
+def _calls_of(entries: list[ReadEntry]) -> list[tuple[ReadEntry, Any]]:
+    return [
+        (entry, body)
+        for entry in entries
+        if (body := _call_body(entry)) is not None
+    ]
+
+
+# The model replies of the record in order, each with its body.
+def _replies_of(entries: list[ReadEntry]) -> list[tuple[ReadEntry, Any]]:
+    return [
+        (entry, body)
+        for entry in entries
+        if (body := _reply_body(entry)) is not None
+    ]
+
+
+# The input items of a model call as sent, none for any other line.
+def input_of(entry: ReadEntry) -> list[dict[str, Any]]:
+    body = _call_body(entry)
+    return [] if body is None else body["input"]
+
+
+# The function calls of a reply's output, in order.
+def _calls_in(output: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [item for item in output if item["type"] == _CALL_TYPE]
+
+
+# The kind of an item: its type, or the role of a message that has none.
+def _kind_of(item: dict[str, Any]) -> str:
+    return str(item["type"] if "type" in item else item["role"])
+
+
+# The kinds of a model call's items counted, as one short text.
+def _kinds_text(items: list[dict[str, Any]]) -> str:
+    kinds = collections.Counter(_kind_of(item) for item in items)
+    return " ".join(f"{kind}={kinds[kind]}" for kind in sorted(kinds))
+
+
+# A request's tool list counted, or the text a debug mode request sends.
+def _tools_text(tools: Any) -> str:
+    if isinstance(tools, list):
+        return f"{len(tools)} tools"
+    return f"tools {tools}"
 
 
 # What a request to the provider's port asks.
 def _request_detail(entry: ReadEntry) -> str:
-    body: dict[str, Any] = _payload_of(entry).get("json", {})
-    messages = messages_of(entry)
-    if not messages:
-        return f"image {_text_short(body.get('prompt'))}"
-    last = messages[-1]
-    said = last.get("content")
+    body = _call_body(entry)
+    if body is None:
+        asked = _payload_of(entry).get("json", {}).get("prompt")
+        return f"image {_text_short(asked)}"
+    items = body["input"]
+    chained = "a chain start"
+    if _CHAIN_FIELD in body:
+        chained = f"chained to {body[_CHAIN_FIELD]}"
     return (
-        f"chat {len(messages)} messages, {_roles_text(messages)},"
-        f" {len(body.get('tools', []))} tools, last {last['role']}:"
-        f" {_text_short(said)}"
+        f"model {len(items)} items ({_kinds_text(items)}), {entry.kept} kept,"
+        f" {chained}, {_tools_text(body.get(_TOOLS_FIELD, []))}"
     )
+
+
+# The texts of a reply's messages joined, as the agent joins them.
+def _said_of(output: list[dict[str, Any]]) -> str:
+    return "\n".join(
+        part["text"]
+        for item in output
+        if item["type"] == "message"
+        for part in item["content"]
+    )
+
+
+# The input tokens of a model reply and those served from cache, as a text.
+def _cached_text(body: dict[str, Any]) -> str:
+    usage = body["usage"]
+    cached = usage["input_tokens_details"]["cached_tokens"]
+    return f"cached {cached} of {usage['input_tokens']}"
 
 
 # What the provider's port answered.
 def _answer_detail(entry: ReadEntry) -> str:
     payload = _payload_of(entry)
-    body: dict[str, Any] = payload.get("json", {})
     status = payload.get("status")
-    if "choices" not in body:
-        return f"status {status}, {len(body.get('data', []))} images"
-    message = body["choices"][0]["message"]
-    calls = [
-        call["function"]["name"] for call in message.get("tool_calls", [])
-    ]
-    said = "" if message.get("content") is None else message["content"]
-    return f"status {status}, calls {calls}, says {_text_short(said)}"
+    body = _reply_body(entry)
+    if body is None:
+        images = payload.get("json", {}).get("data", [])
+        return f"status {status}, {len(images)} images"
+    output = body["output"]
+    calls = [call["name"] for call in _calls_in(output)]
+    return (
+        f"status {status}, {body['id']}, {_cached_text(body)}, calls {calls},"
+        f" says {_text_short(_said_of(output))}"
+    )
 
 
 # What an MCP message asks or answers.
@@ -323,38 +472,107 @@ def digest_lines(entries: list[ReadEntry]) -> list[str]:
     return lines
 
 
-# The names of the tools the provider was told of, in the first request.
-def _tools_listed(entries: list[ReadEntry]) -> list[str]:
-    for entry in entries:
-        if messages_of(entry):
-            tools = _payload_of(entry)["json"].get("tools", [])
-            return [tool["function"]["name"] for tool in tools]
-    return []
+# The names of the tools the first model call lists, or the text it sends.
+def _tools_listed(entries: list[ReadEntry]) -> list[str] | str:
+    calls = _calls_of(entries)
+    if not calls:
+        return []
+    tools = calls[0][1].get(_TOOLS_FIELD, [])
+    if not isinstance(tools, list):
+        return str(tools)
+    return [str(tool["name"]) for tool in tools]
+
+
+# The summary's lines of the tools called and of those listed.
+def _tools_lines(listed: list[str] | str, called: dict[str, int]) -> list[str]:
+    if isinstance(listed, str):
+        return [
+            f"tools called: {len(called)}: {called}",
+            f"tools listed: none, the first model call sent {listed}",
+        ]
+    return [
+        f"tools called: {len(called)} of {len(listed)} listed: {called}",
+        f"tools not called: {[name for name in listed if name not in called]}",
+    ]
 
 
 # Each tool the agent called, counted, in the order of first call.
 def _tools_called(entries: list[ReadEntry]) -> dict[str, int]:
     called: dict[str, int] = {}
-    for entry in entries:
-        answer = _payload_of(entry).get("json", {})
-        if type_of(entry) == _HTTP_TYPE and "choices" in answer:
-            message = answer["choices"][0]["message"]
-            for call in message.get("tool_calls", []):
-                name = call["function"]["name"]
-                called[name] = called.get(name, 0) + 1
+    for _, body in _replies_of(entries):
+        for call in _calls_in(body["output"]):
+            name = str(call["name"])
+            called[name] = called.get(name, 0) + 1
     return called
 
 
-# The copies of the first request's system prompt in each chat request.
+# The text of the first model call's first item, its system prompt, or None.
+def _prompt_of(entries: list[ReadEntry]) -> Any:
+    calls = _calls_of(entries)
+    if not calls:
+        return None
+    return calls[0][1]["input"][0]["content"]
+
+
+# How many items of a model call hold the system prompt as their content.
+def _copies_in(items: list[dict[str, Any]], prompt: Any) -> int:
+    return sum(item.get("content") == prompt for item in items)
+
+
+# The copies of the first model call's system prompt in each model call.
 def prompt_copies(entries: list[ReadEntry]) -> list[int]:
-    chats = [messages_of(entry) for entry in entries if messages_of(entry)]
-    if not chats:
-        return []
-    prompt = chats[0][0]["content"]
-    return [
-        sum(message.get("content") == prompt for message in messages)
-        for messages in chats
-    ]
+    prompt = _prompt_of(entries)
+    calls = _calls_of(entries)
+    return [_copies_in(body["input"], prompt) for _, body in calls]
+
+
+# The copies of the first model call's system prompt the lanes wrote.
+def prompt_recorded(entries: list[ReadEntry]) -> int:
+    prompt = _prompt_of(entries)
+    if prompt is None:
+        return 0
+    text = json.dumps(prompt, ensure_ascii=False)
+    return sum(
+        entry.body.count(text)
+        for entry in entries
+        if entry.label in _CONVERSATION_LANES
+    )
+
+
+# The input tokens of the model calls, those served from cache and the share.
+def _usage_text(entries: list[ReadEntry]) -> str:
+    total = 0
+    cached = 0
+    for _, body in _replies_of(entries):
+        total += body["usage"]["input_tokens"]
+        cached += body["usage"]["input_tokens_details"]["cached_tokens"]
+    share = f", {cached / total:.1%}" if total else ""
+    return f"{cached} of {total} served from cache{share}"
+
+
+# The line an entry's body wrote, and the end of its JSON text in the body.
+def _written_of(entry: ReadEntry) -> tuple[Any, int]:
+    return json.JSONDecoder().raw_decode(entry.body)
+
+
+# Each lane's bytes as sent and as written, both laid out as the document is.
+def _bytes_lines(entries: list[ReadEntry]) -> list[str]:
+    lines: list[str] = []
+    for lane in _CONVERSATION_LANES:
+        sent = 0
+        written = 0
+        for entry in entries:
+            if entry.label == lane:
+                text = json.dumps(
+                    entry.line, ensure_ascii=False, indent=_JSON_INDENT
+                )
+                sent += len(text.encode("utf-8"))
+                end = _written_of(entry)[1]
+                written += len(entry.body[:end].encode("utf-8"))
+        lines.append(
+            f"bytes of the lane {lane}: {sent} as sent, {written} as written"
+        )
+    return lines
 
 
 # The commits the browser sent the server, counted by type.
@@ -391,17 +609,21 @@ def summary_lines(entries: list[ReadEntry]) -> list[str]:
     ]
     listed = _tools_listed(entries)
     called = _tools_called(entries)
-    copies = prompt_copies(entries)
+    calls = _calls_of(entries)
+    started = sum(_CHAIN_FIELD not in body for _, body in calls)
     span = entries[-1].at - entries[0].at if entries else 0
     starts = entries[-1].start if entries else 0
     return [
         f"entries: {len(entries)} in {span / _SECOND_MILLISECONDS:.3f} s,"
         f" engine starts: {starts}",
         f"inputs: {len(inputs)}: {inputs}",
-        f"model calls: {len(copies)}, copies of the system prompt in each:"
-        f" {sorted(set(copies))}",
-        f"tools called: {len(called)} of {len(listed)} listed: {called}",
-        f"tools not called: {[name for name in listed if name not in called]}",
+        f"model calls: {len(calls)}, chains started: {started}, copies of"
+        f" the system prompt sent: {sum(prompt_copies(entries))}",
+        f"system prompt written in the conversation's lanes:"
+        f" {prompt_recorded(entries)}",
+        f"input tokens of the model calls: {_usage_text(entries)}",
+        *_bytes_lines(entries),
+        *_tools_lines(listed, called),
         f"commits to the server: {_commits_counted(entries)}",
         f"database dumps: {_dumps_text(entries)}",
     ]
@@ -529,6 +751,109 @@ def _note_failure(entry: ReadEntry) -> str | None:
     return None
 
 
+# The first conversation whose system prompt was stored again, or None.
+def _prompt_stray(entries: list[ReadEntry]) -> str | None:
+    scenes: set[str] = set()
+    for entry in entries:
+        if entry.label == _COMMIT_LANE and type_of(entry) == _PROMPT_TYPE:
+            scene = str(_payload_of(entry).get("scene"))
+            if scene in scenes:
+                return f"line {entry.number}: a second prompt of {scene}"
+            scenes.add(scene)
+    return None
+
+
+# What a chained call sends beside the new items, or None when it sends them.
+def _chained_failure(body: dict[str, Any], output: Any) -> str | None:
+    items: list[dict[str, Any]] = body["input"]
+    if output is None:
+        return (
+            f"a chained call names {body[_CHAIN_FIELD]}, which no reply of its"
+            " start holds"
+        )
+    if any(item.get("role") == _SYSTEM_ROLE for item in items):
+        return "a chained call sends a system message"
+    calls = [call["call_id"] for call in _calls_in(output)]
+    if calls:
+        answers = [
+            item.get("call_id")
+            for item in items
+            if item.get("type") == _ANSWER_TYPE
+        ]
+        new = answers == calls and len(answers) == len(items)
+    else:
+        new = len(items) == 1 and items[0].get("role") == _USER_ROLE
+    if new:
+        return None
+    return (
+        "a chained call sends other than the new items alone:"
+        f" {_kinds_text(items)}"
+    )
+
+
+# The first chained call that sends more than the new items, or None.
+def _chain_stray(entries: list[ReadEntry]) -> str | None:
+    outputs: dict[tuple[int, object], Any] = {}
+    for entry in entries:
+        reply = _reply_body(entry)
+        if reply is not None:
+            outputs[(entry.start, reply["id"])] = reply["output"]
+        body = _call_body(entry)
+        if body is not None and _CHAIN_FIELD in body:
+            output = outputs.get((entry.start, body[_CHAIN_FIELD]))
+            failure = _chained_failure(body, output)
+            if failure is not None:
+                return f"line {entry.number}: {failure}"
+    return None
+
+
+# The first chain start not holding the prompt once as its first item, or None.
+def _start_stray(entries: list[ReadEntry]) -> str | None:
+    prompt = _prompt_of(entries)
+    for entry, body in _calls_of(entries):
+        items = body["input"]
+        copies = _copies_in(items, prompt)
+        if _CHAIN_FIELD not in body and (
+            copies != 1 or items[0].get("content") != prompt
+        ):
+            return (
+                f"line {entry.number}: a chain's first call holds the system"
+                f" prompt {copies} times, not once as its first item"
+            )
+    return None
+
+
+# The ids of the model's output items anywhere in a value, in order.
+def _ids_in(value: Any) -> list[str]:
+    if isinstance(value, list):
+        held = cast(list[Any], value)
+        return [ident for item in held for ident in _ids_in(item)]
+    if not isinstance(value, dict):
+        return []
+    fields = cast(dict[str, Any], value)
+    found: list[str] = []
+    if fields.get("type") in _OUTPUT_TYPES and "id" in fields:
+        found.append(str(fields["id"]))
+    for item in fields.values():
+        found += _ids_in(item)
+    return found
+
+
+# The first output item a second body of the lanes wrote again, or None.
+def _item_repeated(entries: list[ReadEntry]) -> str | None:
+    first: dict[str, int] = {}
+    for entry in entries:
+        if entry.label in _CONVERSATION_LANES:
+            for ident in dict.fromkeys(_ids_in(_written_of(entry)[0])):
+                if ident in first:
+                    return (
+                        f"line {entry.number}: the item {ident} is written"
+                        f" again, first at line {first[ident]}"
+                    )
+                first[ident] = entry.number
+    return None
+
+
 # Raises at the first unexpected failure of the record, naming its line.
 def failure_check(entries: list[ReadEntry]) -> None:
     for entry in entries:
@@ -542,14 +867,18 @@ def failure_check(entries: list[ReadEntry]) -> None:
     opened = requests_open(entries)
     if opened:
         raise AuditFailed(opened[0])
-    stray = _sleep_stray(entries)
+    for find in (_sleep_stray, _prompt_stray, _chain_stray, _start_stray):
+        stray = find(entries)
+        if stray is not None:
+            raise AuditFailed(stray)
+    written = prompt_recorded(entries)
+    if written > 1:
+        raise AuditFailed(
+            f"the conversation's lanes hold the system prompt {written} times"
+        )
+    stray = _item_repeated(entries)
     if stray is not None:
         raise AuditFailed(stray)
-    copies = prompt_copies(entries)
-    if any(count != 1 for count in copies):
-        raise AuditFailed(
-            f"a model call holds the system prompt other than once: {copies}"
-        )
 
 
 # Prints the digest and summary, checks when asked, returns the exit code.

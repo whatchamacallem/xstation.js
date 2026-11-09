@@ -3,10 +3,19 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // The scripted provider, with no network and no AI: a port that answers the
-// `http.request` lines of the provider door from a table of nodes, and the
-// PNG test pattern that answers every image request, built here by hand from
-// stored deflate blocks with its checksums computed in code. Every part of it
-// is synchronous.
+// `http.request` lines of the provider door, `POST {base_url}/responses` from
+// a table of nodes and every image request with a PNG test pattern, built
+// here by hand from stored deflate blocks with its checksums computed in code.
+// Every part of it is synchronous. The port holds one place in the table: the
+// last input item, a user message or the outputs of the last reply's calls,
+// picks the reply. Once it has chosen, it holds the request to what xAI's
+// pages expect and refuses the first bad field. It keeps each response under
+// its id with its whole context, unless `store` is false, so that a chained
+// request's context is the one it chains from, then its input. Its ids carry
+// the first 16 hexadecimal digits of the `SHA-256` of the cache key and the
+// context, and its `usage` is arithmetic on the context in characters, the
+// cached part being the leading items of the key's last context and output.
+// In debug mode, by its reader, it takes `provider.tools_omitted` for tools.
 
 namespace provider_script {
   // The line type, the request and reply parts, and the layout of the PNG.
@@ -14,18 +23,44 @@ namespace provider_script {
     request_type: "http.request",
     full_key: "type",
     method: "POST",
-    chat_path: "/chat/completions",
+    model_path: "/responses",
     image_path: "/images/generations",
     image_format: "b64_json",
     status: 200,
     content_key: "content-type",
     json_media: "application/json",
-    id_prefix: "chatcmpl-synthetic-",
-    assistant_role: "assistant",
+    function_type: "function",
+    key_header: "Authorization",
+    key_start: "Bearer ",
+    media_header: "Content-Type",
+    url_start: "https://",
+    // What a function's name may hold: OpenAI's rule, as xAI follows that API.
+    tool_name: /^[a-zA-Z0-9_-]{1,64}$/,
+    tools_max: 1000,
+    tool_choices: Object.freeze(["auto", "none", "required"]),
     user_role: "user",
-    tool_role: "tool",
-    calls_reason: "tool_calls",
-    stop_reason: "stop",
+    assistant_role: "assistant",
+    // The roles of an input message, an item with no type.
+    input_roles: Object.freeze(["system", "user"]),
+    reasoning_type: "reasoning",
+    message_type: "message",
+    call_type: "function_call",
+    output_type: "function_call_output",
+    text_type: "output_text",
+    // The types of the model's items, a run of which starts with reasoning.
+    model_types: Object.freeze(["reasoning", "message", "function_call"]),
+    // The fields of a function call item, each text.
+    call_fields: Object.freeze(["call_id", "name", "arguments"]),
+    completed_status: "completed",
+    response_object: "response",
+    response_prefix: "resp_",
+    reasoning_prefix: "rs_",
+    message_prefix: "msg_",
+    call_prefix: "fc_",
+    // The hexadecimal digits of the digest that the ids carry.
+    digest_digits: 16,
+    // The encrypted reasoning of every reply, which a restart sends back.
+    reasoning_text: "scripted",
     // The decimal text of one integer, the only text `replies` answers.
     integer_text: /^(?:0|-?[1-9][0-9]*)$/,
     pattern_size: 16,
@@ -72,12 +107,19 @@ namespace provider_script {
     sum_range: 2 ** 16,
   });
 
+  // A call of the script, which the reply sends as a `function_call` item.
+  export interface ScriptCall {
+    call_id: string;
+    name: string;
+    arguments: string;
+  }
+
   // One reply of the script and the node it leads to.
   export interface ScriptReply {
     // What the assistant says, `null` when it only calls tools.
     content: string | null;
     // The tools the reply calls, if any.
-    tool_calls?: provider.ToolCall[];
+    tool_calls?: ScriptCall[];
     // The node to be in after this reply's tool results arrive.
     next: string;
   }
@@ -104,6 +146,24 @@ namespace provider_script {
 
   // An object of unknown members, as a parsed JSON body holds them.
   type FieldTable = { [key: string]: unknown };
+
+  // The reply chosen for a request and the node it was chosen in.
+  interface ChosenReply {
+    reply: ScriptReply;
+    node: string;
+  }
+
+  // The node the outputs of a reply's calls lead to, and the ids of the calls.
+  interface PendingCalls {
+    node: string;
+    ids: string[];
+  }
+
+  // A response the port keeps: its context then its output, and its calls.
+  interface HeldResponse {
+    context: unknown[];
+    calls: string[];
+  }
 
   // The largest prime below the limit, found by trial division.
   function prime_below(limit: number): number {
@@ -287,6 +347,209 @@ namespace provider_script {
     return value;
   }
 
+  // The JSON text of a value with the keys of every object in it sorted.
+  function canonical_text(value: unknown): string {
+    if (Array.isArray(value)) {
+      return `[${value.map(canonical_text).join(",")}]`;
+    }
+    if (fields_is(value)) {
+      const fields = value;
+      const members = Object.keys(fields)
+        .sort()
+        .map(
+          (key) => `${utility.json_text(key)}:${canonical_text(fields[key])}`,
+        );
+      return `{${members.join(",")}}`;
+    }
+    return utility.json_text(value);
+  }
+
+  // The sum of the lengths of the texts, characters standing for tokens.
+  function size_sum(texts: string[]): number {
+    return texts.reduce((sum, text) => sum + text.length, 0);
+  }
+
+  // The first hexadecimal digits of the `SHA-256` of the key and context.
+  function digest_make(key: string, context: unknown[]): string {
+    const text = canonical_text([key, context]);
+    const digest = utility.sha256_hex(utility.utf8_encode(text));
+    return digest.slice(0, constants.digest_digits);
+  }
+
+  // The calls of a reply of the script, none when it names none.
+  function reply_calls(reply: ScriptReply): ScriptCall[] {
+    return reply.tool_calls ?? [];
+  }
+
+  // Refuses an address or a header that the real endpoint would refuse.
+  function post_check(payload: FieldTable): void {
+    if (!(payload.url as string).startsWith(constants.url_start)) {
+      field_invalid("url");
+    }
+    const headers = fields_read(payload.headers, "headers");
+    const key = headers[constants.key_header];
+    if (
+      typeof key !== "string" ||
+      !key.startsWith(constants.key_start) ||
+      key === constants.key_start
+    ) {
+      field_invalid(`headers.${constants.key_header}`);
+    }
+    if (headers[constants.media_header] !== constants.json_media) {
+      field_invalid(`headers.${constants.media_header}`);
+    }
+  }
+
+  // Refuses in debug mode all but the omission, else the first bad definition.
+  function tools_check(tools: unknown, debug: boolean): void {
+    if (tools === undefined) {
+      return;
+    }
+    if (debug) {
+      if (tools !== provider.tools_omitted) {
+        field_invalid("json.tools");
+      }
+      return;
+    }
+    if (!Array.isArray(tools) || tools.length > constants.tools_max) {
+      return field_invalid("json.tools");
+    }
+    tools.forEach((tool: unknown, index: number) => {
+      const path = `json.tools[${index}]`;
+      const fields = fields_read(tool, path);
+      if (fields.type !== constants.function_type) {
+        field_invalid(`${path}.type`);
+      }
+      const name = fields.name;
+      if (typeof name !== "string" || !constants.tool_name.test(name)) {
+        field_invalid(`${path}.name`);
+      }
+      if (typeof fields.description !== "string") {
+        field_invalid(`${path}.description`);
+      }
+      fields_read(fields.parameters, `${path}.parameters`);
+    });
+  }
+
+  // Refuses an input message, an item with no type, of another role or text.
+  function message_check(item: FieldTable, path: string): void {
+    if (!constants.input_roles.includes(item.role as string)) {
+      field_invalid(`${path}.role`);
+    }
+    if (typeof item.content !== "string") {
+      field_invalid(`${path}.content`);
+    }
+  }
+
+  // Refuses a message item that is not the model's or holds a part not text.
+  function reply_check(item: FieldTable, path: string): void {
+    if (item.role !== constants.assistant_role) {
+      field_invalid(`${path}.role`);
+    }
+    const content = item.content;
+    if (!Array.isArray(content)) {
+      return field_invalid(`${path}.content`);
+    }
+    content.forEach((value: unknown, index: number) => {
+      const part_path = `${path}.content[${index}]`;
+      const part = fields_read(value, part_path);
+      if (part.type !== constants.text_type) {
+        field_invalid(`${part_path}.type`);
+      }
+      if (typeof part.text !== "string") {
+        field_invalid(`${part_path}.text`);
+      }
+    });
+  }
+
+  // Refuses a function call item whose id, name or arguments are not text.
+  function call_check(item: FieldTable, path: string): void {
+    for (const key of constants.call_fields) {
+      if (typeof item[key] !== "string") {
+        field_invalid(`${path}.${key}`);
+      }
+    }
+  }
+
+  // Refuses the first input item the real endpoint would refuse or miss by.
+  function items_check(input: unknown[], due_start: string[]): void {
+    const due = [...due_start];
+    let made: string[] = [];
+    let model_before = false;
+    input.forEach((value: unknown, index: number) => {
+      const path = `json.input[${index}]`;
+      const item = fields_read(value, path);
+      const type = item.type;
+      const model = constants.model_types.includes(type as string);
+      if (!model) {
+        due.push(...made);
+        made = [];
+      }
+      if (type === constants.output_type) {
+        const asked = due.shift();
+        if (asked === undefined || item.call_id !== asked) {
+          field_invalid(`${path}.call_id`);
+        }
+        if (typeof item.output !== "string") {
+          field_invalid(`${path}.output`);
+        }
+      } else if (due.length > 0) {
+        field_invalid(`${path}.type`);
+      } else if (model && !model_before && type !== constants.reasoning_type) {
+        field_invalid(`${path}.type`);
+      } else if (type === undefined) {
+        message_check(item, path);
+      } else if (type === constants.message_type) {
+        reply_check(item, path);
+      } else if (type === constants.call_type) {
+        call_check(item, path);
+        made.push(item.call_id as string);
+      } else if (type !== constants.reasoning_type) {
+        field_invalid(`${path}.type`);
+      }
+      model_before = model;
+    });
+    due.push(...made);
+    if (due.length > 0) {
+      field_invalid("json.input");
+    }
+  }
+
+  // A reply's output: its reasoning, its message when it says one, its calls.
+  function output_make(reply: ScriptReply, digest: string): FieldTable[] {
+    const output: FieldTable[] = [
+      {
+        type: constants.reasoning_type,
+        id: `${constants.reasoning_prefix}${digest}`,
+        summary: [],
+        encrypted_content: constants.reasoning_text,
+        status: constants.completed_status,
+      },
+    ];
+    if (reply.content !== null) {
+      output.push({
+        type: constants.message_type,
+        id: `${constants.message_prefix}${digest}`,
+        role: constants.assistant_role,
+        status: constants.completed_status,
+        content: [
+          { type: constants.text_type, text: reply.content, annotations: [] },
+        ],
+      });
+    }
+    reply_calls(reply).forEach((call: ScriptCall, index: number) => {
+      output.push({
+        type: constants.call_type,
+        id: `${constants.call_prefix}${digest}_${index + 1}`,
+        call_id: call.call_id,
+        name: call.name,
+        arguments: call.arguments,
+        status: constants.completed_status,
+      });
+    });
+    return output;
+  }
+
   // The node of the script by its name, or a throw when it has none.
   function node_get(script: Script, name: string): ScriptNode {
     if (!Object.hasOwn(script.nodes, name)) {
@@ -315,33 +578,33 @@ namespace provider_script {
     return { data };
   }
 
-  // The index of the first of the tool results that end the messages.
-  function results_start(messages: unknown[]): number {
-    let start = messages.length;
+  // The index of the first of the call outputs that end the input.
+  function results_start(input: unknown[]): number {
+    let start = input.length;
     while (
       start > 0 &&
-      fields_read(messages[start - 1], `json.messages[${start - 1}]`).role ===
-        constants.tool_role
+      fields_read(input[start - 1], `json.input[${start - 1}]`).type ===
+        constants.output_type
     ) {
       start -= 1;
     }
     return start;
   }
 
-  // The `tool_call_id` of each tool result that ends the messages, in order.
-  function results_ids(messages: unknown[]): unknown[] {
-    return messages
-      .slice(results_start(messages))
-      .map((message: unknown) => (message as FieldTable).tool_call_id);
+  // The `call_id` of each call output that ends the input, in order.
+  function results_ids(input: unknown[]): unknown[] {
+    return input
+      .slice(results_start(input))
+      .map((item: unknown) => (item as FieldTable).call_id);
   }
 
-  // The text of each tool result that ends the messages, in order.
-  function results_texts(messages: unknown[]): string[] {
-    const start = results_start(messages);
-    return messages.slice(start).map((message: unknown, index: number) => {
-      const text = (message as FieldTable).content;
+  // The output text of each call output that ends the input, in order.
+  function results_texts(input: unknown[]): string[] {
+    const start = results_start(input);
+    return input.slice(start).map((item: unknown, index: number) => {
+      const text = (item as FieldTable).output;
       if (typeof text !== "string") {
-        return field_invalid(`json.messages[${start + index}].content`);
+        return field_invalid(`json.input[${start + index}].output`);
       }
       return text;
     });
@@ -351,7 +614,7 @@ namespace provider_script {
   function after_read(
     node: ScriptNode,
     name: string,
-    messages: unknown[],
+    input: unknown[],
   ): ScriptReply {
     const { after_tools, after_holds, after_lacks } = node;
     if (after_tools === undefined) {
@@ -363,7 +626,7 @@ namespace provider_script {
     if (after_holds === undefined || after_lacks === undefined) {
       throw new Error(i18n("provider_script.after_unpaired", name));
     }
-    const held = results_texts(messages).every((text) =>
+    const held = results_texts(input).every((text) =>
       text.includes(after_holds),
     );
     return held ? after_tools : after_lacks;
@@ -372,17 +635,23 @@ namespace provider_script {
   // A port that answers each request from the script before its post returns.
   export class ScriptPort implements queue.Port {
     private readonly script: Script;
+    // Whether debug mode is on, whose requests hold no tool list.
+    private readonly debug: () => boolean;
+    // The node the next user message is answered in.
     private current: string;
-    private pending: string | undefined;
-    // The ids of the calls whose tool results are pending, in order.
-    private pending_ids: string[] = [];
-    private chats_answered = 0;
+    // The calls of the last reply whose outputs are still to come.
+    private pending: PendingCalls | undefined = undefined;
+    // Each response by its id, but those whose request set `store` false.
+    private readonly responses = new Map<string, HeldResponse>();
+    // The canonical text of each item of a key's last context and output.
+    private readonly caches = new Map<string, string[]>();
     private receiver: ((line: lines.Line) => void) | undefined;
 
-    // Takes the script, whose start must name one of its nodes.
-    constructor(script: Script) {
+    // Takes the script, whose start must name one of its nodes, and the mode.
+    constructor(script: Script, debug: () => boolean) {
       node_get(script, script.start);
       this.script = script;
+      this.debug = debug;
       this.current = script.start;
     }
 
@@ -440,65 +709,158 @@ namespace provider_script {
       if (typeof url !== "string") {
         return field_invalid("url");
       }
-      if (url.endsWith(constants.chat_path)) {
-        return this.chat_answer(fields_read(payload.json, "json"));
+      if (url.endsWith(constants.model_path)) {
+        return this.model_answer(payload, fields_read(payload.json, "json"));
       }
       if (url.endsWith(constants.image_path)) {
-        return image_answer(fields_read(payload.json, "json"));
+        const body = fields_read(payload.json, "json");
+        const answer = image_answer(body);
+        post_check(payload);
+        if (typeof body.model !== "string" || body.model === "") {
+          field_invalid("json.model");
+        }
+        return answer;
       }
       throw new Error(i18n("provider_script.url_unknown", url));
     }
 
-    // The body that answers a chat request, which moves the script on.
-    private chat_answer(body: FieldTable): FieldTable {
+    // The body that answers a model request, which moves the script on.
+    private model_answer(payload: FieldTable, body: FieldTable): FieldTable {
+      const input = body.input;
+      if (!Array.isArray(input) || input.length === 0) {
+        return field_invalid("json.input");
+      }
+      const chosen = this.reply_choose(input);
+      post_check(payload);
       const model = body.model;
-      if (typeof model !== "string") {
+      if (typeof model !== "string" || model === "") {
         return field_invalid("json.model");
       }
-      const messages = body.messages;
-      if (!Array.isArray(messages) || messages.length === 0) {
-        return field_invalid("json.messages");
+      tools_check(body.tools, this.debug());
+      const choice = body.tool_choice;
+      if (
+        choice !== undefined &&
+        !constants.tool_choices.includes(choice as string)
+      ) {
+        field_invalid("json.tool_choice");
       }
-      const index = messages.length - 1;
-      const last = fields_read(messages[index], `json.messages[${index}]`);
-      const reply = this.reply_choose(last, messages);
-      const calls = reply.tool_calls ?? [];
-      const message: FieldTable = {
-        role: constants.assistant_role,
-        content: reply.content,
-      };
-      if (calls.length > 0) {
-        message.tool_calls = structuredClone(calls);
-        this.pending = reply.next;
-        this.pending_ids = calls.map((call) => call.id);
-      } else {
-        this.current = reply.next;
+      const key = body.prompt_cache_key;
+      if (typeof key !== "string" || key === "") {
+        return field_invalid("json.prompt_cache_key");
       }
-      this.chats_answered += 1;
-      const reason =
-        calls.length > 0 ? constants.calls_reason : constants.stop_reason;
-      return {
-        id: `${constants.id_prefix}${this.chats_answered}`,
+      const previous = body.previous_response_id;
+      if (previous !== undefined && body.instructions !== undefined) {
+        field_invalid("json.instructions");
+      }
+      const held = this.held_read(previous);
+      const store = body.store;
+      if (store !== undefined && typeof store !== "boolean") {
+        field_invalid("json.store");
+      }
+      items_check(input, held === undefined ? [] : held.calls);
+      const context =
+        held === undefined ? [...input] : [...held.context, ...input];
+      const digest = digest_make(key, context);
+      const output = output_make(chosen.reply, digest);
+      const id = `${constants.response_prefix}${digest}`;
+      const answer: FieldTable = {
+        id,
+        object: constants.response_object,
         model,
-        choices: [{ index: 0, message, finish_reason: reason }],
+        status: constants.completed_status,
+        output,
+      };
+      if (body.tools !== undefined) {
+        answer.tools = structuredClone(body.tools);
+      }
+      if (choice !== undefined) {
+        answer.tool_choice = choice;
+      }
+      answer.previous_response_id = previous === undefined ? null : previous;
+      answer.usage = this.usage_make(key, context, output);
+      if (store !== false) {
+        this.responses.set(id, {
+          context: structuredClone([...context, ...output]),
+          calls: reply_calls(chosen.reply).map((call) => call.call_id),
+        });
+      }
+      this.state_apply(chosen);
+      return answer;
+    }
+
+    // The response a request chains from, `undefined` for a chain's first.
+    private held_read(previous: unknown): HeldResponse | undefined {
+      if (previous === undefined) {
+        return undefined;
+      }
+      if (typeof previous !== "string" || !this.responses.has(previous)) {
+        return field_invalid("json.previous_response_id");
+      }
+      return this.responses.get(previous);
+    }
+
+    // Characters for tokens, the cached the leading items held for the key.
+    private usage_make(
+      key: string,
+      context: unknown[],
+      output: FieldTable[],
+    ): FieldTable {
+      const texts = context.map(canonical_text);
+      const outputs = output.map(canonical_text);
+      const last = this.caches.get(key);
+      let cached = 0;
+      if (last !== undefined) {
+        for (const [index, text] of texts.entries()) {
+          if (text !== last[index]) {
+            break;
+          }
+          cached += text.length;
+        }
+      }
+      this.caches.set(key, [...texts, ...outputs]);
+      const input_tokens = size_sum(texts);
+      const output_tokens = size_sum(outputs);
+      return {
+        input_tokens,
+        input_tokens_details: { cached_tokens: cached },
+        output_tokens,
+        // The reasoning item comes first in every output.
+        output_tokens_details: { reasoning_tokens: outputs[0].length },
+        total_tokens: input_tokens + output_tokens,
       };
     }
 
-    // The reply to the last message: after tool results, or for the input.
-    private reply_choose(last: FieldTable, messages: unknown[]): ScriptReply {
-      const role = last.role;
+    // Moves the script on by the chosen reply, once the request is answered.
+    private state_apply(chosen: ChosenReply): void {
+      const calls = reply_calls(chosen.reply);
+      this.current = chosen.node;
+      if (calls.length > 0) {
+        this.pending = {
+          node: chosen.reply.next,
+          ids: calls.map((call) => call.call_id),
+        };
+      } else {
+        this.current = chosen.reply.next;
+        this.pending = undefined;
+      }
+    }
+
+    // The reply to the last input item: after call outputs, or for the input.
+    private reply_choose(input: unknown[]): ChosenReply {
+      const index = input.length - 1;
+      const last = fields_read(input[index], `json.input[${index}]`);
       const pending = this.pending;
-      if (role === constants.tool_role) {
+      if (last.type === constants.output_type) {
         if (pending === undefined) {
           throw new Error(
             i18n("provider_script.results_unasked", this.current),
           );
         }
-        const answered = results_ids(messages);
-        const asked = this.pending_ids;
+        const answered = results_ids(input);
+        const asked = pending.ids;
         if (
           answered.length !== asked.length ||
-          answered.some((id: unknown, index: number) => id !== asked[index])
+          answered.some((id: unknown, place: number) => id !== asked[place])
         ) {
           throw new Error(
             i18n(
@@ -509,37 +871,37 @@ namespace provider_script {
             ),
           );
         }
-        const reached = node_get(this.script, pending);
-        const after = after_read(reached, pending, messages);
-        this.current = pending;
-        this.pending = undefined;
-        return after;
+        const reached = node_get(this.script, pending.node);
+        const after = after_read(reached, pending.node, input);
+        return { reply: after, node: pending.node };
       }
-      if (role !== constants.user_role) {
-        throw new Error(i18n("provider_script.role_unexpected", String(role)));
+      if (last.type !== undefined || last.role !== constants.user_role) {
+        throw new Error(
+          i18n("provider_script.role_unexpected", utility.json_text(last)),
+        );
       }
       if (pending !== undefined) {
         throw new Error(
-          i18n("provider_script.results_pending", this.current, pending),
+          i18n("provider_script.results_pending", this.current, pending.node),
         );
       }
-      const input = last.content;
-      if (typeof input !== "string") {
-        throw new Error(i18n("provider_script.input_invalid", String(input)));
+      const text = last.content;
+      if (typeof text !== "string") {
+        throw new Error(i18n("provider_script.input_invalid", String(text)));
       }
       const node = node_get(this.script, this.current);
-      const integer = constants.integer_text.test(input);
-      if (integer && Object.hasOwn(node.replies, input)) {
-        return node.replies[input];
+      const integer = constants.integer_text.test(text);
+      if (integer && Object.hasOwn(node.replies, text)) {
+        return { reply: node.replies[text], node: this.current };
       }
       if (node.otherwise !== undefined) {
-        return node.otherwise;
+        return { reply: node.otherwise, node: this.current };
       }
       if (!integer) {
-        throw new Error(i18n("provider_script.input_invalid", input));
+        throw new Error(i18n("provider_script.input_invalid", text));
       }
       throw new Error(
-        i18n("provider_script.input_unknown", this.current, input),
+        i18n("provider_script.input_unknown", this.current, text),
       );
     }
   }

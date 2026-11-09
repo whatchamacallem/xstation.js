@@ -240,10 +240,12 @@
       "0": {
         "t": "turn.append"
       },
-      "content": {
-        "content": "A turn.",
-        "role": "user"
-      },
+      "content": [
+        {
+          "content": "A turn.",
+          "role": "user"
+        }
+      ],
       "role": "user",
       "scene": "/castle/note/1"
     }

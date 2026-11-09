@@ -2,20 +2,29 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// Tests of the scripted provider: a script walked through the castle turn,
-// which builds the gatehouse scene, the reply lines, every refusal, the
-// replies `otherwise` and `after_lacks` on a table as the seed's, the image
-// answer, and the PNG test pattern held against a reference PNG of the same
+// Tests of the scripted provider, the fake of xAI's Responses API: replies to
+// a user message, after tool results, by `otherwise`, `after_holds` and
+// `after_lacks`; a chained request, its context and due calls taken from the
+// response it chains from; a restart with the whole context; `store` false;
+// the output items and body fields of a reply; its `usage` in characters; its
+// ids, whose digest each test computes at run time from a canonical text it
+// writes literally; every refusal, in the order the port checks; the image
+// answer; and the PNG test pattern held against a reference PNG of the same
 // checkerboard in 88 bytes with other compressed data. The port is driven
 // directly by `line_post` and `line_receive`. The request lines it posts, the
-// reply lines it expects and the texts of the refusals are its gold in
-// `ts/test_setting_test_provider_script.json`, read through the harness.
+// reply lines, body orders and hand counted usages it expects and the texts
+// of the refusals are its gold in `ts/test_setting_test_provider_script.json`,
+// read through the harness.
 
 namespace test_provider_script {
-  // A model, the castle turn's values, the analyst table's, the PNG's.
+  // Models, ids, the tables' texts, the bounds of a tool, the PNG's layout.
   const constants = Object.freeze({
     image_model: "grok-2-image",
-    id_prefix: "chatcmpl-synthetic-",
+    other_key: "/metaverse/hyperposition/2",
+    response_prefix: "resp_",
+    digest_form: /^[0-9a-f]{16}$/,
+    digest_digits: 16,
+    reasoning_text: "scripted",
     subtitle:
       "Mind the moat. The gatehouse keeper has been expecting someone, " +
       "though not necessarily you.",
@@ -25,6 +34,13 @@ namespace test_provider_script {
     seen_text: "It said hyperposition.",
     shut_text: "The console stayed shut.",
     retried_text: "Still nothing.",
+    chain_said: "Looking.",
+    chain_seen: "Seen.",
+    chain_quiet: "Nothing.",
+    tools_max: 1000,
+    // What a debug mode request holds in place of its tool list.
+    tools_omitted: "DEBUG_MODE_TOOL_LIST_OMITTED",
+    name_max: 64,
     recorded_png:
       "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2" +
       "AAAAH0lEQVR42mP4jwQYkAAucYZBqGGQO48o" +
@@ -49,8 +65,54 @@ namespace test_provider_script {
     ]),
   });
 
+  // Canonical texts of the cache keys and items, `{0}` their reply's digest.
+  const canonical = Object.freeze({
+    key: '"/metaverse/hyperposition/1"',
+    other_key: '"/metaverse/hyperposition/2"',
+    user_zero: '{"content":"0","role":"user"}',
+    user_one: '{"content":"1","role":"user"}',
+    user_two: '{"content":"2","role":"user"}',
+    reasoning:
+      '{"encrypted_content":"scripted","id":"rs_{0}","status":"completed",' +
+      '"summary":[],"type":"reasoning"}',
+    looking:
+      '{"content":[{"annotations":[],"text":"Looking.",' +
+      '"type":"output_text"}],"id":"msg_{0}","role":"assistant",' +
+      '"status":"completed","type":"message"}',
+    seen:
+      '{"content":[{"annotations":[],"text":"Seen.",' +
+      '"type":"output_text"}],"id":"msg_{0}","role":"assistant",' +
+      '"status":"completed","type":"message"}',
+    render:
+      '{"arguments":"{}","call_id":"call_1","id":"fc_{0}_1",' +
+      '"name":"browser_render","status":"completed","type":"function_call"}',
+    done: '{"call_id":"call_1","output":"done","type":"function_call_output"}',
+  });
+
   // An object of fields by name.
   type FieldTable = { [key: string]: unknown };
+
+  // The usage of a reply, in characters.
+  interface UsageBody {
+    input_tokens: number;
+    input_tokens_details: { cached_tokens: number };
+    output_tokens: number;
+    output_tokens_details: { reasoning_tokens: number };
+    total_tokens: number;
+  }
+
+  // The body of a model reply, as the tests read it.
+  interface ResponseBody {
+    id: string;
+    object: string;
+    model: string;
+    status: string;
+    output: FieldTable[];
+    tools?: unknown;
+    tool_choice?: unknown;
+    previous_response_id: string | null;
+    usage: UsageBody;
+  }
 
   // A port on the test script and the replies it has sent.
   interface ScriptBench {
@@ -87,7 +149,7 @@ namespace test_provider_script {
     );
   }
 
-  // A text of this module's gold, a run time `{n}` left for the test to fill.
+  // A text of this module's gold.
   function gold_text(name: string): string {
     return harness.gold_get(
       `typescript.test_provider_script.texts.${name}`,
@@ -99,48 +161,122 @@ namespace test_provider_script {
     return gold_value(`lines.${name}`) as lines.Line;
   }
 
+  // The refusal of the request field at the path.
+  function field_text(path: string): string {
+    return i18n("provider_script.field_invalid", path);
+  }
+
   // The bytes of a base64 text, as the platform's `atob` reads it.
   function base64_read(text: string): Uint8Array {
     return Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
   }
 
+  // The first hexadecimal digits of the `SHA-256` of a canonical text.
+  function digest_expected(text: string): string {
+    const digest = utility.sha256_hex(utility.utf8_encode(text));
+    return digest.slice(0, constants.digest_digits);
+  }
+
+  // The canonical text of a cache key and a context, from their own texts.
+  function context_text(key: string, items: string[]): string {
+    return `[${key},[${items.join(",")}]]`;
+  }
+
+  // The canonical texts with the digest of their reply in place of `{0}`.
+  function items_fill(texts: string[], digest: string): string[] {
+    return texts.map((text) => text.replaceAll("{0}", digest));
+  }
+
+  // The sum of the lengths of the texts, characters standing for tokens.
+  function sizes_sum(texts: string[]): number {
+    return texts.reduce((sum, text) => sum + text.length, 0);
+  }
+
+  // The usage of a context's texts, its cached characters and its output's.
+  function usage_expected(
+    inputs: string[],
+    cached: number,
+    outputs: string[],
+  ): UsageBody {
+    const input_tokens = sizes_sum(inputs);
+    const output_tokens = sizes_sum(outputs);
+    return {
+      input_tokens,
+      input_tokens_details: { cached_tokens: cached },
+      output_tokens,
+      output_tokens_details: { reasoning_tokens: outputs[0].length },
+      total_tokens: input_tokens + output_tokens,
+    };
+  }
+
+  // The digest the ids of a reply carry, read from its response id.
+  function digest_read(response: ResponseBody): string {
+    return response.id.slice(constants.response_prefix.length);
+  }
+
+  // The reasoning item of every reply, its id of the reply's digest.
+  function reasoning_expected(digest: string): FieldTable {
+    return {
+      type: "reasoning",
+      id: `rs_${digest}`,
+      summary: [],
+      encrypted_content: constants.reasoning_text,
+      status: "completed",
+    };
+  }
+
+  // The message item of a reply that says the text.
+  function message_expected(digest: string, text: string): FieldTable {
+    return {
+      type: "message",
+      id: `msg_${digest}`,
+      role: "assistant",
+      status: "completed",
+      content: [{ type: "output_text", text, annotations: [] }],
+    };
+  }
+
+  // Sets the ids of a gold reply body, `{0}` standing for the digest.
+  function ids_fill(json: FieldTable, digest: string): void {
+    json.id = (json.id as string).replaceAll("{0}", digest);
+    for (const item of json.output as FieldTable[]) {
+      item.id = (item.id as string).replaceAll("{0}", digest);
+    }
+  }
+
   // A call of the named tool with the arguments as JSON text.
   function call_make(
-    id: string,
+    call_id: string,
     name: string,
     args: FieldTable,
-  ): provider.ToolCall {
-    return {
-      id,
-      type: "function",
-      function: { name, arguments: JSON.stringify(args) },
-    };
+  ): provider_script.ScriptCall {
+    return { call_id, name, arguments: utility.json_text(args) };
   }
 
   // The test script: the castle turn and a reply for each other path.
   function script_make(): provider_script.Script {
-    const bootstrap = call_make("call_1", "browser.script_run", {
+    const bootstrap = call_make("call_1", "browser_script_run", {
       name: "bootstrap",
       args: { universe: "castle", world: "castle_world" },
     });
-    const image = call_make("call_2", "browser.image_make", {
+    const image = call_make("call_2", "browser_image_make", {
       prompt: "A rain dark castle gatehouse at dusk",
       key: "/_files/gatehouse/arrival.png",
     });
-    const scene = call_make("call_3", "browser.doc_put", {
+    const scene = call_make("call_3", "browser_doc_put", {
       db: "castle_gatehouse",
       id: "scene/arrival",
       body: { 0: { t: "scene" }, subtitle: constants.subtitle },
     });
-    const enter = call_make("call_4", "browser.kv_put", {
+    const enter = call_make("call_4", "browser_kv_put", {
       ref: "/castle_world/scene",
       text: "/castle_gatehouse/scene/arrival/1",
     });
-    const render = call_make("call_5", "browser.render", {
+    const render = call_make("call_5", "browser_render", {
       image: "/_files/gatehouse/arrival.png",
       subtitle: constants.subtitle,
     });
-    const look = call_make("call_6", "browser.kv_get", {
+    const look = call_make("call_6", "browser_kv_get", {
       ref: "/metaverse/world",
     });
     return {
@@ -153,6 +289,7 @@ namespace test_provider_script {
             "3": { content: null, tool_calls: [look], next: "bare" },
             "4": { content: "Gone.", next: "nowhere" },
             "5": { content: "To the gatehouse.", next: "gatehouse" },
+            "6": { content: null, tool_calls: [look], next: "nowhere" },
           },
         },
         castle: {
@@ -181,11 +318,11 @@ namespace test_provider_script {
 
   // A table as the seed's: `otherwise`, `after_holds` and `after_lacks`.
   function analyst_make(): provider_script.Script {
-    const run = call_make("call_1", "browser.console_run", { text: "look" });
-    const note = call_make("call_2", "browser.kv_get", {
+    const run = call_make("call_1", "browser_console_run", { text: "look" });
+    const note = call_make("call_2", "browser_kv_get", {
       ref: "/metaverse/world",
     });
-    const read = call_make("call_3", "browser.console_read", { until: "$ " });
+    const read = call_make("call_3", "browser_console_read", { until: "$ " });
     const { otherwise_text, nothing_text, seen_text, shut_text } = constants;
     return {
       start: "start",
@@ -240,9 +377,40 @@ namespace test_provider_script {
     };
   }
 
-  // A port on the script whose receiver keeps every reply.
-  function bench_on(script: provider_script.Script): ScriptBench {
-    const port = new provider_script.ScriptPort(script);
+  // A table of one call whose reply also speaks, so that a chain is short.
+  function chain_make(): provider_script.Script {
+    const render: provider_script.ScriptCall = {
+      call_id: "call_1",
+      name: "browser_render",
+      arguments: "{}",
+    };
+    return {
+      start: "start",
+      nodes: {
+        start: {
+          replies: {
+            "0": { content: constants.chain_quiet, next: "start" },
+            "1": {
+              content: constants.chain_said,
+              tool_calls: [render],
+              next: "seen",
+            },
+          },
+        },
+        seen: {
+          after_tools: { content: constants.chain_seen, next: "start" },
+          replies: {},
+        },
+      },
+    };
+  }
+
+  // A port on the script whose receiver keeps every reply, in the mode given.
+  function bench_on(
+    script: provider_script.Script,
+    debug = false,
+  ): ScriptBench {
+    const port = new provider_script.ScriptPort(script, () => debug);
     const received: lines.Line[] = [];
     port.line_receive((line: lines.Line) => {
       received.push(line);
@@ -256,73 +424,107 @@ namespace test_provider_script {
   }
 
   // A user message with the text.
-  function user_say(text: string | null): provider.ChatMessage {
+  function user_say(text: string | null): FieldTable {
     return { role: "user", content: text };
   }
 
-  // A chat request line of the provider door, numbered, for the messages.
-  function chat_line(
-    messages: provider.ChatMessage[],
+  // The output of the chain table's one call.
+  function done_output(): FieldTable {
+    return { type: "function_call_output", call_id: "call_1", output: "done" };
+  }
+
+  // A model request line of the gold, numbered, chained when an id is given.
+  function model_line(
+    input: unknown[],
     id: number,
+    previous?: string,
   ): lines.Line {
-    const line = gold_line("chat_request");
+    const line = gold_line("model_request");
     line[0].i = id;
-    (line.json as FieldTable).messages = [...messages];
+    const body = line.json as FieldTable;
+    body.input = [...input];
+    if (previous !== undefined) {
+      body.previous_response_id = previous;
+    }
     return line;
   }
 
-  // Posts a chat request and reads the choice of the reply that came at once.
-  function chat_post(
-    bench: ScriptBench,
-    messages: provider.ChatMessage[],
-    id: number,
-  ): provider.ChatChoice {
+  // Posts the line and reads the body of the reply that came within the post.
+  function line_answer(bench: ScriptBench, line: lines.Line): ResponseBody {
     const count = bench.received.length;
-    bench.port.line_post(chat_line(messages, id), []);
+    bench.port.line_post(line, []);
     if (bench.received.length !== count + 1) {
       throw new Error("The scripted provider did not reply within the post.");
     }
-    return (bench.received[count].json as provider.ChatResponse).choices[0];
+    return bench.received[count].json as ResponseBody;
   }
 
-  // Adds the assistant message and one tool result for each call it made.
-  function results_add(
-    messages: provider.ChatMessage[],
-    message: provider.ChatMessage,
-  ): void {
-    messages.push(message);
-    for (const call of message.tool_calls ?? []) {
-      messages.push({ role: "tool", tool_call_id: call.id, content: "{}" });
-    }
-  }
-
-  // Adds the assistant message and a tool result of each text, one per call.
-  function results_give(
-    messages: provider.ChatMessage[],
-    message: provider.ChatMessage,
-    texts: (string | null)[],
-  ): void {
-    messages.push(message);
-    const calls = message.tool_calls ?? [];
-    for (const [index, call] of calls.entries()) {
-      const content = texts[index];
-      messages.push({ role: "tool", tool_call_id: call.id, content });
-    }
-  }
-
-  // The messages of a walk to the menu, the input, and the reply to it.
-  function menu_ask(
+  // Posts a model request of the input and reads the response that came.
+  function model_post(
     bench: ScriptBench,
-    input: string,
-  ): [provider.ChatMessage[], provider.ChatMessage] {
-    const messages = [user_say("0")];
-    messages.push(chat_post(bench, messages, 1).message, user_say(input));
-    return [messages, chat_post(bench, messages, 2).message];
+    input: unknown[],
+    id: number,
+    previous?: string,
+  ): ResponseBody {
+    return line_answer(bench, model_line(input, id, previous));
   }
 
-  // The names of the tools a choice calls, in order.
-  function names_of(choice: provider.ChatChoice): string[] {
-    return (choice.message.tool_calls ?? []).map((call) => call.function.name);
+  // The types of the output items of a response, in order.
+  function types_of(response: ResponseBody): unknown[] {
+    return response.output.map((item) => item.type);
+  }
+
+  // The calls of a response, as the script writes them.
+  function calls_of(response: ResponseBody): provider_script.ScriptCall[] {
+    return response.output
+      .filter((item) => item.type === "function_call")
+      .map((item) => ({
+        call_id: item.call_id as string,
+        name: item.name as string,
+        arguments: item.arguments as string,
+      }));
+  }
+
+  // The names of the tools a response calls, in order.
+  function names_of(response: ResponseBody): string[] {
+    return calls_of(response).map((call) => call.name);
+  }
+
+  // The texts of the parts of a response's messages, in order.
+  function texts_of(response: ResponseBody): unknown[] {
+    return response.output
+      .filter((item) => item.type === "message")
+      .flatMap((item) => (item.content as FieldTable[]).map((p) => p.text));
+  }
+
+  // The output of each call of a response, its text the one at its place.
+  function outputs_give(
+    response: ResponseBody,
+    texts: unknown[],
+  ): FieldTable[] {
+    const calls = calls_of(response);
+    if (calls.length !== texts.length) {
+      throw new Error("The test gives one output text for each call.");
+    }
+    return calls.map((call, index) => ({
+      type: "function_call_output",
+      call_id: call.call_id,
+      output: texts[index],
+    }));
+  }
+
+  // The output `{}` of each call of a response.
+  function outputs_make(response: ResponseBody): FieldTable[] {
+    return outputs_give(
+      response,
+      calls_of(response).map(() => "{}"),
+    );
+  }
+
+  // The response to the input, asked in the menu the reply to 0 leads to.
+  function menu_ask(bench: ScriptBench, input: string): ResponseBody {
+    const first = model_post(bench, [user_say("0")], 1);
+    return model_post(bench, [user_say(input)], 2, first.id);
   }
 
   // An image request line numbered 1 whose body is the one given.
@@ -411,110 +613,339 @@ namespace test_provider_script {
 
   // The walk of a script and the reply lines that carry it.
   export class TestScriptWalk extends unittest.TestCase {
-    // The castle turn: three rounds of tool calls, then the subtitle.
+    // The castle turn, chained: three rounds of calls, then the subtitle.
     test_turn_walk(): void {
       const bench = bench_make();
       const script = script_make();
-      const messages = [user_say("1")];
-      const first = chat_post(bench, messages, 1);
+      const first = model_post(bench, [user_say("1")], 1);
+      this.assertEqual(types_of(first), ["reasoning", "function_call"]);
       this.assertEqual(
-        first.message.tool_calls,
+        calls_of(first),
         script.nodes.hyperposition.replies["1"].tool_calls,
       );
-      this.assertEqual(first.message.content, null);
-      this.assertEqual(first.finish_reason, "tool_calls");
-      results_add(messages, first.message);
-      const second = chat_post(bench, messages, 2);
-      this.assertEqual(names_of(second), ["browser.image_make"]);
-      results_add(messages, second.message);
-      const third = chat_post(bench, messages, 3);
+      const second = model_post(bench, outputs_make(first), 2, first.id);
+      this.assertEqual(names_of(second), ["browser_image_make"]);
+      const third = model_post(bench, outputs_make(second), 3, second.id);
       this.assertEqual(names_of(third), [
-        "browser.doc_put",
-        "browser.kv_put",
-        "browser.render",
+        "browser_doc_put",
+        "browser_kv_put",
+        "browser_render",
       ]);
-      results_add(messages, third.message);
-      const last = chat_post(bench, messages, 4);
-      this.assertEqual(last.message, {
-        role: "assistant",
-        content: constants.subtitle,
-      });
-      this.assertEqual(last.finish_reason, "stop");
-      messages.push(last.message, user_say("0"));
-      const next = chat_post(bench, messages, 5);
-      this.assertEqual(next.message.content, "Still the moat.");
+      const last = model_post(bench, outputs_make(third), 4, third.id);
+      this.assertEqual(types_of(last), ["reasoning", "message"]);
+      this.assertEqual(texts_of(last), [constants.subtitle]);
+      const next = model_post(bench, [user_say("0")], 5, last.id);
+      this.assertEqual(texts_of(next), ["Still the moat."]);
     }
 
-    // The reply comes inside the post, shaped as a chat completion reply.
+    // The reply comes inside the post, whole as the gold has it.
     test_reply_line(): void {
       const bench = bench_make();
-      bench.port.line_post(chat_line([user_say("2")], 7), []);
+      bench.port.line_post(model_line([user_say("2")], 7), []);
       this.assertEqual(bench.received.length, 1);
       const reply = bench.received[0];
-      this.assertEqual(Object.keys(reply).join(","), "0,status,headers,json");
-      const json = reply.json as provider.ChatResponse;
-      this.assertEqual(Object.keys(json).join(","), "id,model,choices");
-      this.assertTrue(json.id.startsWith(constants.id_prefix));
+      this.assertEqual(Object.keys(reply), ["0", "status", "headers", "json"]);
+      const json = reply.json as FieldTable;
+      this.assertEqual(Object.keys(json), gold_value("orders.reply"));
       const expected = gold_line("reply_nothing");
-      (expected.json as FieldTable).id = json.id;
+      const text = context_text(canonical.key, [canonical.user_two]);
+      ids_fill(expected.json as FieldTable, digest_expected(text));
       this.assertEqual(reply, expected);
     }
 
     // A request in full names is answered in full names.
     test_full_names(): void {
       const bench = bench_make();
-      bench.port.line_post(gold_line("chat_full"), []);
+      bench.port.line_post(gold_line("model_full"), []);
       this.assertEqual(bench.received[0][0], gold_line("reply_full")[0]);
     }
 
-    // Each chat reply has an id of its own and the model the request named.
-    test_ids_distinct(): void {
+    // A reply that only calls has no message, and its calls are numbered.
+    test_calls_numbered(): void {
       const bench = bench_make();
-      const first = chat_line([user_say("2")], 1);
-      const other = gold_line("chat_other");
-      bench.port.line_post(first, []);
-      bench.port.line_post(other, []);
-      const responses = bench.received.map(
-        (reply) => reply.json as provider.ChatResponse,
+      const first = model_post(bench, [user_say("1")], 1);
+      const second = model_post(bench, outputs_make(first), 2, first.id);
+      const third = model_post(bench, outputs_make(second), 3, second.id);
+      const digest = digest_read(third);
+      this.assertEqual(
+        third.output.map((item) => item.id),
+        [`rs_${digest}`, `fc_${digest}_1`, `fc_${digest}_2`, `fc_${digest}_3`],
       );
-      this.assertEqual(responses.length, 2);
-      this.assertTrue(responses[0].id !== responses[1].id);
-      for (const response of responses) {
-        this.assertTrue(response.id.startsWith(constants.id_prefix));
-      }
-      this.assertEqual(responses[0].model, (first.json as FieldTable).model);
-      this.assertEqual(responses[1].model, (other.json as FieldTable).model);
     }
 
-    // The calls in a reply are copies, not the script's own objects.
-    test_calls_copied(): void {
-      const script = script_make();
-      const port = new provider_script.ScriptPort(script);
-      const received: lines.Line[] = [];
-      port.line_receive((line: lines.Line) => {
-        received.push(line);
-      });
-      port.line_post(chat_line([user_say("1")], 1), []);
-      const sent = received[0].json as provider.ChatResponse;
-      const calls = sent.choices[0].message.tool_calls ?? [];
-      const kept = script.nodes.hyperposition.replies["1"].tool_calls ?? [];
-      this.assertEqual(calls, kept);
-      this.assertEqual(calls.length, 1);
-      this.assertFalse(calls[0] === kept[0]);
+    // A reply that speaks and calls holds its reasoning, message and call.
+    test_output_items(): void {
+      const text = context_text(canonical.key, [canonical.user_one]);
+      const digest = digest_expected(text);
+      const response = model_post(bench_on(chain_make()), [user_say("1")], 1);
+      this.assertEqual(response.id, `resp_${digest}`);
+      this.assertEqual(response.output, [
+        reasoning_expected(digest),
+        message_expected(digest, constants.chain_said),
+        {
+          type: "function_call",
+          id: `fc_${digest}_1`,
+          call_id: "call_1",
+          name: "browser_render",
+          arguments: "{}",
+          status: "completed",
+        },
+      ]);
     }
 
-    // A reply without tool calls moves to its next node at once.
+    // The body echoes `tools` and `tool_choice` when given, and the model.
+    test_echoes_kept(): void {
+      const bench = bench_on(chain_make());
+      const tools = [
+        {
+          type: "function",
+          name: "browser_render",
+          description: "Show an image and a subtitle.",
+          parameters: { type: "object" },
+        },
+      ];
+      const line = model_line([user_say("1")], 1);
+      const body = line.json as FieldTable;
+      body.model = "grok-x";
+      body.tools = tools;
+      body.tool_choice = "required";
+      const first = line_answer(bench, line);
+      this.assertEqual(Object.keys(first), gold_value("orders.reply_tools"));
+      this.assertEqual(first.object, "response");
+      this.assertEqual(first.model, "grok-x");
+      this.assertEqual(first.status, "completed");
+      this.assertEqual(first.tools, tools);
+      this.assertFalse(first.tools === tools);
+      this.assertEqual(first.tool_choice, "required");
+      this.assertEqual(first.previous_response_id, null);
+      const bare = model_line([done_output()], 2, first.id);
+      delete (bare.json as FieldTable).tool_choice;
+      const second = line_answer(bench, bare);
+      this.assertEqual(Object.keys(second), gold_value("orders.reply_bare"));
+      this.assertEqual(second.previous_response_id, first.id);
+    }
+
+    // A reply without calls moves to its next node at once.
     test_stop_moves(): void {
       const bench = bench_make();
-      const messages = [user_say("5")];
-      const choice = chat_post(bench, messages, 1);
-      this.assertEqual(choice.message.content, "To the gatehouse.");
-      this.assertEqual(choice.finish_reason, "stop");
-      this.assertFalse(Object.hasOwn(choice.message, "tool_calls"));
-      messages.push(choice.message, user_say("0"));
+      const moved = model_post(bench, [user_say("5")], 1);
+      this.assertEqual(texts_of(moved), ["To the gatehouse."]);
+      this.assertEqual(types_of(moved), ["reasoning", "message"]);
+      const next = model_post(bench, [user_say("0")], 2, moved.id);
+      this.assertEqual(texts_of(next), ["Still the moat."]);
+    }
+
+    // The port keeps one place for every chain, so a new chain goes on there.
+    test_place_shared(): void {
+      const bench = bench_make();
+      model_post(bench, [user_say("5")], 1);
+      const fresh = model_post(bench, [user_say("0")], 2);
+      this.assertEqual(texts_of(fresh), ["Still the moat."]);
+      this.assertEqual(fresh.previous_response_id, null);
+    }
+  }
+
+  // The ids, arithmetic on the cache key and the context.
+  export class TestScriptIds extends unittest.TestCase {
+    // One request to two new ports is answered alike, ids included.
+    test_ids_repeated(): void {
+      const first = model_post(bench_on(chain_make()), [user_say("1")], 1);
+      const second = model_post(bench_on(chain_make()), [user_say("1")], 1);
+      this.assertEqual(first, second);
+      this.assertTrue(constants.digest_form.test(digest_read(first)));
+    }
+
+    // Another context, or one context under another key, has another digest.
+    test_ids_differ(): void {
+      const zero = model_post(bench_on(chain_make()), [user_say("0")], 1);
+      const one = model_post(bench_on(chain_make()), [user_say("1")], 1);
+      const line = model_line([user_say("0")], 1);
+      (line.json as FieldTable).prompt_cache_key = constants.other_key;
+      const other = line_answer(bench_on(chain_make()), line);
+      const digests = [zero, one, other].map(digest_read);
+      this.assertEqual(digests, [
+        digest_expected(context_text(canonical.key, [canonical.user_zero])),
+        digest_expected(context_text(canonical.key, [canonical.user_one])),
+        digest_expected(
+          context_text(canonical.other_key, [canonical.user_zero]),
+        ),
+      ]);
+      this.assertEqual(new Set(digests).size, 3);
+    }
+  }
+
+  // A chain of responses by `previous_response_id`, and its restart.
+  export class TestScriptChain extends unittest.TestCase {
+    // A chained request's context is its response's context, output and input.
+    test_chain_context(): void {
+      const bench = bench_on(chain_make());
+      const first = model_post(bench, [user_say("1")], 1);
+      const second = model_post(bench, [done_output()], 2, first.id);
+      const held = items_fill(
+        [
+          canonical.user_one,
+          canonical.reasoning,
+          canonical.looking,
+          canonical.render,
+        ],
+        digest_read(first),
+      );
+      const text = context_text(canonical.key, [...held, canonical.done]);
+      const digest = digest_expected(text);
+      this.assertEqual(second.id, `resp_${digest}`);
+      this.assertEqual(second.previous_response_id, first.id);
+      this.assertEqual(second.output, [
+        reasoning_expected(digest),
+        message_expected(digest, constants.chain_seen),
+      ]);
+    }
+
+    // A restart of the whole context with no chain is answered as the chain.
+    test_restart_whole(): void {
+      const chained = bench_on(chain_make());
+      const first = model_post(chained, [user_say("1")], 1);
+      const second = model_post(chained, [done_output()], 2, first.id);
+      const restarted = bench_on(chain_make());
+      const again = model_post(restarted, [user_say("1")], 1);
+      const input = [user_say("1"), ...again.output, done_output()];
+      const whole = model_post(restarted, input, 2);
+      this.assertEqual(whole.previous_response_id, null);
+      this.assertEqual(whole.id, second.id);
+      this.assertEqual(whole.output, second.output);
+      this.assertEqual(whole.usage, second.usage);
+    }
+
+    // The calls due at a chained request's start are its response's calls.
+    test_due_seeded(): void {
+      const bench = bench_make();
+      const quiet = model_post(bench, [user_say("2")], 1);
+      const asked = model_post(bench, [user_say("1")], 2);
+      const outputs = outputs_make(asked);
+      const error = thrown_get(() => model_post(bench, outputs, 3, quiet.id));
+      this.assertEqual(error.message, field_text("json.input[0].call_id"));
+      const answered = model_post(bench, outputs, 4, asked.id);
+      this.assertEqual(names_of(answered), ["browser_image_make"]);
+    }
+
+    // A chain's first request has no call due, so an output answers none.
+    test_first_undue(): void {
+      const bench = bench_make();
+      const asked = model_post(bench, [user_say("1")], 1);
+      const error = thrown_get(() =>
+        model_post(bench, outputs_make(asked), 2),
+      );
+      this.assertEqual(error.message, field_text("json.input[0].call_id"));
+    }
+
+    // A response another port answered is not held by this one.
+    test_chain_foreign(): void {
+      const other = model_post(bench_make(), [user_say("2")], 1);
+      const error = thrown_get(() =>
+        model_post(bench_make(), [user_say("2")], 1, other.id),
+      );
+      this.assertEqual(error.message, field_text("json.previous_response_id"));
+    }
+
+    // With `store` false no chain follows, but the key's cache is kept.
+    test_store_false(): void {
+      const bench = bench_on(chain_make());
+      const line = model_line([user_say("1")], 1);
+      (line.json as FieldTable).store = false;
+      const first = line_answer(bench, line);
+      const error = thrown_get(() =>
+        model_post(bench, [done_output()], 2, first.id),
+      );
+      this.assertEqual(error.message, field_text("json.previous_response_id"));
+      const input = [user_say("1"), ...first.output, done_output()];
+      const whole = model_post(bench, input, 3);
+      const held = items_fill(
+        [
+          canonical.user_one,
+          canonical.reasoning,
+          canonical.looking,
+          canonical.render,
+        ],
+        digest_read(first),
+      );
       this.assertEqual(
-        chat_post(bench, messages, 2).message.content,
-        "Still the moat.",
+        whole.usage.input_tokens_details.cached_tokens,
+        sizes_sum(held),
+      );
+    }
+
+    // With `store` true the response is held, as with no `store`.
+    test_store_true(): void {
+      const bench = bench_on(chain_make());
+      const line = model_line([user_say("1")], 1);
+      (line.json as FieldTable).store = true;
+      const first = line_answer(bench, line);
+      const second = model_post(bench, [done_output()], 2, first.id);
+      this.assertEqual(texts_of(second), [constants.chain_seen]);
+    }
+
+    // `instructions` is refused beside a chain only, and taken alone.
+    test_instructions_alone(): void {
+      const bench = bench_make();
+      const line = model_line([user_say("2")], 1);
+      (line.json as FieldTable).instructions = "Be brief.";
+      const response = line_answer(bench, line);
+      this.assertEqual(texts_of(response), ["Nothing happens."]);
+    }
+  }
+
+  // The usage of a reply, arithmetic in characters on the context.
+  export class TestScriptUsage extends unittest.TestCase {
+    // A chain's first request counts its input and output, nothing cached.
+    test_usage_first(): void {
+      const response = model_post(bench_on(chain_make()), [user_say("1")], 1);
+      const output = items_fill(
+        [canonical.reasoning, canonical.looking, canonical.render],
+        digest_read(response),
+      );
+      const usage = usage_expected([canonical.user_one], 0, output);
+      this.assertEqual(response.usage, usage);
+      this.assertEqual(response.usage, gold_value("usages.first"));
+    }
+
+    // A chained request counts the whole context, the key's last one cached.
+    test_usage_chained(): void {
+      const bench = bench_on(chain_make());
+      const first = model_post(bench, [user_say("1")], 1);
+      const second = model_post(bench, [done_output()], 2, first.id);
+      const held = items_fill(
+        [
+          canonical.user_one,
+          canonical.reasoning,
+          canonical.looking,
+          canonical.render,
+        ],
+        digest_read(first),
+      );
+      const output = items_fill(
+        [canonical.reasoning, canonical.seen],
+        digest_read(second),
+      );
+      const usage = usage_expected(
+        [...held, canonical.done],
+        sizes_sum(held),
+        output,
+      );
+      this.assertEqual(second.usage, usage);
+      this.assertEqual(second.usage, gold_value("usages.chained"));
+    }
+
+    // The cache is the key's: another key caches nothing of the first.
+    test_cache_keyed(): void {
+      const bench = bench_on(chain_make());
+      model_post(bench, [user_say("0")], 1);
+      const line = model_line([user_say("0")], 2);
+      (line.json as FieldTable).prompt_cache_key = constants.other_key;
+      const other = line_answer(bench, line);
+      this.assertEqual(other.usage.input_tokens_details.cached_tokens, 0);
+      const again = model_post(bench, [user_say("0")], 3);
+      this.assertEqual(
+        again.usage.input_tokens_details.cached_tokens,
+        canonical.user_zero.length,
       );
     }
   }
@@ -524,7 +955,11 @@ namespace test_provider_script {
     // A script whose start names no node is refused when the port is made.
     test_start_unknown(): void {
       const error = thrown_get(
-        () => new provider_script.ScriptPort({ start: "nowhere", nodes: {} }),
+        () =>
+          new provider_script.ScriptPort(
+            { start: "nowhere", nodes: {} },
+            () => false,
+          ),
       );
       this.assertEqual(
         error.message,
@@ -535,11 +970,24 @@ namespace test_provider_script {
     // A reply that leads to no node is refused at the next request.
     test_next_unknown(): void {
       const bench = bench_make();
-      const messages = [user_say("4")];
-      const choice = chat_post(bench, messages, 1);
-      this.assertEqual(choice.message.content, "Gone.");
-      messages.push(choice.message, user_say("1"));
-      const error = thrown_get(() => chat_post(bench, messages, 2));
+      const gone = model_post(bench, [user_say("4")], 1);
+      this.assertEqual(texts_of(gone), ["Gone."]);
+      const error = thrown_get(() =>
+        model_post(bench, [user_say("1")], 2, gone.id),
+      );
+      this.assertEqual(
+        error.message,
+        gold_text("provider_script_node_unknown"),
+      );
+    }
+
+    // Results that lead to no node are refused when they come.
+    test_after_unknown(): void {
+      const bench = bench_make();
+      const asked = model_post(bench, [user_say("6")], 1);
+      const error = thrown_get(() =>
+        model_post(bench, outputs_make(asked), 2, asked.id),
+      );
       this.assertEqual(
         error.message,
         gold_text("provider_script_node_unknown"),
@@ -561,7 +1009,7 @@ namespace test_provider_script {
         [null, "null"],
       ];
       for (const [text, suffix] of cases) {
-        const error = thrown_get(() => chat_post(bench, [user_say(text)], 1));
+        const error = thrown_get(() => model_post(bench, [user_say(text)], 1));
         this.assertEqual(
           error.message,
           gold_text(`provider_script_input_invalid_${suffix}`),
@@ -579,7 +1027,7 @@ namespace test_provider_script {
         ["-5", "minus_five"],
       ];
       for (const [text, suffix] of cases) {
-        const error = thrown_get(() => chat_post(bench, [user_say(text)], 1));
+        const error = thrown_get(() => model_post(bench, [user_say(text)], 1));
         this.assertEqual(
           error.message,
           gold_text(`provider_script_input_unknown_${suffix}`),
@@ -590,11 +1038,11 @@ namespace test_provider_script {
     // Tool results after a reply that called no tool are refused.
     test_results_unasked(): void {
       const bench = bench_make();
-      const messages: provider.ChatMessage[] = [
+      const input = [
         user_say("2"),
-        { role: "tool", tool_call_id: "call_1", content: "{}" },
+        { type: "function_call_output", call_id: "call_1", output: "{}" },
       ];
-      const error = thrown_get(() => chat_post(bench, messages, 1));
+      const error = thrown_get(() => model_post(bench, input, 1));
       this.assertEqual(
         error.message,
         gold_text("provider_script_results_unasked"),
@@ -604,9 +1052,10 @@ namespace test_provider_script {
     // A user message while tool results are pending is refused.
     test_results_pending(): void {
       const bench = bench_make();
-      chat_post(bench, [user_say("1")], 1);
-      const messages = [user_say("1"), user_say("2")];
-      const error = thrown_get(() => chat_post(bench, messages, 2));
+      const asked = model_post(bench, [user_say("1")], 1);
+      const error = thrown_get(() =>
+        model_post(bench, [user_say("2")], 2, asked.id),
+      );
       this.assertEqual(
         error.message,
         gold_text("provider_script_results_pending"),
@@ -616,17 +1065,20 @@ namespace test_provider_script {
     // Tool results whose call ids are not the calls of the reply are refused.
     test_results_unmatched(): void {
       const bench = bench_make();
-      const asked = chat_post(bench, [user_say("1")], 1).message;
+      const asked = model_post(bench, [user_say("1")], 1);
       const cases: [string[], string][] = [
         [["call_9"], "other"],
         [["call_1", "call_1"], "twice"],
       ];
       for (const [ids, suffix] of cases) {
-        const messages: provider.ChatMessage[] = [user_say("1"), asked];
-        for (const id of ids) {
-          messages.push({ role: "tool", tool_call_id: id, content: "{}" });
-        }
-        const error = thrown_get(() => chat_post(bench, messages, 2));
+        const outputs = ids.map((call_id) => ({
+          type: "function_call_output",
+          call_id,
+          output: "{}",
+        }));
+        const error = thrown_get(() =>
+          model_post(bench, outputs, 2, asked.id),
+        );
         this.assertEqual(
           error.message,
           gold_text(`provider_script_results_unmatched_${suffix}`),
@@ -638,32 +1090,45 @@ namespace test_provider_script {
     // Tool results that lead to a node with no reply after them are refused.
     test_after_missing(): void {
       const bench = bench_make();
-      const messages = [user_say("3")];
-      results_add(messages, chat_post(bench, messages, 1).message);
-      const error = thrown_get(() => chat_post(bench, messages, 2));
+      const asked = model_post(bench, [user_say("3")], 1);
+      const error = thrown_get(() =>
+        model_post(bench, outputs_make(asked), 2, asked.id),
+      );
       this.assertEqual(
         error.message,
         gold_text("provider_script_after_missing"),
       );
     }
 
-    // A last message that is neither the user's nor a tool result is refused.
+    // A last item that is neither a user message nor a result is refused.
     test_role_unexpected(): void {
       const bench = bench_make();
-      for (const role of ["assistant", "system"] as const) {
-        const messages = [{ role, content: "Hello." }];
-        const error = thrown_get(() => chat_post(bench, messages, 1));
+      const cases: [FieldTable, string][] = [
+        [{ role: "assistant", content: "Hello." }, "assistant"],
+        [{ role: "system", content: "Hello." }, "system"],
+        [
+          {
+            type: "function_call",
+            call_id: "call_1",
+            name: "browser_render",
+            arguments: "{}",
+          },
+          "call",
+        ],
+      ];
+      for (const [item, suffix] of cases) {
+        const error = thrown_get(() => model_post(bench, [item], 1));
         this.assertEqual(
           error.message,
-          gold_text(`provider_script_role_unexpected_${role}`),
+          gold_text(`provider_script_role_unexpected_${suffix}`),
         );
       }
     }
 
     // A port with no receiver, or given a second one, refuses it.
     test_receiver_rules(): void {
-      const port = new provider_script.ScriptPort(script_make());
-      const request = chat_line([user_say("2")], 1);
+      const port = new provider_script.ScriptPort(script_make(), () => false);
+      const request = model_line([user_say("2")], 1);
       const missing = thrown_get(() => port.line_post(request, []));
       this.assertEqual(
         missing.message,
@@ -677,7 +1142,7 @@ namespace test_provider_script {
       );
     }
 
-    // A line that is not a chat or image request it can read is refused.
+    // A line it cannot read is refused before the script chooses, in order.
     test_line_refused(): void {
       const bench = bench_make();
       const blobs = gold_line("refused_blobs");
@@ -690,15 +1155,9 @@ namespace test_provider_script {
         [gold_line("refused_url"), "provider_script_field_invalid_url"],
         [gold_line("refused_unknown"), "provider_script_url_unknown"],
         [gold_line("refused_json"), "provider_script_field_invalid_json"],
-        [gold_line("refused_model"), "provider_script_field_invalid_model"],
-        [
-          gold_line("refused_messages"),
-          "provider_script_field_invalid_messages",
-        ],
-        [
-          gold_line("refused_message"),
-          "provider_script_field_invalid_message",
-        ],
+        [gold_line("refused_input"), "provider_script_field_invalid_input"],
+        [gold_line("refused_empty"), "provider_script_field_invalid_input"],
+        [gold_line("refused_item"), "provider_script_field_invalid_item"],
       ];
       for (const [line, name] of cases) {
         const error = thrown_get(() => bench.port.line_post(line, []));
@@ -725,47 +1184,42 @@ namespace test_provider_script {
       ];
       for (const text of texts) {
         const bench = bench_on(analyst_make());
-        const choice = chat_post(bench, [user_say(text)], 1);
-        this.assertEqual(choice.message, {
-          role: "assistant",
-          content: constants.otherwise_text,
-        });
-        this.assertEqual(choice.finish_reason, "stop");
+        const response = model_post(bench, [user_say(text)], 1);
+        this.assertEqual(types_of(response), ["reasoning", "message"]);
+        this.assertEqual(texts_of(response), [constants.otherwise_text]);
       }
     }
 
     // `otherwise` moves to its next node, where the choices then answer.
     test_otherwise_moves(): void {
       const bench = bench_on(analyst_make());
-      const messages = [user_say("word")];
-      messages.push(chat_post(bench, messages, 1).message, user_say("1"));
-      const choice = chat_post(bench, messages, 2);
-      this.assertEqual(names_of(choice), ["browser.console_run"]);
+      const first = model_post(bench, [user_say("word")], 1);
+      const second = model_post(bench, [user_say("1")], 2, first.id);
+      this.assertEqual(names_of(second), ["browser_console_run"]);
     }
 
     // An input the node holds takes its own reply, not `otherwise`.
     test_replies_first(): void {
       const bench = bench_on(analyst_make());
-      const choice = chat_post(bench, [user_say("0")], 1);
-      this.assertEqual(choice.message.content, constants.nothing_text);
+      const response = model_post(bench, [user_say("0")], 1);
+      this.assertEqual(texts_of(response), [constants.nothing_text]);
     }
 
     // An `otherwise` that calls tools moves on once their results are back.
     test_otherwise_calls(): void {
       const bench = bench_on(analyst_make());
-      const [messages, asked] = menu_ask(bench, "6");
-      messages.push(asked, user_say("word"));
-      const choice = chat_post(bench, messages, 3);
-      this.assertEqual(names_of(choice), ["browser.console_run"]);
-      results_give(messages, choice.message, [constants.held_text]);
-      const last = chat_post(bench, messages, 4);
-      this.assertEqual(last.message.content, constants.seen_text);
+      const asked = menu_ask(bench, "6");
+      const called = model_post(bench, [user_say("word")], 3, asked.id);
+      this.assertEqual(names_of(called), ["browser_console_run"]);
+      const results = outputs_give(called, [constants.held_text]);
+      const last = model_post(bench, results, 4, called.id);
+      this.assertEqual(texts_of(last), [constants.seen_text]);
     }
 
     // A content that is not a string is refused with `otherwise` in the node.
     test_content_refused(): void {
       const bench = bench_on(analyst_make());
-      const error = thrown_get(() => chat_post(bench, [user_say(null)], 1));
+      const error = thrown_get(() => model_post(bench, [user_say(null)], 1));
       this.assertEqual(
         error.message,
         gold_text("provider_script_input_invalid_null"),
@@ -779,14 +1233,11 @@ namespace test_provider_script {
     // Results that each hold the text are followed by `after_tools`.
     test_holds_followed(): void {
       const bench = bench_on(analyst_make());
-      const [messages, asked] = menu_ask(bench, "2");
+      const asked = menu_ask(bench, "2");
       const output = `{"output":"${constants.held_text}\\n"}`;
-      results_give(messages, asked, [output, constants.held_text]);
-      const choice = chat_post(bench, messages, 3);
-      this.assertEqual(choice.message, {
-        role: "assistant",
-        content: constants.seen_text,
-      });
+      const results = outputs_give(asked, [output, constants.held_text]);
+      const response = model_post(bench, results, 3, asked.id);
+      this.assertEqual(texts_of(response), [constants.seen_text]);
     }
 
     // One result of the reply that lacks the text gives `after_lacks`.
@@ -799,37 +1250,33 @@ namespace test_provider_script {
       ];
       for (const texts of cases) {
         const bench = bench_on(analyst_make());
-        const [messages, asked] = menu_ask(bench, "2");
-        results_give(messages, asked, texts);
-        const choice = chat_post(bench, messages, 3);
-        this.assertEqual(choice.message, {
-          role: "assistant",
-          content: constants.shut_text,
-        });
+        const asked = menu_ask(bench, "2");
+        const results = outputs_give(asked, texts);
+        const response = model_post(bench, results, 3, asked.id);
+        this.assertEqual(texts_of(response), [constants.shut_text]);
       }
     }
 
     // `after_lacks` moves to its next node as `after_tools` does.
     test_lacks_moves(): void {
       const bench = bench_on(analyst_make());
-      const [messages, asked] = menu_ask(bench, "1");
-      results_give(messages, asked, ["denied"]);
-      messages.push(chat_post(bench, messages, 3).message, user_say("0"));
-      const choice = chat_post(bench, messages, 4);
-      this.assertEqual(choice.message.content, constants.nothing_text);
+      const asked = menu_ask(bench, "1");
+      const results = outputs_give(asked, ["denied"]);
+      const shut = model_post(bench, results, 3, asked.id);
+      const next = model_post(bench, [user_say("0")], 4, shut.id);
+      this.assertEqual(texts_of(next), [constants.nothing_text]);
     }
 
     // The calls of `after_lacks` wait for their results, as any reply's do.
     test_lacks_calls(): void {
       const bench = bench_on(analyst_make());
-      const [messages, asked] = menu_ask(bench, "3");
-      results_give(messages, asked, ["denied"]);
-      const choice = chat_post(bench, messages, 3);
-      this.assertEqual(names_of(choice), ["browser.console_read"]);
-      this.assertEqual(choice.finish_reason, "tool_calls");
-      results_add(messages, choice.message);
-      const last = chat_post(bench, messages, 4);
-      this.assertEqual(last.message.content, constants.retried_text);
+      const asked = menu_ask(bench, "3");
+      const results = outputs_give(asked, ["denied"]);
+      const retried = model_post(bench, results, 3, asked.id);
+      this.assertEqual(names_of(retried), ["browser_console_read"]);
+      this.assertEqual(types_of(retried), ["reasoning", "function_call"]);
+      const last = model_post(bench, outputs_make(retried), 4, retried.id);
+      this.assertEqual(texts_of(last), [constants.retried_text]);
     }
 
     // A node with one of `after_holds` and `after_lacks` is a broken table.
@@ -840,9 +1287,11 @@ namespace test_provider_script {
       ];
       for (const [input, suffix] of cases) {
         const bench = bench_on(analyst_make());
-        const [messages, asked] = menu_ask(bench, input);
-        results_give(messages, asked, [constants.held_text]);
-        const error = thrown_get(() => chat_post(bench, messages, 3));
+        const asked = menu_ask(bench, input);
+        const results = outputs_give(asked, [constants.held_text]);
+        const error = thrown_get(() =>
+          model_post(bench, results, 3, asked.id),
+        );
         this.assertEqual(
           error.message,
           gold_text(`provider_script_after_unpaired_${suffix}`),
@@ -850,16 +1299,191 @@ namespace test_provider_script {
       }
     }
 
-    // A tool result whose content is not text cannot be read for the text.
+    // A tool result whose output is not text cannot be read for the text.
     test_result_refused(): void {
       const bench = bench_on(analyst_make());
-      const [messages, asked] = menu_ask(bench, "1");
-      results_give(messages, asked, [null]);
-      const error = thrown_get(() => chat_post(bench, messages, 3));
+      const asked = menu_ask(bench, "1");
+      const results = outputs_give(asked, [5]);
+      const error = thrown_get(() => model_post(bench, results, 3, asked.id));
+      this.assertEqual(error.message, field_text("json.input[0].output"));
+    }
+  }
+
+  // A request the port answers from its table, then held to xAI's rules.
+  export class TestRequestChecks extends unittest.TestCase {
+    // Each row of the gold breaks a good request, its first break named.
+    test_each_refused(): void {
+      const rows = gold_value("bad_requests") as FieldTable[];
+      for (const row of rows) {
+        const bench = bench_make();
+        const line = model_line([user_say("2")], 1);
+        const body = line.json as FieldTable;
+        if (Object.hasOwn(row, "headers")) {
+          Object.assign(line.headers as FieldTable, row.headers);
+        }
+        if (Object.hasOwn(row, "line")) {
+          Object.assign(line, row.line);
+        }
+        if (Object.hasOwn(row, "body")) {
+          Object.assign(body, row.body);
+        }
+        if (Object.hasOwn(row, "absent")) {
+          for (const key of row.absent as string[]) {
+            delete body[key];
+          }
+        }
+        const error = thrown_get(() => bench.port.line_post(line, []));
+        this.assertEqual(
+          error.message,
+          field_text(row.path as string),
+          utility.json_text(row),
+        );
+      }
+    }
+
+    // The script chooses first, so its refusal comes before a bad field's.
+    test_choice_first(): void {
+      const bench = bench_make();
+      const line = model_line([user_say("9")], 1);
+      line.url = "http://api.x.ai/v1/responses";
+      (line.json as FieldTable).model = "";
+      const error = thrown_get(() => bench.port.line_post(line, []));
       this.assertEqual(
         error.message,
-        gold_text("provider_script_field_invalid_content"),
+        gold_text("provider_script_input_unknown_nine"),
       );
+    }
+
+    // A request of 1000 tools is taken, and one of 1001 refused.
+    test_tools_bounded(): void {
+      const tool = {
+        type: "function",
+        name: "browser_render",
+        description: "Show an image and a subtitle.",
+        parameters: { type: "object" },
+      };
+      const bench = bench_make();
+      const line = model_line([user_say("2")], 1);
+      const most = constants.tools_max;
+      (line.json as FieldTable).tools = new Array(most).fill(tool);
+      const answered = line_answer(bench, line);
+      this.assertEqual((answered.tools as unknown[]).length, most);
+      const over = model_line([user_say("2")], 2);
+      (over.json as FieldTable).tools = new Array(most + 1).fill(tool);
+      const error = thrown_get(() => bench.port.line_post(over, []));
+      this.assertEqual(error.message, field_text("json.tools"));
+    }
+
+    // In debug mode the omission's text is taken and echoed, a list refused.
+    test_tools_omitted(): void {
+      const bench = bench_on(script_make(), true);
+      const line = model_line([user_say("2")], 1);
+      (line.json as FieldTable).tools = constants.tools_omitted;
+      const answered = line_answer(bench, line);
+      this.assertEqual(answered.tools, constants.tools_omitted);
+      const listed = model_line([user_say("2")], 2);
+      (listed.json as FieldTable).tools = [];
+      const error = thrown_get(() => bench.port.line_post(listed, []));
+      this.assertEqual(error.message, field_text("json.tools"));
+    }
+
+    // Outside debug mode the omission's text is refused, as xAI would.
+    test_omission_refused(): void {
+      const bench = bench_make();
+      const line = model_line([user_say("2")], 1);
+      (line.json as FieldTable).tools = constants.tools_omitted;
+      const error = thrown_get(() => bench.port.line_post(line, []));
+      this.assertEqual(error.message, field_text("json.tools"));
+    }
+
+    // A name of 64 letters, digits, `_` and `-` is taken, one of 65 refused.
+    test_tool_names(): void {
+      const bench = bench_make();
+      const tool_line = (name: string, id: number): lines.Line => {
+        const line = model_line([user_say("2")], id);
+        (line.json as FieldTable).tools = [
+          {
+            type: "function",
+            name,
+            description: "Show an image and a subtitle.",
+            parameters: { type: "object" },
+          },
+        ];
+        return line;
+      };
+      const longest = "n".repeat(constants.name_max);
+      for (const [index, name] of ["a-b_C9", longest].entries()) {
+        const answered = line_answer(bench, tool_line(name, index + 1));
+        this.assertEqual(texts_of(answered), ["Nothing happens."]);
+      }
+      const error = thrown_get(() =>
+        bench.port.line_post(tool_line(`${longest}n`, 3), []),
+      );
+      this.assertEqual(error.message, field_text("json.tools[0].name"));
+    }
+
+    // A log of every kind of item, two calls answered in order, is taken.
+    test_history_accepted(): void {
+      const bench = bench_make();
+      const input = [
+        { role: "system", content: "Be the castle." },
+        user_say("1"),
+        { type: "reasoning", id: "rs_1" },
+        {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "Two calls." }],
+        },
+        {
+          type: "function_call",
+          call_id: "call_7",
+          name: "browser_render",
+          arguments: "{}",
+        },
+        {
+          type: "function_call",
+          call_id: "call_8",
+          name: "browser_kv_get",
+          arguments: "{}",
+        },
+        { type: "function_call_output", call_id: "call_7", output: "{}" },
+        { type: "function_call_output", call_id: "call_8", output: "{}" },
+        { type: "reasoning", id: "rs_2", encrypted_content: "scripted" },
+        { type: "message", role: "assistant", content: [] },
+        user_say("2"),
+      ];
+      const response = model_post(bench, input, 1);
+      this.assertEqual(texts_of(response), ["Nothing happens."]);
+    }
+
+    // A reply resent without its reasoning item is refused at its first item.
+    test_reasoning_lost(): void {
+      const bench = bench_make();
+      const moved = model_post(bench, [user_say("5")], 1);
+      const said = moved.output.filter((item) => item.type === "message");
+      const input = [user_say("5"), ...said, user_say("0")];
+      const error = thrown_get(() => model_post(bench, input, 2));
+      this.assertEqual(error.message, field_text("json.input[1].type"));
+    }
+
+    // Calls still due at the end of the input are refused by the input.
+    test_due_end(): void {
+      const bench = bench_make();
+      const asked = model_post(bench, [user_say("1")], 1);
+      const extra = {
+        type: "function_call",
+        call_id: "call_9",
+        name: "browser_render",
+        arguments: "{}",
+      };
+      const input = [
+        user_say("1"),
+        ...asked.output,
+        extra,
+        ...outputs_make(asked),
+      ];
+      const error = thrown_get(() => model_post(bench, input, 2));
+      this.assertEqual(error.message, field_text("json.input"));
     }
   }
 
@@ -873,7 +1497,7 @@ namespace test_provider_script {
       const reply = bench.received[0];
       const data = (reply.json as provider.ImageResponse).data;
       this.assertEqual(data.length, 1);
-      this.assertEqual(Object.keys(data[0]).join(","), "b64_json");
+      this.assertEqual(Object.keys(data[0]), ["b64_json"]);
       this.assertEqual(typeof data[0].b64_json, "string");
       this.assertEqual(
         base64_read(data[0].b64_json as string),
@@ -882,8 +1506,8 @@ namespace test_provider_script {
       const expected = gold_line("reply_image");
       expected.json = reply.json;
       this.assertEqual(reply, expected);
-      const choice = chat_post(bench, [user_say("2")], 2);
-      this.assertEqual(choice.message.content, "Nothing happens.");
+      const response = model_post(bench, [user_say("2")], 2);
+      this.assertEqual(texts_of(response), ["Nothing happens."]);
     }
 
     // The pattern is given as many times as the request asks.

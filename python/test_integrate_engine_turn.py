@@ -8,8 +8,9 @@
 # reaches another test, and the parent checks how the child said it ended.
 # Lines of the gold go as wire bytes through the real JSLB decoder to
 # `dispatch.line_dispatch`, and the scene's turns are read back from the
-# store: messages with null and a list in order, text beyond ASCII as raw
-# characters, a line in full names, and a request applied, then refused, its
+# store: each turn's input items, a reply's, a call's output and an answer in
+# order, text beyond ASCII as raw characters, a line in full names, a prompt's
+# message as an array of one item, and a request applied, then refused, its
 # `error` line encoded by the real JSLB encoder and read back.
 
 import copy, dispatch, engine_turn, harness, jslb, json, os, signal, substrate
@@ -65,7 +66,7 @@ def _line_bytes(name: str, *blobs: bytes) -> bytes:
     return b"".join([text.encode("utf-8"), b"\r", *blobs])
 
 
-# The canonical JSON text of a value, as the handler stores a message.
+# The canonical JSON text of a value, as the handler stores a turn's items.
 def _json_text(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
@@ -187,12 +188,17 @@ class TestServed(ScratchCase):
         self.assertEqual(turns, expected)
         return turns
 
-    # The player's message, a call with null and a list, then its answer.
+    # The player's message, a reply's call, the call's output, the answer.
     def test_turns_served(self) -> None:
-        names = ("append_user", "append_call", "append_answer")
+        names = (
+            "append_user",
+            "append_call",
+            "append_result",
+            "append_answer",
+        )
         self.child_run(lambda: self.turns_check(*names))
 
-    # In the child: the wide text is in the stored message as it is.
+    # In the child: the wide text is in the stored items as it is.
     def wide_check(self) -> None:
         (turn,) = self.turns_check("append_wide")
         self.assertIn(_WIDE_TEXT, turn.content)
@@ -204,6 +210,26 @@ class TestServed(ScratchCase):
     # A line in full names is applied as one in short names.
     def test_full_names(self) -> None:
         self.child_run(lambda: self.turns_check("append_full"))
+
+    # In the child: a prompt, then the player's turn, each in its place.
+    def prompt_check(self) -> None:
+        store = self.store_register()
+        self.push_serve("prompt_one")
+        self.push_serve("append_user")
+        line: dict[str, Any] = _gold_copy("lines.prompt_one")
+        scene = line["scene"]
+        (message,) = line["messages"]
+        self.assertEqual(
+            store.turn_list(scene),
+            [
+                substrate.TurnRow(scene, 0, "system", _json_text([message])),
+                *_turns_expected(["append_user"]),
+            ],
+        )
+
+    # A prompt line crosses the wire and comes before the turn that follows.
+    def test_prompt_served(self) -> None:
+        self.child_run(self.prompt_check)
 
     # In the child: the request appends its turn, then is refused.
     def request_check(self) -> None:

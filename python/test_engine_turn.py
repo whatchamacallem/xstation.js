@@ -2,17 +2,19 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Tests the handler of `turn.append` on a real store on a scratch root in
-# `build/`. Each test runs in a forked child that registers the handler in
+# Tests the handlers of `turn.append` and `turn.prompt` on a real store on a
+# scratch root in `build/`. Each test runs in a forked child that registers
+# the handlers in
 # the real dispatcher and kills itself when done, so that no registration
 # reaches another test, and the parent checks how the child said it ended.
 # The handler is called as the dispatcher calls it on lines of the gold, and
-# the scene's turns are read back from the store: the role and the message
-# as canonical JSON, a message with null and a list whole, text beyond ASCII
-# as raw characters, a line in full names, and a line with `i` the handler
-# leaves unanswered. The dispatcher refuses a second registration of the
-# type at version 0. The numbering of turns and the scenes the store refuses
-# are the store's own, `test_substrate.py`'s.
+# the scene's turns are read back from the store: the role and the turn's
+# input items as canonical JSON, a reply's items, a call's output and an
+# answer whole, text beyond ASCII as raw characters, a line in full names,
+# a line with `i` the handler leaves unanswered, and each message of a prompt
+# as an array of one item. The dispatcher refuses a second registration of
+# the type at version 0. The numbering of turns and the scenes the store
+# refuses are the store's own, `test_substrate.py`'s.
 
 import dispatch, engine_turn, harness, json, os, re, signal, substrate, sys
 import tempfile, traceback, unittest
@@ -78,7 +80,7 @@ def _handler_call(fn: Callable[..., Any], line: dict[int | str, Any]) -> Any:
     return fn(line, **payload)
 
 
-# The canonical JSON text of a value, as the handler stores a message.
+# The canonical JSON text of a value, as the handler stores a turn's items.
 def _json_text(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
@@ -158,16 +160,21 @@ class TestAppend(ScratchCase):
         self.assertEqual(turns, expected)
         return turns
 
-    # The player's first message goes to the store as canonical JSON.
+    # The player's turn, one message, goes to the store as canonical JSON.
     def test_turn_appended(self) -> None:
         self.child_run(lambda: self.append_check("append_user"))
 
-    # A message with null and a list goes whole, each turn in order.
-    def test_messages_whole(self) -> None:
-        names = ("append_user", "append_call", "append_answer")
+    # A reply's items, a call's output and the answer go whole, in order.
+    def test_items_whole(self) -> None:
+        names = (
+            "append_user",
+            "append_call",
+            "append_result",
+            "append_answer",
+        )
         self.child_run(lambda: self.append_check(*names))
 
-    # In the child: the wide text is in the stored message as it is.
+    # In the child: the wide text is in the stored items as it is.
     def wide_check(self) -> None:
         (turn,) = self.append_check("append_wide")
         self.assertIn(_WIDE_TEXT, turn.content)
@@ -183,6 +190,36 @@ class TestAppend(ScratchCase):
     # An append with `i` is applied and answered with nothing, as a push is.
     def test_request_none(self) -> None:
         self.child_run(lambda: self.append_check("append_request"))
+
+
+# Tests the handler of `turn.prompt`.
+class TestPrompt(ScratchCase):
+    # In the child: the prompt before turn 1, a row a message, its last at 0.
+    def prompt_check(self) -> None:
+        store = self.store_register()
+        line = _gold_value("lines.prompt_two")
+        user = _gold_value("lines.append_user")
+        self.assertIsNone(_handler_call(engine_turn.turn_prompt, line))
+        self.assertIsNone(_handler_call(engine_turn.turn_append, user))
+        analyst, universe = line["messages"]
+        self.assertEqual(
+            store.turn_list(line["scene"]),
+            [
+                substrate.TurnRow(
+                    line["scene"], -1, "system", _json_text([analyst])
+                ),
+                substrate.TurnRow(
+                    line["scene"], 0, "system", _json_text([universe])
+                ),
+                substrate.TurnRow(
+                    user["scene"], 1, "user", _json_text(user["content"])
+                ),
+            ],
+        )
+
+    # The two messages of a prompt are stored before the player's first turn.
+    def test_prompt_stored(self) -> None:
+        self.child_run(self.prompt_check)
 
 
 # Tests the registration.

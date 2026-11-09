@@ -51,9 +51,32 @@
       "receiver": "server",
       "line": {
         "0": {
+          "type": "turn.prompt"
+        },
+        "scene": "/metaverse/hyperposition/1",
+        "messages": [
+          {
+            "role": "system",
+            "content": "The prompt."
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
           "type": "turn.append"
         },
-        "role": "user"
+        "scene": "/metaverse/hyperposition/1",
+        "role": "user",
+        "content": [
+          {
+            "role": "user",
+            "content": "1"
+          }
+        ]
       }
     },
     {
@@ -65,12 +88,13 @@
           "id": 6
         },
         "method": "POST",
-        "url": "/chat/completions",
+        "url": "https://scripted.invalid/v1/responses",
         "headers": {
           "Authorization": "<masked>"
         },
         "json": {
-          "messages": [
+          "model": "grok-4.7",
+          "input": [
             {
               "role": "system",
               "content": "The prompt."
@@ -82,16 +106,15 @@
           ],
           "tools": [
             {
-              "function": {
-                "name": "browser.render"
-              }
+              "type": "function",
+              "name": "browser_render"
             },
             {
-              "function": {
-                "name": "browser.kv_get"
-              }
+              "type": "function",
+              "name": "browser_kv_get"
             }
-          ]
+          ],
+          "prompt_cache_key": "/metaverse/hyperposition/1"
         }
       }
     },
@@ -109,22 +132,40 @@
         },
         "status": 200,
         "json": {
-          "choices": [
+          "id": "resp_1",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
             {
-              "message": {
-                "content": null,
-                "tool_calls": [
-                  {
-                    "id": "call_1",
-                    "function": {
-                      "name": "browser.render",
-                      "arguments": "{}"
-                    }
-                  }
-                ]
-              }
+              "type": "reasoning",
+              "id": "rs_1",
+              "encrypted_content": "scripted"
+            },
+            {
+              "type": "function_call",
+              "id": "fc_1",
+              "call_id": "call_1",
+              "name": "browser_render",
+              "arguments": "{}"
             }
-          ]
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "name": "browser_render"
+            },
+            {
+              "type": "function",
+              "name": "browser_kv_get"
+            }
+          ],
+          "previous_response_id": null,
+          "usage": {
+            "input_tokens": 100,
+            "input_tokens_details": {
+              "cached_tokens": 0
+            }
+          }
         }
       }
     },
@@ -216,6 +257,49 @@
     },
     {
       "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/metaverse/hyperposition/1",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "reasoning",
+            "id": "rs_1",
+            "encrypted_content": "scripted"
+          },
+          {
+            "type": "function_call",
+            "id": "fc_1",
+            "call_id": "call_1",
+            "name": "browser_render",
+            "arguments": "{}"
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/metaverse/hyperposition/1",
+        "role": "tool",
+        "content": [
+          {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "{}"
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
       "receiver": "http",
       "line": {
         "0": {
@@ -223,37 +307,31 @@
           "id": 9
         },
         "method": "POST",
-        "url": "/chat/completions",
+        "url": "https://scripted.invalid/v1/responses",
         "headers": {
           "Authorization": "<masked>"
         },
         "json": {
-          "messages": [
+          "model": "grok-4.7",
+          "previous_response_id": "resp_1",
+          "input": [
             {
-              "role": "system",
-              "content": "The prompt."
-            },
-            {
-              "role": "user",
-              "content": "1"
-            },
-            {
-              "role": "tool",
-              "content": "{}"
+              "type": "function_call_output",
+              "call_id": "call_1",
+              "output": "{}"
             }
           ],
           "tools": [
             {
-              "function": {
-                "name": "browser.render"
-              }
+              "type": "function",
+              "name": "browser_render"
             },
             {
-              "function": {
-                "name": "browser.kv_get"
-              }
+              "type": "function",
+              "name": "browser_kv_get"
             }
-          ]
+          ],
+          "prompt_cache_key": "/metaverse/hyperposition/1"
         }
       }
     },
@@ -267,14 +345,74 @@
         },
         "status": 200,
         "json": {
-          "choices": [
+          "id": "resp_2",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
             {
-              "message": {
-                "content": "Done."
-              }
+              "type": "reasoning",
+              "id": "rs_2",
+              "encrypted_content": "scripted"
+            },
+            {
+              "type": "message",
+              "id": "msg_2",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "Done."
+                }
+              ]
             }
-          ]
+          ],
+          "tools": [
+            {
+              "type": "function",
+              "name": "browser_render"
+            },
+            {
+              "type": "function",
+              "name": "browser_kv_get"
+            }
+          ],
+          "previous_response_id": "resp_1",
+          "usage": {
+            "input_tokens": 150,
+            "input_tokens_details": {
+              "cached_tokens": 100
+            }
+          }
         }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/metaverse/hyperposition/1",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "reasoning",
+            "id": "rs_2",
+            "encrypted_content": "scripted"
+          },
+          {
+            "type": "message",
+            "id": "msg_2",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "Done."
+              }
+            ]
+          }
+        ]
       }
     },
     {
@@ -410,7 +548,12 @@
   "empty_summary": [
     "entries: 0 in 0.000 s, engine starts: 0",
     "inputs: 0: []",
-    "model calls: 0, copies of the system prompt in each: []",
+    "model calls: 0, chains started: 0, copies of the system prompt sent: 0",
+    "system prompt written in the conversation's lanes: 0",
+    "input tokens of the model calls: 0 of 0 served from cache",
+    "bytes of the lane ai to http: 0 as sent, 0 as written",
+    "bytes of the lane http to ai: 0 as sent, 0 as written",
+    "bytes of the lane ai to server: 0 as sent, 0 as written",
     "tools called: 0 of 0 listed: {}",
     "tools not called: []",
     "commits to the server: {}",
@@ -442,7 +585,13 @@
     "stray": "^line 3: ai to ui answers 77, which was never asked$",
     "unanswered": "^line 3: ui to ai asked 5 in start 1 and has no reply$",
     "sleep": "^line 3: ai sleeps on 88 and that reply never came$",
-    "prompt_twice": "^a model call holds the system prompt other than once: \\[2\\]$"
+    "prompt_twice": "^line 3: a chain's first call holds the system prompt 2 times, not once as its first item$",
+    "prompt_stored": "^line \\d+: a second prompt of /metaverse/hyperposition/1$",
+    "prompt_written": "^the conversation's lanes hold the system prompt 2 times$",
+    "chain_system": "^line \\d+: a chained call sends a system message$",
+    "chain_more": "^line \\d+: a chained call sends other than the new items alone: message=1 reasoning=1 user=1$",
+    "chain_missing": "^line 3: a chained call names resp_9, which no reply of its start holds$",
+    "id_twice": "^line \\d+: the item rs_1 is written again, first at line \\d+$"
   },
   "fault": [
     {
@@ -583,6 +732,40 @@
       "text": "sleeps on 88 until ai.model_reply"
     }
   ],
+  "prompt_stored": [
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.prompt"
+        },
+        "scene": "/metaverse/hyperposition/1",
+        "messages": [
+          {
+            "role": "system",
+            "content": "The prompt."
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.prompt"
+        },
+        "scene": "/metaverse/hyperposition/1",
+        "messages": [
+          {
+            "role": "system",
+            "content": "The prompt."
+          }
+        ]
+      }
+    }
+  ],
   "prompt_twice": [
     {
       "sender": "ai",
@@ -591,8 +774,9 @@
         "0": {
           "type": "http.request"
         },
+        "url": "https://scripted.invalid/v1/responses",
         "json": {
-          "messages": [
+          "input": [
             {
               "role": "system",
               "content": "The prompt."
@@ -605,6 +789,252 @@
               "role": "user",
               "content": "1"
             }
+          ],
+          "prompt_cache_key": "/metaverse/hyperposition/1"
+        }
+      }
+    }
+  ],
+  "chain_system": [
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request", "id": 6},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "input": [
+            {"role": "system", "content": "The prompt."},
+            {"role": "user", "content": "1"}
+          ],
+          "prompt_cache_key": "/metaverse/hyperposition/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request", "reply": 6},
+        "status": 200,
+        "json": {
+          "id": "resp_1",
+          "output": [
+            {"type": "reasoning", "id": "rs_1", "encrypted_content": "scripted"},
+            {"type": "message", "id": "msg_1", "role": "assistant", "content": [{"type": "output_text", "text": "Hello."}]}
+          ]
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request", "id": 7},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "previous_response_id": "resp_1",
+          "input": [
+            {"role": "system", "content": "The prompt."},
+            {"role": "user", "content": "2"}
+          ],
+          "prompt_cache_key": "/metaverse/hyperposition/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request", "reply": 7},
+        "status": 200,
+        "json": {
+          "id": "resp_2",
+          "output": [
+            {"type": "reasoning", "id": "rs_2", "encrypted_content": "scripted"},
+            {"type": "message", "id": "msg_2", "role": "assistant", "content": [{"type": "output_text", "text": "Again."}]}
+          ]
+        }
+      }
+    }
+  ],
+  "chain_more": [
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request", "id": 6},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "input": [
+            {"role": "system", "content": "The prompt."},
+            {"role": "user", "content": "1"}
+          ],
+          "prompt_cache_key": "/metaverse/hyperposition/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request", "reply": 6},
+        "status": 200,
+        "json": {
+          "id": "resp_1",
+          "output": [
+            {"type": "reasoning", "id": "rs_1", "encrypted_content": "scripted"},
+            {"type": "message", "id": "msg_1", "role": "assistant", "content": [{"type": "output_text", "text": "Hello."}]}
+          ]
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request", "id": 7},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "previous_response_id": "resp_1",
+          "input": [
+            {"type": "reasoning", "id": "rs_1", "encrypted_content": "scripted"},
+            {"type": "message", "id": "msg_1", "role": "assistant", "content": [{"type": "output_text", "text": "Hello."}]},
+            {"role": "user", "content": "2"}
+          ],
+          "prompt_cache_key": "/metaverse/hyperposition/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request", "reply": 7},
+        "status": 200,
+        "json": {
+          "id": "resp_2",
+          "output": [
+            {"type": "reasoning", "id": "rs_2", "encrypted_content": "scripted"},
+            {"type": "message", "id": "msg_2", "role": "assistant", "content": [{"type": "output_text", "text": "Again."}]}
+          ]
+        }
+      }
+    }
+  ],
+  "chain_missing": [
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request", "id": 6},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "previous_response_id": "resp_9",
+          "input": [{"role": "user", "content": "1"}],
+          "prompt_cache_key": "/metaverse/hyperposition/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request", "reply": 6},
+        "status": 200,
+        "json": {
+          "id": "resp_1",
+          "output": [
+            {"type": "reasoning", "id": "rs_1", "encrypted_content": "scripted"},
+            {"type": "message", "id": "msg_1", "role": "assistant", "content": [{"type": "output_text", "text": "Hello."}]}
+          ]
+        }
+      }
+    }
+  ],
+  "id_twice": [
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request", "id": 6},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "input": [
+            {"role": "system", "content": "The prompt."},
+            {"role": "user", "content": "1"}
+          ],
+          "prompt_cache_key": "/metaverse/hyperposition/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request", "reply": 6},
+        "status": 200,
+        "json": {
+          "id": "resp_1",
+          "output": [
+            {"type": "reasoning", "id": "rs_1", "encrypted_content": "scripted"},
+            {"type": "message", "id": "msg_1", "role": "assistant", "content": [{"type": "output_text", "text": "Hello."}]}
+          ]
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/metaverse/hyperposition/1",
+        "role": "assistant",
+        "content": [
+          {"type": "reasoning", "id": "rs_1", "encrypted_content": "scripted"},
+          {"type": "message", "id": "msg_1", "role": "assistant", "content": [{"type": "output_text", "text": "Hello."}]}
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/metaverse/hyperposition/1",
+        "role": "user",
+        "content": [{"role": "user", "content": "2"}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request", "id": 7},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "input": [
+            {"role": "system", "content": "The prompt."},
+            {"role": "system", "content": "A summary."},
+            {"type": "reasoning", "id": "rs_1", "encrypted_content": "scripted"},
+            {"type": "message", "id": "msg_1", "role": "assistant", "content": [{"type": "output_text", "text": "Hello."}]},
+            {"role": "user", "content": "2"}
+          ],
+          "prompt_cache_key": "/metaverse/hyperposition/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request", "reply": 7},
+        "status": 200,
+        "json": {
+          "id": "resp_2",
+          "output": [
+            {"type": "reasoning", "id": "rs_2", "encrypted_content": "scripted"},
+            {"type": "message", "id": "msg_2", "role": "assistant", "content": [{"type": "output_text", "text": "Again."}]}
           ]
         }
       }
@@ -633,144 +1063,33 @@
     ]
   ],
   "run_entries": [
-    [
-      3,
-      1,
-      "server to ai",
-      "tap.start"
-    ],
-    [
-      12,
-      1,
-      "ai to server",
-      "tap.start"
-    ],
-    [
-      20,
-      1,
-      "dom to ui",
-      "ui.input"
-    ],
-    [
-      28,
-      1,
-      "ui to ai",
-      "ai.say"
-    ],
-    [
-      37,
-      1,
-      "note of ui",
-      ""
-    ],
-    [
-      40,
-      1,
-      "ai to server",
-      "turn.append"
-    ],
-    [
-      48,
-      1,
-      "ai to http",
-      "http.request"
-    ],
-    [
-      85,
-      1,
-      "note of ai",
-      ""
-    ],
-    [
-      88,
-      1,
-      "http to ai",
-      "http.request"
-    ],
-    [
-      115,
-      1,
-      "ai to ai",
-      "mcp"
-    ],
-    [
-      132,
-      1,
-      "ai to ai",
-      "mcp"
-    ],
-    [
-      150,
-      1,
-      "ai to ai",
-      "mcp"
-    ],
-    [
-      159,
-      1,
-      "ai to http",
-      "http.request"
-    ],
-    [
-      175,
-      1,
-      "http to ai",
-      "http.request"
-    ],
-    [
-      191,
-      1,
-      "ai to http",
-      "http.request"
-    ],
-    [
-      232,
-      1,
-      "http to ai",
-      "http.request"
-    ],
-    [
-      250,
-      1,
-      "ai to console",
-      "console.read"
-    ],
-    [
-      259,
-      1,
-      "console to ai",
-      "console.read"
-    ],
-    [
-      269,
-      1,
-      "ai to console",
-      "console.open"
-    ],
-    [
-      277,
-      1,
-      "console to ai",
-      "console.open"
-    ],
-    [
-      286,
-      1,
-      "note of console",
-      ""
-    ],
-    [
-      289,
-      1,
-      "ai to ui",
-      "ai.say"
-    ],
-    [
-      299,
-      1,
-      "ai to ui",
-      "console.output"
-    ]
+    [3, 1, "server to ai", "tap.start", 0],
+    [12, 1, "ai to server", "tap.start", 0],
+    [20, 1, "dom to ui", "ui.input", 0],
+    [28, 1, "ui to ai", "ai.say", 0],
+    [37, 1, "note of ui", "", 0],
+    [40, 1, "ai to server", "turn.prompt", 0],
+    [55, 1, "ai to server", "turn.append", 0],
+    [70, 1, "ai to http", "http.request", 2],
+    [99, 1, "note of ai", "", 0],
+    [102, 1, "http to ai", "http.request", 0],
+    [138, 1, "ai to ai", "mcp", 0],
+    [155, 1, "ai to ai", "mcp", 0],
+    [173, 1, "ai to ai", "mcp", 0],
+    [182, 1, "ai to http", "http.request", 0],
+    [198, 1, "http to ai", "http.request", 0],
+    [214, 1, "ai to server", "turn.append", 2],
+    [225, 1, "ai to server", "turn.append", 0],
+    [241, 1, "ai to http", "http.request", 1],
+    [262, 1, "http to ai", "http.request", 0],
+    [302, 1, "ai to server", "turn.append", 2],
+    [313, 1, "ai to console", "console.read", 0],
+    [322, 1, "console to ai", "console.read", 0],
+    [332, 1, "ai to console", "console.open", 0],
+    [340, 1, "console to ai", "console.open", 0],
+    [349, 1, "note of console", "", 0],
+    [352, 1, "ai to ui", "ai.say", 0],
+    [362, 1, "ai to ui", "console.output", 0]
   ],
   "run_digest": [
     "==== engine start 1",
@@ -779,34 +1098,44 @@
     "L20     +  0.002     1 ms  dom to ui      ui.input               {\"text\": \"1\"}",
     "L28     +  0.003     1 ms  ui to ai       ai.say         i=5     {\"text\": \"1\"}",
     "L37     +  0.004     1 ms  note of ui                            sleeps on 5 until ui.turn_end",
-    "L40     +  0.005     1 ms  ai to server   turn.append            {\"role\": \"user\"}",
-    "L48     +  0.006     1 ms  ai to http     http.request   i=6     chat 2 messages, system=1 user=1, 2 tools, last user: 1",
-    "L85     +  0.007     1 ms  note of ai                            sleeps on 6 until ai.model_reply",
-    "L88     +  0.008     1 ms  http to ai     http.request   r=6     status 200, calls ['browser.render'], says ",
-    "L115    +  0.009     1 ms  ai to ai       mcp            i=7     call render {\"subtitle\": \"s\"}",
-    "L132    +  0.010     1 ms  ai to ai       mcp            r=7     result [\"{}\"]",
-    "L150    +  0.011     1 ms  ai to ai       mcp                    notifications/initialized",
-    "L159    +  0.012     1 ms  ai to http     http.request   i=8     image a pattern",
-    "L175    +  0.013     1 ms  http to ai     http.request   r=8     status 200, 1 images",
-    "L191    +  0.014     1 ms  ai to http     http.request   i=9     chat 3 messages, system=1 tool=1 user=1, 2 tools, last tool: {}",
-    "L232    +  0.015     1 ms  http to ai     http.request   r=9     status 200, calls [], says Done.",
-    "L250    +  0.016     1 ms  ai to console  console.read   i=10    {\"until\": \"$ \"}",
-    "L259    +  0.017     1 ms  console to ai  console.read   r=10    {\"text\": \"$ \", \"timed_out\": false}",
-    "L269    +  0.018     1 ms  ai to console  console.open   i=11    {}",
-    "L277    +  0.019     1 ms  console to ai  console.open   r=11    {\"token\": \"<masked>\"}",
-    "L286    +  0.020     1 ms  note of console                        `dash` exited with code 0.",
-    "L289    +  0.021     1 ms  ai to ui       ai.say         r=5     {\"turn\": 2, \"subtitle\": \"Done.\"}",
-    "L299    +  0.022     1 ms  ai to ui       console.output         {} + 1 blobs"
+    "L40     +  0.005     1 ms  ai to server   turn.prompt            {\"scene\": \"/metaverse/hyperposition/1\", \"messages\": [{\"role\": \"system\", \"content\": \"The prompt.\"}]}",
+    "L55     +  0.006     1 ms  ai to server   turn.append            {\"scene\": \"/metaverse/hyperposition/1\", \"role\": \"user\", \"content\": [{\"role\": \"user\", \"content\": \"1\"}]}",
+    "L70     +  0.007     1 ms  ai to http     http.request   i=6     model 2 items (system=1 user=1), 2 kept, a chain start, 2 tools",
+    "L99     +  0.008     1 ms  note of ai                            sleeps on 6 until ai.model_reply",
+    "L102    +  0.009     1 ms  http to ai     http.request   r=6     status 200, resp_1, cached 0 of 100, calls ['browser_render'], says ",
+    "L138    +  0.010     1 ms  ai to ai       mcp            i=7     call render {\"subtitle\": \"s\"}",
+    "L155    +  0.011     1 ms  ai to ai       mcp            r=7     result [\"{}\"]",
+    "L173    +  0.012     1 ms  ai to ai       mcp                    notifications/initialized",
+    "L182    +  0.013     1 ms  ai to http     http.request   i=8     image a pattern",
+    "L198    +  0.014     1 ms  http to ai     http.request   r=8     status 200, 1 images",
+    "L214    +  0.015     1 ms  ai to server   turn.append            {\"scene\": \"/metaverse/hyperposition/1\", \"role\": \"assistant\", \"content\": [{\"type\": \"reasoning\", \"id\": \"rs_1\", \"encrypted_content\": \"scripted\"}, {\"type\"...",
+    "L225    +  0.016     1 ms  ai to server   turn.append            {\"scene\": \"/metaverse/hyperposition/1\", \"role\": \"tool\", \"content\": [{\"type\": \"function_call_output\", \"call_id\": \"call_1\", \"output\": \"{}\"}]}",
+    "L241    +  0.017     1 ms  ai to http     http.request   i=9     model 1 items (function_call_output=1), 1 kept, chained to resp_1, 2 tools",
+    "L262    +  0.018     1 ms  http to ai     http.request   r=9     status 200, resp_2, cached 100 of 150, calls [], says Done.",
+    "L302    +  0.019     1 ms  ai to server   turn.append            {\"scene\": \"/metaverse/hyperposition/1\", \"role\": \"assistant\", \"content\": [{\"type\": \"reasoning\", \"id\": \"rs_2\", \"encrypted_content\": \"scripted\"}, {\"type\"...",
+    "L313    +  0.020     1 ms  ai to console  console.read   i=10    {\"until\": \"$ \"}",
+    "L322    +  0.021     1 ms  console to ai  console.read   r=10    {\"text\": \"$ \", \"timed_out\": false}",
+    "L332    +  0.022     1 ms  ai to console  console.open   i=11    {}",
+    "L340    +  0.023     1 ms  console to ai  console.open   r=11    {\"token\": \"<masked>\"}",
+    "L349    +  0.024     1 ms  note of console                        `dash` exited with code 0.",
+    "L352    +  0.025     1 ms  ai to ui       ai.say         r=5     {\"turn\": 2, \"subtitle\": \"Done.\"}",
+    "L362    +  0.026     1 ms  ai to ui       console.output         {} + 1 blobs"
   ],
   "run_summary": [
-    "entries: 23 in 0.022 s, engine starts: 1",
+    "entries: 27 in 0.026 s, engine starts: 1",
     "inputs: 1: ['1']",
-    "model calls: 2, copies of the system prompt in each: [1]",
-    "tools called: 1 of 2 listed: {'browser.render': 1}",
-    "tools not called: ['browser.kv_get']",
-    "commits to the server: {'turn.append': 1}",
+    "model calls: 2, chains started: 1, copies of the system prompt sent: 1",
+    "system prompt written in the conversation's lanes: 1",
+    "input tokens of the model calls: 100 of 250 served from cache, 40.0%",
+    "tools called: 1 of 2 listed: {'browser_render': 1}",
+    "tools not called: ['browser_kv_get']",
+    "commits to the server: {'turn.prompt': 1, 'turn.append': 4}",
     "database dumps: none"
   ],
+  "summary_lanes": ["ai to http", "http to ai", "ai to server"],
+  "summary_bytes_at": 5,
+  "summary_bytes": "bytes of the lane {0}: {1} as sent, {2} as written",
+  "run_copies": [1, 0],
   "details": [
     {
       "sender": "ui",
@@ -835,5 +1164,380 @@
   "details_ends": [
     "{\"text\": \"a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long t...",
     "{\"result\": {\"protocolVersion\": \"2025-06-18\"}}"
+  ],
+  "prompt_written": [
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.prompt"
+        },
+        "scene": "/first/scene/1",
+        "messages": [
+          {
+            "role": "system",
+            "content": "The prompt."
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {
+          "type": "http.request"
+        },
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "input": [
+            {
+              "role": "system",
+              "content": "The prompt."
+            },
+            {
+              "role": "user",
+              "content": "1"
+            }
+          ],
+          "prompt_cache_key": "/first/scene/1"
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.prompt"
+        },
+        "scene": "/second/scene/1",
+        "messages": [
+          {
+            "role": "system",
+            "content": "Another prompt."
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.prompt"
+        },
+        "scene": "/third/scene/1",
+        "messages": [
+          {
+            "role": "system",
+            "content": "The prompt."
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {
+          "type": "http.request"
+        },
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "input": [
+            {
+              "role": "system",
+              "content": "The prompt."
+            },
+            {
+              "role": "user",
+              "content": "1"
+            }
+          ],
+          "prompt_cache_key": "/third/scene/1"
+        }
+      }
+    }
+  ],
+  "scenes": [
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.prompt"},
+        "scene": "/metaverse/hall/1",
+        "messages": [{"role": "system", "content": "The prompt."}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/metaverse/hall/1",
+        "role": "user",
+        "content": [{"role": "user", "content": "1"}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request"},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "input": [
+            {"role": "system", "content": "The prompt."},
+            {"role": "user", "content": "1"}
+          ],
+          "prompt_cache_key": "/metaverse/hall/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request"},
+        "status": 200,
+        "json": {
+          "id": "resp_1",
+          "output": [
+            {"type": "reasoning", "id": "rs_1", "encrypted_content": "scripted"},
+            {"type": "message", "id": "msg_1", "role": "assistant", "content": [{"type": "output_text", "text": "Hello."}]}
+          ]
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/metaverse/hall/1",
+        "role": "assistant",
+        "content": [
+          {"type": "reasoning", "id": "rs_1", "encrypted_content": "scripted"},
+          {"type": "message", "id": "msg_1", "role": "assistant", "content": [{"type": "output_text", "text": "Hello."}]}
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.prompt"},
+        "scene": "/metaverse/yard/1",
+        "messages": [{"role": "system", "content": "The prompt."}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/metaverse/yard/1",
+        "role": "user",
+        "content": [{"role": "user", "content": "2"}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request"},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "input": [
+            {"role": "system", "content": "The prompt."},
+            {"role": "user", "content": "2"}
+          ],
+          "prompt_cache_key": "/metaverse/yard/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request"},
+        "status": 200,
+        "json": {
+          "id": "resp_2",
+          "output": [
+            {"type": "reasoning", "id": "rs_2", "encrypted_content": "scripted"},
+            {"type": "message", "id": "msg_2", "role": "assistant", "content": [{"type": "output_text", "text": "There."}]}
+          ]
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/metaverse/yard/1",
+        "role": "assistant",
+        "content": [
+          {"type": "reasoning", "id": "rs_2", "encrypted_content": "scripted"},
+          {"type": "message", "id": "msg_2", "role": "assistant", "content": [{"type": "output_text", "text": "There."}]}
+        ]
+      }
+    },
+    {
+      "start": "engine"
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/metaverse/hall/1",
+        "role": "user",
+        "content": [{"role": "user", "content": "3"}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request"},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "input": [
+            {"role": "system", "content": "The prompt."},
+            {"role": "user", "content": "1"},
+            {"type": "reasoning", "id": "rs_1", "encrypted_content": "scripted"},
+            {"type": "message", "id": "msg_1", "role": "assistant", "content": [{"type": "output_text", "text": "Hello."}]},
+            {"role": "user", "content": "3"}
+          ],
+          "prompt_cache_key": "/metaverse/hall/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request"},
+        "status": 200,
+        "json": {
+          "id": "resp_3",
+          "output": [
+            {"type": "reasoning", "id": "rs_3", "encrypted_content": "scripted"},
+            {"type": "message", "id": "msg_3", "role": "assistant", "content": [{"type": "output_text", "text": "Back."}]}
+          ]
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/metaverse/hall/1",
+        "role": "assistant",
+        "content": [
+          {"type": "reasoning", "id": "rs_3", "encrypted_content": "scripted"},
+          {"type": "message", "id": "msg_3", "role": "assistant", "content": [{"type": "output_text", "text": "Back."}]}
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/metaverse/yard/1",
+        "role": "user",
+        "content": [{"role": "user", "content": "4"}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request"},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "input": [
+            {"role": "system", "content": "The prompt."},
+            {"role": "user", "content": "2"},
+            {"type": "reasoning", "id": "rs_2", "encrypted_content": "scripted"},
+            {"type": "message", "id": "msg_2", "role": "assistant", "content": [{"type": "output_text", "text": "There."}]},
+            {"role": "user", "content": "4"}
+          ],
+          "prompt_cache_key": "/metaverse/yard/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request"},
+        "status": 200,
+        "json": {
+          "id": "resp_4",
+          "output": [
+            {"type": "reasoning", "id": "rs_4", "encrypted_content": "scripted"},
+            {"type": "message", "id": "msg_4", "role": "assistant", "content": [{"type": "output_text", "text": "Again."}]}
+          ]
+        }
+      }
+    }
+  ],
+  "omitted": [
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request", "id": 6},
+        "method": "POST",
+        "url": "https://scripted.invalid/v1/responses",
+        "headers": {"Authorization": "<masked>"},
+        "json": {
+          "model": "grok-4.7",
+          "input": [
+            {"role": "system", "content": "The prompt."},
+            {"role": "user", "content": "1"}
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "prompt_cache_key": "/s/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request", "reply": 6},
+        "status": 200,
+        "json": {
+          "id": "resp_1",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
+            {"type": "reasoning", "id": "rs_1", "encrypted_content": "scripted"},
+            {
+              "type": "message",
+              "id": "msg_1",
+              "role": "assistant",
+              "content": [{"type": "output_text", "text": "Hi."}]
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "previous_response_id": null,
+          "usage": {"input_tokens": 10, "input_tokens_details": {"cached_tokens": 0}}
+        }
+      }
+    }
+  ],
+  "omitted_detail": "model 2 items (system=1 user=1), 0 kept, a chain start, tools DEBUG_MODE_TOOL_LIST_OMITTED",
+  "omitted_summary": [
+    "tools called: 0: {}",
+    "tools listed: none, the first model call sent DEBUG_MODE_TOOL_LIST_OMITTED"
   ]
 }

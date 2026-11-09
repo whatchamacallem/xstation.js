@@ -72,7 +72,8 @@ namespace substrate {
     // The key of the current version of each document, by id.
     view_heads: "SELECT id || '/' || version FROM _head ORDER BY id",
     // The count of the turns and of the scenes they belong to.
-    view_turns: "SELECT COUNT(*), COUNT(DISTINCT scene) FROM _turn",
+    view_turns:
+      "SELECT COUNT(*), COUNT(DISTINCT scene) FROM _turn WHERE n > 0",
     // The tables but the store's own, `?1`, and SQLite's, by name, with `wr`.
     view_tables:
       "SELECT s.name, l.wr FROM sqlite_schema AS s" +
@@ -224,12 +225,12 @@ namespace substrate {
     sha256: lines.Sha256;
   }
 
-  // A turn of a scene: its number in the scene, its role and its message.
+  // A turn of a scene: its number in the scene, its role and its input items.
   export interface TurnRow {
     scene: lines.DocRef;
     n: number;
     role: provider.Role;
-    content: provider.ChatMessage;
+    content: provider.InputItem[];
   }
 
   // A ref split: the database when external, the key, the version if any.
@@ -1333,7 +1334,7 @@ namespace substrate {
     turn_append(
       scene: lines.DocRef,
       role: provider.Role,
-      content: provider.ChatMessage,
+      content: provider.InputItem[],
     ): lines.TurnAppendReply {
       const name = scene_database(scene);
       const text = json_canonical(content);
@@ -1346,7 +1347,7 @@ namespace substrate {
       });
     }
 
-    // The scene's turns in order.
+    // The scene's whole log in order: its system prompt, then its turns.
     turn_list(scene: lines.DocRef): TurnRow[] {
       const rows = rows_select(
         this.#connection_get(scene_database(scene)),
@@ -1358,8 +1359,24 @@ namespace substrate {
         scene: row[0] as string,
         n: row[1] as number,
         role: row[2] as provider.Role,
-        content: JSON.parse(row[3] as string) as provider.ChatMessage,
+        content: JSON.parse(row[3] as string) as provider.InputItem[],
       }));
+    }
+
+    // Whether the scene's conversation holds its system prompt: its row at 0.
+    turn_prompted(scene: lines.DocRef): boolean {
+      const rows = rows_select(
+        this.#connection_get(scene_database(scene)),
+        "SELECT 1 FROM _turn WHERE scene = ? AND n = 0",
+        [scene],
+      );
+      return rows.length > 0;
+    }
+
+    // Stores the system prompt before turn 1, a row per message, the last at 0.
+    turn_prompt(scene: lines.DocRef, messages: provider.InputMessage[]): void {
+      const database = this.#connection_get(scene_database(scene));
+      this.transaction_run(() => this.#prompt_add(database, scene, messages));
     }
 
     // Replaces turns 1 to `through` by one summary turn at 1, this side only.
@@ -1772,7 +1789,7 @@ namespace substrate {
       this.#transaction_join(database);
       const [count, last] = rows_select(
         database,
-        "SELECT COUNT(*), MAX(n) FROM _turn WHERE scene = ?",
+        "SELECT COUNT(*), MAX(n) FROM _turn WHERE scene = ? AND n > 0",
         [scene],
       )[0] as [number, number];
       if (count >= this.#compact_turns) {
@@ -1799,9 +1816,33 @@ namespace substrate {
           " VALUES (?, ?, ?, ?)",
         bind: [scene, n, role, text],
       });
-      const content = JSON.parse(text) as provider.ChatMessage;
+      const content = JSON.parse(text) as provider.InputItem[];
       this.#pending.push(push_make("turn.append", { scene, role, content }));
       return { n };
+    }
+
+    // Inserts each message as a row `[message]` to `n` 0, pushes them as one.
+    #prompt_add(
+      database: SqliteDatabase,
+      scene: string,
+      messages: provider.InputMessage[],
+    ): void {
+      this.#transaction_join(database);
+      messages.forEach((message, index) => {
+        database.exec({
+          sql:
+            "INSERT INTO _turn (scene, n, role, content)" +
+            " VALUES (?, ?, ?, ?)",
+          bind: [
+            scene,
+            index + 1 - messages.length,
+            message.role,
+            json_canonical([message]),
+          ],
+        });
+      });
+      const copy = structuredClone(messages);
+      this.#pending.push(push_make("turn.prompt", { scene, messages: copy }));
     }
 
     // Deletes turns 1 to `through` and inserts the summary at 1, sending none.
@@ -1813,16 +1854,15 @@ namespace substrate {
     ): void {
       this.#transaction_join(database);
       database.exec({
-        sql: "DELETE FROM _turn WHERE scene = ? AND n <= ?",
+        sql: "DELETE FROM _turn WHERE scene = ? AND n > 0 AND n <= ?",
         bind: [scene, through],
       });
       if (database.changes(false) === 0) {
         throw new Error(i18n("substrate.turns_none", scene, through));
       }
-      const content = json_canonical({
-        role: constants.summary_role,
-        content: summary,
-      });
+      const content = json_canonical([
+        { role: constants.summary_role, content: summary },
+      ]);
       database.exec({
         sql:
           "INSERT INTO _turn (scene, n, role, content)" +

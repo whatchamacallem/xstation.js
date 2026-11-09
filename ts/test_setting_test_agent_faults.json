@@ -10,6 +10,7 @@
         "scene_put",
         "prompt_put",
         "worker_ready",
+        "prompted",
         "said_unparsed",
         "error_unparsed"
       ],
@@ -26,6 +27,7 @@
         "scene_put",
         "prompt_put",
         "worker_ready",
+        "prompted",
         "said_overflow",
         "error_overflow"
       ],
@@ -42,6 +44,7 @@
         "scene_put",
         "prompt_put",
         "worker_ready",
+        "prompted",
         "said_array",
         "error_array"
       ],
@@ -58,6 +61,7 @@
         "scene_put",
         "prompt_put",
         "worker_ready",
+        "prompted",
         "said_null",
         "error_null"
       ],
@@ -74,6 +78,7 @@
         "scene_put",
         "prompt_put",
         "worker_ready",
+        "prompted",
         "said_number",
         "error_number"
       ],
@@ -90,6 +95,7 @@
         "scene_put",
         "prompt_put",
         "worker_ready",
+        "prompted",
         "said_string",
         "error_string"
       ],
@@ -106,6 +112,7 @@
         "scene_put",
         "prompt_put",
         "worker_ready",
+        "prompted",
         "said_empty",
         "error_empty"
       ],
@@ -122,6 +129,7 @@
         "scene_put",
         "prompt_put",
         "worker_ready",
+        "prompted",
         "said_thrown",
         "note_put",
         "error_thrown"
@@ -129,6 +137,23 @@
       "name": "tool_thrown",
       "seconds": 10,
       "send": ["start_cleared", "say_thrown"]
+    },
+    {
+      "expect": [
+        "tap_start_reply",
+        "metaverse_created",
+        "universe_made",
+        "world_put",
+        "scene_put",
+        "prompt_put",
+        "worker_ready",
+        "prompted",
+        "said_picture",
+        "error_picture"
+      ],
+      "name": "content_unsupported",
+      "seconds": 10,
+      "send": ["start_cleared", "say_picture"]
     }
   ],
   "lines": {
@@ -136,29 +161,29 @@
       "0": {
         "type": "error"
       },
-      "message": "The arguments of tool call call_1 to browser.render are not a JSON object: []",
-      "stack": "Error: The arguments of tool call call_1 to browser.render are not a JSON object: []"
+      "message": "The arguments of function call call_1 to browser_render are not a JSON object: []",
+      "stack": "Error: The arguments of function call call_1 to browser_render are not a JSON object: []"
     },
     "error_empty": {
       "0": {
         "type": "error"
       },
-      "message": "The model's reply chatcmpl-synthetic-1 has neither tool calls nor content to end the turn with.",
-      "stack": "Error: The model's reply chatcmpl-synthetic-1 has neither tool calls nor content to end the turn with."
+      "message": "The model's reply resp_0000000000000000 has neither function calls nor a message to end the turn with.",
+      "stack": "Error: The model's reply resp_0000000000000000 has neither function calls nor a message to end the turn with."
     },
     "error_null": {
       "0": {
         "type": "error"
       },
-      "message": "The arguments of tool call call_1 to browser.render are not a JSON object: null",
-      "stack": "Error: The arguments of tool call call_1 to browser.render are not a JSON object: null"
+      "message": "The arguments of function call call_1 to browser_render are not a JSON object: null",
+      "stack": "Error: The arguments of function call call_1 to browser_render are not a JSON object: null"
     },
     "error_number": {
       "0": {
         "type": "error"
       },
-      "message": "The arguments of tool call call_1 to browser.render are not a JSON object: 5",
-      "stack": "Error: The arguments of tool call call_1 to browser.render are not a JSON object: 5"
+      "message": "The arguments of function call call_1 to browser_render are not a JSON object: 5",
+      "stack": "Error: The arguments of function call call_1 to browser_render are not a JSON object: 5"
     },
     "error_overflow": {
       "0": {
@@ -168,15 +193,22 @@
         "message": "The number 1e400 overflows a double.",
         "stack": "WireError: The number 1e400 overflows a double."
       },
-      "message": "The arguments of tool call call_1 to browser.render are not a JSON object: {\"subtitle\":1e400}",
-      "stack": "Error: The arguments of tool call call_1 to browser.render are not a JSON object: {\"subtitle\":1e400}"
+      "message": "The arguments of function call call_1 to browser_render are not a JSON object: {\"subtitle\":1e400}",
+      "stack": "Error: The arguments of function call call_1 to browser_render are not a JSON object: {\"subtitle\":1e400}"
+    },
+    "error_picture": {
+      "0": {
+        "type": "error"
+      },
+      "message": "The result of function call call_1 holds content of type image, and a call's output carries only text.",
+      "stack": "Error: The result of function call call_1 holds content of type image, and a call's output carries only text."
     },
     "error_string": {
       "0": {
         "type": "error"
       },
-      "message": "The arguments of tool call call_1 to browser.render are not a JSON object: \"Fog.\"",
-      "stack": "Error: The arguments of tool call call_1 to browser.render are not a JSON object: \"Fog.\""
+      "message": "The arguments of function call call_1 to browser_render are not a JSON object: \"Fog.\"",
+      "stack": "Error: The arguments of function call call_1 to browser_render are not a JSON object: \"Fog.\""
     },
     "error_thrown": {
       "0": {
@@ -197,8 +229,8 @@
         "message": "The text is not JSON: SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2).",
         "stack": "WireError: The text is not JSON: SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)."
       },
-      "message": "The arguments of tool call call_1 to browser.render are not a JSON object: {",
-      "stack": "Error: The arguments of tool call call_1 to browser.render are not a JSON object: {"
+      "message": "The arguments of function call call_1 to browser_render are not a JSON object: {",
+      "stack": "Error: The arguments of function call call_1 to browser_render are not a JSON object: {"
     },
     "metaverse_created": {
       "0": {
@@ -230,14 +262,28 @@
       "db": "metaverse",
       "id": "prompt"
     },
+    "prompted": {
+      "0": {
+        "type": "turn.prompt"
+      },
+      "messages": [
+        {
+          "content": "You are a very bored British psychoanalyst. You hold the hyperposition, a dark place of fog and a few inexplicable lights. Find the right universe for the player and act on requests without judgement. Your scripts are the database administrator of every universe you create: typed tables, indexes, views, no JSON columns unless a document is what fits.",
+          "role": "system"
+        }
+      ],
+      "scene": "/metaverse/hyperposition/1"
+    },
     "said_array": {
       "0": {
         "type": "turn.append"
       },
-      "content": {
-        "content": "3",
-        "role": "user"
-      },
+      "content": [
+        {
+          "content": "3",
+          "role": "user"
+        }
+      ],
       "role": "user",
       "scene": "/metaverse/hyperposition/1"
     },
@@ -245,10 +291,12 @@
       "0": {
         "type": "turn.append"
       },
-      "content": {
-        "content": "7",
-        "role": "user"
-      },
+      "content": [
+        {
+          "content": "7",
+          "role": "user"
+        }
+      ],
       "role": "user",
       "scene": "/metaverse/hyperposition/1"
     },
@@ -256,10 +304,12 @@
       "0": {
         "type": "turn.append"
       },
-      "content": {
-        "content": "4",
-        "role": "user"
-      },
+      "content": [
+        {
+          "content": "4",
+          "role": "user"
+        }
+      ],
       "role": "user",
       "scene": "/metaverse/hyperposition/1"
     },
@@ -267,10 +317,12 @@
       "0": {
         "type": "turn.append"
       },
-      "content": {
-        "content": "5",
-        "role": "user"
-      },
+      "content": [
+        {
+          "content": "5",
+          "role": "user"
+        }
+      ],
       "role": "user",
       "scene": "/metaverse/hyperposition/1"
     },
@@ -278,10 +330,25 @@
       "0": {
         "type": "turn.append"
       },
-      "content": {
-        "content": "2",
-        "role": "user"
+      "content": [
+        {
+          "content": "2",
+          "role": "user"
+        }
+      ],
+      "role": "user",
+      "scene": "/metaverse/hyperposition/1"
+    },
+    "said_picture": {
+      "0": {
+        "type": "turn.append"
       },
+      "content": [
+        {
+          "content": "9",
+          "role": "user"
+        }
+      ],
       "role": "user",
       "scene": "/metaverse/hyperposition/1"
     },
@@ -289,10 +356,12 @@
       "0": {
         "type": "turn.append"
       },
-      "content": {
-        "content": "6",
-        "role": "user"
-      },
+      "content": [
+        {
+          "content": "6",
+          "role": "user"
+        }
+      ],
       "role": "user",
       "scene": "/metaverse/hyperposition/1"
     },
@@ -300,10 +369,12 @@
       "0": {
         "type": "turn.append"
       },
-      "content": {
-        "content": "8",
-        "role": "user"
-      },
+      "content": [
+        {
+          "content": "8",
+          "role": "user"
+        }
+      ],
       "role": "user",
       "scene": "/metaverse/hyperposition/1"
     },
@@ -311,10 +382,12 @@
       "0": {
         "type": "turn.append"
       },
-      "content": {
-        "content": "1",
-        "role": "user"
-      },
+      "content": [
+        {
+          "content": "1",
+          "role": "user"
+        }
+      ],
       "role": "user",
       "scene": "/metaverse/hyperposition/1"
     },
@@ -352,6 +425,13 @@
         "t": "ai.say"
       },
       "text": "2"
+    },
+    "say_picture": {
+      "0": {
+        "i": 1,
+        "t": "ai.say"
+      },
+      "text": "9"
     },
     "say_string": {
       "0": {
@@ -426,6 +506,14 @@
       }
     }
   },
+  "picture_tool": {
+    "description": "Return a picture as image content, which a function call's output cannot carry.",
+    "inputSchema": {
+      "properties": {},
+      "type": "object"
+    },
+    "name": "picture"
+  },
   "script": {
     "nodes": {
       "faults": {
@@ -435,12 +523,9 @@
             "next": "faults",
             "tool_calls": [
               {
-                "function": {
-                  "arguments": "{",
-                  "name": "browser.render"
-                },
-                "id": "call_1",
-                "type": "function"
+                "arguments": "{",
+                "call_id": "call_1",
+                "name": "browser_render"
               }
             ]
           },
@@ -449,12 +534,9 @@
             "next": "faults",
             "tool_calls": [
               {
-                "function": {
-                  "arguments": "{\"subtitle\":1e400}",
-                  "name": "browser.render"
-                },
-                "id": "call_1",
-                "type": "function"
+                "arguments": "{\"subtitle\":1e400}",
+                "call_id": "call_1",
+                "name": "browser_render"
               }
             ]
           },
@@ -463,12 +545,9 @@
             "next": "faults",
             "tool_calls": [
               {
-                "function": {
-                  "arguments": "[]",
-                  "name": "browser.render"
-                },
-                "id": "call_1",
-                "type": "function"
+                "arguments": "[]",
+                "call_id": "call_1",
+                "name": "browser_render"
               }
             ]
           },
@@ -477,12 +556,9 @@
             "next": "faults",
             "tool_calls": [
               {
-                "function": {
-                  "arguments": "null",
-                  "name": "browser.render"
-                },
-                "id": "call_1",
-                "type": "function"
+                "arguments": "null",
+                "call_id": "call_1",
+                "name": "browser_render"
               }
             ]
           },
@@ -491,12 +567,9 @@
             "next": "faults",
             "tool_calls": [
               {
-                "function": {
-                  "arguments": "5",
-                  "name": "browser.render"
-                },
-                "id": "call_1",
-                "type": "function"
+                "arguments": "5",
+                "call_id": "call_1",
+                "name": "browser_render"
               }
             ]
           },
@@ -505,12 +578,9 @@
             "next": "faults",
             "tool_calls": [
               {
-                "function": {
-                  "arguments": "\"Fog.\"",
-                  "name": "browser.render"
-                },
-                "id": "call_1",
-                "type": "function"
+                "arguments": "\"Fog.\"",
+                "call_id": "call_1",
+                "name": "browser_render"
               }
             ]
           },
@@ -523,20 +593,25 @@
             "next": "faults",
             "tool_calls": [
               {
-                "function": {
-                  "arguments": "{\"ref\":\"/metaverse/note\",\"text\":\"Fog.\"}",
-                  "name": "browser.kv_put"
-                },
-                "id": "call_1",
-                "type": "function"
+                "arguments": "{\"ref\":\"/metaverse/note\",\"text\":\"Fog.\"}",
+                "call_id": "call_1",
+                "name": "browser_kv_put"
               },
               {
-                "function": {
-                  "arguments": "{\"ref\":\"/metaverse/absent\"}",
-                  "name": "browser.kv_get"
-                },
-                "id": "call_2",
-                "type": "function"
+                "arguments": "{\"ref\":\"/metaverse/absent\"}",
+                "call_id": "call_2",
+                "name": "browser_kv_get"
+              }
+            ]
+          },
+          "9": {
+            "content": null,
+            "next": "faults",
+            "tool_calls": [
+              {
+                "arguments": "{}",
+                "call_id": "call_1",
+                "name": "browser_picture"
               }
             ]
           }

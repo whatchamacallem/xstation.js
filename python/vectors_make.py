@@ -225,15 +225,24 @@ _DUMP_OPERATIONS: list[dict[str, Any]] = [
             {"sql": sql, "params": params} for sql, params in _DUMP_STATEMENTS
         ],
     },
-    *(
-        {
-            "op": "turn_append",
-            "scene": _DUMP_SCENE,
-            "role": role,
-            "content": {"role": role, "content": content},
-        }
-        for role, content in (("user", "Hello."), ("assistant", "Welcome."))
-    ),
+    {
+        "op": "turn_append",
+        "scene": _DUMP_SCENE,
+        "role": "user",
+        "content": [{"role": "user", "content": "Hello."}],
+    },
+    {
+        "op": "turn_append",
+        "scene": _DUMP_SCENE,
+        "role": "assistant",
+        "content": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Welcome."}],
+            }
+        ],
+    },
 ]
 
 # The view of the database after the operations, as `substrate.DbView`.

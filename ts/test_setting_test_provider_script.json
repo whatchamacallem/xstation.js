@@ -1,69 +1,756 @@
 {
+  "bad_requests": [
+    {
+      "headers": {
+        "Authorization": "Basic xai-SYNTHETIC-KEY"
+      },
+      "line": {
+        "url": "http://api.x.ai/v1/responses"
+      },
+      "path": "url"
+    },
+    {
+      "body": {
+        "model": ""
+      },
+      "line": {
+        "headers": null
+      },
+      "path": "headers"
+    },
+    {
+      "line": {
+        "headers": {
+          "Content-Type": "application/json"
+        }
+      },
+      "path": "headers.Authorization"
+    },
+    {
+      "headers": {
+        "Authorization": "Basic xai-SYNTHETIC-KEY",
+        "Content-Type": "text/plain"
+      },
+      "path": "headers.Authorization"
+    },
+    {
+      "headers": {
+        "Authorization": "Bearer "
+      },
+      "path": "headers.Authorization"
+    },
+    {
+      "body": {
+        "model": ""
+      },
+      "headers": {
+        "Content-Type": "text/plain"
+      },
+      "path": "headers.Content-Type"
+    },
+    {
+      "line": {
+        "headers": {
+          "Authorization": "Bearer xai-SYNTHETIC-KEY"
+        }
+      },
+      "path": "headers.Content-Type"
+    },
+    {
+      "body": {
+        "model": "",
+        "tools": {}
+      },
+      "path": "json.model"
+    },
+    {
+      "absent": ["model"],
+      "path": "json.model"
+    },
+    {
+      "body": {
+        "model": 5
+      },
+      "path": "json.model"
+    },
+    {
+      "body": {
+        "tool_choice": "always",
+        "tools": {}
+      },
+      "path": "json.tools"
+    },
+    {
+      "body": {
+        "tools": [5]
+      },
+      "path": "json.tools[0]"
+    },
+    {
+      "body": {
+        "tools": [
+          {
+            "type": "other"
+          }
+        ]
+      },
+      "path": "json.tools[0].type"
+    },
+    {
+      "body": {
+        "tools": [
+          {
+            "function": {
+              "description": "d",
+              "name": "browser_render",
+              "parameters": {}
+            },
+            "type": "function"
+          }
+        ]
+      },
+      "path": "json.tools[0].name"
+    },
+    {
+      "body": {
+        "tools": [
+          {
+            "description": "d",
+            "name": "browser.render",
+            "parameters": {},
+            "type": "function"
+          }
+        ]
+      },
+      "path": "json.tools[0].name"
+    },
+    {
+      "body": {
+        "tools": [
+          {
+            "description": "d",
+            "name": "",
+            "parameters": {},
+            "type": "function"
+          }
+        ]
+      },
+      "path": "json.tools[0].name"
+    },
+    {
+      "body": {
+        "tools": [
+          {
+            "name": "browser_render",
+            "parameters": {},
+            "type": "function"
+          }
+        ]
+      },
+      "path": "json.tools[0].description"
+    },
+    {
+      "body": {
+        "tools": [
+          {
+            "description": "d",
+            "name": "browser_render",
+            "type": "function"
+          }
+        ]
+      },
+      "path": "json.tools[0].parameters"
+    },
+    {
+      "body": {
+        "tools": [
+          {
+            "description": "d",
+            "name": "browser_render",
+            "parameters": [],
+            "type": "function"
+          }
+        ]
+      },
+      "path": "json.tools[0].parameters"
+    },
+    {
+      "body": {
+        "tools": [
+          {
+            "description": "Show an image and a subtitle.",
+            "name": "browser_render",
+            "parameters": {
+              "type": "object"
+            },
+            "type": "function"
+          },
+          {
+            "type": "other"
+          }
+        ]
+      },
+      "path": "json.tools[1].type"
+    },
+    {
+      "body": {
+        "prompt_cache_key": "",
+        "tool_choice": "always"
+      },
+      "path": "json.tool_choice"
+    },
+    {
+      "body": {
+        "prompt_cache_key": "",
+        "store": "yes"
+      },
+      "path": "json.prompt_cache_key"
+    },
+    {
+      "absent": ["prompt_cache_key"],
+      "path": "json.prompt_cache_key"
+    },
+    {
+      "body": {
+        "prompt_cache_key": 5
+      },
+      "path": "json.prompt_cache_key"
+    },
+    {
+      "body": {
+        "instructions": "Be brief.",
+        "previous_response_id": "resp_0000000000000000"
+      },
+      "path": "json.instructions"
+    },
+    {
+      "body": {
+        "previous_response_id": "resp_0000000000000000",
+        "store": "yes"
+      },
+      "path": "json.previous_response_id"
+    },
+    {
+      "body": {
+        "previous_response_id": 5
+      },
+      "path": "json.previous_response_id"
+    },
+    {
+      "body": {
+        "input": [
+          5,
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ],
+        "store": "yes"
+      },
+      "path": "json.store"
+    },
+    {
+      "body": {
+        "store": null
+      },
+      "path": "json.store"
+    },
+    {
+      "body": {
+        "input": [
+          5,
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[0]"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "id": "msg_1",
+            "type": "item_reference"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[0].type"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "content": "Hi.",
+            "role": "assistant"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[0].role"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "content": "Hi.",
+            "role": "developer"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[0].role"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "content": 5,
+            "role": "system"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[0].content"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "content": [
+              {
+                "text": "2",
+                "type": "input_text"
+              }
+            ],
+            "role": "user"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[0].content"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "content": [
+              {
+                "text": "Hi.",
+                "type": "output_text"
+              }
+            ],
+            "role": "assistant",
+            "type": "message"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[0].type"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "encrypted_content": "scripted",
+            "id": "rs_1",
+            "type": "reasoning"
+          },
+          {
+            "content": [
+              {
+                "text": "Hi.",
+                "type": "output_text"
+              }
+            ],
+            "role": "user",
+            "type": "message"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[1].role"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "encrypted_content": "scripted",
+            "id": "rs_1",
+            "type": "reasoning"
+          },
+          {
+            "content": "Hi.",
+            "role": "assistant",
+            "type": "message"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[1].content"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "encrypted_content": "scripted",
+            "id": "rs_1",
+            "type": "reasoning"
+          },
+          {
+            "content": [5],
+            "role": "assistant",
+            "type": "message"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[1].content[0]"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "encrypted_content": "scripted",
+            "id": "rs_1",
+            "type": "reasoning"
+          },
+          {
+            "content": [
+              {
+                "refusal": "No.",
+                "type": "refusal"
+              }
+            ],
+            "role": "assistant",
+            "type": "message"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[1].content[0].type"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "encrypted_content": "scripted",
+            "id": "rs_1",
+            "type": "reasoning"
+          },
+          {
+            "content": [
+              {
+                "type": "output_text"
+              }
+            ],
+            "role": "assistant",
+            "type": "message"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[1].content[0].text"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "encrypted_content": "scripted",
+            "id": "rs_1",
+            "type": "reasoning"
+          },
+          {
+            "arguments": "{}",
+            "call_id": 5,
+            "name": "browser_render",
+            "type": "function_call"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[1].call_id"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "encrypted_content": "scripted",
+            "id": "rs_1",
+            "type": "reasoning"
+          },
+          {
+            "arguments": "{}",
+            "call_id": "call_7",
+            "type": "function_call"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[1].name"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "encrypted_content": "scripted",
+            "id": "rs_1",
+            "type": "reasoning"
+          },
+          {
+            "arguments": {},
+            "call_id": "call_7",
+            "name": "browser_render",
+            "type": "function_call"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[1].arguments"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "encrypted_content": "scripted",
+            "id": "rs_1",
+            "type": "reasoning"
+          },
+          {
+            "arguments": "{}",
+            "call_id": "call_7",
+            "name": "browser_render",
+            "type": "function_call"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[2].type"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "call_id": "call_7",
+            "output": "{}",
+            "type": "function_call_output"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[0].call_id"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "encrypted_content": "scripted",
+            "id": "rs_1",
+            "type": "reasoning"
+          },
+          {
+            "arguments": "{}",
+            "call_id": "call_7",
+            "name": "browser_render",
+            "type": "function_call"
+          },
+          {
+            "call_id": "call_8",
+            "output": "{}",
+            "type": "function_call_output"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[2].call_id"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "encrypted_content": "scripted",
+            "id": "rs_1",
+            "type": "reasoning"
+          },
+          {
+            "arguments": "{}",
+            "call_id": "call_7",
+            "name": "browser_render",
+            "type": "function_call"
+          },
+          {
+            "call_id": "call_7",
+            "output": 5,
+            "type": "function_call_output"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[2].output"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "encrypted_content": "scripted",
+            "id": "rs_1",
+            "type": "reasoning"
+          },
+          {
+            "arguments": "{}",
+            "call_id": "call_7",
+            "name": "browser_render",
+            "type": "function_call"
+          },
+          {
+            "arguments": "{}",
+            "call_id": "call_8",
+            "name": "browser_kv_get",
+            "type": "function_call"
+          },
+          {
+            "call_id": "call_8",
+            "output": "{}",
+            "type": "function_call_output"
+          },
+          {
+            "call_id": "call_7",
+            "output": "{}",
+            "type": "function_call_output"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[3].call_id"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "encrypted_content": "scripted",
+            "id": "rs_1",
+            "type": "reasoning"
+          },
+          {
+            "arguments": "{}",
+            "call_id": "call_7",
+            "name": "browser_render",
+            "type": "function_call"
+          },
+          {
+            "call_id": "call_7",
+            "output": "{}",
+            "type": "function_call_output"
+          },
+          {
+            "call_id": "call_7",
+            "output": "{}",
+            "type": "function_call_output"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[3].call_id"
+    },
+    {
+      "body": {
+        "input": [
+          {
+            "content": "1",
+            "role": "user"
+          },
+          {
+            "arguments": "{}",
+            "call_id": "call_7",
+            "name": "browser_render",
+            "type": "function_call"
+          },
+          {
+            "call_id": "call_7",
+            "output": "{}",
+            "type": "function_call_output"
+          },
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ]
+      },
+      "path": "json.input[1].type"
+    }
+  ],
   "lines": {
-    "chat_full": {
-      "0": {
-        "id": 7,
-        "type": "http.request"
-      },
-      "headers": {
-        "Authorization": "Bearer xai-SYNTHETIC-KEY",
-        "Content-Type": "application/json"
-      },
-      "json": {
-        "messages": [
-          {
-            "content": "2",
-            "role": "user"
-          }
-        ],
-        "model": "grok-4",
-        "tool_choice": "auto"
-      },
-      "method": "POST",
-      "url": "https://api.x.ai/v1/chat/completions"
-    },
-    "chat_other": {
-      "0": {
-        "i": 2,
-        "t": "http.request"
-      },
-      "headers": {
-        "Authorization": "Bearer xai-SYNTHETIC-KEY",
-        "Content-Type": "application/json"
-      },
-      "json": {
-        "messages": [
-          {
-            "content": "2",
-            "role": "user"
-          }
-        ],
-        "model": "grok-x"
-      },
-      "method": "POST",
-      "url": "https://api.x.ai/v1/chat/completions"
-    },
-    "chat_request": {
-      "0": {
-        "t": "http.request"
-      },
-      "headers": {
-        "Authorization": "Bearer xai-SYNTHETIC-KEY",
-        "Content-Type": "application/json"
-      },
-      "json": {
-        "model": "grok-4",
-        "tool_choice": "auto"
-      },
-      "method": "POST",
-      "url": "https://api.x.ai/v1/chat/completions"
-    },
     "image_post": {
       "0": {
         "i": 1,
         "t": "http.request"
       },
-      "headers": {},
+      "headers": {
+        "Authorization": "Bearer xai-SYNTHETIC-KEY",
+        "Content-Type": "application/json"
+      },
       "method": "POST",
       "url": "https://api.x.ai/v1/images/generations"
     },
@@ -85,6 +772,45 @@
       "method": "POST",
       "url": "https://api.x.ai/v1/images/generations"
     },
+    "model_full": {
+      "0": {
+        "id": 7,
+        "type": "http.request"
+      },
+      "headers": {
+        "Authorization": "Bearer xai-SYNTHETIC-KEY",
+        "Content-Type": "application/json"
+      },
+      "json": {
+        "input": [
+          {
+            "content": "2",
+            "role": "user"
+          }
+        ],
+        "model": "grok-4",
+        "prompt_cache_key": "/metaverse/hyperposition/1",
+        "tool_choice": "auto"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/responses"
+    },
+    "model_request": {
+      "0": {
+        "t": "http.request"
+      },
+      "headers": {
+        "Authorization": "Bearer xai-SYNTHETIC-KEY",
+        "Content-Type": "application/json"
+      },
+      "json": {
+        "model": "grok-4",
+        "prompt_cache_key": "/metaverse/hyperposition/1",
+        "tool_choice": "auto"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/responses"
+    },
     "refused_blobs": {
       "0": {
         "b": 1,
@@ -96,7 +822,7 @@
       },
       "headers": {},
       "json": {
-        "messages": [
+        "input": [
           {
             "content": "2",
             "role": "user"
@@ -105,7 +831,20 @@
         "model": "grok-4"
       },
       "method": "POST",
-      "url": "https://api.x.ai/v1/chat/completions"
+      "url": "https://api.x.ai/v1/responses"
+    },
+    "refused_empty": {
+      "0": {
+        "i": 1,
+        "t": "http.request"
+      },
+      "headers": {},
+      "json": {
+        "input": [],
+        "model": "m"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/responses"
     },
     "refused_id": {
       "0": {
@@ -113,7 +852,7 @@
       },
       "headers": {},
       "json": {
-        "messages": [
+        "input": [
           {
             "content": "2",
             "role": "user"
@@ -122,7 +861,38 @@
         "model": "grok-4"
       },
       "method": "POST",
-      "url": "https://api.x.ai/v1/chat/completions"
+      "url": "https://api.x.ai/v1/responses"
+    },
+    "refused_input": {
+      "0": {
+        "i": 1,
+        "t": "http.request"
+      },
+      "headers": {},
+      "json": {
+        "model": "m"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/responses"
+    },
+    "refused_item": {
+      "0": {
+        "i": 1,
+        "t": "http.request"
+      },
+      "headers": {},
+      "json": {
+        "input": [
+          {
+            "content": "2",
+            "role": "user"
+          },
+          5
+        ],
+        "model": "m"
+      },
+      "method": "POST",
+      "url": "https://api.x.ai/v1/responses"
     },
     "refused_json": {
       "0": {
@@ -131,32 +901,7 @@
       },
       "headers": {},
       "method": "POST",
-      "url": "https://api.x.ai/v1/chat/completions"
-    },
-    "refused_message": {
-      "0": {
-        "i": 1,
-        "t": "http.request"
-      },
-      "headers": {},
-      "json": {
-        "messages": [5],
-        "model": "m"
-      },
-      "method": "POST",
-      "url": "https://api.x.ai/v1/chat/completions"
-    },
-    "refused_messages": {
-      "0": {
-        "i": 1,
-        "t": "http.request"
-      },
-      "headers": {},
-      "json": {
-        "model": "m"
-      },
-      "method": "POST",
-      "url": "https://api.x.ai/v1/chat/completions"
+      "url": "https://api.x.ai/v1/responses"
     },
     "refused_method": {
       "0": {
@@ -165,7 +910,7 @@
       },
       "headers": {},
       "json": {
-        "messages": [
+        "input": [
           {
             "content": "2",
             "role": "user"
@@ -174,19 +919,7 @@
         "model": "grok-4"
       },
       "method": "GET",
-      "url": "https://api.x.ai/v1/chat/completions"
-    },
-    "refused_model": {
-      "0": {
-        "i": 1,
-        "t": "http.request"
-      },
-      "headers": {},
-      "json": {
-        "messages": []
-      },
-      "method": "POST",
-      "url": "https://api.x.ai/v1/chat/completions"
+      "url": "https://api.x.ai/v1/responses"
     },
     "refused_type": {
       "0": {
@@ -195,7 +928,7 @@
       },
       "headers": {},
       "json": {
-        "messages": [
+        "input": [
           {
             "content": "2",
             "role": "user"
@@ -204,7 +937,7 @@
         "model": "grok-4"
       },
       "method": "POST",
-      "url": "https://api.x.ai/v1/chat/completions"
+      "url": "https://api.x.ai/v1/responses"
     },
     "refused_unknown": {
       "0": {
@@ -213,7 +946,7 @@
       },
       "headers": {},
       "json": {
-        "messages": [
+        "input": [
           {
             "content": "2",
             "role": "user"
@@ -231,7 +964,7 @@
       },
       "headers": {},
       "json": {
-        "messages": [
+        "input": [
           {
             "content": "2",
             "role": "user"
@@ -267,32 +1000,90 @@
         "content-type": "application/json"
       },
       "json": {
-        "choices": [
+        "id": "resp_{0}",
+        "model": "grok-4",
+        "object": "response",
+        "output": [
           {
-            "finish_reason": "stop",
-            "index": 0,
-            "message": {
-              "content": "Nothing happens.",
-              "role": "assistant"
-            }
+            "encrypted_content": "scripted",
+            "id": "rs_{0}",
+            "status": "completed",
+            "summary": [],
+            "type": "reasoning"
+          },
+          {
+            "content": [
+              {
+                "annotations": [],
+                "text": "Nothing happens.",
+                "type": "output_text"
+              }
+            ],
+            "id": "msg_{0}",
+            "role": "assistant",
+            "status": "completed",
+            "type": "message"
           }
         ],
-        "model": "grok-4"
+        "previous_response_id": null,
+        "status": "completed",
+        "tool_choice": "auto",
+        "usage": {
+          "input_tokens": 29,
+          "input_tokens_details": {
+            "cached_tokens": 0
+          },
+          "output_tokens": 276,
+          "output_tokens_details": {
+            "reasoning_tokens": 112
+          },
+          "total_tokens": 305
+        }
       },
       "status": 200
     }
+  },
+  "orders": {
+    "reply": [
+      "id",
+      "object",
+      "model",
+      "status",
+      "output",
+      "tool_choice",
+      "previous_response_id",
+      "usage"
+    ],
+    "reply_bare": [
+      "id",
+      "object",
+      "model",
+      "status",
+      "output",
+      "previous_response_id",
+      "usage"
+    ],
+    "reply_tools": [
+      "id",
+      "object",
+      "model",
+      "status",
+      "output",
+      "tools",
+      "tool_choice",
+      "previous_response_id",
+      "usage"
+    ]
   },
   "texts": {
     "provider_script_after_missing": "The script node bare has no reply after tool results.",
     "provider_script_after_unpaired_holds": "The script node lone_holds holds one of after_holds and after_lacks without the other.",
     "provider_script_after_unpaired_lacks": "The script node lone_lacks holds one of after_holds and after_lacks without the other.",
     "provider_script_blobs_refused": "The http.request line carries blobs, which the scripted provider refuses.",
-    "provider_script_field_invalid_content": "The request field json.messages[4].content is missing or is not valid for the scripted provider.",
+    "provider_script_field_invalid_input": "The request field json.input is missing or is not valid for the scripted provider.",
+    "provider_script_field_invalid_item": "The request field json.input[1] is missing or is not valid for the scripted provider.",
     "provider_script_field_invalid_json": "The request field json is missing or is not valid for the scripted provider.",
-    "provider_script_field_invalid_message": "The request field json.messages[0] is missing or is not valid for the scripted provider.",
-    "provider_script_field_invalid_messages": "The request field json.messages is missing or is not valid for the scripted provider.",
     "provider_script_field_invalid_method": "The request field method is missing or is not valid for the scripted provider.",
-    "provider_script_field_invalid_model": "The request field json.model is missing or is not valid for the scripted provider.",
     "provider_script_field_invalid_n": "The request field json.n is missing or is not valid for the scripted provider.",
     "provider_script_field_invalid_url": "The request field url is missing or is not valid for the scripted provider.",
     "provider_script_format_unsupported_undefined": "The scripted provider answers images only as b64_json, not undefined.",
@@ -317,9 +1108,34 @@
     "provider_script_results_unasked": "The scripted provider got tool results in node hyperposition, but its last reply called no tools.",
     "provider_script_results_unmatched_other": "In node hyperposition the scripted provider got tool results for the calls [\"call_9\"], not for the calls [\"call_1\"] its last reply made.",
     "provider_script_results_unmatched_twice": "In node hyperposition the scripted provider got tool results for the calls [\"call_1\",\"call_1\"], not for the calls [\"call_1\"] its last reply made.",
-    "provider_script_role_unexpected_assistant": "The scripted provider answers a user message or tool results, not a last message of role assistant.",
-    "provider_script_role_unexpected_system": "The scripted provider answers a user message or tool results, not a last message of role system.",
+    "provider_script_role_unexpected_assistant": "The scripted provider answers a user message or tool results, not the last input item {\"role\":\"assistant\",\"content\":\"Hello.\"}.",
+    "provider_script_role_unexpected_call": "The scripted provider answers a user message or tool results, not the last input item {\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"browser_render\",\"arguments\":\"{}\"}.",
+    "provider_script_role_unexpected_system": "The scripted provider answers a user message or tool results, not the last input item {\"role\":\"system\",\"content\":\"Hello.\"}.",
     "provider_script_type_invalid": "The scripted provider got a line of type kv.get instead of http.request.",
     "provider_script_url_unknown": "The scripted provider has no answer for the url https://api.x.ai/v1/models."
+  },
+  "usages": {
+    "chained": {
+      "input_tokens": 497,
+      "input_tokens_details": {
+        "cached_tokens": 431
+      },
+      "output_tokens": 265,
+      "output_tokens_details": {
+        "reasoning_tokens": 112
+      },
+      "total_tokens": 762
+    },
+    "first": {
+      "input_tokens": 29,
+      "input_tokens_details": {
+        "cached_tokens": 0
+      },
+      "output_tokens": 402,
+      "output_tokens_details": {
+        "reasoning_tokens": 112
+      },
+      "total_tokens": 431
+    }
   }
 }

@@ -3,19 +3,24 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // The agent loop on the AI thread, a turn as a chain of tasks. The player's
-// text or click joins the conversation of the scene on screen and goes to the
-// provider after the system prompt. A reply's tool calls go to the MCP
-// clients, and once every result is in the reply and its results are stored
-// together, so that no stored call lacks its answer, and go back to the
-// provider. The reply with no tool calls is stored and ends the turn with its
-// text as the subtitle. Nothing measures the databases: no request carries
-// their sizes, and the loop reads no setting. A tool call's arguments are
-// read by `jslb.json_decode`. Two `universe` rows cannot name one world: the
-// triggers of API/sql/metaverse.sql refuse the second with
-// `agent.content_ambiguous` before it is added.
+// text or click joins the conversation of the scene on screen, whose log gets
+// the system prompt once, before its first model call. A row of the log holds
+// one turn's input items of the Responses API. A reply's function calls go to
+// the MCP clients, and once every result is in, the reply and its call outputs
+// are stored together, so that no stored call lacks its output, and the model
+// is asked again. The reply with no calls is stored and ends the turn with its
+// text as the subtitle. Per scene the loop keeps in memory a chain, the last
+// response's id and the rows its context holds: a request whose log still
+// begins with those rows sends the rows after them, chained by
+// `previous_response_id`, and any other sends the whole log, as the first
+// after a page load or a compaction. Nothing measures the databases, and the
+// loop reads no setting. A call's arguments are read by `jslb.json_decode`.
+// The triggers of API/sql/metaverse.sql refuse a second `universe` row naming
+// one world with `agent.content_ambiguous`.
+// In debug mode, by its reader, the tools sent are `provider.tools_omitted`.
 
 namespace agent {
-  // The line types, refs, ids and statements the loop uses.
+  // The line types, refs, ids, roles and statements the loop uses.
   const constants = Object.freeze({
     say_type: "ai.say",
     click_type: "ai.click",
@@ -28,6 +33,15 @@ namespace agent {
     prompt_id: "prompt",
     part_separator: "\n",
     tool_choice: "auto" as const,
+    // The reasoning every reply carries encrypted, to be sent back in the log.
+    include_reasoning: "reasoning.encrypted_content",
+    // The roles of the rows the loop stores.
+    system_role: "system" as const,
+    user_role: "user" as const,
+    reply_role: "assistant" as const,
+    output_role: "tool" as const,
+    // The type of the item that answers a function call.
+    output_type: "function_call_output" as const,
     // The universe whose row names a world, one at most by the triggers.
     universe_sql: "SELECT name FROM universe WHERE world = ?",
     // The version of the head of a document id, in the substrate's own table.
@@ -41,15 +55,23 @@ namespace agent {
     fn: dispatch.Handler,
   ) => void;
 
-  // What a turn waiting on the model keeps: the request it owes, its scene.
+  // A scene's chain: the last response's id and its context's row texts.
+  interface SceneChain {
+    id: string;
+    texts: string[];
+  }
+
+  // What a turn waiting on the model keeps: its request, scene and row texts.
   interface TurnState {
     request: lines.Line;
     scene: lines.DocRef;
+    texts: string[];
   }
 
-  // What a turn waiting on tools keeps besides: the reply that called them.
+  // What a turn waiting on functions keeps besides: the reply's id and output.
   interface CallState extends TurnState {
-    asked: provider.ChatMessage;
+    response: string;
+    output: provider.OutputItem[];
   }
 
   // The text of a value held in its row, as a small value is.
@@ -85,7 +107,7 @@ namespace agent {
     return rows.length === 0 ? undefined : (rows[0][0] as string);
   }
 
-  // The text of a tool result for its tool message, its text parts joined.
+  // The text of a tool result for its call's output, its text parts joined.
   function result_text(result: mcp.ToolResult, call_id: string): string {
     const texts = result.content.map((part: mcp.Content): string => {
       if (part.type !== "text") {
@@ -96,13 +118,26 @@ namespace agent {
     return texts.join(constants.part_separator);
   }
 
+  // The text a row compares by, the JSON text of its parsed content.
+  function row_text(row: substrate.TurnRow): string {
+    return utility.json_text(row.content);
+  }
+
+  // Whether the texts begin with the prefix's texts, each at its place.
+  function prefix_holds(prefix: string[], texts: string[]): boolean {
+    return (
+      prefix.length <= texts.length &&
+      prefix.every((text, index) => text === texts[index])
+    );
+  }
+
   // The system prompt: the analyst's prompt, then the universe's when present.
   export function prompt_build(
     store: substrate.Store,
-  ): provider.ChatMessage[] {
+  ): provider.InputMessage[] {
     const analyst = store.doc_head(constants.metaverse, constants.prompt_id);
-    const messages: provider.ChatMessage[] = [
-      { role: "system", content: prompt_text(store, analyst) },
+    const messages: provider.InputMessage[] = [
+      { role: constants.system_role, content: prompt_text(store, analyst) },
     ];
     const universe = universe_current(store);
     if (universe === undefined) {
@@ -115,7 +150,10 @@ namespace agent {
     const rows = store.sql_run(universe, [statement])[0].rows;
     if (rows.length > 0) {
       const ref = `/${universe}/${constants.prompt_id}/${String(rows[0][0])}`;
-      messages.push({ role: "system", content: prompt_text(store, ref) });
+      messages.push({
+        role: constants.system_role,
+        content: prompt_text(store, ref),
+      });
     }
     return messages;
   }
@@ -130,8 +168,12 @@ namespace agent {
     readonly #tasks: queue.TaskQueue;
     // The owner whose port answers the provider's requests.
     readonly #provider_owner: queue.ThreadName;
-    // The provider's address and the model every chat request names.
+    // The provider's address and the model every model request names.
     readonly #info: lines.ProviderInfo;
+    // Whether debug mode is on, which sends no tool list.
+    readonly #debug: () => boolean;
+    // The chain of each scene by its ref, held in memory alone.
+    readonly #chains = new Map<lines.DocRef, SceneChain>();
 
     // Takes what the handlers work with.
     constructor(
@@ -140,12 +182,14 @@ namespace agent {
       tasks: queue.TaskQueue,
       provider_owner: queue.ThreadName,
       info: lines.ProviderInfo,
+      debug: () => boolean,
     ) {
       this.#store = store;
       this.#clients = clients;
       this.#tasks = tasks;
       this.#provider_owner = provider_owner;
       this.#info = info;
+      this.#debug = debug;
     }
 
     // Starts a turn with the text the player said.
@@ -158,28 +202,34 @@ namespace agent {
       return this.turn_start(line, i18n("agent.click_text", line.x, line.y));
     }
 
-    // Calls the reply's tools, keeping it unstored, or stores it as the end.
+    // Calls the reply's functions, keeping it unstored, or stores it, the end.
     model_handle(line: lines.Line): lines.Line | dispatch.Sleep {
       const state = line.state as TurnState;
       const [reply] = line.replies as lines.Line[];
-      const response = provider.chat_response(reply);
-      const message = response.choices[0].message;
-      const calls = message.tool_calls ?? [];
+      const response = provider.model_response(reply);
+      const calls = provider.calls_find(response.output);
       if (calls.length > 0) {
         const ids = calls.map((call) => this.call_submit(call));
         const next: CallState = {
           request: state.request,
           scene: state.scene,
-          asked: message,
+          texts: state.texts,
+          response: response.id,
+          output: response.output,
         };
         return dispatch.task_sleep(next, ids, constants.tool_type);
       }
-      const subtitle = message.content;
+      const subtitle = provider.text_join(response.output);
       if (subtitle === null) {
         throw new Error(i18n("agent.reply_empty", response.id));
       }
       const store = this.#store;
-      const appended = store.turn_append(state.scene, message.role, message);
+      const appended = store.turn_append(
+        state.scene,
+        constants.reply_role,
+        response.output,
+      );
+      this.chain_keep(state, response.id, appended.n);
       const scene = scene_current(store);
       return dispatch.reply_make(state.request, {
         turn: appended.n,
@@ -188,73 +238,132 @@ namespace agent {
       });
     }
 
-    // Stores the reply that called the tools and their results, then asks.
+    // Stores the reply that called the functions and their outputs, then asks.
     tool_handle(line: lines.Line): dispatch.Sleep {
       const state = line.state as CallState;
       const replies = line.replies as lines.Line[];
-      const calls = state.asked.tool_calls as provider.ToolCall[];
-      const answers = replies.map(
-        (reply: lines.Line, index: number): provider.ChatMessage => {
-          const call_id = calls[index].id;
+      const calls = provider.calls_find(state.output);
+      const outputs = replies.map(
+        (reply: lines.Line, index: number): provider.CallOutput => {
+          const call_id = calls[index].call_id;
           const result = this.#clients.result_of(reply);
           return {
-            role: "tool",
-            tool_call_id: call_id,
-            content: result_text(result, call_id),
+            type: constants.output_type,
+            call_id,
+            output: result_text(result, call_id),
           };
         },
       );
       const store = this.#store;
-      store.transaction_run(() => {
-        for (const message of [state.asked, ...answers]) {
-          store.turn_append(state.scene, message.role, message);
+      const scene = state.scene;
+      const appended = store.transaction_run(() => {
+        const stored = store.turn_append(
+          scene,
+          constants.reply_role,
+          state.output,
+        );
+        for (const output of outputs) {
+          store.turn_append(scene, constants.output_role, [output]);
         }
+        return stored;
       });
-      return this.request_submit(state.request, state.scene);
+      this.chain_keep(state, state.response, appended.n);
+      return this.request_submit(state.request, scene);
     }
 
-    // Appends the player's message to the scene on screen and asks the model.
+    // Appends the player's message to the scene's log, and asks the model.
     turn_start(request: lines.Line, text: string): dispatch.Sleep {
-      const scene = scene_current(this.#store);
-      const message: provider.ChatMessage = { role: "user", content: text };
-      this.#store.turn_append(scene, message.role, message);
+      const store = this.#store;
+      const scene = scene_current(store);
+      if (!store.turn_prompted(scene)) {
+        store.turn_prompt(scene, prompt_build(store));
+      }
+      const message: provider.InputMessage = {
+        role: constants.user_role,
+        content: text,
+      };
+      store.turn_append(scene, message.role, [message]);
       return this.request_submit(request, scene);
     }
 
-    // Submits the chat request of the scene's conversation and sleeps on it.
+    // Submits the model request and sleeps on it, chained when the log allows.
     request_submit(request: lines.Line, scene: lines.DocRef): dispatch.Sleep {
-      const store = this.#store;
-      const messages = prompt_build(store);
-      for (const row of store.turn_list(scene)) {
-        messages.push(row.content);
-      }
+      const rows = this.#store.turn_list(scene);
+      const texts = rows.map(row_text);
+      const chain = this.chain_find(scene, texts);
+      const kept = chain === undefined ? 0 : chain.texts.length;
+      const input = rows.slice(kept).flatMap((row) => row.content);
       const info = this.#info;
-      const line = provider.chat_request(info.base_url, provider.key_get(), {
+      const body: provider.ModelRequest = {
         model: info.chat_model,
-        messages,
-        tools: provider.tools_convert(this.#clients.tools_cached()),
+        input,
+        tools: this.#debug()
+          ? provider.tools_omitted
+          : provider.tools_convert(this.#clients.tools_cached()),
         tool_choice: constants.tool_choice,
-      });
+        prompt_cache_key: scene,
+        include: [constants.include_reasoning],
+      };
+      if (chain !== undefined) {
+        body.previous_response_id = chain.id;
+      }
+      const line = provider.model_request(
+        info.base_url,
+        provider.key_get(),
+        body,
+      );
       const id = this.#tasks.task_submit(line, this.#provider_owner);
-      const state: TurnState = { request, scene };
+      const state: TurnState = { request, scene, texts };
       return dispatch.task_sleep(state, [id], constants.model_type);
     }
 
-    // Submits one tool call, whose arguments must be a JSON object.
-    call_submit(call: provider.ToolCall): number {
-      const name = call.function.name;
-      const text = call.function.arguments;
+    // The scene's chain when the log adds rows after all of it, else deleted.
+    chain_find(scene: lines.DocRef, texts: string[]): SceneChain | undefined {
+      const chain = this.#chains.get(scene);
+      if (
+        chain !== undefined &&
+        texts.length > chain.texts.length &&
+        prefix_holds(chain.texts, texts)
+      ) {
+        return chain;
+      }
+      this.#chains.delete(scene);
+      return undefined;
+    }
+
+    // Chains the response when the log read back is the request's, then row n.
+    chain_keep(state: TurnState, id: string, n: number): void {
+      const rows = this.#store.turn_list(state.scene);
+      const after = rows.at(state.texts.length);
+      if (
+        after !== undefined &&
+        after.n === n &&
+        prefix_holds(state.texts, rows.map(row_text))
+      ) {
+        const texts = [...state.texts, row_text(after)];
+        this.#chains.set(state.scene, { id, texts });
+        return;
+      }
+      this.#chains.delete(state.scene);
+    }
+
+    // Submits one function call, whose arguments must be a JSON object.
+    call_submit(call: provider.FunctionCall): number {
+      const name = call.name;
+      const text = call.arguments;
       let args: unknown;
       try {
         args = jslb.json_decode(text);
       } catch (error) {
         throw utility.error_wrap(
-          i18n("agent.arguments_invalid", call.id, name, text),
+          i18n("agent.arguments_invalid", call.call_id, name, text),
           error,
         );
       }
       if (typeof args !== "object" || args === null || Array.isArray(args)) {
-        throw new Error(i18n("agent.arguments_invalid", call.id, name, text));
+        throw new Error(
+          i18n("agent.arguments_invalid", call.call_id, name, text),
+        );
       }
       return this.#clients.tool_call(name, args as { [key: string]: unknown });
     }
@@ -268,8 +377,16 @@ namespace agent {
     provider_owner: queue.ThreadName,
     info: lines.ProviderInfo,
     register: HandlerRegister,
+    debug: () => boolean,
   ): void {
-    const loop = new TurnLoop(store, clients, tasks, provider_owner, info);
+    const loop = new TurnLoop(
+      store,
+      clients,
+      tasks,
+      provider_owner,
+      info,
+      debug,
+    );
     const version = constants.handler_version;
     register(constants.say_type, version, (line) => loop.say_handle(line));
     register(constants.click_type, version, (line) => loop.click_handle(line));

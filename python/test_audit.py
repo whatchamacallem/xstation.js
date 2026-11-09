@@ -8,8 +8,16 @@
 # out, the start headings of both roles, two opens appending to one file, two
 # processes writing at once with no entry interleaved, a hard exit keeping
 # every entry written, a write past `blob_max` refused whole, the tail's fit
-# and order, and `entries_read` reading back what was written. The texts,
-# lines and views are the gold's.
+# and order, and `entries_read` reading back what was written. The
+# conversation's three lanes are written thin: a chain's first request counts
+# the items shown from their start and a chained one from their end, a reply's
+# echo of the tools and a commit of a reply's output are counts, a prompt kept
+# by an earlier conversation is a count, and a later process reads all three
+# lanes back, a line with blobs and a key of digits among them. Each
+# conversation keeps its own items, so scenes in turn and a reload write no
+# item again. `line_whole` undoes `line_thin` line by line, the shown state of
+# the writer and the reader alike after each. The texts, lines and views are
+# the gold's.
 
 import audit, harness, jslb, json, os, re, signal, sys, tempfile, time
 import unittest
@@ -33,6 +41,19 @@ _FILE_NAME = "_audit.txt"
 # How many milliseconds a second counts.
 _MILLISECONDS = 1000
 
+# The gold's rows of the conversation's lanes, in the order they are written.
+_SHOWN_ROWS = (
+    "shown_turn",
+    "shown_again",
+    "shown_changed",
+    "shown_odd",
+    "shown_scenes",
+    "shown_return",
+    "shown_omitted",
+    "shown_digits",
+    "shown_digits_again",
+)
+
 
 # A value of this module's gold.
 def _gold(name: str) -> Any:
@@ -52,6 +73,16 @@ def _joined(name: str) -> str:
 # A line of the gold read as the decoders read one.
 def _line_of(name: str) -> jslb.Object:
     return cast(jslb.Object, jslb.json_decode(json.dumps(_gold(name))))
+
+
+# The label of a row of the gold, its sender to its receiver.
+def _label_of(row: dict[str, Any]) -> str:
+    return f"{row['sender']} to {row['receiver']}"
+
+
+# The type of the line of a row of the gold.
+def _kind_of(row: dict[str, Any]) -> str:
+    return cast(str, row["line"]["0"]["type"])
 
 
 # The gold's local time in milliseconds since the epoch.
@@ -157,6 +188,133 @@ class TestLayout(ScratchCase):
         self.assertEqual(self.text_read(), before)
 
 
+# Tests what the conversation's lanes leave out, and that it reads back.
+class TestShown(ScratchCase):
+    # Records the gold's rows through the real record.
+    def rows_write(self, name: str) -> None:
+        for row in _gold(name):
+            audit.record_put(
+                row["sender"],
+                row["receiver"],
+                _at_gold(),
+                json.dumps(row["line"]),
+            )
+
+    # The lines of the document, as written.
+    def lines_read(self) -> list[dict[str, Any]]:
+        return [
+            json.loads(entry.body) for entry in audit.entries_read(self.root)
+        ]
+
+    # Each request, reply and commit holds only what the document did not show.
+    def test_lines_thin(self) -> None:
+        self.audit_ready()
+        self.rows_write("shown_turn")
+        self.assertEqual(self.lines_read(), _gold("shown_thin"))
+
+    # Reading the document makes each line whole again.
+    def test_lines_whole(self) -> None:
+        self.audit_ready()
+        self.rows_write("shown_turn")
+        shown = audit.ShownLog()
+        rows: list[dict[str, Any]] = _gold("shown_turn")
+        whole = [
+            shown.line_whole(_label_of(row), _kind_of(row), line)
+            for row, line in zip(rows, self.lines_read(), strict=True)
+        ]
+        self.assertEqual(whole, [row["line"] for row in rows])
+
+    # A later process reads the three lanes back, as a page load's does.
+    def test_reopened_kept(self) -> None:
+        audit.audit_open(self.root, _BLOB_MAX, "engine")
+        self.rows_write("shown_turn")
+        audit.audit_close()
+        self.audit_ready()
+        self.rows_write("shown_again")
+        self.assertEqual(self.lines_read()[-4:], _gold("shown_again_thin"))
+
+    # A later process reads back a line of a lane that carries blobs.
+    def test_reopened_blobs(self) -> None:
+        audit.audit_open(self.root, _BLOB_MAX, "engine")
+        audit.line_received(_line_of("blob_line"))
+        audit.audit_close()
+        self.audit_ready()
+        self.rows_write("shown_turn")
+        entries = audit.entries_read(self.root)[1:]
+        lines = [json.loads(entry.body) for entry in entries]
+        self.assertEqual(lines, _gold("shown_thin"))
+
+    # Scenes in turn, then a later process: each restart is a count alone.
+    def test_scenes_kept(self) -> None:
+        audit.audit_open(self.root, _BLOB_MAX, "engine")
+        self.rows_write("shown_turn")
+        self.rows_write("shown_scenes")
+        scenes = self.lines_read()[-len(_gold("shown_scenes")) :]
+        audit.audit_close()
+        self.audit_ready()
+        self.rows_write("shown_return")
+        returned = self.lines_read()[-len(_gold("shown_return")) :]
+        self.assertEqual(scenes, _gold("shown_scenes_thin"))
+        self.assertEqual(returned, _gold("shown_return_thin"))
+
+    # A key of digits in an item compares alike in a later process.
+    def test_digits_kept(self) -> None:
+        audit.audit_open(self.root, _BLOB_MAX, "engine")
+        self.rows_write("shown_digits")
+        audit.audit_close()
+        self.audit_ready()
+        self.rows_write("shown_digits_again")
+        self.assertEqual(self.lines_read()[-1], _gold("shown_digits_thin"))
+
+    # A prompt shown before is a count, a new prompt and tool list are whole.
+    def test_new_written(self) -> None:
+        self.audit_ready()
+        self.rows_write("shown_turn")
+        self.rows_write("shown_changed")
+        self.assertEqual(self.lines_read()[-4:], _gold("shown_changed_thin"))
+
+    # Items the document did not show, other lines and a partial commit.
+    def test_odd_written(self) -> None:
+        self.audit_ready()
+        self.rows_write("shown_turn")
+        self.rows_write("shown_odd")
+        self.assertEqual(self.lines_read()[-7:], _gold("shown_odd_thin"))
+
+    # The text that omits a debug mode tool list is written whole, no count.
+    def test_omitted_written(self) -> None:
+        self.audit_ready()
+        self.rows_write("shown_turn")
+        self.rows_write("shown_omitted")
+        self.assertEqual(self.lines_read()[-3:], _gold("shown_omitted_thin"))
+
+    # Each thin line made whole is the line, the shown state alike after it.
+    def test_whole_undoes(self) -> None:
+        writer = audit.ShownLog()
+        reader = audit.ShownLog()
+        for name in _SHOWN_ROWS:
+            for row in _gold(name):
+                label = _label_of(row)
+                thin = writer.line_thin(label, _kind_of(row), row["line"])
+                whole = reader.line_whole(label, _kind_of(row), thin)
+                self.assertEqual(whole, row["line"])
+                self.assertEqual(reader.items, writer.items)
+                self.assertEqual(reader.last, writer.last)
+                self.assertEqual(reader.tools, writer.tools)
+                self.assertEqual(reader.output, writer.output)
+
+    # A line of no count reads as it is, as a document older than the count.
+    def test_whole_kept(self) -> None:
+        shown = audit.ShownLog()
+        row = _gold("shown_turn")[2]
+        body = row["line"]["json"]
+        key = body["prompt_cache_key"]
+        whole = shown.line_whole(_label_of(row), _kind_of(row), row["line"])
+        self.assertEqual(whole, row["line"])
+        self.assertEqual(shown.items, {key: body["input"]})
+        self.assertEqual(shown.last, key)
+        self.assertEqual(shown.tools, body["tools"])
+
+
 # Tests the file: its headings, its appends, its limit and its writers.
 class TestFile(ScratchCase):
     # Each role's open writes its start heading with the process id.
@@ -202,11 +360,13 @@ class TestFile(ScratchCase):
         )
         self.assertEqual(os.path.getsize(self.path), size)
 
-    # Before the open each call raises, and a second open raises too.
+    # Each call raises before the open, a lane's record too, and a second open.
     def test_not_open(self) -> None:
+        prompt = json.dumps(_gold("shown_turn")[0]["line"])
         for call in (
             audit.audit_close,
             lambda: audit.note_put("ui", 0, "x"),
+            lambda: audit.record_put("ai", "server", 0, prompt),
             lambda: audit.tail_read(1, _BLOB_MAX),
         ):
             with self.assertRaises(RuntimeError) as raised:

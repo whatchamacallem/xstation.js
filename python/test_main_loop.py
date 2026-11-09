@@ -43,10 +43,13 @@ _MODULE_PATH = os.path.join(_ROOT_PATH, "python", "main_loop.py")
 _TOOLS_PATH = os.path.join(_ROOT_PATH, "API", "mcp", "tools.json")
 
 # The prefix of a browser tool's name in a tool call.
-_BROWSER_PREFIX = "browser."
+_BROWSER_PREFIX = "browser_"
 
 # The keys of a node of the analyst's table that hold one reply each.
 _REPLY_KEYS = ("otherwise", "after_tools", "after_lacks")
+
+# The fields of a tool call of the table, a `provider_script.ScriptCall`.
+_CALL_KEYS = ("arguments", "call_id", "name")
 
 # The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_main_loop"
@@ -261,19 +264,23 @@ def _replies_all(script: dict[str, Any]) -> list[dict[str, Any]]:
 
 # A tool call of the table as the gold has it, its arguments decoded.
 def _call_read(call: dict[str, Any]) -> dict[str, Any]:
-    function = call["function"]
-    arguments = json.loads(function["arguments"])
-    return {"arguments": arguments, "name": function["name"]}
+    arguments = json.loads(call["arguments"])
+    return {"arguments": arguments, "name": call["name"]}
 
 
-# Every tool call of the table, as the gold has them.
-def _calls_all(script: dict[str, Any]) -> list[dict[str, Any]]:
+# Every tool call of the table, as the table holds them.
+def _calls_held(script: dict[str, Any]) -> list[dict[str, Any]]:
     return [
-        _call_read(call)
+        call
         for reply in _replies_all(script)
         if "tool_calls" in reply
         for call in reply["tool_calls"]
     ]
+
+
+# Every tool call of the table, as the gold has them.
+def _calls_all(script: dict[str, Any]) -> list[dict[str, Any]]:
+    return [_call_read(call) for call in _calls_held(script)]
 
 
 # Walks an input by the key `after` where a node holds it, else `after_tools`.
@@ -739,6 +746,13 @@ class TestAnalyst(unittest.TestCase):
     def test_next_known(self) -> None:
         for reply in _replies_all(self.script):
             self.assertIn(reply["next"], self.script["nodes"])
+
+    # Every tool call is a `ScriptCall`: its three fields, each a string.
+    def test_calls_form(self) -> None:
+        for call in _calls_held(self.script):
+            self.assertEqual(sorted(call), list(_CALL_KEYS), call)
+            for key in _CALL_KEYS:
+                self.assertIsInstance(call[key], str, call)
 
     # Every tool call names a browser tool of the tool list, with its prefix.
     def test_tools_listed(self) -> None:

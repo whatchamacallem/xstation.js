@@ -12,6 +12,9 @@
 // entry of `test_digests.json` in `test_vectors`, under
 // `test_substrate_store`. The view of a database is compared with the vector
 // `dump.json` of `test_vectors`, whole and after a restore that loses values.
+// A turn's row is a JSON array of input items, as the store's canonical JSON
+// text: a message, a reply's output items, a call output, a prompt message or
+// a summary. `turn.prompt` pushes the messages, `turn.append` the array.
 namespace test_substrate_store {
   // The initialized sqlite3.wasm module, a global the bring up sets.
   declare const test_sqlite3: substrate.SqliteModule;
@@ -262,7 +265,7 @@ namespace test_substrate_store {
         store.turn_append(
           operation.scene as string,
           operation.role as provider.Role,
-          operation.content as provider.ChatMessage,
+          operation.content as provider.InputItem[],
         );
         break;
       default:
@@ -311,12 +314,32 @@ namespace test_substrate_store {
     return joined;
   }
 
-  // The message of the role with the text.
+  // The input message of the role with the text, as a prompt holds it.
   function message_said(
-    role: provider.Role,
+    role: provider.InputMessage["role"],
     content: string,
-  ): provider.ChatMessage {
+  ): provider.InputMessage {
     return { role, content };
+  }
+
+  // A turn's row of the one input message of the role with the text.
+  function row_said(
+    role: provider.InputMessage["role"],
+    content: string,
+  ): provider.InputItem[] {
+    return [message_said(role, content)];
+  }
+
+  // A turn's row of a reply of the model: its reasoning, then its text.
+  function reply_said(text: string): provider.InputItem[] {
+    return [
+      { type: "reasoning", id: "rs_1", encrypted_content: "weighed" },
+      {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text }],
+      },
+    ];
   }
 
   // The digest entry of exactly `overflow_bytes`, which stays in its row.
@@ -1431,24 +1454,36 @@ namespace test_substrate_store {
 
   // Turns: appended in order, listed, and compacted into one summary.
   export class TestTurns extends StoreCase {
-    // Turns number from 1 in their scene, a bad scene or content throws.
+    // Turns number from 1 in their scene, each an array of items as JSON.
     test_turns_append(): void {
       const store = this.store_fresh();
       store.db_create("metaverse");
       const scene = constants.scene;
-      const user: provider.ChatMessage = { role: "user", content: "1" };
-      const answer: provider.ChatMessage = {
-        role: "assistant",
-        content: constants.text_wide,
-      };
+      const user = row_said("user", "1");
+      const answer = reply_said(constants.text_wide);
+      const output: provider.InputItem[] = [
+        { type: "function_call_output", call_id: "call_1", output: "{}" },
+      ];
       this.assertEqual(store.turn_append(scene, "user", user), { n: 1 });
       this.assertEqual(store.turn_append(scene, "assistant", answer), {
         n: 2,
       });
+      this.assertEqual(store.turn_append(scene, "tool", output), { n: 3 });
       this.assertEqual(store.turn_list(scene), [
         { scene, n: 1, role: "user", content: user },
         { scene, n: 2, role: "assistant", content: answer },
+        { scene, n: 3, role: "tool", content: output },
       ]);
+      // Items hold no integer key, so their canonical text is their JSON.
+      const texts = rows_query(
+        store,
+        "metaverse",
+        "SELECT content FROM _turn ORDER BY n",
+      ).map((row) => row[0]);
+      this.assertEqual(
+        texts,
+        [user, answer, output].map((content) => utility.json_text(content)),
+      );
       this.assertEqual(store.turn_list("/metaverse/elsewhere/1"), []);
       const scenes_bad: [string, string][] = [
         ["hyperposition/1", "substrate_scene_bad_internal"],
@@ -1465,11 +1500,11 @@ namespace test_substrate_store {
             sql:
               "INSERT INTO _turn (scene, n, role, content)" +
               " VALUES (?, ?, ?, ?)",
-            params: [scene, 3, "user", "not json"],
+            params: [scene, 4, "user", "not json"],
           },
         ]),
       );
-      this.assertEqual(store.turn_list(scene).length, 2);
+      this.assertEqual(store.turn_list(scene).length, 3);
     }
 
     // Compaction replaces turns 1 to `through` by one summary turn at 1.
@@ -1478,7 +1513,7 @@ namespace test_substrate_store {
       store.db_create("metaverse");
       const scene = constants.scene;
       for (const text of ["1", "2", "3", "4"]) {
-        store.turn_append(scene, "user", { role: "user", content: text });
+        store.turn_append(scene, "user", row_said("user", text));
       }
       this.pushes_taken(store);
       this.assertEqual(
@@ -1486,13 +1521,13 @@ namespace test_substrate_store {
         undefined,
       );
       this.assertEqual(this.pushes_of(store), []);
-      const fourth: provider.ChatMessage = { role: "user", content: "4" };
+      const fourth = row_said("user", "4");
       this.assertEqual(store.turn_list(scene), [
         {
           scene,
           n: 1,
           role: "system",
-          content: { role: "system", content: "Asked thrice." },
+          content: [{ role: "system", content: "Asked thrice." }],
         },
         { scene, n: 4, role: "user", content: fourth },
       ]);
@@ -1509,6 +1544,106 @@ namespace test_substrate_store {
     }
   }
 
+  // A conversation's system prompt: stored once, before its turn 1.
+  export class TestPrompted extends StoreCase {
+    // A row `[message]` each, first, in order, and the turns count from 1.
+    test_prompt_first(): void {
+      const store = this.store_fresh();
+      store.db_create("alpha");
+      const scene = "/alpha/scene/1";
+      this.assertFalse(store.turn_prompted(scene));
+      const analyst = message_said("system", "analyst");
+      const universe = message_said("system", "universe");
+      store.turn_prompt(scene, [analyst, universe]);
+      this.assertTrue(store.turn_prompted(scene));
+      this.assertFalse(store.turn_prompted("/alpha/scene/2"));
+      const hi = row_said("user", "hi");
+      this.assertEqual(store.turn_append(scene, "user", hi), { n: 1 });
+      this.assertEqual(store.turn_list(scene), [
+        { scene, n: -1, role: "system", content: [analyst] },
+        { scene, n: 0, role: "system", content: [universe] },
+        { scene, n: 1, role: "user", content: hi },
+      ]);
+      this.assertEqual(store.db_view("alpha").turns_hidden, 1);
+    }
+
+    // One push carries its messages, and a second is refused, sending none.
+    test_prompt_pushed(): void {
+      const store = this.store_fresh();
+      store.db_create("alpha");
+      const scene = "/alpha/scene/1";
+      this.pushes_taken(store);
+      store.turn_prompt(scene, [message_said("system", "analyst")]);
+      this.assertEqual(this.pushes_taken(store), [
+        push_gold("push_turn_prompt"),
+      ]);
+      const refused = "UNIQUE constraint failed: _turn.scene, _turn.n";
+      this.sqlite_assert(refused, () =>
+        store.turn_prompt(scene, [message_said("system", "again")]),
+      );
+      this.assertEqual(this.pushes_of(store), []);
+      this.assertEqual(store.turn_list(scene).length, 1);
+    }
+
+    // Compaction neither counts it nor replaces it, by threshold or by call.
+    test_prompt_compacted(): void {
+      const store = this.store_make(
+        this.root_make(),
+        this.cache_make(),
+        constants.compact_small,
+      );
+      store.db_create("alpha");
+      const scene = "/alpha/scene/1";
+      const analyst = message_said("system", "analyst");
+      const prompt_row = { scene, n: 0, role: "system", content: [analyst] };
+      store.turn_prompt(scene, [analyst]);
+      store.turn_append(scene, "assistant", reply_said("1"));
+      store.turn_append(scene, "assistant", reply_said("2"));
+      this.assertEqual(
+        store.turn_append(scene, "user", row_said("user", "3")),
+        { n: 3 },
+      );
+      const fourth = row_said("user", "4");
+      this.assertEqual(store.turn_append(scene, "user", fourth), { n: 2 });
+      const summary = gold_text("substrate_turns_compacted_three");
+      this.assertEqual(store.turn_list(scene), [
+        prompt_row,
+        {
+          scene,
+          n: 1,
+          role: "system",
+          content: row_said("system", summary),
+        },
+        { scene, n: 2, role: "user", content: fourth },
+      ]);
+      store.turn_compact(scene, 2, "Asked.");
+      this.assertEqual(store.turn_list(scene), [
+        prompt_row,
+        {
+          scene,
+          n: 1,
+          role: "system",
+          content: row_said("system", "Asked."),
+        },
+      ]);
+    }
+
+    // The flag travels with the database in a whole sync.
+    test_prompt_restored(): void {
+      const store = this.store_fresh();
+      store.db_create("alpha");
+      const scene = "/alpha/scene/1";
+      const analyst = message_said("system", "analyst");
+      store.turn_prompt(scene, [analyst]);
+      const second = this.store_fresh();
+      second.db_restore("alpha", store.db_snapshot("alpha").data, []);
+      this.assertTrue(second.turn_prompted(scene));
+      this.assertEqual(second.turn_list(scene), [
+        { scene, n: 0, role: "system", content: [analyst] },
+      ]);
+    }
+  }
+
   // Compaction at `turn_compact_turns`: when it runs, what it writes, sends.
   export class TestCompaction extends StoreCase {
     // A `user` turn at the threshold compacts its scene first, sending none.
@@ -1517,22 +1652,22 @@ namespace test_substrate_store {
       store.db_create("alpha");
       const scene = "/alpha/scene/1";
       const other = "/alpha/scene/2";
-      store.turn_append(scene, "user", message_said("user", "1"));
-      store.turn_append(scene, "assistant", message_said("assistant", "2"));
+      store.turn_append(scene, "user", row_said("user", "1"));
+      store.turn_append(scene, "assistant", reply_said("2"));
       this.assertEqual(
-        store.turn_append(scene, "user", message_said("user", "3")),
+        store.turn_append(scene, "user", row_said("user", "3")),
         { n: 3 },
       );
       this.assertEqual(
-        store.turn_append(scene, "assistant", message_said("assistant", "4")),
+        store.turn_append(scene, "assistant", reply_said("4")),
         { n: 4 },
       );
       this.assertEqual(
-        store.turn_append(other, "user", message_said("user", "a")),
+        store.turn_append(other, "user", row_said("user", "a")),
         { n: 1 },
       );
       this.pushes_taken(store);
-      const fifth = message_said("user", "5");
+      const fifth = row_said("user", "5");
       this.assertEqual(store.turn_append(scene, "user", fifth), { n: 2 });
       const summary = gold_text("substrate_turns_compacted_four");
       this.assertEqual(store.turn_list(scene), [
@@ -1540,17 +1675,17 @@ namespace test_substrate_store {
           scene,
           n: 1,
           role: "system",
-          content: message_said("system", summary),
+          content: row_said("system", summary),
         },
         { scene, n: 2, role: "user", content: fifth },
       ]);
       this.assertEqual(this.types_taken(store), ["turn.append"]);
-      const opening = message_said("user", "a");
+      const opening = row_said("user", "a");
       this.assertEqual(store.turn_list(other), [
         { scene: other, n: 1, role: "user", content: opening },
       ]);
       this.assertEqual(
-        store.turn_append(scene, "user", message_said("user", "6")),
+        store.turn_append(scene, "user", row_said("user", "6")),
         { n: 3 },
       );
       this.assertEqual(store.turn_list(scene).length, 3);
@@ -1562,13 +1697,13 @@ namespace test_substrate_store {
       store.db_create("alpha");
       const scene = "/alpha/scene/1";
       for (const text of ["1", "2", "3"]) {
-        store.turn_append(scene, "assistant", message_said("assistant", text));
+        store.turn_append(scene, "assistant", reply_said(text));
       }
       this.pushes_taken(store);
       const before = store.turn_list(scene);
       this.raised_assert("rolled back", () =>
         store.transaction_run(() => {
-          store.turn_append(scene, "user", message_said("user", "4"));
+          store.turn_append(scene, "user", row_said("user", "4"));
           throw new Error("rolled back");
         }),
       );
@@ -1741,7 +1876,7 @@ namespace test_substrate_store {
       const note = { 0: { t: "note" }, text: constants.text_wide };
       const ref = store.doc_put("alpha", "note", note).ref;
       const scene = "/alpha/scene/1";
-      const hi = message_said("user", "hi");
+      const hi = row_said("user", "hi");
       store.turn_append(scene, "user", hi);
       const rows = store.kv_list("alpha", "");
       store.db_close("alpha");
@@ -2109,8 +2244,17 @@ namespace test_substrate_store {
       const body = { 0: { t: "note" } };
       store.doc_put("alpha", "note", body);
       const scene = "/alpha/scene/1";
-      const user = message_said("user", "hi");
-      store.turn_append(scene, "user", user);
+      store.turn_append(scene, "user", row_said("user", "hi"));
+      const reply: provider.InputItem[] = [
+        { type: "reasoning", id: "rs_1", encrypted_content: "weighed" },
+        {
+          type: "function_call",
+          call_id: "call_1",
+          name: "browser_kv_get",
+          arguments: '{"ref":"/alpha/a"}',
+        },
+      ];
+      store.turn_append(scene, "assistant", reply);
       const created: lines.SqlStatement[] = [
         { sql: "CREATE TABLE t (x TEXT)", params: [] },
       ];
@@ -2127,10 +2271,13 @@ namespace test_substrate_store {
       this.assertEqual(pushed, [
         push_gold("push_doc_put"),
         push_gold("push_turn_append_hi"),
+        push_gold("push_turn_append_reply"),
         push_gold("push_sql_run_create"),
         push_gold("push_sql_run_insert"),
       ]);
-      this.assertFalse(pushed[2].statements === created);
+      // A turn's push holds its array parsed from the row, a statement a copy.
+      this.assertFalse(pushed[2].content === reply);
+      this.assertFalse(pushed[3].statements === created);
     }
 
     // The pushes of one transaction follow its commit, in order, or none.
@@ -2167,10 +2314,10 @@ namespace test_substrate_store {
       store.db_create("alpha");
       const scene = "/alpha/scene/1";
       for (const text of ["1", "2", "3"]) {
-        store.turn_append(scene, "assistant", message_said("assistant", text));
+        store.turn_append(scene, "assistant", reply_said(text));
       }
       this.pushes_taken(store);
-      const user = message_said("user", "4");
+      const user = row_said("user", "4");
       this.assertEqual(store.turn_append(scene, "user", user), { n: 2 });
       this.assertEqual(this.pushes_taken(store), [
         push_gold("push_turn_append_four"),
@@ -2181,7 +2328,7 @@ namespace test_substrate_store {
           scene,
           n: 1,
           role: "system",
-          content: message_said("system", summary),
+          content: row_said("system", summary),
         },
         { scene, n: 2, role: "user", content: user },
       ]);

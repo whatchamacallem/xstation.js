@@ -35,7 +35,7 @@ class KvValue(NamedTuple):
     size: int
     sha256: bytes
 
-# A `_turn` row: `n` counts within the scene, `content` is one message.
+# A `_turn` row: `n` counts within the scene, `content` a JSON array of items.
 class TurnRow(NamedTuple):
     scene: str
     n: int
@@ -111,8 +111,10 @@ class Store:
     def doc_head(self, db: str, id: str) -> str: ...
     # Appends a turn to the scene's conversation. Returns its `n`.
     def turn_append(self, scene: str, role: str, content: str) -> int: ...
-    # The scene's turns in order.
+    # The scene's whole log in order: its system prompt, then its turns.
     def turn_list(self, scene: str) -> list[TurnRow]: ...
+    # Stores the prompt's roles and contents before turn 1, the last at `n` 0.
+    def turn_prompt(self, scene: str, rows: list[tuple[str, str]]) -> None: ...
     # Runs the statements in order.
     def sql_run(
         self, db: str, statements: list[SqlStatement]

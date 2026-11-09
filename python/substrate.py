@@ -109,7 +109,7 @@ _VIEW_HIDDEN = (
 _VIEW_HEADS = "SELECT id || '/' || version FROM _head ORDER BY id"
 
 # The count of the turns and of the scenes they belong to.
-_VIEW_TURNS = "SELECT COUNT(*), COUNT(DISTINCT scene) FROM _turn"
+_VIEW_TURNS = "SELECT COUNT(*), COUNT(DISTINCT scene) FROM _turn WHERE n > 0"
 
 # The tables but the store's own, `?1`, and SQLite's, by name, with `wr`.
 _VIEW_TABLES = (
@@ -151,7 +151,7 @@ class KvValue(NamedTuple):
     sha256: bytes
 
 
-# A `_turn` row: `n` counts within the scene, `content` is one message.
+# A `_turn` row: `n` counts within the scene, `content` a JSON array of items.
 class TurnRow(NamedTuple):
     scene: str
     n: int
@@ -671,7 +671,7 @@ class Store:
             lambda: self._turn_add(connection, scene, role, content)
         )
 
-    # The scene's turns in order.
+    # The scene's whole log in order: its system prompt, then its turns.
     def turn_list(self, scene: str) -> list[TurnRow]:
         connection = self._connection_get(_scene_database(scene))
         rows = connection.execute(
@@ -680,6 +680,11 @@ class Store:
             (scene,),
         ).fetchall()
         return [TurnRow(*row) for row in rows]
+
+    # Stores the prompt's roles and contents before turn 1, the last at `n` 0.
+    def turn_prompt(self, scene: str, rows: list[tuple[str, str]]) -> None:
+        connection = self._connection_get(_scene_database(scene))
+        self.transaction_run(lambda: self._prompt_add(connection, scene, rows))
 
     # Runs the statements in order.
     def sql_run(
@@ -984,6 +989,21 @@ class Store:
             (scene, n, role, content),
         )
         return n
+
+    # Inserts the system prompt's rows up to `n` 0 inside the transaction.
+    def _prompt_add(
+        self,
+        connection: sqlite3.Connection,
+        scene: str,
+        rows: list[tuple[str, str]],
+    ) -> None:
+        self._transaction_join(connection)
+        for index, (role, content) in enumerate(rows):
+            connection.execute(
+                "INSERT INTO _turn (scene, n, role, content)"
+                " VALUES (?, ?, ?, ?)",
+                (scene, index + 1 - len(rows), role, content),
+            )
 
     # Runs the statements, a trigger's refusal raised as the string it names.
     def _statements_run(

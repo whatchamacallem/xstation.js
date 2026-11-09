@@ -97,10 +97,12 @@
         "i": 10,
         "t": "turn.append"
       },
-      "content": {
-        "content": "Open the gate.",
-        "role": "user"
-      },
+      "content": [
+        {
+          "content": "Open the gate.",
+          "role": "user"
+        }
+      ],
       "role": "user",
       "scene": "/alpha/scene/1"
     },
@@ -108,10 +110,12 @@
       "0": {
         "type": "turn.append"
       },
-      "content": {
-        "content": "Open the gate.",
-        "role": "user"
-      },
+      "content": [
+        {
+          "content": "Open the gate.",
+          "role": "user"
+        }
+      ],
       "role": "user",
       "scene": "/alpha/scene/1"
     },

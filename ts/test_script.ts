@@ -57,7 +57,8 @@ namespace test_script {
       "doc_head",
       "turn_append",
       "turn_list",
-      "turn_compact",
+      "turn_prompted",
+      "turn_prompt",
       "transaction_run",
     ]),
     // The start of the root of each store a test makes in the pool.

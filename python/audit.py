@@ -51,6 +51,42 @@ _TIME_FORMAT = "%H:%M:%S"
 # The format of a start heading's date, before its time.
 _DATE_FORMAT = "%Y-%m-%d"
 
+# The lanes of the conversation: the model's requests and replies, the commits.
+_REQUEST_LABEL = "ai to http"
+_REPLY_LABEL = "http to ai"
+_COMMIT_LABEL = "ai to server"
+_LANES = (_REQUEST_LABEL, _REPLY_LABEL, _COMMIT_LABEL)
+
+# The commits of the conversation's items.
+_PROMPT_TYPE = "turn.prompt"
+_TURN_TYPE = "turn.append"
+
+# The field of a line of the provider's port that holds its JSON body.
+_BODY_FIELD = "json"
+
+# The fields of a request, a reply and a commit that hold the conversation.
+_INPUT_FIELD = "input"
+_OUTPUT_FIELD = "output"
+_CONTENT_FIELD = "content"
+_MESSAGES_FIELD = "messages"
+_TOOLS_FIELD = "tools"
+
+# The field of a model request that chains it to the response before it.
+_CHAIN_FIELD = "previous_response_id"
+
+# The fields of a model request and of a commit that name the conversation.
+_KEY_FIELD = "prompt_cache_key"
+_SCENE_FIELD = "scene"
+
+# The end of a line's laid out JSON text, its one brace at the left margin.
+_LINE_CLOSE = "\n}"
+
+# The fields of a line that count what the document already shows.
+_INPUT_KEPT = "input_kept"
+_CONTENT_KEPT = "content_kept"
+_MESSAGES_KEPT = "messages_kept"
+_TOOLS_KEPT = "tools_kept"
+
 
 # One entry read back: its start from 1, its time, its label, its body.
 class AuditEntry(NamedTuple):
@@ -60,6 +96,218 @@ class AuditEntry(NamedTuple):
     body: str
 
 
+# How many of the items lead with the items shown, equal one by one.
+def _kept_count(items: list[Any], shown: list[Any]) -> int:
+    count = 0
+    for given, held in zip(items, shown):
+        if given != held:
+            break
+        count += 1
+    return count
+
+
+# The largest count of the items' leading ones equal to the shown ones' last.
+def _tail_count(items: list[Any], shown: list[Any]) -> int:
+    for count in range(min(len(items), len(shown)), 0, -1):
+        if items[:count] == shown[len(shown) - count :]:
+            return count
+    return 0
+
+
+# The fields with the list's first items as their count, a 0 only if `always`.
+def _list_cut(
+    fields: dict[Any, Any], name: str, counted: str, kept: int, always: bool
+) -> dict[Any, Any]:
+    cut: dict[Any, Any] = {}
+    for key, value in fields.items():
+        if key == name and (kept or always):
+            cut[counted] = kept
+            cut[key] = value[kept:]
+        else:
+            cut[key] = value
+    return cut
+
+
+# The fields with the list under `name` whole again, the `shown` items first.
+def _list_joined(
+    fields: dict[Any, Any], name: str, counted: str, shown: list[Any]
+) -> dict[Any, Any]:
+    joined: dict[Any, Any] = {}
+    for key, value in fields.items():
+        if key == name:
+            joined[key] = [*shown, *value]
+        elif key != counted:
+            joined[key] = value
+    return joined
+
+
+# The fields with a tool list equal to the one shown written as its count.
+def _tools_cut(fields: dict[Any, Any], shown: list[Any]) -> dict[Any, Any]:
+    cut: dict[Any, Any] = {}
+    for key, value in fields.items():
+        if key == _TOOLS_FIELD and isinstance(value, list) and value == shown:
+            cut[_TOOLS_KEPT] = len(value)
+        else:
+            cut[key] = value
+    return cut
+
+
+# The fields with a counted tool list whole again, the one shown.
+def _tools_joined(fields: dict[Any, Any], shown: list[Any]) -> dict[Any, Any]:
+    joined: dict[Any, Any] = {}
+    for key, value in fields.items():
+        if key == _TOOLS_KEPT:
+            joined[_TOOLS_FIELD] = shown
+        else:
+            joined[key] = value
+    return joined
+
+
+# Whether a line's JSON body is an object that holds the field.
+def _body_holds(line: dict[Any, Any], field: str) -> bool:
+    body = line.get(_BODY_FIELD)
+    return isinstance(body, dict) and field in body
+
+
+# What the document shows of each conversation: only what is new goes in.
+class ShownLog:
+    # Starts having shown nothing.
+    def __init__(self) -> None:
+        self.items: dict[str, list[Any]] = {}
+        self.last: str = ""
+        self.tools: list[Any] = []
+        self.output: list[Any] = []
+
+    # A conversation's items shown, else those of the one last shown.
+    def _items_shown(self, key: str) -> list[Any]:
+        return self.items.get(key, self.items.get(self.last, []))
+
+    # Keeps the items a conversation shows, the conversation last shown.
+    def _items_put(self, key: str, items: list[Any]) -> None:
+        self.items[key] = items
+        self.last = key
+
+    # A request's body thin of the items shown: at their end if it is chained.
+    def _request_thin(self, body: dict[Any, Any]) -> dict[Any, Any]:
+        given = cast(list[Any], body[_INPUT_FIELD])
+        shown = self._items_shown(cast(str, body[_KEY_FIELD]))
+        if _CHAIN_FIELD in body:
+            kept = _tail_count(given, shown)
+        else:
+            kept = _kept_count(given, shown)
+        thin = _list_cut(body, _INPUT_FIELD, _INPUT_KEPT, kept, True)
+        thin = _tools_cut(thin, self.tools)
+        self._request_moved(body, kept)
+        return thin
+
+    # A request's body whole again, the shown state moved alike.
+    def _request_whole(self, body: dict[Any, Any]) -> dict[Any, Any]:
+        kept = cast(int, body.get(_INPUT_KEPT, 0))
+        shown = self._items_shown(cast(str, body[_KEY_FIELD]))
+        if _CHAIN_FIELD in body:
+            shown = shown[len(shown) - kept :]
+        else:
+            shown = shown[:kept]
+        whole = _list_joined(body, _INPUT_FIELD, _INPUT_KEPT, shown)
+        whole = _tools_joined(whole, self.tools)
+        self._request_moved(whole, kept)
+        return whole
+
+    # Moves the items and tools shown by a whole request, `kept` of it shown.
+    def _request_moved(self, body: dict[Any, Any], kept: int) -> None:
+        given = cast(list[Any], body[_INPUT_FIELD])
+        key = cast(str, body[_KEY_FIELD])
+        if _CHAIN_FIELD in body:
+            self._items_put(key, [*self._items_shown(key), *given[kept:]])
+        else:
+            self._items_put(key, list(given))
+        tools = body.get(_TOOLS_FIELD)
+        if isinstance(tools, list):
+            self.tools = cast(list[Any], tools)
+
+    # A reply's body thin, its output held.
+    def _reply_thin(self, body: dict[Any, Any]) -> dict[Any, Any]:
+        thin = _tools_cut(body, self.tools)
+        self.output = cast(list[Any], body[_OUTPUT_FIELD])
+        return thin
+
+    # A reply's body whole again, its output held.
+    def _reply_whole(self, body: dict[Any, Any]) -> dict[Any, Any]:
+        whole = _tools_joined(body, self.tools)
+        self.output = cast(list[Any], whole[_OUTPUT_FIELD])
+        return whole
+
+    # A turn's commit thin of the output it leads with, its items shown.
+    def _append_thin(self, line: dict[Any, Any]) -> dict[Any, Any]:
+        content = cast(list[Any], line[_CONTENT_FIELD])
+        kept = _kept_count(content, self.output)
+        thin = _list_cut(line, _CONTENT_FIELD, _CONTENT_KEPT, kept, False)
+        self._append_moved(line)
+        return thin
+
+    # A turn's commit whole again, its items shown.
+    def _append_whole(self, line: dict[Any, Any]) -> dict[Any, Any]:
+        kept = cast(int, line.get(_CONTENT_KEPT, 0))
+        output = self.output[:kept]
+        whole = _list_joined(line, _CONTENT_FIELD, _CONTENT_KEPT, output)
+        self._append_moved(whole)
+        return whole
+
+    # Adds a whole commit's content to the items its conversation shows.
+    def _append_moved(self, line: dict[Any, Any]) -> None:
+        key = cast(str, line[_SCENE_FIELD])
+        content = cast(list[Any], line[_CONTENT_FIELD])
+        self._items_put(key, [*self._items_shown(key), *content])
+
+    # A prompt's commit thin of the items shown, which become its messages.
+    def _prompt_thin(self, line: dict[Any, Any]) -> dict[Any, Any]:
+        messages = cast(list[Any], line[_MESSAGES_FIELD])
+        key = cast(str, line[_SCENE_FIELD])
+        kept = _kept_count(messages, self._items_shown(key))
+        thin = _list_cut(line, _MESSAGES_FIELD, _MESSAGES_KEPT, kept, True)
+        self._items_put(key, list(messages))
+        return thin
+
+    # A prompt's commit whole again, its messages the items shown.
+    def _prompt_whole(self, line: dict[Any, Any]) -> dict[Any, Any]:
+        kept = cast(int, line.get(_MESSAGES_KEPT, 0))
+        key = cast(str, line[_SCENE_FIELD])
+        shown = self._items_shown(key)[:kept]
+        whole = _list_joined(line, _MESSAGES_FIELD, _MESSAGES_KEPT, shown)
+        self._items_put(key, list(whole[_MESSAGES_FIELD]))
+        return whole
+
+    # The line moved thin or whole by its lane and kind, else as it is.
+    def _line_moved(
+        self, label: str, kind: str, line: dict[Any, Any], whole: bool
+    ) -> dict[Any, Any]:
+        if label == _REQUEST_LABEL and _body_holds(line, _INPUT_FIELD):
+            move = self._request_whole if whole else self._request_thin
+            return {**line, _BODY_FIELD: move(line[_BODY_FIELD])}
+        if label == _REPLY_LABEL and _body_holds(line, _OUTPUT_FIELD):
+            move = self._reply_whole if whole else self._reply_thin
+            return {**line, _BODY_FIELD: move(line[_BODY_FIELD])}
+        if label == _COMMIT_LABEL and kind == _PROMPT_TYPE:
+            move = self._prompt_whole if whole else self._prompt_thin
+            return move(line)
+        if label == _COMMIT_LABEL and kind == _TURN_TYPE:
+            move = self._append_whole if whole else self._append_thin
+            return move(line)
+        return line
+
+    # The line as the document holds it, what the document shows left out.
+    def line_thin(
+        self, label: str, kind: str, line: dict[Any, Any]
+    ) -> dict[Any, Any]:
+        return self._line_moved(label, kind, line, False)
+
+    # The line whole again, from what the document shows.
+    def line_whole(
+        self, label: str, kind: str, line: dict[Any, Any]
+    ) -> dict[Any, Any]:
+        return self._line_moved(label, kind, line, True)
+
+
 # The state of the module, which is empty until the document is opened.
 class _AuditState:
     # Starts with no file.
@@ -67,6 +315,7 @@ class _AuditState:
         self.descriptor: int | None = None
         self.path: str | None = None
         self.blob_max = 0
+        self.shown: ShownLog | None = None
 
 
 # The one document of the process.
@@ -141,7 +390,11 @@ def _json_layout(value: object) -> str:
 
 # The body of a line from its JSON text, then the count of its blobs.
 def _line_layout(text: str) -> str:
-    line = cast(dict[int | str, Any], jslb.json_decode(text))
+    return _value_layout(cast(dict[Any, Any], jslb.json_decode(text)))
+
+
+# The body of a line from its value, then the count of its blobs.
+def _value_layout(line: dict[Any, Any]) -> str:
     header = cast(dict[str, Any], line[0])
     count = 0
     for field in _BLOB_FIELDS:
@@ -151,6 +404,11 @@ def _line_layout(text: str) -> str:
     if count:
         body += "\n" + i18n("audit.blobs_omitted", count)
     return body
+
+
+# The JSON text of a line entry's body, the count of its blobs left off.
+def _json_text(body: str) -> str:
+    return body[: body.index(_LINE_CLOSE) + len(_LINE_CLOSE)]
 
 
 # Whether a line is one of the audit's own, which no entry records.
@@ -180,6 +438,32 @@ def audit_close() -> None:
     _STATE.descriptor = None
     _STATE.path = None
     _STATE.blob_max = 0
+    _STATE.shown = None
+
+
+# What the document shows, read back the first time this process needs it.
+def _shown_get() -> ShownLog:
+    _descriptor_get()
+    if _STATE.shown is None:
+        shown = ShownLog()
+        for _, entry in _entries_split(_document_read(cast(str, _STATE.path))):
+            heading, _, body = entry.partition("\n")
+            label = heading.partition(", ")[2]
+            if label in _LANES:
+                line = cast(dict[Any, Any], jslb.json_decode(_json_text(body)))
+                shown.line_whole(label, jslb.field_get(line[0], "type"), line)
+        _STATE.shown = shown
+    return _STATE.shown
+
+
+# A line entry, what the document shows left out of the conversation.
+def _record_append(sender: str, receiver: str, at: int, text: str) -> None:
+    label = i18n("audit.line_label", sender, receiver)
+    line = cast(dict[Any, Any], jslb.json_decode(text))
+    if label in _LANES:
+        kind: str = jslb.field_get(line[0], "type")
+        line = _shown_get().line_thin(label, kind, line)
+    _text_append(_entry_text(at, label, _value_layout(line)))
 
 
 # The laid out text of a page thread's record, as the document holds it.
@@ -197,10 +481,8 @@ def note_text(thread: str, at: int, text: str) -> str:
 # A line entry of a wire line the server read, but the audit's own lines.
 def line_received(line: jslb.Object) -> None:
     if not _own_is(line):
-        _text_append(
-            record_text(
-                _WIRE_THREAD, _SERVER_NAME, _now(), jslb.line_json(line)
-            )
+        _record_append(
+            _WIRE_THREAD, _SERVER_NAME, _now(), jslb.line_json(line)
         )
 
 
@@ -216,7 +498,7 @@ def line_sent(line: jslb.Object) -> None:
 
 # A line entry of a page thread's record.
 def record_put(sender: str, receiver: str, at: int, text: str) -> None:
-    _text_append(record_text(sender, receiver, at, text))
+    _record_append(sender, receiver, at, text)
 
 
 # A note of a thread.

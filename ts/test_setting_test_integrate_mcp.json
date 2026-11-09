@@ -169,7 +169,7 @@
             "required": ["ref"],
             "type": "object"
           },
-          "name": "browser.kv_get"
+          "name": "browser_kv_get"
         },
         {
           "description": "Write a main loop file into the server's main_loop directory for system_restart to serve. Debug mode.",
@@ -185,7 +185,7 @@
             "required": ["name", "text"],
             "type": "object"
           },
-          "name": "browser.source_put"
+          "name": "browser_source_put"
         },
         {
           "description": "A tool of the tests.",
@@ -193,7 +193,7 @@
             "properties": {},
             "type": "object"
           },
-          "name": "browser.render"
+          "name": "browser_render"
         },
         {
           "description": "Read the value a Key-Value-Ref names, /$db/$key, as text.",
@@ -206,7 +206,7 @@
             "required": ["ref"],
             "type": "object"
           },
-          "name": "server.kv_get"
+          "name": "server_kv_get"
         },
         {
           "description": "Write a main loop file into the server's main_loop directory for system_restart to serve. Debug mode.",
@@ -222,7 +222,7 @@
             "required": ["name", "text"],
             "type": "object"
           },
-          "name": "server.source_put"
+          "name": "server_source_put"
         },
         {
           "description": "A tool of the tests.",
@@ -230,7 +230,7 @@
             "properties": {},
             "type": "object"
           },
-          "name": "server.render"
+          "name": "server_render"
         }
       ]
     },

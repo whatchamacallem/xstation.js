@@ -24,9 +24,12 @@ CREATE TABLE _head (
 ) WITHOUT ROWID, STRICT;
 
 -- The conversation of each scene, by the scene's Document-Ref. n counts
--- within the scene; content is one provider message as JSON. The browser's
--- compaction deletes turns 1 to N and inserts one summary row at n 1; the
--- server never compacts.
+-- within the scene; content is the turn's input items of the Responses API as
+-- a JSON array: a message, a model reply's output items, or one call's output.
+-- The browser's compaction deletes turns 1 to N and inserts one summary row at
+-- n 1; the server never compacts. The system prompt comes first, once per
+-- conversation, at n 0 and below, so it is no turn: it is neither counted nor
+-- compacted. The row at n 0 is the flag that the conversation holds its prompt.
 CREATE TABLE _turn (
     scene   TEXT    NOT NULL,
     n       INTEGER NOT NULL,

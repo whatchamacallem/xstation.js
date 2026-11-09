@@ -98,10 +98,12 @@
       "0": {
         "type": "turn.append"
       },
-      "content": {
-        "content": "4",
-        "role": "user"
-      },
+      "content": [
+        {
+          "content": "4",
+          "role": "user"
+        }
+      ],
       "role": "user",
       "scene": "/alpha/scene/1"
     },
@@ -109,11 +111,45 @@
       "0": {
         "type": "turn.append"
       },
-      "content": {
-        "content": "hi",
-        "role": "user"
-      },
+      "content": [
+        {
+          "content": "hi",
+          "role": "user"
+        }
+      ],
       "role": "user",
+      "scene": "/alpha/scene/1"
+    },
+    "push_turn_append_reply": {
+      "0": {
+        "type": "turn.append"
+      },
+      "content": [
+        {
+          "encrypted_content": "weighed",
+          "id": "rs_1",
+          "type": "reasoning"
+        },
+        {
+          "arguments": "{\"ref\":\"/alpha/a\"}",
+          "call_id": "call_1",
+          "name": "browser_kv_get",
+          "type": "function_call"
+        }
+      ],
+      "role": "assistant",
+      "scene": "/alpha/scene/1"
+    },
+    "push_turn_prompt": {
+      "0": {
+        "type": "turn.prompt"
+      },
+      "messages": [
+        {
+          "content": "analyst",
+          "role": "system"
+        }
+      ],
       "scene": "/alpha/scene/1"
     },
     "request_db_create": {
@@ -223,10 +259,12 @@
         "i": 15,
         "t": "turn.append"
       },
-      "content": {
-        "content": "1",
-        "role": "user"
-      },
+      "content": [
+        {
+          "content": "1",
+          "role": "user"
+        }
+      ],
       "role": "user",
       "scene": "/metaverse/hyperposition/1"
     },

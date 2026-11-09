@@ -163,12 +163,12 @@ namespace test_integrate_mcp {
       [key: string]: unknown;
     };
     chain_register(constants.routed_type, [
-      () => [set.tool_call("server.kv_get", nothing)],
+      () => [set.tool_call("server_kv_get", nothing)],
       (request, [reply]) =>
         dispatch.reply_make(request, { result: set.result_of(reply) }),
     ]);
     chain_register(constants.browser_type, [
-      () => [set.tool_call("browser.kv_get", nothing)],
+      () => [set.tool_call("browser_kv_get", nothing)],
     ]);
     const listed = new mcp.ClientSet();
     const first = client_make(tasks, near);

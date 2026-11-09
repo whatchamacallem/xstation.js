@@ -140,5 +140,1259 @@
     "audit_open_twice": "The audit is already open."
   },
   "process_entries": 300,
-  "hard_entries": 3
+  "hard_entries": 3,
+  "shown_turn": [
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.prompt"},
+        "scene": "/s/1",
+        "messages": [{"role": "system", "content": "The prompt."}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/s/1",
+        "role": "user",
+        "content": [{"role": "user", "content": "1"}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request"},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "model": "grok-4.7",
+          "input": [
+            {"role": "system", "content": "The prompt."},
+            {"role": "user", "content": "1"}
+          ],
+          "tools": [
+            {"type": "function", "name": "browser_render", "description": "d", "parameters": {}}
+          ],
+          "tool_choice": "auto",
+          "prompt_cache_key": "/s/1",
+          "include": ["reasoning.encrypted_content"]
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request"},
+        "status": 200,
+        "json": {
+          "id": "resp_a",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
+            {"type": "reasoning", "id": "rs_a", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+            {"type": "function_call", "id": "fc_a_1", "call_id": "call_1", "name": "browser_render", "arguments": "{}", "status": "completed"}
+          ],
+          "tools": [
+            {"type": "function", "name": "browser_render", "description": "d", "parameters": {}}
+          ],
+          "tool_choice": "auto",
+          "previous_response_id": null
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/s/1",
+        "role": "assistant",
+        "content": [
+          {"type": "reasoning", "id": "rs_a", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+          {"type": "function_call", "id": "fc_a_1", "call_id": "call_1", "name": "browser_render", "arguments": "{}", "status": "completed"}
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/s/1",
+        "role": "tool",
+        "content": [{"type": "function_call_output", "call_id": "call_1", "output": "{}"}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request"},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "model": "grok-4.7",
+          "previous_response_id": "resp_a",
+          "input": [{"type": "function_call_output", "call_id": "call_1", "output": "{}"}],
+          "tools": [
+            {"type": "function", "name": "browser_render", "description": "d", "parameters": {}}
+          ],
+          "tool_choice": "auto",
+          "prompt_cache_key": "/s/1",
+          "include": ["reasoning.encrypted_content"]
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request"},
+        "status": 200,
+        "json": {
+          "id": "resp_b",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
+            {"type": "reasoning", "id": "rs_b", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+            {"type": "message", "id": "msg_b", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Done.", "annotations": []}]}
+          ],
+          "tools": [
+            {"type": "function", "name": "browser_render", "description": "d", "parameters": {}}
+          ],
+          "tool_choice": "auto",
+          "previous_response_id": "resp_a"
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/s/1",
+        "role": "assistant",
+        "content": [
+          {"type": "reasoning", "id": "rs_b", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+          {"type": "message", "id": "msg_b", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Done.", "annotations": []}]}
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/s/1",
+        "role": "user",
+        "content": [{"role": "user", "content": "2"}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request"},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "model": "grok-4.7",
+          "previous_response_id": "resp_b",
+          "input": [{"role": "user", "content": "2"}],
+          "tools": [
+            {"type": "function", "name": "browser_render", "description": "d", "parameters": {}}
+          ],
+          "tool_choice": "auto",
+          "prompt_cache_key": "/s/1",
+          "include": ["reasoning.encrypted_content"]
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request"},
+        "status": 200,
+        "json": {
+          "id": "resp_c",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
+            {"type": "reasoning", "id": "rs_c", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+            {"type": "message", "id": "msg_c", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Again.", "annotations": []}]}
+          ],
+          "tools": [
+            {"type": "function", "name": "browser_render", "description": "d", "parameters": {}}
+          ],
+          "tool_choice": "auto",
+          "previous_response_id": "resp_b"
+        }
+      }
+    }
+  ],
+  "shown_thin": [
+    {
+      "0": {"type": "turn.prompt"},
+      "scene": "/s/1",
+      "messages_kept": 0,
+      "messages": [{"role": "system", "content": "The prompt."}]
+    },
+    {
+      "0": {"type": "turn.append"},
+      "scene": "/s/1",
+      "role": "user",
+      "content": [{"role": "user", "content": "1"}]
+    },
+    {
+      "0": {"type": "http.request"},
+      "url": "https://scripted.invalid/v1/responses",
+      "json": {
+        "model": "grok-4.7",
+        "input_kept": 2,
+        "input": [],
+        "tools": [
+          {"type": "function", "name": "browser_render", "description": "d", "parameters": {}}
+        ],
+        "tool_choice": "auto",
+        "prompt_cache_key": "/s/1",
+        "include": ["reasoning.encrypted_content"]
+      }
+    },
+    {
+      "0": {"type": "http.request"},
+      "status": 200,
+      "json": {
+        "id": "resp_a",
+        "model": "grok-4.7",
+        "status": "completed",
+        "output": [
+          {"type": "reasoning", "id": "rs_a", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+          {"type": "function_call", "id": "fc_a_1", "call_id": "call_1", "name": "browser_render", "arguments": "{}", "status": "completed"}
+        ],
+        "tools_kept": 1,
+        "tool_choice": "auto",
+        "previous_response_id": null
+      }
+    },
+    {
+      "0": {"type": "turn.append"},
+      "scene": "/s/1",
+      "role": "assistant",
+      "content_kept": 2,
+      "content": []
+    },
+    {
+      "0": {"type": "turn.append"},
+      "scene": "/s/1",
+      "role": "tool",
+      "content": [{"type": "function_call_output", "call_id": "call_1", "output": "{}"}]
+    },
+    {
+      "0": {"type": "http.request"},
+      "url": "https://scripted.invalid/v1/responses",
+      "json": {
+        "model": "grok-4.7",
+        "previous_response_id": "resp_a",
+        "input_kept": 1,
+        "input": [],
+        "tools_kept": 1,
+        "tool_choice": "auto",
+        "prompt_cache_key": "/s/1",
+        "include": ["reasoning.encrypted_content"]
+      }
+    },
+    {
+      "0": {"type": "http.request"},
+      "status": 200,
+      "json": {
+        "id": "resp_b",
+        "model": "grok-4.7",
+        "status": "completed",
+        "output": [
+          {"type": "reasoning", "id": "rs_b", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+          {"type": "message", "id": "msg_b", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Done.", "annotations": []}]}
+        ],
+        "tools_kept": 1,
+        "tool_choice": "auto",
+        "previous_response_id": "resp_a"
+      }
+    },
+    {
+      "0": {"type": "turn.append"},
+      "scene": "/s/1",
+      "role": "assistant",
+      "content_kept": 2,
+      "content": []
+    },
+    {
+      "0": {"type": "turn.append"},
+      "scene": "/s/1",
+      "role": "user",
+      "content": [{"role": "user", "content": "2"}]
+    },
+    {
+      "0": {"type": "http.request"},
+      "url": "https://scripted.invalid/v1/responses",
+      "json": {
+        "model": "grok-4.7",
+        "previous_response_id": "resp_b",
+        "input_kept": 1,
+        "input": [],
+        "tools_kept": 1,
+        "tool_choice": "auto",
+        "prompt_cache_key": "/s/1",
+        "include": ["reasoning.encrypted_content"]
+      }
+    },
+    {
+      "0": {"type": "http.request"},
+      "status": 200,
+      "json": {
+        "id": "resp_c",
+        "model": "grok-4.7",
+        "status": "completed",
+        "output": [
+          {"type": "reasoning", "id": "rs_c", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+          {"type": "message", "id": "msg_c", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Again.", "annotations": []}]}
+        ],
+        "tools_kept": 1,
+        "tool_choice": "auto",
+        "previous_response_id": "resp_b"
+      }
+    }
+  ],
+  "shown_again": [
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/s/1",
+        "role": "assistant",
+        "content": [
+          {"type": "reasoning", "id": "rs_c", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+          {"type": "message", "id": "msg_c", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Again.", "annotations": []}]}
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/s/1",
+        "role": "user",
+        "content": [{"role": "user", "content": "3"}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request"},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "model": "grok-4.7",
+          "input": [
+            {"role": "system", "content": "The prompt."},
+            {"role": "user", "content": "1"},
+            {"type": "reasoning", "id": "rs_a", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+            {"type": "function_call", "id": "fc_a_1", "call_id": "call_1", "name": "browser_render", "arguments": "{}", "status": "completed"},
+            {"type": "function_call_output", "call_id": "call_1", "output": "{}"},
+            {"type": "reasoning", "id": "rs_b", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+            {"type": "message", "id": "msg_b", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Done.", "annotations": []}]},
+            {"role": "user", "content": "2"},
+            {"type": "reasoning", "id": "rs_c", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+            {"type": "message", "id": "msg_c", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Again.", "annotations": []}]},
+            {"role": "user", "content": "3"}
+          ],
+          "tools": [
+            {"type": "function", "name": "browser_render", "description": "d", "parameters": {}}
+          ],
+          "tool_choice": "auto",
+          "prompt_cache_key": "/s/1",
+          "include": ["reasoning.encrypted_content"]
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request"},
+        "status": 200,
+        "json": {
+          "id": "resp_d",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
+            {"type": "reasoning", "id": "rs_d", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+            {"type": "message", "id": "msg_d", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Back.", "annotations": []}]}
+          ],
+          "tools": [
+            {"type": "function", "name": "browser_render", "description": "d", "parameters": {}}
+          ],
+          "tool_choice": "auto",
+          "previous_response_id": null
+        }
+      }
+    }
+  ],
+  "shown_again_thin": [
+    {
+      "0": {"type": "turn.append"},
+      "scene": "/s/1",
+      "role": "assistant",
+      "content_kept": 2,
+      "content": []
+    },
+    {
+      "0": {"type": "turn.append"},
+      "scene": "/s/1",
+      "role": "user",
+      "content": [{"role": "user", "content": "3"}]
+    },
+    {
+      "0": {"type": "http.request"},
+      "url": "https://scripted.invalid/v1/responses",
+      "json": {
+        "model": "grok-4.7",
+        "input_kept": 11,
+        "input": [],
+        "tools_kept": 1,
+        "tool_choice": "auto",
+        "prompt_cache_key": "/s/1",
+        "include": ["reasoning.encrypted_content"]
+      }
+    },
+    {
+      "0": {"type": "http.request"},
+      "status": 200,
+      "json": {
+        "id": "resp_d",
+        "model": "grok-4.7",
+        "status": "completed",
+        "output": [
+          {"type": "reasoning", "id": "rs_d", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+          {"type": "message", "id": "msg_d", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Back.", "annotations": []}]}
+        ],
+        "tools_kept": 1,
+        "tool_choice": "auto",
+        "previous_response_id": null
+      }
+    }
+  ],
+  "shown_changed": [
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.prompt"},
+        "scene": "/s/2",
+        "messages": [{"role": "system", "content": "The prompt."}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.prompt"},
+        "scene": "/s/3",
+        "messages": [{"role": "system", "content": "A new prompt."}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/s/3",
+        "role": "user",
+        "content": [{"role": "user", "content": "1"}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request"},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "model": "grok-4.7",
+          "input": [
+            {"role": "system", "content": "A new prompt."},
+            {"role": "user", "content": "1"}
+          ],
+          "tools": [
+            {"type": "function", "name": "browser_kv_get", "description": "d", "parameters": {}}
+          ],
+          "tool_choice": "auto",
+          "prompt_cache_key": "/s/3",
+          "include": ["reasoning.encrypted_content"]
+        }
+      }
+    }
+  ],
+  "shown_changed_thin": [
+    {
+      "0": {"type": "turn.prompt"},
+      "scene": "/s/2",
+      "messages_kept": 1,
+      "messages": []
+    },
+    {
+      "0": {"type": "turn.prompt"},
+      "scene": "/s/3",
+      "messages_kept": 0,
+      "messages": [{"role": "system", "content": "A new prompt."}]
+    },
+    {
+      "0": {"type": "turn.append"},
+      "scene": "/s/3",
+      "role": "user",
+      "content": [{"role": "user", "content": "1"}]
+    },
+    {
+      "0": {"type": "http.request"},
+      "url": "https://scripted.invalid/v1/responses",
+      "json": {
+        "model": "grok-4.7",
+        "input_kept": 2,
+        "input": [],
+        "tools": [
+          {"type": "function", "name": "browser_kv_get", "description": "d", "parameters": {}}
+        ],
+        "tool_choice": "auto",
+        "prompt_cache_key": "/s/3",
+        "include": ["reasoning.encrypted_content"]
+      }
+    }
+  ],
+  "shown_odd": [
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request"},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "model": "grok-4.7",
+          "previous_response_id": "resp_c",
+          "input": [{"role": "user", "content": "9"}],
+          "prompt_cache_key": "/s/1"
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request"},
+        "url": "https://scripted.invalid/v1/images/generations",
+        "json": {"model": "grok-imagine-image", "prompt": "a pattern"}
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request"},
+        "status": 200,
+        "json": {"data": [{"b64_json": "AAAA"}]}
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request"},
+        "status": 500,
+        "text": "broke"
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "tap.start", "reply": 101}
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request"},
+        "status": 200,
+        "json": {
+          "id": "resp_e",
+          "output": [
+            {"type": "reasoning", "id": "rs_e", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+            {"type": "function_call", "id": "fc_e_1", "call_id": "call_2", "name": "browser_render", "arguments": "{}", "status": "completed"}
+          ],
+          "tools": [],
+          "previous_response_id": "resp_c"
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/s/1",
+        "role": "assistant",
+        "content": [
+          {"type": "reasoning", "id": "rs_e", "summary": [], "encrypted_content": "scripted", "status": "completed"}
+        ]
+      }
+    }
+  ],
+  "shown_odd_thin": [
+    {
+      "0": {"type": "http.request"},
+      "url": "https://scripted.invalid/v1/responses",
+      "json": {
+        "model": "grok-4.7",
+        "previous_response_id": "resp_c",
+        "input_kept": 0,
+        "input": [{"role": "user", "content": "9"}],
+        "prompt_cache_key": "/s/1"
+      }
+    },
+    {
+      "0": {"type": "http.request"},
+      "url": "https://scripted.invalid/v1/images/generations",
+      "json": {"model": "grok-imagine-image", "prompt": "a pattern"}
+    },
+    {
+      "0": {"type": "http.request"},
+      "status": 200,
+      "json": {"data": [{"b64_json": "AAAA"}]}
+    },
+    {
+      "0": {"type": "http.request"},
+      "status": 500,
+      "text": "broke"
+    },
+    {
+      "0": {"type": "tap.start", "reply": 101}
+    },
+    {
+      "0": {"type": "http.request"},
+      "status": 200,
+      "json": {
+        "id": "resp_e",
+        "output": [
+          {"type": "reasoning", "id": "rs_e", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+          {"type": "function_call", "id": "fc_e_1", "call_id": "call_2", "name": "browser_render", "arguments": "{}", "status": "completed"}
+        ],
+        "tools": [],
+        "previous_response_id": "resp_c"
+      }
+    },
+    {
+      "0": {"type": "turn.append"},
+      "scene": "/s/1",
+      "role": "assistant",
+      "content_kept": 1,
+      "content": []
+    }
+  ],
+  "shown_scenes": [
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/s/1",
+        "role": "assistant",
+        "content": [
+          {"type": "reasoning", "id": "rs_c", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+          {"type": "message", "id": "msg_c", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Again.", "annotations": []}]}
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.prompt"},
+        "scene": "/s/2",
+        "messages": [{"role": "system", "content": "The prompt."}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/s/2",
+        "role": "user",
+        "content": [{"role": "user", "content": "3"}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request"},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "model": "grok-4.7",
+          "input": [
+            {"role": "system", "content": "The prompt."},
+            {"role": "user", "content": "3"}
+          ],
+          "tools": [
+            {"type": "function", "name": "browser_render", "description": "d", "parameters": {}}
+          ],
+          "tool_choice": "auto",
+          "prompt_cache_key": "/s/2",
+          "include": ["reasoning.encrypted_content"]
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request"},
+        "status": 200,
+        "json": {
+          "id": "resp_f",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
+            {"type": "reasoning", "id": "rs_f", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+            {"type": "message", "id": "msg_f", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "There.", "annotations": []}]}
+          ],
+          "tools": [
+            {"type": "function", "name": "browser_render", "description": "d", "parameters": {}}
+          ],
+          "tool_choice": "auto",
+          "previous_response_id": null
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/s/2",
+        "role": "assistant",
+        "content": [
+          {"type": "reasoning", "id": "rs_f", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+          {"type": "message", "id": "msg_f", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "There.", "annotations": []}]}
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/s/1",
+        "role": "user",
+        "content": [{"role": "user", "content": "4"}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request"},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "model": "grok-4.7",
+          "previous_response_id": "resp_c",
+          "input": [{"role": "user", "content": "4"}],
+          "tools": [
+            {"type": "function", "name": "browser_render", "description": "d", "parameters": {}}
+          ],
+          "tool_choice": "auto",
+          "prompt_cache_key": "/s/1",
+          "include": ["reasoning.encrypted_content"]
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request"},
+        "status": 200,
+        "json": {
+          "id": "resp_g",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
+            {"type": "reasoning", "id": "rs_g", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+            {"type": "message", "id": "msg_g", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Returned.", "annotations": []}]}
+          ],
+          "tools": [
+            {"type": "function", "name": "browser_render", "description": "d", "parameters": {}}
+          ],
+          "tool_choice": "auto",
+          "previous_response_id": "resp_c"
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/s/1",
+        "role": "assistant",
+        "content": [
+          {"type": "reasoning", "id": "rs_g", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+          {"type": "message", "id": "msg_g", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Returned.", "annotations": []}]}
+        ]
+      }
+    }
+  ],
+  "shown_scenes_thin": [
+    {
+      "0": {"type": "turn.append"},
+      "scene": "/s/1",
+      "role": "assistant",
+      "content_kept": 2,
+      "content": []
+    },
+    {
+      "0": {"type": "turn.prompt"},
+      "scene": "/s/2",
+      "messages_kept": 1,
+      "messages": []
+    },
+    {
+      "0": {"type": "turn.append"},
+      "scene": "/s/2",
+      "role": "user",
+      "content": [{"role": "user", "content": "3"}]
+    },
+    {
+      "0": {"type": "http.request"},
+      "url": "https://scripted.invalid/v1/responses",
+      "json": {
+        "model": "grok-4.7",
+        "input_kept": 2,
+        "input": [],
+        "tools_kept": 1,
+        "tool_choice": "auto",
+        "prompt_cache_key": "/s/2",
+        "include": ["reasoning.encrypted_content"]
+      }
+    },
+    {
+      "0": {"type": "http.request"},
+      "status": 200,
+      "json": {
+        "id": "resp_f",
+        "model": "grok-4.7",
+        "status": "completed",
+        "output": [
+          {"type": "reasoning", "id": "rs_f", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+          {"type": "message", "id": "msg_f", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "There.", "annotations": []}]}
+        ],
+        "tools_kept": 1,
+        "tool_choice": "auto",
+        "previous_response_id": null
+      }
+    },
+    {
+      "0": {"type": "turn.append"},
+      "scene": "/s/2",
+      "role": "assistant",
+      "content_kept": 2,
+      "content": []
+    },
+    {
+      "0": {"type": "turn.append"},
+      "scene": "/s/1",
+      "role": "user",
+      "content": [{"role": "user", "content": "4"}]
+    },
+    {
+      "0": {"type": "http.request"},
+      "url": "https://scripted.invalid/v1/responses",
+      "json": {
+        "model": "grok-4.7",
+        "previous_response_id": "resp_c",
+        "input_kept": 1,
+        "input": [],
+        "tools_kept": 1,
+        "tool_choice": "auto",
+        "prompt_cache_key": "/s/1",
+        "include": ["reasoning.encrypted_content"]
+      }
+    },
+    {
+      "0": {"type": "http.request"},
+      "status": 200,
+      "json": {
+        "id": "resp_g",
+        "model": "grok-4.7",
+        "status": "completed",
+        "output": [
+          {"type": "reasoning", "id": "rs_g", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+          {"type": "message", "id": "msg_g", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Returned.", "annotations": []}]}
+        ],
+        "tools_kept": 1,
+        "tool_choice": "auto",
+        "previous_response_id": "resp_c"
+      }
+    },
+    {
+      "0": {"type": "turn.append"},
+      "scene": "/s/1",
+      "role": "assistant",
+      "content_kept": 2,
+      "content": []
+    }
+  ],
+  "shown_return": [
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/s/1",
+        "role": "user",
+        "content": [{"role": "user", "content": "5"}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request"},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "model": "grok-4.7",
+          "input": [
+            {"role": "system", "content": "The prompt."},
+            {"role": "user", "content": "1"},
+            {"type": "reasoning", "id": "rs_a", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+            {"type": "function_call", "id": "fc_a_1", "call_id": "call_1", "name": "browser_render", "arguments": "{}", "status": "completed"},
+            {"type": "function_call_output", "call_id": "call_1", "output": "{}"},
+            {"type": "reasoning", "id": "rs_b", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+            {"type": "message", "id": "msg_b", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Done.", "annotations": []}]},
+            {"role": "user", "content": "2"},
+            {"type": "reasoning", "id": "rs_c", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+            {"type": "message", "id": "msg_c", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Again.", "annotations": []}]},
+            {"role": "user", "content": "4"},
+            {"type": "reasoning", "id": "rs_g", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+            {"type": "message", "id": "msg_g", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Returned.", "annotations": []}]},
+            {"role": "user", "content": "5"}
+          ],
+          "tools": [
+            {"type": "function", "name": "browser_render", "description": "d", "parameters": {}}
+          ],
+          "tool_choice": "auto",
+          "prompt_cache_key": "/s/1",
+          "include": ["reasoning.encrypted_content"]
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request"},
+        "status": 200,
+        "json": {
+          "id": "resp_h",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
+            {"type": "reasoning", "id": "rs_h", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+            {"type": "message", "id": "msg_h", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Here.", "annotations": []}]}
+          ],
+          "tools": [
+            {"type": "function", "name": "browser_render", "description": "d", "parameters": {}}
+          ],
+          "tool_choice": "auto",
+          "previous_response_id": null
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/s/1",
+        "role": "assistant",
+        "content": [
+          {"type": "reasoning", "id": "rs_h", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+          {"type": "message", "id": "msg_h", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Here.", "annotations": []}]}
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/s/2",
+        "role": "user",
+        "content": [{"role": "user", "content": "6"}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request"},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "model": "grok-4.7",
+          "input": [
+            {"role": "system", "content": "The prompt."},
+            {"role": "user", "content": "3"},
+            {"type": "reasoning", "id": "rs_f", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+            {"type": "message", "id": "msg_f", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "There.", "annotations": []}]},
+            {"role": "user", "content": "6"}
+          ],
+          "tools": [
+            {"type": "function", "name": "browser_render", "description": "d", "parameters": {}}
+          ],
+          "tool_choice": "auto",
+          "prompt_cache_key": "/s/2",
+          "include": ["reasoning.encrypted_content"]
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request"},
+        "status": 200,
+        "json": {
+          "id": "resp_i",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
+            {"type": "reasoning", "id": "rs_i", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+            {"type": "message", "id": "msg_i", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Over.", "annotations": []}]}
+          ],
+          "tools": [
+            {"type": "function", "name": "browser_render", "description": "d", "parameters": {}}
+          ],
+          "tool_choice": "auto",
+          "previous_response_id": null
+        }
+      }
+    }
+  ],
+  "shown_return_thin": [
+    {
+      "0": {"type": "turn.append"},
+      "scene": "/s/1",
+      "role": "user",
+      "content": [{"role": "user", "content": "5"}]
+    },
+    {
+      "0": {"type": "http.request"},
+      "url": "https://scripted.invalid/v1/responses",
+      "json": {
+        "model": "grok-4.7",
+        "input_kept": 14,
+        "input": [],
+        "tools_kept": 1,
+        "tool_choice": "auto",
+        "prompt_cache_key": "/s/1",
+        "include": ["reasoning.encrypted_content"]
+      }
+    },
+    {
+      "0": {"type": "http.request"},
+      "status": 200,
+      "json": {
+        "id": "resp_h",
+        "model": "grok-4.7",
+        "status": "completed",
+        "output": [
+          {"type": "reasoning", "id": "rs_h", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+          {"type": "message", "id": "msg_h", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Here.", "annotations": []}]}
+        ],
+        "tools_kept": 1,
+        "tool_choice": "auto",
+        "previous_response_id": null
+      }
+    },
+    {
+      "0": {"type": "turn.append"},
+      "scene": "/s/1",
+      "role": "assistant",
+      "content_kept": 2,
+      "content": []
+    },
+    {
+      "0": {"type": "turn.append"},
+      "scene": "/s/2",
+      "role": "user",
+      "content": [{"role": "user", "content": "6"}]
+    },
+    {
+      "0": {"type": "http.request"},
+      "url": "https://scripted.invalid/v1/responses",
+      "json": {
+        "model": "grok-4.7",
+        "input_kept": 5,
+        "input": [],
+        "tools_kept": 1,
+        "tool_choice": "auto",
+        "prompt_cache_key": "/s/2",
+        "include": ["reasoning.encrypted_content"]
+      }
+    },
+    {
+      "0": {"type": "http.request"},
+      "status": 200,
+      "json": {
+        "id": "resp_i",
+        "model": "grok-4.7",
+        "status": "completed",
+        "output": [
+          {"type": "reasoning", "id": "rs_i", "summary": [], "encrypted_content": "scripted", "status": "completed"},
+          {"type": "message", "id": "msg_i", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Over.", "annotations": []}]}
+        ],
+        "tools_kept": 1,
+        "tool_choice": "auto",
+        "previous_response_id": null
+      }
+    }
+  ],
+  "shown_digits": [
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.prompt"},
+        "scene": "/s/7",
+        "messages": [{"role": "system", "content": "The prompt.", "1": "x"}]
+      }
+    }
+  ],
+  "shown_digits_again": [
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.prompt"},
+        "scene": "/s/8",
+        "messages": [{"role": "system", "content": "The prompt.", "1": "x"}]
+      }
+    }
+  ],
+  "shown_digits_thin": {
+    "0": {"type": "turn.prompt"},
+    "scene": "/s/8",
+    "messages_kept": 1,
+    "messages": []
+  },
+  "shown_omitted": [
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {"type": "turn.append"},
+        "scene": "/s/1",
+        "role": "user",
+        "content": [{"role": "user", "content": "3"}]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {"type": "http.request"},
+        "url": "https://scripted.invalid/v1/responses",
+        "json": {
+          "model": "grok-4.7",
+          "previous_response_id": "resp_c",
+          "input": [{"role": "user", "content": "3"}],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "tool_choice": "auto",
+          "prompt_cache_key": "/s/1",
+          "include": ["reasoning.encrypted_content"]
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {"type": "http.request"},
+        "status": 200,
+        "json": {
+          "id": "resp_d",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
+            {
+              "type": "reasoning",
+              "id": "rs_d",
+              "summary": [],
+              "encrypted_content": "scripted",
+              "status": "completed"
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "tool_choice": "auto",
+          "previous_response_id": "resp_c"
+        }
+      }
+    }
+  ],
+  "shown_omitted_thin": [
+    {
+      "0": {"type": "turn.append"},
+      "scene": "/s/1",
+      "role": "user",
+      "content": [{"role": "user", "content": "3"}]
+    },
+    {
+      "0": {"type": "http.request"},
+      "url": "https://scripted.invalid/v1/responses",
+      "json": {
+        "model": "grok-4.7",
+        "previous_response_id": "resp_c",
+        "input_kept": 1,
+        "input": [],
+        "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+        "tool_choice": "auto",
+        "prompt_cache_key": "/s/1",
+        "include": ["reasoning.encrypted_content"]
+      }
+    },
+    {
+      "0": {"type": "http.request"},
+      "status": 200,
+      "json": {
+        "id": "resp_d",
+        "model": "grok-4.7",
+        "status": "completed",
+        "output": [
+          {
+            "type": "reasoning",
+            "id": "rs_d",
+            "summary": [],
+            "encrypted_content": "scripted",
+            "status": "completed"
+          }
+        ],
+        "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+        "tool_choice": "auto",
+        "previous_response_id": "resp_c"
+      }
+    }
+  ]
 }

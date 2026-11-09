@@ -10,7 +10,11 @@
 // case sends an `ask` line to a second real queue of thread `ui`, whose
 // handler of this file's own submits its `request` to the agent and replies to
 // the `ask` with the turn's reply as its `answer`. A third real queue of
-// thread `server` takes the store's pushes.
+// thread `server` takes the store's pushes. Each request after a scene's
+// first is chained by `previous_response_id`, which the scripted AI refuses
+// unless it holds that response and the input answers its due calls in order:
+// the castle turn's calls and the arrival scene's second turn are chained.
+// The answers pinned hold none of the scripted AI's ids.
 
 namespace test_integrate_agent {
   // The initialized sqlite3.wasm module, a global the test page sets.
@@ -52,6 +56,7 @@ namespace test_integrate_agent {
       "kv.delete",
       "doc.put",
       "turn.append",
+      "turn.prompt",
       "sql.run",
     ]),
     overflow_setting: "overflow_bytes",
@@ -62,11 +67,11 @@ namespace test_integrate_agent {
     client_name: "hyperposition-engine",
     version: "0",
     prefix: "browser",
-    // The provider's address and models of a scripted run, empty.
+    // A scripted run's request as xAI takes it, its address never resolving.
     info: Object.freeze<lines.ProviderInfo>({
-      base_url: "",
-      chat_model: "",
-      image_model: "",
+      base_url: "https://scripted.invalid/v1",
+      chat_model: "grok-4.7",
+      image_model: "grok-imagine-image",
     }),
     key: "xai-SYNTHETIC-KEY",
     // The hyperposition scene, on screen when the castle turn starts.
@@ -194,7 +199,7 @@ namespace test_integrate_agent {
     ) as provider_script.Script;
     tasks.port_add(
       constants.http_thread,
-      new provider_script.ScriptPort(script),
+      new provider_script.ScriptPort(script, switches.debug_on),
     );
     const ui = far_join(tasks, constants.ui_thread, [
       ...constants.ui_types,
@@ -246,6 +251,7 @@ namespace test_integrate_agent {
       constants.http_thread,
       constants.info,
       dispatch.handler_register,
+      switches.debug_on,
     );
     const channel = new MessageChannel();
     ui.port_add(constants.test_thread, new queue.ThreadPort(channel.port2));

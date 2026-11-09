@@ -150,7 +150,7 @@
         "timeout_seconds": 30
       },
       "permit": 1,
-      "tool": "browser.console_run"
+      "tool": "browser_console_run"
     },
     "ask_9_reply": {
       "0": {
@@ -352,7 +352,7 @@
       },
       "buttons": ["Accept", "Deny", "Always Allow"],
       "texts": [
-        "browser.console_run asks to run with {\"text\":\"echo hyperposition\",\"timeout_seconds\":30}."
+        "browser_console_run asks to run with {\"text\":\"echo hyperposition\",\"timeout_seconds\":30}."
       ]
     },
     "permit_11": {

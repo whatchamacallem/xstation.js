@@ -225,12 +225,9 @@
             "next": "after",
             "tool_calls": [
               {
-                "function": {
-                  "arguments": "{\"subtitle\":\"Shown by the tool.\"}",
-                  "name": "browser.render"
-                },
-                "id": "call_1",
-                "type": "function"
+                "arguments": "{\"subtitle\":\"Shown by the tool.\"}",
+                "call_id": "call_1",
+                "name": "browser_render"
               }
             ]
           }
@@ -267,27 +264,33 @@
     "sync_differs": "The reply to db.sync names the databases [\"_files\",\"metaverse\"], and the browser's store holds [\"metaverse\"]."
   },
   "tool_names": [
-    "browser.sql_run",
-    "browser.db_create",
-    "browser.db_drop",
-    "browser.kv_get",
-    "browser.kv_put",
-    "browser.kv_delete",
-    "browser.kv_list",
-    "browser.doc_get",
-    "browser.doc_put",
-    "browser.doc_head",
-    "browser.script_run",
-    "browser.script_debug",
-    "browser.image_make",
-    "browser.render",
-    "browser.console_run",
-    "browser.console_write",
-    "browser.console_read",
-    "server.source_put",
-    "server.system_restart"
+    "browser_sql_run",
+    "browser_db_create",
+    "browser_db_drop",
+    "browser_kv_get",
+    "browser_kv_put",
+    "browser_kv_delete",
+    "browser_kv_list",
+    "browser_doc_get",
+    "browser_doc_put",
+    "browser_doc_head",
+    "browser_script_run",
+    "browser_script_debug",
+    "browser_image_make",
+    "browser_render",
+    "browser_console_run",
+    "browser_console_write",
+    "browser_console_read",
+    "server_source_put",
+    "server_system_restart"
   ],
-  "turn_commits": ["turn.append", "turn.append", "turn.append", "turn.append"],
+  "turn_commits": [
+    "turn.prompt",
+    "turn.append",
+    "turn.append",
+    "turn.append",
+    "turn.append"
+  ],
   "universe_sql": "CREATE TABLE universe (name TEXT PRIMARY KEY, title TEXT NOT NULL, player TEXT NOT NULL, world TEXT NOT NULL) WITHOUT ROWID, STRICT",
   "world_keys": ["world"]
 }

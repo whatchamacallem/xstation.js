@@ -13,9 +13,42 @@
       "name": "next_answered",
       "seconds": 10,
       "send": ["next_ask"]
+    },
+    {
+      "expect": ["again_answer"],
+      "name": "again_chained",
+      "seconds": 10,
+      "send": ["again_ask"]
     }
   ],
   "lines": {
+    "again_answer": {
+      "0": {
+        "r": 3,
+        "t": "test_integrate_agent_ui.ask"
+      },
+      "answer": {
+        "0": {
+          "r": 3,
+          "t": "ai.say"
+        },
+        "scene": "/castle_gatehouse/scene/arrival/1",
+        "subtitle": "Still the moat.",
+        "turn": 4
+      }
+    },
+    "again_ask": {
+      "0": {
+        "i": 3,
+        "t": "test_integrate_agent_ui.ask"
+      },
+      "request": {
+        "0": {
+          "t": "ai.say"
+        },
+        "text": "0"
+      }
+    },
     "castle_answer": {
       "0": {
         "r": 1,
@@ -79,12 +112,9 @@
           "next": "imaged",
           "tool_calls": [
             {
-              "function": {
-                "arguments": "{\"prompt\":\"A rain dark castle gatehouse at dusk seen from the far side of a moat, one lantern lit, painted, wide still frame, no people\",\"key\":\"gatehouse/arrival.png\"}",
-                "name": "browser.image_make"
-              },
-              "id": "call_2",
-              "type": "function"
+              "arguments": "{\"prompt\":\"A rain dark castle gatehouse at dusk seen from the far side of a moat, one lantern lit, painted, wide still frame, no people\",\"key\":\"gatehouse/arrival.png\"}",
+              "call_id": "call_2",
+              "name": "browser_image_make"
             }
           ]
         },
@@ -112,12 +142,9 @@
             "next": "castle",
             "tool_calls": [
               {
-                "function": {
-                  "arguments": "{\"name\":\"bootstrap\",\"args\":{\"universe\":\"castle\",\"title\":\"The castle\",\"world\":\"castle_world\",\"region\":\"castle_gatehouse\"}}",
-                  "name": "browser.script_run"
-                },
-                "id": "call_1",
-                "type": "function"
+                "arguments": "{\"name\":\"bootstrap\",\"args\":{\"universe\":\"castle\",\"title\":\"The castle\",\"world\":\"castle_world\",\"region\":\"castle_gatehouse\"}}",
+                "call_id": "call_1",
+                "name": "browser_script_run"
               }
             ]
           }
@@ -129,28 +156,19 @@
           "next": "entered",
           "tool_calls": [
             {
-              "function": {
-                "arguments": "{\"db\":\"castle_gatehouse\",\"id\":\"scene/arrival\",\"body\":{\"0\":{\"t\":\"scene\"},\"1\":\"/_files/gatehouse/arrival.png\",\"subtitle\":\"Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.\",\"image\":{\"$ref\":1}}}",
-                "name": "browser.doc_put"
-              },
-              "id": "call_3",
-              "type": "function"
+              "arguments": "{\"db\":\"castle_gatehouse\",\"id\":\"scene/arrival\",\"body\":{\"0\":{\"t\":\"scene\"},\"1\":\"/_files/gatehouse/arrival.png\",\"subtitle\":\"Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.\",\"image\":{\"$ref\":1}}}",
+              "call_id": "call_3",
+              "name": "browser_doc_put"
             },
             {
-              "function": {
-                "arguments": "{\"ref\":\"/castle_world/scene\",\"text\":\"/castle_gatehouse/scene/arrival/1\"}",
-                "name": "browser.kv_put"
-              },
-              "id": "call_4",
-              "type": "function"
+              "arguments": "{\"ref\":\"/castle_world/scene\",\"text\":\"/castle_gatehouse/scene/arrival/1\"}",
+              "call_id": "call_4",
+              "name": "browser_kv_put"
             },
             {
-              "function": {
-                "arguments": "{\"image\":\"/_files/gatehouse/arrival.png\",\"subtitle\":\"Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.\"}",
-                "name": "browser.render"
-              },
-              "id": "call_5",
-              "type": "function"
+              "arguments": "{\"image\":\"/_files/gatehouse/arrival.png\",\"subtitle\":\"Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.\"}",
+              "call_id": "call_5",
+              "name": "browser_render"
             }
           ]
         },

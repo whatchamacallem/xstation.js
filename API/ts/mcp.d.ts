@@ -89,7 +89,7 @@ declare namespace mcp {
     readonly code_unknown: -32601;
     readonly code_params: -32602;
     readonly code_internal: -32603;
-    readonly prefix_mark: ".";
+    readonly prefix_mark: "_";
   };
 
   // A tool runs inside the `mcp` line's handler: its result or a sleep.
@@ -139,7 +139,7 @@ declare namespace mcp {
     result_of(reply: lines.Line): ToolResult;
   }
 
-  // Several servers as one flat tool list, each tool `prefix.name`.
+  // Several servers as one flat tool list, each tool `prefix_name`.
   class ClientSet {
     client_add(prefix: string, client: Client): void;
     tools_cached(): Tool[];

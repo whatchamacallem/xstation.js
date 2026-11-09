@@ -1095,8 +1095,11 @@ class TestTurns(unittest.TestCase):
     def test_turns_append(self) -> None:
         store = _store_make(self, _root_make(self))
         store.db_create("metaverse")
-        user = '{"role":"user","content":"1"}'
-        answer = _json_text({"role": "assistant", "content": _WIDE_TEXT})
+        user = '[{"role":"user","content":"1"}]'
+        said = {"type": "output_text", "text": _WIDE_TEXT}
+        answer = _json_text(
+            [{"type": "message", "role": "assistant", "content": [said]}]
+        )
         self.assertEqual(store.turn_append(_SCENE, "user", user), 1)
         self.assertEqual(store.turn_append(_SCENE, "assistant", answer), 2)
         self.assertEqual(
@@ -1129,6 +1132,32 @@ class TestTurns(unittest.TestCase):
             lambda: store.turn_append(_SCENE, "user", "not json"),
         )
         self.assertEqual([row.n for row in store.turn_list(_SCENE)], [1, 2])
+
+    # The prompt's rows come before turn 1, and the key refuses a second one.
+    def test_prompt_first(self) -> None:
+        store = _store_make(self, _root_make(self))
+        store.db_create("metaverse")
+        analyst = '[{"role":"system","content":"analyst"}]'
+        universe = '[{"role":"system","content":"universe"}]'
+        user = '[{"role":"user","content":"1"}]'
+        store.turn_prompt(_SCENE, [("system", analyst), ("system", universe)])
+        self.assertEqual(store.turn_append(_SCENE, "user", user), 1)
+        self.assertEqual(
+            store.turn_list(_SCENE),
+            [
+                substrate.TurnRow(_SCENE, -1, "system", analyst),
+                substrate.TurnRow(_SCENE, 0, "system", universe),
+                substrate.TurnRow(_SCENE, 1, "user", user),
+            ],
+        )
+        self.assertEqual(store.db_view("metaverse")["turns_hidden"], 1)
+        _error_check(
+            self,
+            sqlite3.IntegrityError,
+            "UNIQUE constraint failed: _turn.scene, _turn.n",
+            lambda: store.turn_prompt(_SCENE, [("system", analyst)]),
+        )
+        self.assertEqual(len(store.turn_list(_SCENE)), 3)
 
 
 # SQL: the results of statements, the changes they make, a trigger's refusal.

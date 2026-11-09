@@ -371,7 +371,7 @@
       },
       "buttons": ["Accept", "Deny", "Always Allow"],
       "texts": [
-        "browser.console_run asks to run with {\"text\":\"ls\",\"timeout_seconds\":5}."
+        "browser_console_run asks to run with {\"text\":\"ls\",\"timeout_seconds\":5}."
       ]
     },
     "permit_15": {
@@ -398,7 +398,7 @@
         "timeout_seconds": 5
       },
       "permit": 1,
-      "tool": "browser.console_run"
+      "tool": "browser_console_run"
     },
     "permit_4_reply": {
       "0": {

@@ -16,12 +16,9 @@
           "next": "after_render",
           "tool_calls": [
             {
-              "function": {
-                "arguments": "{\"subtitle\":\"A subtitle, as requested. Do try to contain yourself.\"}",
-                "name": "browser.render"
-              },
-              "id": "call_1",
-              "type": "function"
+              "arguments": "{\"subtitle\":\"A subtitle, as requested. Do try to contain yourself.\"}",
+              "call_id": "call_1",
+              "name": "browser_render"
             }
           ]
         },
@@ -30,20 +27,14 @@
           "next": "after_note",
           "tool_calls": [
             {
-              "function": {
-                "arguments": "{\"ref\":\"/metaverse/demo/note\",\"text\":\"Patient presses numbers. Prognosis: tedious.\"}",
-                "name": "browser.kv_put"
-              },
-              "id": "call_2",
-              "type": "function"
+              "arguments": "{\"ref\":\"/metaverse/demo/note\",\"text\":\"Patient presses numbers. Prognosis: tedious.\"}",
+              "call_id": "call_2",
+              "name": "browser_kv_put"
             },
             {
-              "function": {
-                "arguments": "{\"ref\":\"/metaverse/demo/note\"}",
-                "name": "browser.kv_get"
-              },
-              "id": "call_3",
-              "type": "function"
+              "arguments": "{\"ref\":\"/metaverse/demo/note\"}",
+              "call_id": "call_3",
+              "name": "browser_kv_get"
             }
           ]
         },
@@ -52,12 +43,9 @@
           "next": "after_console",
           "tool_calls": [
             {
-              "function": {
-                "arguments": "{\"text\":\"echo hyperposition\",\"timeout_seconds\":30}",
-                "name": "browser.console_run"
-              },
-              "id": "call_4",
-              "type": "function"
+              "arguments": "{\"text\":\"echo hyperposition\",\"timeout_seconds\":30}",
+              "call_id": "call_4",
+              "name": "browser_console_run"
             }
           ]
         }
@@ -78,12 +66,9 @@
           "next": "after_render",
           "tool_calls": [
             {
-              "function": {
-                "arguments": "{\"subtitle\":\"A subtitle, as requested. Do try to contain yourself.\"}",
-                "name": "browser.render"
-              },
-              "id": "call_1",
-              "type": "function"
+              "arguments": "{\"subtitle\":\"A subtitle, as requested. Do try to contain yourself.\"}",
+              "call_id": "call_1",
+              "name": "browser_render"
             }
           ]
         },
@@ -92,20 +77,14 @@
           "next": "after_note",
           "tool_calls": [
             {
-              "function": {
-                "arguments": "{\"ref\":\"/metaverse/demo/note\",\"text\":\"Patient presses numbers. Prognosis: tedious.\"}",
-                "name": "browser.kv_put"
-              },
-              "id": "call_2",
-              "type": "function"
+              "arguments": "{\"ref\":\"/metaverse/demo/note\",\"text\":\"Patient presses numbers. Prognosis: tedious.\"}",
+              "call_id": "call_2",
+              "name": "browser_kv_put"
             },
             {
-              "function": {
-                "arguments": "{\"ref\":\"/metaverse/demo/note\"}",
-                "name": "browser.kv_get"
-              },
-              "id": "call_3",
-              "type": "function"
+              "arguments": "{\"ref\":\"/metaverse/demo/note\"}",
+              "call_id": "call_3",
+              "name": "browser_kv_get"
             }
           ]
         },
@@ -114,12 +93,9 @@
           "next": "after_console",
           "tool_calls": [
             {
-              "function": {
-                "arguments": "{\"text\":\"echo hyperposition\",\"timeout_seconds\":30}",
-                "name": "browser.console_run"
-              },
-              "id": "call_4",
-              "type": "function"
+              "arguments": "{\"text\":\"echo hyperposition\",\"timeout_seconds\":30}",
+              "call_id": "call_4",
+              "name": "browser_console_run"
             }
           ]
         }
@@ -150,12 +126,9 @@
         "next": "after_output",
         "tool_calls": [
           {
-            "function": {
-              "arguments": "{\"subtitle\":\"hyperposition\"}",
-              "name": "browser.render"
-            },
-            "id": "call_5",
-            "type": "function"
+            "arguments": "{\"subtitle\":\"hyperposition\"}",
+            "call_id": "call_5",
+            "name": "browser_render"
           }
         ]
       },

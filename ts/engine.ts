@@ -34,11 +34,11 @@ namespace engine {
     version: "0",
     browser_prefix: "browser",
     server_prefix: "server",
-    // The provider's address and models of a scripted run, empty.
+    // A scripted run's request as xAI takes it, its address never resolving.
     info: Object.freeze<lines.ProviderInfo>({
-      base_url: "",
-      chat_model: "",
-      image_model: "",
+      base_url: "https://scripted.invalid/v1",
+      chat_model: "grok-4.7",
+      image_model: "grok-imagine-image",
     }),
     // The key the provider door needs, which the scripted port never reads.
     provider_key: "scripted",
@@ -162,6 +162,7 @@ namespace engine {
       constants.http_owner,
       constants.info,
       dispatch.handler_register,
+      switches.debug_on,
     );
     return { browser, server: remote, clients };
   }
@@ -176,7 +177,7 @@ namespace engine {
     const script = jslb.json_decode(text) as provider_script.Script;
     tasks.port_add(
       constants.http_owner,
-      new provider_script.ScriptPort(script),
+      new provider_script.ScriptPort(script, switches.debug_on),
     );
   }
 

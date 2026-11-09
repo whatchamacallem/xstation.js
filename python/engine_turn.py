@@ -2,10 +2,14 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# The handler of `turn.append`, the browser's commit, which the server
-# applies to its own store as a plain message and never answers. The server
-# keeps every turn: it never compacts, and no compaction crosses the wire.
-# The message is stored as canonical JSON.
+# The handlers of `turn.append` and `turn.prompt`, the browser's commits, which
+# the server applies to its own store as plain messages and never answers. The
+# server keeps every turn: it never compacts, and no compaction crosses the
+# wire. A turn's items are stored as compact JSON in the order they came, and
+# each message of a prompt as an array of one item. That text equals the row
+# the browser's store writes while no object in the items has an integer key,
+# as the browser writes integer keys first, at every level, and keeps the rest
+# in the order they came.
 
 import dispatch, jslb, json, substrate
 from internationalization import i18n
@@ -22,15 +26,15 @@ class _StoreState:
 _STATE = _StoreState()
 
 
-# Returns the store, raising before the handler is registered.
+# Returns the store, raising before the handlers are registered.
 def _store_get() -> substrate.Store:
     if _STATE.store is None:
         raise RuntimeError(i18n("engine_turn.not_registered"))
     return _STATE.store
 
 
-# The canonical JSON text of a message: no white space, raw `UTF-8` text.
-def _content_encode(content: dict[str, object]) -> str:
+# The compact JSON text of a turn's items in their order: raw `UTF-8` text.
+def _content_encode(content: list[dict[str, object]]) -> str:
     return json.dumps(content, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -40,12 +44,24 @@ def turn_append(
     *,
     scene: str,
     role: str,
-    content: dict[str, object],
+    content: list[dict[str, object]],
 ) -> None:
     _store_get().turn_append(scene, role, _content_encode(content))
 
 
-# Registers the handler on the store given.
+# `turn.prompt`: stores the conversation's system prompt before its turn 1.
+def turn_prompt(
+    line: jslb.Object,
+    *,
+    scene: str,
+    messages: list[dict[str, object]],
+) -> None:
+    rows = [(str(item["role"]), _content_encode([item])) for item in messages]
+    _store_get().turn_prompt(scene, rows)
+
+
+# Registers the handlers on the store given.
 def handlers_register(store: substrate.Store) -> None:
     _STATE.store = store
     dispatch.handler_register("turn.append", 0, turn_append)
+    dispatch.handler_register("turn.prompt", 0, turn_prompt)

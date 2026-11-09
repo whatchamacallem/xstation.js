@@ -4,9 +4,15 @@
 #
 # Tests the audit's reader on documents the real audit module writes in scratch
 # roots in `build/`, whose suite has passed: a run with no failure read back,
-# its digest and summary, each kind of unexpected failure found at its line,
-# and the form of a document refused. The program whole runs in a forked child
-# by `runpy`, so that the count reaches its last line. The texts are the gold's.
+# each line whole though the document wrote it thin, its digest and summary,
+# each lane's bytes fewer as written than as sent, two scenes in turn across a
+# reload with no failure, each kind of unexpected failure found at its line,
+# and the form of a document refused. The failures of a chain are a chained
+# call that resends the prompt or the history or names a response the record
+# lacks, a chain's first call holding the prompt twice, the lanes writing the
+# prompt twice, and an item of the model's output written twice. The program
+# whole runs in a forked child by `runpy`, so that the count reaches its last
+# line. The texts are the gold's.
 
 import audit, audit_read, harness, json, os, runpy, signal, sys, tempfile
 import traceback, unittest
@@ -32,6 +38,9 @@ _BLOB_MAX: int = harness.setting_get("blob_max")
 
 # The first entry's time, milliseconds since the epoch.
 _FIRST_AT = 1_700_000_000_000
+
+# The indent of a line's JSON text in the document.
+_JSON_INDENT = 2
 
 
 # A value of this module's gold.
@@ -112,18 +121,56 @@ class AuditCase(unittest.TestCase):
             audit_read.failure_check(entries)
         self.assertRegex(str(caught.exception), gold_value("failures")[name])
 
+    # Each lane's bytes as the gold's rows were sent and as the document holds.
+    def lanes_measured(
+        self, rows: list[dict[str, Any]]
+    ) -> list[tuple[str, int, int]]:
+        written = audit.entries_read(self.root)
+        measured: list[tuple[str, int, int]] = []
+        for lane in gold_value("summary_lanes"):
+            sent = sum(
+                len(
+                    json.dumps(
+                        row["line"], ensure_ascii=False, indent=_JSON_INDENT
+                    ).encode("utf-8")
+                )
+                for row in rows
+                if "line" in row
+                and f"{row['sender']} to {row['receiver']}" == lane
+            )
+            held = sum(
+                len(entry.body.encode("utf-8"))
+                for entry in written
+                if entry.label == lane
+            )
+            measured.append((lane, sent, held))
+        return measured
+
 
 # A document of a run that went as it should.
 class TestRead(AuditCase):
-    # The entries are in order, with their lines, starts, labels and types.
+    # The entries in order, with their lines, starts, labels, types and counts.
     def test_entries_read(self) -> None:
         entries = self.entries_of("run")
         rows: list[list[Any]] = gold_value("run_entries")
         found = [
-            [entry.number, entry.start, entry.label, audit_read.type_of(entry)]
+            [
+                entry.number,
+                entry.start,
+                entry.label,
+                audit_read.type_of(entry),
+                entry.kept,
+            ]
             for entry in entries
         ]
         self.assertEqual(found, rows)
+
+    # Each line is read whole, as it was sent, though the document is thin.
+    def test_lines_whole(self) -> None:
+        entries = self.entries_of("run")
+        rows: list[dict[str, Any]] = gold_value("run")
+        lines = [entry.line for entry in entries if entry.line is not None]
+        self.assertEqual(lines, [row["line"] for row in rows if "line" in row])
 
     # A blob's mark after the JSON leaves the JSON read.
     def test_blobs_read(self) -> None:
@@ -143,18 +190,41 @@ class TestRead(AuditCase):
             audit_read.summary_lines(entries), gold_value("empty_summary")
         )
 
-    # The summary counts what the run did.
+    # The summary counts what the run did, each lane's bytes measured here.
     def test_summary_lines(self) -> None:
         entries = self.entries_of("run")
+        fixed: list[str] = gold_value("run_summary")
+        at: int = gold_value("summary_bytes_at")
+        lanes = [
+            gold_value("summary_bytes").format(*measured)
+            for measured in self.lanes_measured(gold_value("run"))
+        ]
         self.assertEqual(
-            audit_read.summary_lines(entries), gold_value("run_summary")
+            audit_read.summary_lines(entries),
+            [*fixed[:at], *lanes, *fixed[at:]],
         )
+
+    # Each lane of the conversation writes fewer bytes than it sent.
+    def test_lanes_thinner(self) -> None:
+        self.entries_of("run")
+        for lane, sent, held in self.lanes_measured(gold_value("run")):
+            with self.subTest(lane=lane):
+                self.assertLess(held, sent)
 
     # The run has no failure, and every request its reply.
     def test_run_passed(self) -> None:
         entries = self.entries_of("run")
         audit_read.failure_check(entries)
         self.assertEqual(audit_read.requests_open(entries), [])
+
+    # Scenes in turn across a reload write the prompt once and no item twice.
+    def test_scenes_passed(self) -> None:
+        entries = self.entries_of("scenes")
+        rows: list[dict[str, Any]] = gold_value("scenes")
+        lines = [entry.line for entry in entries if entry.line is not None]
+        self.assertEqual(lines, [row["line"] for row in rows if "line" in row])
+        self.assertEqual(audit_read.prompt_recorded(entries), 1)
+        audit_read.failure_check(entries)
 
     # A dump of each side, the same text and differing, is told in the summary.
     def test_dumps_told(self) -> None:
@@ -180,17 +250,34 @@ class TestRead(AuditCase):
         for line, end in zip(lines[1:], ends, strict=True):
             self.assertTrue(line.endswith(end), line)
 
+    # A debug mode call's tool list is told as the text it sent in its place.
+    def test_tools_omitted(self) -> None:
+        entries = self.entries_of("omitted")
+        detail: str = gold_value("omitted_detail")
+        line = audit_read.digest_lines(entries)[1]
+        self.assertTrue(line.endswith(detail), line)
+        summary = audit_read.summary_lines(entries)
+        for told in gold_value("omitted_summary"):
+            self.assertIn(told, summary)
+        audit_read.failure_check(entries)
+
     # A dump's digest line tells its size alone.
     def test_dump_size(self) -> None:
         audit.dump_put("databases of the server", gold_value("views"))
         lines = audit_read.digest_lines(self.entries_of())
         self.assertRegex(lines[-1], r" \d+ bytes$")
 
-    # Each message of a chat request is in the copies of its system prompt.
+    # A chain's first call sends the prompt once, a chained call none.
     def test_prompt_copies(self) -> None:
         entries = self.entries_of("run")
-        self.assertEqual(audit_read.prompt_copies(entries), [1, 1])
-        self.assertEqual(audit_read.messages_of(entries[0]), [])
+        rows: list[dict[str, Any]] = gold_value("run")
+        self.assertEqual(
+            audit_read.prompt_copies(entries), gold_value("run_copies")
+        )
+        self.assertEqual(audit_read.input_of(entries[0]), [])
+        self.assertEqual(
+            audit_read.input_of(entries[7]), rows[7]["line"]["json"]["input"]
+        )
 
 
 # Each unexpected failure, found at its line.

@@ -88,15 +88,6 @@
       "subtitle": "Mind the moat. The gatehouse keeper has been expecting someone, though not necessarily you.",
       "turn": 10
     },
-    "reply_chat": {
-      "0": {
-        "t": "http.request"
-      },
-      "headers": {
-        "content-type": "application/json"
-      },
-      "status": 200
-    },
     "reply_click": {
       "0": {
         "r": 1,
@@ -115,6 +106,15 @@
       "subtitle": "Nothing happens.",
       "turn": 2
     },
+    "reply_model": {
+      "0": {
+        "t": "http.request"
+      },
+      "headers": {
+        "content-type": "application/json"
+      },
+      "status": 200
+    },
     "reply_next": {
       "0": {
         "r": 2,
@@ -124,7 +124,7 @@
       "subtitle": "Still the moat.",
       "turn": 2
     },
-    "request_chat": {
+    "request_model": {
       "0": {
         "type": "http.request"
       },
@@ -133,7 +133,7 @@
         "Content-Type": "application/json"
       },
       "method": "POST",
-      "url": "https://api.x.ai/v1/chat/completions"
+      "url": "https://api.x.ai/v1/responses"
     },
     "say_again": {
       "0": {
@@ -176,7 +176,8 @@
     "agent_prompt_invalid_analyst": "The document /metaverse/prompt/2 is not a prompt: it needs its text as a string in the member text.",
     "agent_prompt_invalid_universe": "The document /castle/prompt/1 is not a prompt: it needs its text as a string in the member text.",
     "substrate_id_missing": "The database metaverse has no document 'prompt'.",
-    "substrate_turns_compacted": "Turns 1 to 2 of this conversation were compacted when it held 2 turns. Their text is no longer in the conversation; the databases hold the state."
+    "substrate_turns_compacted": "Turns 1 to 2 of this conversation were compacted when it held 2 turns. Their text is no longer in the conversation; the databases hold the state.",
+    "substrate_turns_compacted_at": "Turns 1 to {0} of this conversation were compacted when it held {0} turns. Their text is no longer in the conversation; the databases hold the state."
   },
   "tools": [
     {

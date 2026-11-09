@@ -316,7 +316,7 @@
         "timeout_seconds": 5
       },
       "permit": 3,
-      "tool": "browser.console_run"
+      "tool": "browser_console_run"
     },
     "always_reply": {
       "0": {
@@ -376,7 +376,7 @@
         "timeout_seconds": 5
       },
       "permit": 2,
-      "tool": "browser.console_run"
+      "tool": "browser_console_run"
     },
     "counted_reply": {
       "0": {
@@ -712,7 +712,7 @@
         "until": "$ "
       },
       "permit": 5,
-      "tool": "browser.console_read"
+      "tool": "browser_console_read"
     },
     "prompted_wait_reply": {
       "0": {
@@ -761,7 +761,7 @@
         "text": "read answer && echo got $answer\n"
       },
       "permit": 4,
-      "tool": "browser.console_write"
+      "tool": "browser_console_write"
     },
     "prompted_write_reply": {
       "0": {
@@ -810,7 +810,7 @@
         "timeout_seconds": 5
       },
       "permit": 1,
-      "tool": "browser.console_run"
+      "tool": "browser_console_run"
     },
     "recorded_reply": {
       "0": {

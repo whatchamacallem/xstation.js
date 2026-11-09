@@ -68,10 +68,12 @@
       },
       {
         "payload": {
-          "content": {
-            "content": "a turn",
-            "role": "user"
-          },
+          "content": [
+            {
+              "content": "a turn",
+              "role": "user"
+            }
+          ],
           "role": "user",
           "scene": "/wire_commits/note/1"
         },

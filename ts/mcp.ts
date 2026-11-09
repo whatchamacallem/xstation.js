@@ -36,7 +36,7 @@ namespace mcp {
     code_unknown: -32601,
     code_params: -32602,
     code_internal: -32603,
-    prefix_mark: ".",
+    prefix_mark: "_",
   });
 
   // A `JSON-RPC` id, a number or text. A notification has none.
@@ -614,12 +614,12 @@ namespace mcp {
     }
   }
 
-  // The view of several servers as one list of tools named `prefix.name`.
+  // The view of several servers as one list of tools named `prefix_name`.
   export class ClientSet {
     private readonly clients = new Map<string, Client>();
     private readonly calls = new Map<number, Client>();
 
-    // Adds a client under a new prefix that is not empty and holds no dot.
+    // Adds a client under a new prefix that is not empty and holds no underscore.
     client_add(prefix: string, client: Client): void {
       if (
         prefix === "" ||

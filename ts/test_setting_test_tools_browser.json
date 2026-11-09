@@ -83,7 +83,7 @@
         "timeout_seconds": 5
       },
       "permit": 1,
-      "tool": "browser.console_run"
+      "tool": "browser_console_run"
     },
     "permit_ask_read": {
       "0": {
@@ -94,7 +94,7 @@
         "until": "$ "
       },
       "permit": 3,
-      "tool": "browser.console_read"
+      "tool": "browser_console_read"
     },
     "permit_ask_write": {
       "0": {
@@ -104,7 +104,7 @@
         "text": "echo hi"
       },
       "permit": 2,
-      "tool": "browser.console_write"
+      "tool": "browser_console_write"
     },
     "permit_deny": {
       "0": {
@@ -473,12 +473,12 @@
     "substrate_file_lost_image": "The value /_files/gatehouse/arrival.png names the cache file {1}, which this store does not hold.",
     "substrate_file_lost_value": "The value /alpha/big names the cache file {1}, which this store does not hold.",
     "substrate_key_missing_image": "The database _files has no key 'gatehouse/arrival.png'.",
-    "tools_browser_debug_off": "browser.console_run needs debug mode, and the parameter debug is false.",
-    "tools_browser_debug_off_read": "browser.console_read needs debug mode, and the parameter debug is false.",
-    "tools_browser_debug_off_write": "browser.console_write needs debug mode, and the parameter debug is false.",
-    "tools_browser_permit_denied": "The player denied the tool browser.console_run.",
-    "tools_browser_permit_denied_read": "The player denied the tool browser.console_read.",
-    "tools_browser_permit_denied_write": "The player denied the tool browser.console_write.",
+    "tools_browser_debug_off": "browser_console_run needs debug mode, and the parameter debug is false.",
+    "tools_browser_debug_off_read": "browser_console_read needs debug mode, and the parameter debug is false.",
+    "tools_browser_debug_off_write": "browser_console_write needs debug mode, and the parameter debug is false.",
+    "tools_browser_permit_denied": "The player denied the tool browser_console_run.",
+    "tools_browser_permit_denied_read": "The player denied the tool browser_console_read.",
+    "tools_browser_permit_denied_write": "The player denied the tool browser_console_write.",
     "utility_bytes_refused": "The bytes are not valid UTF-8."
   }
 }

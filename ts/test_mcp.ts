@@ -936,14 +936,14 @@ namespace test_mcp {
 
   // The set of clients: the prefixes it refuses and the replies it reads.
   export class TestClientSet extends unittest.TestCase {
-    // A prefix that is empty, dotted or already added is refused.
+    // A prefix that is empty, holds the mark or is already added is refused.
     test_prefix_refused(): void {
       const tasks = clients_make(server_make());
       const set = new mcp.ClientSet();
       set.client_add("server", client_make(tasks, constants.far_thread));
       const cases: [string, string][] = [
         ["", "mcp_prefix_refused_empty"],
-        ["browser.tools", "mcp_prefix_refused_dotted"],
+        ["browser_tools", "mcp_prefix_refused_marked"],
         ["server", "mcp_prefix_refused_taken"],
       ];
       for (const [prefix, text] of cases) {
@@ -954,14 +954,14 @@ namespace test_mcp {
       }
     }
 
-    // A name with no dot or with a prefix of no client is refused.
+    // A name with no mark or with a prefix of no client is refused.
     test_prefix_unknown(): void {
       const tasks = clients_make(server_make());
       const set = new mcp.ClientSet();
       set.client_add("server", client_make(tasks, constants.far_thread));
       const cases: [string, string][] = [
-        ["kv_get", "mcp_prefix_unknown_bare"],
-        ["browser.kv_get", "mcp_prefix_unknown_browser"],
+        ["render", "mcp_prefix_unknown_bare"],
+        ["browser_kv_get", "mcp_prefix_unknown_browser"],
       ];
       for (const [name, text] of cases) {
         const error = thrown_get(() => set.tool_call(name, {}));
