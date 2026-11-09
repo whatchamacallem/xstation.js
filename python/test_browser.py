@@ -318,7 +318,7 @@ _INPUT_KIND = "0"
 # The whole seconds wire.ts waits for its socket to send its buffered bytes.
 _DRAIN_SECONDS = 120
 
-# The rungs no run takes, each with why it does not run in under a second.
+# The rungs only `--test-disabled` takes, each with why it takes over a second.
 _DISABLED_RUNGS: dict[str, str] = {
     "stage 5: wire token timer": "waits out the 120 s token wait of wire.ts",
     "stage 5: wire open timer": "waits out the 120 s open wait of wire.ts",
@@ -333,7 +333,7 @@ _DISABLED_RUNGS: dict[str, str] = {
     " bootstrap.py",
 }
 
-# The roots no run makes, as every rung of each is disabled.
+# The roots only `--test-disabled` makes, as every rung of each is disabled.
 _DISABLED_ROOTS = frozenset(("echo", "stalled", "locked"))
 
 # The label of the audit's entry of a wire line the server read.
@@ -785,6 +785,7 @@ class RungLog:
         import category
 
         self.book = category.LabelBook(chosen)
+        self.disabled = category.disabled_runs(chosen)
         self.rung = "build"
         self.timer = RungTimer(self.rung, gold_value("rung_seconds"))
         self.started = time.monotonic()
@@ -836,7 +837,9 @@ class RungLog:
         check: Callable[[], str],
         seconds: float | None = None,
     ) -> None:
-        if rung in _DISABLED_RUNGS or not self.book.rung_enter(rung, label):
+        if rung in _DISABLED_RUNGS and not self.disabled:
+            return
+        if not self.book.rung_enter(rung, label):
             return
         timer = gold_value("rung_seconds") if seconds is None else seconds
         self.rung_start(rung, timer)
@@ -3170,7 +3173,9 @@ def session_run(
     body: Callable[[PageSession], None],
 ) -> None:
     log = context.log
-    if name in _DISABLED_ROOTS or not log.book.root_enter(name, label):
+    if name in _DISABLED_ROOTS and not log.disabled:
+        return
+    if not log.book.root_enter(name, label):
         return
     page_ready(context, page)
     made = root_make(context.work, name, page, changed)

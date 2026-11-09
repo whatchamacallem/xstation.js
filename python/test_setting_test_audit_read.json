@@ -1,0 +1,839 @@
+{
+  "run": [
+    {
+      "sender": "server",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "tap.start",
+          "id": 101
+        },
+        "settings": {}
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "tap.start",
+          "reply": 101
+        }
+      }
+    },
+    {
+      "sender": "dom",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "ui.input"
+        },
+        "text": "1"
+      }
+    },
+    {
+      "sender": "ui",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "ai.say",
+          "id": 5
+        },
+        "text": "1"
+      }
+    },
+    {
+      "note": "ui",
+      "text": "sleeps on 5 until ui.turn_end"
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "role": "user"
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "id": 6
+        },
+        "method": "POST",
+        "url": "/chat/completions",
+        "headers": {
+          "Authorization": "<masked>"
+        },
+        "json": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "The prompt."
+            },
+            {
+              "role": "user",
+              "content": "1"
+            }
+          ],
+          "tools": [
+            {
+              "function": {
+                "name": "browser.render"
+              }
+            },
+            {
+              "function": {
+                "name": "browser.kv_get"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "note": "ai",
+      "text": "sleeps on 6 until ai.model_reply"
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "reply": 6
+        },
+        "status": 200,
+        "json": {
+          "choices": [
+            {
+              "message": {
+                "content": null,
+                "tool_calls": [
+                  {
+                    "id": "call_1",
+                    "function": {
+                      "name": "browser.render",
+                      "arguments": "{}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "id": 7
+        },
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "tools/call",
+        "params": {
+          "name": "render",
+          "arguments": {
+            "subtitle": "s"
+          }
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "reply": 7
+        },
+        "jsonrpc": "2.0",
+        "id": 7,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp"
+        },
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized"
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "id": 8
+        },
+        "method": "POST",
+        "url": "/images/generations",
+        "headers": {
+          "Authorization": "<masked>"
+        },
+        "json": {
+          "prompt": "a pattern"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "reply": 8
+        },
+        "status": 200,
+        "json": {
+          "data": [
+            {
+              "b64_json": "AAAA"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "id": 9
+        },
+        "method": "POST",
+        "url": "/chat/completions",
+        "headers": {
+          "Authorization": "<masked>"
+        },
+        "json": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "The prompt."
+            },
+            {
+              "role": "user",
+              "content": "1"
+            },
+            {
+              "role": "tool",
+              "content": "{}"
+            }
+          ],
+          "tools": [
+            {
+              "function": {
+                "name": "browser.render"
+              }
+            },
+            {
+              "function": {
+                "name": "browser.kv_get"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "reply": 9
+        },
+        "status": 200,
+        "json": {
+          "choices": [
+            {
+              "message": {
+                "content": "Done."
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "console",
+      "line": {
+        "0": {
+          "type": "console.read",
+          "id": 10
+        },
+        "until": "$ "
+      }
+    },
+    {
+      "sender": "console",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "console.read",
+          "reply": 10
+        },
+        "text": "$ ",
+        "timed_out": false
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "console",
+      "line": {
+        "0": {
+          "type": "console.open",
+          "id": 11
+        }
+      }
+    },
+    {
+      "sender": "console",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "console.open",
+          "reply": 11
+        },
+        "token": "<masked>"
+      }
+    },
+    {
+      "note": "console",
+      "text": "`dash` exited with code 0."
+    },
+    {
+      "sender": "ai",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "ai.say",
+          "reply": 5
+        },
+        "turn": 2,
+        "subtitle": "Done."
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "console.output",
+          "blobs": 1
+        }
+      }
+    }
+  ],
+  "blobs": [
+    {
+      "sender": "ui",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "media.store",
+          "blobs": 2
+        },
+        "size": 3
+      }
+    }
+  ],
+  "error": [
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "error"
+        },
+        "message": "broke"
+      }
+    }
+  ],
+  "second_start": [
+    {
+      "start": "engine"
+    }
+  ],
+  "request": [
+    {
+      "sender": "ui",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "ai.say",
+          "id": 5
+        },
+        "text": "1"
+      }
+    }
+  ],
+  "reply": [
+    {
+      "sender": "ai",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "ai.say",
+          "reply": 5
+        },
+        "turn": 2
+      }
+    }
+  ],
+  "request_open": [
+    "line 3: ui to ai asked 5 in start 1 and has no reply"
+  ],
+  "empty_summary": [
+    "entries: 0 in 0.000 s, engine starts: 0",
+    "inputs: 0: []",
+    "model calls: 0, copies of the system prompt in each: []",
+    "tools called: 0 of 0 listed: {}",
+    "tools not called: []",
+    "commits to the server: {}",
+    "database dumps: none"
+  ],
+  "views": [
+    {
+      "db": "a",
+      "rows": [],
+      "documents": [],
+      "tables": [],
+      "schema": [],
+      "versions_hidden": 0,
+      "turns_hidden": 0,
+      "scenes_hidden": 0
+    }
+  ],
+  "failures": {
+    "error": "^line 3: a line of type error: ",
+    "fault": "^line 3: a line of type fault: ",
+    "own": "^line 3: the audit recorded its own line of type audit.line$",
+    "status": "^line 3: the provider's port answered with the status 500$",
+    "credential": "^line 3: a request's Authorization header is not masked$",
+    "rpc_error": "^line 3: an MCP request failed: ",
+    "tool_failed": "^line 3: a tool failed: ",
+    "timed_out": "^line 3: a read of the console timed out$",
+    "token": "^line 3: the token of a console.open reply is not masked$",
+    "exit_code": "^line 3: a program ended badly: ",
+    "stray": "^line 3: ai to ui answers 77, which was never asked$",
+    "unanswered": "^line 3: ui to ai asked 5 in start 1 and has no reply$",
+    "sleep": "^line 3: ai sleeps on 88 and that reply never came$",
+    "prompt_twice": "^a model call holds the system prompt other than once: \\[2\\]$"
+  },
+  "fault": [
+    {
+      "sender": "ui",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "fault"
+        },
+        "message": "broke"
+      }
+    }
+  ],
+  "own": [
+    {
+      "sender": "ui",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "audit.line"
+        }
+      }
+    }
+  ],
+  "status": [
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "http.request"
+        },
+        "status": 500
+      }
+    }
+  ],
+  "credential": [
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {
+          "type": "http.request"
+        },
+        "headers": {
+          "Authorization": "Bearer x"
+        }
+      }
+    }
+  ],
+  "rpc_error": [
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp"
+        },
+        "error": {
+          "code": -1
+        }
+      }
+    }
+  ],
+  "tool_failed": [
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp"
+        },
+        "result": {
+          "isError": true,
+          "content": []
+        }
+      }
+    }
+  ],
+  "timed_out": [
+    {
+      "sender": "console",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "console.read"
+        },
+        "timed_out": true
+      }
+    }
+  ],
+  "token": [
+    {
+      "sender": "console",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "console.open"
+        },
+        "token": "secret"
+      }
+    }
+  ],
+  "exit_code": [
+    {
+      "note": "console",
+      "text": "`dash` exited with code 1."
+    }
+  ],
+  "stray": [
+    {
+      "sender": "ai",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "ai.say",
+          "reply": 77
+        }
+      }
+    }
+  ],
+  "unanswered": [
+    {
+      "sender": "ui",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "ai.say",
+          "id": 5
+        },
+        "text": "1"
+      }
+    }
+  ],
+  "sleep": [
+    {
+      "note": "ai",
+      "text": "sleeps on 88 until ai.model_reply"
+    }
+  ],
+  "prompt_twice": [
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {
+          "type": "http.request"
+        },
+        "json": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "The prompt."
+            },
+            {
+              "role": "system",
+              "content": "The prompt."
+            },
+            {
+              "role": "user",
+              "content": "1"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "refused": [
+    [
+      "stray text\n",
+      "line 1: outside any entry: 'stray text'"
+    ],
+    [
+      "---- a heading of no form\n",
+      "line 1: no heading: '---- a heading of no form'"
+    ],
+    [
+      "==== no end\n",
+      "line 1: no heading: '==== no end'"
+    ],
+    [
+      "---- 01:02:03.004, ai to ui\nnot json\n",
+      "line 1: no JSON: 'not json'"
+    ],
+    [
+      "---- 01:02:03.004, ai to ui\n{} and more\n",
+      "line 1: the JSON is followed by ' and more'"
+    ]
+  ],
+  "run_entries": [
+    [
+      3,
+      1,
+      "server to ai",
+      "tap.start"
+    ],
+    [
+      12,
+      1,
+      "ai to server",
+      "tap.start"
+    ],
+    [
+      20,
+      1,
+      "dom to ui",
+      "ui.input"
+    ],
+    [
+      28,
+      1,
+      "ui to ai",
+      "ai.say"
+    ],
+    [
+      37,
+      1,
+      "note of ui",
+      ""
+    ],
+    [
+      40,
+      1,
+      "ai to server",
+      "turn.append"
+    ],
+    [
+      48,
+      1,
+      "ai to http",
+      "http.request"
+    ],
+    [
+      85,
+      1,
+      "note of ai",
+      ""
+    ],
+    [
+      88,
+      1,
+      "http to ai",
+      "http.request"
+    ],
+    [
+      115,
+      1,
+      "ai to ai",
+      "mcp"
+    ],
+    [
+      132,
+      1,
+      "ai to ai",
+      "mcp"
+    ],
+    [
+      150,
+      1,
+      "ai to ai",
+      "mcp"
+    ],
+    [
+      159,
+      1,
+      "ai to http",
+      "http.request"
+    ],
+    [
+      175,
+      1,
+      "http to ai",
+      "http.request"
+    ],
+    [
+      191,
+      1,
+      "ai to http",
+      "http.request"
+    ],
+    [
+      232,
+      1,
+      "http to ai",
+      "http.request"
+    ],
+    [
+      250,
+      1,
+      "ai to console",
+      "console.read"
+    ],
+    [
+      259,
+      1,
+      "console to ai",
+      "console.read"
+    ],
+    [
+      269,
+      1,
+      "ai to console",
+      "console.open"
+    ],
+    [
+      277,
+      1,
+      "console to ai",
+      "console.open"
+    ],
+    [
+      286,
+      1,
+      "note of console",
+      ""
+    ],
+    [
+      289,
+      1,
+      "ai to ui",
+      "ai.say"
+    ],
+    [
+      299,
+      1,
+      "ai to ui",
+      "console.output"
+    ]
+  ],
+  "run_digest": [
+    "==== engine start 1",
+    "L3      +  0.000     0 ms  server to ai   tap.start      i=101   {\"settings\": {}}",
+    "L12     +  0.001     1 ms  ai to server   tap.start      r=101   {}",
+    "L20     +  0.002     1 ms  dom to ui      ui.input               {\"text\": \"1\"}",
+    "L28     +  0.003     1 ms  ui to ai       ai.say         i=5     {\"text\": \"1\"}",
+    "L37     +  0.004     1 ms  note of ui                            sleeps on 5 until ui.turn_end",
+    "L40     +  0.005     1 ms  ai to server   turn.append            {\"role\": \"user\"}",
+    "L48     +  0.006     1 ms  ai to http     http.request   i=6     chat 2 messages, system=1 user=1, 2 tools, last user: 1",
+    "L85     +  0.007     1 ms  note of ai                            sleeps on 6 until ai.model_reply",
+    "L88     +  0.008     1 ms  http to ai     http.request   r=6     status 200, calls ['browser.render'], says ",
+    "L115    +  0.009     1 ms  ai to ai       mcp            i=7     call render {\"subtitle\": \"s\"}",
+    "L132    +  0.010     1 ms  ai to ai       mcp            r=7     result [\"{}\"]",
+    "L150    +  0.011     1 ms  ai to ai       mcp                    notifications/initialized",
+    "L159    +  0.012     1 ms  ai to http     http.request   i=8     image a pattern",
+    "L175    +  0.013     1 ms  http to ai     http.request   r=8     status 200, 1 images",
+    "L191    +  0.014     1 ms  ai to http     http.request   i=9     chat 3 messages, system=1 tool=1 user=1, 2 tools, last tool: {}",
+    "L232    +  0.015     1 ms  http to ai     http.request   r=9     status 200, calls [], says Done.",
+    "L250    +  0.016     1 ms  ai to console  console.read   i=10    {\"until\": \"$ \"}",
+    "L259    +  0.017     1 ms  console to ai  console.read   r=10    {\"text\": \"$ \", \"timed_out\": false}",
+    "L269    +  0.018     1 ms  ai to console  console.open   i=11    {}",
+    "L277    +  0.019     1 ms  console to ai  console.open   r=11    {\"token\": \"<masked>\"}",
+    "L286    +  0.020     1 ms  note of console                        `dash` exited with code 0.",
+    "L289    +  0.021     1 ms  ai to ui       ai.say         r=5     {\"turn\": 2, \"subtitle\": \"Done.\"}",
+    "L299    +  0.022     1 ms  ai to ui       console.output         {} + 1 blobs"
+  ],
+  "run_summary": [
+    "entries: 23 in 0.022 s, engine starts: 1",
+    "inputs: 1: ['1']",
+    "model calls: 2, copies of the system prompt in each: [1]",
+    "tools called: 1 of 2 listed: {'browser.render': 1}",
+    "tools not called: ['browser.kv_get']",
+    "commits to the server: {'turn.append': 1}",
+    "database dumps: none"
+  ],
+  "details": [
+    {
+      "sender": "ui",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "ai.say"
+        },
+        "text": "a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text "
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "reply": 1
+        },
+        "result": {
+          "protocolVersion": "2025-06-18"
+        }
+      }
+    }
+  ],
+  "details_ends": [
+    "{\"text\": \"a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long t...",
+    "{\"result\": {\"protocolVersion\": \"2025-06-18\"}}"
+  ]
+}

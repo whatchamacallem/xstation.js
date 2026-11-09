@@ -2,20 +2,24 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# The two categories of test suite that the runners share: smoke-test, the
-# important suites that fit in 3 minutes in all, and test-all, the others.
-# It holds the one option --test-all that chooses the category of a run,
-# smoke-test without it, and the words of a category's option for a command
-# line, none for smoke-test; whether a suite of a label runs in a run of a
-# category, a smoke-test suite in both and a test-all suite in a test-all run
-# only; the seconds a run may take, the driver's gold
-# python.test_all.smoke_seconds for a smoke-test run; the alarm of a suite, its
-# own seconds or the run's deadline, whichever comes first; and LabelBook,
-# which checks as a runner reaches them that a root labelled smoke-test holds a
-# rung labelled smoke-test and that a root labelled test-all holds none. A
-# label or category other than the two strings raises.
+# The two labels of a suite or rung that the runners share: smoke-test, the
+# important ones that fit in 3 minutes in all, and test-all, the others. A run
+# has one of three categories: smoke-test takes the label smoke-test, test-all
+# takes both labels, and test-disabled takes both labels and what is disabled.
+# It holds the two options --test-all and --test-disabled, each of which raises
+# the category of a run and neither of which lowers it, so that no two levels
+# can contradict; the words of a category's option for a command line, none for
+# smoke-test; whether a suite of a label runs in a run of a category; whether a
+# run of a category takes what is disabled, and the one setting of that for a
+# disabled test, read as its module is imported; the seconds a run may take,
+# the driver's gold python.test_all.smoke_seconds for a smoke-test run; the
+# alarm of a suite, its own seconds or the run's deadline, whichever comes
+# first; and LabelBook, which checks as a runner reaches them that a root
+# labelled smoke-test holds a rung labelled smoke-test and that a root labelled
+# test-all holds none. A label or category other than these strings raises.
 
 import argparse, harness
+from typing import cast
 
 # The label of the important suites that fit in 3 minutes, and its category.
 _SMOKE_TEST = "smoke-test"
@@ -23,22 +27,58 @@ _SMOKE_TEST = "smoke-test"
 # The label of every other suite, and the category that runs both labels.
 _TEST_ALL = "test-all"
 
-# The two labels, which are also the two categories.
+# The category that runs both labels and what is disabled.
+_TEST_DISABLED = "test-disabled"
+
+# The two labels, which are also two of the categories.
 _LABELS = (_SMOKE_TEST, _TEST_ALL)
+
+# The categories, lowest first, each running what the one before it runs.
+_CATEGORIES = (_SMOKE_TEST, _TEST_ALL, _TEST_DISABLED)
 
 # The driver's gold of the seconds a `smoke-test` run may take in all.
 _SMOKE_ID = "python.test_all.smoke_seconds"
 
 
-# Adds `--test-all` as `category`, `smoke-test` without it.
+# Whether this run takes its disabled tests, none until `disabled_set`.
+_disabled_taken = False
+
+
+# An option of a category, which raises the run's category and never lowers it.
+class _CategoryRaise(argparse.Action):
+    # Keeps the higher of the category held and the category of this option.
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: str | None = None,
+    ) -> None:
+        held: str = namespace.category
+        wanted = cast(str, self.const)
+        if _CATEGORIES.index(wanted) > _CATEGORIES.index(held):
+            namespace.category = wanted
+
+
+# Adds `--test-all` and `--test-disabled` as `category`, else `smoke-test`.
 def options_add(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         f"--{_TEST_ALL}",
-        action="store_const",
+        action=_CategoryRaise,
+        nargs=0,
         const=_TEST_ALL,
         default=_SMOKE_TEST,
         dest="category",
-        help="run the suites of both labels, not the smoke-test suites alone",
+        help="run what both labels hold, not the smoke-test label alone",
+    )
+    parser.add_argument(
+        f"--{_TEST_DISABLED}",
+        action=_CategoryRaise,
+        nargs=0,
+        const=_TEST_DISABLED,
+        default=_SMOKE_TEST,
+        dest="category",
+        help="run what both labels hold and everything disabled too",
     )
 
 
@@ -47,7 +87,24 @@ def option_words(category: str) -> list[str]:
     _category_check(category)
     if category == _SMOKE_TEST:
         return []
-    return [f"--{_TEST_ALL}"]
+    return [f"--{category}"]
+
+
+# Whether a run of the category takes what is disabled.
+def disabled_runs(category: str) -> bool:
+    _category_check(category)
+    return category == _TEST_DISABLED
+
+
+# Sets from the run's category whether its disabled tests run.
+def disabled_set(category: str) -> None:
+    global _disabled_taken
+    _disabled_taken = disabled_runs(category)
+
+
+# Whether this run takes its disabled tests, read as their module is imported.
+def disabled_taken() -> bool:
+    return _disabled_taken
 
 
 # Whether a label's suite runs in a category's run. Other strings raise.
@@ -57,7 +114,7 @@ def suite_runs(label: str, category: str) -> bool:
             f"the label {label!r} is neither {_SMOKE_TEST} nor {_TEST_ALL}"
         )
     _category_check(category)
-    return label == _SMOKE_TEST or category == _TEST_ALL
+    return label == _SMOKE_TEST or category != _SMOKE_TEST
 
 
 # A run's seconds: the driver's `smoke_seconds` for `smoke-test`, else None.
@@ -136,10 +193,10 @@ class LabelBook:
         self._label = None
 
 
-# Raises unless the category is one of the two.
+# Raises unless the category is one of the three.
 def _category_check(category: str) -> None:
-    if category not in _LABELS:
+    if category not in _CATEGORIES:
         raise ValueError(
-            f"the category {category!r} is neither {_SMOKE_TEST} nor"
-            f" {_TEST_ALL}"
+            f"the category {category!r} is none of {_SMOKE_TEST}, {_TEST_ALL}"
+            f" and {_TEST_DISABLED}"
         )

@@ -15,8 +15,8 @@
 # and the run, unanswered. Each child writes how its run ended to a file, then
 # kills itself. The lines and texts are the gold's.
 
-import audit, bootstrap, errno, functools, harness, json, os, pty, signal
-import subprocess, switches, sys, tempfile, traceback, unittest
+import audit, bootstrap, category, errno, functools, harness, json, os, pty
+import signal, subprocess, switches, sys, tempfile, traceback, unittest
 from typing import Any, NamedTuple
 
 # The checkout's top directory, above this file's `python/`.
@@ -292,7 +292,10 @@ class TestStock(unittest.TestCase):
 # The driver's children end by the hangup, however the driver was started.
 class TestDriverHangup(unittest.TestCase):
     # A driver started with the hangup ignored still passes the suite.
-    @unittest.skip("disabled: runs all of test_bootstrap again, 0.8 s")
+    @unittest.skipUnless(
+        category.disabled_taken(),
+        "disabled: runs all of test_bootstrap again, 0.8 s",
+    )
     def test_hangup_restored(self) -> None:
         completed = subprocess.run(
             [

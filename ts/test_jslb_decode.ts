@@ -8,10 +8,8 @@
 // in memory, its limits, its number rules, its deferred fault and every hard
 // error, each refusal compared with its message, blobs over overflow_bytes
 // streamed into the cache and hashed by it, a cache with no free file, a
-// file closed under a streamed blob, the encode tests that decode first, and
-// the vectors of build/vectors, which the test page carries as test_vectors,
-// each read with the limits its sidecar names, whole, by single bytes and
-// split at every offset, a streamed blob's digest the one its sidecar holds.
+// file closed under a streamed blob and the encode tests that decode first.
+// The vectors are test_jslb_decode_vectors', on the helpers exported here.
 // A cache is made for each decoder over the same two files, as a finished
 // blob keeps its file for the life of its cache, and the close test closes
 // a third, so the bring up gives at least three. The decoders built here take
@@ -51,14 +49,14 @@ namespace test_jslb_decode {
   });
 
   // The limits a vector's decoder is built with, as its sidecar holds them.
-  interface VectorLimits {
+  export interface VectorLimits {
     line_max: number;
     blob_max: number;
     overflow_bytes: number;
   }
 
   // A sidecar: its limits, messages, JSON forms, renders, fault or canonical.
-  interface VectorSidecar {
+  export interface VectorSidecar {
     limits: VectorLimits;
     messages: unknown[];
     json: string[];
@@ -71,7 +69,7 @@ namespace test_jslb_decode {
   type FaultExpected = readonly [string, string];
 
   // The expected fault of each error vector, by name.
-  type FaultTable = { readonly [name: string]: FaultExpected };
+  export type FaultTable = { readonly [name: string]: FaultExpected };
 
   // An entry of the digest vector: an input and the `SHA-256` of it.
   interface DigestEntry {
@@ -123,7 +121,7 @@ namespace test_jslb_decode {
   }
 
   // The bytes of the pieces one after another.
-  function bytes_join(pieces: readonly Uint8Array[]): Uint8Array {
+  export function bytes_join(pieces: readonly Uint8Array[]): Uint8Array {
     let length = 0;
     for (const piece of pieces) {
       length += piece.length;
@@ -138,7 +136,7 @@ namespace test_jslb_decode {
   }
 
   // Whether two byte arrays hold the same bytes.
-  function bytes_equal(first: Uint8Array, second: Uint8Array): boolean {
+  export function bytes_equal(first: Uint8Array, second: Uint8Array): boolean {
     return (
       first.length === second.length &&
       first.every((byte, index) => byte === second[index])
@@ -210,7 +208,7 @@ namespace test_jslb_decode {
   }
 
   // A new cache over the files of the caches, whose blobs a later one reuses.
-  function cache_make(): substrate.CacheFiles {
+  export function cache_make(): substrate.CacheFiles {
     return new substrate.CacheFiles(files_get(0, constants.cache_slots));
   }
 
@@ -226,7 +224,7 @@ namespace test_jslb_decode {
   }
 
   // A new decoder with a sidecar's limits, streaming into the cache.
-  function sidecar_decoder(
+  export function sidecar_decoder(
     sidecar: VectorSidecar,
     cache: substrate.CacheFiles,
   ): jslb.LineDecoder {
@@ -240,7 +238,7 @@ namespace test_jslb_decode {
   }
 
   // Feeds the pieces to the decoder and returns every line they finish.
-  function pieces_decode(
+  export function pieces_decode(
     decoder: jslb.LineDecoder,
     pieces: readonly Uint8Array[],
   ): jslb.Line[] {
@@ -252,7 +250,7 @@ namespace test_jslb_decode {
   }
 
   // The ways to feed bytes: whole, by single bytes, split at each offset.
-  function feeds_make(data: Uint8Array): Uint8Array[][] {
+  export function feeds_make(data: Uint8Array): Uint8Array[][] {
     const feeds: Uint8Array[][] = [[data]];
     feeds.push(
       Array.from(data, (_byte, index) => data.subarray(index, index + 1)),
@@ -318,7 +316,7 @@ namespace test_jslb_decode {
   }
 
   // The bytes a decoded line encodes to, each streamed blob read back.
-  function line_bytes(
+  export function line_bytes(
     line: jslb.Line,
     cache: substrate.CacheFiles,
   ): Uint8Array {
@@ -346,7 +344,7 @@ namespace test_jslb_decode {
   }
 
   // A decoded line as a sidecar holds it, each blob's `d` in hex.
-  function line_plain(
+  export function line_plain(
     line: jslb.Line,
     cache: substrate.CacheFiles,
   ): { [key: string]: unknown } {
@@ -366,7 +364,7 @@ namespace test_jslb_decode {
   }
 
   // The bytes of a file the test page carries in `test_vectors`.
-  function file_bytes(name: string): Uint8Array {
+  export function file_bytes(name: string): Uint8Array {
     if (!Object.hasOwn(test_vectors, name)) {
       throw new Error(`test_vectors has no file ${name}`);
     }
@@ -376,7 +374,7 @@ namespace test_jslb_decode {
   }
 
   // The sidecar of a vector.
-  function sidecar_read(name: string): VectorSidecar {
+  export function sidecar_read(name: string): VectorSidecar {
     const file = file_bytes(name + constants.sidecar_suffix);
     return JSON.parse(text_decode(file)) as VectorSidecar;
   }
@@ -397,7 +395,7 @@ namespace test_jslb_decode {
   }
 
   // The sorted names of the vectors whose sidecar holds a fault, or not.
-  function vector_names(error: boolean): string[] {
+  export function vector_names(error: boolean): string[] {
     const suffix = constants.vector_suffix;
     return Object.keys(test_vectors)
       .filter((file) => file.endsWith(suffix))
@@ -407,7 +405,7 @@ namespace test_jslb_decode {
   }
 
   // Each error vector's slug and its message under the limits, by name.
-  function errors_expected(limits: VectorLimits): FaultTable {
+  export function errors_expected(limits: VectorLimits): FaultTable {
     const { line_max, blob_max } = limits;
     const over: FaultExpected = [
       "blobs_over",
@@ -515,7 +513,7 @@ namespace test_jslb_decode {
   }
 
   // A test case with the asserts of a refusal and its message.
-  class RefusalCase extends unittest.TestCase {
+  export class RefusalCase extends unittest.TestCase {
     // Asserts the call throws exactly the class with exactly the message.
     raised_assert(
       kind: new (...args: never[]) => Error,
@@ -1167,82 +1165,6 @@ namespace test_jslb_decode {
         ["sha256", sent],
         ["d", bytes_of("x")],
       ]);
-    }
-  }
-
-  // Reads each vector of `test_vectors`, whole, by bytes and split.
-  export class TestVectors extends RefusalCase {
-    // Skips both tests, which decode each vector once per split position.
-    setUp(): void {
-      this.skipTest("disabled: decodes each vector at every split, 7.1 s");
-    }
-
-    // Each success vector, and the bytes it encodes to, decode to its sidecar.
-    test_vectors_success(): void {
-      const names = vector_names(false);
-      this.assertTrue(names.length > 0, "no success vectors in test_vectors");
-      for (const name of names) {
-        const data = file_bytes(name + constants.vector_suffix);
-        const sidecar = sidecar_read(name);
-        const messages = JSON.stringify(sidecar.messages);
-        const cache = cache_make();
-        const decoded = pieces_decode(sidecar_decoder(sidecar, cache), [data]);
-        const encoded = bytes_join(
-          decoded.map((line) => line_bytes(line, cache)),
-        );
-        const same = bytes_equal(encoded, data);
-        this.assertEqual(same, sidecar.canonical, name);
-        for (const source of same ? [data] : [data, encoded]) {
-          for (const pieces of feeds_make(source)) {
-            const feed_cache = cache_make();
-            const decoder = sidecar_decoder(sidecar, feed_cache);
-            const found = pieces_decode(decoder, pieces);
-            const plain = found.map((line) => line_plain(line, feed_cache));
-            this.assertEqual(JSON.stringify(plain), messages, name);
-            const renders = found.map((line) => jslb.line_render(line));
-            this.assertEqual(renders, sidecar.render, name);
-            const forms = found.map((line) => jslb.line_json(line));
-            this.assertEqual(forms, sidecar.json, name);
-          }
-        }
-      }
-    }
-
-    // Each error vector gives its lines, then its fault, however it is fed.
-    test_vectors_error(): void {
-      const names = vector_names(true);
-      this.assertTrue(names.length > 0, "no error vectors in test_vectors");
-      for (const name of names) {
-        const data = file_bytes(name + constants.vector_suffix);
-        const sidecar = sidecar_read(name);
-        const expected = errors_expected(sidecar.limits);
-        this.assertEqual(Object.keys(expected).sort(), names);
-        const [slug, message] = expected[name];
-        this.assertEqual(sidecar.error, slug, name);
-        const messages = JSON.stringify(sidecar.messages);
-        for (const pieces of feeds_make(data)) {
-          const cache = cache_make();
-          const decoder = sidecar_decoder(sidecar, cache);
-          const found: jslb.Line[] = [];
-          this.raised_assert(
-            jslb.WireError,
-            message,
-            () => {
-              for (const piece of pieces) {
-                found.push(...decoder.bytes_feed(piece));
-              }
-              decoder.bytes_feed(new Uint8Array(0));
-            },
-            name,
-          );
-          const plain = found.map((line) => line_plain(line, cache));
-          this.assertEqual(JSON.stringify(plain), messages, name);
-          const renders = found.map((line) => jslb.line_render(line));
-          this.assertEqual(renders, sidecar.render, name);
-          const forms = found.map((line) => jslb.line_json(line));
-          this.assertEqual(forms, sidecar.json, name);
-        }
-      }
     }
   }
 }

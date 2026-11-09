@@ -7,7 +7,7 @@
 # of difference, written into a copy of it, raises and names its member. The
 # real checkout is matched by `test_posix.py`.
 
-import api_match, json, os, tempfile, unittest
+import api_match, category, json, os, tempfile, unittest
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -269,7 +269,10 @@ class ScratchCase(unittest.TestCase):
 
 
 # A whole checkout.
-@unittest.skip("disabled: two real compiler runs each, 1.6 s to 1.9 s")
+@unittest.skipUnless(
+    category.disabled_taken(),
+    "disabled: two real compiler runs each, 1.6 s to 1.9 s",
+)
 class TestCheckout(ScratchCase):
     # A checkout whose text and code agree passes, its old intermediates gone.
     def test_checkout_passed(self) -> None:

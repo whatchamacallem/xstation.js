@@ -27,6 +27,9 @@ _HOST: str = _SCRIPT["host"]
 _PORT: int = _SCRIPT["port"]
 _CLOSED_PORT: int = _SCRIPT["closed_port"]
 
+# A path of the script that answers at once.
+_FAST_PATH = "/json"
+
 # The build directory of the checkout, where the scratch directories go.
 _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"

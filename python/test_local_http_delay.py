@@ -11,7 +11,7 @@
 import harness, http.client, select, socket, test_local_http, time
 from typing import Any, cast
 
-# The script the server of test_local_http answers, from that suite's gold.
+# The script the server of `test_local_http` answers, from that suite's gold.
 _SCRIPT: dict[str, Any] = harness.gold_get("python.test_local_http.server")
 
 # The host and the port of the script.

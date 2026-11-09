@@ -37,7 +37,7 @@ _HTML_PATH = os.path.join(_ROOT_PATH, "html")
 # The stamp of the API text's check, repeated as a test imports no constant.
 _API_STAMP = os.path.join(_BUILD_PATH, "api_check.passed")
 
-# The folders of a checkout that each compile reads, as page_build has them.
+# The folders of a checkout that each compile reads, as `page_build` has them.
 _SOURCE_FOLDERS = ("ts", os.path.join("API", "ts"))
 
 # The name of a source made in each folder of a scratch checkout.

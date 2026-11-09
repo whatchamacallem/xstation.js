@@ -16,11 +16,11 @@
 # test_all.py leaves the suites that start formatters out of a test-all run,
 # and --module refuses them, while without it the run takes them. Every suite
 # of a test-all run counts under --coverage for modules that exist, the
-# store's limit suite for the store. A disabled suite runs only when named by
-# --module, unchecked otherwise. --end-to-end refuses the stream's options.
+# store's limit suite for the store. A disabled suite runs when --module names
+# it or at the disabled level, and each level's option only raises a run.
 
-import argparse, functools, os, signal, switches, sys, tempfile, test_all
-import test_posix, traceback, unittest
+import argparse, contextlib, functools, io, os, signal, switches, sys, tempfile
+import test_all, test_posix, traceback, unittest
 from collections.abc import Callable
 
 # The checkout's top directory, above this file's `python/`.
@@ -34,6 +34,9 @@ _SMOKE_TEST = "smoke-test"
 
 # The category that does the reformatting.
 _TEST_ALL = "test-all"
+
+# The category that also takes what is disabled.
+_TEST_DISABLED = "test-disabled"
 
 # The PowerShell files the step is given, which no Linux row formats.
 _WINDOWS_NAMES = ["a.ps1", "a.psd1"]
@@ -62,20 +65,29 @@ _DISABLED_SUITE = "test_devtools_chrome"
 # The module that suite counts for.
 _DISABLED_PATH = os.path.join(_ROOT_PATH, "python", "devtools.py")
 
-# The option of the run of the end to end programs alone.
-_END_OPTION = "--end-to-end"
-
-# Options of the stream it refuses, but --coverage, which would count here.
+# The options of the stream, each of which raises a run to the normal level.
 _STREAM_OPTIONS = [
     ["--stream"],
     ["--module", "test_jslb"],
     ["--failfast"],
     ["--failures", "1"],
     ["--tty"],
+    ["--coverage"],
 ]
 
-# What the driver's refusal of those options says.
-_END_REFUSAL = "--end-to-end runs no stream"
+# The options of each level above end to end, and the category each gives.
+_LEVELS = [
+    (["--test-normal"], _SMOKE_TEST),
+    (["--test-all"], _TEST_ALL),
+    (["--test-disabled"], _TEST_DISABLED),
+    (["--test-normal", "--test-all"], _TEST_ALL),
+    (["--test-all", "--test-normal"], _TEST_ALL),
+    (["--test-normal", "--test-disabled"], _TEST_DISABLED),
+    (["--test-disabled", "--test-all"], _TEST_DISABLED),
+]
+
+# The option a run's level once was, which the driver no longer knows.
+_REMOVED_OPTION = "--end-to-end"
 
 
 # Returns the text of the file.
@@ -274,18 +286,41 @@ class TestDriverDisabled(unittest.TestCase):
         self.assertEqual([name for name, _ in modules], named)
         self.assertNotIn(_DISABLED_PATH, test_all.paths_unchecked(modules))
 
+    # A `test-disabled` run takes each disabled suite, and checks its module.
+    def test_disabled_level(self) -> None:
+        parser = argparse.ArgumentParser()
+        modules = test_all.modules_chosen(parser, [], _TEST_DISABLED)
+        self.assertIn(_DISABLED_SUITE, [name for name, _ in modules])
+        self.assertNotIn(_DISABLED_PATH, test_all.paths_unchecked(modules))
 
-# The run of the end to end programs alone, which has no stream.
-class TestDriverEndToEnd(ChildCase):
-    # Each option of the stream is refused before the bring up.
-    def test_stream_refused(self) -> None:
-        for options in _STREAM_OPTIONS:
-            with self.subTest(options=options):
-                arguments = [_END_OPTION, *options]
 
-                def work() -> None:
-                    test_all.main(arguments)
+# The level of a run, which its options only raise.
+class TestDriverLevels(unittest.TestCase):
+    # With no option the run has no stream, and its rungs are of `smoke-test`.
+    def test_default_end(self) -> None:
+        parsed = test_all.parser_make().parse_args([])
+        self.assertFalse(test_all.stream_wanted(parsed))
+        self.assertEqual(parsed.category, _SMOKE_TEST)
 
-                ending, output = self.child_run(work)
-                self.assertTrue(ending.endswith(_ENDING_REFUSED), ending)
-                self.assertIn(_END_REFUSAL, output)
+    # Each level above end to end has a stream, the higher of two options won.
+    def test_levels_raised(self) -> None:
+        for words, chosen in _LEVELS:
+            with self.subTest(words=words):
+                parsed = test_all.parser_make().parse_args(words)
+                self.assertTrue(test_all.stream_wanted(parsed))
+                self.assertEqual(parsed.category, chosen)
+
+    # An option of the stream raises the run to normal, not higher.
+    def test_stream_raised(self) -> None:
+        for words in _STREAM_OPTIONS:
+            with self.subTest(words=words):
+                parsed = test_all.parser_make().parse_args(words)
+                self.assertTrue(test_all.stream_wanted(parsed))
+                self.assertEqual(parsed.category, _SMOKE_TEST)
+
+    # The option the default level took the place of is gone.
+    def test_removed_refused(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as caught:
+                test_all.parser_make().parse_args([_REMOVED_OPTION])
+        self.assertEqual(caught.exception.code, 2)

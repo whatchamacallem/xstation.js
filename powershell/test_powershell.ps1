@@ -17,7 +17,7 @@
 #
 # The test command has to be run as admin:
 # Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-# .\powershell\test_powershell.ps1 [--test-all]
+# .\powershell\test_powershell.ps1 [--test-normal | --test-all | --test-disabled]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
     'PSAvoidUsingWriteHost', '',
     Justification = 'Coloured headings for the person running it.')]
@@ -25,7 +25,7 @@ param()
 
 . (Join-Path $PSScriptRoot 'xsjs_util.ps1')
 
-# Read `$args`, not `param()`: PowerShell takes `--test-all` for a parameter.
+# Read `$args`, not `param()`: PowerShell takes each level for a parameter.
 $arguments_ = $args
 
 # The project's top directory. Each Script is relative to it.
@@ -54,10 +54,11 @@ $lifecycle_ = @(
     @{ Script = 'xsjs_status.ps1'; Expect = $i18n_.status_stopped }
 )
 
-# Returns the category option as words, none if not given, or throws usage.
+# Returns the level's option as words, none if not given, or throws usage.
 function _test_powershell_get_category {
     if ($arguments_.Count -eq 0) { return @() }
-    if ($arguments_.Count -eq 1 -and $arguments_[0] -ceq '--test-all') {
+    $levels_ = @('--test-normal', '--test-all', '--test-disabled')
+    if ($arguments_.Count -eq 1 -and $levels_ -ccontains $arguments_[0]) {
         return @($arguments_[0])
     }
     throw ($i18n_.test_usage -f $script_name_)

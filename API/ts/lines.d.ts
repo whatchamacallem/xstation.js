@@ -262,7 +262,7 @@ declare namespace lines {
 
   // tap.run: only `tap_loop.py` serves it, each line of the run a push.
   interface TapRun {
-    category: "smoke-test" | "test-all";
+    category: "smoke-test" | "test-all" | "test-disabled";
     failfast: boolean;
     // The failing tests the run expects: it passes only with exactly these.
     failures: number;

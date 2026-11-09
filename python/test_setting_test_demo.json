@@ -157,7 +157,11 @@
     }
   ],
   "audit_wake_note": "until audit.",
-  "bad_inputs": ["7", "word", ""],
+  "bad_inputs": [
+    "7",
+    "word",
+    ""
+  ],
   "buttons": [
     "Accept",
     "Deny",
@@ -172,9 +176,17 @@
   "console_output": "hyperposition",
   "console_prompt": "$",
   "dump_entries": [
-    {"label": "databases of the browser"},
-    {"label": "databases of the server"},
-    {"label": "ui to ai", "type": "ai.say", "fragment": "\"text\": \"0\""}
+    {
+      "label": "databases of the browser"
+    },
+    {
+      "label": "databases of the server"
+    },
+    {
+      "label": "ui to ai",
+      "type": "ai.say",
+      "fragment": "\"text\": \"0\""
+    }
   ],
   "dump_fragments": [
     "  database metaverse",
@@ -194,9 +206,15 @@
     "\"subtitle\": \"Noted, filed and read back. It was no more interesting the second time.\""
   ],
   "permit_text": "browser.console_run asks to run with {\"text\":\"echo hyperposition\",\"timeout_seconds\":30}.",
-  "picture_colours": ["0 0 0 255"],
+  "picture_colours": [
+    "0 0 0 255"
+  ],
   "picture_size": 4,
-  "plain_absent": ["_audit.txt", "_verbose*", "tap"],
+  "plain_absent": [
+    "_audit.txt",
+    "_verbose*",
+    "tap"
+  ],
   "plain_debug": false,
   "plain_fragments": [
     "started process, pid: ",
@@ -212,5 +230,347 @@
   "sleep_note": "  sleeps on ",
   "ttyd_code": 0,
   "window_height": 720,
-  "window_width": 1280
+  "window_width": 1280,
+  "tools": {
+    "data_calls": [
+      {
+        "name": "browser.db_create",
+        "arguments": {
+          "db": "tour"
+        },
+        "holds": "{}"
+      },
+      {
+        "name": "browser.sql_run",
+        "arguments": {
+          "db": "tour",
+          "statements": [
+            {
+              "sql": "CREATE TABLE note (id INTEGER PRIMARY KEY, text TEXT)",
+              "params": []
+            },
+            {
+              "sql": "INSERT INTO note (text) VALUES (?)",
+              "params": [
+                "first line"
+              ]
+            },
+            {
+              "sql": "SELECT text FROM note",
+              "params": []
+            }
+          ]
+        },
+        "holds": "first line"
+      },
+      {
+        "name": "browser.kv_put",
+        "arguments": {
+          "ref": "/tour/note",
+          "text": "kept"
+        },
+        "holds": "79f076abdd19a752db7267bfff2f9022161d120dea919fdaca2ffdfc24ca8c96"
+      },
+      {
+        "name": "browser.kv_get",
+        "arguments": {
+          "ref": "/tour/note"
+        },
+        "holds": "kept"
+      },
+      {
+        "name": "browser.kv_list",
+        "arguments": {
+          "db": "tour",
+          "prefix": ""
+        },
+        "holds": "note"
+      },
+      {
+        "name": "browser.kv_delete",
+        "arguments": {
+          "ref": "/tour/note"
+        },
+        "holds": "{}"
+      },
+      {
+        "name": "browser.doc_put",
+        "arguments": {
+          "db": "tour",
+          "id": "page",
+          "body": {
+            "0": {
+              "t": "page"
+            },
+            "title": "first"
+          }
+        },
+        "holds": "/tour/page/1"
+      },
+      {
+        "name": "browser.doc_head",
+        "arguments": {
+          "db": "tour",
+          "id": "page"
+        },
+        "holds": "/tour/page/1"
+      },
+      {
+        "name": "browser.doc_get",
+        "arguments": {
+          "ref": "/tour/page/1"
+        },
+        "holds": "\"title\":\"first\""
+      },
+      {
+        "name": "browser.kv_put",
+        "arguments": {
+          "ref": "/_files/script/tour.js",
+          "text": "const rows = engine.store.kv_list(\"tour\", \"\");\nreturn rows.length + args.a + args.b;\n"
+        },
+        "holds": "d466befe355e3fde2cc8c68ed7066c5dc239fac7d4554b15a03341e1412ed15f"
+      },
+      {
+        "name": "browser.script_run",
+        "arguments": {
+          "name": "tour",
+          "args": {
+            "a": 2,
+            "b": 3
+          }
+        },
+        "holds": "\"value\":6"
+      },
+      {
+        "name": "browser.script_debug",
+        "arguments": {
+          "name": "tour",
+          "args": {
+            "a": 2,
+            "b": 3
+          }
+        },
+        "holds": "kv_list"
+      },
+      {
+        "name": "browser.image_make",
+        "arguments": {
+          "prompt": "a test pattern",
+          "key": "tour/pattern.png"
+        },
+        "holds": "\"key\":\"/_files/tour/pattern.png\""
+      },
+      {
+        "name": "browser.render",
+        "arguments": {
+          "image": "/_files/tour/pattern.png",
+          "subtitle": "The test pattern."
+        },
+        "holds": "{}"
+      },
+      {
+        "name": "browser.kv_put",
+        "arguments": {
+          "ref": "/metaverse/tour/kept",
+          "text": "Kept on both sides."
+        },
+        "holds": "408ecf78ac91a7dc0f449879e575ff0fffaf7108dda13cd10fedc8f9cd8fc053"
+      },
+      {
+        "name": "browser.db_drop",
+        "arguments": {
+          "db": "tour"
+        },
+        "holds": "{}"
+      },
+      {
+        "name": "server.source_put",
+        "arguments": {
+          "name": "tour_loop.py",
+          "text": "def loop_prepare(root):\n    pass\n\n\ndef loop_run(read_fd, write_fd, root):\n    pass\n"
+        },
+        "holds": "582b229c0b257a95cbf688b0c807ed2fe4842eba9a0281b88209b7b9ef5a73ff"
+      }
+    ],
+    "console_calls": [
+      {
+        "name": "browser.console_run",
+        "arguments": {
+          "text": "echo tour",
+          "timeout_seconds": 30
+        },
+        "holds": "tour\\n"
+      },
+      {
+        "name": "browser.console_write",
+        "arguments": {
+          "text": "echo written\n"
+        },
+        "holds": "{}"
+      },
+      {
+        "name": "browser.console_read",
+        "arguments": {
+          "until": "$ ",
+          "timeout_seconds": 30
+        },
+        "holds": "written"
+      }
+    ],
+    "restart_calls": [
+      {
+        "name": "server.system_restart",
+        "arguments": {
+          "main_loop": "tour_loop.py"
+        }
+      }
+    ],
+    "chains": [
+      {
+        "input": "1",
+        "chain": "data",
+        "calls": "data_calls",
+        "answer": "Every data tool has run."
+      },
+      {
+        "input": "2",
+        "chain": "console",
+        "calls": "console_calls",
+        "answer": "Every console tool has run."
+      },
+      {
+        "input": "3",
+        "chain": "data_again",
+        "calls": "data_calls",
+        "answer": "Every data tool has run again."
+      },
+      {
+        "input": "4",
+        "chain": "console_again",
+        "calls": "console_calls",
+        "answer": "Every console tool has run again."
+      },
+      {
+        "input": "5",
+        "chain": "restart",
+        "calls": "restart_calls",
+        "answer": "No reply comes to this."
+      }
+    ],
+    "rest_answer": "Nothing more.",
+    "otherwise": "Not on the tour.",
+    "permits": {
+      "console": [
+        [
+          "browser.console_run",
+          "Always Allow"
+        ],
+        [
+          "browser.console_write",
+          "Accept"
+        ],
+        [
+          "browser.console_read",
+          "Always Allow"
+        ]
+      ],
+      "console_again": [
+        [
+          "browser.console_write",
+          "Accept"
+        ]
+      ]
+    },
+    "permit_words": " asks to run with ",
+    "picture_size": 16,
+    "picture_colours": [
+      "255 255 255 255",
+      "0 0 0 255"
+    ],
+    "kept_db": "metaverse",
+    "kept_key": "tour/kept",
+    "kept_text": "Kept on both sides.",
+    "dropped_db": "tour",
+    "loop_name": "tour_loop.py",
+    "loop_text": "def loop_prepare(root):\n    pass\n\n\ndef loop_run(read_fd, write_fd, root):\n    pass\n",
+    "commits": [
+      {
+        "label": "ai to server",
+        "type": "db.create",
+        "fragment": "\"db\": \"tour\""
+      },
+      {
+        "label": "ai to server",
+        "type": "sql.run",
+        "fragment": "INSERT INTO note"
+      },
+      {
+        "label": "ai to server",
+        "type": "kv.put",
+        "fragment": "/tour/note"
+      },
+      {
+        "label": "ai to server",
+        "type": "kv.delete",
+        "fragment": "/tour/note"
+      },
+      {
+        "label": "ai to server",
+        "type": "doc.put",
+        "fragment": "\"id\": \"page\""
+      },
+      {
+        "label": "ai to server",
+        "type": "db.drop",
+        "fragment": "\"db\": \"tour\""
+      },
+      {
+        "label": "ai to server",
+        "type": "mcp",
+        "fragment": "\"name\": \"source_put\""
+      },
+      {
+        "label": "server to ai",
+        "type": "mcp",
+        "fragment": "sha256"
+      },
+      {
+        "label": "ai to http",
+        "type": "http.request",
+        "fragment": "/images/generations"
+      },
+      {
+        "label": "ai to ui",
+        "type": "media.store",
+        "fragment": "\"k\": \"/_files/tour/pattern.png\""
+      },
+      {
+        "label": "ai to ui",
+        "type": "render",
+        "fragment": "\"image\": \"/_files/tour/pattern.png\""
+      },
+      {
+        "label": "ai to ui",
+        "type": "permit.ask",
+        "fragment": "\"tool\": \"browser.console_write\""
+      },
+      {
+        "label": "ui to ai",
+        "type": "permit.ask",
+        "fragment": "\"choice\": \"always\""
+      },
+      {
+        "label": "ai to console",
+        "type": "console.write",
+        "fragment": "echo written"
+      }
+    ],
+    "compact_summary": "Turns 1 to 80 of this conversation were compacted when it held 80 turns.",
+    "turns_sent": 90,
+    "dump_turns": {
+      "browser": 9,
+      "server": 88
+    },
+    "restart_fault": "The server sent tap.start a second time"
+  }
 }

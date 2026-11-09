@@ -46,6 +46,7 @@
     "test_tap_producer.ts",
     "test_jslb.ts",
     "test_jslb_decode.ts",
+    "test_jslb_decode_vectors.ts",
     "test_dispatch.ts",
     "test_queue.ts",
     "test_integrate_queue.ts",

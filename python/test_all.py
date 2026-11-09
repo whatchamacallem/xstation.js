@@ -3,11 +3,10 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# The one runner of every test suite, by category: smoke-test runs the
-# important suites that fit in 3 minutes, test-all the suites of both
-# labels. Every suite and block is one block of one TAP stream on stdout, read
-# by the consumer as it is written, so nothing else writes to stdout during the
-# stream.
+# The one runner of every test suite, by level: end to end with no option, then
+# --test-normal, --test-all and --test-disabled, each holding the one below it.
+# Every suite and block is one block of one TAP stream on stdout, read by the
+# consumer as it is written, so nothing else writes to stdout during the stream.
 #
 # The order of the lists below is strict dependency order: a suite runs only
 # after the suites of every module it calls into, directly or transitively,
@@ -60,6 +59,7 @@ _MODULES: list[tuple[str, str]] = [
     ("test_test", "smoke-test"),
     ("test_jslb", "smoke-test"),
     ("test_audit", "smoke-test"),
+    ("test_audit_read", "smoke-test"),
     ("test_switches", "smoke-test"),
     ("test_third_party_fetch", "smoke-test"),
     ("test_devtools", "smoke-test"),
@@ -167,6 +167,7 @@ _B_UNIT: list[tuple[str, str]] = [
     ("test_substrate_limit.ts", "smoke-test"),
     ("test_substrate_store.ts", "smoke-test"),
     ("test_jslb_decode.ts", "smoke-test"),
+    ("test_jslb_decode_vectors.ts", "smoke-test"),
     ("test_console_view.ts", "smoke-test"),
     ("test_media_cache.ts", "smoke-test"),
     ("test_script.ts", "smoke-test"),
@@ -223,6 +224,9 @@ _PHASES = (
 _FORMATTER_SUITES = frozenset(
     ("test_reformat_formatters", "test_test_posix_formatters")
 )
+
+# The label of what only a run above the normal level takes.
+_ALL_LABEL = "test-all"
 
 # The suites and blocks that fail by design, which only `--module` runs.
 _FAILING: list[tuple[str, str]] = [
@@ -344,7 +348,7 @@ _LANGUAGE = "typescript"
 # The most bytes read from a realm's stdout at once.
 _READ_BYTES = 65536
 
-# The suites no run takes unless `--module` names one, each with why.
+# The suites only `--test-disabled` or `--module` runs, each with why.
 _DISABLED: dict[str, str] = {
     "test_devtools_chrome": "15 s: 25 tests that each start a Chrome of their"
     " own, 0.2 s at least, and one that waits out the 5 s a Chrome has to"
@@ -359,6 +363,7 @@ _DISABLED: dict[str, str] = {
     " and five cases that wait out a timeout of 0.5 s to 2 s",
     "test_console_open.ts": "4.3 s: four cases wait a fixed 0.2 s to 2 s for"
     " dash's output to draw",
+    "test_jslb_decode_vectors.ts": "7.1 s: decodes each vector at every split",
 }
 
 # The later suites, each with what it waits on, which no run takes.
@@ -465,7 +470,14 @@ def suite_taken(name: str, label: str, chosen: str) -> bool:
     return category.suite_runs(label, chosen)
 
 
-# The suites the run takes: the category's not disabled, or only those named.
+# Whether a run of the category keeps the suite, a disabled one left out.
+def disabled_kept(name: str, chosen: str) -> bool:
+    import category
+
+    return name not in _DISABLED or category.disabled_runs(chosen)
+
+
+# The suites the run takes: the category's, or only those named.
 def modules_chosen(
     parser: argparse.ArgumentParser, named: list[str], chosen: str
 ) -> list[tuple[str, str]]:
@@ -482,7 +494,7 @@ def modules_chosen(
         (name, label)
         for name, label in listed
         if suite_taken(name, label, chosen)
-        and (name in named if named else name not in _DISABLED)
+        and (name in named if named else disabled_kept(name, chosen))
     ]
 
 
@@ -1268,22 +1280,17 @@ def signal_exit(number: int, frame: types.FrameType | None) -> None:
     sys.exit(_SIGNAL_BASE + number)
 
 
-# Runs the modules of the category, checks the stream, then runs the rest.
-def main(arguments: list[str]) -> int:
-    # The suites expect a hangup to end a child, even in a run under `nohup`.
-    signal.signal(signal.SIGHUP, signal.SIG_DFL)
-    import line_coverage
-
-    # With `--coverage`, counting precedes project imports, so that they count.
-    count = line_coverage.LineCount() if "--coverage" in arguments else None
+# The driver's options, the level's among them.
+def parser_make() -> argparse.ArgumentParser:
     import category, switches
 
     parser = argparse.ArgumentParser(
-        description="Run the suites of a category: the Python test modules"
-        " and the TypeScript blocks in the testing order, the tests of the TAP"
-        " modules first, as one"
-        " TAP stream on stdout, check the stream, then run the checks of"
-        " test_posix.py, the wire test, the browser test and the demo test.",
+        description="Run the tests of a level. With no option, the end to end"
+        " level: the wire test, the browser test and the demo test. Above it"
+        " come the Python test modules and the TypeScript blocks in the"
+        " testing order, the tests of the TAP modules first, as one TAP stream"
+        " on stdout, the stream checked, then the checks of test_posix.py and"
+        " those three tests.",
         allow_abbrev=False,
     )
     parser.add_argument(
@@ -1325,14 +1332,44 @@ def main(arguments: list[str]) -> int:
         " first line of its modules never counted as run",
     )
     parser.add_argument(
-        "--end-to-end",
+        "--test-normal",
         action="store_true",
-        help="run only the end to end programs after the bring up, the wire"
-        " test, the browser test and the demo test: no suite, no block and no"
-        " check of test_posix.py",
+        help="raise the run from the end to end level to the normal level:"
+        " the suites labelled smoke-test, the checks of test_posix.py, then"
+        " the end to end tests",
     )
     category.options_add(parser)
     switches.options_add(parser)
+    return parser
+
+
+# Whether the run has a stream: any level above end to end or a stream option.
+def stream_wanted(parsed: argparse.Namespace) -> bool:
+    import category
+
+    return (
+        parsed.test_normal
+        or category.suite_runs(_ALL_LABEL, parsed.category)
+        or parsed.failfast
+        or parsed.stream
+        or len(parsed.module) > 0
+        or parsed.failures != 0
+        or parsed.tty
+        or parsed.coverage
+    )
+
+
+# Runs the tests of the run's level: the stream's and its checks, then the rest.
+def main(arguments: list[str]) -> int:
+    # The suites expect a hangup to end a child, even in a run under `nohup`.
+    signal.signal(signal.SIGHUP, signal.SIG_DFL)
+    import line_coverage
+
+    # With `--coverage`, counting precedes project imports, so that they count.
+    count = line_coverage.LineCount() if "--coverage" in arguments else None
+    import category, switches
+
+    parser = parser_make()
     parsed = parser.parse_args(arguments)
     if os.geteuid() == _ROOT_UID:
         raise PermissionError(
@@ -1351,19 +1388,7 @@ def main(arguments: list[str]) -> int:
             "--coverage counts the lines run in this process, and --tty runs"
             " the stream in another"
         )
-    end_to_end: bool = parsed.end_to_end
-    if end_to_end and (
-        failfast
-        or parsed.stream
-        or parsed.module
-        or failures
-        or parsed.tty
-        or count is not None
-    ):
-        parser.error(
-            "--end-to-end runs no stream, so it takes none of --failfast,"
-            " --stream, --module, --failures, --tty and --coverage"
-        )
+    category.disabled_set(chosen)
     modules = modules_chosen(parser, parsed.module, chosen)
     import third_party_fetch, ttyd_build
 
@@ -1372,7 +1397,7 @@ def main(arguments: list[str]) -> int:
     ttyd = ttyd_build.checkout_build()
     started = time.monotonic()
     limit = category.limit_seconds(chosen)
-    if end_to_end:
+    if not stream_wanted(parsed):
         return programs_run(chosen, limit, started)
     stream = StreamWriter([name for name, _ in modules])
     code: int | None = None

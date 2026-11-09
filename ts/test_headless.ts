@@ -128,6 +128,10 @@ namespace test_headless {
       topology: test_integrate_substrate.topology_build,
     },
     test_jslb_decode: { side: "worker", module: () => test_jslb_decode },
+    test_jslb_decode_vectors: {
+      side: "worker",
+      module: () => test_jslb_decode_vectors,
+    },
     test_script: { side: "worker", module: () => test_script },
     test_tools_browser: { side: "worker", module: () => test_tools_browser },
     test_integrate_tools_browser: {

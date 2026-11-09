@@ -51,8 +51,13 @@ _SMOKE_TEST = "smoke-test"
 # The label and category of every other suite.
 _TEST_ALL = "test-all"
 
-# The refusal of the category `all`, which is neither of the two.
-_ALL_REFUSED = "the category 'all' is neither smoke-test nor test-all"
+# The category of both labels and what is disabled.
+_TEST_DISABLED = "test-disabled"
+
+# The refusal of the category `all`, which is none of the three.
+_ALL_REFUSED = (
+    "the category 'all' is none of smoke-test, test-all and test-disabled"
+)
 
 # The mark that exempts a statement and the block its first line opens.
 _MARK = "# pragma: no cover"
@@ -111,7 +116,7 @@ def scale(
 """
 
 
-# Returns a parser with the two options and no abbreviations, as runners make.
+# Returns a parser with the options and no abbreviations, as runners make.
 def parser_make() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     category.options_add(parser)
@@ -253,7 +258,7 @@ class TestHarness(unittest.TestCase):
         self.assertEqual(harness.gold_copy(), self.gold)
 
 
-# The one option, `--test-all`, and `smoke-test` when it is not given.
+# The options of a category, `smoke-test` when none is given.
 class TestOptions(unittest.TestCase):
     # No option gives `smoke-test`.
     def test_default_smoke(self) -> None:
@@ -264,6 +269,20 @@ class TestOptions(unittest.TestCase):
     def test_normal_given(self) -> None:
         parsed = parser_make().parse_args(["--test-all"])
         self.assertEqual(parsed.category, _TEST_ALL)
+
+    # The option `--test-disabled` gives `test-disabled`.
+    def test_disabled_given(self) -> None:
+        parsed = parser_make().parse_args(["--test-disabled"])
+        self.assertEqual(parsed.category, _TEST_DISABLED)
+
+    # Two options give the higher in either order, so that none contradicts.
+    def test_options_raised(self) -> None:
+        for words in (
+            ["--test-all", "--test-disabled"],
+            ["--test-disabled", "--test-all"],
+        ):
+            parsed = parser_make().parse_args(words)
+            self.assertEqual(parsed.category, _TEST_DISABLED, words)
 
     # The default's name is no option: `--smoke-test` exits with the code 2.
     def test_smoke_refused(self) -> None:
@@ -290,14 +309,19 @@ class TestOptionWords(unittest.TestCase):
     def test_normal_option(self) -> None:
         self.assertEqual(category.option_words(_TEST_ALL), ["--test-all"])
 
+    # A `test-disabled` run has its one option.
+    def test_disabled_option(self) -> None:
+        words = category.option_words(_TEST_DISABLED)
+        self.assertEqual(words, ["--test-disabled"])
+
     # The words parse back to their category.
     def test_words_parsed(self) -> None:
-        for chosen in (_SMOKE_TEST, _TEST_ALL):
+        for chosen in (_SMOKE_TEST, _TEST_ALL, _TEST_DISABLED):
             words = category.option_words(chosen)
             parsed = parser_make().parse_args(words)
             self.assertEqual(parsed.category, chosen, chosen)
 
-    # A category other than the two raises.
+    # A category other than the three raises.
     def test_category_refused(self) -> None:
         with self.assertRaises(ValueError) as caught:
             category.option_words("all")
@@ -306,15 +330,25 @@ class TestOptionWords(unittest.TestCase):
 
 # Which suites a run of each category runs, and the strings it refuses.
 class TestSelection(unittest.TestCase):
-    # A `smoke-test` suite runs in a run of either category.
+    # A `smoke-test` suite runs in a run of any category.
     def test_smoke_runs(self) -> None:
-        for chosen in (_SMOKE_TEST, _TEST_ALL):
+        for chosen in (_SMOKE_TEST, _TEST_ALL, _TEST_DISABLED):
             self.assertTrue(category.suite_runs(_SMOKE_TEST, chosen), chosen)
 
-    # A `test-all` suite runs in a `test-all` run only.
+    # A `test-all` suite runs in a run of the two higher categories.
     def test_normal_runs(self) -> None:
         self.assertTrue(category.suite_runs(_TEST_ALL, _TEST_ALL))
+        self.assertTrue(category.suite_runs(_TEST_ALL, _TEST_DISABLED))
         self.assertFalse(category.suite_runs(_TEST_ALL, _SMOKE_TEST))
+
+    # The category `test-disabled` is no label.
+    def test_disabled_label(self) -> None:
+        with self.assertRaises(ValueError) as caught:
+            category.suite_runs(_TEST_DISABLED, _TEST_DISABLED)
+        expected = (
+            "the label 'test-disabled' is neither smoke-test nor test-all"
+        )
+        self.assertEqual(caught.exception.args, (expected,))
 
     # A label other than the two raises.
     def test_label_refused(self) -> None:
@@ -323,11 +357,37 @@ class TestSelection(unittest.TestCase):
         expected = "the label 'smoke' is neither smoke-test nor test-all"
         self.assertEqual(caught.exception.args, (expected,))
 
-    # A category other than the two raises.
+    # A category other than the three raises.
     def test_category_refused(self) -> None:
         with self.assertRaises(ValueError) as caught:
             category.suite_runs(_SMOKE_TEST, "all")
         self.assertEqual(caught.exception.args, (_ALL_REFUSED,))
+
+
+# What is disabled: which category takes it, and the setting of a run.
+class TestDisabled(unittest.TestCase):
+    # `test-disabled` alone takes what is disabled.
+    def test_runs_chosen(self) -> None:
+        self.assertTrue(category.disabled_runs(_TEST_DISABLED))
+        self.assertFalse(category.disabled_runs(_TEST_ALL))
+        self.assertFalse(category.disabled_runs(_SMOKE_TEST))
+
+    # A category other than the three raises.
+    def test_category_refused(self) -> None:
+        with self.assertRaises(ValueError) as caught:
+            category.disabled_runs("all")
+        self.assertEqual(caught.exception.args, (_ALL_REFUSED,))
+
+    # A run's setting holds until the next, which turns it off again.
+    def test_setting_kept(self) -> None:
+        held = category.disabled_taken()
+        self.addCleanup(
+            category.disabled_set, _TEST_DISABLED if held else _SMOKE_TEST
+        )
+        category.disabled_set(_TEST_DISABLED)
+        self.assertTrue(category.disabled_taken())
+        category.disabled_set(_TEST_ALL)
+        self.assertFalse(category.disabled_taken())
 
 
 # The seconds a run of each category may take.
@@ -339,11 +399,12 @@ class TestLimit(unittest.TestCase):
         self.assertEqual(limit, expected)
         self.assertIs(type(limit), float)
 
-    # A `test-all` run has no limit of its own.
+    # A `test-all` or `test-disabled` run has no limit of its own.
     def test_normal_unlimited(self) -> None:
         self.assertIsNone(category.limit_seconds(_TEST_ALL))
+        self.assertIsNone(category.limit_seconds(_TEST_DISABLED))
 
-    # A category other than the two raises.
+    # A category other than the three raises.
     def test_category_refused(self) -> None:
         with self.assertRaises(ValueError) as caught:
             category.limit_seconds("all")

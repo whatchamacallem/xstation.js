@@ -1,10 +1,19 @@
 import argparse
 
-# Adds `--test-all` as `category`, `smoke-test` without it.
+# Adds `--test-all` and `--test-disabled` as `category`, else `smoke-test`.
 def options_add(parser: argparse.ArgumentParser) -> None: ...
 
 # The words of a category's option for a command line, none for `smoke-test`.
 def option_words(category: str) -> list[str]: ...
+
+# Whether a run of the category takes what is disabled.
+def disabled_runs(category: str) -> bool: ...
+
+# Sets from the run's category whether its disabled tests run.
+def disabled_set(category: str) -> None: ...
+
+# Whether this run takes its disabled tests, read as their module is imported.
+def disabled_taken() -> bool: ...
 
 # Whether a label's suite runs in a category's run. Other strings raise.
 def suite_runs(label: str, category: str) -> bool: ...

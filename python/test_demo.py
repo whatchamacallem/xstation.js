@@ -4,20 +4,19 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # The demo test, which proves the engine page is ready for a person to view. It
-# serves a fresh debug root in build/test_demo-*/root through the functions of
+# serves fresh debug roots in build/test_demo-*/ through the functions of
 # xsjs_serve.py, as the maintainer serves one, and drives chrome-headless-shell
 # over DevTools as a person would: clicks and keys are input events, and every
-# reading is of the page's elements. The analyst is the seed's scripted table,
-# and no real AI provider is contacted. A person's error, an input the table
-# does not hold, ends in her answer in the band. Each rung has a timer and a
-# label, smoke-test or test-all, and a mislabel fails the run. The last rung
-# serves a second root, debug false, that must record nothing, its ttyd's log
-# in server.txt. build/test_demo/, emptied at each run, keeps that, the PNGs of
-# the states, and audit.txt after a failed rung or under --debug. The roots go
-# once the run passes. With --hold a failed rung leaves the page, keeps ttyd
-# serving its root, prints the address and waits for ctrl C, so that a person
-# opens the failed state, which a fresh load restores. Its timers, window size,
-# texts and audit table are in its gold, python.test_demo.
+# reading is of the page's elements. The analyst is a scripted table, and no
+# real AI provider is contacted. Each rung has a timer and a label, smoke-test
+# or test-all, and a mislabel fails the run. One root must hold no unexpected
+# failure, one outside debug mode must record nothing, and in a test-all run one
+# calls every tool the AI is given in one conversation. build/test_demo/,
+# emptied at each run, keeps PNGs of the states, server.txt, and the audits
+# after a failed rung or under --debug. The roots go once the run passes. With
+# --hold a failed rung leaves the page, keeps ttyd serving its root, prints the
+# address and waits for ctrl C, so that a person opens the failed state, which
+# a fresh load restores. Its timers and texts are in its gold, python.test_demo.
 
 import argparse, contextlib, fnmatch, json, os, re, shutil, signal, sqlite3
 import sys, tempfile, time, types
@@ -48,6 +47,9 @@ _ROOT_NAME = "root"
 
 # The name of the root outside debug mode there and in the label book.
 _PLAIN_NAME = "plain"
+
+# The name of the root of the gold's table of every tool.
+_TOOLS_NAME = "tools"
 
 # The directory of the PNGs of the states and the logs, kept after the run.
 _PICTURE_PATH = os.path.join(_BUILD_PATH, "test_demo")
@@ -118,6 +120,39 @@ _KEY_TYPE = "ui.control_key"
 # The root's audit, and its copy beside the PNGs.
 _AUDIT_NAME = "_audit.txt"
 _AUDIT_COPY = os.path.join(_PICTURE_PATH, "audit.txt")
+
+# The copy of the audit of the root of every tool, before its deliberate end.
+_TOOLS_COPY = os.path.join(_PICTURE_PATH, "audit_tools.txt")
+
+# The tools the AI is given, as `tools/list` returns them, by server.
+_TOOLS_PATH = os.path.join(_CHECKOUT_PATH, "API", "mcp", "tools.json")
+
+# The seed's system prompt, a document whose text the agent sends.
+_PROMPT_PATH = os.path.join(_PYTHON_PATH, "seed", "prompt.json")
+
+# The scripted table a root seeds its store with, under that root.
+_TABLE_PATH = os.path.join("python", "seed", "provider_script.json")
+
+# The node of the table of every tool that takes each person's input.
+_MENU_NODE = "menu"
+
+# The end of the URL of a chat request.
+_CHAT_PATH = "/chat/completions"
+
+# The role of a system message and of a tool's result.
+_SYSTEM_ROLE = "system"
+_TOOL_ROLE = "tool"
+
+# The line that carries a stored turn to the server.
+_TURN_TYPE = "turn.append"
+
+# A start heading of the engine, its process's id captured.
+_START_PATTERN = re.compile(
+    r"^==== engine started, .*, process (\d+) ====$", re.M
+)
+
+# The line of a database's dump that counts what it does not show, its turns.
+_HIDDEN_PATTERN = re.compile(r"turns: (\d+),")
 
 # The heading of each start of the engine role in the audit.
 _ENGINE_START = "==== engine started, "
@@ -292,6 +327,8 @@ class DemoRun:
         self.server_fd = server_fd
         self.root = os.path.join(work, _ROOT_NAME)
         self.bootstrap = self.bootstrap_path(self.root)
+        # Where a failure copies the audit of the root that runs.
+        self.audit_path = _AUDIT_COPY
         # The built page, which both roots copy, once the served rung built it.
         self.page: str | None = None
         self.ttyd: xsjs_serve.TtydServer | None = None
@@ -405,7 +442,7 @@ class DemoRun:
         log.timer_renew()
         # A run that failed before the server started has no audit to copy.
         if os.path.exists(os.path.join(self.root, _AUDIT_NAME)):
-            audit_copy(self.root)
+            audit_copy(self.root, self.audit_path)
         self.picture_save(_FAILED_PREFIX + log.rung.replace(" ", "_"))
         if hold and self.ttyd is not None:
             print(f"error: {log.rung}: {failure}", file=sys.stderr, flush=True)
@@ -455,20 +492,36 @@ def programs_find(ttyd_pid: int, bootstrap: str) -> list[int]:
     return pids
 
 
-# The note's value in the server's database file, None until its row comes.
-def note_read(root: str) -> bytes | None:
-    path = os.path.join(root, gold_value("note_db") + _DB_EXTENSION)
+# A value in the server's database file, None until its row comes.
+def value_read(root: str, db: str, key: str) -> bytes | None:
+    path = os.path.join(root, db + _DB_EXTENSION)
     connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     with contextlib.closing(connection):
-        row = connection.execute(
-            _NOTE_SELECT, (gold_value("note_key"),)
-        ).fetchone()
+        row = connection.execute(_NOTE_SELECT, (key,)).fetchone()
     return None if row is None else cast(bytes, row[0])
 
 
-# Copies the root's audit beside the PNGs.
-def audit_copy(root: str) -> None:
-    shutil.copyfile(os.path.join(root, _AUDIT_NAME), _AUDIT_COPY)
+# Copies the root's audit beside the PNGs, to the path given.
+def audit_copy(root: str, path: str) -> None:
+    shutil.copyfile(os.path.join(root, _AUDIT_NAME), path)
+
+
+# Waits for each request of the root's audit to be answered, then checks it.
+def failures_check(run: DemoRun, root: str) -> int:
+    import audit_read
+
+    path = os.path.join(root, _AUDIT_NAME)
+    while True:
+        entries = audit_read.entries_parse(audit_read.document_read(path))
+        opened = audit_read.requests_open(entries)
+        if not opened:
+            break
+        run.poll_sleep(f"the replies of the audit's requests: {opened}")
+    try:
+        audit_read.failure_check(entries)
+    except audit_read.AuditFailed as failure:
+        raise CheckFailed(f"the audit of {root}: {failure}") from failure
+    return len(entries)
 
 
 # The parameters of a root of this run, its debug mode as given.
@@ -700,7 +753,8 @@ def rung_refused(run: DemoRun) -> str:
 def rung_choice_note(run: DemoRun) -> str:
     text = choice_take(run, "2")
     note: str = gold_value("note_text")
-    while (value := note_read(run.root)) is None:
+    db, key = gold_value("note_db"), gold_value("note_key")
+    while (value := value_read(run.root, db, key)) is None:
         run.poll_sleep("the note's row in the server's database")
     if value != note.encode():
         raise CheckFailed(
@@ -842,11 +896,13 @@ def rung_audit(run: DemoRun) -> str:
             f"the audit holds {starts} starts of the engine for"
             f" {run.loads} loads"
         )
+    failures_check(run, run.root)
     return (
         f"the audit's {len(entries)} entries hold the {len(rows)} rows of the"
         f" gold's table, every line's body JSON, no line of the audit's own,"
         f" each note of a page thread a sleep on no wake of the audit's own,"
-        f" and {starts} starts of the engine, one per load"
+        f" {starts} starts of the engine, one per load, and no unexpected"
+        " failure"
     )
 
 
@@ -855,7 +911,7 @@ def rung_left(run: DemoRun) -> str:
     import switches
 
     if switches.debug:
-        audit_copy(run.root)
+        audit_copy(run.root, _AUDIT_COPY)
     ttyd = cast("xsjs_serve.TtydServer", run.ttyd)
     programs = page_leave(run, ttyd, run.bootstrap)
     code = server_finish(run, ttyd)
@@ -903,6 +959,347 @@ def rung_plain(run: DemoRun) -> str:
     )
 
 
+# A value of the gold of the root of every tool.
+def tools_value(name: str) -> Any:
+    return gold_value(f"tools.{name}")
+
+
+# The prefixed name of every tool the AI is given.
+def tools_listed() -> list[str]:
+    with open(_TOOLS_PATH, encoding="utf-8") as file:
+        listed: dict[str, Any] = json.load(file)
+    return [
+        f"{side}.{tool['name']}"
+        for side, reply in listed.items()
+        for tool in reply["result"]["tools"]
+    ]
+
+
+# The reply that calls a chain's tool of the index, its results ending there.
+def call_reply(chain: str, index: int, call: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "content": None,
+        "next": f"{chain}_{index}",
+        "tool_calls": [
+            {
+                "id": f"call_{chain}_{index}",
+                "type": "function",
+                "function": {
+                    "name": call["name"],
+                    "arguments": json.dumps(call["arguments"]),
+                },
+            }
+        ],
+    }
+
+
+# Adds a chain's nodes to the table and returns the reply that starts it.
+def chain_add(
+    nodes: dict[str, Any], row: dict[str, str], calls: list[dict[str, Any]]
+) -> dict[str, Any]:
+    chain = row["chain"]
+    last = {"content": row["answer"], "next": _MENU_NODE}
+    for index in range(len(calls)):
+        after = last
+        if index + 1 < len(calls):
+            after = call_reply(chain, index + 1, calls[index + 1])
+        nodes[f"{chain}_{index}"] = {"replies": {}, "after_tools": after}
+    return call_reply(chain, 0, calls[0])
+
+
+# The scripted table of every tool, refusing a tool the gold's chains omit.
+def table_make() -> dict[str, Any]:
+    nodes: dict[str, Any] = {}
+    replies: dict[str, Any] = {
+        "0": {"content": tools_value("rest_answer"), "next": _MENU_NODE}
+    }
+    called: set[str] = set()
+    for row in cast(list[dict[str, str]], tools_value("chains")):
+        calls: list[dict[str, Any]] = tools_value(row["calls"])
+        replies[row["input"]] = chain_add(nodes, row, calls)
+        called.update(call["name"] for call in calls)
+    missing = [name for name in tools_listed() if name not in called]
+    if missing:
+        raise CheckFailed(f"the gold's chains call none of {missing}")
+    nodes[_MENU_NODE] = {
+        "replies": replies,
+        "otherwise": {"content": tools_value("otherwise"), "next": _MENU_NODE},
+    }
+    return {"start": _MENU_NODE, "nodes": nodes}
+
+
+# Types a chain's input, answers the permits it asks, waits for its answer.
+def chain_take(run: DemoRun, number: int) -> str:
+    row: dict[str, str] = tools_value("chains")[number]
+    permits: dict[str, list[list[str]]] = tools_value("permits")
+    run.line_type(row["input"])
+    words: str = tools_value("permit_words")
+    for tool, label in permits.get(row["chain"], []):
+        shown = tool + words
+        state = run.state_wait(
+            f"the permit of {tool}",
+            lambda state: (
+                len(state["permit_texts"]) == 1
+                and state["permit_texts"][0].startswith(shown)
+            ),
+        )
+        button = next(
+            button for button in state["buttons"] if button["text"] == label
+        )
+        run.mouse_click(button["x"], button["y"])
+    run.band_wait(row["answer"])
+    return row["answer"]
+
+
+# A root whose table calls every tool serves, and its first render shows.
+def rung_tools_served(run: DemoRun) -> str:
+    import xsjs_serve
+
+    table = table_make()
+    root = os.path.join(run.work, _TOOLS_NAME)
+    run.root = root
+    run.bootstrap = run.bootstrap_path(root)
+    run.audit_path = _TOOLS_COPY
+    parameters = parameters_make(gold_value("root_debug"))
+    page = cast(str, run.page)
+    xsjs_serve.root_make(run.values, page, root, parameters, True)
+    with open(os.path.join(root, _TABLE_PATH), "w", encoding="utf-8") as file:
+        json.dump(table, file)
+    ttyd = run.server_start(root, sys.stderr.fileno())
+    run.browser.page_open(ttyd.address_get())
+    remark: str = gold_value("remark")
+    run.band_wait(remark)
+    return (
+        f"the table of {len(table['nodes'])} nodes, which calls all"
+        f" {len(tools_listed())} tools the AI is given, serves {remark!r}"
+    )
+
+
+# Typing 1 runs every data tool, and the picture they render shows.
+def rung_tools_data(run: DemoRun) -> str:
+    text = chain_take(run, 0)
+    size: int = tools_value("picture_size")
+    colours: list[str] = tools_value("picture_colours")
+    state = run.state_read()
+    picture = (
+        state["image_hidden"],
+        state["image_width"],
+        state["image_height"],
+        state["image_colours"],
+    )
+    if picture != (False, size, size, colours):
+        raise CheckFailed(
+            f"the picture's hidden, width, height and colours are {picture},"
+            f" where it should show, {size} by {size}, all of {colours}"
+        )
+    png = run.picture_save("tools_data")
+    return (
+        f"typing 1 ended with {text!r}, the made picture shown, {size} by"
+        f" {size}, of {colours}; PNG {png}"
+    )
+
+
+# Typing 2 runs every console tool, each permit answered by a click.
+def rung_tools_console(run: DemoRun) -> str:
+    text = chain_take(run, 1)
+    png = run.picture_save("tools_console")
+    return f"typing 2 answered its permits and ended with {text!r}; PNG {png}"
+
+
+# Each tool again: 3 past the turns that compact, 4 compacting them first.
+def rung_tools_again(run: DemoRun) -> str:
+    texts = [chain_take(run, 2), chain_take(run, 3)]
+    return f"typing 3 and 4 ended with {texts}"
+
+
+# Typing 0 dumps both sides, the server holding the turns the browser dropped.
+def rung_tools_dump(run: DemoRun) -> str:
+    text: str = tools_value("rest_answer")
+    run.line_type("0")
+    run.band_wait(text)
+    rows: list[dict[str, str]] = gold_value("dump_entries")
+    while (bodies := entries_ordered(run.root, rows)) is None:
+        run.poll_sleep(f"the audit's entries {rows} of the input 0")
+    turns: dict[str, int] = tools_value("dump_turns")
+    held = {
+        "browser": [int(n) for n in _HIDDEN_PATTERN.findall(bodies[0])],
+        "server": [int(n) for n in _HIDDEN_PATTERN.findall(bodies[1])],
+    }
+    for side, counts in held.items():
+        if max(counts) != turns[side]:
+            raise CheckFailed(
+                f"the {side}'s dump counts {counts} turns, not {turns[side]}"
+            )
+    browser = _HIDDEN_PATTERN.sub("", bodies[0])
+    server = _HIDDEN_PATTERN.sub("", bodies[1])
+    if browser != server:
+        raise CheckFailed(
+            f"the dumps differ past their turns: {browser!r}, {server!r}"
+        )
+    return (
+        f"typing 0 ended with {text!r}, and the dumps differ in nothing but"
+        f" their turns: {turns}"
+    )
+
+
+# The chat requests of a root's audit, each line's body read.
+def chats_read(entries: list[Any]) -> list[dict[str, Any]]:
+    lines = [
+        body_line(entry) for entry in entries if entry.label == "ai to http"
+    ]
+    return [line for line in lines if line["url"].endswith(_CHAT_PATH)]
+
+
+# Each model call holds the seed's prompt once, as its first message.
+def prompt_check(chats: list[dict[str, Any]]) -> None:
+    with open(_PROMPT_PATH, encoding="utf-8") as file:
+        prompt: str = json.load(file)["text"]
+    listed = len(tools_listed())
+    for number, chat in enumerate(chats, 1):
+        messages: list[dict[str, Any]] = chat["json"]["messages"]
+        holding = [m for m in messages if prompt in str(m.get("content"))]
+        if len(holding) != 1 or messages[0] is not holding[0]:
+            raise CheckFailed(
+                f"model call {number} holds the system prompt in"
+                f" {len(holding)} messages, not as its first alone"
+            )
+        tools = len(chat["json"]["tools"])
+        if tools != listed:
+            raise CheckFailed(f"model call {number} lists {tools} tools")
+
+
+# The stored turns the browser sent, which must hold no copy of the prompt.
+def turns_read(entries: list[Any]) -> list[dict[str, Any]]:
+    with open(_PROMPT_PATH, encoding="utf-8") as file:
+        prompt: str = json.load(file)["text"]
+    turns: list[dict[str, Any]] = []
+    for entry in entries:
+        if entry.label == "ai to server":
+            line = body_line(entry)
+            if line["0"].get("type") == _TURN_TYPE:
+                turns.append(line)
+                if prompt in str(line["content"].get("content")):
+                    raise CheckFailed(
+                        f"a stored turn holds the prompt: {entry}"
+                    )
+                if line["role"] == _SYSTEM_ROLE:
+                    raise CheckFailed(f"a system turn was stored: {entry}")
+    return turns
+
+
+# Each tool's result is stored under its own id and holds the gold's text.
+def results_check(turns: list[dict[str, Any]]) -> int:
+    results: dict[str, str] = {}
+    for turn in turns:
+        if turn["role"] == _TOOL_ROLE:
+            call = turn["content"]["tool_call_id"]
+            if call in results:
+                raise CheckFailed(f"the tool call id {call} comes twice")
+            results[call] = turn["content"]["content"]
+    for row in cast(list[dict[str, str]], tools_value("chains")):
+        if row["chain"] == "restart":
+            continue
+        calls: list[dict[str, Any]] = tools_value(row["calls"])
+        for index, call in enumerate(calls):
+            found = results[f"call_{row['chain']}_{index}"]
+            if call["holds"] not in found:
+                raise CheckFailed(
+                    f"{call['name']} of {row['chain']} returned {found!r},"
+                    f" which lacks {call['holds']!r}"
+                )
+    return len(results)
+
+
+# A compaction left one call of the prompt, its summary and the person's text.
+def compaction_check(chats: list[dict[str, Any]]) -> None:
+    summary: str = tools_value("compact_summary")
+    for chat in chats:
+        messages: list[dict[str, Any]] = chat["json"]["messages"]
+        roles = [message["role"] for message in messages]
+        if roles[:2] == [_SYSTEM_ROLE, _SYSTEM_ROLE] and len(roles) == 3:
+            if summary not in messages[1]["content"]:
+                raise CheckFailed(f"the summary turn is {messages[1]!r}")
+            return
+    raise CheckFailed(f"no model call shows the compaction: {summary!r}")
+
+
+# What the server holds of the tour: the kept row, the file, no dropped file.
+def server_check(root: str) -> None:
+    text: str = tools_value("kept_text")
+    value = value_read(root, tools_value("kept_db"), tools_value("kept_key"))
+    if value != text.encode():
+        raise CheckFailed(f"the server holds {value!r}, not {text!r}")
+    dropped = os.path.join(root, tools_value("dropped_db") + _DB_EXTENSION)
+    if os.path.exists(dropped):
+        raise CheckFailed(f"the dropped database {dropped} is still there")
+    path = os.path.join(root, "main_loop", tools_value("loop_name"))
+    with open(path, encoding="utf-8") as file:
+        written = file.read()
+    if written != tools_value("loop_text"):
+        raise CheckFailed(f"the server's main loop file holds {written!r}")
+
+
+# The audit shows the prompt sent once per call, every tool's result and commit.
+def rung_tools_record(run: DemoRun) -> str:
+    import audit, switches
+
+    count = failures_check(run, run.root)
+    entries = audit.entries_read(run.root)
+    chats = chats_read(entries)
+    prompt_check(chats)
+    compaction_check(chats)
+    turns = turns_read(entries)
+    due: int = tools_value("turns_sent")
+    if len(turns) != due:
+        raise CheckFailed(f"the browser sent {len(turns)} turns, not {due}")
+    results = results_check(turns)
+    rows: list[dict[str, str]] = tools_value("commits")
+    missing = [
+        row
+        for row in rows
+        if not any(entry_fits(entry, row) for entry in entries)
+    ]
+    if missing:
+        raise CheckFailed(f"the audit lacks {missing}")
+    server_check(run.root)
+    if switches.debug:
+        audit_copy(run.root, _TOOLS_COPY)
+    return (
+        f"the audit's {count} entries hold no unexpected failure; each of the"
+        f" {len(chats)} model calls holds the system prompt once, as its first"
+        f" message, and none of the {len(turns)} stored turns holds it, past"
+        f" the compaction; {results} tool results hold the gold's texts, and"
+        " the server holds their commits"
+    )
+
+
+# Typing 5 restarts the server in place, which the page refuses by its fault.
+def rung_tools_restart(run: DemoRun) -> str:
+    text: str = tools_value("restart_fault")
+    run.line_type(tools_value("chains")[4]["input"])
+    while True:
+        state = cast(
+            dict[str, Any], run.browser.script_evaluate(_STATE_SCRIPT)
+        )
+        if state["fault"] is not None:
+            break
+        run.poll_sleep(f"the fault screen holding {text!r}")
+    if text not in state["fault"]:
+        raise CheckFailed(f"the fault screen holds {state['fault']!r}")
+    png = run.picture_save("tools_restart")
+    with open(os.path.join(run.root, _AUDIT_NAME), encoding="utf-8") as file:
+        pids = _START_PATTERN.findall(file.read())
+    if len(pids) != 2 or pids[0] != pids[1]:
+        raise CheckFailed(f"the audit's engine starts are of the pids {pids}")
+    run.browser.page_open(_BLANK_URL)
+    code = server_finish(run, cast("xsjs_serve.TtydServer", run.ttyd))
+    return (
+        f"typing 5 restarted the server in place, the pid {pids[0]} kept, the"
+        f" page refused it with {text!r}, and ttyd stopped with code {code};"
+        f" PNG {png}"
+    )
+
+
 # The run passed: `--debug` has left the audit, and the roots go.
 def run_finish(run: DemoRun) -> None:
     import switches
@@ -938,6 +1335,19 @@ def rungs_climb(run: DemoRun) -> None:
     log.book.root_enter(_PLAIN_NAME, _SMOKE_TEST)
     log.rung_run("plain", _SMOKE_TEST, lambda: rung_plain(run))
     log.book.root_leave()
+    if log.book.root_enter(_TOOLS_NAME, _TEST_ALL):
+        log.rung_run("tools served", _TEST_ALL, lambda: rung_tools_served(run))
+        log.rung_run("tools data", _TEST_ALL, lambda: rung_tools_data(run))
+        log.rung_run(
+            "tools console", _TEST_ALL, lambda: rung_tools_console(run)
+        )
+        log.rung_run("tools again", _TEST_ALL, lambda: rung_tools_again(run))
+        log.rung_run("tools dump", _TEST_ALL, lambda: rung_tools_dump(run))
+        log.rung_run("tools record", _TEST_ALL, lambda: rung_tools_record(run))
+        log.rung_run(
+            "tools restart", _TEST_ALL, lambda: rung_tools_restart(run)
+        )
+        log.book.root_leave()
     run_finish(run)
 
 

@@ -19,8 +19,8 @@
 # the archive is the package manager's, as the run's build is, and a forked
 # child turns the switch on to reach that branch of checkout_build.
 
-import harness, io, os, signal, subprocess, switches, tarfile, tempfile
-import third_party_fetch, traceback, ttyd_build, unittest
+import category, harness, io, os, signal, subprocess, switches, tarfile
+import tempfile, third_party_fetch, traceback, ttyd_build, unittest
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -242,7 +242,10 @@ class TestInputs(unittest.TestCase):
             self.assertEqual(file.read(), data)
 
     # Other patches build again, the same are kept, a removed ttyd is built.
-    @unittest.skip("disabled: builds ttyd from source three times, 4.5 s")
+    @unittest.skipUnless(
+        category.disabled_taken(),
+        "disabled: builds ttyd from source three times, 4.5 s",
+    )
     def test_inputs_changed(self) -> None:
         empty = self.patches_write("empty", {})
         size = harness.setting_get("srv_buf_size")

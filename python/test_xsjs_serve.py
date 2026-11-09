@@ -16,8 +16,8 @@
 # ttyd is the suite of test_xsjs_serve_death.py, which takes ProgramCase from
 # here.
 
-import contextlib, filecmp, harness, os, re, runpy, signal, socket, switches
-import sys, tempfile, traceback, unittest, xsjs_serve
+import category, contextlib, filecmp, harness, os, re, runpy, signal, socket
+import switches, sys, tempfile, traceback, unittest, xsjs_serve
 from typing import Any, IO, NoReturn, cast
 
 # The checkout's top directory, above this file's `python/`.
@@ -373,7 +373,10 @@ class TestServer(ScratchCase):
         )
 
     # A ttyd deaf to SIGTERM is killed past the wait, with a shell's code.
-    @unittest.skip("disabled: waits out the 5 s a ttyd has to stop")
+    @unittest.skipUnless(
+        category.disabled_taken(),
+        "disabled: waits out the 5 s a ttyd has to stop",
+    )
     def test_stop_killed(self) -> None:
         server = self.server_start()
         os.kill(server.pid, signal.SIGSTOP)
@@ -419,7 +422,10 @@ class ProgramCase(ScratchCase):
 # The program's own ends: its stop at a signal and its refusal.
 class TestProgram(ProgramCase):
     # It builds the page, makes the root, serves on stdout, stops at SIGINT.
-    @unittest.skip("disabled: the program whole, with a full compile, 2.3 s")
+    @unittest.skipUnless(
+        category.disabled_taken(),
+        "disabled: the program whole, with a full compile, 2.3 s",
+    )
     def test_program_served(self) -> None:
         pid, output = self.program_start(
             ["--debug", "--verbose", "--port", "0", "--root", self.root]

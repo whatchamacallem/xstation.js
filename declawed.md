@@ -201,15 +201,32 @@ command only to name the log.
 
 ### Testing
 
-- Define 2 categories of test suite `smoke-test` and `test-all`. Have
-  `test_posix.sh` run by default whatever important test suites fit in 3
-  minutes by labelling those `smoke-test` and running only them unless asked
-  to run the normal tests too.
-- After making changes, run the end to end tests alone,
-  `./test_posix.sh --end-to-end`. Any further testing without the
-  maintainer's permission is banned: the default run, the full run, a suite
-  or block named by `--module` and a test program run by itself alike.
-  Permission is asked for as a question.
+- A run has one of four test levels, and each level holds every level below
+  it. With no option `test_posix.sh` runs at the lowest, and an option only
+  ever raises the level, so no two options contradict: given two, the run is
+  at the higher of them.
+
+  ```text
+  option           level       what the run adds
+  (none)           end-to-end  the wire, browser and demo tests, their
+                               smoke-test rungs
+  --test-normal    normal      the suites and blocks labelled smoke-test and
+                               the checks of test_posix.py, without formatting
+  --test-all       all         those labelled test-all, the test-all rungs,
+                               the formatters and the line count
+  --test-disabled  disabled    every disabled suite, test, root and rung, with
+                               no line count
+  ```
+
+- Suites, blocks, roots and rungs carry one of 2 labels, `smoke-test` and
+  `test-all`. The end-to-end and normal levels take the label `smoke-test`, and
+  the all and disabled levels take both. The labels are not options. The
+  important ones that fit in 3 minutes are labelled `smoke-test`, and the
+  end-to-end and normal levels hold that deadline.
+- After making changes, run the end to end tests alone, `./test_posix.sh`. Any
+  further testing without the maintainer's permission is banned: a run at a
+  higher level, a suite or block named by `--module` and a test program run by
+  itself alike. Permission is asked for as a question.
 - The two official test targets for the whole project are
   `powershell/test_powershell.ps1`, which runs on Windows, and
   `test_posix.sh`, which will later run in Docker. Both call
@@ -405,7 +422,7 @@ maintainer. You have permission to update this file and fix errors.
   Tools
 - Build and start: page_build, ttyd_build, vectors_make, xsjs_start,
   xsjs_serve, api_match, devtools, xsjs_screenshot
-- Test: test_all, Blocks, Realms, line_case, TAP, Rungs
+- Test: test_all, Blocks, Realms, line_case, TAP, Rungs, audit_read
 
 ## Files
 
@@ -1282,7 +1299,7 @@ fault realm REALM->DRIVER 0 push; fails the block
   its cause, and a PATH with no tsc raises FileNotFoundError.
 - api_check: tsc_run on ts/tsconfig.api.json by compile_timed, its stamp
   build/api_check.passed. No page build calls it; test_posix.py does, last.
-  In the default run that is among the checks after the stream, so a mismatch
+  In a normal run that is among the checks after the stream, so a mismatch
   does not stop the code's blocks; a full run meets it first in
   test_test_posix_formatters, in the Python unit phase. No other unit suite
   compiles the real API text, and test_page_build reaches api_check in a
@@ -1430,8 +1447,8 @@ fault realm REALM->DRIVER 0 push; fails the block
   today. Its descriptors 0, 1 and 2 are the pty, which is the wire; ttyd's
   uv_disable_stdio_inheritance closes every other descriptor across the exec;
   and `/proc/PPID/fd/2` works under the serve program but refuses with EACCES
-  under the Windows runner, whose pipes are root's. The design, AUDIT_PLAN.md
-  8.3: a patch of ttyd's pty_spawn duplicates its stderr before forkpty and, in
+  under the Windows runner, whose pipes are root's. The design: a patch of
+  ttyd's pty_spawn duplicates its stderr before forkpty and, in
   the child, places the copy at a fixed descriptor, 3, with close-on-exec off;
   `verbose` writes a failure's text there outside debug mode, before the
   `error` line; the console role closes it before the sandbox; a test's engine
@@ -1480,7 +1497,7 @@ fault realm REALM->DRIVER 0 push; fails the block
   imports test_xsjs_serve for ProgramCase, and its gold holds gone_seconds,
   poll_seconds and token_path alone.
 - test_xsjs_serve_death count: its _COUNTED row counts it for xsjs_serve.py, so
-  a test-all count checks that module after it and a default count after
+  a test-all count checks that module after it and a normal count after
   test_xsjs_serve. No line of the module is reached by that suite alone.
 - test_integrate_xsjs_serve: starts the program as a person does on port 0,
   fetches ttyd's token, stops it by SIGTERM and checks the exit code and the
@@ -1488,7 +1505,7 @@ fault realm REALM->DRIVER 0 push; fails the block
 
 ## api_match
 
-- api_match.py: proves the text of API/ against the code, read and never imported, so a module with a fault at import fails its own suite and not this one. test_posix.py calls text_match last, after page_build.api_check, so a default run meets a difference after the stream and the cloud run skips it. text_match runs typescript_match by page_build.compile_timed, its stamp build/api_match/passed, which typescript_match's removal of that folder takes away first.
+- api_match.py: proves the text of API/ against the code, read and never imported, so a module with a fault at import fails its own suite and not this one. test_posix.py calls text_match last, after page_build.api_check, so a normal run meets a difference after the stream and the cloud run skips it. text_match runs typescript_match by page_build.compile_timed, its stamp build/api_match/passed, which typescript_match's removal of that folder takes away first.
 - typescript_match: tsc emits the declarations of the bundle's project into build/api_match/, code_wrap moves them under a namespace `code` with `private` and `#private` members cut, since those make a class nominal and the text never declares them, and one project compiles them beside the API text with a check file. Each pair of the check assigns a member to its twin both ways.
 - typescript_match names: compared first, by names_match on members_read of each side: a member the text holds and the code lacks fails, as does one the code exports and the text lacks, a namespace with `export {};` holding only what says `export`. `function` and `const` are both a value. A class in one side is no interface in the other.
 - typescript_match failure: tsc's first error in check.ts names the member by its line over _PAIR_LINES, and tsc's whole output is the cause. A failure in another file keeps tsc's own error.
@@ -1551,29 +1568,41 @@ fault realm REALM->DRIVER 0 push; fails the block
 
 ## test_all
 
-- test_all: `python3 python/test_all.py [--test-all] [--failfast] [--stream]
-  [--module NAME]... [--failures N] [--tty] [--coverage] [--end-to-end]
-  [--anthropic] [--debug] [--verbose]`. It refuses to start as root. Standard
-  library only.
-- --end-to-end: the bring up, then the end to end programs alone, the wire
-  test, the browser test and the demo test, in that order, ending at the first
-  failure with its code: no suite, no block, no check of test_posix.py and no
-  line count. With --test-all it adds their test-all rungs. It refuses
-  --failfast, --stream, --module, --failures, --tty and --coverage, as it has
-  no stream, and test_posix.sh gives no --coverage with it. The smoke-test
-  run's deadline holds. TestDriverEndToEnd of
-  python/test_integrate_test_posix.py proves the refusal.
-- no category option: runs the suites labelled smoke-test. category.py holds
-  the labels and the one option, and its option_words gives a category's
-  option for a command line, none for smoke-test.
-- --test-all: runs the suites of both labels.
+- test_all: `python3 python/test_all.py [--test-normal] [--test-all]
+  [--test-disabled] [--failfast] [--stream] [--module NAME]... [--failures N]
+  [--tty] [--coverage] [--anthropic] [--debug] [--verbose]`. It refuses to
+  start as root. Standard library only.
+- end to end level: with no option, the bring up, then the end to end programs
+  alone, the wire test, the browser test and the demo test, in that order,
+  ending at the first failure with its code: no suite, no block, no check of
+  test_posix.py and no line count. The smoke-test run's deadline holds.
+- level options: each only raises the level, by test_all.stream_wanted and the
+  category's action, so a run given two takes the higher in either order.
+  TestDriverLevels of python/test_integrate_test_posix.py proves it.
+- stream options: --failfast, --stream, --module, --failures, --tty and
+  --coverage need a stream, so each raises an end to end run to the normal
+  level, and no higher.
+- --test-normal: adds the suites labelled smoke-test, as one stream, and the
+  checks of test_posix.py.
+- --test-all: adds the suites of the label test-all and the rungs of that label,
+  and test_posix.sh passes --coverage with it.
+- --test-disabled: adds every disabled suite, test, root and rung, which have
+  no time limit but their own: the wire timers of the browser test wait out 120
+  s each. test_posix.sh passes no --coverage with it, as the modules only it
+  checks would pass or fail by whether the compile stamps are cold: a warm
+  stamp leaves page_build.bundle_compile's lines unrun.
+- category.py: holds the two labels, the three categories smoke-test, test-all
+  and test-disabled, the options --test-all and --test-disabled, which every
+  program takes, and option_words, which gives a category's option for a command
+  line, none for smoke-test. --test-normal is the driver's alone, as only it has
+  a stream.
 - --failfast: the first failing test ends the stream.
 - --stream: ends the run once the stream is checked, before the checks after
   it, and writes nothing to stdout but the stream.
 - --module: runs only the suites and blocks it names, once each, in order, each
   one the category runs. It alone runs a suite or block that fails by design,
-  listed apart, so that a run can check that --failures counts right, and it
-  alone runs a disabled suite. Without
+  listed apart, so that a run can check that --failures counts right, and below
+  the disabled level it alone runs a disabled suite. Without
   --stream the run goes on to the checks after the stream, the demo test
   included.
 - --failures: exit 1 unless the consumer counted exactly the N failing points
@@ -1590,9 +1619,8 @@ fault realm REALM->DRIVER 0 push; fails the block
   for the module of its name or those listed for it; integration and stdio
   suites and TypeScript blocks count for none. It refuses --tty.
 - line count run: `./test_posix.sh --test-all` passes --coverage to the driver,
-  so a full run fails at a module's first line never run. The default run never
-  does, nor a run with --end-to-end, and the tty run stays separate, as
-  --coverage refuses --tty. A count of
+  so a full run fails at a module's first line never run. No other level does,
+  and the tty run stays separate, as --coverage refuses --tty. A count of
   2026-11-07 found every module complete but api_match, whose two lines a test
   then reached.
 - unchecked modules: under --coverage a module is not checked when a disabled
@@ -1635,26 +1663,30 @@ fault realm REALM->DRIVER 0 push; fails the block
   in no phase, and --module refuses them.
 - disabled suites: `_DISABLED` of python/test_all.py, each suite or block with
   why it ran longer than a second. Each keeps its place and label in the phase
-  lists, no category's run takes it, and `--stream --module NAME` runs it, with
-  --test-all for one labelled test-all. Today: test_devtools_chrome,
+  lists, only a --test-disabled run takes it, and `--stream --module NAME` runs
+  it, with --test-all for one labelled test-all. Today: test_devtools_chrome,
   test_page_build_tsc, test_xsjs_serve_death, test_integrate_console_view.ts,
-  test_tools_browser_console.ts and test_console_open.ts.
-- disabled tests: a slow test of a suite that stays is skipped, by
-  unittest.skip in Python and by skipTest in its class's setUp in TypeScript,
-  its reason starting `disabled:`, so the stream shows a SKIP point. Today:
+  test_tools_browser_console.ts, test_console_open.ts and
+  test_jslb_decode_vectors.ts.
+- disabled tests: a slow test of a Python suite that stays is skipped by
+  `unittest.skipUnless(category.disabled_taken(), reason)`, its reason starting
+  `disabled:`, so the stream shows a SKIP point below the disabled level. The
+  driver sets that by category.disabled_set before it imports any suite. Today:
   test_inputs_changed of test_ttyd_build, TestCheckout of test_api_match,
   test_program_served and test_stop_killed of test_xsjs_serve,
   test_hangup_restored of test_integrate_bootstrap, test_lock_refused,
-  test_lock_waited and test_lock_hangup of test_bootstrap and TestVectors of
-  test_jslb_decode.ts.
+  test_lock_waited and test_lock_hangup of test_bootstrap. A TypeScript block
+  has no such reader, as tap.start carries no level, so a slow TypeScript test
+  moves to a disabled block of its own, as test_jslb_decode_vectors.ts, on the
+  helpers its first block exports.
 - fixed waits: a test that waits out a fixed time is labelled test-all and
-  runs in no default run. A label is a suite's, so test_integrate_http.ts,
+  runs in no normal run. A label is a suite's, so test_integrate_http.ts,
   test_integrate_media.ts and test_integrate_wire.ts, each holding one such
   case, are test-all whole; the wire block's case first_sent sits in its chain
   of cases on one tty 0. test_local_http's tests of the delayed path, the
   answer of /slow and test_delay_threaded, are the suite
   test_local_http_delay, so that the unit suite of the HTTP server the blocks
-  use stays in the default run.
+  use stays in the normal run.
 - test_local_http_delay: test-all, beside test_local_http in the Python unit
   list, on that suite's ServerCase, answers_check and gold, counting for
   local_http.py by its _COUNTED row; test_local_http's answers_check takes the
@@ -1919,7 +1951,7 @@ fault realm REALM->DRIVER 0 push; fails the block
   writes tap.start and reads its reply as for any main loop. loop_prepare
   reads the settings for the decoder's limits and the name form.
 - tap_loop loop_run: decodes each line, refuses any reply, and serves tap.run
-  alone, by `python3 test_all.py --stream` with --test-all for that category,
+  alone, by `python3 test_all.py --stream` with the option of its category,
   --failfast when asked, --failures, and --module for each suite named, its
   input empty. A blob is refused. A failure writes one error line and exits 1.
 - tap.line of tap_loop: the language python, in the name form of the parameter
@@ -1940,8 +1972,8 @@ fault realm REALM->DRIVER 0 push; fails the block
 
 ## Rungs
 
-- test_wire.py: `python3 python/test_wire.py [--test-all] [--anthropic]
-  [--debug] [--verbose]`. A TAP run: the producer is ts/test_wire_rungs.ts in
+- test_wire.py: `python3 python/test_wire.py [--test-all] [--test-disabled]
+  [--anthropic] [--debug] [--verbose]`. A TAP run: the producer is ts/test_wire_rungs.ts in
   the page, and this file is the consumer. Exit 0, or 1 at the first failed
   check, naming its rung.
 - wire roots: echo, stock and restart, each with its own ttyd, page copy and
@@ -2000,35 +2032,63 @@ fault realm REALM->DRIVER 0 push; fails the block
 - held rung: a rung named in held_rungs, restart, waits until the driver posts
   its name on release_channel, a BroadcastChannel of the page's origin, so
   that the driver reads the server before it execs.
-- test_browser.py: `python3 python/test_browser.py [--test-all] [--anthropic]
-  [--debug] [--verbose]`. Drives chrome-headless-shell by devtools.LinuxPipe,
+- test_browser.py: `python3 python/test_browser.py [--test-all]
+  [--test-disabled] [--anthropic] [--debug] [--verbose]`. Drives chrome-headless-shell by devtools.LinuxPipe,
   rung by rung, each under a timer and named by the stage of the plan it
   proves.
 - browser roots: the suites root runs the ttyd page's bring up over TAP. The
   probe, credential and echo roots serve the headless page. Others serve the
   ttyd page. Roots are removed once the run passes and kept after a failure.
 - disabled rungs: `_DISABLED_RUNGS` of python/test_browser.py, each rung with
-  why it ran longer than a second, which no run takes: the wire token, open,
+  why it ran longer than a second, which only --test-disabled takes: the wire
+  token, open,
   first line and drain timers, each waiting out a 120 s constant of
   ts/wire.ts; error before the first line, which waits out bootstrap.py's 5 s
   lock wait; wire drain poll; release runs nothing. `_DISABLED_ROOTS` names
-  the roots whose every rung is disabled, echo, stalled and locked, which no
-  run makes.
+  the roots whose every rung is disabled, echo, stalled and locked, which only
+  --test-disabled makes.
 - console role refused: opens the release root's page and waits for its
   settings itself, as the rung before it, release runs nothing, is disabled.
 - http one line per request: its port's timeout is the gold's late_seconds,
   0.2, and its window after the late answer late_quiet_seconds, 0.3, so that
   the rung runs in 0.7 s; the other http rungs keep http_seconds, 2.
-- test_demo.py: `python3 python/test_demo.py [--test-all] [--hold]
-  [--anthropic] [--debug] [--verbose]`. Drives chrome-headless-shell by
+- test_demo.py: `python3 python/test_demo.py [--test-all] [--test-disabled]
+  [--hold] [--anthropic] [--debug] [--verbose]`. Drives chrome-headless-shell by
   devtools.LinuxPipe over the engine page, rung by rung, each under a timer and
   labelled, through roots and ttyd made by xsjs_serve's functions. Exit 0, 1 at
   the first failed check, naming its rung, 130 at ctrl C, or 128 plus the
   signal's number at SIGHUP or SIGTERM.
 - demo rungs: served, choice 1, choice 3, bad input, dump, audit, left and
-  plain are smoke-test; reload, choice 2, console and overlay are test-all;
-  they run in the order served, reload, choice 1, choice 3, bad input, choice
-  2, console, overlay, dump, audit, left, plain.
+  plain are smoke-test; reload, choice 2, console, overlay and the tools rungs
+  are test-all; they run in the order served, reload, choice 1, choice 3, bad
+  input, choice 2, console, overlay, dump, audit, left, plain, then tools
+  served, data, console, again, dump, record and restart.
+- demo audit check: the audit rung and the tools record rung wait until each
+  request of the audit has its reply, as a page thread's record comes late, then
+  run audit_read.failure_check on it. The plain root records nothing, and the
+  wire and browser roots fail on purpose, so no other root takes that check.
+- demo tools root: `build/test_demo-*/tools`, test-all, a debug root whose
+  python/seed/provider_script.json test_demo.table_make replaces before ttyd
+  starts, from the chains of the gold's `tools`. Each chain is one input, whose
+  calls each take one model call, and a chain of the gold names its list of
+  calls, so that 1 and 3 run data_calls and 2 and 4 console_calls with ids of
+  their own. table_make fails when API/mcp/tools.json lists a tool no chain
+  calls, so a new tool cannot miss the rung.
+- demo tools order: 1 runs 17 data calls of 15 tools, whose render shows the
+  pattern image_make kept. 2 runs the console's 3, answering each permit by a
+  click, Always Allow then Accept then Always Allow; 4 then asks only the one
+  not always allowed. 3 takes the conversation to 80 turns, so that 4 compacts
+  it first. 0 dumps both sides, which differ in their turns alone, 9 and 88.
+- demo tools record: every model call holds the seed's prompt exactly once, as
+  its first message, with all the tools, and no stored turn holds it or has the
+  role system; the compaction's summary is the second system message of the call
+  after it; each result holds the gold's text under its own id; the audit shows
+  each commit; and the server holds the kept row and the main loop file, not the
+  dropped database. A chat API keeps nothing between calls, so the prompt goes
+  once per model call, and the record shows no call without it.
+- demo tools restart: 5 calls system_restart, which ends the page, so it comes
+  after the audit's copy. The fault screen holds `wire.start_twice`, the audit
+  holds two engine starts of one pid, and ttyd stops with its code.
 - demo served: _STATE_SCRIPT reads the canvas on the page, and the served rung
   requires it shown, picture_size wide and high and of picture_colours alone;
   rung_choice_render requires it hidden after the first render tool call.
@@ -2054,9 +2114,11 @@ fault realm REALM->DRIVER 0 push; fails the block
   so that a stop signal cannot lose the process; no other signal is blocked, as
   TtydServer unblocks only those two in ttyd.
 - demo pictures: `build/test_demo/`, emptied at each run, holds served,
-  choice_1, choice_3, console and overlay as PNGs, `failed_<rung>.png` for a
-  failed rung, and two texts. audit.txt, the root's audit, is copied as the
-  left rung starts only under the run's --debug switch, or when a rung fails.
+  choice_1, choice_3, console, overlay, tools_data, tools_console and
+  tools_restart as PNGs, `failed_<rung>.png` for a failed rung, and the texts.
+  audit.txt, the root's audit, is copied as the left rung starts, and
+  audit_tools.txt, the tools root's, at the end of its record rung, each only
+  under the run's --debug switch, or when a rung of that root fails.
   server.txt holds the plain rung's ttyd log and stays; it is empty when a run
   fails before that rung.
 - demo hold: --hold after a failed rung prints the error, leaves the page,
@@ -2100,3 +2162,24 @@ fault realm REALM->DRIVER 0 push; fails the block
   a mislabel fails the run.
 - rung gold: test_wire, test_browser and test_demo read their timers, sizes
   and texts from python.test_wire, python.test_browser and python.test_demo.
+
+## audit_read
+
+- audit_read.py: `python3 python/audit_read.py PATH [--check]` prints one line
+  per entry of an audit document, its line number, seconds from the first entry,
+  gap, lane, type, id or reply and detail, then a summary of the run: entries,
+  inputs, model calls with the copies of the system prompt in each, tools called
+  and not called, commits and dumps. Standard library only.
+- audit_read use: only on an end to end run not expected to fail, as
+  `build/test_demo/audit.txt` or `audit_tools.txt` after a run with --debug. The
+  wire and browser tests' roots fail on purpose, and a --check of one is right
+  to exit 1.
+- audit_read --check: exits 1 at the first of these, naming the line: an error
+  or fault line; a line of the audit's own type; an HTTP status outside 200 to
+  299; an MCP error or isError result; a console read timed out; a credential
+  not masked; a note of a program ending with a code not 0; a reply with no
+  request; a request with no reply; a sleep whose reply never came; a model call
+  that holds the first call's system prompt other than once.
+- audit_read starts: requests and replies are paired within one start of the
+  engine, as a reload's ids start again. A console's start heading is no such
+  start, and each is counted against the engine's alone.

@@ -13,9 +13,9 @@
 # no record: the root holds no audit, no `_verbose` file and no `tap`
 # directory.
 
-import audit, bootstrap, errno, fcntl, harness, json, os, pty, resource, runpy
-import select, signal, switches, sys, tempfile, termios, time, traceback
-import unittest
+import audit, bootstrap, category, errno, fcntl, harness, json, os, pty
+import resource, runpy, select, signal, switches, sys, tempfile, termios, time
+import traceback, unittest
 from typing import Any, NamedTuple
 
 # The checkout's top directory, above this file's `python/`.
@@ -656,7 +656,10 @@ class TestLock(unittest.TestCase):
         self.assertEqual(_lock_tried(made.root), b"taken")
 
     # A lock held past the wait is one error line, its cause the last refusal.
-    @unittest.skip("disabled: waits out the 5 s lock wait of bootstrap.py")
+    @unittest.skipUnless(
+        category.disabled_taken(),
+        "disabled: waits out the 5 s lock wait of bootstrap.py",
+    )
     def test_lock_refused(self) -> None:
         made = _root_make(self, False)
         _loop_write(made.root, _LOOP_TEXT)
@@ -688,7 +691,10 @@ class TestLock(unittest.TestCase):
         self.assertEqual(_lock_tried(made.root), b"taken")
 
     # A lock freed within the wait is taken, and the first line then comes.
-    @unittest.skip("disabled: holds the lock 0.25 s, the suite then over 1 s")
+    @unittest.skipUnless(
+        category.disabled_taken(),
+        "disabled: holds the lock 0.25 s, the suite then over 1 s",
+    )
     def test_lock_waited(self) -> None:
         made = _root_make(self, True)
         _loop_write(made.root, _LOOP_TEXT)
@@ -707,7 +713,10 @@ class TestLock(unittest.TestCase):
         self.assertEqual(_lock_tried(made.root), b"taken")
 
     # A hangup during the wait ends the run by SIGHUP, as elsewhere.
-    @unittest.skip("disabled: holds the lock 0.25 s, the suite then over 1 s")
+    @unittest.skipUnless(
+        category.disabled_taken(),
+        "disabled: holds the lock 0.25 s, the suite then over 1 s",
+    )
     def test_lock_hangup(self) -> None:
         made = _root_make(self, False)
         argv = ["--root", made.root]
