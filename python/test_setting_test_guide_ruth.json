@@ -86,9 +86,43 @@
           "rows": [
             {
               "db": "summer",
-              "sql": "SELECT id, partner, altitude_ft, resume_ft, exits, purse_cents FROM jenny",
+              "sql": "SELECT id, name FROM entity ORDER BY id",
               "params": [],
-              "rows": [[1, "Sam", 2000, 0, 0, 0]]
+              "rows": [
+                [1, "world"],
+                [2, "jenny"],
+                [3, "ruth"],
+                [4, "player"],
+                [5, "fair"],
+                [6, "motorcar"],
+                [7, "wind"],
+                [8, "north"],
+                [9, "south"]
+              ]
+            },
+            {
+              "db": "summer",
+              "sql": "SELECT entity.name, name.text FROM name JOIN entity ON entity.id = name.entity",
+              "params": [],
+              "rows": [["player", "Sam"]]
+            },
+            {
+              "db": "summer",
+              "sql": "SELECT entity.name, altitude.ft FROM altitude JOIN entity ON entity.id = altitude.entity",
+              "params": [],
+              "rows": [["jenny", 2000]]
+            },
+            {
+              "db": "summer",
+              "sql": "SELECT step, tick FROM clock",
+              "params": [],
+              "rows": [[1, 0]]
+            },
+            {
+              "db": "summer",
+              "sql": "SELECT step, tick, beat, choice, outcome FROM beat_log ORDER BY n",
+              "params": [],
+              "rows": [[1, 0, "climb", "take her up", "made"]]
             }
           ]
         },
@@ -98,15 +132,35 @@
           "rows": [
             {
               "db": "summer",
-              "sql": "SELECT id, partner, altitude_ft, resume_ft, exits, purse_cents FROM jenny",
+              "sql": "SELECT entity.name, altitude.ft, resume.ft FROM altitude JOIN resume ON resume.entity = altitude.entity JOIN entity ON entity.id = altitude.entity",
               "params": [],
-              "rows": [[1, "Sam", 0, 2000, 1, 0]]
+              "rows": [["jenny", 0, 2000]]
+            },
+            {
+              "db": "summer",
+              "sql": "SELECT entity.name, exits.count FROM exits JOIN entity ON entity.id = exits.entity",
+              "params": [],
+              "rows": [["player", 1]]
             }
           ]
         },
         {
           "say": "Go on",
-          "band": "Back up to 2000 feet in 10 minutes, on 1.5 gallons more. Easy, like I promised. Feel her ride the air? Say your stick when you want to fly her yourself."
+          "band": "Back up to 2000 feet in 10 minutes, on 1.5 gallons more. Easy, like I promised. Feel her ride the air? Say your stick when you want to fly her yourself.",
+          "rows": [
+            {
+              "db": "summer",
+              "sql": "SELECT entity.name, altitude.ft FROM altitude JOIN entity ON entity.id = altitude.entity",
+              "params": [],
+              "rows": [["jenny", 2000]]
+            },
+            {
+              "db": "summer",
+              "sql": "SELECT COUNT(*) FROM resume",
+              "params": [],
+              "rows": [[0]]
+            }
+          ]
         },
         {
           "say": "Your stick",
@@ -152,7 +206,15 @@
         },
         {
           "say": "40",
-          "band": "Nose 40 degrees up at 75 mph and 4 seconds round: she comes out 25 feet high. A roll. Here's the next town. We buzz Main Street and throw out the handbills. How low do you take her, in feet?"
+          "band": "Nose 40 degrees up at 75 mph and 4 seconds round: she comes out 25 feet high. A roll. Here's the next town. We buzz Main Street and throw out the handbills. How low do you take her, in feet?",
+          "rows": [
+            {
+              "db": "summer",
+              "sql": "SELECT entity.name, altitude.ft FROM altitude JOIN entity ON entity.id = altitude.entity",
+              "params": [],
+              "rows": [["jenny", 1918]]
+            }
+          ]
         }
       ]
     },
@@ -180,9 +242,15 @@
           "rows": [
             {
               "db": "summer",
-              "sql": "SELECT id, partner, altitude_ft, resume_ft, exits, purse_cents FROM jenny",
+              "sql": "SELECT entity.name, purse.cents FROM purse JOIN entity ON entity.id = purse.entity",
               "params": [],
-              "rows": [[1, "Sam", 0, 0, 1, 4685]]
+              "rows": [["ruth", 4685]]
+            },
+            {
+              "db": "summer",
+              "sql": "SELECT entity.name, altitude.ft FROM altitude JOIN entity ON entity.id = altitude.entity",
+              "params": [],
+              "rows": [["jenny", 0]]
             }
           ]
         }
@@ -194,7 +262,43 @@
       "steps": [
         {
           "say": "Full throttle",
-          "band": "Full throttle: 75 mph into a 15 mph wind is 60 over the road, 5.0 miles in 5:00. The motorcar at 45 takes 6:40. You win by 1:40 and the fair's $25.00 purse: $71.85 in the cigar box. Then the wing walk, which is always optional. Who flies and who walks?"
+          "band": "Full throttle: 75 mph into a 15 mph wind is 60 over the road, 5.0 miles in 5:00. The motorcar at 45 takes 6:40. You win by 1:40 and the fair's $25.00 purse: $71.85 in the cigar box. Then the wing walk, which is always optional. Who flies and who walks?",
+          "rows": [
+            {
+              "db": "summer",
+              "sql": "SELECT entity.name, purse.cents FROM purse JOIN entity ON entity.id = purse.entity",
+              "params": [],
+              "rows": [["ruth", 7185]]
+            },
+            {
+              "db": "summer",
+              "sql": "SELECT step, tick FROM clock",
+              "params": [],
+              "rows": [[12, 20]]
+            },
+            {
+              "db": "summer",
+              "sql": "SELECT tick, system, text FROM output WHERE step = ? ORDER BY n",
+              "params": [12],
+              "rows": [
+                [0, "ruth_race", "Full throttle: 75 mph into a 15 mph wind is 60 over the road,"],
+                [20, "ruth_finish", "5.0 miles in 5:00. The motorcar at 45 takes 6:40."],
+                [20, "ruth_finish", "You win by 1:40 and the fair's $25.00 purse: $71.85 in the cigar box."]
+              ]
+            },
+            {
+              "db": "summer",
+              "sql": "SELECT (SELECT COUNT(*) FROM racer), (SELECT COUNT(*) FROM throttle), (SELECT COUNT(*) FROM busy)",
+              "params": [],
+              "rows": [[0, 0, 0]]
+            },
+            {
+              "db": "summer",
+              "sql": "SELECT entity.name, altitude.ft FROM altitude JOIN entity ON entity.id = altitude.entity",
+              "params": [],
+              "rows": [["jenny", 50]]
+            }
+          ]
         }
       ]
     },
@@ -204,7 +308,15 @@
       "steps": [
         {
           "say": "I'll fly, you walk",
-          "band": "Ruth walks the top wing while you hold her straight and level at 60 mph and 1000 feet. Then, over open country, the OX-5 coughs and quits: 1000 feet up, the wind 15 mph from the north, the north hayfield 1.5 miles off and the south pasture 3.0. Which field?"
+          "band": "Ruth walks the top wing while you hold her straight and level at 60 mph and 1000 feet. Then, over open country, the OX-5 coughs and quits: 1000 feet up, the wind 15 mph from the north, the north hayfield 1.5 miles off and the south pasture 3.0. Which field?",
+          "rows": [
+            {
+              "db": "summer",
+              "sql": "SELECT entity.name, altitude.ft FROM altitude JOIN entity ON entity.id = altitude.entity",
+              "params": [],
+              "rows": [["jenny", 1000]]
+            }
+          ]
         }
       ]
     },
@@ -237,42 +349,82 @@
           "rows": [
             {
               "db": "summer",
-              "sql": "SELECT id, partner, altitude_ft, resume_ft, exits, purse_cents FROM jenny",
+              "sql": "SELECT entity.name, purse.cents FROM purse JOIN entity ON entity.id = purse.entity",
               "params": [],
-              "rows": [[1, "Sam", 0, 0, 1, 7185]]
+              "rows": [["ruth", 7185]]
             },
             {
               "db": "summer",
-              "sql": "SELECT n, beat, choice, outcome FROM flight ORDER BY n",
+              "sql": "SELECT n, step, tick, beat, choice, outcome FROM beat_log ORDER BY n",
               "params": [],
               "rows": [
-                [1, "climb", "2000", "made"],
-                [2, "exit", "2000", "landed"],
-                [3, "resume", "2000", "made"],
-                [4, "turn", "60", "stalled"],
-                [5, "turn", "30", "made"],
-                [6, "loop", "80", "fell"],
-                [7, "loop", "90", "made"],
-                [8, "roll", "20", "sank"],
-                [9, "roll", "40", "made"],
-                [10, "buzz", "50", "made"],
-                [11, "rides", "10", "made"],
-                [12, "race", "full throttle", "won"],
-                [13, "wing_walk", "Ruth", "walked"],
-                [14, "field", "south", "short"],
-                [15, "field", "north", "reached"],
-                [16, "landing", "into the wind", "landed"]
+                [1, 1, 0, "climb", "take her up", "made"],
+                [2, 2, 0, "exit", "i tap my head twice", "landed"],
+                [3, 3, 0, "resume", "go on", "made"],
+                [4, 4, 0, "turn", "60", "stalled"],
+                [5, 5, 0, "turn", "30", "made"],
+                [6, 6, 0, "loop", "80", "fell"],
+                [7, 7, 0, "loop", "90", "made"],
+                [8, 8, 0, "roll", "20", "sank"],
+                [9, 9, 0, "roll", "40", "made"],
+                [10, 10, 0, "buzz", "50", "made"],
+                [11, 11, 0, "rides", "10", "made"],
+                [12, 12, 20, "race", "full throttle", "won"],
+                [13, 13, 20, "wing_walk", "Ruth", "walked"],
+                [14, 14, 20, "field", "south", "short"],
+                [15, 15, 20, "field", "north", "reached"],
+                [16, 16, 20, "landing", "into the wind", "landed"],
+                [17, 17, 20, "keepsake", "yes please", "kept"]
               ]
             },
             {
               "db": "summer",
-              "sql": "SELECT kind, text FROM keepsake ORDER BY kind",
+              "sql": "SELECT entity.name, keepsake.kind, keepsake.text FROM keepsake JOIN entity ON entity.id = keepsake.entity",
               "params": [],
-              "rows": [["handbill", "RUTH CALLOWAY AND SAM, AERIAL ACROBATS: loops, rolls, the wing walk and a motorcar beaten! Rides $5.00 for 10 minutes."]]
+              "rows": [["handbill", "handbill", "RUTH CALLOWAY AND SAM, AERIAL ACROBATS: loops, rolls, the wing walk and a motorcar beaten! Rides $5.00 for 10 minutes."]]
+            },
+            {
+              "db": "summer",
+              "sql": "SELECT step, tick, tick_seconds, ticks_max FROM clock",
+              "params": [],
+              "rows": [[17, 20, 20, 30]]
+            },
+            {
+              "db": "summer",
+              "sql": "SELECT (SELECT COUNT(*) FROM output), (SELECT COUNT(*) FROM intent), (SELECT COUNT(*) FROM busy)",
+              "params": [],
+              "rows": [[20, 0, 0]]
+            },
+            {
+              "db": "summer",
+              "sql": "SELECT entity.name, altitude.ft FROM altitude JOIN entity ON entity.id = altitude.entity",
+              "params": [],
+              "rows": [["jenny", 0]]
+            },
+            {
+              "db": "summer",
+              "sql": "SELECT entity.name, exits.count FROM exits JOIN entity ON entity.id = exits.entity",
+              "params": [],
+              "rows": [["player", 1]]
             }
           ]
         }
       ]
+    },
+    {
+      "rung": "goodbye",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "So long, Ruth",
+          "band": "Sam, the cigar box holds $71.85 for the summer, with the fair's $25.00 purse in it. The Jenny's still mine, and that's your doing too. So long, partner. Come find me in the next town."
+        }
+      ]
     }
-  ]
+  ],
+  "repeated": {
+    "db": "summer",
+    "sql": "SELECT printf('$%d.%02d', cents / 100, cents % 100) FROM purse JOIN entity ON entity.id = purse.entity WHERE entity.name = ?",
+    "params": ["ruth"]
+  }
 }

@@ -4,23 +4,23 @@
 #
 # Tests the audit's reader on documents the real audit module writes in scratch
 # roots in `build/`, whose suite has passed: a run with no failure read back,
-# each line whole though the document wrote it thin, each lane's bytes fewer as
-# written than as sent, two scenes in turn across a reload with no failure,
-# each kind of unexpected failure found at its line, and the form of a document
-# refused. The failures of a chain are a chained call that resends the prompt
-# or the history or names a response the record lacks, a chain's first call
-# holding the prompt twice, the lanes writing the prompt twice, and an item of
-# the model's output written twice. The audit digest of a tiny guide's walk and
-# of every other kind of line is the gold's, every entry told and a text shown
-# before named by its line, and the guide check passes that walk and fails each
-# fault put in it. The database check replays each kind of commit the server's
-# handlers applied in a forked child, puts replaced, dropped or cached among
-# them, and fails a value, a row and a refused commit; the text tells each kind
-# of cell. The program whole runs in a forked child by `runpy`, so that the
+# each line whole though written thin, each lane's bytes fewer as written than
+# as sent, two scenes in turn across a reload with no failure, each kind of
+# unexpected failure found at its line, and the form of a document refused.
+# A chain fails by a chained call resending the prompt or history or naming a
+# response the record lacks, a chain's first call holding the prompt twice, the
+# lanes writing it twice, and an output item written twice. The audit digest
+# of a tiny guide's walk and of every other kind of line is the gold's, and the
+# guide check passes that walk and fails each fault put in it. The database
+# check replays each kind of commit the server's handlers applied in a forked
+# child, puts replaced, dropped or cached among them, and fails a value, a row
+# and a refused commit; the text tells each kind of cell. The repeat check
+# passes a told walk on a database the real store wrote and fails each of its
+# conditions. The program whole runs in a forked child by `runpy`, so that the
 # count reaches its last line. The texts are the gold's.
 
 import audit, audit_read, copy, harness, jslb, json, os, runpy, shutil, signal
-import substrate, sys, tempfile, traceback, unittest
+import sqlite3, substrate, sys, tempfile, traceback, unittest
 from typing import Any
 
 # The id of this module's gold, in its own `test_setting_` file.
@@ -444,6 +444,121 @@ class TestDatabases(AuditCase):
         for line in gold_value("databases_lines"):
             with self.subTest(line=line):
                 self.assertIn(line, lines)
+
+
+# The repeat check of a told walk, on a database the real store wrote.
+class TestRepeated(AuditCase):
+    # Writes the end's database by the real store, as the server left it.
+    def setUp(self) -> None:
+        super().setUp()
+        self.end = os.path.join(self.root, "end")
+        made: dict[str, Any] = gold_value("repeat_database")
+        store = substrate.Store(self.end, *gold_value("databases_limits"))
+        store.db_create(made["db"])
+        statements = [
+            substrate.SqlStatement(row["sql"], row["params"])
+            for row in made["statements"]
+        ]
+        store.sql_run(made["db"], statements)
+        store.db_close(made["db"])
+
+    # Starts the document again with no entry.
+    def document_renew(self) -> None:
+        self.document_close()
+        os.remove(self.path)
+        audit.audit_open(self.root, _BLOB_MAX, "engine")
+        self.closed = False
+
+    # The message of the check's refusal of the entries by a table and query.
+    def refusal_of(
+        self,
+        entries: list[audit_read.ReadEntry],
+        table: dict[str, Any],
+        repeated: dict[str, Any],
+    ) -> str:
+        with self.assertRaises(audit_read.AuditFailed) as caught:
+            audit_read.repeat_check(entries, table, self.end, repeated)
+        return str(caught.exception)
+
+    # A told walk passes, its evidence naming the line that shows each part.
+    def test_repeat_passed(self) -> None:
+        entries = self.entries_of("repeat_walk")
+        audit_read.failure_check(entries)
+        evidence = audit_read.repeat_check(
+            entries,
+            gold_value("repeat_table"),
+            self.end,
+            gold_value("repeat_query"),
+        )
+        lines: list[int] = gold_value("repeat_lines")
+        numbers = [entries[index].number for index in lines]
+        due = gold_value("repeat_evidence").format(*numbers)
+        self.assertEqual(evidence, due)
+
+    # A query of no row, two rows, a number, an empty text or two texts fails.
+    def test_query_refused(self) -> None:
+        entries = self.entries_of("repeat_walk")
+        for case in gold_value("repeat_queries"):
+            with self.subTest(sql=case["sql"]):
+                repeated = {
+                    **gold_value("repeat_query"),
+                    "sql": case["sql"],
+                    "params": case["params"],
+                }
+                message = self.refusal_of(
+                    entries, gold_value("repeat_table"), repeated
+                )
+                self.assertEqual(message, case["failure"])
+
+    # Read only: a query that writes raises, and the database keeps its rows.
+    def test_read_only(self) -> None:
+        entries = self.entries_of("repeat_walk")
+        table = gold_value("repeat_table")
+        repeated: dict[str, Any] = gold_value("repeat_query")
+        writing = {**repeated, "sql": gold_value("repeat_write")}
+        with self.assertRaises(sqlite3.OperationalError):
+            audit_read.repeat_check(entries, table, self.end, writing)
+        audit_read.repeat_check(entries, table, self.end, repeated)
+
+    # A record with no band yet fails before it reads a turn.
+    def test_band_missing(self) -> None:
+        cut: dict[str, Any] = gold_value("repeat_cut")
+        walk: list[dict[str, Any]] = gold_value("repeat_walk")
+        self.rows_write(walk[: cut["at"]])
+        message = self.refusal_of(
+            self.entries_of(),
+            gold_value("repeat_table"),
+            gold_value("repeat_query"),
+        )
+        self.assertEqual(message, cut["failure"])
+
+    # Each fault of the gold, put in the walk, fails naming the line it says.
+    def test_each_refusal(self) -> None:
+        walk: list[dict[str, Any]] = gold_value("repeat_walk")
+        faults: dict[str, dict[str, Any]] = gold_value("repeat_failures")
+        for name, fault in faults.items():
+            with self.subTest(name=name):
+                self.document_renew()
+                at: int = fault["at"]
+                self.rows_write([*walk[:at], *fault["rows"], *walk[at + 1 :]])
+                entries = self.entries_of()
+                message = self.refusal_of(
+                    entries,
+                    gold_value("repeat_table"),
+                    gold_value("repeat_query"),
+                )
+                number = entries[fault["line"]].number
+                self.assertEqual(message, fault["failure"].format(number))
+
+    # A content of the table that holds the output fails, named by its place.
+    def test_own_text(self) -> None:
+        own: dict[str, Any] = gold_value("repeat_own")
+        table = copy.deepcopy(gold_value("repeat_table"))
+        table["nodes"]["end"]["otherwise"]["content"] = own["content"]
+        message = self.refusal_of(
+            self.entries_of("repeat_walk"), table, gold_value("repeat_query")
+        )
+        self.assertEqual(message, own["failure"])
 
 
 # A text that is no audit document.

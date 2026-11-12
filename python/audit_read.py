@@ -14,7 +14,8 @@
 # document holds only what was new, and the check then proves that it was new.
 # --guide NAME also checks that each message is the one the walk of
 # python/guides/NAME expects. databases_check replays the record's commits on
-# a copy of a root's databases, and database_lines tells databases as text.
+# a copy of a root's databases, database_lines tells databases as text, and
+# repeat_check proves that the guide said a sim's output at the end and before.
 #
 #     python3 python/audit_read.py PATH [--check] [--guide NAME]
 
@@ -1695,6 +1696,141 @@ def databases_check(
         for name in ended.db_list():
             ended.db_close(name)
     _texts_compare(database_lines(end), database_lines(scratch))
+
+
+# Whether a text holds `token` whole, no letter or digit just before or after.
+def _token_held(text: str, token: str) -> bool:
+    start = text.find(token)
+    while start >= 0:
+        end = start + len(token)
+        before = text[max(start - 1, 0) : start]
+        if not before.isalnum() and not text[end : end + 1].isalnum():
+            return True
+        start = text.find(token, start + 1)
+    return False
+
+
+# The one text the gold's query reads from its database in `end`, read only.
+def _repeated_read(end: str, repeated: dict[str, Any]) -> str:
+    db = str(repeated["db"])
+    path = os.path.join(end, db + _DB_EXTENSION)
+    connection = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+    try:
+        cursor = connection.execute(repeated["sql"], repeated["params"])
+        rows: list[Any] = cursor.fetchall()
+    finally:
+        connection.close()
+    shapes = [tuple(type(cell) for cell in row) for row in rows]
+    if shapes != [(str,)] or not rows[0][0]:
+        raise AuditFailed(
+            f"the query of repeated on {db} gives {rows!r}, not one row of"
+            " one text that is not empty"
+        )
+    return str(rows[0][0])
+
+
+# The band an ai.say reply shows the player, or None for any other entry.
+def _band_of(entry: ReadEntry) -> str | None:
+    if type_of(entry) != _SAY_TYPE or _line_kind(entry) != _REPLY_KIND:
+        return None
+    return str(_payload_of(entry)["subtitle"])
+
+
+# Each `content` text in a value at any depth, with the members leading to it.
+def _contents_found(
+    value: Any, path: list[str | int]
+) -> list[tuple[list[str | int], str]]:
+    found: list[tuple[list[str | int], str]] = []
+    if isinstance(value, dict):
+        for key, item in cast(dict[str, Any], value).items():
+            if key == "content" and isinstance(item, str):
+                found.append(([*path, key], item))
+            else:
+                found += _contents_found(item, [*path, key])
+    elif isinstance(value, list):
+        for index, item in enumerate(cast(list[Any], value)):
+            found += _contents_found(item, [*path, index])
+    return found
+
+
+# The evidence that the guide said the text the gold's query reads from `end`.
+def repeat_check(
+    entries: list[ReadEntry],
+    table: dict[str, Any],
+    end: str,
+    repeated: dict[str, Any],
+) -> str:
+    text = _repeated_read(end, repeated)
+    bands = [
+        index
+        for index, entry in enumerate(entries)
+        if _band_of(entry) is not None
+    ]
+    if not bands:
+        raise AuditFailed(
+            f"the record holds no ai.say reply, so no band holds {text!r}"
+        )
+    band = entries[bands[-1]]
+    shown = str(_band_of(band))
+    if not _token_held(shown, text):
+        raise AuditFailed(
+            f"line {band.number}: the last band {shown!r} does not hold"
+            f" {text!r}"
+        )
+    # The end turn runs from the last input before the last band to that band.
+    began = max(
+        index
+        for index in range(bands[-1])
+        if type_of(entries[index]) == _INPUT_TYPE
+    )
+    turn = entries[began : bands[-1]]
+    reply, answer = _replies_of(turn)[-1]
+    said = _said_of(answer["output"])
+    if not _token_held(said, text):
+        raise AuditFailed(
+            f"line {reply.number}: the model reply before the last band says"
+            f" {said!r}, which does not hold {text!r}"
+        )
+    call, asked = _calls_of(turn)[-1]
+    endings = _outputs_ending(asked["input"])
+    if not any(_token_held(str(item["output"]), text) for item in endings):
+        raise AuditFailed(
+            f"line {call.number}: the last model call of the end turn carries"
+            f" no tool result that holds {text!r}"
+        )
+    for path, content in _contents_found(table, []):
+        if _token_held(content, text):
+            raise AuditFailed(
+                f"the table's content at {json.dumps(path)} holds {text!r},"
+                " so the guide could say it in its own words"
+            )
+    for entry in turn:
+        kind = type_of(entry)
+        committed = entry.label == _COMMIT_LANE and kind in _COMMIT_TYPES
+        if committed and kind != "turn.append":
+            raise AuditFailed(
+                f"line {entry.number}: the end turn commits {kind}, where it"
+                " should commit nothing but turn.append"
+            )
+    told = [
+        index
+        for index in bands[:-1]
+        if _token_held(str(_band_of(entries[index])), text)
+    ]
+    if not told:
+        raise AuditFailed(
+            f"line {band.number}: no band before the last holds {text!r}, so"
+            " it was not told when it was made"
+        )
+    first = entries[told[0]]
+    quoted = json.dumps(text, ensure_ascii=False)
+    return (
+        f"repeated: {quoted} from {repeated['db']}, first said at"
+        f" L{first.number}, said at the end at L{band.number} by the reply"
+        f" L{reply.number}, carried by the tool result L{call.number}, in no"
+        " text of the guide's own, and the last turn committed nothing but"
+        " turns"
+    )
 
 
 # Prints the digest and, when asked, checks and prints the verdict.

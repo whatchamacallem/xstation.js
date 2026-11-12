@@ -3,18 +3,42 @@
   "puzzled": "I did not understand. Say it slowly, please.",
   "exit": {
     "input": "take me down",
-    "call": {
-      "call_id": "call_exit",
-      "name": "browser_script_run",
-      "arguments": {"name": "dawa", "args": {"action": "exit"}}
-    },
+    "calls": [
+      {
+        "call_id": "call_exit",
+        "name": "browser_sql_run",
+        "arguments": {
+          "db": "expedition",
+          "statements": [
+            {"sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?", "params": ["exit", "take me down", "player"]}
+          ]
+        }
+      },
+      {
+        "call_id": "call_exit_step",
+        "name": "browser_script_run",
+        "arguments": {"name": "ecs_step", "args": {"world": "expedition"}}
+      }
+    ],
     "after": "On the mountain nobody is brave about this. We rest here as long as you like, and when you want to climb again, say let's go up again.",
     "resume": "let's go up again",
-    "resume_call": {
-      "call_id": "call_resume",
-      "name": "browser_script_run",
-      "arguments": {"name": "dawa", "args": {"action": "resume"}}
-    },
+    "resume_calls": [
+      {
+        "call_id": "call_resume",
+        "name": "browser_sql_run",
+        "arguments": {
+          "db": "expedition",
+          "statements": [
+            {"sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?", "params": ["resume", "let's go up again", "player"]}
+          ]
+        }
+      },
+      {
+        "call_id": "call_resume_step",
+        "name": "browser_script_run",
+        "arguments": {"name": "ecs_step", "args": {"world": "expedition"}}
+      }
+    ],
     "paused": "We rest here. When you want to climb again, say let's go up again."
   },
   "nodes": {
@@ -126,38 +150,138 @@
           "content": null,
           "tool_calls": [
             {
-              "call_id": "call_script",
+              "call_id": "call_put_ecs_init",
               "name": "browser_kv_put",
-              "arguments": {
-                "ref": "/_files/script/dawa.js",
-                "text": {"$text": "sim.js"}
-              }
+              "arguments": {"ref": "/_files/script/ecs_init.js", "text": {"$ecs": "init.js"}}
             },
             {
-              "call_id": "call_tables",
+              "call_id": "call_put_ecs_step",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ecs_step.js", "text": {"$ecs": "step.js"}}
+            },
+            {
+              "call_id": "call_put_dawa_lib",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/dawa_lib.js", "text": {"$text": "lib.js"}}
+            },
+            {
+              "call_id": "call_put_dawa_spawn",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/dawa_spawn.js", "text": {"$text": "spawn.js"}}
+            },
+            {
+              "call_id": "call_put_dawa_report",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/dawa_report.js", "text": {"$text": "report.js"}}
+            },
+            {
+              "call_id": "call_put_dawa_icefall",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/dawa_icefall.js", "text": {"$text": "icefall.js"}}
+            },
+            {
+              "call_id": "call_put_dawa_morning",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/dawa_morning.js", "text": {"$text": "morning.js"}}
+            },
+            {
+              "call_id": "call_put_dawa_exit",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/dawa_exit.js", "text": {"$text": "exit.js"}}
+            },
+            {
+              "call_id": "call_put_dawa_resume",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/dawa_resume.js", "text": {"$text": "resume.js"}}
+            },
+            {
+              "call_id": "call_put_dawa_window",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/dawa_window.js", "text": {"$text": "window.js"}}
+            },
+            {
+              "call_id": "call_put_dawa_loads",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/dawa_loads.js", "text": {"$text": "loads.js"}}
+            },
+            {
+              "call_id": "call_put_dawa_push",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/dawa_push.js", "text": {"$text": "push.js"}}
+            },
+            {
+              "call_id": "call_put_dawa_decide",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/dawa_decide.js", "text": {"$text": "decide.js"}}
+            },
+            {
+              "call_id": "call_put_dawa_keepsake",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/dawa_keepsake.js", "text": {"$text": "keepsake.js"}}
+            },
+            {
+              "call_id": "call_put_dawa_breathe",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/dawa_breathe.js", "text": {"$text": "breathe.js"}}
+            },
+            {
+              "call_id": "call_put_dawa_move",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/dawa_move.js", "text": {"$text": "move.js"}}
+            },
+            {
+              "call_id": "call_put_dawa_rescue",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/dawa_rescue.js", "text": {"$text": "rescue.js"}}
+            },
+            {
+              "call_id": "call_put_dawa_stop",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/dawa_stop.js", "text": {"$text": "stop.js"}}
+            },
+            {
+              "call_id": "call_init",
+              "name": "browser_script_run",
+              "arguments": {"name": "ecs_init", "args": {"world": "expedition"}}
+            },
+            {
+              "call_id": "call_schema",
               "name": "browser_sql_run",
               "arguments": {
                 "db": "expedition",
                 "statements": [
-                  {
-                    "sql": "CREATE TABLE climber (id INTEGER PRIMARY KEY CHECK (id = 1), camp TEXT NOT NULL, altitude_m INTEGER NOT NULL, ams INTEGER NOT NULL, hidden INTEGER NOT NULL, rest_days INTEGER NOT NULL, load_kg INTEGER NOT NULL, bottles INTEGER NOT NULL, resume_camp TEXT NOT NULL, exits INTEGER NOT NULL, high_m INTEGER NOT NULL, record TEXT NOT NULL) STRICT",
-                    "params": []
-                  },
-                  {
-                    "sql": "CREATE TABLE climb_log (n INTEGER PRIMARY KEY, beat TEXT NOT NULL, choice TEXT NOT NULL, outcome TEXT NOT NULL) STRICT",
-                    "params": []
-                  },
-                  {
-                    "sql": "CREATE TABLE keepsake (kind TEXT NOT NULL PRIMARY KEY, text TEXT NOT NULL) STRICT",
-                    "params": []
-                  }
+                  {"sql": "CREATE TABLE camp (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, name TEXT NOT NULL, place TEXT NOT NULL, altitude_m INTEGER NOT NULL, ord INTEGER NOT NULL UNIQUE, way TEXT NOT NULL) STRICT", "params": []},
+                  {"sql": "CREATE TABLE leg (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, up_minutes INTEGER NOT NULL, down_minutes INTEGER NOT NULL) STRICT", "params": []},
+                  {"sql": "CREATE TABLE at (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, camp INTEGER NOT NULL REFERENCES entity (id)) STRICT", "params": []},
+                  {"sql": "CREATE TABLE climb (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, to_camp INTEGER NOT NULL REFERENCES entity (id), ticks_left INTEGER NOT NULL) STRICT", "params": []},
+                  {"sql": "CREATE TABLE day (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, minute INTEGER NOT NULL) STRICT", "params": []},
+                  {"sql": "CREATE TABLE ams (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, grade INTEGER NOT NULL, hidden INTEGER NOT NULL) STRICT", "params": []},
+                  {"sql": "CREATE TABLE rest (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, days INTEGER NOT NULL) STRICT", "params": []},
+                  {"sql": "CREATE TABLE load (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, kg INTEGER NOT NULL) STRICT", "params": []},
+                  {"sql": "CREATE TABLE high (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, m INTEGER NOT NULL) STRICT", "params": []},
+                  {"sql": "CREATE TABLE exits (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, count INTEGER NOT NULL) STRICT", "params": []},
+                  {"sql": "CREATE TABLE resume (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, camp INTEGER NOT NULL REFERENCES entity (id)) STRICT", "params": []},
+                  {"sql": "CREATE TABLE limits (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, load_kg INTEGER NOT NULL, wind_kmh INTEGER NOT NULL) STRICT", "params": []},
+                  {"sql": "CREATE TABLE record (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, text TEXT NOT NULL) STRICT", "params": []},
+                  {"sql": "CREATE TABLE bottle (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, full_l INTEGER NOT NULL, left_l INTEGER NOT NULL, kg INTEGER NOT NULL, holder INTEGER NOT NULL REFERENCES entity (id)) STRICT", "params": []},
+                  {"sql": "CREATE TABLE breathe (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, lpm INTEGER NOT NULL, bottle INTEGER NOT NULL REFERENCES entity (id)) STRICT", "params": []},
+                  {"sql": "CREATE TABLE down (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE) STRICT", "params": []},
+                  {"sql": "CREATE TABLE forecast (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, days_ahead INTEGER NOT NULL UNIQUE, kmh INTEGER NOT NULL) STRICT", "params": []},
+                  {"sql": "CREATE TABLE sun (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, loosen_hour INTEGER NOT NULL) STRICT", "params": []},
+                  {"sql": "CREATE TABLE icefall (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, hours INTEGER NOT NULL) STRICT", "params": []},
+                  {"sql": "CREATE TABLE kit (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, tent_kg INTEGER NOT NULL, stove_kg INTEGER NOT NULL, food_kg INTEGER NOT NULL) STRICT", "params": []},
+                  {"sql": "CREATE TABLE oxygen (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, camp INTEGER NOT NULL REFERENCES entity (id), climb_lpm INTEGER NOT NULL, sick_lpm INTEGER NOT NULL) STRICT", "params": []},
+                  {"sql": "CREATE TABLE staging (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, camp INTEGER NOT NULL REFERENCES entity (id)) STRICT", "params": []},
+                  {"sql": "CREATE TABLE departure (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, hour INTEGER NOT NULL) STRICT", "params": []},
+                  {"sql": "CREATE TABLE keepsake (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, kind TEXT NOT NULL UNIQUE, text TEXT NOT NULL) STRICT", "params": []},
+                  {"sql": "INSERT INTO system (ord, name, kind) VALUES (1, 'dawa_lib', 'lib'), (2, 'dawa_icefall', 'step'), (3, 'dawa_morning', 'step'), (4, 'dawa_exit', 'step'), (5, 'dawa_resume', 'step'), (6, 'dawa_window', 'step'), (7, 'dawa_loads', 'step'), (8, 'dawa_push', 'step'), (9, 'dawa_decide', 'step'), (10, 'dawa_keepsake', 'step'), (11, 'dawa_breathe', 'tick'), (12, 'dawa_move', 'tick'), (13, 'dawa_rescue', 'tick'), (14, 'dawa_stop', 'tick')", "params": []}
                 ]
               }
             },
             {
-              "call_id": "call_setup",
+              "call_id": "call_spawn",
               "name": "browser_script_run",
-              "arguments": {"name": "dawa", "args": {"action": "setup"}}
+              "arguments": {"name": "dawa_spawn", "args": {"world": "expedition"}}
             }
           ],
           "next": "built"
@@ -184,23 +308,47 @@
           "tool_calls": [
             {
               "call_id": "call_icefall",
-              "name": "browser_script_run",
-              "arguments": {"name": "dawa", "args": {"action": "icefall", "start": 7}}
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "expedition",
+                "statements": [
+                  {"sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?", "params": ["icefall", "7", "player"]}
+                ]
+              }
             }
           ],
-          "next": "crossed"
+          "next": "icefall_step"
         },
         "2": {
           "content": null,
           "tool_calls": [
             {
               "call_id": "call_icefall",
-              "name": "browser_script_run",
-              "arguments": {"name": "dawa", "args": {"action": "icefall", "start": 2}}
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "expedition",
+                "statements": [
+                  {"sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?", "params": ["icefall", "2", "player"]}
+                ]
+              }
             }
           ],
-          "next": "crossed"
+          "next": "icefall_step"
         }
+      }
+    },
+    "icefall_step": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_step",
+            "name": "browser_script_run",
+            "arguments": {"name": "ecs_step", "args": {"world": "expedition"}}
+          }
+        ],
+        "next": "crossed"
       }
     },
     "crossed": {
@@ -225,23 +373,47 @@
           "tool_calls": [
             {
               "call_id": "call_morning",
-              "name": "browser_script_run",
-              "arguments": {"name": "dawa", "args": {"action": "morning", "answer": "no"}}
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "expedition",
+                "statements": [
+                  {"sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?", "params": ["morning", "no", "player"]}
+                ]
+              }
             }
           ],
-          "next": "answered"
+          "next": "morning_step"
         },
         "yes, it hurts": {
           "content": null,
           "tool_calls": [
             {
               "call_id": "call_morning",
-              "name": "browser_script_run",
-              "arguments": {"name": "dawa", "args": {"action": "morning", "answer": "yes"}}
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "expedition",
+                "statements": [
+                  {"sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?", "params": ["morning", "yes", "player"]}
+                ]
+              }
             }
           ],
-          "next": "answered"
+          "next": "morning_step"
         }
+      }
+    },
+    "morning_step": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_step",
+            "name": "browser_script_run",
+            "arguments": {"name": "ecs_step", "args": {"world": "expedition"}}
+          }
+        ],
+        "next": "answered"
       }
     },
     "answered": {
@@ -266,23 +438,47 @@
           "tool_calls": [
             {
               "call_id": "call_window",
-              "name": "browser_script_run",
-              "arguments": {"name": "dawa", "args": {"action": "window", "wait": 1}}
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "expedition",
+                "statements": [
+                  {"sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?", "params": ["window", "1", "player"]}
+                ]
+              }
             }
           ],
-          "next": "forecast"
+          "next": "window_step"
         },
         "wait three days": {
           "content": null,
           "tool_calls": [
             {
               "call_id": "call_window",
-              "name": "browser_script_run",
-              "arguments": {"name": "dawa", "args": {"action": "window", "wait": 3}}
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "expedition",
+                "statements": [
+                  {"sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?", "params": ["window", "3", "player"]}
+                ]
+              }
             }
           ],
-          "next": "forecast"
+          "next": "window_step"
         }
+      }
+    },
+    "window_step": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_step",
+            "name": "browser_script_run",
+            "arguments": {"name": "ecs_step", "args": {"world": "expedition"}}
+          }
+        ],
+        "next": "forecast"
       }
     },
     "forecast": {
@@ -307,23 +503,47 @@
           "tool_calls": [
             {
               "call_id": "call_loads",
-              "name": "browser_script_run",
-              "arguments": {"name": "dawa", "args": {"action": "loads", "carry": "everything"}}
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "expedition",
+                "statements": [
+                  {"sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?", "params": ["loads", "everything", "player"]}
+                ]
+              }
             }
           ],
-          "next": "packed"
+          "next": "loads_step"
         },
         "leave one bottle": {
           "content": null,
           "tool_calls": [
             {
               "call_id": "call_loads",
-              "name": "browser_script_run",
-              "arguments": {"name": "dawa", "args": {"action": "loads", "carry": "one bottle"}}
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "expedition",
+                "statements": [
+                  {"sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?", "params": ["loads", "one bottle", "player"]}
+                ]
+              }
             }
           ],
-          "next": "packed"
+          "next": "loads_step"
         }
+      }
+    },
+    "loads_step": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_step",
+            "name": "browser_script_run",
+            "arguments": {"name": "ecs_step", "args": {"world": "expedition"}}
+          }
+        ],
+        "next": "packed"
       }
     },
     "packed": {
@@ -348,8 +568,18 @@
           "tool_calls": [
             {
               "call_id": "call_push",
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "expedition",
+                "statements": [
+                  {"sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?", "params": ["push", "go", "player"]}
+                ]
+              }
+            },
+            {
+              "call_id": "call_step",
               "name": "browser_script_run",
-              "arguments": {"name": "dawa", "args": {"action": "push"}}
+              "arguments": {"name": "ecs_step", "args": {"world": "expedition"}}
             }
           ],
           "next": "pushed"
@@ -372,8 +602,18 @@
           "tool_calls": [
             {
               "call_id": "call_decide",
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "expedition",
+                "statements": [
+                  {"sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?", "params": ["decide", "rescue", "player"]}
+                ]
+              }
+            },
+            {
+              "call_id": "call_step",
               "name": "browser_script_run",
-              "arguments": {"name": "dawa", "args": {"action": "decide", "choice": "rescue"}}
+              "arguments": {"name": "ecs_step", "args": {"world": "expedition"}}
             }
           ],
           "next": "decided"
@@ -383,8 +623,18 @@
           "tool_calls": [
             {
               "call_id": "call_decide",
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "expedition",
+                "statements": [
+                  {"sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?", "params": ["decide", "summit", "player"]}
+                ]
+              }
+            },
+            {
+              "call_id": "call_step",
               "name": "browser_script_run",
-              "arguments": {"name": "dawa", "args": {"action": "decide", "choice": "summit"}}
+              "arguments": {"name": "ecs_step", "args": {"world": "expedition"}}
             }
           ],
           "next": "decided"
@@ -433,8 +683,18 @@
           },
           {
             "call_id": "call_keepsake",
+            "name": "browser_sql_run",
+            "arguments": {
+              "db": "expedition",
+              "statements": [
+                {"sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?", "params": ["keepsake", "yes", "player"]}
+              ]
+            }
+          },
+          {
+            "call_id": "call_step",
             "name": "browser_script_run",
-            "arguments": {"name": "dawa", "args": {"action": "keepsake"}}
+            "arguments": {"name": "ecs_step", "args": {"world": "expedition"}}
           }
         ],
         "next": "kept"
@@ -449,9 +709,29 @@
       }
     },
     "end": {
-      "replies": {},
+      "replies": {
+        "goodbye, dawa": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_report",
+              "name": "browser_script_run",
+              "arguments": {"name": "dawa_report", "args": {"world": "expedition"}}
+            }
+          ],
+          "next": "told"
+        }
+      },
       "otherwise": {
         "content": "Dawa smiles and pours the last of the tea. Go slowly.",
+        "next": "end"
+      }
+    },
+    "told": {
+      "replies": {},
+      "after_tools": {
+        "content": "Dawa takes your hand in both of his. Thank you for climbing on my rope. Go slowly, my friend.",
+        "quote": "value.say",
         "next": "end"
       }
     }

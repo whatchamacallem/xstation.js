@@ -493,16 +493,20 @@ maintainer. You have permission to update this file and fix errors.
   test_guide_dawa.py are test modules by their names, with no stub.
 - `python/guides/GUIDE/`: the files of one guide, GUIDE `isaiah`, `ruth` or
   `dawa`, read from the checkout by guide_walk.table_build alone and copied
-  into no root: `table.json`, the table source; `sim.js`, the sim's script;
-  `prompt.txt`, the text of the universe's prompt document; and
+  into no root: `table.json`, the table source; `lib.js`, `spawn.js`,
+  `report.js` and one file per system, the sim's scripts by the rule guide
+  scripts; `prompt.txt`, the text of the universe's prompt document; and
   `introduction.txt`, the guide's introduction in guides.md, the text after
   `> ` on its one line, exactly. Each text file ends in one newline.
+- `python/guides/ecs/`: the core scripts every guide sends, `init.js` and
+  `step.js`, named in a table by `{"$ecs": FILE}`, read from the checkout by
+  guide_walk.table_build alone, as the directory `ecs` beside the guide's.
 - guide golds: `python/test_setting_test_guide_isaiah.json`,
   `python/test_setting_test_guide_ruth.json` and
   `python/test_setting_test_guide_dawa.json`, each the walk of a guide
   program under the id python.test_guide_GUIDE, and
   `python/test_setting_test_guide_walk.json`, the scratch guide of the
-  builder's unit suite and the whole table it must build.
+  builder's unit suite, its core's files and the whole table it must build.
 - `guides.md`: at the checkout's top, the document of the 50 guided
   experiences, moved there from API/ts/guides.md on 2026-11-11, its content
   unchanged, by the maintainer, as no task of that session's swarm moved it.
@@ -2037,10 +2041,18 @@ fault realm REALM->DRIVER 0 push; fails the block
   module's lines are checked.
 - test_guide_walk: the unit suite of guide_walk.table_build, smoke-test,
   directly after test_xsjs_serve_death in the Python unit list. TestScratch
-  writes a scratch guide under build/ from its gold's table and files and
-  checks each step of the build and each refusal, the exit's expansion
-  compared whole with the gold's built table; TestGuides builds the three
-  guides of python/guides/, each start one of its nodes. Its _COUNTED row is
+  writes a scratch guide under build/ from its gold's table and files, with
+  its core's files, the gold's ecs_files, in `ecs` beside it, and checks each
+  step of the build, `$text` and `$ecs` replaced, arguments made text, the
+  otherwise and the exit's expansion compared whole with the gold's built
+  table, and that a second node that asks gets its own copies of the exit's
+  lists; and each refusal by its text: a file of the guide or of the core
+  with no final newline, a `$text` or `$ecs` object beside another member,
+  `$text` named first when both are, ask beside otherwise, replies with no
+  otherwise, the exit's input or resume already a reply, a taken name, the
+  exit in the old form, and calls or resume_calls empty or no list.
+  TestGuides builds the three guides of python/guides/, each start one of
+  its nodes. Its _COUNTED row is
   empty, so it counts for no module: guide_walk.py's other lines need the page
   and run in the guide programs alone, and no --coverage run checks that
   module.
@@ -2557,10 +2569,154 @@ fault realm REALM->DRIVER 0 push; fails the block
   the guide, talk with the player, build a sim, then guide the player through
   operating it, the player's inputs numbers, words and phrases, offline,
   POSIX, headless, on the fake AI alone.
-- guide time: estimated by GUIDES_PLAN.md 3.1.4 at 10 to 20 s a guide, so 30
-  to 60 s at the end to end level and 100 to 130 s at the normal level, under
-  the 180 s of python.test_all.smoke_seconds; not measured, as the swarm that
-  wrote them ran nothing.
+- guide ecs: by DB_USE.md, task 1.1 of tmp/tasks_12_0737.md, each guide's sim
+  is an entity-component-system in its world database: entities and
+  components are rows of tables, systems are scripts whose work is SQL over
+  those tables, and a step runs the systems in a fixed order, tick by tick.
+  The fake guide operates it on the fake player's behalf: the player only
+  talks, and the guide's table writes the player's choice into the world
+  database as an intent by browser_sql_run, then steps the sim by
+  browser_script_run of ecs_step, so every number the page shows is the sim's.
+- ecs terms: an entity is one row of `entity`, an id and a unique name. A
+  component is a table keyed by `entity`, plain data and no behaviour; an
+  entity holds it when the table holds its row, and a tag is a component of
+  no column but `entity`. A system is a script that finds the entities
+  holding a set of components by SQL joins or correlated subqueries and
+  changes them by set-based SQL; a step system runs once a step, a tick system
+  once a tick. A step is one run of ecs_step for one decision of the player;
+  a tick one unit of the sim's time, fixed per guide in its clock, a day for
+  Isaiah, 20 seconds for Ruth and 30 minutes for Dawa; an intent the player's
+  choice, a component of the player's entity that the guide writes and one
+  step system consumes; an output one fragment of what a step says.
+- ecs core tables: made in each guide's world database by ecs_init, each
+  STRICT, as DB_USE.md 3.2.1 writes them: `entity (id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE)`; `system (ord INTEGER PRIMARY KEY, name TEXT NOT
+  NULL UNIQUE, kind TEXT NOT NULL CHECK (kind IN ('lib', 'step', 'tick')))`,
+  the schedule, exactly one row of kind lib; `clock (entity, step, tick,
+  tick_seconds, ticks_max)`, a component of the entity `world` alone, the
+  steps taken, the ticks run, the seconds a tick stands for and the most ticks
+  one step may run; `intent (entity, verb TEXT, value TEXT)`; `busy (entity)`,
+  the tag of an entity a tick system still moves; `output (n INTEGER PRIMARY
+  KEY, step, tick, system TEXT, text TEXT)`, every fragment ever said; and
+  `beat_log (n INTEGER PRIMARY KEY, step, tick, beat TEXT, choice TEXT,
+  outcome TEXT)`, which replaces the one-row sims' logs. Every other column is
+  INTEGER NOT NULL, and each component's `entity` is `INTEGER PRIMARY KEY
+  REFERENCES entity (id) ON DELETE CASCADE`.
+- ecs_init: python/guides/ecs/init.js, kept at /_files/script/ecs_init.js,
+  args `{world}`: runs the DDL of the ecs core tables on the world in one
+  sql_run and returns `{world}`, its tool result `{"value":{"world":W}}`.
+- ecs_step: python/guides/ecs/step.js, kept at /_files/script/ecs_step.js,
+  args `{world}`, inside one store.transaction_run: reads the one row of
+  clock, the step its step plus 1; reads `system` in ord, each script's text
+  by store.kv_get of /_files/script/NAME.js, compiled once by `new
+  Function("engine", "args", text)`, a value that is no byte array throwing
+  naming the script; runs the lib script with `{}`, its value the library;
+  runs each step system once, in ord, with `{ecs}`; throws when an intent is
+  left, naming its verb, as no system took it; while `busy` holds a row, runs
+  a tick, the tick plus 1, then each tick system in ord, and throws when a
+  step reaches ticks_max ticks with an entity still busy; writes the step and
+  tick to clock in one statement; reads this step's outputs in n and its
+  beat_log rows, throws unless there is at least one output and exactly one
+  log row, and returns `{say, outcome}`, the outputs joined by single spaces
+  and the log row's outcome, in that key order.
+- ecs system contract: each system gets `args.ecs`, a frozen object the step
+  makes: `world`, `step`, `tick`, `system`, its own name, and `lib`; `rows(sql,
+  params)`, the rows of a SELECT on the world as objects; `run(statements)`, a
+  sql_run on the world; `id(name)`, an entity's id, throwing when it is
+  absent; `take(verb)`, the intent of that verb as `{entity, name, value}`,
+  deleted, or null when none waits, so the system has no work this step;
+  `say(text)`, one output row; `log(beat, choice, outcome)`, one beat_log row.
+  A system returns nothing, keeps nothing between runs and finds its entities
+  by their components alone, never by a list in its code. A step system takes
+  at most one verb's intent. A tick system that moves an entity to its end
+  deletes its `busy` row; one that starts nothing adds none.
+- ecs replay agreement: the server and audit_read.databases_check repeat the
+  statements, not the scripts, so every value SQL computes is an integer or
+  text, by integer arithmetic, comparison, MIN, MAX or printf of integers;
+  floating point is worked in JavaScript alone and bound as a parameter; no
+  statement calls a math function, random() or a time function. An UPDATE
+  takes its values from correlated subqueries keyed by `entity`, or from an
+  UPDATE ... FROM matching at most one row per target row. An INSERT ...
+  SELECT of several rows orders them by a key, so the rowids agree. A system
+  does its writes of one tick in as few sql_run calls as it can, as each call
+  that changes something is one push and one record.
+- ecs_init form: args.world must be a non-empty text, else it throws; one
+  sql_run of seven CREATE TABLE statements in the order entity, system,
+  clock, intent, busy, output, beat_log.
+- ecs_step checks: clock is exactly one row, of the entity named world;
+  there is exactly one system of kind lib, whose value is a frozen object;
+  every system is compiled before the lib runs, its script read as strict
+  UTF-8, and a cache handle, a bad encoding or a compile failure throws
+  naming the script's key; each step or tick system returns undefined; a
+  system's throw is thrown again naming the world, the system's kind and name
+  and the thrown value's stack, the value as its cause, so the tool result
+  names the system.
+- ecs time: clock.tick counts every tick the world has run, across steps; a
+  step system's ecs.tick is the clock's tick before the step, a tick
+  system's the tick it runs, and output and beat_log rows carry it; ticks_max
+  bounds the ticks of one step, and a step that has run ticks_max ticks with a
+  row in busy throws naming the busy entities; the clock is written by
+  `UPDATE clock SET step = ?, tick = ? WHERE entity = ?`.
+- ecs methods: rows(sql, params) takes a text and an array, runs one
+  statement and gives each row as an object of its column names, throwing
+  when two columns share a name, so every expression is named by AS;
+  run(statements) returns store.sql_run of the world; id(name) throws when
+  the world lacks the entity; take(verb) takes a non-empty text, may be called
+  once in one run of a system, throws when more than one entity holds an
+  intent of the verb, and deletes the one it returns by `DELETE FROM intent
+  WHERE entity = ?`; say(text) takes a non-empty text and log(beat, choice,
+  outcome) three texts, each one INSERT and one push, by the core's design
+  and not batched with a system's own writes.
+- guide scripts: each guide's directory holds `lib.js`, the number formats,
+  units and published formulas with their coefficients, each with a one line
+  comment naming its source, returned as a frozen object; `spawn.js`; `report.js`;
+  and one file per system, named by the system. Each is kept at
+  /_files/script/NAME_STEM.js, as isaiah_travel for
+  python/guides/isaiah/travel.js; the core scripts keep the keys ecs_init and
+  ecs_step in every guide. Every script is the body of the function script_run
+  makes, `new Function("engine", "args", text)`, as python/seed/bootstrap.js
+  is, beginning with the SPDX lines and a header of what it does, its args
+  and, for a system, the components it reads and writes.
+- guide spawn: NAME_spawn, args `{world}` and the guide's own, as Ruth's
+  partner: makes every entity, every component row and the clock from the
+  guide's constants, each with the one line comment naming its source, and
+  returns the setup's say and outcome `ready`, the say also written as one
+  `output` row at step 0, tick 0, of the spawn's own name. It runs the lib
+  once, read from the schedule's row of kind lib and compiled as ecs_step
+  does, for every format and formula its say needs, so no spawn copies the
+  lib or formats inline; the three spawns share that one pattern, a function
+  `lib_run`, the say built first and the output row ending the spawn's one
+  write sql_run, inside one transaction_run. One exception: Ruth's say shows
+  WING_SQFT as WING_SQFT_X100 / 100 by String, the inverse of the spawn's own
+  scale, as her lib unscales only inside aircraft_read of an ecs. Every
+  constant of the guide's
+  world, game rules and an aircraft's book figures included, is a component
+  value, so the database holds the whole model; a figure that is no whole
+  number is an integer of a stated scale, its column named with `_x` and the
+  scale, as glide_ratio_x100 1066, divided by it in JavaScript, which gives
+  the same double as the literal. An item entity a step system makes when the
+  keepsake is given, as Isaiah's trail_name and Ruth's handbill, is the one
+  entity spawn does not make.
+- guide report: NAME_report, args `{world}`: reads the guide's chosen output
+  and what frames it from the components by SELECTs alone, so it commits
+  nothing, and returns `{say, outcome: "told"}`. The guide runs it once, at
+  the goodbye of the guide end step.
+- guide chosen output: Isaiah's herd's `tally.head`, 1980, first said at the
+  toll, `1980 head cross the ford`; Ruth's `purse.cents`, 7185, said `$71.85`,
+  first at the race; Dawa's spare bottle's `full_l - left_l`, 1080, first said
+  at the summit push as Teo's reckoned need, `Teo needs 1080 at 4 litres a
+  minute`, 270 minutes of descent at 4 litres, then measured by dawa_breathe
+  and said at the decision, `1080 of its 1200 litres`, one quantity reckoned
+  then drawn, so repeat_check's first line names the push band. DB_USE.md
+  3.9.3.5 names the decision.
+- guide time: measured by two passing runs of 2026-11-12 at the end to end
+  level: the level took 14.2 s and 13.1 s, bring up included, and each guide
+  about 4 s from its ttyd's start to its last rung, Isaiah 4.0 and 3.9 s, Ruth
+  4.3 s, Dawa 3.7 s, far inside the 180 s of python.test_all.smoke_seconds.
+  Their audits: Isaiah 762 entries in 3.3 s of audit time, 111 sql.run
+  commits and 51 model calls; Ruth 817 in 3.7 s, 125 and 59; Dawa 711 in 3.0
+  s, 135 and 47; the one-row sims committed 27 sql.run lines in Isaiah's 3.1
+  s. A cold compile of the bundle is not measured here.
 - guide_walk.py: the one module of the guide tests. It imports nothing of
   test_demo.py, as the default tests must not depend on a program the default
   level no longer runs, so the helpers both need, the page state script, the
@@ -2576,10 +2732,20 @@ fault realm REALM->DRIVER 0 push; fails the block
   devtools.LinuxPipe()) and climbs the rungs in it, under a category.LabelBook
   of the run's category, the root NAME entered with the gold's root_label.
 - guide rungs: served, under served_seconds; the gold's rungs in order, each
-  under rung_seconds; audit; left; databases, under rung_seconds. served,
-  audit, left and databases take root_label, and every rung of the three
-  golds is smoke-test, so every level runs all of them. Each rung's timer
-  bounds the browser's DevTools waits too.
+  under rung_seconds; audit; left; databases and repeated, each under
+  rung_seconds. served, audit, left, databases and repeated take root_label,
+  and every rung of the three golds is smoke-test, so every level runs all of
+  them. Each rung's timer bounds the browser's DevTools waits too.
+- guide repeated rung: after databases, runs audit_read.repeat_check on the
+  root's audit entries, table_build of the guide, the copy the databases rung
+  made in build/test_guide_NAME/databases/ and the gold's `repeated`, reading
+  the audit and building the guide's table anew; appends a newline, the
+  evidence or `failure: ` and the check's message, then a newline, to
+  build/audit/NAME_db.txt in every run that ends in the evidence or an audit
+  failure; and only then fails on what it found, raising CheckFailed naming
+  the copy of the databases at the end. Any other exception, as sqlite3's for
+  a broken gold or the ValueError of repeat_check end turn, appends nothing
+  and is raised with the rung's note.
 - guide served rung: xsjs_serve.page_ready, then xsjs_serve.root_make with
   fresh true on WORK/root, its parameters the run's switches with debug the
   gold's root_debug, true, and verbose its root_verbose, false; writes
@@ -2613,7 +2779,7 @@ fault realm REALM->DRIVER 0 push; fails the block
   line starting `==== engine started, ` in _audit.txt, the one load, and under
   the run's --debug copies the audit to build/test_guide_NAME/audit.txt.
 - guide digest: build/audit/NAME.txt and build/audit/NAME_db.txt, written by
-  the audit and databases rungs of each guide test in every run, never
+  the audit, databases and repeated rungs of each guide test in every run, never
   removed, each replaced by the guide's next run. A walk that fails before a
   rung writes none of its file; its audit is in
   build/test_guide_NAME/audit.txt, and `audit_read.py PATH --guide NAME >
@@ -2660,37 +2826,55 @@ fault realm REALM->DRIVER 0 push; fails the block
 - guide gold: python/test_setting_test_guide_NAME.json holds poll_seconds 0.1,
   rung_seconds 60, served_seconds 240, window_width 1280, window_height 720,
   root_debug true, root_verbose false, root_label smoke-test, ttyd_code 0,
-  served {band, picture} and rungs, each {rung, label, steps}: a step {say,
-  band, picture?, rows?}, a picture {hidden, size, colours}, a rows check {db,
-  sql, params, rows}. A guide's walk is data, so a guide is written in JSON and
-  JavaScript with no Python. No gold holds a digest or a response id.
-- guide walks: Isaiah's 21 steps in the rungs creation, confirm, talk, build,
-  night guard, reading, stampede, tracking, river, toll, dodge and keepsake;
-  Ruth's 25 in creation, confirm, talk, build, first flight, turns, loop, roll,
-  main street, rides, race, wing walk, engine out and keepsake; Dawa's 19 in
-  creation, confirm, talk, build, icefall, morning, window, loads, summit push,
-  decision and keepsake. Every band of the three was worked by hand.
+  served {band, picture}, rungs, each {rung, label, steps}, and repeated: a
+  step {say, band, picture?, rows?}, a picture {hidden, size, colours}, a rows
+  check {db, sql, params, rows}. A guide's walk is data, so a guide is written
+  in JSON and JavaScript with no Python. No gold holds a digest or a response
+  id.
+- guide repeated: the gold's `repeated`, `{db, sql, params}`, the SQL that
+  reads the guide's chosen output from the server's databases at the end as
+  one row of one text, as `SELECT CAST(tally.head AS TEXT) FROM tally JOIN
+  entity ON entity.id = tally.entity WHERE entity.name = ?` with params
+  `["herd"]` on drive; Ruth's by `printf('$%d.%02d', cents / 100, cents %
+  100)` of ruth's purse, Dawa's by `CAST(full_l - left_l AS TEXT)` of the
+  spare. The text is a measurement or plain arithmetic on one; the gold holds
+  the query and never the value.
+- guide walks: Isaiah's 22 steps in the rungs creation, confirm, talk, build,
+  night guard, reading, stampede, tracking, river, toll, dodge, keepsake and
+  goodbye; Ruth's 26 in creation, confirm, talk, build, first flight, turns,
+  loop, roll, main street, rides, race, wing walk, engine out, keepsake and
+  goodbye; Dawa's 20 in creation, confirm, talk, build, icefall, morning,
+  window, loads, summit push, decision, keepsake and goodbye. Every band of
+  the three was worked by hand, and every band of the one-row sims is kept
+  byte for byte by the ecs sims, the oracle that their arithmetic is
+  unchanged; the rows checks read the components.
 - guide inputs: numbers (`60`, `90`, `10`, `20`, `2`, `7`), words (`Yes`,
   `Sam`, `Settled`, `East`, `Ready`, `Everything`, `Go`) and phrases (`What if
   I hate it?`, `I tap my head twice`, `I'll fly, you walk`, `No thanks, take me
-  back`, `Streets of Laredo`, `We take Teo down`), some typed with capitals
+  back`, `Streets of Laredo`, `We take Teo down`, `So long`, `So long, Ruth`,
+  `Goodbye, Dawa`), some typed with capitals
   and matched in lower case, which proves the normal form of script keys. Each
   walk types one bad input at a node with ask, Isaiah's `Which way did they
   go?`, Ruth's `lots` and Dawa's `Whenever`, answered by the built otherwise.
 - guide table source: python/guides/NAME/table.json, a provider_script.Script
   with these differences, which table_build removes: top level `puzzled`, the
   guide's words before a question asked again; top level `exit`, `{input,
-  call, after, resume, resume_call, paused}`, input and resume reply keys in
-  normal form, call and resume_call calls in source form, after the text said
-  after the exit's result, paused the answer to anything but resume while
-  paused; a node's `ask`, the question it asks; a call's arguments a JSON
-  object, not its text; and anywhere an object whose one member is `$text`,
-  standing for the text of the file it names in the guide's directory.
+  calls, after, resume, resume_calls, paused}`, input and resume reply keys in
+  normal form, calls and resume_calls lists of calls in source form, the two
+  calls of the guide intent of the verbs `exit` and `resume`, after the text
+  said after the exit's result, paused the answer to anything but resume
+  while paused; a node's `ask`, the question it asks; a call's arguments a
+  JSON object, not its text; anywhere an object whose one member is `$text`,
+  standing for the text of the file it names in the guide's directory; and
+  anywhere an object whose one member is `$ecs`, standing for the text of the
+  file it names in the directory `ecs` beside the guide's.
 - table_build: reads table.json by json.load as UTF-8; replaces every
-  `{"$text": NAME}` at any depth by that file's text, read as UTF-8 with no
-  newline translation, less the one newline that must end it, a file not
-  ending in one or a `$text` object beside another member raising ValueError,
-  so a CRLF file keeps its CR and fails its band; for each node of the source
+  `{"$text": NAME}` at any depth by that file's text, and every `{"$ecs":
+  NAME}` by the text of NAME in the directory `ecs` beside the guide's, each
+  read as UTF-8 with no newline translation, less the one newline that must
+  end it, a file not ending in one or a `$text` or `$ecs` object beside
+  another member raising ValueError, so a CRLF file keeps its CR and fails its
+  band; for each node of the source
   holding ask, in order, refuses it holding otherwise too, sets otherwise to
   `{content: PUZZLED + " " + ASK, next: NODE}`, adds the exit when the table
   holds one and removes ask; refuses any node, generated ones included, with
@@ -2698,11 +2882,17 @@ fault realm REALM->DRIVER 0 push; fails the block
   included, into json.dumps(arguments, ensure_ascii=False, separators=(",",
   ":")), arguments that are no object raising ValueError; returns {start,
   nodes}, puzzled and exit left out.
+- table_build exit form: the table's exit holds exactly the members input,
+  calls, after, resume, resume_calls and paused, else ValueError naming them,
+  so the old form of call and resume_call is refused; calls and resume_calls
+  are each a list of one call or more, else ValueError, as a reply of no call
+  would strand the player at `X~exit`; the directory `ecs` is the one beside
+  the absolute path of the guide's directory.
 - guide exit expansion: at a node X holding ask A, the exit adds to X the
-  reply of its input, content null, calling a deep copy of the exit's call,
+  reply of its input, content null, calling a deep copy of the exit's calls,
   next `X~exit`; `X~exit`, no replies, after_tools of content after and quote
   value.say, next `X~paused`; `X~paused`, the reply of resume, content null,
-  calling a copy of resume_call, next `X~resume`, and otherwise of content
+  calling a deep copy of resume_calls, next `X~resume`, and otherwise of content
   paused, next itself; `X~resume`, no replies, after_tools of content A and
   quote value.say, next X. The page so shows the exit's arithmetic then the
   guide's words, and on resume the resume's arithmetic then the question that
@@ -2711,9 +2901,9 @@ fault realm REALM->DRIVER 0 push; fails the block
   generated name already a node, raises ValueError.
 - guide exit placement: the builder of the test side, not the provider, gives
   every node holding ask the exit, so the exit promised in the introduction
-  works at every point once the sim exists, rule 4 of guides.md. The exit runs
-  the script's `exit` action, which brings the player to safety by its own
-  arithmetic, and the resume its `resume` action.
+  works at every point once the sim exists, rule 4 of guides.md. The exit
+  writes the intent `exit` and steps, whose exit system brings the player to
+  safety by its own arithmetic, and the resume the intent `resume`.
 - guide ask rule: a node holds ask exactly when the sim exists by the time the
   player can be in it, as an exit before the build would run a script not yet
   written. The nodes before the build, hyperposition to talk, hold their own
@@ -2748,66 +2938,110 @@ fault realm REALM->DRIVER 0 push; fails the block
   stays there, Isaiah's `how long have you been riding night guard?`, Ruth's
   `why are you short a partner?` and Dawa's `why have you never left anyone
   behind?`, and starts the build at `let's ride out`, `let's go` or `ready`.
-- guide build turn: one reply of three calls: browser_kv_put of `{ref:
-  "/_files/script/NAME.js", text: SIM}`, browser_sql_run of the sim's DDL on
-  the guide's world, and browser_script_run of `{name: NAME, args: {action:
-  "setup", ...}}`, next built, whose after_tools quotes value.say and says the
-  first beat's ask. Every later beat is a script_run of the script with the
-  player's choice as its args.
+- guide build turn: the reply to `let's ride out`, `let's go` or `ready`,
+  its calls in order: browser_kv_put of each script, `{ref:
+  "/_files/script/KEY.js", text: {"$ecs": FILE}}` for the core's two and
+  `{"$text": FILE}` for each of the guide's; browser_script_run of `{name:
+  "ecs_init", args: {world: WORLD}}`; browser_sql_run on the world of the
+  guide's component DDL and the INSERTs of `system`, the schedule written by
+  the guide in SQL; then browser_script_run of `{name: "NAME_spawn", args:
+  {world: WORLD, ...}}`, last, next built, whose after_tools quotes value.say,
+  the spawn's say, and asks the first beat.
+- guide intent: a beat makes two calls, in one reply or two by guide beat:
+  browser_sql_run on the world of `INSERT INTO intent (entity, verb, value)
+  SELECT id, ?, ? FROM entity WHERE name = ?` with params `[VERB, VALUE,
+  "player"]`, the player's choice written by the guide on the player's
+  behalf, VALUE always text, then browser_script_run of `{name: "ecs_step",
+  args: {world: WORLD}}`. The quote reads the step's value, the last call's
+  output. The player entity is named `player` in every guide, Ruth's partner
+  included. VALUE is the player's choice as the guide reads it from the
+  player's words: the words in normal form, as `ride out again`, or the
+  choice they name, as Ruth's walker `Ruth`, and never a number of the model.
 - guide beat: a node holding ask and replies keyed by the walk's inputs, each
-  calling browser_script_run with the choice as args, next an after node,
-  which always goes on, by after_tools quoting value.say with the next node's
-  ask as content, or holds after_holds `"outcome":"WORD"`, going on by
-  after_tools and back by after_lacks, whose content asks again. Every number
-  the page shows is the sim's arithmetic, and the table holds no number of the
-  model.
+  making the two calls of the guide intent with the choice's verb and value,
+  next an after node, which always goes on, by after_tools quoting value.say
+  with the next node's ask as content, or holds after_holds
+  `"outcome":"WORD"`, going on by after_tools and back by after_lacks, whose
+  content asks again. Every number the page shows is the sim's arithmetic,
+  and the table holds no number of the model.
+- guide split beat: a beat whose after node holds after_holds sends the
+  intent alone, next a node `NODE_step`, no replies, whose after_tools,
+  content null, calls ecs_step, next the after node, which so sees the step's
+  result alone: the scripted provider's after_read and audit_read's
+  _after_reply take after_tools only when every call output ending the input
+  holds the text, and the intent's sql_run result never holds an outcome. A
+  beat whose after node always goes on, the exit, the resume and the keepsake
+  send both calls in one reply. The design not taken, after_holds reading the
+  last call output alone as the quote does, changes ts/provider_script.ts and
+  the rules script after_holds and guide_check script, and DB_USE.md 5.9
+  changes no TypeScript. A real model's prompt names one reply of both calls;
+  the split is the scripted table's alone.
 - guide keepsake turn: with a picture, Ruth's and Dawa's, one reply calls
   browser_image_make of the keepsake's picture, next a node, Ruth's printed
-  and Dawa's developed, whose after_tools calls browser_render of it then
-  browser_script_run of `{action: "keepsake"}`, last, so that the quote reads
-  the script's result; with none, Isaiah's, the reply calls that script_run
-  alone. The node its result reaches quotes value.say with the guide's
-  farewell, next end, whose empty replies and otherwise of the guide's last
-  words answer anything after.
-- guide call ids: `call_` and a short word, unique within each reply, the
-  exit's `call_exit` and `call_resume`.
+  and Dawa's developed, whose after_tools calls browser_render of it, then the
+  two calls of the guide intent of the verb `keepsake`, last, so that the
+  quote reads the step's result; with none, Isaiah's, the reply makes those
+  two calls alone. The node its result reaches quotes value.say with the
+  guide's farewell, next end.
+- guide end step: each walk's last rung, goodbye, is one step, the end of the
+  conversation: the player says goodbye, `So long`, `So long, Ruth` or
+  `Goodbye, Dawa`, a reply key of the node end, whose one call is
+  browser_script_run of `{name: "NAME_report", args: {world: WORLD}}`, next
+  `told`, whose after_tools quotes value.say with the guide's farewell as
+  content and goes back to end. end keeps its otherwise of the guide's last
+  words for anything else. Its band, the report's say then the farewell, is
+  worked by hand from numbers that earlier bands already show, and the end
+  turn commits nothing but its turns, as the report only reads.
+- guide call ids: `call_` and a short word, unique within each reply: the
+  build turn's `call_put_KEY` for the put of /_files/script/KEY.js,
+  `call_init`, `call_schema` and `call_spawn`; a beat's `call_` and its verb,
+  as `call_track`, and `call_step`, a split beat's `NODE_step` calling
+  `call_step` alone; the exit's `call_exit` and
+  `call_exit_step`, its resume's `call_resume` and `call_resume_step`; the
+  goodbye's `call_report`.
 - guide no number by hand: an ask, a content or a puzzled, after or paused
   text states no number of a model; every such number comes from a script's
-  say. The introductions are verbatim and keep their own words.
+  say. The intent's value is the player's choice, by guide intent. The
+  introductions are verbatim and keep their own words.
 - guide prompt: prompt.txt, the universe's prompt document, which
   agent.prompt_build sends after the analyst's prompt: who the guide is, in
   the guide's voice and world; the rules every experience follows of
-  guides.md; the guide's beats; the exit and how to resume; the script's name,
-  each action and its args, and that the AI calls the script and says its
-  say; that the guide stays inside its own world and answers anything outside
+  guides.md; the guide's beats; the exit and how to resume; the scripts it
+  sends at the build, each verb of an intent and its value, the intent's SQL
+  and the step, the report at goodbye, and that the AI writes the intent,
+  steps the sim and says the step's say; that the guide stays inside its own
+  world and answers anything outside
   it in-world, by policy flag 1 of guides.md. The fake AI never reads it; a
   real AI would.
-- guide sim contract: sim.js is the body of the function script_run makes,
-  `new Function("engine", "args", text)`, as python/seed/bootstrap.js is, kept
-  by the build turn at /_files/script/NAME.js. It begins with the SPDX lines
-  and a header of what it models and its args, then `const store =
-  engine.store;` and the world's name; the model's constants, each with a one
-  line comment naming its source; helpers that read the one state row, write
-  it, append a log row and format numbers; one function per action in a frozen
-  object actions; then a throw for an action actions does not own, a table's
-  bug, and `return store.transaction_run(() => actions[args.action](args));`.
-- guide sim result: every action returns `{say, outcome}`, say the text the
-  page shows, outcome a short text of the action's outcomes, as `made`; the
-  tool result the fake reads is then `{"value":{"say":"...","outcome":"..."}}`,
-  compact JSON in insertion order passed unchanged as the call output, so a
-  node's after_holds is `"outcome":"WORD"`, quotes and colon as JSON.stringify
-  writes them, and its quote `value.say`. Each action but setup and keepsake
-  appends a log row `(beat, choice, outcome)`.
+- guide sim contract: a guide's sim is the core scripts and its own, by the
+  rules ecs_step, ecs system contract and guide scripts, kept by the build
+  turn under /_files/script/; no script but ecs_step, and NAME_spawn for the
+  lib named by the schedule's row of kind lib, compiled and run once as
+  ecs_step does for a say that needs a published formula, as Dawa's air at
+  Base Camp, runs another; none keeps
+  state between runs, and only spawn.js and lib.js hold a constant of the
+  model, each with a one line comment naming its source. The one-row sims'
+  sim.js, one script of actions, is gone.
+- guide sim result: ecs_step and NAME_spawn return `{say, outcome}` and
+  NAME_report `{say, outcome: "told"}`, say the text the page shows, outcome
+  a short word, as `made`; the tool result the fake reads is then
+  `{"value":{"say":"...","outcome":"..."}}`, compact JSON in insertion order
+  passed unchanged as the call output, so a node's after_holds is
+  `"outcome":"WORD"`, quotes and colon as JSON.stringify writes them, and its
+  quote `value.say`. Every step, the keepsake's included, logs exactly one
+  beat_log row, beat the verb, choice the value, a number of the input logged
+  as its text.
 - guide sim tables: every table STRICT, every column INTEGER or TEXT and NOT
-  NULL: the one state row `id INTEGER PRIMARY KEY CHECK (id = 1)`, the log `(n
-  INTEGER PRIMARY KEY, beat, choice, outcome)` and `keepsake (kind TEXT NOT
-  NULL PRIMARY KEY, text TEXT NOT NULL)`. A value bound is an integer, made by
-  Math.round or Math.floor when not whole already, or a string, and a number
-  of the args is logged as its text. No statement uses random(), a time
-  function or anything else that differs when the server replays it.
+  NULL: the ecs core tables, and the guide's components, each keyed by
+  `entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE`, a
+  tag of that column alone, the keepsake a component `keepsake (kind, text)`
+  of an item entity. A value bound is an integer, made by Math.round or
+  Math.floor when not whole already, or a string. No statement uses random(),
+  a math function, a time function or anything else that differs when the
+  server replays it, by ecs replay agreement.
 - guide sim failures: a player's choice that fails is an outcome with its own
   say, never a throw, as bad user input is expected; a throw is a broken
-  table, an unknown action or args of the wrong form. Branches no walk takes,
+  table, an unknown verb or a value of the wrong form. Branches no walk takes,
   as Isaiah's west flank and swimming the river now, have says and outcomes of
   their own.
 - guide number formats: whole, `String(Math.round(x))`; tenths,
@@ -2819,11 +3053,20 @@ fault realm REALM->DRIVER 0 push; fails the block
   then ` M minutes` when M is not 0; a constant as its source writes it, as
   352.56 and 10.66, by String.
 - guide compaction: the browser compacts a scene when a player's turn is
-  appended to it holding turn_compact_turns, 64, turns or more. Isaiah's
-  campfire conversation holds 65 before step 20, Count them in, and compacts
-  there; Ruth's hayfield holds 62 before step 20 and 66 after it, so step 21,
-  I'll fly, you walk, compacts it; Dawa's base camp holds 62 at step 19, under
-  64, and never compacts, one more step without tool calls short of it.
+  appended to it holding turn_compact_turns, 64, turns or more, counted
+  before that turn. The ecs sims store more rows a beat than the one-row sims
+  did, a split beat taking two replies and the build turn some 21 calls, so
+  compaction comes sooner, as the passing runs of 2026-11-12 measured:
+  Isaiah's campfire holds 65 before step 13, Which way did they go?, the bad
+  input, and compacts there, the restart answered by the track node's
+  otherwise, then ends at row 48 at step 20, Count them in, which moves the
+  walk to the stockyard, a new conversation of 9 rows at the end; Ruth's
+  hayfield holds 69 before step 14, 90, and compacts there, then 68 before
+  step 26, So long, Ruth, and compacts again, so the goodbye's first model
+  call restarts the chain and its last, the one repeat_check reads, chains
+  from that restart; Dawa's base camp holds 66 before step 13, Go tomorrow,
+  and compacts there, then 43 before step 20, Goodbye, Dawa, under 64, and
+  does not compact again.
 - guide restart: the turn that compacts sends a chain's first request, with no
   previous_response_id, of the prompts, the summary and the player's text. The
   fake takes it, as a chain's first request has no call due and each item is a
@@ -2839,35 +3082,143 @@ fault realm REALM->DRIVER 0 push; fails the block
   No walk returns in a second session, by guide deferred serving.
 - Isaiah Cole: guides.md entry 1, Two Thousand Head to Dodge: universe
   trail_drive, world drive, region trail, scene campfire with the image
-  /_files/isaiah/campfire.png, script isaiah, tables herd, drive_log and
-  keepsake. The stake is the herd, counted at Dodge City in a new scene,
-  /trail/stockyard/1 with /_files/isaiah/dodge.png. The exit, designed by
-  rule 4 from his "You don't have to say a word" and "if you'd like", is `i'll
-  ride back to the fire`, while Isaiah keeps the circle singing, resumed by
-  `ride out again`. The keepsake is a trail name, the last word of the song
-  sung, as `Trail name: Laredo.`, keepsake's row `trail name`. The song,
-  Streets of Laredo, is public domain, by policy flag 7.
-- Isaiah's constants, each the guide's own, from its text or its rules: HERD
-  2000; MILES 100, the last hundred miles; MILES_A_DAY 10; MISSING 40, the
-  head missing at sunrise; the herd's calm, a game rule of 0 to 10,
-  CALM_START 5, SONG_CALM 3, CALM_MAX 10, SETTLED_CALM 7 and MILLED_CALM 3;
-  BUNCHES ridge 12 in the cedars, creek 25 in the willows and draw 3 in the
-  plum thicket, summing to MISSING; LOOKS 3, the searches before noon;
-  BREAKS_LOSS 60, the run into the breaks; HIGH_WATER_PER 100, a head drowned
-  for each 100 swum in high water; TOLL_FLOOR 20, the least the outfit takes;
-  WAGE_CENTS 100, a dollar a day; the days 100 / 10 plus those waited.
+  /_files/isaiah/campfire.png, scripts isaiah_lib, isaiah_spawn,
+  isaiah_report and the systems of Isaiah's schedule. The stake is the herd,
+  counted at Dodge City in a new scene, /trail/stockyard/1 with
+  /_files/isaiah/dodge.png. The exit, designed by rule 4 from his "You don't
+  have to say a word" and "if you'd like", is `i'll ride back to the fire`,
+  while Isaiah keeps the circle singing, resumed by `ride out again`. The
+  keepsake is a trail name, the last word of the song sung, as `Trail name:
+  Laredo.`, the `keepsake` row of kind `trail name` of the entity trail_name.
+  The song, Streets of Laredo, is public domain, by policy flag 7. The
+  goodbye is `so long`, running isaiah_report.
+- Isaiah's entities: world, herd, ridge, creek, draw, player, isaiah,
+  cimarron, outfit and dodge, ids 1 to 10, made by isaiah_spawn in one
+  sql_run, and trail_name, 11, made by the keepsake. The clock: a tick of a
+  day, tick_seconds 86400, ticks_max 10.
+- Isaiah's components: of the herd head (count), bed (head), calm (level,
+  most), temper (song_calm, settled, milled), breaks (loss), pace (miles),
+  losses (lost, tolled, found) and tally (head, tick), made at the count; of
+  each bunch share (head) and cover (name, opening), and head and the tag
+  hidden while it is out; place (mile) of the herd, cimarron and dodge; of
+  the cimarron water (high, per_drowned), high the days of waiting its water
+  needs to drop; of the outfit toll (floor); of the player looks (used,
+  most), exits (count) and song (title), made by an upsert at the sing; of
+  the player and isaiah wage (cents_a_day, earned); while the sim runs travel
+  (goal) of an entity under way and wait (days) of the herd holding on the
+  bank; of trail_name keepsake (kind, text). Systems find the herd by its
+  components alone: losses for head changes, temper and calm for calm, head
+  and bed for the tally.
+- Isaiah's schedule: ord 1 isaiah_lib; ord 2 to 11 the step systems
+  isaiah_sing, isaiah_exit, isaiah_resume, isaiah_read, isaiah_stampede,
+  isaiah_track, isaiah_river, isaiah_toll, isaiah_count and isaiah_keepsake,
+  each taking the verb of its name; ord 12 to 14 the tick systems
+  isaiah_travel, which moves each entity of travel by its pace up to its
+  goal's mile and there deletes its travel and busy, isaiah_hold, which adds
+  a day to each wait and lowers the water of the river at the waiter's mile,
+  at water.high 0 saying the crossing and deleting the wait and busy, and
+  isaiah_wage, which adds cents_a_day to every earned. Travel and wage say
+  nothing.
+- Isaiah's ticks: tracking done sends every entity of pace to the next place
+  ahead, the Cimarron, 6 ticks; waiting at the river is 1 tick; the toll paid
+  sends it to Dodge City, 4 ticks. The clock ends at step 14, tick 11. The
+  count reads 11 days as the tally's tick times tick_seconds over the lib's
+  SECONDS_A_DAY, and $11.00 from the player's earned wage. The river beat
+  throws when the water is already low, as the table reaches it once.
+- Isaiah's says: the river's wait is two outputs, the river system's `You
+  hold the herd a day on the south bank of the Cimarron` at the step's tick
+  and the hold system's `and the water drops: ...` one tick later; every
+  other step says one output of its step system. isaiah_spawn stores its say
+  as an output at step 0 and formats by its lib, by guide spawn.
+- Isaiah's intents: sing `Streets of Laredo`; read `settled` or `restless`;
+  stampede `east` or `west`; track the bunch's entity name, `ridge`, `creek`
+  or `draw`; river `wait` or `swim`; toll digits, `10` or `20`; count,
+  keepsake, exit and resume the player's words in normal form. read, track
+  and toll are split beats, by guide split beat, through `read_step`,
+  `track_step` and `toll_step`.
+- Isaiah's report: one SELECT of tally, bed and losses, each number cast to
+  text by SQL as the gold's query casts it. Its say: `The tally man's book: N
+  head counted in at Dodge City, of N bedded on the flat, N paid at the ford
+  and N lost on the trail.`; the told farewell: `Isaiah tips his hat and
+  turns his horse for the trail back south. "So long. Ride easy."` No content
+  of his table holds a digit.
+- Isaiah's constants, each the guide's own, from its text or its rules, in
+  spawn.js with its source comment: HERD 2000, into head and bed; BED_MILE 0
+  and MILES 100, the places of the herd and of dodge, the last hundred miles;
+  RIVER_MILE 60, a game rule no band shows; MILES_A_DAY 10, the pace; the
+  herd's calm, a game rule of 0 to 10, CALM_START 5 and CALM_MAX 10, and its
+  temper SONG_CALM 3, SETTLED_CALM 7 and MILLED_CALM 3; the bunches, ridge 12
+  in the cedars, creek 25 in the willows and draw 3 in the plum thicket, into
+  share and cover, their sum the forty missing at sunrise, so MISSING is no
+  constant; LOOKS 3, the searches before noon; BREAKS_LOSS 60, the run into
+  the breaks; HIGH_DAYS 1 and HIGH_WATER_PER 100, a head drowned for each 100
+  swum in high water; TOLL_FLOOR 20, the least the outfit takes; WAGE_CENTS
+  100, a dollar a day, the wage of both riders; TICK_SECONDS 86400, and
+  TICKS_MAX 10, MILES over MILES_A_DAY. lib.js holds SECONDS_A_DAY 86400 and
+  the formats whole, money and days.
 - Ruth Calloway: guides.md entry 2, The First Ride's Free: universe
   barnstorming, world summer, region county, scene hayfield with the image
-  /_files/ruth/hayfield.png, script ruth, tables jenny, flight and keepsake. The
-  stake is her purse for the summer, purse_cents, and her airplane, the Jenny.
-  The exit is her own rule, `i tap my head twice`: a glide from the height
-  flown to the grass, like a feather, resumed by `go on`, a climb back to the
-  height left; offer, name and talk answer it too in her voice, before any
-  sim, with no call. The keepsake is a handbill with the player's name beside
-  hers, as `RUTH CALLOWAY AND SAM, AERIAL ACROBATS: loops, rolls, the wing
-  walk and a motorcar beaten! Rides $5.00 for 10 minutes.`, keepsake's row
-  handbill, its feats those the flight log shows made. Her sim is turn based
-  on a real world aviation stunt model, as task 1.1 requires.
+  /_files/ruth/hayfield.png, scripts ruth_lib, ruth_spawn, ruth_report and
+  the systems of Ruth's systems. The stake is ruth's `purse.cents` for the
+  summer and her airplane, the Jenny. The exit is her own rule, `i tap my
+  head twice`: the intent exit, a glide from the height flown to the grass,
+  like a feather, keeping the height in `resume`, resumed by `go on`, a climb
+  back to the height left; offer, name and talk answer it too in her voice,
+  before any sim, with no call. The keepsake is a handbill with the player's
+  name beside hers, as `RUTH CALLOWAY AND SAM, AERIAL ACROBATS: loops, rolls,
+  the wing walk and a motorcar beaten! Rides $5.00 for 10 minutes.`, the
+  `keepsake` row of the item entity handbill, its feats those beat_log shows
+  made. The goodbye is `so long, ruth`, running ruth_report. Her sim is turn
+  based on a real world aviation stunt model, as task 1.1 requires.
+- Ruth's entities: world, jenny, ruth, player, the partner, fair, motorcar,
+  wind, north and south, ids 1 to 9, made by ruth_spawn; handbill, 10, made
+  by ruth_keepsake. `fair` holds the show, prize and course, which DB_USE.md
+  3.9.2 gave no owner. The clock: tick_seconds 20, ticks_max 30, a game rule,
+  ten minutes of sim time.
+- Ruth's components: of the jenny `airframe (gross_lb, wing_sqft_x100, hp,
+  max_mph, min_mph, climb_ft, climb_min, tank_gal, burn_gal_hr,
+  level_off_ft, cruise_mph, glide_ratio_x100)`, `altitude (ft)` and `resume
+  (ft)`, a row only while an exit's height is kept, written by upsert; of
+  ruth `technique (loop_pull_g, loop_top_g_x10, roll_seconds, stunt_ft)`,
+  `fares (ride_cents, ride_min, gas_cents_gal)` and `purse (cents)`; of the
+  player `name (text)` and `exits (count)`; of the fair `show (minutes, ft)`,
+  `prize (cents)` and `course (feet)`; of the motorcar `vehicle (top_mph)`;
+  of the wind `wind (mph, quarter)`, quarter the side it blows from, as
+  `from` is an SQL keyword; of north and south `field (miles_x10, name)`, a
+  field's heading its entity's name; while racing `racer (ground_mph, feet,
+  ticks)` of each racer, ticks in place of start and finish ticks as NOT NULL
+  forbids a finish unknown while racing, and `throttle (setting)` of the
+  jenny; of the handbill `keepsake (kind, text)`.
+- Ruth's systems: ord 1 ruth_lib; ord 2 to 14 the step systems ruth_climb,
+  ruth_exit, ruth_resume, ruth_turn, ruth_loop, ruth_roll, ruth_buzz,
+  ruth_rides, ruth_race, ruth_wing_walk, ruth_field, ruth_landing and
+  ruth_keepsake, each taking its verb's intent and working today's formula
+  in JavaScript from the components; ord 15 and 16 the tick systems
+  ruth_drive then ruth_finish. ruth_lib holds the units, standard gravity,
+  FPS_PER_MPH as 5280 / 3600, the same double as 22 / 15, the number formats,
+  the book's climb and burn, and the shared reads of the aircraft, pilot,
+  wind and fields, dividing the scaled figures. The split beats, by guide
+  split beat, are turns, loop, roll, buzz, rides and engine.
+- Ruth's intents: climb `take her up`; exit `i tap my head twice`; resume `go
+  on`; keepsake `yes please`; turn, loop, roll, buzz and rides the number as
+  typed; race `full throttle`; landing `into the wind`; wing_walk `Ruth` and
+  field `south` or `north`, the guide's reading of the player's words.
+- Ruth's race ticks: ruth_race sets the altitude to the book's 50 ft, enters
+  the jenny at 75 less 15, 60 mph over the road, and each vehicle at its top
+  speed, marks them busy and says the start, ending in a comma. ruth_drive
+  moves each busy racer `ground_mph * 5280 * tick_seconds / 3600` whole feet
+  a tick by integer SQL, throwing at a fraction, and frees it at the course's
+  26400 ft. ruth_finish, once none is busy, says the miles and both times as
+  ticks times 20 s, pays the prize and logs the beat race with the throttle
+  as its choice. Full throttle runs 15 and 20 ticks, 5:00 against 6:40; at
+  the cruise both take 20, a dead heat. clock.tick is 20 after the race.
+- Ruth's report: `printf('$%d.%02d')` of the one purse as the gold's query,
+  the partner's name as the text of the one `name`, found as its holder and
+  not by entity name, and the prize when beat_log holds the race won; read
+  only; outcome told. Its say `Sam, the cigar box holds $71.85 for the
+  summer, with the fair's $25.00 purse in it.`; the told farewell `The
+  Jenny's still mine, and that's your doing too. So long, partner. Come find
+  me in the next town.`
 - Ruth's aircraft constants: by the Curtiss JN4-D Specifications and
   Operating Instructions, 1918, as reproduced at
   airminded.net/jenny/jn4_spec.html: GROSS_LB 1920, gross weight loaded, with
@@ -2890,7 +3241,11 @@ fault realm REALM->DRIVER 0 push; fails the block
   Model T's top speed of about 45 mph, as The Henry Ford gives it. The guide's
   world: WIND_MPH 15 from the north; RACE_MI 5; PURSE_CENTS 2500; SHOW_MIN 40;
   STUNT_FT 2000, where she teaches; SHOW_FT 1000, the wing walk's height,
-  where the engine quits; NORTH_MI 1.5 and SOUTH_MI 3, the fields.
+  where the engine quits; NORTH_MI 1.5 and SOUTH_MI 3, the fields. Each is a
+  component value of ruth_spawn with its source comment: WING_SQFT and
+  GLIDE_RATIO as 35256 and 1066 hundredths, LOOP_TOP_G as 5 tenths, the
+  fields as 15 and 30 tenths of a mile, RACE_MI as 26400 ft, and the purse
+  starting at 0; G and the units sit in lib.js.
 - Ruth's formulas: every speed in ft/s inside, mph outside. A level turn at
   bank b pulls n = 1 / cos(b) and stalls at Vs(n) = MIN_MPH sqrt(n), from lift
   L = n W at the wing's greatest lift coefficient, a turn at the cruise
@@ -2919,18 +3274,73 @@ fault realm REALM->DRIVER 0 push; fails the block
   rise at 40 degrees, 25.4345, 0.066 below 25.5; n at 60 degrees,
   1.9999999999999996 in JavaScript, shown 2.0; and the exact products 21320,
   7995, 13325 and 315, which Math.round takes from a float error under
-  0.0000001. 75 * (22 / 15) is 109.99999999999999, shown 110.
+  0.0000001. 75 * (22 / 15) is 109.99999999999999, shown 110. Every scaled
+  figure divided by its power of ten is the double of its literal.
 - Dawa: guides.md entry 4, Nobody Left Behind: universe everest, world
   expedition, region khumbu, scene base_camp with the image
-  /_files/dawa/base_camp.png, script dawa, tables climber, climb_log and
-  keepsake. The stake is Dawa's record of never leaving anyone behind,
-  climber's record `kept` or `broken`, met at the South Summit, where the top
-  and Teo's rescue cannot both happen. The exit, designed by rule 4 from his
-  "Tell me if it starts" and "I have never left anyone behind", is `take me
-  down`, Dawa taking the player down the fixed line to the camp below, at Base
-  Camp saying they are at the bottom, resumed by `let's go up again`. The
-  keepsake is a photograph from the high point and a white scarf from Dawa,
-  keepsake's rows photograph and scarf.
+  /_files/dawa/base_camp.png, scripts dawa_lib, dawa_spawn, dawa_report and
+  the systems of Dawa's schedule. The stake is Dawa's record of never leaving
+  anyone behind, dawa's `record` `kept` or `broken`, met at the South Summit,
+  where the top and Teo's rescue cannot both happen. The exit, designed by
+  rule 4 from his "Tell me if it starts" and "I have never left anyone
+  behind", is `take me down`, the intent exit, Dawa taking the rope down the
+  fixed line to the camp below, at Base Camp saying they are at the bottom,
+  resumed by `let's go up again`, the intent resume. The keepsake is a
+  photograph from the high point and a white scarf from Dawa, the items
+  photograph and scarf, ids 17 and 18, each with `keepsake (kind, text)`. The
+  goodbye is `goodbye, dawa`, running dawa_report.
+- Dawa's entities: world, player, dawa, teo, base_camp, camp_1, camp_2,
+  camp_3, camp_4, south_summit, summit, player_bottle, teo_bottle, spare,
+  forecast_1 and forecast_3, ids 1 to 16 in that order, made by dawa_spawn.
+  The clock: tick_seconds 1800, ticks_max 48, a day of half hours.
+- Dawa's schedule: ord 1 dawa_lib; the step systems dawa_icefall,
+  dawa_morning, dawa_exit, dawa_resume, dawa_window, dawa_loads, dawa_push,
+  dawa_decide and dawa_keepsake; ord 11 to 14 the tick systems dawa_breathe,
+  dawa_move, dawa_rescue and dawa_stop, the last two beyond DB_USE.md 3.9.3,
+  as a step system's outputs come before every tick's, so a text worked from
+  what the ticks measured is said by a tick system after dawa_move. The split
+  beats, by guide split beat, are icefall, morning, window and loads.
+- Dawa's components: `camp (name, place, altitude_m, ord UNIQUE, way)` of each
+  camp, the top as Summit, place "the top"; `leg (up_minutes, down_minutes)`
+  of south_summit and summit; `at (camp)` of the rope, player, dawa and teo,
+  the rope moving whole; `climb (to_camp, ticks_left)` with the core's busy
+  of a climber under way; `day (minute)` of the world, made by the first
+  timed start, in place of the plan's climb.start_minute; of the player `ams
+  (grade, hidden)`, `rest (days)`, `load (kg)`, `high (m)`, `exits (count)`,
+  and `resume (camp)` while an exit is held; of dawa `limits (load_kg,
+  wind_kmh)` and `record (text)`; `bottle (full_l, left_l, kg, holder)` of
+  each bottle; `breathe (lpm, bottle)` of the player and teo; `down`, the tag
+  of a climber whose bottle ran dry; `forecast (days_ahead UNIQUE, kmh)`; of
+  the world `sun (loosen_hour)`, `icefall (hours)`, `kit (tent_kg, stove_kg,
+  food_kg)`, `oxygen (camp, climb_lpm, sick_lpm)`, `staging (camp)` and
+  `departure (hour)`; `keepsake (kind UNIQUE, text)` of each item. A
+  reference column is `INTEGER NOT NULL REFERENCES entity (id)`. The player
+  is found as the holder of `ams`, the guide as the holder of `limits`.
+- Dawa's ticks: timed moves tick, the icefall from 2:00 for 12 ticks, the
+  day ending at 480; the push from 23:00 for 10 ticks, Teo's bottle at 0 and
+  the player's at 600 at the 10th; the descent 9 ticks, the spare ending at
+  120, the player's bottle at 60 and the day at 510. The Western Cwm, the
+  Lhotse Face, the Geneva Spur, the exit, the resume and the summit branch,
+  not walked, are instant. The clock ends the walk at step 13, tick 31.
+  Teo breathes 4 litres a minute from his own bottle from the spawn, so his
+  bottle is measured empty at the South Summit.
+- Dawa's arrivals: dawa_stop, once a climber who does not hold `ams`
+  breathes from an empty bottle and climbs no more, says the hour, the top
+  above and the oxygen reckoned from the legs, the player's bottle and the
+  spare, throws when the spare covers both the top and Teo, deletes his
+  breathe and adds down; dawa_rescue, once the holder of down breathes from
+  the bottle the holder of `limits` carries and climbs no more, says the
+  litres drawn, the minutes those litres last at his flow, the player's
+  litres in those minutes and the camp reached, and removes down; dawa_move
+  says the air only at the end of a climb up, for the holder of `ams`, then a
+  night over the sleep rule when there is one. The keepsake decides by no
+  climber holding down, the record and the high mark.
+- Dawa's report: dawa_report, by SELECTs alone, says `Dawa's spare gave 1080
+  of its 1200 litres to bring Teo down to Camp 4, and nobody was left
+  behind.`; the told farewell `Dawa takes your hand in both of his. Thank you
+  for climbing on my rope. Go slowly, my friend.` The chosen output, the
+  spare's full_l less left_l, is measured by dawa_breathe over the descent's
+  9 ticks.
 - Dawa's policy: he stands in a living culture, by policy flag 5 of guides.md:
   his words stay respectful and plain, the scarf is his gift, and nothing
   makes a ritual a mechanic. Teo is invented. No one dies on either branch:
@@ -2948,7 +3358,14 @@ fault realm REALM->DRIVER 0 push; fails the block
   4:00, the top 90 minutes up, 60 back and 270 down to Camp 4. ams, the
   headache's grade, a game rule, gains 1 for a night's sleep more than 500 m
   above the last without bottled oxygen, used from Camp 3 up, and 1 by the
-  next morning for a headache hidden.
+  next morning for a headache hidden. Each is a component value made by
+  dawa_spawn with its one line source comment, with the camps' ways, the
+  Khumbu Glacier, Khumbu Icefall, Western Cwm, Lhotse Face, Geneva Spur,
+  Southeast Ridge and the summit ridge, the staging camp Camp 2, bottled
+  oxygen from Camp 3 up, Teo's flow 4, the player holding its own bottle and
+  the spare and Teo his, and the legs, the South Summit 300 minutes up from
+  Camp 4 and 270 down, the top 90 up and 60 back; the sleep rule's 3000 m
+  and 500 m, a published rule, sit in dawa_lib.
 - Dawa's air: West's formula, J. B. West, J Appl Physiol 81 (1996) 1850: P =
   exp(6.63268 - 0.1112 h - 0.00149 h^2) mmHg at h km, by Math.exp; the oxygen
   breathed in, 0.2094 (P - 47) mmHg, oxygen's share of dry air and the water
@@ -2958,6 +3375,9 @@ fault realm REALM->DRIVER 0 push; fails the block
   sea gives.", each whole by Math.round: Base Camp 401, 74 and 50; Camp 1 366,
   67 and 45; Camp 2 351, 64 and 43; Camp 4 287, 50 and 34; the South Summit
   256, 44 and 29; the nearest to a rounding boundary Camp 2's oxygen, 63.5976.
+  It is kept in dawa_lib as air_text(place, m), the same expression in the
+  same order, so the same doubles, said by dawa_spawn, dawa_move,
+  dawa_morning, dawa_exit, dawa_resume and dawa_loads.
 - guide next purchase: the second half of each keepsake paragraph of
   guides.md, the cowboy RPG, the next town, the other route, is marketing no
   walk can build, and is not built.
@@ -3164,3 +3584,78 @@ fault realm REALM->DRIVER 0 push; fails the block
   data. Nothing is cut, as the user asked for the contents, so a row is one
   line however long: the scripted provider's table, the sim's script and the
   reply row whose call carries it are 15 to 55 thousand characters each.
+- audit_read repeat_check: repeat_check(entries, table, end, repeated) runs
+  the gold's query, repeated's sql and params, on `end`'s repeated.db, opened
+  read only and immutable, `file:PATH?mode=ro&immutable=1`, so no -wal or
+  -shm file is left in the copy, and raises AuditFailed at the first of these
+  that fails, naming
+  the line of the audit that shows it: the query gives exactly one row of one
+  text, not empty, the text T; the last ai.say reply of the audit, the band
+  the player saw last, holds T as a whole token, neither a letter nor a digit
+  on either side; the model reply before that ai.say holds T in its
+  output_text, so the guide said it; the last model call of the end turn, the
+  turn of the last ui.input, holds T in a function_call_output, so a tool
+  result carried it; no `content` text of the built table holds T, which
+  covers every ask, puzzled, otherwise, after and paused text, as table_build
+  folds them into contents, a call's arguments being no content; the end
+  turn, from its ui.input to its ai.say reply, commits nothing but
+  turn.append, so the guide read T and wrote nothing; and an earlier ai.say
+  reply holds T, the first one named, so the output was told when it was made
+  and told again at the end. Every "holds T" is by the whole token test. It
+  returns the evidence, one line: `repeated: "T" from DB, first said at
+  L<first>, said at the end at L<band> by the reply L<reply>, carried by the
+  tool result L<result>, in no text of the guide's own, and the last turn
+  committed nothing but turns`.
+- repeat_check limits: audit_read.py's program does not run it, as it holds
+  no copy of the databases. It fits the scripted guide, which repeats by
+  quoting; a real model could say 1980 as nineteen eighty, and a real
+  provider is tried only by the maintainer, by hand, outside every run. The
+  tool result is matched as the call output's JSON text, so a T holding a
+  quote, a backslash or a control character would never match; no chosen
+  output holds one. A whole token match cannot tell a reckoning from a
+  measurement of the same number, so the earlier band may be the one where
+  the sim reckoned T, as Dawa's push.
+- repeat_check end turn: the entries from the last ui.input before the last
+  ai.say reply to that reply. Its model reply is the last one in it, its text
+  the output_text parts joined as guide_check joins them. Its tool results
+  are the call outputs that end its last model call's items, so a chain
+  restart that resends older outputs cannot carry T. A record with a band but
+  no input, model reply or model call before it fails loud by ValueError or
+  IndexError, as the engine never makes one.
+- repeat_check evidence lines: L<first> is the first earlier ai.say reply
+  holding T, L<band> the last ai.say reply, L<reply> the end turn's last model
+  reply, and L<result> the end turn's last model call, whose
+  function_call_output carried T. T is written by json.dumps, ensure_ascii
+  false, and the texts of a failure by Python's repr.
+- repeat_check table: every string under a key `content` at any depth of the
+  built table, named in a failure by its path of members as JSON; arguments,
+  quote and next are never contents. Any commit of _COMMIT_TYPES but
+  turn.append in the end turn fails, turn.prompt included. The whole token
+  test is str.isalnum on the one character each side, trying each occurrence.
+  The query opens `file:PATH?mode=ro&immutable=1`, which reads no WAL, so
+  both sources close their databases first; a missing database or bad SQL raises
+  sqlite3's own error, a broken gold and not an audit failure.
+- repeat_check messages, in order: `the query of repeated on DB gives ROWS,
+  not one row of one text that is not empty`; `the record holds no ai.say
+  reply, so no band holds 'T'`; `line N: the last band 'BAND' does not hold
+  'T'`; `line N: the model reply before the last band says 'SAID', which does
+  not hold 'T'`; `line N: the last model call of the end turn carries no tool
+  result that holds 'T'`; `the table's content at PATH holds 'T', so the guide
+  could say it in its own words`; `line N: the end turn commits KIND, where it
+  should commit nothing but turn.append`; `line N: no band before the last
+  holds 'T', so it was not told when it was made`.
+- test_audit_read repeat cases: TestRepeated of python/test_audit_read.py.
+  Its setUp writes `end/drive.sqlite` by substrate.Store from the gold's
+  repeat_database, tables entity and tally, the herd at 1980. repeat_walk is
+  a told walk of two turns, the toll, whose band first says 1980, and the
+  goodbye, whose report carries and repeats it; it passes failure_check and
+  repeat_check, its evidence the gold's repeat_evidence. repeat_queries fail
+  by no row, two rows, a number, an empty text and two columns;
+  test_read_only shows a writing query raises sqlite3.OperationalError and
+  the rows stay; repeat_cut cuts the walk before its first band; each of
+  repeat_failures puts one fault in the walk, band `19800`, reply `No1980`,
+  result `21980`, a sql.run in the end turn and first `1980th`, each failing
+  its own condition at its own line, the whole token test met by a digit and
+  by a letter; repeat_own puts T in the end node's otherwise. Its databases
+  are written by the real store in a scratch directory, so the line count
+  reaches every line of repeat_check.

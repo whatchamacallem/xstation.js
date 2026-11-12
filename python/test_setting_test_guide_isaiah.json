@@ -82,14 +82,18 @@
           "say": "Streets of Laredo",
           "band": "You ride the slow circle singing Streets of Laredo, and the herd's calm comes up from 5 to 8 of 10. \"Now listen to them breathe. Settled, or restless?\"",
           "rows": [
-            {"db": "drive", "sql": "SELECT id, head, scattered, lost, tolled, calm, looks, found, waited, exits, song FROM herd", "params": [], "rows": [[1, 2000, 0, 0, 0, 8, 0, 0, 0, 0, "Streets of Laredo"]]}
+            {"db": "drive", "sql": "SELECT ord, name, kind FROM system ORDER BY ord", "params": [], "rows": [[1, "isaiah_lib", "lib"], [2, "isaiah_sing", "step"], [3, "isaiah_exit", "step"], [4, "isaiah_resume", "step"], [5, "isaiah_read", "step"], [6, "isaiah_stampede", "step"], [7, "isaiah_track", "step"], [8, "isaiah_river", "step"], [9, "isaiah_toll", "step"], [10, "isaiah_count", "step"], [11, "isaiah_keepsake", "step"], [12, "isaiah_travel", "tick"], [13, "isaiah_hold", "tick"], [14, "isaiah_wage", "tick"]]},
+            {"db": "drive", "sql": "SELECT entity.name, calm.level, calm.most FROM calm JOIN entity ON entity.id = calm.entity ORDER BY calm.entity", "params": [], "rows": [["herd", 8, 10]]},
+            {"db": "drive", "sql": "SELECT entity.name, song.title FROM song JOIN entity ON entity.id = song.entity ORDER BY song.entity", "params": [], "rows": [["player", "Streets of Laredo"]]},
+            {"db": "drive", "sql": "SELECT step, tick FROM clock", "params": [], "rows": [[1, 0]]}
           ]
         },
         {
           "say": "I'll ride back to the fire",
           "band": "You ride back to the fire and the coffee. Isaiah keeps the circle alone, singing, and the 2000 head stay down. His song carries in from the dark, slow and easy. When you want the herd again, say ride out again.",
           "rows": [
-            {"db": "drive", "sql": "SELECT id, head, scattered, lost, tolled, calm, looks, found, waited, exits, song FROM herd", "params": [], "rows": [[1, 2000, 0, 0, 0, 8, 0, 0, 0, 1, "Streets of Laredo"]]}
+            {"db": "drive", "sql": "SELECT entity.name, exits.count FROM exits JOIN entity ON entity.id = exits.entity ORDER BY exits.entity", "params": [], "rows": [["player", 1]]},
+            {"db": "drive", "sql": "SELECT step, tick FROM clock", "params": [], "rows": [[2, 0]]}
           ]
         },
         {
@@ -120,7 +124,9 @@
           "say": "East",
           "band": "You ride for the leaders on the east flank and bend the run west into a circle, short of the breaks. At sunrise the count is 1960: 40 head scattered, and 3 looks before noon to find them. \"They'll have gone where there's cover. The ridge, the creek or the draw?\"",
           "rows": [
-            {"db": "drive", "sql": "SELECT id, head, scattered, lost, tolled, calm, looks, found, waited, exits, song FROM herd", "params": [], "rows": [[1, 1960, 40, 0, 0, 3, 0, 0, 0, 1, "Streets of Laredo"]]}
+            {"db": "drive", "sql": "SELECT entity.name, head.count FROM head JOIN entity ON entity.id = head.entity ORDER BY head.entity", "params": [], "rows": [["herd", 1960], ["ridge", 12], ["creek", 25], ["draw", 3]]},
+            {"db": "drive", "sql": "SELECT entity.name FROM hidden JOIN entity ON entity.id = hidden.entity ORDER BY hidden.entity", "params": [], "rows": [["ridge"], ["creek"], ["draw"]]},
+            {"db": "drive", "sql": "SELECT entity.name, calm.level, calm.most FROM calm JOIN entity ON entity.id = calm.entity ORDER BY calm.entity", "params": [], "rows": [["herd", 3, 10]]}
           ]
         }
       ]
@@ -143,7 +149,14 @@
         },
         {
           "say": "The draw",
-          "band": "Down in the draw: 3 head in the plum thicket, driven back. 2000 with the herd, 0 still out, looks used 3 of 3. The Cimarron runs high and brown across the trail. \"We can wait a day for it to drop, or swim them now.\""
+          "band": "Down in the draw: 3 head in the plum thicket, driven back. 2000 with the herd, 0 still out, looks used 3 of 3. The Cimarron runs high and brown across the trail. \"We can wait a day for it to drop, or swim them now.\"",
+          "rows": [
+            {"db": "drive", "sql": "SELECT entity.name, head.count FROM head JOIN entity ON entity.id = head.entity ORDER BY head.entity", "params": [], "rows": [["herd", 2000]]},
+            {"db": "drive", "sql": "SELECT entity.name, looks.used, looks.most FROM looks JOIN entity ON entity.id = looks.entity ORDER BY looks.entity", "params": [], "rows": [["player", 3, 3]]},
+            {"db": "drive", "sql": "SELECT entity.name, place.mile FROM place JOIN entity ON entity.id = place.entity ORDER BY place.entity", "params": [], "rows": [["herd", 60], ["cimarron", 60], ["dodge", 100]]},
+            {"db": "drive", "sql": "SELECT entity.name, wage.cents_a_day, wage.earned FROM wage JOIN entity ON entity.id = wage.entity ORDER BY wage.entity", "params": [], "rows": [["player", 100, 600], ["isaiah", 100, 600]]},
+            {"db": "drive", "sql": "SELECT step, tick FROM clock", "params": [], "rows": [[9, 6]]}
+          ]
         }
       ]
     },
@@ -153,7 +166,12 @@
       "steps": [
         {
           "say": "Wait a day",
-          "band": "You hold the herd a day on the south bank of the Cimarron and the water drops: all 2000 swim it, leaders first, and none is lost. 1 day spent waiting. At the ford a hard outfit has a rope across the trail and wants a toll in cattle. \"How many head do we give them?\""
+          "band": "You hold the herd a day on the south bank of the Cimarron and the water drops: all 2000 swim it, leaders first, and none is lost. 1 day spent waiting. At the ford a hard outfit has a rope across the trail and wants a toll in cattle. \"How many head do we give them?\"",
+          "rows": [
+            {"db": "drive", "sql": "SELECT entity.name, water.high, water.per_drowned FROM water JOIN entity ON entity.id = water.entity ORDER BY water.entity", "params": [], "rows": [["cimarron", 0, 100]]},
+            {"db": "drive", "sql": "SELECT entity.name, wage.cents_a_day, wage.earned FROM wage JOIN entity ON entity.id = wage.entity ORDER BY wage.entity", "params": [], "rows": [["player", 100, 700], ["isaiah", 100, 700]]},
+            {"db": "drive", "sql": "SELECT step, tick FROM clock", "params": [], "rows": [[10, 7]]}
+          ]
         }
       ]
     },
@@ -167,7 +185,13 @@
         },
         {
           "say": "20",
-          "band": "You offer 20 head and the rope comes down: 1980 head cross the ford. Dodge City comes up out of the grass, and the stockyard gate stands open. \"Shall we count them in?\""
+          "band": "You offer 20 head and the rope comes down: 1980 head cross the ford. Dodge City comes up out of the grass, and the stockyard gate stands open. \"Shall we count them in?\"",
+          "rows": [
+            {"db": "drive", "sql": "SELECT entity.name, head.count FROM head JOIN entity ON entity.id = head.entity ORDER BY head.entity", "params": [], "rows": [["herd", 1980]]},
+            {"db": "drive", "sql": "SELECT entity.name, losses.lost, losses.tolled, losses.found FROM losses JOIN entity ON entity.id = losses.entity ORDER BY losses.entity", "params": [], "rows": [["herd", 0, 20, 40]]},
+            {"db": "drive", "sql": "SELECT entity.name, place.mile FROM place JOIN entity ON entity.id = place.entity ORDER BY place.entity", "params": [], "rows": [["herd", 100], ["cimarron", 60], ["dodge", 100]]},
+            {"db": "drive", "sql": "SELECT step, tick FROM clock", "params": [], "rows": [[12, 11]]}
+          ]
         }
       ]
     },
@@ -180,7 +204,9 @@
           "band": "At the stockyard gate the tally man counts 1980 head: 2000 from the bed ground, 20 paid at the ford and 0 lost on the trail. 11 days on the trail at $1.00 a day: $11.00 in wages, and a bath. Isaiah tucks his pay inside his coat. \"A rider who brings the herd in gets a trail name. Want yours?\"",
           "picture": {"hidden": false, "size": 16, "colours": ["0 0 0 255", "255 255 255 255"]},
           "rows": [
-            {"db": "drive", "sql": "SELECT CAST(data AS TEXT) FROM _kv WHERE key = ?", "params": ["scene"], "rows": [["/trail/stockyard/1"]]}
+            {"db": "drive", "sql": "SELECT CAST(data AS TEXT) FROM _kv WHERE key = ?", "params": ["scene"], "rows": [["/trail/stockyard/1"]]},
+            {"db": "drive", "sql": "SELECT entity.name, tally.head, tally.tick FROM tally JOIN entity ON entity.id = tally.entity ORDER BY tally.entity", "params": [], "rows": [["herd", 1980, 11]]},
+            {"db": "drive", "sql": "SELECT entity.name, wage.cents_a_day, wage.earned FROM wage JOIN entity ON entity.id = wage.entity ORDER BY wage.entity", "params": [], "rows": [["player", 100, 1100], ["isaiah", 100, 1100]]}
           ]
         }
       ]
@@ -193,12 +219,29 @@
           "say": "yes",
           "band": "Trail name: Laredo. Rode night guard with Isaiah Cole, turned the stampede, tracked 40 head and brought 1980 to Dodge City. Isaiah shakes your hand once. \"You rode well. The fire's lit any night you come this way again.\"",
           "rows": [
-            {"db": "drive", "sql": "SELECT id, head, scattered, lost, tolled, calm, looks, found, waited, exits, song FROM herd", "params": [], "rows": [[1, 1980, 0, 0, 20, 3, 3, 40, 1, 1, "Streets of Laredo"]]},
-            {"db": "drive", "sql": "SELECT n, beat, choice, outcome FROM drive_log ORDER BY n", "params": [], "rows": [[1, "sing", "Streets of Laredo", "calmer"], [2, "exit", "fire", "at the fire"], [3, "resume", "herd", "riding"], [4, "read", "restless", "wrong"], [5, "read", "settled", "right"], [6, "stampede", "east", "circled"], [7, "track", "ridge", "searching"], [8, "track", "creek", "searching"], [9, "track", "draw", "done"], [10, "river", "wait", "crossed"], [11, "toll", "10", "refused"], [12, "toll", "20", "paid"], [13, "count", "1980", "delivered"]]},
-            {"db": "drive", "sql": "SELECT kind, text FROM keepsake ORDER BY kind", "params": [], "rows": [["trail name", "Trail name: Laredo. Rode night guard with Isaiah Cole, turned the stampede, tracked 40 head and brought 1980 to Dodge City."]]}
+            {"db": "drive", "sql": "SELECT entity.name, keepsake.kind, keepsake.text FROM keepsake JOIN entity ON entity.id = keepsake.entity ORDER BY keepsake.entity", "params": [], "rows": [["trail_name", "trail name", "Trail name: Laredo. Rode night guard with Isaiah Cole, turned the stampede, tracked 40 head and brought 1980 to Dodge City."]]},
+            {"db": "drive", "sql": "SELECT id, name FROM entity ORDER BY id", "params": [], "rows": [[1, "world"], [2, "herd"], [3, "ridge"], [4, "creek"], [5, "draw"], [6, "player"], [7, "isaiah"], [8, "cimarron"], [9, "outfit"], [10, "dodge"], [11, "trail_name"]]},
+            {"db": "drive", "sql": "SELECT n, step, tick, beat, choice, outcome FROM beat_log ORDER BY n", "params": [], "rows": [[1, 1, 0, "sing", "Streets of Laredo", "calmer"], [2, 2, 0, "exit", "i'll ride back to the fire", "at the fire"], [3, 3, 0, "resume", "ride out again", "riding"], [4, 4, 0, "read", "restless", "wrong"], [5, 5, 0, "read", "settled", "right"], [6, 6, 0, "stampede", "east", "circled"], [7, 7, 0, "track", "ridge", "searching"], [8, 8, 0, "track", "creek", "searching"], [9, 9, 0, "track", "draw", "done"], [10, 10, 6, "river", "wait", "crossed"], [11, 11, 7, "toll", "10", "refused"], [12, 12, 7, "toll", "20", "paid"], [13, 13, 11, "count", "count them in", "delivered"], [14, 14, 11, "keepsake", "yes", "named"]]},
+            {"db": "drive", "sql": "SELECT step, tick, system FROM output ORDER BY n", "params": [], "rows": [[0, 0, "isaiah_spawn"], [1, 0, "isaiah_sing"], [2, 0, "isaiah_exit"], [3, 0, "isaiah_resume"], [4, 0, "isaiah_read"], [5, 0, "isaiah_read"], [6, 0, "isaiah_stampede"], [7, 0, "isaiah_track"], [8, 0, "isaiah_track"], [9, 0, "isaiah_track"], [10, 6, "isaiah_river"], [10, 7, "isaiah_hold"], [11, 7, "isaiah_toll"], [12, 7, "isaiah_toll"], [13, 11, "isaiah_count"], [14, 11, "isaiah_keepsake"]]},
+            {"db": "drive", "sql": "SELECT step, tick FROM clock", "params": [], "rows": [[14, 11]]}
           ]
         }
       ]
+    },
+    {
+      "rung": "goodbye",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "So long",
+          "band": "The tally man's book: 1980 head counted in at Dodge City, of 2000 bedded on the flat, 20 paid at the ford and 0 lost on the trail. Isaiah tips his hat and turns his horse for the trail back south. \"So long. Ride easy.\""
+        }
+      ]
     }
-  ]
+  ],
+  "repeated": {
+    "db": "drive",
+    "sql": "SELECT CAST(tally.head AS TEXT) FROM tally JOIN entity ON entity.id = tally.entity WHERE entity.name = ?",
+    "params": ["herd"]
+  }
 }

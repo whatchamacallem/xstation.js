@@ -1,5 +1,5 @@
 {
-  "arguments_text": "{\"name\":\"scratch\",\"args\":{\"action\":\"setup\",\"label\":\"camp\"}}",
+  "arguments_text": "{\"name\":\"scratch_spawn\",\"args\":{\"world\":\"scratch\",\"label\":\"camp\"}}",
   "built": {
     "start": "begin",
     "nodes": {
@@ -9,9 +9,19 @@
             "content": null,
             "tool_calls": [
               {
-                "call_id": "call_build",
+                "call_id": "call_put_ecs_step",
+                "name": "browser_kv_put",
+                "arguments": "{\"ref\":\"/_files/script/ecs_step.js\",\"text\":\"// The scratch step\\nreturn args;\"}"
+              },
+              {
+                "call_id": "call_put_scratch_lib",
+                "name": "browser_kv_put",
+                "arguments": "{\"ref\":\"/_files/script/scratch_lib.js\",\"text\":\"return Object.freeze({ mile: 5280 });\"}"
+              },
+              {
+                "call_id": "call_spawn",
                 "name": "browser_script_run",
-                "arguments": "{\"name\":\"scratch\",\"args\":{\"action\":\"setup\",\"label\":\"camp\"}}"
+                "arguments": "{\"name\":\"scratch_spawn\",\"args\":{\"world\":\"scratch\",\"label\":\"camp\"}}"
               }
             ],
             "next": "built"
@@ -36,20 +46,25 @@
             "content": null,
             "tool_calls": [
               {
-                "call_id": "call_east",
-                "name": "browser_script_run",
-                "arguments": "{\"name\":\"scratch\",\"args\":{\"action\":\"go\",\"way\":\"east\"}}"
+                "call_id": "call_go",
+                "name": "browser_sql_run",
+                "arguments": "{\"db\":\"scratch\",\"statements\":[{\"sql\":\"INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?\",\"params\":[\"go\",\"east\",\"player\"]}]}"
               }
             ],
-            "next": "moved"
+            "next": "choose_step"
           },
           "take me back": {
             "content": null,
             "tool_calls": [
               {
                 "call_id": "call_exit",
+                "name": "browser_sql_run",
+                "arguments": "{\"db\":\"scratch\",\"statements\":[{\"sql\":\"INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?\",\"params\":[\"exit\",\"take me back\",\"player\"]}]}"
+              },
+              {
+                "call_id": "call_exit_step",
                 "name": "browser_script_run",
-                "arguments": "{\"name\":\"scratch\",\"args\":{\"action\":\"exit\"}}"
+                "arguments": "{\"name\":\"ecs_step\",\"args\":{\"world\":\"scratch\"}}"
               }
             ],
             "next": "choose~exit"
@@ -58,6 +73,20 @@
         "otherwise": {
           "content": "Come again? East or west?",
           "next": "choose"
+        }
+      },
+      "choose_step": {
+        "replies": {},
+        "after_tools": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_step",
+              "name": "browser_script_run",
+              "arguments": "{\"name\":\"ecs_step\",\"args\":{\"world\":\"scratch\"}}"
+            }
+          ],
+          "next": "moved"
         }
       },
       "moved": {
@@ -96,8 +125,13 @@
             "tool_calls": [
               {
                 "call_id": "call_resume",
+                "name": "browser_sql_run",
+                "arguments": "{\"db\":\"scratch\",\"statements\":[{\"sql\":\"INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?\",\"params\":[\"resume\",\"go on\",\"player\"]}]}"
+              },
+              {
+                "call_id": "call_resume_step",
                 "name": "browser_script_run",
-                "arguments": "{\"name\":\"scratch\",\"args\":{\"action\":\"resume\"}}"
+                "arguments": "{\"name\":\"ecs_step\",\"args\":{\"world\":\"scratch\"}}"
               }
             ],
             "next": "choose~resume"
@@ -118,9 +152,13 @@
       }
     }
   },
+  "ecs_files": {
+    "step.js": "// The scratch step\nreturn args;\n"
+  },
   "files": {
     "after.txt": "You are back at the fire.\n",
-    "ask.txt": "East or west?\n"
+    "ask.txt": "East or west?\n",
+    "lib.js": "return Object.freeze({ mile: 5280 });\n"
   },
   "guides": [
     "isaiah",
@@ -132,30 +170,68 @@
     "puzzled": "Come again?",
     "exit": {
       "input": "take me back",
-      "call": {
-        "call_id": "call_exit",
-        "name": "browser_script_run",
-        "arguments": {
-          "name": "scratch",
-          "args": {
-            "action": "exit"
+      "calls": [
+        {
+          "call_id": "call_exit",
+          "name": "browser_sql_run",
+          "arguments": {
+            "db": "scratch",
+            "statements": [
+              {
+                "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                "params": [
+                  "exit",
+                  "take me back",
+                  "player"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "call_id": "call_exit_step",
+          "name": "browser_script_run",
+          "arguments": {
+            "name": "ecs_step",
+            "args": {
+              "world": "scratch"
+            }
           }
         }
-      },
+      ],
       "after": {
         "$text": "after.txt"
       },
       "resume": "go on",
-      "resume_call": {
-        "call_id": "call_resume",
-        "name": "browser_script_run",
-        "arguments": {
-          "name": "scratch",
-          "args": {
-            "action": "resume"
+      "resume_calls": [
+        {
+          "call_id": "call_resume",
+          "name": "browser_sql_run",
+          "arguments": {
+            "db": "scratch",
+            "statements": [
+              {
+                "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                "params": [
+                  "resume",
+                  "go on",
+                  "player"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "call_id": "call_resume_step",
+          "name": "browser_script_run",
+          "arguments": {
+            "name": "ecs_step",
+            "args": {
+              "world": "scratch"
+            }
           }
         }
-      },
+      ],
       "paused": "Say go on when you are ready."
     },
     "nodes": {
@@ -165,12 +241,32 @@
             "content": null,
             "tool_calls": [
               {
-                "call_id": "call_build",
+                "call_id": "call_put_ecs_step",
+                "name": "browser_kv_put",
+                "arguments": {
+                  "ref": "/_files/script/ecs_step.js",
+                  "text": {
+                    "$ecs": "step.js"
+                  }
+                }
+              },
+              {
+                "call_id": "call_put_scratch_lib",
+                "name": "browser_kv_put",
+                "arguments": {
+                  "ref": "/_files/script/scratch_lib.js",
+                  "text": {
+                    "$text": "lib.js"
+                  }
+                }
+              },
+              {
+                "call_id": "call_spawn",
                 "name": "browser_script_run",
                 "arguments": {
-                  "name": "scratch",
+                  "name": "scratch_spawn",
                   "args": {
-                    "action": "setup",
+                    "world": "scratch",
                     "label": "camp"
                   }
                 }
@@ -203,19 +299,44 @@
             "content": null,
             "tool_calls": [
               {
-                "call_id": "call_east",
-                "name": "browser_script_run",
+                "call_id": "call_go",
+                "name": "browser_sql_run",
                 "arguments": {
-                  "name": "scratch",
-                  "args": {
-                    "action": "go",
-                    "way": "east"
-                  }
+                  "db": "scratch",
+                  "statements": [
+                    {
+                      "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                      "params": [
+                        "go",
+                        "east",
+                        "player"
+                      ]
+                    }
+                  ]
                 }
               }
             ],
-            "next": "moved"
+            "next": "choose_step"
           }
+        }
+      },
+      "choose_step": {
+        "replies": {},
+        "after_tools": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_step",
+              "name": "browser_script_run",
+              "arguments": {
+                "name": "ecs_step",
+                "args": {
+                  "world": "scratch"
+                }
+              }
+            }
+          ],
+          "next": "moved"
         }
       },
       "moved": {

@@ -4,20 +4,20 @@
 #
 # Walks a guide test on the engine page, the work of the three programs
 # test_guide_NAME.py, by the contract of API/python/guide_walk.pyi. table_build
-# turns a guide's table.json into the scripted table the port takes: each node
-# holding `ask` gains an `otherwise` of the table's `puzzled` then `ask`, and,
-# with the table's `exit`, a reply of the exit's input and the three nodes
-# NODE~exit, NODE~paused and NODE~resume, which pause there and resume there.
-# guide_main serves a fresh debug root through the functions of xsjs_serve.py,
-# as the maintainer serves one, its seed table the guide's, and drives
-# chrome-headless-shell by keys alone, one step at a time: the line typed, its
-# band waited for with the box enabled, then the picture and the rows of the
-# server's databases the gold names. A step whose band the step before showed
-# already is refused, as its wait could pass before its turn ran. The server's
-# databases, copied at the first render and at the end, must agree with the
-# audit's commits, their text in build/audit/NAME_db.txt. It imports nothing of
-# test_demo.py, and the modules beside it are imported inside the functions
-# that use them, after their bytecode has been sent to build/.
+# turns a guide's table.json into the scripted table the port takes: a `$text`
+# or `$ecs` object becomes the text of a file of the guide or of the core in
+# `ecs` beside it, each node holding `ask` gains an `otherwise` of `puzzled`
+# then `ask` and, with the table's `exit`, a reply of its input calling its
+# `calls` and the nodes NODE~exit, NODE~paused and NODE~resume. guide_main
+# serves a fresh debug root through xsjs_serve.py, as the maintainer serves
+# one, its seed table the guide's, and drives chrome-headless-shell by keys
+# alone, a step at a time: the line typed, its band waited for with the box
+# enabled, then the picture and the rows the gold names, a band shown already
+# refused. The server's databases, copied at the first render and at the end,
+# must agree with the audit's commits, and the rung `repeated` proves the guide
+# said the gold's output at the end and before, in build/audit/NAME_db.txt.
+# It imports nothing of test_demo.py, and the modules beside it are imported
+# inside the functions that use them, after their bytecode is sent to build/.
 
 import argparse, contextlib, copy, functools, json, os, shutil, signal, sqlite3
 import sys, tempfile, time, types
@@ -49,6 +49,12 @@ _TABLE_NAME = "table.json"
 # The one member of an object that stands for the text of a file of the guide.
 _TEXT_KEY = "$text"
 
+# The one member of an object that stands for the text of a file of the core.
+_ECS_KEY = "$ecs"
+
+# The directory of the core's files, beside the directory of the guide.
+_ECS_NAME = "ecs"
+
 # The newline that ends each text file of a guide, which its text leaves out.
 _TEXT_END = "\n"
 
@@ -59,6 +65,10 @@ _OTHERWISE_KEY = "otherwise"
 # The table's members of its words before a question asked again, its exit.
 _PUZZLED_KEY = "puzzled"
 _EXIT_KEY = "exit"
+
+# The members of the exit, exactly, and those of them that are lists of calls.
+_EXIT_MEMBERS = ("input", "calls", "after", "resume", "resume_calls", "paused")
+_EXIT_CALLS = ("calls", "resume_calls")
 
 # The members of a node that hold one reply each, beside its `replies`.
 _REPLY_KEYS = ("otherwise", "after_tools", "after_lacks")
@@ -130,6 +140,7 @@ _SERVED_RUNG = "served"
 _AUDIT_RUNG = "audit"
 _LEFT_RUNG = "left"
 _DATABASES_RUNG = "databases"
+_REPEATED_RUNG = "repeated"
 
 # The exit code of a run with a failed check, and of one `^C` ended.
 _EXIT_FAILED = 1
@@ -423,35 +434,52 @@ class _GuideRun:
             self.ttyd.server_stop()
 
 
-# The text of a file of the guide's directory, less the newline that ends it.
+# The text of a file of the directory, less the newline that ends it.
 def _text_read(directory: str, name: str) -> str:
     path = os.path.join(directory, name)
     with open(path, encoding="utf-8", newline="") as file:
         text = file.read()
     if not text.endswith(_TEXT_END):
-        raise ValueError(f"the guide's file {path} does not end in a newline")
+        raise ValueError(f"the file {path} does not end in a newline")
     return text.removesuffix(_TEXT_END)
 
 
-# The value with each object of `$text` alone replaced by its file's text.
-def _texts_replace(value: Any, directory: str) -> Any:
+# The value with each object of a file's member alone replaced by its text.
+def _texts_replace(value: Any, folders: dict[str, str]) -> Any:
     if isinstance(value, list):
         items = cast(list[Any], value)
-        return [_texts_replace(item, directory) for item in items]
+        return [_texts_replace(item, folders) for item in items]
     if not isinstance(value, dict):
         return value
     fields = cast(dict[str, Any], value)
-    if _TEXT_KEY not in fields:
+    named = [key for key in folders if key in fields]
+    if not named:
         return {
-            key: _texts_replace(item, directory)
-            for key, item in fields.items()
+            key: _texts_replace(item, folders) for key, item in fields.items()
         }
+    key = named[0]
     if len(fields) != 1:
         raise ValueError(
-            f"an object of {_TEXT_KEY} in {directory} holds other members:"
+            f"an object of {key} in {folders[key]} holds other members:"
             f" {sorted(fields)}"
         )
-    return _text_read(directory, fields[_TEXT_KEY])
+    return _text_read(folders[key], fields[key])
+
+
+# Refuses an exit whose members are not its form's, or whose calls are no list.
+def _exit_check(way_out: dict[str, Any], path: str) -> None:
+    if sorted(way_out) != sorted(_EXIT_MEMBERS):
+        raise ValueError(
+            f"the exit of {path} holds the members {sorted(way_out)}, not"
+            f" {sorted(_EXIT_MEMBERS)}"
+        )
+    for key in _EXIT_CALLS:
+        calls: object = way_out[key]
+        if not isinstance(calls, list) or not calls:
+            raise ValueError(
+                f"the exit's {key} of {path} is {calls!r}, where it lists one"
+                " call or more"
+            )
 
 
 # Adds the exit to the node that asks: a reply, and three nodes of its own.
@@ -475,10 +503,10 @@ def _exit_add(
             raise ValueError(
                 f"the node {made} of {path} takes a name of the exit of {name}"
             )
-    # Each reply holds a call of its own, as each call's arguments become text.
+    # Each reply holds calls of its own, as each call's arguments become text.
     replies[way_out["input"]] = {
         "content": None,
-        "tool_calls": [copy.deepcopy(way_out["call"])],
+        "tool_calls": copy.deepcopy(way_out["calls"]),
         "next": left,
     }
     nodes[left] = {
@@ -493,7 +521,7 @@ def _exit_add(
         "replies": {
             way_out["resume"]: {
                 "content": None,
-                "tool_calls": [copy.deepcopy(way_out["resume_call"])],
+                "tool_calls": copy.deepcopy(way_out["resume_calls"]),
                 "next": resumed,
             }
         },
@@ -534,7 +562,14 @@ def table_build(directory: str) -> dict[str, Any]:
     path = os.path.join(directory, _TABLE_NAME)
     with open(path, encoding="utf-8") as file:
         loaded: object = json.load(file)
-    source = cast(dict[str, Any], _texts_replace(loaded, directory))
+    guides = os.path.dirname(os.path.abspath(directory))
+    folders = {
+        _TEXT_KEY: directory,
+        _ECS_KEY: os.path.join(guides, _ECS_NAME),
+    }
+    source = cast(dict[str, Any], _texts_replace(loaded, folders))
+    if _EXIT_KEY in source:
+        _exit_check(source[_EXIT_KEY], path)
     nodes: dict[str, Any] = source["nodes"]
     # The source's nodes alone, as an exit adds nodes of its own.
     for name in list(nodes):
@@ -768,6 +803,32 @@ def _rung_databases(run: _GuideRun) -> str:
     )
 
 
+# The guide said the gold's output at the end and before, by the audit.
+def _rung_repeated(run: _GuideRun) -> str:
+    import audit_read
+
+    path = os.path.join(run.root, _AUDIT_NAME)
+    entries = audit_read.entries_parse(audit_read.document_read(path))
+    table = table_build(os.path.join(_GUIDES_PATH, run.name))
+    end = os.path.join(run.failed, _END_NAME)
+    repeated: dict[str, Any] = run.gold["repeated"]
+    failed: audit_read.AuditFailed | None = None
+    try:
+        verdict = audit_read.repeat_check(entries, table, end, repeated)
+    except audit_read.AuditFailed as failure:
+        failed = failure
+        verdict = f"failure: {failure}"
+    told = os.path.join(_DIGEST_PATH, run.name + _DATABASES_END)
+    # A blank line then the verdict, after the verdict of the databases.
+    with open(told, "a", encoding="utf-8") as file:
+        file.write(f"\n{verdict}\n")
+    if failed is not None:
+        raise CheckFailed(
+            f"the output the gold's query reads from {end}: {failed}"
+        ) from failed
+    return f"{verdict}, appended to {told}"
+
+
 # Runs the rungs in order, each by its label, the gold's between the fixed.
 def _rungs_climb(run: _GuideRun) -> None:
     log = run.log
@@ -799,6 +860,12 @@ def _rungs_climb(run: _GuideRun) -> None:
         _DATABASES_RUNG,
         label,
         functools.partial(_rung_databases, run),
+        rung_seconds,
+    )
+    log.rung_run(
+        _REPEATED_RUNG,
+        label,
+        functools.partial(_rung_repeated, run),
         rung_seconds,
     )
     log.book.root_leave()

@@ -74,12 +74,23 @@
           "say": "7",
           "band": "Start at 7:00 and the icefall's 6 hours keep you under the seracs until 13:00, 4 hours after the sun loosens the ice at 9:00. Earlier. What hour do we start?",
           "rows": [
-            {"db": "expedition", "sql": "SELECT id, camp, altitude_m, ams, hidden, rest_days, load_kg, bottles, resume_camp, exits, high_m, record FROM climber", "params": [], "rows": [[1, "Base Camp", 5364, 0, 0, 0, 0, 0, "", 0, 5364, "kept"]]}
+            {"db": "expedition", "sql": "SELECT id, name FROM entity ORDER BY id", "params": [], "rows": [[1, "world"], [2, "player"], [3, "dawa"], [4, "teo"], [5, "base_camp"], [6, "camp_1"], [7, "camp_2"], [8, "camp_3"], [9, "camp_4"], [10, "south_summit"], [11, "summit"], [12, "player_bottle"], [13, "teo_bottle"], [14, "spare"], [15, "forecast_1"], [16, "forecast_3"]]},
+            {"db": "expedition", "sql": "SELECT ord, name, kind FROM system ORDER BY ord", "params": [], "rows": [[1, "dawa_lib", "lib"], [2, "dawa_icefall", "step"], [3, "dawa_morning", "step"], [4, "dawa_exit", "step"], [5, "dawa_resume", "step"], [6, "dawa_window", "step"], [7, "dawa_loads", "step"], [8, "dawa_push", "step"], [9, "dawa_decide", "step"], [10, "dawa_keepsake", "step"], [11, "dawa_breathe", "tick"], [12, "dawa_move", "tick"], [13, "dawa_rescue", "tick"], [14, "dawa_stop", "tick"]]},
+            {"db": "expedition", "sql": "SELECT step, tick, tick_seconds, ticks_max FROM clock", "params": [], "rows": [[1, 0, 1800, 48]]},
+            {"db": "expedition", "sql": "SELECT entity.name, camp.name FROM at JOIN entity ON entity.id = at.entity JOIN camp ON camp.entity = at.camp ORDER BY at.entity", "params": [], "rows": [["player", "Base Camp"], ["dawa", "Base Camp"], ["teo", "Base Camp"]]},
+            {"db": "expedition", "sql": "SELECT camp.name, ams.grade, ams.hidden, rest.days, load.kg, high.m, exits.count FROM entity JOIN at ON at.entity = entity.id JOIN camp ON camp.entity = at.camp JOIN ams ON ams.entity = entity.id JOIN rest ON rest.entity = entity.id JOIN load ON load.entity = entity.id JOIN high ON high.entity = entity.id JOIN exits ON exits.entity = entity.id WHERE entity.name = ?", "params": ["player"], "rows": [["Base Camp", 0, 0, 0, 0, 5364, 0]]},
+            {"db": "expedition", "sql": "SELECT step, tick, beat, choice, outcome FROM beat_log ORDER BY n", "params": [], "rows": [[1, 0, "icefall", "7", "refused"]]}
           ]
         },
         {
           "say": "2",
-          "band": "Start at 2:00 and you are through the icefall at 8:00, 1 hour before the sun. Camp 1, 6065 m: the air presses 366 mmHg, and you breathe in 67 mmHg of oxygen, 45 percent of what the sea gives. You sleep 701 m higher than last night, over the 500 m a night the doctors allow. Morning. Tell me true: does your head hurt?"
+          "band": "Start at 2:00 and you are through the icefall at 8:00, 1 hour before the sun. Camp 1, 6065 m: the air presses 366 mmHg, and you breathe in 67 mmHg of oxygen, 45 percent of what the sea gives. You sleep 701 m higher than last night, over the 500 m a night the doctors allow. Morning. Tell me true: does your head hurt?",
+          "rows": [
+            {"db": "expedition", "sql": "SELECT system, tick FROM output WHERE step = ? ORDER BY n", "params": [2], "rows": [["dawa_icefall", 0], ["dawa_move", 12]]},
+            {"db": "expedition", "sql": "SELECT step, tick, tick_seconds, ticks_max FROM clock", "params": [], "rows": [[2, 12, 1800, 48]]},
+            {"db": "expedition", "sql": "SELECT minute FROM day", "params": [], "rows": [[480]]},
+            {"db": "expedition", "sql": "SELECT camp.name, ams.grade, ams.hidden, rest.days, load.kg, high.m, exits.count FROM entity JOIN at ON at.entity = entity.id JOIN camp ON camp.entity = at.camp JOIN ams ON ams.entity = entity.id JOIN rest ON rest.entity = entity.id JOIN load ON load.entity = entity.id JOIN high ON high.entity = entity.id JOIN exits ON exits.entity = entity.id WHERE entity.name = ?", "params": ["player"], "rows": [["Camp 1", 1, 0, 0, 0, 6065, 0]]}
+          ]
         }
       ]
     },
@@ -105,7 +116,9 @@
           "say": "Take me down",
           "band": "Dawa clips you to the fixed line and takes you down 335 m to Camp 1, 6065 m: the air presses 366 mmHg, and you breathe in 67 mmHg of oxygen, 45 percent of what the sea gives. On the mountain nobody is brave about this. We rest here as long as you like, and when you want to climb again, say let's go up again.",
           "rows": [
-            {"db": "expedition", "sql": "SELECT id, camp, altitude_m, ams, hidden, rest_days, load_kg, bottles, resume_camp, exits, high_m, record FROM climber", "params": [], "rows": [[1, "Camp 1", 6065, 0, 0, 2, 0, 0, "Camp 2", 1, 6400, "kept"]]}
+            {"db": "expedition", "sql": "SELECT camp.name, ams.grade, ams.hidden, rest.days, load.kg, high.m, exits.count FROM entity JOIN at ON at.entity = entity.id JOIN camp ON camp.entity = at.camp JOIN ams ON ams.entity = entity.id JOIN rest ON rest.entity = entity.id JOIN load ON load.entity = entity.id JOIN high ON high.entity = entity.id JOIN exits ON exits.entity = entity.id WHERE entity.name = ?", "params": ["player"], "rows": [["Camp 1", 0, 0, 2, 0, 6400, 1]]},
+            {"db": "expedition", "sql": "SELECT entity.name, camp.name FROM resume JOIN entity ON entity.id = resume.entity JOIN camp ON camp.entity = resume.camp", "params": [], "rows": [["player", "Camp 2"]]},
+            {"db": "expedition", "sql": "SELECT entity.name, camp.name FROM at JOIN entity ON entity.id = at.entity JOIN camp ON camp.entity = at.camp ORDER BY at.entity", "params": [], "rows": [["player", "Camp 1"], ["dawa", "Camp 1"], ["teo", "Camp 1"]]}
           ]
         },
         {
@@ -142,7 +155,14 @@
       "steps": [
         {
           "say": "Go",
-          "band": "The South Summit, 8749 m: the air presses 256 mmHg, and you breathe in 44 mmHg of oxygen, 29 percent of what the sea gives. It is 4:00, the top is 100 m above, and Teo is down, his bottle empty. Your bottle holds 600 litres, 5 hours at 2 litres a minute. The top and back down to the Col takes 7 hours and 840 litres, 240 of them from Dawa's spare, which leaves it 960, and Teo needs 1080 at 4 litres a minute to get down. Not both. Dawa looks at you and waits. It is your call: the top, or we take Teo down?"
+          "band": "The South Summit, 8749 m: the air presses 256 mmHg, and you breathe in 44 mmHg of oxygen, 29 percent of what the sea gives. It is 4:00, the top is 100 m above, and Teo is down, his bottle empty. Your bottle holds 600 litres, 5 hours at 2 litres a minute. The top and back down to the Col takes 7 hours and 840 litres, 240 of them from Dawa's spare, which leaves it 960, and Teo needs 1080 at 4 litres a minute to get down. Not both. Dawa looks at you and waits. It is your call: the top, or we take Teo down?",
+          "rows": [
+            {"db": "expedition", "sql": "SELECT system, tick FROM output WHERE step = ? ORDER BY n", "params": [11], "rows": [["dawa_move", 22], ["dawa_stop", 22]]},
+            {"db": "expedition", "sql": "SELECT minute FROM day", "params": [], "rows": [[240]]},
+            {"db": "expedition", "sql": "SELECT entity.name, bottle.full_l, bottle.left_l, holder.name FROM bottle JOIN entity ON entity.id = bottle.entity JOIN entity AS holder ON holder.id = bottle.holder ORDER BY bottle.entity", "params": [], "rows": [["player_bottle", 1200, 600, "player"], ["teo_bottle", 1200, 0, "teo"], ["spare", 1200, 1200, "dawa"]]},
+            {"db": "expedition", "sql": "SELECT entity.name, breathe.lpm, source.name FROM breathe JOIN entity ON entity.id = breathe.entity JOIN entity AS source ON source.id = breathe.bottle ORDER BY breathe.entity", "params": [], "rows": [["player", 2, "player_bottle"]]},
+            {"db": "expedition", "sql": "SELECT entity.name FROM down JOIN entity ON entity.id = down.entity", "params": [], "rows": [["teo"]]}
+          ]
         }
       ]
     },
@@ -152,7 +172,15 @@
       "steps": [
         {
           "say": "We take Teo down",
-          "band": "Teo goes on Dawa's spare at 4 litres a minute: 1080 of its 1200 litres for the 4 hours 30 minutes down to the South Col. You use 540 of your 600. Everyone reaches Camp 4, and Dawa has still never left anyone behind. At the Col, Dawa holds out his camera. Do you want the picture from up there?"
+          "band": "Teo goes on Dawa's spare at 4 litres a minute: 1080 of its 1200 litres for the 4 hours 30 minutes down to the South Col. You use 540 of your 600. Everyone reaches Camp 4, and Dawa has still never left anyone behind. At the Col, Dawa holds out his camera. Do you want the picture from up there?",
+          "rows": [
+            {"db": "expedition", "sql": "SELECT system, tick FROM output WHERE step = ? ORDER BY n", "params": [12], "rows": [["dawa_rescue", 31]]},
+            {"db": "expedition", "sql": "SELECT minute FROM day", "params": [], "rows": [[510]]},
+            {"db": "expedition", "sql": "SELECT entity.name, bottle.full_l, bottle.left_l, holder.name FROM bottle JOIN entity ON entity.id = bottle.entity JOIN entity AS holder ON holder.id = bottle.holder ORDER BY bottle.entity", "params": [], "rows": [["player_bottle", 1200, 60, "player"], ["teo_bottle", 1200, 0, "teo"], ["spare", 1200, 120, "dawa"]]},
+            {"db": "expedition", "sql": "SELECT entity.name, breathe.lpm, source.name FROM breathe JOIN entity ON entity.id = breathe.entity JOIN entity AS source ON source.id = breathe.bottle ORDER BY breathe.entity", "params": [], "rows": [["player", 2, "player_bottle"], ["teo", 4, "spare"]]},
+            {"db": "expedition", "sql": "SELECT (SELECT COUNT(*) FROM down), (SELECT COUNT(*) FROM climb), (SELECT COUNT(*) FROM busy)", "params": [], "rows": [[0, 0, 0]]},
+            {"db": "expedition", "sql": "SELECT entity.name, camp.name FROM at JOIN entity ON entity.id = at.entity JOIN camp ON camp.entity = at.camp ORDER BY at.entity", "params": [], "rows": [["player", "Camp 4"], ["dawa", "Camp 4"], ["teo", "Camp 4"]]}
+          ]
         }
       ]
     },
@@ -165,12 +193,30 @@
           "band": "A photograph from the South Summit, 8749 m, 100 m below the top, the morning you took Teo down. A white scarf from Dawa. Go slowly, and come back some day. The mountain has other routes, and I will be climbing them.",
           "picture": {"hidden": false, "size": 16, "colours": ["0 0 0 255", "255 255 255 255"]},
           "rows": [
-            {"db": "expedition", "sql": "SELECT id, camp, altitude_m, ams, hidden, rest_days, load_kg, bottles, resume_camp, exits, high_m, record FROM climber", "params": [], "rows": [[1, "Camp 4", 7906, 0, 0, 5, 12, 1, "", 1, 8749, "kept"]]},
-            {"db": "expedition", "sql": "SELECT n, beat, choice, outcome FROM climb_log ORDER BY n", "params": [], "rows": [[1, "icefall", "7", "refused"], [2, "icefall", "2", "crossed"], [3, "morning", "no", "hidden"], [4, "morning", "yes", "told"], [5, "exit", "Camp 2", "down"], [6, "resume", "Camp 2", "up"], [7, "window", "1", "false"], [8, "window", "3", "real"], [9, "loads", "everything", "refused"], [10, "loads", "one bottle", "carried"], [11, "push", "go", "stopped"], [12, "decide", "rescue", "rescued"]]},
-            {"db": "expedition", "sql": "SELECT kind, text FROM keepsake ORDER BY kind", "params": [], "rows": [["photograph", "A photograph from the South Summit, 8749 m, 100 m below the top, the morning you took Teo down."], ["scarf", "A white scarf from Dawa."]]}
+            {"db": "expedition", "sql": "SELECT camp.name, ams.grade, ams.hidden, rest.days, load.kg, high.m, exits.count FROM entity JOIN at ON at.entity = entity.id JOIN camp ON camp.entity = at.camp JOIN ams ON ams.entity = entity.id JOIN rest ON rest.entity = entity.id JOIN load ON load.entity = entity.id JOIN high ON high.entity = entity.id JOIN exits ON exits.entity = entity.id WHERE entity.name = ?", "params": ["player"], "rows": [["Camp 4", 0, 0, 5, 12, 8749, 1]]},
+            {"db": "expedition", "sql": "SELECT entity.name, record.text FROM record JOIN entity ON entity.id = record.entity", "params": [], "rows": [["dawa", "kept"]]},
+            {"db": "expedition", "sql": "SELECT step, tick, tick_seconds, ticks_max FROM clock", "params": [], "rows": [[13, 31, 1800, 48]]},
+            {"db": "expedition", "sql": "SELECT step, tick, beat, choice, outcome FROM beat_log ORDER BY n", "params": [], "rows": [[1, 0, "icefall", "7", "refused"], [2, 0, "icefall", "2", "crossed"], [3, 12, "morning", "no", "hidden"], [4, 12, "morning", "yes", "told"], [5, 12, "exit", "take me down", "down"], [6, 12, "resume", "let's go up again", "up"], [7, 12, "window", "1", "false"], [8, 12, "window", "3", "real"], [9, 12, "loads", "everything", "refused"], [10, 12, "loads", "one bottle", "carried"], [11, 12, "push", "go", "stopped"], [12, 22, "decide", "rescue", "rescued"], [13, 31, "keepsake", "yes", "kept"]]},
+            {"db": "expedition", "sql": "SELECT keepsake.entity, entity.name, keepsake.kind, keepsake.text FROM keepsake JOIN entity ON entity.id = keepsake.entity ORDER BY keepsake.entity", "params": [], "rows": [[17, "photograph", "photograph", "A photograph from the South Summit, 8749 m, 100 m below the top, the morning you took Teo down."], [18, "scarf", "scarf", "A white scarf from Dawa."]]},
+            {"db": "expedition", "sql": "SELECT COUNT(*) FROM intent", "params": [], "rows": [[0]]}
           ]
         }
       ]
+    },
+    {
+      "rung": "goodbye",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Goodbye, Dawa",
+          "band": "Dawa's spare gave 1080 of its 1200 litres to bring Teo down to Camp 4, and nobody was left behind. Dawa takes your hand in both of his. Thank you for climbing on my rope. Go slowly, my friend."
+        }
+      ]
     }
-  ]
+  ],
+  "repeated": {
+    "db": "expedition",
+    "sql": "SELECT CAST(full_l - left_l AS TEXT) FROM bottle JOIN entity ON entity.id = bottle.entity WHERE entity.name = ?",
+    "params": ["spare"]
+  }
 }

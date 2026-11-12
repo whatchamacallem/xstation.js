@@ -3,18 +3,48 @@
   "puzzled": "Say again? The wind took that.",
   "exit": {
     "input": "i tap my head twice",
-    "call": {
-      "call_id": "call_exit",
-      "name": "browser_script_run",
-      "arguments": {"name": "ruth", "args": {"action": "exit"}}
-    },
+    "calls": [
+      {
+        "call_id": "call_exit",
+        "name": "browser_sql_run",
+        "arguments": {
+          "db": "summer",
+          "statements": [
+            {
+              "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+              "params": ["exit", "i tap my head twice", "player"]
+            }
+          ]
+        }
+      },
+      {
+        "call_id": "call_exit_step",
+        "name": "browser_script_run",
+        "arguments": {"name": "ecs_step", "args": {"world": "summer"}}
+      }
+    ],
     "after": "No questions, no teasing. Say go on when you want to go back up.",
     "resume": "go on",
-    "resume_call": {
-      "call_id": "call_resume",
-      "name": "browser_script_run",
-      "arguments": {"name": "ruth", "args": {"action": "resume"}}
-    },
+    "resume_calls": [
+      {
+        "call_id": "call_resume",
+        "name": "browser_sql_run",
+        "arguments": {
+          "db": "summer",
+          "statements": [
+            {
+              "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+              "params": ["resume", "go on", "player"]
+            }
+          ]
+        }
+      },
+      {
+        "call_id": "call_resume_step",
+        "name": "browser_script_run",
+        "arguments": {"name": "ecs_step", "args": {"world": "summer"}}
+      }
+    ],
     "paused": "No hurry. I'll sit on the wheel in the shade. Say go on when you want to go back up."
   },
   "nodes": {
@@ -146,40 +176,197 @@
           "content": null,
           "tool_calls": [
             {
-              "call_id": "call_script",
+              "call_id": "call_put_ecs_init",
               "name": "browser_kv_put",
-              "arguments": {
-                "ref": "/_files/script/ruth.js",
-                "text": {"$text": "sim.js"}
-              }
+              "arguments": {"ref": "/_files/script/ecs_init.js", "text": {"$ecs": "init.js"}}
             },
             {
-              "call_id": "call_tables",
+              "call_id": "call_put_ecs_step",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ecs_step.js", "text": {"$ecs": "step.js"}}
+            },
+            {
+              "call_id": "call_put_ruth_lib",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ruth_lib.js", "text": {"$text": "lib.js"}}
+            },
+            {
+              "call_id": "call_put_ruth_spawn",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ruth_spawn.js", "text": {"$text": "spawn.js"}}
+            },
+            {
+              "call_id": "call_put_ruth_report",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ruth_report.js", "text": {"$text": "report.js"}}
+            },
+            {
+              "call_id": "call_put_ruth_climb",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ruth_climb.js", "text": {"$text": "climb.js"}}
+            },
+            {
+              "call_id": "call_put_ruth_exit",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ruth_exit.js", "text": {"$text": "exit.js"}}
+            },
+            {
+              "call_id": "call_put_ruth_resume",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ruth_resume.js", "text": {"$text": "resume.js"}}
+            },
+            {
+              "call_id": "call_put_ruth_turn",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ruth_turn.js", "text": {"$text": "turn.js"}}
+            },
+            {
+              "call_id": "call_put_ruth_loop",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ruth_loop.js", "text": {"$text": "loop.js"}}
+            },
+            {
+              "call_id": "call_put_ruth_roll",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ruth_roll.js", "text": {"$text": "roll.js"}}
+            },
+            {
+              "call_id": "call_put_ruth_buzz",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ruth_buzz.js", "text": {"$text": "buzz.js"}}
+            },
+            {
+              "call_id": "call_put_ruth_rides",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ruth_rides.js", "text": {"$text": "rides.js"}}
+            },
+            {
+              "call_id": "call_put_ruth_race",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ruth_race.js", "text": {"$text": "race.js"}}
+            },
+            {
+              "call_id": "call_put_ruth_wing_walk",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ruth_wing_walk.js", "text": {"$text": "wing_walk.js"}}
+            },
+            {
+              "call_id": "call_put_ruth_field",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ruth_field.js", "text": {"$text": "field.js"}}
+            },
+            {
+              "call_id": "call_put_ruth_landing",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ruth_landing.js", "text": {"$text": "landing.js"}}
+            },
+            {
+              "call_id": "call_put_ruth_keepsake",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ruth_keepsake.js", "text": {"$text": "keepsake.js"}}
+            },
+            {
+              "call_id": "call_put_ruth_drive",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ruth_drive.js", "text": {"$text": "drive.js"}}
+            },
+            {
+              "call_id": "call_put_ruth_finish",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/_files/script/ruth_finish.js", "text": {"$text": "finish.js"}}
+            },
+            {
+              "call_id": "call_init",
+              "name": "browser_script_run",
+              "arguments": {"name": "ecs_init", "args": {"world": "summer"}}
+            },
+            {
+              "call_id": "call_schema",
               "name": "browser_sql_run",
               "arguments": {
                 "db": "summer",
                 "statements": [
                   {
-                    "sql": "CREATE TABLE jenny (id INTEGER PRIMARY KEY CHECK (id = 1), partner TEXT NOT NULL, altitude_ft INTEGER NOT NULL, resume_ft INTEGER NOT NULL, exits INTEGER NOT NULL, purse_cents INTEGER NOT NULL) STRICT",
+                    "sql": "CREATE TABLE airframe (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, gross_lb INTEGER NOT NULL, wing_sqft_x100 INTEGER NOT NULL, hp INTEGER NOT NULL, max_mph INTEGER NOT NULL, min_mph INTEGER NOT NULL, climb_ft INTEGER NOT NULL, climb_min INTEGER NOT NULL, tank_gal INTEGER NOT NULL, burn_gal_hr INTEGER NOT NULL, level_off_ft INTEGER NOT NULL, cruise_mph INTEGER NOT NULL, glide_ratio_x100 INTEGER NOT NULL) STRICT",
                     "params": []
                   },
                   {
-                    "sql": "CREATE TABLE flight (n INTEGER PRIMARY KEY, beat TEXT NOT NULL, choice TEXT NOT NULL, outcome TEXT NOT NULL) STRICT",
+                    "sql": "CREATE TABLE altitude (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, ft INTEGER NOT NULL) STRICT",
                     "params": []
                   },
                   {
-                    "sql": "CREATE TABLE keepsake (kind TEXT NOT NULL PRIMARY KEY, text TEXT NOT NULL) STRICT",
+                    "sql": "CREATE TABLE resume (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, ft INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE technique (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, loop_pull_g INTEGER NOT NULL, loop_top_g_x10 INTEGER NOT NULL, roll_seconds INTEGER NOT NULL, stunt_ft INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE fares (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, ride_cents INTEGER NOT NULL, ride_min INTEGER NOT NULL, gas_cents_gal INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE purse (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, cents INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE name (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, text TEXT NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE exits (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, count INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE show (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, minutes INTEGER NOT NULL, ft INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE prize (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, cents INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE course (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, feet INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE vehicle (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, top_mph INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE wind (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, mph INTEGER NOT NULL, quarter TEXT NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE field (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, miles_x10 INTEGER NOT NULL, name TEXT NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE racer (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, ground_mph INTEGER NOT NULL, feet INTEGER NOT NULL, ticks INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE throttle (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, setting TEXT NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE keepsake (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, kind TEXT NOT NULL, text TEXT NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "INSERT INTO system (ord, name, kind) VALUES (1, 'ruth_lib', 'lib'), (2, 'ruth_climb', 'step'), (3, 'ruth_exit', 'step'), (4, 'ruth_resume', 'step'), (5, 'ruth_turn', 'step'), (6, 'ruth_loop', 'step'), (7, 'ruth_roll', 'step'), (8, 'ruth_buzz', 'step'), (9, 'ruth_rides', 'step'), (10, 'ruth_race', 'step'), (11, 'ruth_wing_walk', 'step'), (12, 'ruth_field', 'step'), (13, 'ruth_landing', 'step'), (14, 'ruth_keepsake', 'step'), (15, 'ruth_drive', 'tick'), (16, 'ruth_finish', 'tick')",
                     "params": []
                   }
                 ]
               }
             },
             {
-              "call_id": "call_setup",
+              "call_id": "call_spawn",
               "name": "browser_script_run",
               "arguments": {
-                "name": "ruth",
-                "args": {"action": "setup", "partner": "Sam"}
+                "name": "ruth_spawn",
+                "args": {"world": "summer", "partner": "Sam"}
               }
             }
           ],
@@ -211,8 +398,21 @@
           "tool_calls": [
             {
               "call_id": "call_climb",
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "summer",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["climb", "take her up", "player"]
+                  }
+                ]
+              }
+            },
+            {
+              "call_id": "call_step",
               "name": "browser_script_run",
-              "arguments": {"name": "ruth", "args": {"action": "climb"}}
+              "arguments": {"name": "ecs_step", "args": {"world": "summer"}}
             }
           ],
           "next": "climbed"
@@ -243,24 +443,54 @@
           "content": null,
           "tool_calls": [
             {
-              "call_id": "call_steep",
-              "name": "browser_script_run",
-              "arguments": {"name": "ruth", "args": {"action": "turn", "bank": 60}}
+              "call_id": "call_turn",
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "summer",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["turn", "60", "player"]
+                  }
+                ]
+              }
             }
           ],
-          "next": "turned"
+          "next": "turns_step"
         },
         "30": {
           "content": null,
           "tool_calls": [
             {
-              "call_id": "call_gentle",
-              "name": "browser_script_run",
-              "arguments": {"name": "ruth", "args": {"action": "turn", "bank": 30}}
+              "call_id": "call_turn",
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "summer",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["turn", "30", "player"]
+                  }
+                ]
+              }
             }
           ],
-          "next": "turned"
+          "next": "turns_step"
         }
+      }
+    },
+    "turns_step": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_step",
+            "name": "browser_script_run",
+            "arguments": {"name": "ecs_step", "args": {"world": "summer"}}
+          }
+        ],
+        "next": "turned"
       }
     },
     "turned": {
@@ -284,24 +514,54 @@
           "content": null,
           "tool_calls": [
             {
-              "call_id": "call_slow",
-              "name": "browser_script_run",
-              "arguments": {"name": "ruth", "args": {"action": "loop", "entry_mph": 80}}
+              "call_id": "call_loop",
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "summer",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["loop", "80", "player"]
+                  }
+                ]
+              }
             }
           ],
-          "next": "looped"
+          "next": "loop_step"
         },
         "90": {
           "content": null,
           "tool_calls": [
             {
-              "call_id": "call_fast",
-              "name": "browser_script_run",
-              "arguments": {"name": "ruth", "args": {"action": "loop", "entry_mph": 90}}
+              "call_id": "call_loop",
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "summer",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["loop", "90", "player"]
+                  }
+                ]
+              }
             }
           ],
-          "next": "looped"
+          "next": "loop_step"
         }
+      }
+    },
+    "loop_step": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_step",
+            "name": "browser_script_run",
+            "arguments": {"name": "ecs_step", "args": {"world": "summer"}}
+          }
+        ],
+        "next": "looped"
       }
     },
     "looped": {
@@ -325,24 +585,54 @@
           "content": null,
           "tool_calls": [
             {
-              "call_id": "call_low",
-              "name": "browser_script_run",
-              "arguments": {"name": "ruth", "args": {"action": "roll", "nose_deg": 20}}
+              "call_id": "call_roll",
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "summer",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["roll", "20", "player"]
+                  }
+                ]
+              }
             }
           ],
-          "next": "rolled"
+          "next": "roll_step"
         },
         "40": {
           "content": null,
           "tool_calls": [
             {
-              "call_id": "call_high",
-              "name": "browser_script_run",
-              "arguments": {"name": "ruth", "args": {"action": "roll", "nose_deg": 40}}
+              "call_id": "call_roll",
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "summer",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["roll", "40", "player"]
+                  }
+                ]
+              }
             }
           ],
-          "next": "rolled"
+          "next": "roll_step"
         }
+      }
+    },
+    "roll_step": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_step",
+            "name": "browser_script_run",
+            "arguments": {"name": "ecs_step", "args": {"world": "summer"}}
+          }
+        ],
+        "next": "rolled"
       }
     },
     "rolled": {
@@ -367,12 +657,34 @@
           "tool_calls": [
             {
               "call_id": "call_buzz",
-              "name": "browser_script_run",
-              "arguments": {"name": "ruth", "args": {"action": "buzz", "feet": 50}}
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "summer",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["buzz", "50", "player"]
+                  }
+                ]
+              }
             }
           ],
-          "next": "buzzed"
+          "next": "buzz_step"
         }
+      }
+    },
+    "buzz_step": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_step",
+            "name": "browser_script_run",
+            "arguments": {"name": "ecs_step", "args": {"world": "summer"}}
+          }
+        ],
+        "next": "buzzed"
       }
     },
     "buzzed": {
@@ -397,12 +709,34 @@
           "tool_calls": [
             {
               "call_id": "call_rides",
-              "name": "browser_script_run",
-              "arguments": {"name": "ruth", "args": {"action": "rides", "count": 10}}
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "summer",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["rides", "10", "player"]
+                  }
+                ]
+              }
             }
           ],
-          "next": "sold"
+          "next": "rides_step"
         }
+      }
+    },
+    "rides_step": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_step",
+            "name": "browser_script_run",
+            "arguments": {"name": "ecs_step", "args": {"world": "summer"}}
+          }
+        ],
+        "next": "sold"
       }
     },
     "sold": {
@@ -427,8 +761,21 @@
           "tool_calls": [
             {
               "call_id": "call_race",
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "summer",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["race", "full throttle", "player"]
+                  }
+                ]
+              }
+            },
+            {
+              "call_id": "call_step",
               "name": "browser_script_run",
-              "arguments": {"name": "ruth", "args": {"action": "race", "throttle": "full throttle"}}
+              "arguments": {"name": "ecs_step", "args": {"world": "summer"}}
             }
           ],
           "next": "raced"
@@ -450,9 +797,22 @@
           "content": null,
           "tool_calls": [
             {
-              "call_id": "call_wing",
+              "call_id": "call_wing_walk",
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "summer",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["wing_walk", "Ruth", "player"]
+                  }
+                ]
+              }
+            },
+            {
+              "call_id": "call_step",
               "name": "browser_script_run",
-              "arguments": {"name": "ruth", "args": {"action": "wing_walk", "walker": "Ruth"}}
+              "arguments": {"name": "ecs_step", "args": {"world": "summer"}}
             }
           ],
           "next": "walked"
@@ -474,24 +834,54 @@
           "content": null,
           "tool_calls": [
             {
-              "call_id": "call_south",
-              "name": "browser_script_run",
-              "arguments": {"name": "ruth", "args": {"action": "field", "field": "south"}}
+              "call_id": "call_field",
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "summer",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["field", "south", "player"]
+                  }
+                ]
+              }
             }
           ],
-          "next": "glided"
+          "next": "engine_step"
         },
         "the north hayfield": {
           "content": null,
           "tool_calls": [
             {
-              "call_id": "call_north",
-              "name": "browser_script_run",
-              "arguments": {"name": "ruth", "args": {"action": "field", "field": "north"}}
+              "call_id": "call_field",
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "summer",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["field", "north", "player"]
+                  }
+                ]
+              }
             }
           ],
-          "next": "glided"
+          "next": "engine_step"
         }
+      }
+    },
+    "engine_step": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_step",
+            "name": "browser_script_run",
+            "arguments": {"name": "ecs_step", "args": {"world": "summer"}}
+          }
+        ],
+        "next": "glided"
       }
     },
     "glided": {
@@ -516,8 +906,21 @@
           "tool_calls": [
             {
               "call_id": "call_landing",
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "summer",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["landing", "into the wind", "player"]
+                  }
+                ]
+              }
+            },
+            {
+              "call_id": "call_step",
               "name": "browser_script_run",
-              "arguments": {"name": "ruth", "args": {"action": "landing", "direction": "into the wind"}}
+              "arguments": {"name": "ecs_step", "args": {"world": "summer"}}
             }
           ],
           "next": "landed"
@@ -566,8 +969,21 @@
           },
           {
             "call_id": "call_keepsake",
+            "name": "browser_sql_run",
+            "arguments": {
+              "db": "summer",
+              "statements": [
+                {
+                  "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                  "params": ["keepsake", "yes please", "player"]
+                }
+              ]
+            }
+          },
+          {
+            "call_id": "call_step",
             "name": "browser_script_run",
-            "arguments": {"name": "ruth", "args": {"action": "keepsake"}}
+            "arguments": {"name": "ecs_step", "args": {"world": "summer"}}
           }
         ],
         "next": "kept"
@@ -582,9 +998,29 @@
       }
     },
     "end": {
-      "replies": {},
+      "replies": {
+        "so long, ruth": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_report",
+              "name": "browser_script_run",
+              "arguments": {"name": "ruth_report", "args": {"world": "summer"}}
+            }
+          ],
+          "next": "told"
+        }
+      },
       "otherwise": {
         "content": "We're down and the Jenny's tied for the night. Come find me in the next town, partner.",
+        "next": "end"
+      }
+    },
+    "told": {
+      "replies": {},
+      "after_tools": {
+        "content": "The Jenny's still mine, and that's your doing too. So long, partner. Come find me in the next town.",
+        "quote": "value.say",
         "next": "end"
       }
     }

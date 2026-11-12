@@ -3728,5 +3728,965 @@
     "  'scene', 1",
     "  '/world/scene/1', 0, 'system', '[{\"role\":\"system\",\"content\":\"Be brief.\"}]'",
     "  '/world/scene/1', 1, 'user', '[{\"role\":\"user\",\"content\":\"Hello.\"}]'"
-  ]
+  ],
+  "repeat_database": {
+    "db": "drive",
+    "statements": [
+      {
+        "sql": "CREATE TABLE entity (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE) STRICT",
+        "params": []
+      },
+      {
+        "sql": "CREATE TABLE tally (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, head INTEGER NOT NULL, tick INTEGER NOT NULL) STRICT",
+        "params": []
+      },
+      {
+        "sql": "INSERT INTO entity (id, name) VALUES (?, ?), (?, ?)",
+        "params": [
+          1,
+          "world",
+          2,
+          "herd"
+        ]
+      },
+      {
+        "sql": "INSERT INTO tally (entity, head, tick) VALUES (?, ?, ?)",
+        "params": [
+          2,
+          1980,
+          10
+        ]
+      }
+    ]
+  },
+  "repeat_query": {
+    "db": "drive",
+    "sql": "SELECT CAST(tally.head AS TEXT) FROM tally JOIN entity ON entity.id = tally.entity WHERE entity.name = ?",
+    "params": [
+      "herd"
+    ]
+  },
+  "repeat_write": "UPDATE tally SET head = 0 WHERE entity = (SELECT id FROM entity WHERE name = ?)",
+  "repeat_queries": [
+    {
+      "sql": "SELECT CAST(tally.head AS TEXT) FROM tally JOIN entity ON entity.id = tally.entity WHERE entity.name = ?",
+      "params": [
+        "world"
+      ],
+      "failure": "the query of repeated on drive gives [], not one row of one text that is not empty"
+    },
+    {
+      "sql": "SELECT name FROM entity ORDER BY id",
+      "params": [],
+      "failure": "the query of repeated on drive gives [('world',), ('herd',)], not one row of one text that is not empty"
+    },
+    {
+      "sql": "SELECT tally.head FROM tally JOIN entity ON entity.id = tally.entity WHERE entity.name = ?",
+      "params": [
+        "herd"
+      ],
+      "failure": "the query of repeated on drive gives [(1980,)], not one row of one text that is not empty"
+    },
+    {
+      "sql": "SELECT '' FROM entity WHERE name = ?",
+      "params": [
+        "herd"
+      ],
+      "failure": "the query of repeated on drive gives [('',)], not one row of one text that is not empty"
+    },
+    {
+      "sql": "SELECT entity.name, CAST(tally.head AS TEXT) FROM tally JOIN entity ON entity.id = tally.entity",
+      "params": [],
+      "failure": "the query of repeated on drive gives [('herd', '1980')], not one row of one text that is not empty"
+    }
+  ],
+  "repeat_table": {
+    "start": "ford",
+    "nodes": {
+      "ford": {
+        "replies": {
+          "pay": {
+            "content": null,
+            "tool_calls": [
+              {
+                "call_id": "call_step",
+                "name": "browser_script_run",
+                "arguments": "{\"name\":\"ecs_step\",\"args\":{\"world\":\"drive\"}}"
+              }
+            ],
+            "next": "crossed"
+          }
+        },
+        "otherwise": {
+          "content": "Pay the toll or swim them, partner.",
+          "next": "ford"
+        }
+      },
+      "crossed": {
+        "replies": {},
+        "after_tools": {
+          "content": "On to Dodge.",
+          "quote": "value.say",
+          "next": "end"
+        }
+      },
+      "end": {
+        "replies": {
+          "so long": {
+            "content": null,
+            "tool_calls": [
+              {
+                "call_id": "call_report",
+                "name": "browser_script_run",
+                "arguments": "{\"name\":\"trail_report\",\"args\":{\"world\":\"drive\"}}"
+              }
+            ],
+            "next": "told"
+          }
+        },
+        "otherwise": {
+          "content": "The fire is lit any night you come this way.",
+          "next": "end"
+        }
+      },
+      "told": {
+        "replies": {},
+        "after_tools": {
+          "content": "So long, partner.",
+          "quote": "value.say",
+          "next": "end"
+        }
+      }
+    }
+  },
+  "repeat_own": {
+    "content": "Still 1980 head, partner.",
+    "failure": "the table's content at [\"nodes\", \"end\", \"otherwise\", \"content\"] holds '1980', so the guide could say it in its own words"
+  },
+  "repeat_walk": [
+    {
+      "sender": "dom",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "ui.input"
+        },
+        "text": "Pay"
+      }
+    },
+    {
+      "sender": "ui",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "ai.say",
+          "id": 2
+        },
+        "text": "Pay"
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.prompt"
+        },
+        "scene": "/trail/ford/1",
+        "messages": [
+          {
+            "role": "system",
+            "content": "The prompt."
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/trail/ford/1",
+        "role": "user",
+        "content": [
+          {
+            "role": "user",
+            "content": "Pay"
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "id": 6
+        },
+        "method": "POST",
+        "url": "https://scripted.invalid/v1/responses",
+        "headers": {
+          "Authorization": "<masked>"
+        },
+        "json": {
+          "model": "grok-4.7",
+          "input": [
+            {
+              "role": "system",
+              "content": "The prompt."
+            },
+            {
+              "role": "user",
+              "content": "Pay"
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "prompt_cache_key": "/trail/ford/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "reply": 6
+        },
+        "status": 200,
+        "json": {
+          "id": "resp_1",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
+            {
+              "type": "reasoning",
+              "id": "rs_1",
+              "encrypted_content": "scripted"
+            },
+            {
+              "type": "function_call",
+              "id": "fc_1_1",
+              "call_id": "call_step",
+              "name": "browser_script_run",
+              "arguments": "{\"name\":\"ecs_step\",\"args\":{\"world\":\"drive\"}}"
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "previous_response_id": null,
+          "usage": {
+            "input_tokens": 100,
+            "input_tokens_details": {
+              "cached_tokens": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "id": 7
+        },
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+          "name": "script_run",
+          "arguments": {
+            "name": "ecs_step",
+            "args": {
+              "world": "drive"
+            }
+          }
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "sql.run"
+        },
+        "db": "drive",
+        "statements": [
+          {
+            "sql": "UPDATE tally SET head = ?, tick = ? WHERE entity = ?",
+            "params": [
+              1980,
+              10,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "reply": 7
+        },
+        "jsonrpc": "2.0",
+        "id": 3,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"value\":{\"say\":\"1980 head cross the ford.\",\"outcome\":\"crossed\"}}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/trail/ford/1",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "reasoning",
+            "id": "rs_1",
+            "encrypted_content": "scripted"
+          },
+          {
+            "type": "function_call",
+            "id": "fc_1_1",
+            "call_id": "call_step",
+            "name": "browser_script_run",
+            "arguments": "{\"name\":\"ecs_step\",\"args\":{\"world\":\"drive\"}}"
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/trail/ford/1",
+        "role": "tool",
+        "content": [
+          {
+            "type": "function_call_output",
+            "call_id": "call_step",
+            "output": "{\"value\":{\"say\":\"1980 head cross the ford.\",\"outcome\":\"crossed\"}}"
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "id": 8
+        },
+        "method": "POST",
+        "url": "https://scripted.invalid/v1/responses",
+        "headers": {
+          "Authorization": "<masked>"
+        },
+        "json": {
+          "model": "grok-4.7",
+          "previous_response_id": "resp_1",
+          "input": [
+            {
+              "type": "function_call_output",
+              "call_id": "call_step",
+              "output": "{\"value\":{\"say\":\"1980 head cross the ford.\",\"outcome\":\"crossed\"}}"
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "prompt_cache_key": "/trail/ford/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "reply": 8
+        },
+        "status": 200,
+        "json": {
+          "id": "resp_2",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
+            {
+              "type": "reasoning",
+              "id": "rs_2",
+              "encrypted_content": "scripted"
+            },
+            {
+              "type": "message",
+              "id": "msg_2",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "1980 head cross the ford. On to Dodge."
+                }
+              ]
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "previous_response_id": "resp_1",
+          "usage": {
+            "input_tokens": 200,
+            "input_tokens_details": {
+              "cached_tokens": 100
+            }
+          }
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/trail/ford/1",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "reasoning",
+            "id": "rs_2",
+            "encrypted_content": "scripted"
+          },
+          {
+            "type": "message",
+            "id": "msg_2",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "1980 head cross the ford. On to Dodge."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "ai.say",
+          "reply": 2
+        },
+        "turn": 4,
+        "scene": "/trail/ford/1",
+        "subtitle": "1980 head cross the ford. On to Dodge."
+      }
+    },
+    {
+      "sender": "dom",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "ui.input"
+        },
+        "text": "So long"
+      }
+    },
+    {
+      "sender": "ui",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "ai.say",
+          "id": 3
+        },
+        "text": "So long"
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/trail/ford/1",
+        "role": "user",
+        "content": [
+          {
+            "role": "user",
+            "content": "So long"
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "id": 9
+        },
+        "method": "POST",
+        "url": "https://scripted.invalid/v1/responses",
+        "headers": {
+          "Authorization": "<masked>"
+        },
+        "json": {
+          "model": "grok-4.7",
+          "previous_response_id": "resp_2",
+          "input": [
+            {
+              "role": "user",
+              "content": "So long"
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "prompt_cache_key": "/trail/ford/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "reply": 9
+        },
+        "status": 200,
+        "json": {
+          "id": "resp_3",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
+            {
+              "type": "reasoning",
+              "id": "rs_3",
+              "encrypted_content": "scripted"
+            },
+            {
+              "type": "function_call",
+              "id": "fc_3_1",
+              "call_id": "call_report",
+              "name": "browser_script_run",
+              "arguments": "{\"name\":\"trail_report\",\"args\":{\"world\":\"drive\"}}"
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "previous_response_id": "resp_2",
+          "usage": {
+            "input_tokens": 300,
+            "input_tokens_details": {
+              "cached_tokens": 200
+            }
+          }
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "id": 10
+        },
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "tools/call",
+        "params": {
+          "name": "script_run",
+          "arguments": {
+            "name": "trail_report",
+            "args": {
+              "world": "drive"
+            }
+          }
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "reply": 10
+        },
+        "jsonrpc": "2.0",
+        "id": 4,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"value\":{\"say\":\"The tally stands at 1980 head.\",\"outcome\":\"told\"}}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/trail/ford/1",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "reasoning",
+            "id": "rs_3",
+            "encrypted_content": "scripted"
+          },
+          {
+            "type": "function_call",
+            "id": "fc_3_1",
+            "call_id": "call_report",
+            "name": "browser_script_run",
+            "arguments": "{\"name\":\"trail_report\",\"args\":{\"world\":\"drive\"}}"
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/trail/ford/1",
+        "role": "tool",
+        "content": [
+          {
+            "type": "function_call_output",
+            "call_id": "call_report",
+            "output": "{\"value\":{\"say\":\"The tally stands at 1980 head.\",\"outcome\":\"told\"}}"
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "id": 11
+        },
+        "method": "POST",
+        "url": "https://scripted.invalid/v1/responses",
+        "headers": {
+          "Authorization": "<masked>"
+        },
+        "json": {
+          "model": "grok-4.7",
+          "previous_response_id": "resp_3",
+          "input": [
+            {
+              "type": "function_call_output",
+              "call_id": "call_report",
+              "output": "{\"value\":{\"say\":\"The tally stands at 1980 head.\",\"outcome\":\"told\"}}"
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "prompt_cache_key": "/trail/ford/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "reply": 11
+        },
+        "status": 200,
+        "json": {
+          "id": "resp_4",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
+            {
+              "type": "reasoning",
+              "id": "rs_4",
+              "encrypted_content": "scripted"
+            },
+            {
+              "type": "message",
+              "id": "msg_4",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "The tally stands at 1980 head. So long, partner."
+                }
+              ]
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "previous_response_id": "resp_3",
+          "usage": {
+            "input_tokens": 400,
+            "input_tokens_details": {
+              "cached_tokens": 300
+            }
+          }
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/trail/ford/1",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "reasoning",
+            "id": "rs_4",
+            "encrypted_content": "scripted"
+          },
+          {
+            "type": "message",
+            "id": "msg_4",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "The tally stands at 1980 head. So long, partner."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "ai.say",
+          "reply": 3
+        },
+        "turn": 8,
+        "scene": "/trail/ford/1",
+        "subtitle": "The tally stands at 1980 head. So long, partner."
+      }
+    }
+  ],
+  "repeat_lines": [
+    14,
+    27,
+    25,
+    24
+  ],
+  "repeat_evidence": "repeated: \"1980\" from drive, first said at L{0}, said at the end at L{1} by the reply L{2}, carried by the tool result L{3}, in no text of the guide's own, and the last turn committed nothing but turns",
+  "repeat_cut": {
+    "at": 14,
+    "failure": "the record holds no ai.say reply, so no band holds '1980'"
+  },
+  "repeat_failures": {
+    "band": {
+      "at": 27,
+      "rows": [
+        {
+          "sender": "ai",
+          "receiver": "ui",
+          "line": {
+            "0": {
+              "type": "ai.say",
+              "reply": 3
+            },
+            "turn": 8,
+            "scene": "/trail/ford/1",
+            "subtitle": "The tally stands at 19800 head. So long, partner."
+          }
+        }
+      ],
+      "line": 27,
+      "failure": "line {0}: the last band 'The tally stands at 19800 head. So long, partner.' does not hold '1980'"
+    },
+    "reply": {
+      "at": 25,
+      "rows": [
+        {
+          "sender": "http",
+          "receiver": "ai",
+          "line": {
+            "0": {
+              "type": "http.request",
+              "reply": 11
+            },
+            "status": 200,
+            "json": {
+              "id": "resp_4",
+              "model": "grok-4.7",
+              "status": "completed",
+              "output": [
+                {
+                  "type": "reasoning",
+                  "id": "rs_4",
+                  "encrypted_content": "scripted"
+                },
+                {
+                  "type": "message",
+                  "id": "msg_4",
+                  "role": "assistant",
+                  "content": [
+                    {
+                      "type": "output_text",
+                      "text": "The tally stands at No1980 head. So long, partner."
+                    }
+                  ]
+                }
+              ],
+              "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+              "previous_response_id": "resp_3",
+              "usage": {
+                "input_tokens": 400,
+                "input_tokens_details": {
+                  "cached_tokens": 300
+                }
+              }
+            }
+          }
+        }
+      ],
+      "line": 25,
+      "failure": "line {0}: the model reply before the last band says 'The tally stands at No1980 head. So long, partner.', which does not hold '1980'"
+    },
+    "result": {
+      "at": 24,
+      "rows": [
+        {
+          "sender": "ai",
+          "receiver": "http",
+          "line": {
+            "0": {
+              "type": "http.request",
+              "id": 11
+            },
+            "method": "POST",
+            "url": "https://scripted.invalid/v1/responses",
+            "headers": {
+              "Authorization": "<masked>"
+            },
+            "json": {
+              "model": "grok-4.7",
+              "previous_response_id": "resp_3",
+              "input": [
+                {
+                  "type": "function_call_output",
+                  "call_id": "call_report",
+                  "output": "{\"value\":{\"say\":\"The tally stands at 21980 head.\",\"outcome\":\"told\"}}"
+                }
+              ],
+              "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+              "prompt_cache_key": "/trail/ford/1"
+            }
+          }
+        }
+      ],
+      "line": 24,
+      "failure": "line {0}: the last model call of the end turn carries no tool result that holds '1980'"
+    },
+    "commit": {
+      "at": 20,
+      "rows": [
+        {
+          "sender": "ai",
+          "receiver": "ai",
+          "line": {
+            "0": {
+              "type": "mcp",
+              "id": 10
+            },
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+              "name": "script_run",
+              "arguments": {
+                "name": "trail_report",
+                "args": {
+                  "world": "drive"
+                }
+              }
+            }
+          }
+        },
+        {
+          "sender": "ai",
+          "receiver": "server",
+          "line": {
+            "0": {
+              "type": "sql.run"
+            },
+            "db": "drive",
+            "statements": [
+              {
+                "sql": "UPDATE tally SET tick = ? WHERE entity = ?",
+                "params": [
+                  11,
+                  2
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "line": 21,
+      "failure": "line {0}: the end turn commits sql.run, where it should commit nothing but turn.append"
+    },
+    "first": {
+      "at": 14,
+      "rows": [
+        {
+          "sender": "ai",
+          "receiver": "ui",
+          "line": {
+            "0": {
+              "type": "ai.say",
+              "reply": 2
+            },
+            "turn": 4,
+            "scene": "/trail/ford/1",
+            "subtitle": "1980th head cross the ford. On to Dodge."
+          }
+        }
+      ],
+      "line": 27,
+      "failure": "line {0}: no band before the last holds '1980', so it was not told when it was made"
+    }
+  }
 }

@@ -3,18 +3,48 @@
   "puzzled": "Isaiah thinks on that, then lets it go.",
   "exit": {
     "input": "i'll ride back to the fire",
-    "call": {
-      "call_id": "call_exit",
-      "name": "browser_script_run",
-      "arguments": {"name": "isaiah", "args": {"action": "exit"}}
-    },
+    "calls": [
+      {
+        "call_id": "call_exit",
+        "name": "browser_sql_run",
+        "arguments": {
+          "db": "drive",
+          "statements": [
+            {
+              "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+              "params": ["exit", "i'll ride back to the fire", "player"]
+            }
+          ]
+        }
+      },
+      {
+        "call_id": "call_exit_step",
+        "name": "browser_script_run",
+        "arguments": {"name": "ecs_step", "args": {"world": "drive"}}
+      }
+    ],
     "after": "His song carries in from the dark, slow and easy. When you want the herd again, say ride out again.",
     "resume": "ride out again",
-    "resume_call": {
-      "call_id": "call_resume",
-      "name": "browser_script_run",
-      "arguments": {"name": "isaiah", "args": {"action": "resume"}}
-    },
+    "resume_calls": [
+      {
+        "call_id": "call_resume",
+        "name": "browser_sql_run",
+        "arguments": {
+          "db": "drive",
+          "statements": [
+            {
+              "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+              "params": ["resume", "ride out again", "player"]
+            }
+          ]
+        }
+      },
+      {
+        "call_id": "call_resume_step",
+        "name": "browser_script_run",
+        "arguments": {"name": "ecs_step", "args": {"world": "drive"}}
+      }
+    ],
     "paused": "The fire pops and settles. When you want the herd again, say ride out again."
   },
   "nodes": {
@@ -182,38 +212,255 @@
           "content": null,
           "tool_calls": [
             {
-              "call_id": "call_script",
+              "call_id": "call_put_ecs_init",
               "name": "browser_kv_put",
               "arguments": {
-                "ref": "/_files/script/isaiah.js",
-                "text": {"$text": "sim.js"}
+                "ref": "/_files/script/ecs_init.js",
+                "text": {"$ecs": "init.js"}
               }
             },
             {
-              "call_id": "call_tables",
+              "call_id": "call_put_ecs_step",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/ecs_step.js",
+                "text": {"$ecs": "step.js"}
+              }
+            },
+            {
+              "call_id": "call_put_isaiah_lib",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/isaiah_lib.js",
+                "text": {"$text": "lib.js"}
+              }
+            },
+            {
+              "call_id": "call_put_isaiah_spawn",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/isaiah_spawn.js",
+                "text": {"$text": "spawn.js"}
+              }
+            },
+            {
+              "call_id": "call_put_isaiah_report",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/isaiah_report.js",
+                "text": {"$text": "report.js"}
+              }
+            },
+            {
+              "call_id": "call_put_isaiah_sing",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/isaiah_sing.js",
+                "text": {"$text": "sing.js"}
+              }
+            },
+            {
+              "call_id": "call_put_isaiah_exit",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/isaiah_exit.js",
+                "text": {"$text": "exit.js"}
+              }
+            },
+            {
+              "call_id": "call_put_isaiah_resume",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/isaiah_resume.js",
+                "text": {"$text": "resume.js"}
+              }
+            },
+            {
+              "call_id": "call_put_isaiah_read",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/isaiah_read.js",
+                "text": {"$text": "read.js"}
+              }
+            },
+            {
+              "call_id": "call_put_isaiah_stampede",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/isaiah_stampede.js",
+                "text": {"$text": "stampede.js"}
+              }
+            },
+            {
+              "call_id": "call_put_isaiah_track",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/isaiah_track.js",
+                "text": {"$text": "track.js"}
+              }
+            },
+            {
+              "call_id": "call_put_isaiah_river",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/isaiah_river.js",
+                "text": {"$text": "river.js"}
+              }
+            },
+            {
+              "call_id": "call_put_isaiah_toll",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/isaiah_toll.js",
+                "text": {"$text": "toll.js"}
+              }
+            },
+            {
+              "call_id": "call_put_isaiah_count",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/isaiah_count.js",
+                "text": {"$text": "count.js"}
+              }
+            },
+            {
+              "call_id": "call_put_isaiah_keepsake",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/isaiah_keepsake.js",
+                "text": {"$text": "keepsake.js"}
+              }
+            },
+            {
+              "call_id": "call_put_isaiah_travel",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/isaiah_travel.js",
+                "text": {"$text": "travel.js"}
+              }
+            },
+            {
+              "call_id": "call_put_isaiah_hold",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/isaiah_hold.js",
+                "text": {"$text": "hold.js"}
+              }
+            },
+            {
+              "call_id": "call_put_isaiah_wage",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/isaiah_wage.js",
+                "text": {"$text": "wage.js"}
+              }
+            },
+            {
+              "call_id": "call_init",
+              "name": "browser_script_run",
+              "arguments": {"name": "ecs_init", "args": {"world": "drive"}}
+            },
+            {
+              "call_id": "call_schema",
               "name": "browser_sql_run",
               "arguments": {
                 "db": "drive",
                 "statements": [
                   {
-                    "sql": "CREATE TABLE herd (id INTEGER PRIMARY KEY CHECK (id = 1), head INTEGER NOT NULL, scattered INTEGER NOT NULL, lost INTEGER NOT NULL, tolled INTEGER NOT NULL, calm INTEGER NOT NULL, looks INTEGER NOT NULL, found INTEGER NOT NULL, waited INTEGER NOT NULL, exits INTEGER NOT NULL, song TEXT NOT NULL) STRICT",
+                    "sql": "CREATE TABLE head (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, count INTEGER NOT NULL) STRICT",
                     "params": []
                   },
                   {
-                    "sql": "CREATE TABLE drive_log (n INTEGER PRIMARY KEY, beat TEXT NOT NULL, choice TEXT NOT NULL, outcome TEXT NOT NULL) STRICT",
+                    "sql": "CREATE TABLE bed (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, head INTEGER NOT NULL) STRICT",
                     "params": []
                   },
                   {
-                    "sql": "CREATE TABLE keepsake (kind TEXT NOT NULL PRIMARY KEY, text TEXT NOT NULL) STRICT",
+                    "sql": "CREATE TABLE calm (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, level INTEGER NOT NULL, most INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE temper (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, song_calm INTEGER NOT NULL, settled INTEGER NOT NULL, milled INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE breaks (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, loss INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE share (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, head INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE cover (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, name TEXT NOT NULL, opening TEXT NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE hidden (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE place (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, mile INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE pace (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, miles INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE travel (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, goal INTEGER NOT NULL REFERENCES entity (id) ON DELETE CASCADE) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE water (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, high INTEGER NOT NULL, per_drowned INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE wait (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, days INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE toll (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, floor INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE wage (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, cents_a_day INTEGER NOT NULL, earned INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE looks (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, used INTEGER NOT NULL, most INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE song (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, title TEXT NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE exits (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, count INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE losses (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, lost INTEGER NOT NULL, tolled INTEGER NOT NULL, found INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE tally (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, head INTEGER NOT NULL, tick INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE keepsake (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, kind TEXT NOT NULL, text TEXT NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "INSERT INTO system (ord, name, kind) VALUES (1, 'isaiah_lib', 'lib'), (2, 'isaiah_sing', 'step'), (3, 'isaiah_exit', 'step'), (4, 'isaiah_resume', 'step'), (5, 'isaiah_read', 'step'), (6, 'isaiah_stampede', 'step'), (7, 'isaiah_track', 'step'), (8, 'isaiah_river', 'step'), (9, 'isaiah_toll', 'step'), (10, 'isaiah_count', 'step'), (11, 'isaiah_keepsake', 'step'), (12, 'isaiah_travel', 'tick'), (13, 'isaiah_hold', 'tick'), (14, 'isaiah_wage', 'tick')",
                     "params": []
                   }
                 ]
               }
             },
             {
-              "call_id": "call_setup",
+              "call_id": "call_spawn",
               "name": "browser_script_run",
-              "arguments": {"name": "isaiah", "args": {"action": "setup"}}
+              "arguments": {"name": "isaiah_spawn", "args": {"world": "drive"}}
             }
           ],
           "next": "built"
@@ -240,11 +487,21 @@
           "tool_calls": [
             {
               "call_id": "call_sing",
-              "name": "browser_script_run",
+              "name": "browser_sql_run",
               "arguments": {
-                "name": "isaiah",
-                "args": {"action": "sing", "song": "Streets of Laredo"}
+                "db": "drive",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["sing", "Streets of Laredo", "player"]
+                  }
+                ]
               }
+            },
+            {
+              "call_id": "call_step",
+              "name": "browser_script_run",
+              "arguments": {"name": "ecs_step", "args": {"world": "drive"}}
             }
           ],
           "next": "sung"
@@ -267,29 +524,53 @@
           "tool_calls": [
             {
               "call_id": "call_read",
-              "name": "browser_script_run",
+              "name": "browser_sql_run",
               "arguments": {
-                "name": "isaiah",
-                "args": {"action": "read", "judge": "restless"}
+                "db": "drive",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["read", "restless", "player"]
+                  }
+                ]
               }
             }
           ],
-          "next": "judged"
+          "next": "read_step"
         },
         "settled": {
           "content": null,
           "tool_calls": [
             {
               "call_id": "call_read",
-              "name": "browser_script_run",
+              "name": "browser_sql_run",
               "arguments": {
-                "name": "isaiah",
-                "args": {"action": "read", "judge": "settled"}
+                "db": "drive",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["read", "settled", "player"]
+                  }
+                ]
               }
             }
           ],
-          "next": "judged"
+          "next": "read_step"
         }
+      }
+    },
+    "read_step": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_step",
+            "name": "browser_script_run",
+            "arguments": {"name": "ecs_step", "args": {"world": "drive"}}
+          }
+        ],
+        "next": "judged"
       }
     },
     "judged": {
@@ -313,12 +594,22 @@
           "content": null,
           "tool_calls": [
             {
-              "call_id": "call_flank",
-              "name": "browser_script_run",
+              "call_id": "call_stampede",
+              "name": "browser_sql_run",
               "arguments": {
-                "name": "isaiah",
-                "args": {"action": "stampede", "flank": "east"}
+                "db": "drive",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["stampede", "east", "player"]
+                  }
+                ]
               }
+            },
+            {
+              "call_id": "call_step",
+              "name": "browser_script_run",
+              "arguments": {"name": "ecs_step", "args": {"world": "drive"}}
             }
           ],
           "next": "turned"
@@ -327,12 +618,22 @@
           "content": null,
           "tool_calls": [
             {
-              "call_id": "call_flank",
-              "name": "browser_script_run",
+              "call_id": "call_stampede",
+              "name": "browser_sql_run",
               "arguments": {
-                "name": "isaiah",
-                "args": {"action": "stampede", "flank": "west"}
+                "db": "drive",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["stampede", "west", "player"]
+                  }
+                ]
               }
+            },
+            {
+              "call_id": "call_step",
+              "name": "browser_script_run",
+              "arguments": {"name": "ecs_step", "args": {"world": "drive"}}
             }
           ],
           "next": "turned"
@@ -355,43 +656,72 @@
           "tool_calls": [
             {
               "call_id": "call_track",
-              "name": "browser_script_run",
+              "name": "browser_sql_run",
               "arguments": {
-                "name": "isaiah",
-                "args": {"action": "track", "place": "ridge"}
+                "db": "drive",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["track", "ridge", "player"]
+                  }
+                ]
               }
             }
           ],
-          "next": "tracked"
+          "next": "track_step"
         },
         "the creek": {
           "content": null,
           "tool_calls": [
             {
               "call_id": "call_track",
-              "name": "browser_script_run",
+              "name": "browser_sql_run",
               "arguments": {
-                "name": "isaiah",
-                "args": {"action": "track", "place": "creek"}
+                "db": "drive",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["track", "creek", "player"]
+                  }
+                ]
               }
             }
           ],
-          "next": "tracked"
+          "next": "track_step"
         },
         "the draw": {
           "content": null,
           "tool_calls": [
             {
               "call_id": "call_track",
-              "name": "browser_script_run",
+              "name": "browser_sql_run",
               "arguments": {
-                "name": "isaiah",
-                "args": {"action": "track", "place": "draw"}
+                "db": "drive",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["track", "draw", "player"]
+                  }
+                ]
               }
             }
           ],
-          "next": "tracked"
+          "next": "track_step"
         }
+      }
+    },
+    "track_step": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_step",
+            "name": "browser_script_run",
+            "arguments": {"name": "ecs_step", "args": {"world": "drive"}}
+          }
+        ],
+        "next": "tracked"
       }
     },
     "tracked": {
@@ -416,11 +746,21 @@
           "tool_calls": [
             {
               "call_id": "call_river",
-              "name": "browser_script_run",
+              "name": "browser_sql_run",
               "arguments": {
-                "name": "isaiah",
-                "args": {"action": "river", "choice": "wait"}
+                "db": "drive",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["river", "wait", "player"]
+                  }
+                ]
               }
+            },
+            {
+              "call_id": "call_step",
+              "name": "browser_script_run",
+              "arguments": {"name": "ecs_step", "args": {"world": "drive"}}
             }
           ],
           "next": "crossed"
@@ -430,11 +770,21 @@
           "tool_calls": [
             {
               "call_id": "call_river",
-              "name": "browser_script_run",
+              "name": "browser_sql_run",
               "arguments": {
-                "name": "isaiah",
-                "args": {"action": "river", "choice": "swim"}
+                "db": "drive",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["river", "swim", "player"]
+                  }
+                ]
               }
+            },
+            {
+              "call_id": "call_step",
+              "name": "browser_script_run",
+              "arguments": {"name": "ecs_step", "args": {"world": "drive"}}
             }
           ],
           "next": "crossed"
@@ -457,29 +807,53 @@
           "tool_calls": [
             {
               "call_id": "call_toll",
-              "name": "browser_script_run",
+              "name": "browser_sql_run",
               "arguments": {
-                "name": "isaiah",
-                "args": {"action": "toll", "offer": 10}
+                "db": "drive",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["toll", "10", "player"]
+                  }
+                ]
               }
             }
           ],
-          "next": "tolled"
+          "next": "toll_step"
         },
         "20": {
           "content": null,
           "tool_calls": [
             {
               "call_id": "call_toll",
-              "name": "browser_script_run",
+              "name": "browser_sql_run",
               "arguments": {
-                "name": "isaiah",
-                "args": {"action": "toll", "offer": 20}
+                "db": "drive",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["toll", "20", "player"]
+                  }
+                ]
               }
             }
           ],
-          "next": "tolled"
+          "next": "toll_step"
         }
+      }
+    },
+    "toll_step": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_step",
+            "name": "browser_script_run",
+            "arguments": {"name": "ecs_step", "args": {"world": "drive"}}
+          }
+        ],
+        "next": "tolled"
       }
     },
     "tolled": {
@@ -549,8 +923,21 @@
           },
           {
             "call_id": "call_count",
+            "name": "browser_sql_run",
+            "arguments": {
+              "db": "drive",
+              "statements": [
+                {
+                  "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                  "params": ["count", "count them in", "player"]
+                }
+              ]
+            }
+          },
+          {
+            "call_id": "call_step",
             "name": "browser_script_run",
-            "arguments": {"name": "isaiah", "args": {"action": "count"}}
+            "arguments": {"name": "ecs_step", "args": {"world": "drive"}}
           }
         ],
         "next": "counted"
@@ -571,9 +958,22 @@
           "content": null,
           "tool_calls": [
             {
-              "call_id": "call_keep",
+              "call_id": "call_keepsake",
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "drive",
+                "statements": [
+                  {
+                    "sql": "INSERT INTO intent (entity, verb, value) SELECT id, ?, ? FROM entity WHERE name = ?",
+                    "params": ["keepsake", "yes", "player"]
+                  }
+                ]
+              }
+            },
+            {
+              "call_id": "call_step",
               "name": "browser_script_run",
-              "arguments": {"name": "isaiah", "args": {"action": "keepsake"}}
+              "arguments": {"name": "ecs_step", "args": {"world": "drive"}}
             }
           ],
           "next": "named"
@@ -589,9 +989,29 @@
       }
     },
     "end": {
-      "replies": {},
+      "replies": {
+        "so long": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_report",
+              "name": "browser_script_run",
+              "arguments": {"name": "isaiah_report", "args": {"world": "drive"}}
+            }
+          ],
+          "next": "told"
+        }
+      },
       "otherwise": {
         "content": "Isaiah tips his hat. \"Go on and get your bath. You've earned it.\"",
+        "next": "end"
+      }
+    },
+    "told": {
+      "replies": {},
+      "after_tools": {
+        "content": "Isaiah tips his hat and turns his horse for the trail back south. \"So long. Ride easy.\"",
+        "quote": "value.say",
         "next": "end"
       }
     }

@@ -14,8 +14,8 @@
 # item written twice. `--guide NAME` adds the guide check, that every message
 # is the one the walk of python/guides/NAME expects. databases_check replays
 # the record's commits on a copy of a root's databases and compares them with
-# the server's, and database_lines tells databases as text, by the rules of
-# declawed.md's audit_read.
+# the server's, database_lines tells databases as text, and repeat_check
+# proves that the guide said a sim's output at the end and said it before.
 #
 #     python3 python/audit_read.py PATH [--check] [--guide NAME]
 
@@ -64,6 +64,14 @@ def guide_check(
 def databases_check(
     entries: list[ReadEntry], start: str, end: str, scratch: str
 ) -> None: ...
+
+# The evidence that the guide said the text the gold's query reads from `end`.
+def repeat_check(
+    entries: list[ReadEntry],
+    table: dict[str, Any],
+    end: str,
+    repeated: dict[str, Any],
+) -> str: ...
 
 # The databases of a directory as text, each object's SQL and rows.
 def database_lines(root: str) -> list[str]: ...
