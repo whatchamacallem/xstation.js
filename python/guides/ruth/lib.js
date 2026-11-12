@@ -5,10 +5,11 @@
 // The lib of Ruth Calloway's sim, the system `ruth_lib` of kind lib, kept at
 // /_files/script/ruth_lib.js: ecs_step runs it with `{}` once a step, before
 // her systems, which find its value at `ecs.lib`. It holds the units and
-// standard gravity, the number formats of her says, the book's rate of climb
-// and fuel burn, the parse of an intent's whole number, and the reads of the
-// components most systems share: the aircraft, its pilot, the wind and the
-// fields. Every figure of the model is a component value that ruth_spawn
+// standard gravity, the bounds of a bank, the number formats of her says, the
+// book's rate of climb and fuel burn, the parse of an intent's whole number,
+// and the reads of the components most systems share: the aircraft, its
+// pilot, whether its engine is out, the wind and the fields. Every figure of
+// the model is a component value that ruth_spawn
 // wrote; a figure kept as an integer of a stated scale, its column ending in
 // `_x100` or `_x10`, is divided by that scale here, which gives the same double
 // as its decimal literal.
@@ -31,6 +32,10 @@ const RADIANS_PER_DEGREE = Math.PI / 180;
 const G = 32.174;
 // Feet a second in a mile an hour: 5280 feet over 3600 seconds, 22 / 15.
 const FPS_PER_MPH = FEET_PER_MILE / SECONDS_PER_HOUR;
+// Geometry: at a right angle of bank the wing's lift holds none of the weight.
+const BANK_VERTICAL = 90;
+// Geometry: a straight angle, the most bank there is, the wings level inverted.
+const BANK_MOST = 180;
 
 // The scale of a figure kept in hundredths, and of one kept in tenths.
 const HUNDREDTHS = 100;
@@ -77,6 +82,11 @@ function list_text(items) {
     return items.join("");
   }
   return items.slice(0, -1).join(", ") + " and " + items[items.length - 1];
+}
+
+// A whole count and its noun, the singular for one, as `1 foot`.
+function count_text(n, one, many) {
+  return `${n} ${n === 1 ? one : many}`;
 }
 
 // The whole number an intent's value writes, thrown when it writes none.
@@ -184,6 +194,15 @@ function pilot_read(ecs) {
   });
 }
 
+// Whether the aircraft holds the tag `engine_out`, its engine dead.
+function engine_dead(ecs, aircraft) {
+  const rows = ecs.rows(
+    "SELECT entity AS entity FROM engine_out WHERE entity = ?",
+    [aircraft.entity],
+  );
+  return rows.length > 0;
+}
+
 // The one wind: its speed in miles an hour and the quarter it blows from.
 function wind_read(ecs) {
   return sole_row(
@@ -219,12 +238,15 @@ return Object.freeze({
   RADIANS_PER_DEGREE,
   G,
   FPS_PER_MPH,
+  BANK_VERTICAL,
+  BANK_MOST,
   OPPOSITE,
   whole_text,
   tenths_text,
   money_text,
   clock_text,
   list_text,
+  count_text,
   whole_value,
   choice_get,
   sole_row,
@@ -233,6 +255,7 @@ return Object.freeze({
   climb_cost,
   aircraft_read,
   pilot_read,
+  engine_dead,
   wind_read,
   fields_read,
 });

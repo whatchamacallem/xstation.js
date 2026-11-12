@@ -299,6 +299,10 @@
                     "params": []
                   },
                   {
+                    "sql": "CREATE TABLE engine_out (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE) STRICT",
+                    "params": []
+                  },
+                  {
                     "sql": "CREATE TABLE technique (entity INTEGER PRIMARY KEY REFERENCES entity (id) ON DELETE CASCADE, loop_pull_g INTEGER NOT NULL, loop_top_g_x10 INTEGER NOT NULL, roll_seconds INTEGER NOT NULL, stunt_ft INTEGER NOT NULL) STRICT",
                     "params": []
                   },

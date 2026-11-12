@@ -16,12 +16,23 @@
 const ecs = args.ecs;
 const lib = ecs.lib;
 
-// The entities that hold on a bank this tick, or none and no work.
-const waiting = ecs.rows("SELECT entity FROM wait ORDER BY entity", []);
+// The waiters on a bank, their days, head and the high water at their mile.
+const waiting = ecs.rows(
+  "SELECT wait.entity AS entity, wait.days AS days, head.count AS count," +
+    " water.high AS high FROM wait JOIN head ON head.entity = wait.entity" +
+    " JOIN place AS bank ON bank.entity = wait.entity" +
+    " JOIN place AS shore ON shore.mile = bank.mile" +
+    " JOIN water ON water.entity = shore.entity ORDER BY wait.entity",
+  [],
+);
 if (waiting.length === 0) {
   return;
 }
 
+// The waiters whose river is down once this day drops its water a day.
+const crossed = waiting.filter((herd) => herd.high <= 1);
+
+// Every write of the day in one run, as reads came first.
 ecs.run([
   { sql: "UPDATE wait SET days = days + 1", params: [] },
   {
@@ -32,31 +43,15 @@ ecs.run([
       " JOIN place AS shore ON shore.mile = bank.mile)",
     params: [],
   },
+  ...crossed.flatMap((herd) => [
+    { sql: "DELETE FROM busy WHERE entity = ?", params: [herd.entity] },
+    { sql: "DELETE FROM wait WHERE entity = ?", params: [herd.entity] },
+  ]),
 ]);
-
-// The waiters whose river is down, the days they waited and their head.
-const crossed = ecs.rows(
-  "SELECT wait.entity AS entity, wait.days AS days, head.count AS count" +
-    " FROM wait JOIN head ON head.entity = wait.entity" +
-    " JOIN place AS bank ON bank.entity = wait.entity" +
-    " JOIN place AS shore ON shore.mile = bank.mile" +
-    " JOIN water ON water.entity = shore.entity WHERE water.high = 0" +
-    " ORDER BY wait.entity",
-  [],
-);
-if (crossed.length === 0) {
-  return;
-}
 for (const herd of crossed) {
   ecs.say(
     `and the water drops: all ${lib.whole_text(herd.count)} swim it,` +
       " leaders first, and none is lost." +
-      ` ${lib.days_text(herd.days)} spent waiting.`,
+      ` ${lib.days_text(herd.days + 1)} spent waiting.`,
   );
 }
-ecs.run(
-  crossed.flatMap((herd) => [
-    { sql: "DELETE FROM busy WHERE entity = ?", params: [herd.entity] },
-    { sql: "DELETE FROM wait WHERE entity = ?", params: [herd.entity] },
-  ]),
-);

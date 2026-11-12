@@ -13,8 +13,8 @@
 // beat `circled` or `broken`.
 //
 // Args: `ecs`, of the contract of `ecs_step`. Reads `share`, `temper`,
-// `breaks` and `looks`. Writes `head`, `hidden`, `calm.level` and
-// `losses.lost`.
+// `breaks`, `head`, `hidden` and `looks`. Writes `head`, `hidden`,
+// `calm.level` and `losses.lost`.
 
 // The step's methods and the drive's lib.
 const ecs = args.ecs;
@@ -26,6 +26,10 @@ if (intent === null) {
   return;
 }
 const flank = lib.choice_read(intent.value, ["east", "west"]);
+
+// The head of every bunch, which the herd loses to the scatter.
+const shares = ecs.rows("SELECT head FROM share ORDER BY entity", []);
+const shared = shares.reduce((sum, bunch) => sum + bunch.head, 0);
 
 // The bunches scatter and the herd mills, whichever flank is ridden.
 const statements = [
@@ -43,9 +47,9 @@ const statements = [
   },
   {
     sql:
-      "UPDATE head SET count = count - (SELECT SUM(share.head) FROM share)" +
+      "UPDATE head SET count = count - ?" +
       " WHERE entity IN (SELECT entity FROM temper)",
-    params: [],
+    params: [shared],
   },
   {
     sql:

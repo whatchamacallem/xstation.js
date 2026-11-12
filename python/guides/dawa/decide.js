@@ -9,8 +9,11 @@
 // rope starts down to the camp below, a tick at a time for the leg's minutes
 // down; dawa_breathe draws the oxygen and dawa_rescue tells it. On `summit`,
 // a branch no walk takes, the top, the way back and Teo's descent with the
-// other rope are worked out at once with no tick: the rope ends at the camp
-// below, both bottles spent, the high mark the top and Dawa's record broken.
+// other rope are worked out at once with no tick, the bottles moving whole:
+// the player breathes his own bottle dry, then the spare, which stays on the
+// rope, for the rest of the way down; the climber who is down goes with the
+// other rope on his empty bottle and is carried in alive. The rope ends at
+// the camp below, the high mark the top and Dawa's record broken.
 //
 // Args: `ecs`. Reads `at`, `camp`, `leg`, `breathe`, `bottle`, `limits`,
 // `down`, `oxygen`, `day` and the clock; writes `breathe`, `climb` and
@@ -55,26 +58,33 @@ function rescue_start(state) {
   ]);
 }
 
-// Goes to the top on the spare and back to the camp below, worked out at once, the record broken.
+// Goes to the top and back to the camp below on your bottle then the spare, the bottles whole, worked out at once, the record broken.
 function summit_take(state) {
   const units = lib.units;
-  const { legs, you, spare, oxygen } = state;
+  const { legs, you, spare } = state;
   const round = legs.up + legs.back + legs.down;
-  const needed = round * you.lpm;
-  const borrowed = needed - you.left_l;
-  const left = spare.left_l - borrowed;
-  const lasts = left / oxygen.sick_lpm;
-  const shortfall = legs.down - lasts;
-  if (borrowed < 0 || !Number.isInteger(lasts) || shortfall <= 0) {
+  const lasts = you.left_l / you.lpm;
+  const borrowed = round * you.lpm - you.left_l;
+  const empty = lib.row_read(
+    ecs,
+    "SELECT left_l FROM bottle WHERE holder = ?",
+    [state.fallen.entity],
+  );
+  if (
+    !Number.isInteger(lasts) ||
+    borrowed <= 0 ||
+    borrowed > spare.left_l ||
+    empty.left_l !== 0
+  ) {
     throw new Error(
-      `dawa_decide: the top takes ${borrowed} litres of the spare and leaves` +
-        ` Teo ${lasts} minutes of the ${legs.down} he needs, which is no stake.`,
+      `dawa_decide: the top takes ${borrowed} litres of the spare's` +
+        ` ${spare.left_l} after ${lasts} minutes on your bottle, and the` +
+        ` bottle of the climber who is down holds ${empty.left_l}, which is` +
+        " no stake.",
     );
   }
   const day = lib.row_read(ecs, "SELECT minute FROM day", []);
-  const topped = day.minute + legs.up;
   const per_day = units.hours_per_day * units.minutes_per_hour;
-  const down = lib.duration_text(legs.down);
   ecs.run([
     {
       sql: "UPDATE high SET m = MAX(m, ?) WHERE entity = ?",
@@ -87,9 +97,16 @@ function summit_take(state) {
     },
     {
       sql: "UPDATE bottle SET left_l = left_l - ? WHERE entity = ?",
-      params: [borrowed + left, spare.entity],
+      params: [borrowed, spare.entity],
     },
-    { sql: "DELETE FROM down", params: [] },
+    {
+      sql: "UPDATE breathe SET bottle = ? WHERE entity = ?",
+      params: [spare.entity, state.player],
+    },
+    {
+      sql: "DELETE FROM down WHERE entity = ?",
+      params: [state.fallen.entity],
+    },
     ...lib.rope_move(state.here.entity, state.below.entity),
     {
       sql: "UPDATE day SET minute = ?",
@@ -97,12 +114,15 @@ function summit_take(state) {
     },
   ]);
   ecs.say(
-    `You and Dawa go on, and at ${lib.clock_text(topped)} you stand on the ` +
-      `top, ${state.top.altitude_m} m, on ${borrowed} litres of his spare. ` +
-      `Teo goes down with the other rope on the ${left} left, ` +
-      `${lib.duration_text(lasts)} at ${oxygen.sick_lpm} litres a minute of ` +
-      `the ${down} he needs: his oxygen runs out ${shortfall} minutes above the ` +
-      "Col, and they carry him in alive. Dawa's record is broken.",
+    `You and Dawa go on, and at ${lib.clock_text(day.minute + legs.up)} you ` +
+      `stand on the top, ${state.top.altitude_m} m. Your bottle runs dry at ` +
+      `${lib.clock_text(day.minute + lasts)}, and Dawa's spare gives you the ` +
+      `last ${borrowed} litres, ${lib.duration_text(round - lasts)} at ` +
+      `${you.lpm} litres a minute, down to ${state.below.name} at ` +
+      `${lib.clock_text(day.minute + round)}. Teo goes down with the other ` +
+      `rope on his empty bottle, ${lib.duration_text(legs.down)} with no ` +
+      `oxygen, and they carry him in to ${state.below.name} alive. Dawa's ` +
+      "record is broken.",
   );
 }
 

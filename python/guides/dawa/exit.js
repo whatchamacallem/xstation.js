@@ -7,10 +7,11 @@
 // It keeps the camp the player left as `resume` and counts the exit; Dawa
 // clips the player to the fixed line and the rope goes down at once to the
 // camp below, its time stated by no band, with the air there, or at the
-// bottom of the route stays, as it is the bottom already. An exit taken
-// while one is held is a bug of the table, and throws.
+// bottom of the route stays, as it is the bottom already. A climber who is
+// down at the camp it leaves is lowered with the rope, and the say names him.
+// An exit taken while one is held is a bug of the table, and throws.
 //
-// Args: `ecs`. Reads `resume`, `at` and `camp`; writes `resume`, `exits`,
+// Args: `ecs`. Reads `resume`, `at`, `camp` and `down`; writes `resume`, `exits`,
 // `at` and `high`. Says the way down, and logs the beat `exit` with the
 // player's words and `down`.
 
@@ -44,10 +45,13 @@ function exit_down(intent) {
   } else {
     const below = lib.route_camp(ecs, here.ord - 1);
     const drop = here.altitude_m - below.altitude_m;
+    const fallen = lib.fallen_names(ecs, here.entity);
+    const lowering =
+      fallen.length === 0 ? "" : `, lowering ${fallen.join(" and ")} with the rope,`;
     statements.push(...lib.rope_move(here.entity, below.entity));
     say =
-      `Dawa clips you to the fixed line and takes you down ${drop} m to ` +
-      lib.air_text(below.place, below.altitude_m);
+      `Dawa clips you to the fixed line and takes you down ${drop} m` +
+      `${lowering} to ${lib.air_text(below.place, below.altitude_m)}`;
   }
   ecs.run(statements);
   ecs.say(say);

@@ -297,7 +297,12 @@ function climb_statements() {
   return statements;
 }
 
-// The lib the schedule names, compiled and run once as `ecs_step` runs it.
+// The text of a thrown value: its stack when it is an `Error`.
+function thrown_text(thrown) {
+  return thrown instanceof Error ? String(thrown.stack) : String(thrown);
+}
+
+// The lib the schedule names, compiled and run once as `ecs_step` runs it, its value a frozen object.
 function lib_run() {
   const [result] = store.sql_run(world, [
     { sql: "SELECT name FROM system WHERE kind = ?", params: [LIB_KIND] },
@@ -308,17 +313,49 @@ function lib_run() {
         ` ${JSON.stringify(result.rows)}.`,
     );
   }
-  const ref = SCRIPT_PREFIX + result.rows[0][0] + SCRIPT_SUFFIX;
+  const name = result.rows[0][0];
+  const ref = SCRIPT_PREFIX + name + SCRIPT_SUFFIX;
   const { data } = store.kv_get(ref);
   // A script over `overflow_bytes` comes back as a handle of the cache.
   if (!(data instanceof Uint8Array)) {
     throw new Error(
-      `dawa_spawn reads ${ref}, the lib, as a handle of the cache and not` +
-        " as its bytes, as it is over overflow_bytes.",
+      `dawa_spawn reads ${ref}, the script of the lib ${name}, as a handle` +
+        " of the cache and not as its bytes, as it is over overflow_bytes.",
     );
   }
-  const body = new Function("engine", "args", decoder.decode(data));
-  return body(engine, {});
+  let body;
+  try {
+    body = new Function("engine", "args", decoder.decode(data));
+  } catch (thrown) {
+    throw new Error(
+      `dawa_spawn cannot compile ${ref}, the script of the lib ${name}:` +
+        ` ${thrown_text(thrown)}`,
+      { cause: thrown },
+    );
+  }
+  let value;
+  try {
+    value = body(engine, {});
+  } catch (thrown) {
+    throw new Error(
+      `dawa_spawn ran the lib ${name} of ${world}, which threw` +
+        ` ${thrown_text(thrown)}`,
+      { cause: thrown },
+    );
+  }
+  if (typeof value !== "object" || value === null) {
+    throw new Error(
+      `dawa_spawn ran the lib ${name} of ${world}, which returned` +
+        ` ${value === null ? "null" : typeof value}, not a frozen object.`,
+    );
+  }
+  if (!Object.isFrozen(value)) {
+    throw new Error(
+      `dawa_spawn ran the lib ${name} of ${world}, which returned an object` +
+        " not frozen.",
+    );
+  }
+  return value;
 }
 
 // Makes the climb and says the air at the camp where the rope starts.

@@ -23,7 +23,7 @@
         "arguments": {"name": "ecs_step", "args": {"world": "drive"}}
       }
     ],
-    "after": "His song carries in from the dark, slow and easy. When you want the herd again, say ride out again.",
+    "after": "When you want the herd again, say ride out again.",
     "resume": "ride out again",
     "resume_calls": [
       {
@@ -151,6 +151,25 @@
           ],
           "next": "left"
         },
+        "no thanks": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_world",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/metaverse/world", "text": "metaverse"}
+            },
+            {
+              "call_id": "call_render",
+              "name": "browser_render",
+              "arguments": {
+                "image": "/metaverse/image/hyperposition",
+                "subtitle": "How can I help you?"
+              }
+            }
+          ],
+          "next": "left"
+        },
         "yes": {
           "content": "Isaiah stands and gives you the reins of a gentle bay. \"Good. We'll go out slow. Ask me anything on the way, and tell me when you're ready to ride out.\"",
           "next": "talk"
@@ -171,6 +190,44 @@
     "away": {
       "replies": {
         "actually, the cattle drive": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_world",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/metaverse/world", "text": "drive"}
+            },
+            {
+              "call_id": "call_render",
+              "name": "browser_render",
+              "arguments": {
+                "image": "/_files/isaiah/campfire.png",
+                "subtitle": "Isaiah looks up from the fire and fills the cup again. \"Still hot. The horse is still saddled, if you'd like to ride out.\""
+              }
+            }
+          ],
+          "next": "back"
+        },
+        "the cattle drive": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_world",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/metaverse/world", "text": "drive"}
+            },
+            {
+              "call_id": "call_render",
+              "name": "browser_render",
+              "arguments": {
+                "image": "/_files/isaiah/campfire.png",
+                "subtitle": "Isaiah looks up from the fire and fills the cup again. \"Still hot. The horse is still saddled, if you'd like to ride out.\""
+              }
+            }
+          ],
+          "next": "back"
+        },
+        "take me on a cattle drive": {
           "content": null,
           "tool_calls": [
             {
@@ -467,7 +524,7 @@
         }
       },
       "otherwise": {
-        "content": "Isaiah turns that over and lets it go. \"Ask me about the work, if you like, or we can ride out.\"",
+        "content": "Isaiah turns that over and lets it go. \"Ask me how long I have been riding night guard, if you like, or say let's ride out.\"",
         "next": "talk"
       }
     },

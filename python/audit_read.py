@@ -20,7 +20,7 @@
 #     python3 python/audit_read.py PATH [--check] [--guide NAME]
 
 import argparse, base64, collections, fcntl, itertools, json, os, re
-import shutil, sqlite3, sys
+import shutil, sqlite3, sys, urllib.parse
 from typing import Any, NamedTuple, cast
 
 # The name `argparse` shows, as `sys.argv` may be empty.
@@ -237,6 +237,9 @@ _DIGEST_FIELD = "sha256"
 
 # The file of a database in a directory, after its name.
 _DB_EXTENSION = ".sqlite"
+
+# The query of the URI that opens the repeated database read only, no WAL read.
+_QUERY_READ = "mode=ro&immutable=1"
 
 # The heading of a database in the text of databases, and a row's indent.
 _DB_MARK = "==== "
@@ -1714,7 +1717,8 @@ def _token_held(text: str, token: str) -> bool:
 def _repeated_read(end: str, repeated: dict[str, Any]) -> str:
     db = str(repeated["db"])
     path = os.path.join(end, db + _DB_EXTENSION)
-    connection = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+    uri = "file:" + urllib.parse.quote(path) + "?" + _QUERY_READ
+    connection = sqlite3.connect(uri, uri=True)
     try:
         cursor = connection.execute(repeated["sql"], repeated["params"])
         rows: list[Any] = cursor.fetchall()

@@ -315,6 +315,12 @@
               "sql": "SELECT entity.name, altitude.ft FROM altitude JOIN entity ON entity.id = altitude.entity",
               "params": [],
               "rows": [["jenny", 1000]]
+            },
+            {
+              "db": "summer",
+              "sql": "SELECT entity.name FROM engine_out JOIN entity ON entity.id = engine_out.entity",
+              "params": [],
+              "rows": [["jenny"]]
             }
           ]
         }
@@ -334,7 +340,15 @@
         },
         {
           "say": "Into the wind",
-          "band": "Into the wind she touches down at 45 mph through the air and 30 over the hay, and rolls to a stop. Down safe. The printer in town owes me a favor. Want a handbill with your name beside mine?"
+          "band": "Into the wind she touches down at 45 mph through the air and 30 over the hay, and rolls to a stop. Down safe. The printer in town owes me a favor. Want a handbill with your name beside mine?",
+          "rows": [
+            {
+              "db": "summer",
+              "sql": "SELECT COUNT(*) FROM engine_out",
+              "params": [],
+              "rows": [[0]]
+            }
+          ]
         }
       ]
     },

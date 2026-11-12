@@ -2682,21 +2682,23 @@ fault realm REALM->DRIVER 0 push; fails the block
   guide's constants, each with the one line comment naming its source, and
   returns the setup's say and outcome `ready`, the say also written as one
   `output` row at step 0, tick 0, of the spawn's own name. It runs the lib
-  once, read from the schedule's row of kind lib and compiled as ecs_step
-  does, for every format and formula its say needs, so no spawn copies the
-  lib or formats inline; the three spawns share that one pattern, a function
-  `lib_run`, the say built first and the output row ending the spawn's one
+  once, read from the schedule's row of kind lib and compiled as ecs_step does,
+  for every format and formula its say needs, so no spawn copies the lib or
+  formats inline; the three spawns share that one pattern, a function
+  `lib_run`, which refuses as ecs_step does: a value of the lib's key that is
+  no byte array, a bad encoding or a compile failure, naming the key, the
+  failure its cause; a throw of the lib, naming it; and a value that is no
+  frozen object; the say built first and the output row ending the spawn's one
   write sql_run, inside one transaction_run. One exception: Ruth's say shows
   WING_SQFT as WING_SQFT_X100 / 100 by String, the inverse of the spawn's own
   scale, as her lib unscales only inside aircraft_read of an ecs. Every
-  constant of the guide's
-  world, game rules and an aircraft's book figures included, is a component
-  value, so the database holds the whole model; a figure that is no whole
-  number is an integer of a stated scale, its column named with `_x` and the
-  scale, as glide_ratio_x100 1066, divided by it in JavaScript, which gives
-  the same double as the literal. An item entity a step system makes when the
-  keepsake is given, as Isaiah's trail_name and Ruth's handbill, is the one
-  entity spawn does not make.
+  constant of the guide's world, game rules and an aircraft's book figures
+  included, is a component value, so the database holds the whole model; a
+  figure that is no whole number is an integer of a stated scale, its column
+  named with `_x` and the scale, as glide_ratio_x100 1066, divided by it in
+  JavaScript, which gives the same double as the literal. An item entity a step
+  system makes when the keepsake is given, as Isaiah's trail_name and Ruth's
+  handbill, is the one entity spawn does not make.
 - guide report: NAME_report, args `{world}`: reads the guide's chosen output
   and what frames it from the components by SELECTs alone, so it commits
   nothing, and returns `{say, outcome: "told"}`. The guide runs it once, at
@@ -2713,10 +2715,12 @@ fault realm REALM->DRIVER 0 push; fails the block
   level: the level took 14.2 s and 13.1 s, bring up included, and each guide
   about 4 s from its ttyd's start to its last rung, Isaiah 4.0 and 3.9 s, Ruth
   4.3 s, Dawa 3.7 s, far inside the 180 s of python.test_all.smoke_seconds.
-  Their audits: Isaiah 762 entries in 3.3 s of audit time, 111 sql.run
-  commits and 51 model calls; Ruth 817 in 3.7 s, 125 and 59; Dawa 711 in 3.0
-  s, 135 and 47; the one-row sims committed 27 sql.run lines in Isaiah's 3.1
-  s. A cold compile of the bundle is not measured here.
+  Their audits: Isaiah 762 entries in 3.3 s of audit time, 111 sql.run commits
+  and 51 model calls, then 760 entries and 109 sql.run commits once task
+  1.1.3.1 of tmp/tasks_12_1058.md had isaiah_track and isaiah_hold write in one
+  sql_run each, that run's level taking 13.4 s; Ruth 817 in 3.7 s, 125 and 59;
+  Dawa 711 in 3.0 s, 135 and 47; the one-row sims committed 27 sql.run lines in
+  Isaiah's 3.1 s. A cold compile of the bundle is not measured here.
 - guide_walk.py: the one module of the guide tests. It imports nothing of
   test_demo.py, as the default tests must not depend on a program the default
   level no longer runs, so the helpers both need, the page state script, the
@@ -2907,7 +2911,7 @@ fault realm REALM->DRIVER 0 push; fails the block
 - guide ask rule: a node holds ask exactly when the sim exists by the time the
   player can be in it, as an exit before the build would run a script not yet
   written. The nodes before the build, hyperposition to talk, hold their own
-  otherwise.
+  otherwise, and so does end, the goodbye's node, where the walk is over.
 - guide start: each guide test starts at the hyperposition, as every player
   does, and the fake AI makes the guide's universe, world, region and scene by
   the AI's own tools. No guide state is written at root time but the seed's
@@ -3082,16 +3086,16 @@ fault realm REALM->DRIVER 0 push; fails the block
   No walk returns in a second session, by guide deferred serving.
 - Isaiah Cole: guides.md entry 1, Two Thousand Head to Dodge: universe
   trail_drive, world drive, region trail, scene campfire with the image
-  /_files/isaiah/campfire.png, scripts isaiah_lib, isaiah_spawn,
-  isaiah_report and the systems of Isaiah's schedule. The stake is the herd,
-  counted at Dodge City in a new scene, /trail/stockyard/1 with
-  /_files/isaiah/dodge.png. The exit, designed by rule 4 from his "You don't
-  have to say a word" and "if you'd like", is `i'll ride back to the fire`,
-  while Isaiah keeps the circle singing, resumed by `ride out again`. The
-  keepsake is a trail name, the last word of the song sung, as `Trail name:
-  Laredo.`, the `keepsake` row of kind `trail name` of the entity trail_name.
-  The song, Streets of Laredo, is public domain, by policy flag 7. The
-  goodbye is `so long`, running isaiah_report.
+  /_files/isaiah/campfire.png, scripts isaiah_lib, isaiah_spawn, isaiah_report
+  and the systems of Isaiah's schedule. The stake is the herd, counted at Dodge
+  City in a new scene, /trail/stockyard/1 with /_files/isaiah/dodge.png. The
+  exit, designed by rule 4 from his "You don't have to say a word" and "if
+  you'd like", is `i'll ride back to the fire`, while Isaiah keeps the herd,
+  isaiah_exit saying where it stands, resumed by `ride out again`. The keepsake
+  is a trail name, the last word of the song sung, as `Trail name: Laredo.`,
+  the `keepsake` row of kind `trail name` of the entity trail_name. The song,
+  Streets of Laredo, is public domain, by policy flag 7. The goodbye is `so
+  long`, running isaiah_report.
 - Isaiah's entities: world, herd, ridge, creek, draw, player, isaiah,
   cimarron, outfit and dodge, ids 1 to 10, made by isaiah_spawn in one
   sql_run, and trail_name, 11, made by the keepsake. The clock: a tick of a
@@ -3125,11 +3129,31 @@ fault realm REALM->DRIVER 0 push; fails the block
   count reads 11 days as the tally's tick times tick_seconds over the lib's
   SECONDS_A_DAY, and $11.00 from the player's earned wage. The river beat
   throws when the water is already low, as the table reaches it once.
-- Isaiah's says: the river's wait is two outputs, the river system's `You
-  hold the herd a day on the south bank of the Cimarron` at the step's tick
-  and the hold system's `and the water drops: ...` one tick later; every
-  other step says one output of its step system. isaiah_spawn stores its say
-  as an output at step 0 and formats by its lib, by guide spawn.
+- Isaiah's says: the river's wait is two outputs, the river system's `You hold
+  the herd a day on the south bank of the Cimarron` at the step's tick and the
+  hold system's `and the water drops: ...` one tick later; every other step
+  says one output of its step system. isaiah_spawn stores its say as an output
+  at step 0 and formats by its lib, by guide spawn.
+- Isaiah's exit: isaiah_exit says `You ride back to the fire and the coffee.`,
+  then where the herd, the holder of head and calm, stands, the first that
+  holds: counted in the stockyard pens when it holds a tally; on the grass by
+  the stockyard gate when no place lies ahead of its mile; on the bank of the
+  Cimarron when a river of water shares its mile; held together, the head still
+  out, while a bunch is hidden; running through the storm when beat_log holds a
+  read of outcome right and no stampede, as no component holds the storm; else
+  down on night guard, ending `His song carries in from the dark, slow and
+  easy.` The table's exit after, `When you want the herd again, say ride out
+  again.`, is true at every node, and the walked band is unchanged.
+- Isaiah's toll: isaiah_toll refuses an offer below toll.floor, and one above
+  the herd's head, saying `You offer N head, and the herd holds M. The outfit's
+  boss laughs and keeps the rope up.`, outcome refused and nothing paid, so the
+  table's after_lacks asks again; an offer of the whole herd is paid.
+- Isaiah's hint keys: each phrase a node's otherwise hints is a reply key of
+  that node: offer takes `no thanks` as `no thanks, take me back`; away takes
+  `the cattle drive` and `take me on a cattle drive` as `actually, the cattle
+  drive`; talk's otherwise names its own two keys, the night guard question and
+  `let's ride out`, as a table cannot alias a reply and a copy of the build
+  reply would be some 250 lines.
 - Isaiah's intents: sing `Streets of Laredo`; read `settled` or `restless`;
   stampede `east` or `west`; track the bunch's entity name, `ridge`, `creek`
   or `draw`; river `wait` or `swim`; toll digits, `10` or `20`; count,
@@ -3158,60 +3182,77 @@ fault realm REALM->DRIVER 0 push; fails the block
   the formats whole, money and days.
 - Ruth Calloway: guides.md entry 2, The First Ride's Free: universe
   barnstorming, world summer, region county, scene hayfield with the image
-  /_files/ruth/hayfield.png, scripts ruth_lib, ruth_spawn, ruth_report and
-  the systems of Ruth's systems. The stake is ruth's `purse.cents` for the
-  summer and her airplane, the Jenny. The exit is her own rule, `i tap my
-  head twice`: the intent exit, a glide from the height flown to the grass,
-  like a feather, keeping the height in `resume`, resumed by `go on`, a climb
-  back to the height left; offer, name and talk answer it too in her voice,
-  before any sim, with no call. The keepsake is a handbill with the player's
-  name beside hers, as `RUTH CALLOWAY AND SAM, AERIAL ACROBATS: loops, rolls,
-  the wing walk and a motorcar beaten! Rides $5.00 for 10 minutes.`, the
-  `keepsake` row of the item entity handbill, its feats those beat_log shows
-  made. The goodbye is `so long, ruth`, running ruth_report. Her sim is turn
-  based on a real world aviation stunt model, as task 1.1 requires.
+  /_files/ruth/hayfield.png, scripts ruth_lib, ruth_spawn, ruth_report and the
+  systems of Ruth's systems. The stake is ruth's `purse.cents` for the summer
+  and her airplane, the Jenny. The exit is her own rule, `i tap my head twice`:
+  the intent exit, a glide from the height flown to the grass, like a feather,
+  keeping the height in `resume`, resumed by `go on`, a climb back to the
+  height left, said in words when under a minute; while the jenny holds
+  `engine_out`, the exit says the OX-5 is dead and she is gliding already,
+  glides down by the same arithmetic and keeps no height, and `go on` leaves
+  her on the grass; offer, name and talk answer it too in her voice, before any
+  sim, with no call. The keepsake is a handbill with the player's name beside
+  hers, as `RUTH CALLOWAY AND SAM, AERIAL ACROBATS: loops, rolls, the wing walk
+  and a motorcar beaten! Rides $5.00 for 10 minutes.`, the `keepsake` row of
+  the item entity handbill, its feats those beat_log shows made. The goodbye is
+  `so long, ruth`, running ruth_report. Her sim is turn based on a real world
+  aviation stunt model, as task 1.1 requires.
 - Ruth's entities: world, jenny, ruth, player, the partner, fair, motorcar,
   wind, north and south, ids 1 to 9, made by ruth_spawn; handbill, 10, made
   by ruth_keepsake. `fair` holds the show, prize and course, which DB_USE.md
   3.9.2 gave no owner. The clock: tick_seconds 20, ticks_max 30, a game rule,
   ten minutes of sim time.
 - Ruth's components: of the jenny `airframe (gross_lb, wing_sqft_x100, hp,
-  max_mph, min_mph, climb_ft, climb_min, tank_gal, burn_gal_hr,
-  level_off_ft, cruise_mph, glide_ratio_x100)`, `altitude (ft)` and `resume
-  (ft)`, a row only while an exit's height is kept, written by upsert; of
-  ruth `technique (loop_pull_g, loop_top_g_x10, roll_seconds, stunt_ft)`,
-  `fares (ride_cents, ride_min, gas_cents_gal)` and `purse (cents)`; of the
-  player `name (text)` and `exits (count)`; of the fair `show (minutes, ft)`,
-  `prize (cents)` and `course (feet)`; of the motorcar `vehicle (top_mph)`;
-  of the wind `wind (mph, quarter)`, quarter the side it blows from, as
-  `from` is an SQL keyword; of north and south `field (miles_x10, name)`, a
-  field's heading its entity's name; while racing `racer (ground_mph, feet,
-  ticks)` of each racer, ticks in place of start and finish ticks as NOT NULL
-  forbids a finish unknown while racing, and `throttle (setting)` of the
-  jenny; of the handbill `keepsake (kind, text)`.
+  max_mph, min_mph, climb_ft, climb_min, tank_gal, burn_gal_hr, level_off_ft,
+  cruise_mph, glide_ratio_x100)`, `altitude (ft)` and `resume (ft)`, a row only
+  while an exit's height is kept, written by upsert, and `engine_out`, a tag
+  from the wing walk, where the OX-5 quits, until ruth_landing removes it, read
+  by ruth_exit and ruth_resume; of ruth `technique (loop_pull_g,
+  loop_top_g_x10, roll_seconds, stunt_ft)`, `fares (ride_cents, ride_min,
+  gas_cents_gal)` and `purse (cents)`; of the player `name (text)` and `exits
+  (count)`; of the fair `show (minutes, ft)`, `prize (cents)` and `course
+  (feet)`; of the motorcar `vehicle (top_mph)`; of the wind `wind (mph,
+  quarter)`, quarter the side it blows from, as `from` is an SQL keyword; of
+  north and south `field (miles_x10, name)`, a field's heading its entity's
+  name; while racing `racer (ground_mph, feet, ticks)` of each racer, ticks in
+  place of start and finish ticks as NOT NULL forbids a finish unknown while
+  racing, and `throttle (setting)` of the jenny; of the handbill `keepsake
+  (kind, text)`.
 - Ruth's systems: ord 1 ruth_lib; ord 2 to 14 the step systems ruth_climb,
   ruth_exit, ruth_resume, ruth_turn, ruth_loop, ruth_roll, ruth_buzz,
   ruth_rides, ruth_race, ruth_wing_walk, ruth_field, ruth_landing and
-  ruth_keepsake, each taking its verb's intent and working today's formula
-  in JavaScript from the components; ord 15 and 16 the tick systems
-  ruth_drive then ruth_finish. ruth_lib holds the units, standard gravity,
-  FPS_PER_MPH as 5280 / 3600, the same double as 22 / 15, the number formats,
-  the book's climb and burn, and the shared reads of the aircraft, pilot,
-  wind and fields, dividing the scaled figures. The split beats, by guide
-  split beat, are turns, loop, roll, buzz, rides and engine.
+  ruth_keepsake, each taking its verb's intent and working today's formula in
+  JavaScript from the components; ord 15 and 16 the tick systems ruth_drive
+  then ruth_finish. ruth_lib holds the units, standard gravity, FPS_PER_MPH as
+  5280 / 3600, the same double as 22 / 15, the number formats, the book's climb
+  and burn, and the shared reads of the aircraft, pilot, wind and fields,
+  dividing the scaled figures. The split beats, by guide split beat, are turns,
+  loop, roll, buzz, rides and engine. ruth_lib also holds BANK_VERTICAL 90 and
+  BANK_MOST 180, by geometry, and engine_dead. ruth_wing_walk writes engine_out
+  and ruth_landing removes it. On the grass already after an exit with the
+  engine dead, ruth_field says so, outcome reached, and ruth_landing says so,
+  outcome landed.
+- Ruth's failed choices: a bank of 0 is straight; a bank of 90 to 180 is
+  stalled, with no load said; a bank past 180 throws; a roll that would come
+  out under LEVEL_OFF_FT is not flown, and Ruth climbs back to STUNT_FT,
+  outcome low; a buzz under LEVEL_OFF_FT or above the height flown is refused;
+  rides past the tank's spare are refused; a race the jenny finishes last is
+  lost.
 - Ruth's intents: climb `take her up`; exit `i tap my head twice`; resume `go
   on`; keepsake `yes please`; turn, loop, roll, buzz and rides the number as
-  typed; race `full throttle`; landing `into the wind`; wing_walk `Ruth` and
-  field `south` or `north`, the guide's reading of the player's words.
+  typed, a turn's a whole number from 0 to 180, as prompt.txt tells the AI;
+  race `full throttle`; landing `into the wind`; wing_walk `Ruth` and field
+  `south` or `north`, the guide's reading of the player's words.
 - Ruth's race ticks: ruth_race sets the altitude to the book's 50 ft, enters
   the jenny at 75 less 15, 60 mph over the road, and each vehicle at its top
   speed, marks them busy and says the start, ending in a comma. ruth_drive
-  moves each busy racer `ground_mph * 5280 * tick_seconds / 3600` whole feet
-  a tick by integer SQL, throwing at a fraction, and frees it at the course's
+  moves each busy racer `ground_mph * 5280 * tick_seconds / 3600` whole feet a
+  tick by integer SQL, throwing at a fraction, and frees it at the course's
   26400 ft. ruth_finish, once none is busy, says the miles and both times as
-  ticks times 20 s, pays the prize and logs the beat race with the throttle
-  as its choice. Full throttle runs 15 and 20 ticks, 5:00 against 6:40; at
-  the cruise both take 20, a dead heat. clock.tick is 20 after the race.
+  ticks times 20 s, pays the prize and logs the beat race with the throttle as
+  its choice. Full throttle runs 15 and 20 ticks, 5:00 against 6:40; at the
+  cruise both take 20, a dead heat. clock.tick is 20 after the race. An
+  aircraft home last loses, outcome lost; no throttle of today's reaches it.
 - Ruth's report: `printf('$%d.%02d')` of the one purse as the gold's query,
   the partner's name as the text of the one `name`, found as its holder and
   not by entity name, and the prize when beat_log holds the race won; read
@@ -3250,45 +3291,52 @@ fault realm REALM->DRIVER 0 push; fails the block
   bank b pulls n = 1 / cos(b) and stalls at Vs(n) = MIN_MPH sqrt(n), from lift
   L = n W at the wing's greatest lift coefficient, a turn at the cruise
   stalling when Vs(n) > CRUISE_MPH; its radius is V^2 / (G tan b) and its time
-  round 2 pi V / (G tan b) at the cruise. A loop is two arcs with energy kept,
-  the engine's pull and the drag taken to cancel: Rb = Ve^2 / (G (LOOP_PULL_G
-  - 1)), Rt = Vt^2 / (G (LOOP_TOP_G + 1)) and Vt^2 = Ve^2 - 2 G (Rb + Rt), so
-  Vt^2 = Ve^2 (1 - 2 / (LOOP_PULL_G - 1)) / (1 + 2 / (LOOP_TOP_G + 1)), Ve^2 /
-  7 for 4 and 0.5; it is made when Vt reaches MIN_MPH sqrt(LOOP_TOP_G), the
-  entry wanted that speed times sqrt(7), the dive from the cruise costs (Ve^2 -
-  Vc^2) / (2 G) of height and the top is Rb + Rt above the pull. A roll at
-  MAX_MPH, zero g for ROLL_SECONDS T, changes height by V sin(nose) T - G T^2 /
-  2, keeping it when sin(nose) >= G T / (2 V). A glide with the engine off at
-  the cruise goes h GLIDE_RATIO in still air, sinks V / GLIDE_RATIO and takes h
-  GLIDE_RATIO / V, over the ground times (V - W) / V into the wind and (V + W)
-  / V with it. A touchdown at MIN_MPH through the air is MIN_MPH - W over the
-  ground into the wind, MIN_MPH + W with it. Fuel is minutes BURN_GAL_HR / 60
-  and gas money gallons GAS_CENTS_GAL, in whole cents; the rides sold may burn
-  what TANK_GAL spares once SHOW_MIN is kept; the race runs into the wind at
-  the throttle's airspeed less WIND_MPH against the motorcar's MOTORCAR_MPH
-  over RACE_MI, a dead heat at the cruise.
-- Ruth's rounding: every shown value sits at least 0.1 of its last shown digit
-  from a rounding boundary but these, each far wider than a double's error:
-  the exit's sink, 8.25516, 0.005 above 8.25; n at 30 degrees, 1.1547, 0.047
-  tenths above 1.15; the loop's dive, 150.432, 0.068 below 150.5; the roll's
-  rise at 40 degrees, 25.4345, 0.066 below 25.5; n at 60 degrees,
+  round 2 pi V / (G tan b) at the cruise. A bank of 0 is no turn; at 90 degrees
+  or more the lift holds none of the weight, so no speed holds a level turn. A
+  loop is two arcs with energy kept, the engine's pull and the drag taken to
+  cancel: Rb = Ve^2 / (G (LOOP_PULL_G - 1)), Rt = Vt^2 / (G (LOOP_TOP_G + 1))
+  and Vt^2 = Ve^2 - 2 G (Rb + Rt), so Vt^2 = Ve^2 (1 - 2 / (LOOP_PULL_G - 1)) /
+  (1 + 2 / (LOOP_TOP_G + 1)), Ve^2 / 7 for 4 and 0.5; it is made when Vt
+  reaches MIN_MPH sqrt(LOOP_TOP_G), the entry wanted that speed times sqrt(7),
+  the dive from the cruise costs (Ve^2 - Vc^2) / (2 G) of height and the top is
+  Rb + Rt above the pull. A roll at MAX_MPH, zero g for ROLL_SECONDS T, changes
+  height by V sin(nose) T - G T^2 / 2, keeping it when sin(nose) >= G T / (2
+  V); a roll that would come out below LEVEL_OFF_FT is not flown. A glide with
+  the engine off at the cruise goes h GLIDE_RATIO in still air, sinks V /
+  GLIDE_RATIO and takes h GLIDE_RATIO / V, over the ground times (V - W) / V
+  into the wind and (V + W) / V with it. A touchdown at MIN_MPH through the air
+  is MIN_MPH - W over the ground into the wind, MIN_MPH + W with it. Fuel is
+  minutes BURN_GAL_HR / 60 and gas money gallons GAS_CENTS_GAL, in whole cents;
+  the rides sold may burn what TANK_GAL spares once SHOW_MIN is kept; the race
+  runs into the wind at the throttle's airspeed less WIND_MPH against the
+  motorcar's MOTORCAR_MPH over RACE_MI, a dead heat at the cruise.
+- Ruth's rounding: every walked band's shown value sits at least 0.1 of its
+  last shown digit from a rounding boundary but these, each far wider than a
+  double's error: the exit's sink, 8.25516, 0.005 above 8.25; n at 30 degrees,
+  1.1547, 0.047 tenths above 1.15; the loop's dive, 150.432, 0.068 below 150.5;
+  the roll's rise at 40 degrees, 25.4345, 0.066 below 25.5; n at 60 degrees,
   1.9999999999999996 in JavaScript, shown 2.0; and the exact products 21320,
   7995, 13325 and 315, which Math.round takes from a float error under
   0.0000001. 75 * (22 / 15) is 109.99999999999999, shown 110. Every scaled
-  figure divided by its power of ten is the double of its literal.
+  figure divided by its power of ten is the double of its literal. Branches no
+  walk takes are not held to it: a resume from 1000 ft burns exactly 0.75
+  gallons, the double 0x3FE8000000000000, and 0.75 * 10 is exactly 7.5, which
+  Math.round takes to 8, shown 0.8; the roll's climb back from 74 ft burns
+  1.4445000000000001 gallons, shown 1.4.
 - Dawa: guides.md entry 4, Nobody Left Behind: universe everest, world
   expedition, region khumbu, scene base_camp with the image
-  /_files/dawa/base_camp.png, scripts dawa_lib, dawa_spawn, dawa_report and
-  the systems of Dawa's schedule. The stake is Dawa's record of never leaving
+  /_files/dawa/base_camp.png, scripts dawa_lib, dawa_spawn, dawa_report and the
+  systems of Dawa's schedule. The stake is Dawa's record of never leaving
   anyone behind, dawa's `record` `kept` or `broken`, met at the South Summit,
-  where the top and Teo's rescue cannot both happen. The exit, designed by
-  rule 4 from his "Tell me if it starts" and "I have never left anyone
-  behind", is `take me down`, the intent exit, Dawa taking the rope down the
-  fixed line to the camp below, at Base Camp saying they are at the bottom,
-  resumed by `let's go up again`, the intent resume. The keepsake is a
-  photograph from the high point and a white scarf from Dawa, the items
-  photograph and scarf, ids 17 and 18, each with `keepsake (kind, text)`. The
-  goodbye is `goodbye, dawa`, running dawa_report.
+  where the top and Teo's rescue cannot both happen. The exit, designed by rule
+  4 from his "Tell me if it starts" and "I have never left anyone behind", is
+  `take me down`, the intent exit, Dawa taking the rope down the fixed line to
+  the camp below, the rope moving whole and a climber who is down named as
+  lowered with it, at Base Camp saying they are at the bottom, resumed by
+  `let's go up again`, the intent resume, which names him carried back up with
+  the rope. The keepsake is a photograph from the high point and a white scarf
+  from Dawa, the items photograph and scarf, ids 17 and 18, each with `keepsake
+  (kind, text)`. The goodbye is `goodbye, dawa`, running dawa_report.
 - Dawa's entities: world, player, dawa, teo, base_camp, camp_1, camp_2,
   camp_3, camp_4, south_summit, summit, player_bottle, teo_bottle, spare,
   forecast_1 and forecast_3, ids 1 to 16 in that order, made by dawa_spawn.
@@ -3335,12 +3383,32 @@ fault realm REALM->DRIVER 0 push; fails the block
   says the air only at the end of a climb up, for the holder of `ams`, then a
   night over the sleep rule when there is one. The keepsake decides by no
   climber holding down, the record and the high mark.
-- Dawa's report: dawa_report, by SELECTs alone, says `Dawa's spare gave 1080
-  of its 1200 litres to bring Teo down to Camp 4, and nobody was left
-  behind.`; the told farewell `Dawa takes your hand in both of his. Thank you
-  for climbing on my rope. Go slowly, my friend.` The chosen output, the
-  spare's full_l less left_l, is measured by dawa_breathe over the descent's
-  9 ticks.
+- Dawa's report: dawa_report, by SELECTs alone, says `Dawa's spare gave 1080 of
+  its 1200 litres to bring Teo down to Camp 4, and nobody was left behind.`;
+  the told farewell `Dawa takes your hand in both of his. Thank you for
+  climbing on my rope. Go slowly, my friend.` The chosen output, the spare's
+  full_l less left_l, is measured by dawa_breathe over the descent's 9 ticks.
+  On the summit branch, which no walk takes, it says `Dawa's spare gave 240 of
+  its 1200 litres to bring you down from the top to Camp 4, and Dawa's record
+  is broken.`
+- Dawa's summit branch: dawa_decide's `summit`, a branch no walk takes, is
+  worked at once with no tick, the bottles moving whole: the player's bottle is
+  drawn dry, its 600 litres lasting to 9:00, then the spare, which stays with
+  Dawa on the player's rope, for the 240 litres the rest of the way down needs,
+  the player's breathe moving to it; Teo goes down with the other rope on his
+  empty bottle, 4 hours 30 minutes with no oxygen, and is carried in to Camp 4
+  alive, his down removed. The rope ends at Camp 4 at 11:00, the high mark the
+  top, the spare at 960 and the record broken. It throws unless the player's
+  bottle lasts whole minutes, the top needs some of the spare and no more than
+  it holds, and the down climber's bottle is empty. The walked push band's
+  pooled reckoning stays: 240 of the spare, leaving 960 short of Teo's 1080,
+  reckons one bottle that cannot serve both.
+- Dawa's icefall: dawa_icefall takes a whole hour of the day, one or two digits
+  below 24, and throws for any other value, one of the wrong form. The
+  crossing's end is taken modulo the day and refused when it is at or past the
+  sun's 9:00 of the day it ends, as the model holds no hour when the ice sets
+  again, so 0 to 2 and 18 to 23 cross and 3 to 17 are refused, each an outcome
+  with its own say.
 - Dawa's policy: he stands in a living culture, by policy flag 5 of guides.md:
   his words stay respectful and plain, the scarf is his gift, and nothing
   makes a ritual a mechanic. Teo is invented. No one dies on either branch:
@@ -3369,15 +3437,17 @@ fault realm REALM->DRIVER 0 push; fails the block
 - Dawa's air: West's formula, J. B. West, J Appl Physiol 81 (1996) 1850: P =
   exp(6.63268 - 0.1112 h - 0.00149 h^2) mmHg at h km, by Math.exp; the oxygen
   breathed in, 0.2094 (P - 47) mmHg, oxygen's share of dry air and the water
-  vapour pressure at 37 C; its share of the sea's, 100 times that over the
-  same at 0 km, P0 759.515 and 149.2006. air_text says "NAME, M m: the air
-  presses P mmHg, and you breathe in O mmHg of oxygen, PCT percent of what the
-  sea gives.", each whole by Math.round: Base Camp 401, 74 and 50; Camp 1 366,
-  67 and 45; Camp 2 351, 64 and 43; Camp 4 287, 50 and 34; the South Summit
-  256, 44 and 29; the nearest to a rounding boundary Camp 2's oxygen, 63.5976.
-  It is kept in dawa_lib as air_text(place, m), the same expression in the
-  same order, so the same doubles, said by dawa_spawn, dawa_move,
-  dawa_morning, dawa_exit, dawa_resume and dawa_loads.
+  vapour pressure at 37 C, by Physiology in Medicine: Acute altitude exposure
+  in patients with pulmonary and cardiovascular disease, J Appl Physiol (2014),
+  doi 10.1152/japplphysiol.01013.2013, named in dawa_lib's comments; its share
+  of the sea's, 100 times that over the same at 0 km, P0 759.515 and 149.2006.
+  air_text says "NAME, M m: the air presses P mmHg, and you breathe in O mmHg
+  of oxygen, PCT percent of what the sea gives.", each whole by Math.round:
+  Base Camp 401, 74 and 50; Camp 1 366, 67 and 45; Camp 2 351, 64 and 43; Camp
+  4 287, 50 and 34; the South Summit 256, 44 and 29; the nearest to a rounding
+  boundary Camp 2's oxygen, 63.5976. It is kept in dawa_lib as air_text(place,
+  m), the same expression in the same order, so the same doubles, said by
+  dawa_spawn, dawa_move, dawa_morning, dawa_exit, dawa_resume and dawa_loads.
 - guide next purchase: the second half of each keepsake paragraph of
   guides.md, the cowboy RPG, the next town, the other route, is marketing no
   walk can build, and is not built.
@@ -3594,8 +3664,9 @@ fault realm REALM->DRIVER 0 push; fails the block
   the player saw last, holds T as a whole token, neither a letter nor a digit
   on either side; the model reply before that ai.say holds T in its
   output_text, so the guide said it; the last model call of the end turn, the
-  turn of the last ui.input, holds T in a function_call_output, so a tool
-  result carried it; no `content` text of the built table holds T, which
+  turn of the last ui.input before the last band, holds T in a
+  function_call_output, so a tool result carried it; no `content` text of
+  the built table holds T, which
   covers every ask, puzzled, otherwise, after and paused text, as table_build
   folds them into contents, a call's arguments being no content; the end
   turn, from its ui.input to its ai.say reply, commits nothing but

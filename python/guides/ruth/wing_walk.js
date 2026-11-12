@@ -5,12 +5,13 @@
 // The step system `ruth_wing_walk`, kept at /_files/script/ruth_wing_walk.js:
 // takes the player's intent `wing_walk`, its value who walks, Ruth or the
 // player's `name`, and flies the wing walk at the cruise and the show's
-// height; then the engine quits over open country, and it says the height,
-// the wind and each field's distance, in the order of their entities. Outcome
-// walked, logged as the beat wing_walk.
+// height; then the engine quits over open country, the aircraft's
+// `engine_out` until ruth_landing, and it says the height, the wind and each
+// field's distance, in the order of their entities. Outcome walked, logged as
+// the beat wing_walk.
 //
 // Args: `ecs`. Reads `name`, `airframe`, `altitude`, `show`, `wind` and
-// `field`; writes `altitude`.
+// `field`; writes `altitude` and `engine_out`.
 
 // The step's view of the world, and the lib.
 const ecs = args.ecs;
@@ -45,6 +46,10 @@ ecs.run([
   {
     sql: "UPDATE altitude SET ft = ? WHERE entity = ?",
     params: [show.ft, aircraft.entity],
+  },
+  {
+    sql: "INSERT INTO engine_out (entity) VALUES (?)",
+    params: [aircraft.entity],
   },
 ]);
 ecs.say(

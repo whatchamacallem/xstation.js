@@ -44,9 +44,9 @@ const spare = aircraft.tank_gal - lib.fuel_gallons(show.minutes, burn);
 if (gallons > spare) {
   const most = Math.floor(spare / lib.fuel_gallons(fares.ride_min, burn));
   ecs.say(
-    `${count} rides burn ${lib.tenths_text(gallons)} gallons, and the tank` +
+    `${lib.count_text(count, "ride", "rides")} burn ${lib.tenths_text(gallons)} gallons, and the tank` +
       ` spares ${lib.tenths_text(spare)} once the show's ${show.minutes}` +
-      ` minutes are kept: ${most} rides at most.`,
+      ` minutes are kept: ${lib.count_text(most, "ride", "rides")} at most.`,
   );
   ecs.log("rides", intent.value, "refused");
   return;
@@ -64,7 +64,7 @@ ecs.run([
   },
 ]);
 ecs.say(
-  `${count} rides at ${lib.money_text(fares.ride_cents)} for` +
+  `${lib.count_text(count, "ride", "rides")} at ${lib.money_text(fares.ride_cents)} for` +
     ` ${fares.ride_min} minutes: ${lib.money_text(taken)} taken in` +
     ` ${minutes} minutes of flying, on ${lib.tenths_text(gallons)} gallons` +
     ` of gasoline at ${fares.gas_cents_gal} cents, ${lib.money_text(gas)}.` +

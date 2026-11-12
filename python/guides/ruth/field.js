@@ -7,8 +7,9 @@
 // its entity, `north` or `south`, and glides for it with the engine dead at
 // the cruise: the aircraft's height times the glide ratio in still air, over
 // the ground times (V - W) / V into the wind or (V + W) / V with it, in whole
-// feet. Outcome short or reached by the field's distance, logged as the beat
-// field.
+// feet. Outcome short or reached by the field's distance; on the grass
+// already, set down by an exit, it says so, outcome reached, as no glide is
+// left to fly. Logged as the beat field.
 //
 // Args: `ecs`. Reads `field`, `airframe`, `altitude` and `wind`; writes
 // nothing but its say and beat.
@@ -36,6 +37,14 @@ const ways = {
 };
 const way = lib.choice_get(ways, choice);
 const height = aircraft.ft;
+if (height === 0) {
+  ecs.say(
+    `She's on the grass already, where Ruth set her down, so there's no` +
+      ` glide left to fly for the ${field.called}.`,
+  );
+  ecs.log("field", intent.value, "reached");
+  return;
+}
 const cruise = aircraft.cruise_mph;
 const ground = cruise + way.sign * wind.mph;
 const reach = Math.round((height * aircraft.glide_ratio * ground) / cruise);
@@ -46,9 +55,9 @@ const opening =
   ` ${lib.tenths_text(reach / lib.FEET_PER_MILE)} miles, and the` +
   ` ${field.called} is ${lib.tenths_text(field.miles)} miles off:`;
 if (margin < 0) {
-  ecs.say(`${opening} ${-margin} feet short.`);
+  ecs.say(`${opening} ${lib.count_text(-margin, "foot", "feet")} short.`);
   ecs.log("field", intent.value, "short");
   return;
 }
-ecs.say(`${opening} ${margin} feet to spare.`);
+ecs.say(`${opening} ${lib.count_text(margin, "foot", "feet")} to spare.`);
 ecs.log("field", intent.value, "reached");

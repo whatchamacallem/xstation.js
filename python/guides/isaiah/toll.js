@@ -5,11 +5,11 @@
 // The step system `isaiah_toll` of Isaiah Cole's cattle drive, kept at
 // `/_files/script/isaiah_toll.js`: takes the intent `toll`, its value the
 // head offered in digits, as `20`, to the outfit at the ford, the entity of
-// `toll`. An offer below its `toll.floor` is refused and changes nothing.
-// One at the floor or more is paid: the herd, the entity of `losses`, gives
-// the head, counted in `losses.tolled`, and each entity of `pace` sets out by
-// `travel` for the next `place` ahead and is `busy`. It says the offer and
-// what came of it, and logs the beat `refused` or `paid`.
+// `toll`. An offer below its `toll.floor`, or above the `head` of the herd,
+// the entity of `losses`, is refused and changes nothing. Any other is paid:
+// the herd gives the head, counted in `losses.tolled`, and each entity of
+// `pace` sets out by `travel` for the next `place` ahead and is `busy`. It
+// says the offer and what came of it, and logs the beat `refused` or `paid`.
 //
 // Args: `ecs`, of the contract of `ecs_step`. Reads `toll`, `losses`,
 // `head`, `place` and `pace`. Writes `head`, `losses.tolled`, `travel` and
@@ -41,9 +41,23 @@ if (offer < outfit.floor) {
 }
 
 const herd = lib.row_one(
-  ecs.rows("SELECT entity FROM losses ORDER BY entity", []),
-  "the herd's losses",
+  ecs.rows(
+    "SELECT losses.entity AS entity, head.count AS count FROM losses" +
+      " JOIN head ON head.entity = losses.entity ORDER BY losses.entity",
+    [],
+  ),
+  "the herd's head",
 );
+// The herd cannot give more head than it holds.
+if (offer > herd.count) {
+  ecs.say(
+    `You offer ${lib.whole_text(offer)} head, and the herd holds` +
+      ` ${lib.whole_text(herd.count)}. The outfit's boss laughs and keeps` +
+      " the rope up.",
+  );
+  ecs.log("toll", intent.value, "refused");
+  return;
+}
 ecs.run([
   {
     sql: "UPDATE head SET count = count - ? WHERE entity = ?",

@@ -4,7 +4,8 @@
 //
 // The step system `ruth_buzz`, kept at /_files/script/ruth_buzz.js: takes the
 // player's intent `buzz`, its value the height in feet, and buzzes Main Street
-// at the book's top speed, refusing a height under the book's leveling off.
+// at the book's top speed, refusing a height under the book's leveling off
+// and one above the height she flies, as a buzz goes down to the street.
 // Outcome refused or made, logged as the beat buzz.
 //
 // Args: `ecs`. Reads `airframe` and `altitude`; writes `altitude`.
@@ -24,6 +25,14 @@ if (feet < aircraft.level_off_ft) {
   ecs.say(
     `Under the ${aircraft.level_off_ft} feet the book gives for leveling` +
       ` off? I'm bold. I'm not stupid.`,
+  );
+  ecs.log("buzz", intent.value, "refused");
+  return;
+}
+if (feet > aircraft.ft) {
+  ecs.say(
+    `Down to ${lib.count_text(feet, "foot", "feet")}, when we're flying at ${aircraft.ft}? That's a` +
+      ` climb, not a buzz.`,
   );
   ecs.log("buzz", intent.value, "refused");
   return;

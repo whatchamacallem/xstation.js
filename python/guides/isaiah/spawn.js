@@ -187,6 +187,33 @@ const statements = [
   row_insert("place", { mile: BED_MILE + MILES }, "dodge"),
 ];
 
+// The text of a thrown value: its stack when it is an `Error`.
+function thrown_text(thrown) {
+  return thrown instanceof Error ? String(thrown.stack) : String(thrown);
+}
+
+// The function of the lib's script, read from its key and compiled once.
+function lib_compile(name) {
+  const ref = SCRIPT_PREFIX + name + SCRIPT_SUFFIX;
+  const { data } = store.kv_get(ref);
+  // A script over `overflow_bytes` comes back as a handle of the cache.
+  if (!(data instanceof Uint8Array)) {
+    throw new Error(
+      `isaiah_spawn reads ${ref}, the script of the lib ${name}, as a handle` +
+        " of the cache and not as its bytes, as it is over overflow_bytes.",
+    );
+  }
+  try {
+    return new Function("engine", "args", decoder.decode(data));
+  } catch (thrown) {
+    throw new Error(
+      `isaiah_spawn cannot compile ${ref}, the script of the lib ${name}:` +
+        ` ${thrown_text(thrown)}`,
+      { cause: thrown },
+    );
+  }
+}
+
 // The lib the schedule names, compiled and run once as `ecs_step` runs it.
 function lib_run() {
   const [result] = store.sql_run(world, [
@@ -198,17 +225,31 @@ function lib_run() {
         ` ${JSON.stringify(result.rows)}.`,
     );
   }
-  const ref = SCRIPT_PREFIX + result.rows[0][0] + SCRIPT_SUFFIX;
-  const { data } = store.kv_get(ref);
-  // A script over `overflow_bytes` comes back as a handle of the cache.
-  if (!(data instanceof Uint8Array)) {
+  const [[name]] = result.rows;
+  const body = lib_compile(name);
+  let value;
+  try {
+    value = body(engine, {});
+  } catch (thrown) {
     throw new Error(
-      `isaiah_spawn reads ${ref}, the lib, as a handle of the cache and not` +
-        " as its bytes, as it is over overflow_bytes.",
+      `isaiah_spawn ran the lib ${name} of ${world}, which threw` +
+        ` ${thrown_text(thrown)}`,
+      { cause: thrown },
     );
   }
-  const body = new Function("engine", "args", decoder.decode(data));
-  return body(engine, {});
+  if (typeof value !== "object" || value === null) {
+    throw new Error(
+      `isaiah_spawn ran the lib ${name} of ${world}, which returned` +
+        ` ${value === null ? "null" : typeof value}, not a frozen object.`,
+    );
+  }
+  if (!Object.isFrozen(value)) {
+    throw new Error(
+      `isaiah_spawn ran the lib ${name} of ${world}, which returned an` +
+        " object not frozen.",
+    );
+  }
+  return value;
 }
 
 // Beds the herd down and says the herd, the miles and the calm it starts with.

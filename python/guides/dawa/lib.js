@@ -14,7 +14,8 @@
 // Args: none. Returns a frozen object of `units`, `air_text`, `night_text`,
 // `whole_text`, `count_text`, `clock_text`, `hour_text`, `duration_text`,
 // `sentence_start`, `row_read`, `tick_minutes`, `route_ends`, `route_camp`,
-// `climber_camp`, `oxygen_read`, `rope_move`, `climb_start` and `day_set`.
+// `climber_camp`, `fallen_names`, `oxygen_read`, `rope_move`, `climb_start`
+// and `day_set`.
 
 // Metres in a kilometre, seconds in a minute, minutes in an hour, hours in a day, and a whole in percent.
 const units = Object.freeze({
@@ -28,10 +29,10 @@ const units = Object.freeze({
 // Air pressure in mmHg at h km is exp(a less b h less c h h): J. B. West, J Appl Physiol 81 (1996) 1850.
 const west = Object.freeze({ a: 6.63268, b: 0.1112, c: 0.00149 });
 
-// Oxygen's share of dry air.
+// Oxygen's share of dry air in the oxygen breathed in, 0.2094 (PB less 47) mmHg: Physiology in Medicine: Acute altitude exposure in patients with pulmonary and cardiovascular disease, J Appl Physiol (2014), doi 10.1152/japplphysiol.01013.2013.
 const oxygen_share = 0.2094;
 
-// The pressure of water vapour in the lungs at 37 C, in mmHg.
+// The pressure of water vapour in the lungs at 37 C in mmHg, the 47 of that formula: Physiology in Medicine: Acute altitude exposure in patients with pulmonary and cardiovascular disease, J Appl Physiol (2014), doi 10.1152/japplphysiol.01013.2013.
 const vapour_mmhg = 47;
 
 // Above 3000 m sleep no more than 500 m higher a night: Wilderness Medical Society Clinical Practice Guidelines, 2019 update.
@@ -163,6 +164,17 @@ function climber_camp(ecs, entity) {
   );
 }
 
+// The names of the climbers who are down at a camp, as a say gives them, in the order of their entities.
+function fallen_names(ecs, camp) {
+  const rows = ecs.rows(
+    "SELECT entity.name AS name FROM down JOIN at ON at.entity = down.entity" +
+      " JOIN entity ON entity.id = down.entity WHERE at.camp = ?" +
+      " ORDER BY down.entity",
+    [camp],
+  );
+  return rows.map((row) => sentence_start(row.name));
+}
+
 // The rule of bottled oxygen: the camp from which the rope breathes it, its height, and the flows of a climber and of a sick one.
 function oxygen_read(ecs) {
   return row_read(
@@ -237,6 +249,7 @@ return Object.freeze({
   route_ends,
   route_camp,
   climber_camp,
+  fallen_names,
   oxygen_read,
   rope_move,
   climb_start,

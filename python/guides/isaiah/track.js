@@ -14,8 +14,8 @@
 // is left, and logs the beat `searching` or `done`.
 //
 // Args: `ecs`, of the contract of `ecs_step`. Reads `cover`, `hidden`,
-// `head`, `looks`, `place` and `pace`. Writes `head`, `hidden`, `losses`,
-// `looks.used`, `travel` and `busy`.
+// `head`, `losses`, `looks`, `place` and `pace`. Writes `head`, `hidden`,
+// `losses`, `looks.used`, `travel` and `busy`.
 
 // The step's methods and the drive's lib.
 const ecs = args.ecs;
@@ -43,14 +43,34 @@ const herd = lib.row_one(
   "the herd's losses",
 );
 
+// The herd's head, the head still out and the looks, before the search.
+const head = lib.row_one(
+  ecs.rows("SELECT count FROM head WHERE entity = ?", [herd.entity]),
+  "the herd's head",
+).count;
+const out = ecs.rows(
+  "SELECT head.entity AS entity, head.count AS count FROM head" +
+    " JOIN hidden ON hidden.entity = head.entity ORDER BY head.entity",
+  [],
+);
+const looks = lib.row_one(
+  ecs.rows("SELECT used, most FROM looks WHERE entity = ?", [intent.entity]),
+  "the rider's looks",
+);
+
 // A hidden bunch is driven back whole, and each search spends a look.
 const found =
   bunch.hidden === 1
     ? lib.row_one(
-        ecs.rows("SELECT count FROM head WHERE entity = ?", [bunch.entity]),
+        out.filter((left) => left.entity === bunch.entity),
         "the bunch's head",
       ).count
     : 0;
+const scattered = out.reduce((sum, left) => sum + left.count, 0) - found;
+const used = looks.used + 1;
+const done = scattered === 0 || used >= looks.most;
+
+// Every write of the search in one run, as reads came first.
 const statements = [
   {
     sql: "UPDATE looks SET used = used + 1 WHERE entity = ?",
@@ -71,51 +91,23 @@ if (bunch.hidden === 1) {
     { sql: "DELETE FROM hidden WHERE entity = ?", params: [bunch.entity] },
   );
 }
-ecs.run(statements);
-
-const head = lib.row_one(
-  ecs.rows("SELECT count FROM head WHERE entity = ?", [herd.entity]),
-  "the herd's head",
-).count;
-const out = ecs.rows(
-  "SELECT head.count AS count FROM head" +
-    " JOIN hidden ON hidden.entity = head.entity ORDER BY head.entity",
-  [],
-);
-const scattered = out.reduce((sum, left) => sum + left.count, 0);
-const looks = lib.row_one(
-  ecs.rows("SELECT used, most FROM looks WHERE entity = ?", [intent.entity]),
-  "the rider's looks",
-);
-
-const told =
-  found > 0
-    ? `${lib.whole_text(found)} head in the ${bunch.cover}, driven back`
-    : `nothing left in the ${bunch.cover}`;
-let say =
-  `${bunch.opening}: ${told}. ${lib.whole_text(head)} with the herd,` +
-  ` ${lib.whole_text(scattered)} still out, looks used` +
-  ` ${lib.whole_text(looks.used)} of ${lib.whole_text(looks.most)}.`;
-const done = scattered === 0 || looks.used >= looks.most;
+// The head still out when the looks are spent are lost for good.
+if (done && scattered > 0) {
+  statements.push(
+    {
+      sql: "UPDATE losses SET lost = lost + ? WHERE entity = ?",
+      params: [scattered, herd.entity],
+    },
+    {
+      sql: "DELETE FROM head WHERE entity IN (SELECT entity FROM hidden)",
+      params: [],
+    },
+    { sql: "DELETE FROM hidden", params: [] },
+  );
+}
+// The herd walks on to the next place ahead, the ticks moving it there.
 if (done) {
-  const after = [];
-  // The head still out when the looks are spent are lost for good.
-  if (scattered > 0) {
-    say += ` The ${lib.whole_text(scattered)} still out are lost for good.`;
-    after.push(
-      {
-        sql: "UPDATE losses SET lost = lost + ? WHERE entity = ?",
-        params: [scattered, herd.entity],
-      },
-      {
-        sql: "DELETE FROM head WHERE entity IN (SELECT entity FROM hidden)",
-        params: [],
-      },
-      { sql: "DELETE FROM hidden", params: [] },
-    );
-  }
-  // The herd walks on to the next place ahead, the ticks moving it there.
-  after.push(
+  statements.push(
     {
       sql:
         "INSERT INTO travel (entity, goal) SELECT place.entity," +
@@ -132,7 +124,19 @@ if (done) {
       params: [],
     },
   );
-  ecs.run(after);
+}
+ecs.run(statements);
+
+const told =
+  found > 0
+    ? `${lib.whole_text(found)} head in the ${bunch.cover}, driven back`
+    : `nothing left in the ${bunch.cover}`;
+let say =
+  `${bunch.opening}: ${told}. ${lib.whole_text(head + found)} with the herd,` +
+  ` ${lib.whole_text(scattered)} still out, looks used` +
+  ` ${lib.whole_text(used)} of ${lib.whole_text(looks.most)}.`;
+if (done && scattered > 0) {
+  say += ` The ${lib.whole_text(scattered)} still out are lost for good.`;
 }
 ecs.say(say);
 ecs.log("track", intent.value, done ? "done" : "searching");

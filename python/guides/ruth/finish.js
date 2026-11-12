@@ -6,10 +6,10 @@
 // every racer has reached the course's end and none is busy, says the course
 // in miles, the aircraft's time and the vehicle's, each its ticks times the
 // clock's seconds a tick, then the result: an aircraft home first wins the
-// fair's prize into the purse, outcome won, else a dead heat, outcome tied,
-// logged as the beat race with the throttle as its choice. It then removes
-// each `racer` and `throttle`. While a racer is busy, or with no race, it does
-// nothing.
+// fair's prize into the purse, outcome won; one home last loses, outcome
+// lost; both home at once is a dead heat, outcome tied; each logged as the
+// beat race with the throttle as its choice. It then removes each `racer` and
+// `throttle`. While a racer is busy, or with no race, it does nothing.
 //
 // Args: `ecs`. Reads `racer`, `busy`, `airframe`, `throttle`, `vehicle`,
 // `course`, `prize`, `purse` and `clock`; writes `purse`, `racer` and
@@ -94,6 +94,14 @@ if (flown < driven) {
   return;
 }
 ecs.run(ended);
+if (flown > driven) {
+  ecs.say(
+    `The motorcar wins by ${lib.clock_text(flown - driven)}, and the fair` +
+      ` keeps its ${lib.money_text(prize.cents)} purse.`,
+  );
+  ecs.log("race", plane.setting, "lost");
+  return;
+}
 ecs.say(
   `A dead heat, and the fair keeps its ${lib.money_text(prize.cents)} purse.`,
 );

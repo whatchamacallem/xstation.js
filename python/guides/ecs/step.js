@@ -336,7 +336,7 @@ function step_run() {
   intents_check(step);
   let ticks = 0;
   for (let busy = busy_read(); busy.length > 0; busy = busy_read()) {
-    if (ticks === clock.ticks_max) {
+    if (ticks >= clock.ticks_max) {
       throw new Error(
         `ecs_step ran ${ticks} ticks, the clock's ticks_max, in step ${step}` +
           ` of ${world}, and ${busy.join(", ")} are still busy.`,

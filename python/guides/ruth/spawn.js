@@ -89,8 +89,12 @@ const MOTORCAR_MPH = 45;
 const WIND_MPH = 15;
 // The guide's world: the quarter the day's wind blows from.
 const WIND_QUARTER = "north";
+// The guide's world: the field to the north, a hayfield.
+const NORTH_FIELD_NAME = "north hayfield";
 // The guide's world: the north hayfield's distance, tenths of a mile.
 const NORTH_MILES_X10 = 15;
+// The guide's world: the field to the south, a pasture.
+const SOUTH_FIELD_NAME = "south pasture";
 // The guide's world: the south pasture's distance, tenths of a mile.
 const SOUTH_MILES_X10 = 30;
 
@@ -208,16 +212,21 @@ const statements = [
   component_row(
     "field",
     ["miles_x10", "name"],
-    [NORTH_MILES_X10, "north hayfield"],
+    [NORTH_MILES_X10, NORTH_FIELD_NAME],
     "north",
   ),
   component_row(
     "field",
     ["miles_x10", "name"],
-    [SOUTH_MILES_X10, "south pasture"],
+    [SOUTH_MILES_X10, SOUTH_FIELD_NAME],
     "south",
   ),
 ];
+
+// The text of a thrown value: its stack when it is an `Error`.
+function thrown_text(thrown) {
+  return thrown instanceof Error ? String(thrown.stack) : String(thrown);
+}
 
 // The lib the schedule names, compiled and run once as `ecs_step` runs it.
 function lib_run() {
@@ -230,17 +239,49 @@ function lib_run() {
         ` ${JSON.stringify(result.rows)}.`,
     );
   }
-  const ref = SCRIPT_PREFIX + result.rows[0][0] + SCRIPT_SUFFIX;
+  const name = result.rows[0][0];
+  const ref = SCRIPT_PREFIX + name + SCRIPT_SUFFIX;
   const { data } = store.kv_get(ref);
   // A script over `overflow_bytes` comes back as a handle of the cache.
   if (!(data instanceof Uint8Array)) {
     throw new Error(
-      `ruth_spawn reads ${ref}, the lib, as a handle of the cache and not` +
-        " as its bytes, as it is over overflow_bytes.",
+      `ruth_spawn reads ${ref}, the script of the lib ${name}, as a handle` +
+        ` of the cache and not as its bytes, as it is over overflow_bytes.`,
     );
   }
-  const body = new Function("engine", "args", decoder.decode(data));
-  return body(engine, {});
+  let body;
+  try {
+    body = new Function("engine", "args", decoder.decode(data));
+  } catch (thrown) {
+    throw new Error(
+      `ruth_spawn cannot compile ${ref}, the script of the lib ${name}:` +
+        ` ${thrown_text(thrown)}`,
+      { cause: thrown },
+    );
+  }
+  let value;
+  try {
+    value = body(engine, {});
+  } catch (thrown) {
+    throw new Error(
+      `ruth_spawn ran the lib ${name} of ${world}, which threw` +
+        ` ${thrown_text(thrown)}`,
+      { cause: thrown },
+    );
+  }
+  if (typeof value !== "object" || value === null) {
+    throw new Error(
+      `ruth_spawn ran the lib ${name} of ${world}, which returned` +
+        ` ${value === null ? "null" : typeof value}, not a frozen object.`,
+    );
+  }
+  if (!Object.isFrozen(value)) {
+    throw new Error(
+      `ruth_spawn ran the lib ${name} of ${world}, which returned an` +
+        ` object not frozen.`,
+    );
+  }
+  return value;
 }
 
 // Makes the summer's world and says the Jenny's figures from the book.

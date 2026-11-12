@@ -7,9 +7,11 @@
 // by ecs_step. It reads, by SELECTs alone, the litres the spare gave, the
 // `full_l` less the `left_l` of the bottle the guide carries, the holder of
 // `limits`, with its whole; the camp the followed climber, the holder of
-// `ams`, came down to; and Dawa's record. It commits nothing, so the goodbye
-// writes no row of the world. A spare that gave nothing, or a record neither
-// kept nor broken, is a bug of the table, and throws.
+// `ams`, came down to; and Dawa's record, kept when the spare brought Teo
+// down, broken when it brought the player down from the top. It commits
+// nothing, so the goodbye writes no row of the world. A spare that gave
+// nothing, or a record neither kept nor broken, is a bug of the table, and
+// throws.
 //
 // Args: `world`, the world database. Returns `say`, what the spare gave told
 // again, and `outcome`, `told`.
@@ -59,7 +61,7 @@ function spare_told() {
     return `${gave} to bring Teo down to ${you.camp}, and nobody was left behind.`;
   }
   if (record.text === "broken") {
-    return `${gave}, to the top and to Teo, and Dawa's record is broken.`;
+    return `${gave} to bring you down from the top to ${you.camp}, and Dawa's record is broken.`;
   }
   throw new Error(
     `dawa_report: Dawa's record is ${JSON.stringify(record.text)}, neither` +
