@@ -9,8 +9,10 @@
 # in chrome-headless-shell, and walks the rungs of the gold of
 # test_guide_NAME.py: each step types a line and waits for its band with the
 # box enabled, then checks the picture and polls the rows of the server's
-# databases it names. Then the audit must hold no unexpected failure and one
-# engine start, the page leaves and ttyd stops with the gold's code. A run
+# databases it names. Then the audit's digest goes to build/audit/NAME.txt,
+# and the audit must hold no unexpected failure, no message the guide does
+# not expect and one engine start; the page leaves and ttyd stops with the
+# gold's code. A run
 # that passes removes its work directory; a failed rung keeps it, with its PNG
 # and the audit in build/test_guide_NAME/. Exit 0, 1 at the first failed check
 # naming its rung, 130 at ctrl C, 128 plus the signal's number at SIGHUP or

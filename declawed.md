@@ -2587,9 +2587,17 @@ fault realm REALM->DRIVER 0 push; fails the block
   served band, "How can I help you?", with the box enabled, and checks its
   picture, the hyperposition's 4 by 4 of `0 0 0 255`.
 - guide audit rung: waits until audit_read.requests_open of the root's
-  entries is empty, runs audit_read.failure_check, requires exactly one line
-  starting `==== engine started, ` in _audit.txt, the one load, and under the
-  run's --debug copies the audit to build/test_guide_NAME/audit.txt.
+  entries is empty, runs audit_read.failure_check then audit_read.guide_check
+  on table_build of the guide and the gold, writes build/audit/NAME.txt, the
+  audit digest then the verdict, in every run, and only then fails on what the
+  checks found, so a failed check keeps its digest; then requires exactly one
+  line starting `==== engine started, ` in _audit.txt, the one load, and under
+  the run's --debug copies the audit to build/test_guide_NAME/audit.txt.
+- guide digest: build/audit/NAME.txt, written by the audit rung of each guide
+  test in every run, never removed, each guide's file replaced by its next run.
+  A walk that fails before its audit rung writes none; its audit is in
+  build/test_guide_NAME/audit.txt, and `audit_read.py PATH --guide NAME
+  --digest FILE` makes one.
 - guide left rung: lists by /proc the pids of ttyd's children whose command
   line holds the root's bootstrap.py, failing when there is none; opens
   about:blank; waits for them to end; stops ttyd and requires the gold's
@@ -2963,9 +2971,10 @@ fault realm REALM->DRIVER 0 push; fails the block
 
 ## audit_read
 
-- audit_read.py: `python3 python/audit_read.py PATH [--check]` prints one line
-  per entry of an audit document, its line number, seconds from the first entry,
-  gap, lane, type, id or reply and detail, then a summary of the run: entries
+- audit_read.py: `python3 python/audit_read.py PATH [--check] [--guide NAME]
+  [--digest FILE]` prints the listing, one line per entry of an audit document,
+  its line number, seconds from the first entry, gap, lane, type, id or reply
+  and detail, by listing_lines, then a summary of the run: entries
   and engine starts; inputs; model calls, the chains they started and the
   copies of the system prompt sent; the copies written in the three lanes; the
   input tokens served from cache by each reply's usage, with the share; each
@@ -2981,6 +2990,78 @@ fault realm REALM->DRIVER 0 push; fails the block
   required. A call's detail counts its items by kind, the count kept and its
   chain; a reply's names its id, cached tokens, calls and text. prompt_copies
   counts the prompt in each call's input, 0 in a chained call.
+- audit_read listing and digest: the listing is one line per entry, cut at
+  _DETAIL_MAX; the audit digest is the run told for a person to read, and the
+  word digest names it alone. listing_lines was digest_lines until 2026-11-11.
+- audit_read --guide: runs the failure check, then guide_check on
+  guide_walk.table_build of python/guides/NAME and the gold
+  python.test_guide_NAME, and exits 1 at the first failure of either, naming
+  its line. Its verdict on a pass is `check: no unexpected failure, and every
+  message is the guide's`, which guide_walk repeats in its own constant.
+- audit_read --digest: writes `audit digest of PATH`, the digest_lines, then a
+  blank line and the verdict when --check or --guide is given. The verdict also
+  goes to stdout on a pass and stderr on a failure, as before.
+- audit digest records: a record is its entry's line in the audit, `L` and the
+  number, the seconds from the first entry, the lane, then what it says; its
+  later lines indented 8 spaces, a text's own later lines 10. `==== engine
+  start N` then `---- bring up` open each start, and `---- turn K` each input.
+- audit digest shown whole: the player's input; each ai.say reply's band with
+  its turn, told as the row the reply was stored at, and its scene, told as
+  the scene shown, as agent.ts sends the row of the conversation the turn ran
+  in and the scene on screen at its end, which differ when a turn changes the
+  scene; each model call's chain and items, a user's text, a call
+  output's text up to _RESULT_LENGTH and a system text the first time, later
+  `system: the text of L913`; each model reply's cache, text and calls; each
+  MCP tools/call and its result, up to _RESULT_LENGTH; each statement of a
+  sql.run commit with its params; each render's scene, image and subtitle;
+  each image request's prompt and answer's sizes; an error or fault laid out.
+- audit digest one line: the bring up's tap.start and settings.set with the
+  switches, engine.start, the MCP handshakes, tools/list with its names,
+  db.sync, db.restore; the commits kv.put and media.store with their sizes,
+  kv.delete, db.create, db.drop, doc.put with its body, turn.append with its
+  count of items, the items being the conversation shown already.
+- audit digest cut: a string past _CUT_LENGTH, 300, in a call's or a tool's
+  arguments or a document's body is cut and its length told, as a kv_put of a
+  sim's script would fill pages. Nothing else is cut.
+- audit digest hidden: notes, the media port's lane `ui to media` and `media to
+  ui`, the ai.say requests the inputs repeat, and the replies of render and
+  media.store, which carry nothing new. They are counted by kind at the end,
+  `not shown: N of M entries`, before the summary of summary_lines.
+- guide_check lines: each line entry's lane, type and kind, request, reply or
+  push, is one of _GUIDE_LINES: the bring up's tap.start, settings.set,
+  engine.start, MCP handshakes and db.sync with its db.restore and db.file
+  pushes; ui.input and ai.say; http.request; mcp; the commits of the Line
+  types table; render and media.store with the media port's lane. Every note
+  is a sleep of ai or ui, and a dump, the answer to an input of 0 in debug
+  mode, passes. A console, permit, error, fault or any other line fails.
+- guide_check walk: the first render's subtitle is the gold's served band; the
+  ui.input texts are the gold's steps' says, all of them, in order; each
+  ai.say request's text is the input before it; each ai.say reply's subtitle
+  is its step's band.
+- guide_check script: a Python twin of provider_script.ScriptPort's choice
+  walks the table from start: a model call ending in call outputs takes the
+  pending node's after_tools, or after_lacks when after_holds is in a result
+  that lacks it, its text the quote at its path in the last output, then the
+  content; any other takes the current node's reply for the last user text in
+  normal form, else otherwise. The reply must be the reasoning item, then one
+  message of one output_text part of that text unless it is null, then the
+  calls' call_id, name and arguments exactly, and nothing else; a difference
+  names the item and the node. The normal form is Python's strip and lower,
+  which equal JavaScript's trim and toLowerCase on ASCII, as the guides' inputs
+  are. A table that would make the port throw is not checked again, as the run
+  then fails the failure check first.
+- guide_check tools: each MCP tools/call is the next function call of the
+  model reply before it: the prefix of the call's name gives its lane, browser
+  `ai to ai` and server `ai to server`, and the rest its name, and its
+  arguments are the call's arguments text parsed. Every call of a reply runs
+  before the next model call. The call outputs ending a model call are their
+  tools' result texts, the text parts joined by a newline as agent.result_text
+  joins them. Each image request's prompt is that of the image_make call
+  before it.
+- guide_check proof: on 2026-11-11 the three guides' audits pass; Isaiah's
+  audit checked as Ruth's fails at its first input, and planted faults fail
+  where planted: a reply's number at the script check, a tool's argument at
+  the tool check, and a console line at the lane check.
 - audit_read use: only on an end to end run not expected to fail, as
   `build/test_demo/audit.txt` or `audit_tools.txt` after a run with --debug,
   or `build/test_guide_GUIDE/audit.txt`, which a guide program copies there

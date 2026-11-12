@@ -4,18 +4,20 @@
 #
 # Tests the audit's reader on documents the real audit module writes in scratch
 # roots in `build/`, whose suite has passed: a run with no failure read back,
-# each line whole though the document wrote it thin, its digest and summary,
+# each line whole though the document wrote it thin, its listing and summary,
 # each lane's bytes fewer as written than as sent, two scenes in turn across a
 # reload with no failure, each kind of unexpected failure found at its line,
 # and the form of a document refused. The failures of a chain are a chained
 # call that resends the prompt or the history or names a response the record
 # lacks, a chain's first call holding the prompt twice, the lanes writing the
-# prompt twice, and an item of the model's output written twice. The program
-# whole runs in a forked child by `runpy`, so that the count reaches its last
-# line. The texts are the gold's.
+# prompt twice, and an item of the model's output written twice. The audit
+# digest of a tiny guide's walk and of every other kind of line is the gold's,
+# and the guide check passes that walk and fails each fault put in it. The
+# program whole runs in a forked child by `runpy`, so that the count reaches
+# its last line. The texts are the gold's.
 
-import audit, audit_read, harness, json, os, runpy, signal, sys, tempfile
-import traceback, unittest
+import audit, audit_read, copy, harness, json, os, runpy, signal, sys
+import tempfile, traceback, unittest
 from typing import Any
 
 # The id of this module's gold, in its own `test_setting_` file.
@@ -177,15 +179,15 @@ class TestRead(AuditCase):
         entries = self.entries_of("blobs")
         self.assertEqual(entries[0].line["size"], 3)
 
-    # A digest has a line per entry and a line per start of the engine.
-    def test_digest_lines(self) -> None:
-        lines = audit_read.digest_lines(self.entries_of("run"))
-        self.assertEqual(lines, gold_value("run_digest"))
+    # A listing has a line per entry and a line per start of the engine.
+    def test_listing_lines(self) -> None:
+        lines = audit_read.listing_lines(self.entries_of("run"))
+        self.assertEqual(lines, gold_value("run_listing"))
 
-    # A document with no entry has an empty digest and a summary of nothing.
+    # A document with no entry has an empty listing and a summary of nothing.
     def test_empty_read(self) -> None:
         entries = self.entries_of()
-        self.assertEqual(audit_read.digest_lines(entries), [])
+        self.assertEqual(audit_read.listing_lines(entries), [])
         self.assertEqual(
             audit_read.summary_lines(entries), gold_value("empty_summary")
         )
@@ -245,7 +247,7 @@ class TestRead(AuditCase):
 
     # A long value is cut, and an MCP reply with no content shows its payload.
     def test_details_told(self) -> None:
-        lines = audit_read.digest_lines(self.entries_of("details"))
+        lines = audit_read.listing_lines(self.entries_of("details"))
         ends: list[str] = gold_value("details_ends")
         for line, end in zip(lines[1:], ends, strict=True):
             self.assertTrue(line.endswith(end), line)
@@ -254,17 +256,17 @@ class TestRead(AuditCase):
     def test_tools_omitted(self) -> None:
         entries = self.entries_of("omitted")
         detail: str = gold_value("omitted_detail")
-        line = audit_read.digest_lines(entries)[1]
+        line = audit_read.listing_lines(entries)[1]
         self.assertTrue(line.endswith(detail), line)
         summary = audit_read.summary_lines(entries)
         for told in gold_value("omitted_summary"):
             self.assertIn(told, summary)
         audit_read.failure_check(entries)
 
-    # A dump's digest line tells its size alone.
+    # A dump's listing line tells its size alone.
     def test_dump_size(self) -> None:
         audit.dump_put("databases of the server", gold_value("views"))
-        lines = audit_read.digest_lines(self.entries_of())
+        lines = audit_read.listing_lines(self.entries_of())
         self.assertRegex(lines[-1], r" \d+ bytes$")
 
     # A chain's first call sends the prompt once, a chained call none.
@@ -309,6 +311,90 @@ class TestFailures(AuditCase):
         )
 
 
+# The audit digest, the run told for a person to read.
+class TestDigest(AuditCase):
+    # The digest of the rows named is the gold's, then the summary follows.
+    def digest_assert(self, name: str) -> None:
+        entries = self.entries_of(name)
+        lines = audit_read.digest_lines(entries)
+        summary = audit_read.summary_lines(entries)
+        at = len(lines) - len(summary) - 1
+        self.assertEqual(lines[:at], gold_value(f"{name}_digest"))
+        self.assertEqual(lines[at:], ["", *summary])
+
+    # A walk tells the player, the model, the tools, the bands and commits.
+    def test_walk_told(self) -> None:
+        self.digest_assert("walk")
+
+    # Every other kind of line is told, a long string cut, a second start.
+    def test_lines_told(self) -> None:
+        self.digest_assert("told")
+
+    # A dump is told by its size, as it is shown nowhere else.
+    def test_dump_told(self) -> None:
+        audit.dump_put("databases of the browser", gold_value("views"))
+        lines = audit_read.digest_lines(self.entries_of())
+        dumped = [line for line in lines if line.startswith("L")]
+        self.assertEqual(len(dumped), 1)
+        self.assertRegex(dumped[0], gold_value("dump_told"))
+
+    # A document with no entry tells nothing, then a summary of nothing.
+    def test_empty_told(self) -> None:
+        lines = audit_read.digest_lines(self.entries_of())
+        self.assertEqual(
+            lines,
+            [*gold_value("empty_digest"), "", *gold_value("empty_summary")],
+        )
+
+
+# The guide check of a tiny guide's walk, by its table and gold.
+class TestGuide(AuditCase):
+    # Checks the entries by the gold's table and walk.
+    def guide_check(self, entries: list[audit_read.ReadEntry]) -> None:
+        audit_read.guide_check(
+            entries, gold_value("walk_table"), gold_value("walk_gold")
+        )
+
+    # A walk its table and gold expect passes both checks.
+    def test_walk_passed(self) -> None:
+        entries = self.entries_of("walk")
+        audit_read.failure_check(entries)
+        self.guide_check(entries)
+
+    # A dump, the answer to an input of 0 in debug mode, is no fault.
+    def test_dump_passed(self) -> None:
+        self.rows_write(gold_value("walk"))
+        audit.dump_put("databases of the browser", gold_value("views"))
+        self.guide_check(self.entries_of())
+
+    # A table with no reply to the player's text fails at the model's reply.
+    def test_reply_missing(self) -> None:
+        entries = self.entries_of("walk")
+        table = copy.deepcopy(gold_value("walk_table"))
+        del table["nodes"]["again"]["otherwise"]
+        with self.assertRaisesRegex(
+            audit_read.AuditFailed, gold_value("reply_missing")
+        ):
+            audit_read.guide_check(entries, table, gold_value("walk_gold"))
+
+    # Each fault of the gold, put in the walk, fails at its first message.
+    def test_each_fault(self) -> None:
+        walk: list[dict[str, Any]] = gold_value("walk")
+        faults: dict[str, dict[str, Any]] = gold_value("guide_failures")
+        for name, fault in faults.items():
+            with self.subTest(name=name):
+                self.document_close()
+                os.remove(self.path)
+                audit.audit_open(self.root, _BLOB_MAX, "engine")
+                self.closed = False
+                at: int = fault["at"]
+                self.rows_write([*walk[:at], *fault["rows"], *walk[at + 1 :]])
+                with self.assertRaisesRegex(
+                    audit_read.AuditFailed, fault["failure"]
+                ):
+                    self.guide_check(self.entries_of())
+
+
 # A text that is no audit document.
 class TestForm(unittest.TestCase):
     # Each of the gold's texts raises naming the line that does not fit.
@@ -341,8 +427,8 @@ class TestProgram(AuditCase):
         os.remove(output)
         return ended, printed
 
-    # Without `--check` a document with a failure exits 0, its digest printed.
-    def test_digest_only(self) -> None:
+    # Without `--check` a document with a failure exits 0, its listing printed.
+    def test_listing_only(self) -> None:
         self.rows_write(gold_value("error"))
         ended, printed = self.program_run(self.path)
         self.assertEqual(ended, "0")
@@ -362,3 +448,42 @@ class TestProgram(AuditCase):
         ended, printed = self.program_run(self.path, "--check")
         self.assertEqual(ended, "1")
         self.assertIn("failure: line 3: a line of type error", printed)
+
+    # `--digest` writes the title, the digest, then the verdict of `--check`.
+    def test_digest_written(self) -> None:
+        self.rows_write(gold_value("walk"))
+        written = os.path.join(self.root, "digest.txt")
+        ended, _ = self.program_run(self.path, "--check", "--digest", written)
+        self.assertEqual(ended, "0")
+        entries = audit_read.entries_parse(audit_read.document_read(self.path))
+        due = [
+            gold_value("digest_title").format(self.path),
+            *audit_read.digest_lines(entries),
+            "",
+            gold_value("check_passed"),
+        ]
+        with open(written, encoding="utf-8") as file:
+            self.assertEqual(file.read(), "\n".join(due) + "\n")
+
+    # With no check, the digest ends with the summary.
+    def test_digest_alone(self) -> None:
+        self.rows_write(gold_value("walk"))
+        written = os.path.join(self.root, "digest.txt")
+        ended, _ = self.program_run(self.path, "--digest", written)
+        self.assertEqual(ended, "0")
+        entries = audit_read.entries_parse(audit_read.document_read(self.path))
+        due = [
+            gold_value("digest_title").format(self.path),
+            *audit_read.digest_lines(entries),
+        ]
+        with open(written, encoding="utf-8") as file:
+            self.assertEqual(file.read(), "\n".join(due) + "\n")
+
+    # `--guide` reads a real guide's table and gold, and fails a walk not its.
+    def test_guide_refused(self) -> None:
+        self.rows_write(gold_value("walk"))
+        ended, printed = self.program_run(
+            self.path, "--guide", gold_value("guide_name")
+        )
+        self.assertEqual(ended, "1")
+        self.assertRegex(printed, gold_value("guide_refused"))

@@ -1091,7 +1091,7 @@
     [352, 1, "ai to ui", "ai.say", 0],
     [362, 1, "ai to ui", "console.output", 0]
   ],
-  "run_digest": [
+  "run_listing": [
     "==== engine start 1",
     "L3      +  0.000     0 ms  server to ai   tap.start      i=101   {\"settings\": {}}",
     "L12     +  0.001     1 ms  ai to server   tap.start      r=101   {}",
@@ -1539,5 +1539,2102 @@
   "omitted_summary": [
     "tools called: 0: {}",
     "tools listed: none, the first model call sent DEBUG_MODE_TOOL_LIST_OMITTED"
-  ]
+  ],
+  "walk": [
+    {
+      "sender": "server",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "tap.start",
+          "id": 101
+        },
+        "settings": {},
+        "switches": {
+          "debug": true
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "tap.start",
+          "reply": 101
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "render",
+          "id": 5
+        },
+        "scene": "/metaverse/hyperposition/1",
+        "subtitle": "How can I help you?",
+        "image": "/metaverse/image/hyperposition"
+      }
+    },
+    {
+      "note": "ai",
+      "text": "sleeps on 5 until engine.rendered"
+    },
+    {
+      "sender": "ui",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "render",
+          "reply": 5
+        }
+      }
+    },
+    {
+      "sender": "dom",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "ui.input"
+        },
+        "text": "Go"
+      }
+    },
+    {
+      "sender": "ui",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "ai.say",
+          "id": 2
+        },
+        "text": "Go"
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.prompt"
+        },
+        "scene": "/walk/field/1",
+        "messages": [
+          {
+            "role": "system",
+            "content": "The prompt."
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/walk/field/1",
+        "role": "user",
+        "content": [
+          {
+            "role": "user",
+            "content": "Go"
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "id": 6
+        },
+        "method": "POST",
+        "url": "https://scripted.invalid/v1/responses",
+        "headers": {
+          "Authorization": "<masked>"
+        },
+        "json": {
+          "model": "grok-4.7",
+          "input": [
+            {
+              "role": "system",
+              "content": "The prompt."
+            },
+            {
+              "role": "user",
+              "content": "Go"
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "prompt_cache_key": "/walk/field/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "reply": 6
+        },
+        "status": 200,
+        "json": {
+          "id": "resp_1",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
+            {
+              "type": "reasoning",
+              "id": "rs_1",
+              "encrypted_content": "scripted"
+            },
+            {
+              "type": "function_call",
+              "id": "fc_1_1",
+              "call_id": "call_image",
+              "name": "browser_image_make",
+              "arguments": "{\"prompt\":\"a herd\",\"key\":\"walk/herd.png\"}"
+            },
+            {
+              "type": "function_call",
+              "id": "fc_1_2",
+              "call_id": "call_run",
+              "name": "browser_script_run",
+              "arguments": "{\"name\":\"sim\",\"args\":{\"action\":\"go\"}}"
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "previous_response_id": null,
+          "usage": {
+            "input_tokens": 100,
+            "input_tokens_details": {
+              "cached_tokens": 0
+            }
+          }
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "id": 7
+        },
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+          "name": "image_make",
+          "arguments": {
+            "prompt": "a herd",
+            "key": "walk/herd.png"
+          }
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "id": 8
+        },
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "tools/call",
+        "params": {
+          "name": "script_run",
+          "arguments": {
+            "name": "sim",
+            "args": {
+              "action": "go"
+            }
+          }
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "id": 9
+        },
+        "method": "POST",
+        "url": "https://scripted.invalid/v1/images/generations",
+        "headers": {
+          "Authorization": "<masked>"
+        },
+        "json": {
+          "model": "grok-imagine-image",
+          "prompt": "a herd",
+          "n": 1,
+          "response_format": "b64_json"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "reply": 9
+        },
+        "status": 200,
+        "json": {
+          "data": [
+            {
+              "b64_json": "AAAA"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "reply": 7
+        },
+        "jsonrpc": "2.0",
+        "id": 3,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"key\":\"/_files/walk/herd.png\"}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "reply": 8
+        },
+        "jsonrpc": "2.0",
+        "id": 4,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"value\":{\"say\":\"Made it.\",\"outcome\":\"made\"}}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/walk/field/1",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "reasoning",
+            "id": "rs_1",
+            "encrypted_content": "scripted"
+          },
+          {
+            "type": "function_call",
+            "id": "fc_1_1",
+            "call_id": "call_image",
+            "name": "browser_image_make",
+            "arguments": "{\"prompt\":\"a herd\",\"key\":\"walk/herd.png\"}"
+          },
+          {
+            "type": "function_call",
+            "id": "fc_1_2",
+            "call_id": "call_run",
+            "name": "browser_script_run",
+            "arguments": "{\"name\":\"sim\",\"args\":{\"action\":\"go\"}}"
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/walk/field/1",
+        "role": "tool",
+        "content": [
+          {
+            "type": "function_call_output",
+            "call_id": "call_image",
+            "output": "{\"key\":\"/_files/walk/herd.png\"}"
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/walk/field/1",
+        "role": "tool",
+        "content": [
+          {
+            "type": "function_call_output",
+            "call_id": "call_run",
+            "output": "{\"value\":{\"say\":\"Made it.\",\"outcome\":\"made\"}}"
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "id": 10
+        },
+        "method": "POST",
+        "url": "https://scripted.invalid/v1/responses",
+        "headers": {
+          "Authorization": "<masked>"
+        },
+        "json": {
+          "model": "grok-4.7",
+          "previous_response_id": "resp_1",
+          "input": [
+            {
+              "type": "function_call_output",
+              "call_id": "call_image",
+              "output": "{\"key\":\"/_files/walk/herd.png\"}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_run",
+              "output": "{\"value\":{\"say\":\"Made it.\",\"outcome\":\"made\"}}"
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "prompt_cache_key": "/walk/field/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "reply": 10
+        },
+        "status": 200,
+        "json": {
+          "id": "resp_2",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
+            {
+              "type": "reasoning",
+              "id": "rs_2",
+              "encrypted_content": "scripted"
+            },
+            {
+              "type": "message",
+              "id": "msg_2",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "Made it. Again?"
+                }
+              ]
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "previous_response_id": "resp_1",
+          "usage": {
+            "input_tokens": 200,
+            "input_tokens_details": {
+              "cached_tokens": 100
+            }
+          }
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/walk/field/1",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "reasoning",
+            "id": "rs_2",
+            "encrypted_content": "scripted"
+          },
+          {
+            "type": "message",
+            "id": "msg_2",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "Made it. Again?"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "ai.say",
+          "reply": 2
+        },
+        "turn": 5,
+        "scene": "/walk/field/1",
+        "subtitle": "Made it. Again?"
+      }
+    },
+    {
+      "sender": "dom",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "ui.input"
+        },
+        "text": "what"
+      }
+    },
+    {
+      "sender": "ui",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "ai.say",
+          "id": 3
+        },
+        "text": "what"
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/walk/field/1",
+        "role": "user",
+        "content": [
+          {
+            "role": "user",
+            "content": "what"
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "id": 11
+        },
+        "method": "POST",
+        "url": "https://scripted.invalid/v1/responses",
+        "headers": {
+          "Authorization": "<masked>"
+        },
+        "json": {
+          "model": "grok-4.7",
+          "previous_response_id": "resp_2",
+          "input": [
+            {
+              "role": "user",
+              "content": "what"
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "prompt_cache_key": "/walk/field/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "reply": 11
+        },
+        "status": 200,
+        "json": {
+          "id": "resp_3",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
+            {
+              "type": "reasoning",
+              "id": "rs_3",
+              "encrypted_content": "scripted"
+            },
+            {
+              "type": "message",
+              "id": "msg_3",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "Say go."
+                }
+              ]
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "previous_response_id": "resp_2",
+          "usage": {
+            "input_tokens": 300,
+            "input_tokens_details": {
+              "cached_tokens": 200
+            }
+          }
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/walk/field/1",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "reasoning",
+            "id": "rs_3",
+            "encrypted_content": "scripted"
+          },
+          {
+            "type": "message",
+            "id": "msg_3",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "Say go."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "ai.say",
+          "reply": 3
+        },
+        "turn": 7,
+        "scene": "/walk/field/1",
+        "subtitle": "Say go."
+      }
+    },
+    {
+      "sender": "dom",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "ui.input"
+        },
+        "text": "go"
+      }
+    },
+    {
+      "sender": "ui",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "ai.say",
+          "id": 4
+        },
+        "text": "go"
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/walk/field/1",
+        "role": "user",
+        "content": [
+          {
+            "role": "user",
+            "content": "go"
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "id": 12
+        },
+        "method": "POST",
+        "url": "https://scripted.invalid/v1/responses",
+        "headers": {
+          "Authorization": "<masked>"
+        },
+        "json": {
+          "model": "grok-4.7",
+          "previous_response_id": "resp_3",
+          "input": [
+            {
+              "role": "user",
+              "content": "go"
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "prompt_cache_key": "/walk/field/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "reply": 12
+        },
+        "status": 200,
+        "json": {
+          "id": "resp_4",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
+            {
+              "type": "reasoning",
+              "id": "rs_4",
+              "encrypted_content": "scripted"
+            },
+            {
+              "type": "function_call",
+              "id": "fc_4_1",
+              "call_id": "call_run",
+              "name": "browser_script_run",
+              "arguments": "{\"name\":\"sim\",\"args\":{\"action\":\"go\"}}"
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "previous_response_id": "resp_3",
+          "usage": {
+            "input_tokens": 400,
+            "input_tokens_details": {
+              "cached_tokens": 300
+            }
+          }
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "id": 13
+        },
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "tools/call",
+        "params": {
+          "name": "script_run",
+          "arguments": {
+            "name": "sim",
+            "args": {
+              "action": "go"
+            }
+          }
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "reply": 13
+        },
+        "jsonrpc": "2.0",
+        "id": 5,
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"value\":{\"say\":\"Missed.\",\"outcome\":\"missed\"}}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/walk/field/1",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "reasoning",
+            "id": "rs_4",
+            "encrypted_content": "scripted"
+          },
+          {
+            "type": "function_call",
+            "id": "fc_4_1",
+            "call_id": "call_run",
+            "name": "browser_script_run",
+            "arguments": "{\"name\":\"sim\",\"args\":{\"action\":\"go\"}}"
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/walk/field/1",
+        "role": "tool",
+        "content": [
+          {
+            "type": "function_call_output",
+            "call_id": "call_run",
+            "output": "{\"value\":{\"say\":\"Missed.\",\"outcome\":\"missed\"}}"
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "id": 14
+        },
+        "method": "POST",
+        "url": "https://scripted.invalid/v1/responses",
+        "headers": {
+          "Authorization": "<masked>"
+        },
+        "json": {
+          "model": "grok-4.7",
+          "previous_response_id": "resp_4",
+          "input": [
+            {
+              "type": "function_call_output",
+              "call_id": "call_run",
+              "output": "{\"value\":{\"say\":\"Missed.\",\"outcome\":\"missed\"}}"
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "prompt_cache_key": "/walk/field/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "reply": 14
+        },
+        "status": 200,
+        "json": {
+          "id": "resp_5",
+          "model": "grok-4.7",
+          "status": "completed",
+          "output": [
+            {
+              "type": "reasoning",
+              "id": "rs_5",
+              "encrypted_content": "scripted"
+            },
+            {
+              "type": "message",
+              "id": "msg_5",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "Try again."
+                }
+              ]
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "previous_response_id": "resp_4",
+          "usage": {
+            "input_tokens": 500,
+            "input_tokens_details": {
+              "cached_tokens": 400
+            }
+          }
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/walk/field/1",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "reasoning",
+            "id": "rs_5",
+            "encrypted_content": "scripted"
+          },
+          {
+            "type": "message",
+            "id": "msg_5",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "output_text",
+                "text": "Try again."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "ai.say",
+          "reply": 4
+        },
+        "turn": 11,
+        "scene": "/walk/field/1",
+        "subtitle": "Try again."
+      }
+    }
+  ],
+  "walk_table": {
+    "start": "start",
+    "nodes": {
+      "start": {
+        "replies": {
+          "go": {
+            "content": null,
+            "tool_calls": [
+              {
+                "call_id": "call_image",
+                "name": "browser_image_make",
+                "arguments": "{\"prompt\":\"a herd\",\"key\":\"walk/herd.png\"}"
+              },
+              {
+                "call_id": "call_run",
+                "name": "browser_script_run",
+                "arguments": "{\"name\":\"sim\",\"args\":{\"action\":\"go\"}}"
+              }
+            ],
+            "next": "shown"
+          }
+        },
+        "otherwise": {
+          "content": "Say go.",
+          "next": "start"
+        }
+      },
+      "shown": {
+        "replies": {},
+        "after_tools": {
+          "content": "Again?",
+          "quote": "value.say",
+          "next": "again"
+        }
+      },
+      "again": {
+        "replies": {
+          "go": {
+            "content": null,
+            "tool_calls": [
+              {
+                "call_id": "call_run",
+                "name": "browser_script_run",
+                "arguments": "{\"name\":\"sim\",\"args\":{\"action\":\"go\"}}"
+              }
+            ],
+            "next": "ran"
+          }
+        },
+        "otherwise": {
+          "content": "Say go.",
+          "next": "again"
+        }
+      },
+      "ran": {
+        "replies": {},
+        "after_holds": "\"outcome\":\"made\"",
+        "after_tools": {
+          "content": "Done.",
+          "next": "again"
+        },
+        "after_lacks": {
+          "content": "Try again.",
+          "next": "again"
+        }
+      }
+    }
+  },
+  "walk_gold": {
+    "served": {
+      "band": "How can I help you?"
+    },
+    "rungs": [
+      {
+        "rung": "start",
+        "steps": [
+          {
+            "say": "Go",
+            "band": "Made it. Again?"
+          }
+        ]
+      },
+      {
+        "rung": "again",
+        "steps": [
+          {
+            "say": "what",
+            "band": "Say go."
+          },
+          {
+            "say": "go",
+            "band": "Try again."
+          }
+        ]
+      }
+    ]
+  },
+  "walk_digest": [
+    "each record: its line in the audit, seconds from the first entry, its lane, then what it says",
+    "",
+    "==== engine start 1",
+    "---- bring up",
+    "L3         0.000  server to ai  tap.start i=101, the settings and the switches {\"debug\": true}",
+    "L15        0.001  ai to server  tap.start r=101",
+    "L23        0.002  ai to ui      render i=5 to /metaverse/hyperposition/1, image /metaverse/image/hyperposition",
+    "        subtitle: How can I help you?",
+    "",
+    "---- turn 1",
+    "L45        0.005  dom to ui     player: Go",
+    "L62        0.007  ai to server  turn.prompt to /walk/field/1, 1 message",
+    "        system: The prompt.",
+    "L77        0.008  ai to server  turn.append to /walk/field/1, role user, 1 item",
+    "L92        0.009  ai to http    model call i=6, a chain start, 2 items",
+    "        system: the text of L62",
+    "        user: Go",
+    "L112       0.010  http to ai    model reply r=6, resp_1, cached 0 of 100 tokens",
+    "        call browser_image_make call_image {\"prompt\": \"a herd\", \"key\": \"walk/herd.png\"}",
+    "        call browser_script_run call_run {\"name\": \"sim\", \"args\": {\"action\": \"go\"}}",
+    "L155       0.011  ai to ai      tool call i=7 image_make",
+    "        {\"prompt\": \"a herd\", \"key\": \"walk/herd.png\"}",
+    "L173       0.012  ai to ai      tool call i=8 script_run",
+    "        {\"name\": \"sim\", \"args\": {\"action\": \"go\"}}",
+    "L193       0.013  ai to http    image request i=9",
+    "        prompt: a herd",
+    "L212       0.014  http to ai    image answer r=9, status 200, sizes [3] bytes",
+    "L228       0.015  ai to ai      tool result r=7",
+    "        {\"key\":\"/_files/walk/herd.png\"}",
+    "L246       0.016  ai to ai      tool result r=8",
+    "        {\"value\":{\"say\":\"Made it.\",\"outcome\":\"made\"}}",
+    "L264       0.017  ai to server  turn.append to /walk/field/1, role assistant, 3 items",
+    "L275       0.018  ai to server  turn.append to /walk/field/1, role tool, 1 item",
+    "L291       0.019  ai to server  turn.append to /walk/field/1, role tool, 1 item",
+    "L307       0.020  ai to http    model call i=10, chained to resp_1, 2 items",
+    "        output call_image: {\"key\":\"/_files/walk/herd.png\"}",
+    "        output call_run: {\"value\":{\"say\":\"Made it.\",\"outcome\":\"made\"}}",
+    "L328       0.021  http to ai    model reply r=10, resp_2, cached 100 of 200 tokens",
+    "        says: Made it. Again?",
+    "L368       0.022  ai to server  turn.append to /walk/field/1, role assistant, 2 items",
+    "L379       0.023  ai to ui      ai.say r=2, reply stored at row 5, showing /walk/field/1",
+    "        band: Made it. Again?",
+    "",
+    "---- turn 2",
+    "L390       0.024  dom to ui     player: what",
+    "L407       0.026  ai to server  turn.append to /walk/field/1, role user, 1 item",
+    "L422       0.027  ai to http    model call i=11, chained to resp_2, 1 item",
+    "        user: what",
+    "L443       0.028  http to ai    model reply r=11, resp_3, cached 200 of 300 tokens",
+    "        says: Say go.",
+    "L483       0.029  ai to server  turn.append to /walk/field/1, role assistant, 2 items",
+    "L494       0.030  ai to ui      ai.say r=3, reply stored at row 7, showing /walk/field/1",
+    "        band: Say go.",
+    "",
+    "---- turn 3",
+    "L505       0.031  dom to ui     player: go",
+    "L522       0.033  ai to server  turn.append to /walk/field/1, role user, 1 item",
+    "L537       0.034  ai to http    model call i=12, chained to resp_3, 1 item",
+    "        user: go",
+    "L558       0.035  http to ai    model reply r=12, resp_4, cached 300 of 400 tokens",
+    "        call browser_script_run call_run {\"name\": \"sim\", \"args\": {\"action\": \"go\"}}",
+    "L594       0.036  ai to ai      tool call i=13 script_run",
+    "        {\"name\": \"sim\", \"args\": {\"action\": \"go\"}}",
+    "L614       0.037  ai to ai      tool result r=13",
+    "        {\"value\":{\"say\":\"Missed.\",\"outcome\":\"missed\"}}",
+    "L632       0.038  ai to server  turn.append to /walk/field/1, role assistant, 2 items",
+    "L643       0.039  ai to server  turn.append to /walk/field/1, role tool, 1 item",
+    "L659       0.040  ai to http    model call i=14, chained to resp_4, 1 item",
+    "        output call_run: {\"value\":{\"say\":\"Missed.\",\"outcome\":\"missed\"}}",
+    "L680       0.041  http to ai    model reply r=14, resp_5, cached 400 of 500 tokens",
+    "        says: Try again.",
+    "L720       0.042  ai to server  turn.append to /walk/field/1, role assistant, 2 items",
+    "L731       0.043  ai to ui      ai.say r=4, reply stored at row 11, showing /walk/field/1",
+    "        band: Try again.",
+    "",
+    "not shown: 5 of 44 entries",
+    "        note of ai: 1",
+    "        ui to ai ai.say request: 3",
+    "        ui to ai render reply: 1"
+  ],
+  "told": [
+    {
+      "sender": "ai",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "settings.set"
+        },
+        "settings": {},
+        "switches": {
+          "debug": true
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "engine.start"
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "id": 1
+        },
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18"
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "reply": 1
+        },
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "protocolVersion": "2025-06-18"
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp"
+        },
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized"
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "id": 2
+        },
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list"
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "reply": 2
+        },
+        "jsonrpc": "2.0",
+        "id": 2,
+        "result": {
+          "tools": [
+            {
+              "name": "sql_run"
+            },
+            {
+              "name": "kv_get"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "id": 3
+        },
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/list"
+      }
+    },
+    {
+      "sender": "server",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "reply": 3
+        },
+        "jsonrpc": "2.0",
+        "id": 1,
+        "error": {
+          "code": -32601,
+          "message": "no"
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "db.sync",
+          "id": 4
+        }
+      }
+    },
+    {
+      "sender": "server",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "db.restore",
+          "blobs": 1
+        },
+        "1": {
+          "size": 4096
+        },
+        "db": "metaverse",
+        "files": 1
+      }
+    },
+    {
+      "sender": "server",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "db.file",
+          "blobs": 1
+        },
+        "1": {
+          "size": 3
+        },
+        "db": "metaverse"
+      }
+    },
+    {
+      "sender": "server",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "db.sync",
+          "reply": 4
+        },
+        "databases": [
+          "metaverse"
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "kv.put",
+          "key": "/walk/scene",
+          "blobs": 1
+        },
+        "1": {
+          "size": 17
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "kv.delete",
+          "key": "/walk/old"
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "db.create"
+        },
+        "db": "walk"
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "db.drop"
+        },
+        "db": "old"
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "doc.put"
+        },
+        "db": "walk",
+        "id": "field",
+        "body": {
+          "0": {
+            "t": "scene"
+          },
+          "subtitle": "a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field "
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "sql.run"
+        },
+        "db": "walk",
+        "statements": [
+          {
+            "sql": "CREATE TABLE herd (head INTEGER NOT NULL) STRICT"
+          },
+          {
+            "sql": "INSERT INTO herd VALUES (?)",
+            "params": [
+              2000
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "mcp",
+          "id": 5
+        },
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+          "name": "sql_run",
+          "arguments": {
+            "db": "walk",
+            "statements": [
+              {
+                "sql": "SELECT head FROM herd",
+                "params": [
+                  1
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "media.store",
+          "id": 6,
+          "blobs": 1
+        },
+        "1": {
+          "size": 3
+        },
+        "k": "/_files/walk/herd.png"
+      }
+    },
+    {
+      "sender": "ui",
+      "receiver": "media",
+      "line": {
+        "0": {
+          "type": "media.store",
+          "id": 1,
+          "blobs": 1
+        },
+        "1": {
+          "size": 3
+        },
+        "k": "/_files/walk/herd.png"
+      }
+    },
+    {
+      "sender": "media",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "media.store",
+          "reply": 1
+        },
+        "k": "/_files/walk/herd.png",
+        "size": 3
+      }
+    },
+    {
+      "sender": "ui",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "media.store",
+          "reply": 6
+        },
+        "k": "/_files/walk/herd.png",
+        "size": 3
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "ui",
+      "line": {
+        "0": {
+          "type": "render",
+          "id": 7
+        },
+        "scene": "/walk/field/1",
+        "subtitle": "No picture."
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "http",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "id": 8
+        },
+        "method": "POST",
+        "url": "https://scripted.invalid/v1/responses",
+        "headers": {
+          "Authorization": "<masked>"
+        },
+        "json": {
+          "model": "grok-4.7",
+          "input": [
+            {
+              "role": "system",
+              "content": "The prompt."
+            },
+            {
+              "role": "system",
+              "content": "The prompt."
+            },
+            {
+              "role": "user",
+              "content": "1"
+            },
+            {
+              "type": "reasoning",
+              "id": "rs_1",
+              "encrypted_content": "scripted"
+            },
+            {
+              "type": "message",
+              "id": "msg_1",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "Said."
+                }
+              ]
+            },
+            {
+              "type": "function_call",
+              "id": "fc_1_1",
+              "call_id": "call_run",
+              "name": "browser_script_run",
+              "arguments": "{\"name\":\"sim\",\"args\":{\"action\":\"go\"}}"
+            },
+            {
+              "type": "function_call_output",
+              "call_id": "call_run",
+              "output": "{\"value\":{\"say\":\"Made it.\",\"outcome\":\"made\"}}"
+            }
+          ],
+          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+          "prompt_cache_key": "/walk/field/1"
+        }
+      }
+    },
+    {
+      "sender": "http",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "http.request",
+          "reply": 8
+        },
+        "status": 500,
+        "json": {
+          "error": "busy"
+        }
+      }
+    },
+    {
+      "sender": "ai",
+      "receiver": "server",
+      "line": {
+        "0": {
+          "type": "error"
+        },
+        "message": "broke",
+        "stack": "Error: broke\n    at here"
+      }
+    },
+    {
+      "start": "engine"
+    },
+    {
+      "sender": "ai",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "engine.start"
+        }
+      }
+    }
+  ],
+  "told_digest": [
+    "each record: its line in the audit, seconds from the first entry, its lane, then what it says",
+    "",
+    "==== engine start 1",
+    "---- bring up",
+    "L3         0.000  ai to ui      settings.set, the settings and the switches {\"debug\": true}",
+    "L14        0.001  ai to ai      engine.start",
+    "L21        0.002  ai to ai      mcp i=1 initialize",
+    "L35        0.003  ai to ai      mcp r=1 initialize: {\"protocolVersion\": \"2025-06-18\"}",
+    "L48        0.004  ai to ai      mcp notifications/initialized",
+    "L57        0.005  ai to ai      mcp i=2 tools/list",
+    "L68        0.006  ai to ai      mcp r=2 tools/list, 2 tools: sql_run, kv_get",
+    "L88        0.007  ai to server  mcp i=3 tools/list",
+    "L99        0.008  server to ai  mcp r=3 tools/list failed: {\"code\": -32601, \"message\": \"no\"}",
+    "L113       0.009  ai to server  db.sync i=4",
+    "L121       0.010  server to ai  db.restore metaverse, 4096 bytes, 1 file",
+    "L135       0.011  server to ai  db.file, 1 blob",
+    "        {\"db\": \"metaverse\"}",
+    "L148       0.012  server to ai  db.sync r=4: databases metaverse",
+    "L159       0.013  ai to server  kv.put /walk/scene, 17 bytes",
+    "L172       0.014  ai to server  kv.delete /walk/old",
+    "L180       0.015  ai to server  db.create walk",
+    "L188       0.016  ai to server  db.drop old",
+    "L196       0.017  ai to server  doc.put walk field",
+    "        {\"0\": {\"t\": \"scene\"}, \"subtitle\": \"a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a... (325 characters)\"}",
+    "L211       0.018  ai to server  sql.run on walk",
+    "        CREATE TABLE herd (head INTEGER NOT NULL) STRICT",
+    "        INSERT INTO herd VALUES (?)  with params [2000]",
+    "L230       0.019  ai to ai      tool call i=5 sql_run",
+    "        {\"db\": \"walk\", \"statements\": [{\"sql\": \"SELECT head FROM herd\", \"params\": [1]}]}",
+    "L255       0.020  ai to ui      media.store i=6 /_files/walk/herd.png, 3 bytes",
+    "L303       0.024  ai to ui      render i=7 to /walk/field/1, image none",
+    "        subtitle: No picture.",
+    "L313       0.025  ai to http    model call i=8, a chain start, 7 items",
+    "        system: The prompt.",
+    "        system: the text of L313",
+    "        user: 1",
+    "        reasoning rs_1",
+    "        assistant: Said.",
+    "        call browser_script_run call_run {\"name\": \"sim\", \"args\": {\"action\": \"go\"}}",
+    "        output call_run: {\"value\":{\"say\":\"Made it.\",\"outcome\":\"made\"}}",
+    "L374       0.026  http to ai    http.request r=8",
+    "        {\"status\": 500, \"json\": {\"error\": \"busy\"}}",
+    "L386       0.027  ai to server  error",
+    "        {",
+    "          \"message\": \"broke\",",
+    "          \"stack\": \"Error: broke\\n    at here\"",
+    "        }",
+    "",
+    "==== engine start 2",
+    "---- bring up",
+    "L397       0.029  ai to ai      engine.start",
+    "",
+    "not shown: 3 of 29 entries",
+    "        media to ui media.store reply: 1",
+    "        ui to ai media.store reply: 1",
+    "        ui to media media.store request: 1"
+  ],
+  "dump_told": "^L\\d+ +\\d+\\.\\d{3}  databases of the browser \\d+ bytes$",
+  "empty_digest": [
+    "each record: its line in the audit, seconds from the first entry, its lane, then what it says",
+    "",
+    "not shown: 0 of 0 entries"
+  ],
+  "guide_failures": {
+    "console": {
+      "at": 2,
+      "rows": [
+        {
+          "sender": "ai",
+          "receiver": "console",
+          "line": {
+            "0": {
+              "type": "console.write"
+            },
+            "text": "ls"
+          }
+        },
+        {
+          "sender": "ai",
+          "receiver": "ui",
+          "line": {
+            "0": {
+              "type": "render",
+              "id": 5
+            },
+            "scene": "/metaverse/hyperposition/1",
+            "subtitle": "How can I help you?",
+            "image": "/metaverse/image/hyperposition"
+          }
+        }
+      ],
+      "failure": "^line \\d+: a guide sends no push of type console.write on the lane ai to console$"
+    },
+    "note": {
+      "at": 2,
+      "rows": [
+        {
+          "note": "console",
+          "text": "`dash` exited with code 0."
+        },
+        {
+          "sender": "ai",
+          "receiver": "ui",
+          "line": {
+            "0": {
+              "type": "render",
+              "id": 5
+            },
+            "scene": "/metaverse/hyperposition/1",
+            "subtitle": "How can I help you?",
+            "image": "/metaverse/image/hyperposition"
+          }
+        }
+      ],
+      "failure": "^line \\d+: a guide makes no note of console: `dash` exited with code 0\\.$"
+    },
+    "served": {
+      "at": 2,
+      "rows": [
+        {
+          "sender": "ai",
+          "receiver": "ui",
+          "line": {
+            "0": {
+              "type": "render",
+              "id": 5
+            },
+            "scene": "/metaverse/hyperposition/1",
+            "subtitle": "Hello.",
+            "image": "/metaverse/image/hyperposition"
+          }
+        }
+      ],
+      "failure": "^line \\d+: the first render shows 'Hello\\.', not the served band 'How can I help you\\?'$"
+    },
+    "input": {
+      "at": 5,
+      "rows": [
+        {
+          "sender": "dom",
+          "receiver": "ui",
+          "line": {
+            "0": {
+              "type": "ui.input"
+            },
+            "text": "Stop"
+          }
+        }
+      ],
+      "failure": "^line \\d+: the input 'Stop' is not the step's 'Go'$"
+    },
+    "asked": {
+      "at": 6,
+      "rows": [
+        {
+          "sender": "ui",
+          "receiver": "ai",
+          "line": {
+            "0": {
+              "type": "ai.say",
+              "id": 2
+            },
+            "text": "Stop"
+          }
+        }
+      ],
+      "failure": "^line \\d+: the turn asked 'Stop', not the input 'Go'$"
+    },
+    "band": {
+      "at": 23,
+      "rows": [
+        {
+          "sender": "ai",
+          "receiver": "ui",
+          "line": {
+            "0": {
+              "type": "ai.say",
+              "reply": 2
+            },
+            "turn": 5,
+            "scene": "/walk/field/1",
+            "subtitle": "Made it."
+          }
+        }
+      ],
+      "failure": "^line \\d+: the turn ended showing 'Made it\\.', not the step's band 'Made it\\. Again\\?'$"
+    },
+    "input_more": {
+      "at": 43,
+      "rows": [
+        {
+          "sender": "ai",
+          "receiver": "ui",
+          "line": {
+            "0": {
+              "type": "ai.say",
+              "reply": 4
+            },
+            "turn": 11,
+            "scene": "/walk/field/1",
+            "subtitle": "Try again."
+          }
+        },
+        {
+          "sender": "dom",
+          "receiver": "ui",
+          "line": {
+            "0": {
+              "type": "ui.input"
+            },
+            "text": "more"
+          }
+        }
+      ],
+      "failure": "^line \\d+: an input after the walk's last step$"
+    },
+    "band_more": {
+      "at": 43,
+      "rows": [
+        {
+          "sender": "ai",
+          "receiver": "ui",
+          "line": {
+            "0": {
+              "type": "ai.say",
+              "reply": 4
+            },
+            "turn": 11,
+            "scene": "/walk/field/1",
+            "subtitle": "Try again."
+          }
+        },
+        {
+          "sender": "ai",
+          "receiver": "ui",
+          "line": {
+            "0": {
+              "type": "ai.say",
+              "reply": 9
+            },
+            "turn": 13,
+            "scene": "/walk/field/1",
+            "subtitle": "More."
+          }
+        }
+      ],
+      "failure": "^line \\d+: a band after the walk's last step$"
+    },
+    "band_missing": {
+      "at": 43,
+      "rows": [],
+      "failure": "^the record holds 1 first render, 3 inputs and 2 bands of the walk's 3 steps$"
+    },
+    "said": {
+      "at": 41,
+      "rows": [
+        {
+          "sender": "http",
+          "receiver": "ai",
+          "line": {
+            "0": {
+              "type": "http.request",
+              "reply": 14
+            },
+            "status": 200,
+            "json": {
+              "id": "resp_5",
+              "model": "grok-4.7",
+              "status": "completed",
+              "output": [
+                {
+                  "type": "reasoning",
+                  "id": "rs_5",
+                  "encrypted_content": "scripted"
+                },
+                {
+                  "type": "message",
+                  "id": "msg_5",
+                  "role": "assistant",
+                  "content": [
+                    {
+                      "type": "output_text",
+                      "text": "Try harder."
+                    }
+                  ]
+                }
+              ],
+              "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+              "previous_response_id": "resp_4",
+              "usage": {
+                "input_tokens": 500,
+                "input_tokens_details": {
+                  "cached_tokens": 400
+                }
+              }
+            }
+          }
+        }
+      ],
+      "failure": "^line \\d+: item 1 of the model's reply at the table's node ran is \\[\"message\", \\[\\[\"output_text\", \"Try harder\\.\"\\]\\]\\], not \\[\"message\", \\[\\[\"output_text\", \"Try again\\.\"\\]\\]\\]$"
+    },
+    "unrun": {
+      "at": 12,
+      "rows": [],
+      "failure": "^line \\d+: a model call before \\['browser_script_run'\\] ran$"
+    },
+    "result": {
+      "at": 16,
+      "rows": [
+        {
+          "sender": "ai",
+          "receiver": "ai",
+          "line": {
+            "0": {
+              "type": "mcp",
+              "reply": 8
+            },
+            "jsonrpc": "2.0",
+            "id": 4,
+            "result": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "{\"value\":{\"say\":\"Missed.\",\"outcome\":\"missed\"}}"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "failure": "^line \\d+: the output of call_run is not its tool's result$"
+    },
+    "unasked": {
+      "at": 12,
+      "rows": [
+        {
+          "sender": "ai",
+          "receiver": "ai",
+          "line": {
+            "0": {
+              "type": "mcp",
+              "id": 8
+            },
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+              "name": "script_run",
+              "arguments": {
+                "name": "sim",
+                "args": {
+                  "action": "go"
+                }
+              }
+            }
+          }
+        },
+        {
+          "sender": "ai",
+          "receiver": "ai",
+          "line": {
+            "0": {
+              "type": "mcp",
+              "id": 15
+            },
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "tools/call",
+            "params": {
+              "name": "script_run",
+              "arguments": {
+                "name": "sim",
+                "args": {
+                  "action": "go"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "failure": "^line \\d+: a tool call no reply asked$"
+    },
+    "tool": {
+      "at": 11,
+      "rows": [
+        {
+          "sender": "ai",
+          "receiver": "ai",
+          "line": {
+            "0": {
+              "type": "mcp",
+              "id": 7
+            },
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+              "name": "render",
+              "arguments": {
+                "prompt": "a herd",
+                "key": "walk/herd.png"
+              }
+            }
+          }
+        }
+      ],
+      "failure": "^line \\d+: the tool call render on ai to ai is not browser_image_make call_image \\{\"prompt\":\"a herd\",\"key\":\"walk/herd.png\"\\}$"
+    },
+    "image": {
+      "at": 13,
+      "rows": [
+        {
+          "sender": "ai",
+          "receiver": "http",
+          "line": {
+            "0": {
+              "type": "http.request",
+              "id": 9
+            },
+            "method": "POST",
+            "url": "https://scripted.invalid/v1/images/generations",
+            "headers": {
+              "Authorization": "<masked>"
+            },
+            "json": {
+              "model": "grok-imagine-image",
+              "prompt": "a horse",
+              "n": 1,
+              "response_format": "b64_json"
+            }
+          }
+        }
+      ],
+      "failure": "^line \\d+: an image request no image_make call asked$"
+    },
+    "never_ran": {
+      "at": 43,
+      "rows": [
+        {
+          "sender": "ai",
+          "receiver": "ui",
+          "line": {
+            "0": {
+              "type": "ai.say",
+              "reply": 4
+            },
+            "turn": 11,
+            "scene": "/walk/field/1",
+            "subtitle": "Try again."
+          }
+        },
+        {
+          "sender": "ai",
+          "receiver": "http",
+          "line": {
+            "0": {
+              "type": "http.request",
+              "id": 16
+            },
+            "method": "POST",
+            "url": "https://scripted.invalid/v1/responses",
+            "headers": {
+              "Authorization": "<masked>"
+            },
+            "json": {
+              "model": "grok-4.7",
+              "previous_response_id": "resp_5",
+              "input": [
+                {
+                  "role": "user",
+                  "content": "go"
+                }
+              ],
+              "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+              "prompt_cache_key": "/walk/field/1"
+            }
+          }
+        },
+        {
+          "sender": "http",
+          "receiver": "ai",
+          "line": {
+            "0": {
+              "type": "http.request",
+              "reply": 16
+            },
+            "status": 200,
+            "json": {
+              "id": "resp_6",
+              "model": "grok-4.7",
+              "status": "completed",
+              "output": [
+                {
+                  "type": "reasoning",
+                  "id": "rs_6",
+                  "encrypted_content": "scripted"
+                },
+                {
+                  "type": "function_call",
+                  "id": "fc_6_1",
+                  "call_id": "call_run",
+                  "name": "browser_script_run",
+                  "arguments": "{\"name\":\"sim\",\"args\":{\"action\":\"go\"}}"
+                }
+              ],
+              "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
+              "previous_response_id": "resp_5",
+              "usage": {
+                "input_tokens": 600,
+                "input_tokens_details": {
+                  "cached_tokens": 500
+                }
+              }
+            }
+          }
+        }
+      ],
+      "failure": "^the calls \\['browser_script_run'\\] of the last reply never ran$"
+    }
+  },
+  "reply_missing": "^line \\d+: the table's node again holds no reply to 'what'$",
+  "check_passed": "check: no unexpected failure",
+  "digest_title": "audit digest of {0}",
+  "guide_name": "isaiah",
+  "guide_refused": "failure: line \\d+: the input 'Go' is not the step's '"
 }

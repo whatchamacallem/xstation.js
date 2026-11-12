@@ -90,6 +90,15 @@ _DB_EXTENSION = ".sqlite"
 _AUDIT_NAME = "_audit.txt"
 _AUDIT_COPY = "audit.txt"
 
+# The directory of the audit digests, one per guide named by it, and its end.
+_DIGEST_PATH = os.path.join(_BUILD_PATH, "audit")
+_DIGEST_EXTENSION = ".txt"
+
+# The verdict a digest ends with when its audit holds nothing unexpected.
+_DIGEST_PASSED = (
+    "check: no unexpected failure, and every message is the guide's"
+)
+
 # The heading of each start of the engine role in the audit.
 _ENGINE_START = "==== engine started, "
 
@@ -610,7 +619,7 @@ def _rung_steps(run: _GuideRun, steps: list[dict[str, Any]]) -> str:
     )
 
 
-# The audit holds no unexpected failure and one start of the engine.
+# The digest in build/audit/, then no failure, the guide's messages, one start.
 def _rung_audit(run: _GuideRun) -> str:
     import audit_read, switches
 
@@ -621,10 +630,22 @@ def _rung_audit(run: _GuideRun) -> str:
         if not opened:
             break
         run.poll_sleep(f"the replies of the audit's requests: {opened}")
+    table = table_build(os.path.join(_GUIDES_PATH, run.name))
+    failed: audit_read.AuditFailed | None = None
     try:
         audit_read.failure_check(entries)
+        audit_read.guide_check(entries, table, run.gold)
     except audit_read.AuditFailed as failure:
-        raise CheckFailed(f"the audit of {run.root}: {failure}") from failure
+        failed = failure
+    verdict = _DIGEST_PASSED if failed is None else f"failure: {failed}"
+    os.makedirs(_DIGEST_PATH, exist_ok=True)
+    digest = os.path.join(_DIGEST_PATH, run.name + _DIGEST_EXTENSION)
+    title = f"audit digest of the guide test of python/guides/{run.name}/"
+    lines = [title, *audit_read.digest_lines(entries), "", verdict]
+    with open(digest, "w", encoding="utf-8") as file:
+        file.write("\n".join(lines) + "\n")
+    if failed is not None:
+        raise CheckFailed(f"the audit of {run.root}: {failed}") from failed
     with open(path, encoding="utf-8") as file:
         starts = sum(
             line.startswith(_ENGINE_START) for line in file.read().split("\n")
@@ -636,8 +657,9 @@ def _rung_audit(run: _GuideRun) -> str:
     if switches.debug:
         shutil.copyfile(path, os.path.join(run.failed, _AUDIT_COPY))
     return (
-        f"the audit's {len(entries)} entries hold no unexpected failure and"
-        " one start of the engine"
+        f"the audit's {len(entries)} entries hold no unexpected failure, no"
+        " message the guide does not expect and one start of the engine,"
+        f" its digest in {digest}"
     )
 
 

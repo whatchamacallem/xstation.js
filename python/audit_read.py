@@ -3,18 +3,22 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Reads an audit document for a person, who cannot read it whole: one line per
-# entry with its line number in the document, then a summary of what the run
-# did. With --check it then stops at the first unexpected failure and exits 1,
-# so that a person or a test need not look for one by eye. It is for a run that
-# is not expected to fail: the wire and browser tests' roots fail on purpose,
-# and the check would be right to refuse them. A line is read whole, through
-# `audit.ShownLog`, so a model call counts all it sent though the document
-# holds only what was new, and the check then proves that it was new.
+# Reads an audit document for a person, who cannot read it whole: a listing of
+# one line per entry with its line number in the document, then a summary of
+# what the run did. With --check it then stops at the first unexpected failure
+# and exits 1, so that a person or a test need not look for one by eye. It is
+# for a run that is not expected to fail: the wire and browser tests' roots
+# fail on purpose, and the check would be right to refuse them. A line is read
+# whole, through `audit.ShownLog`, so a model call counts all it sent though
+# the document holds only what was new, and the check then proves that it was
+# new. --guide NAME also checks that each message is the one the walk of
+# python/guides/NAME expects, and --digest FILE writes the audit digest, the
+# run told as the player's and the model's conversation, the verdict last.
 #
-#     python3 python/audit_read.py PATH [--check]
+#     python3 python/audit_read.py PATH [--check] [--guide NAME]
+#         [--digest FILE]
 
-import argparse, collections, fcntl, json, os, re, sys
+import argparse, base64, collections, fcntl, itertools, json, os, re, sys
 from typing import Any, NamedTuple, cast
 
 # The name `argparse` shows, as `sys.argv` may be empty.
@@ -103,6 +107,11 @@ _OUTPUT_TYPES = ("reasoning", "message", "function_call")
 _CALL_TYPE = "function_call"
 _ANSWER_TYPE = "function_call_output"
 
+# The item types of the model's reasoning and message, and a message's part.
+_REASONING_TYPE = "reasoning"
+_MESSAGE_TYPE = "message"
+_TEXT_TYPE = "output_text"
+
 # The roles of a system message and of the player's message.
 _SYSTEM_ROLE = "system"
 _USER_ROLE = "user"
@@ -120,13 +129,121 @@ _MASK = "<masked>"
 _STATUS_LOW = 200
 _STATUS_HIGH = 300
 
-# The widest detail of a digest line, so that one line stays one line.
+# The widest detail of a listing line, so that one line stays one line.
 _DETAIL_MAX = 150
 
 # The milliseconds of an hour, a minute and a second.
 _HOUR_MILLISECONDS = 3600000
 _MINUTE_MILLISECONDS = 60000
 _SECOND_MILLISECONDS = 1000
+
+# The checkout's directory of the guides, each in a directory of its own.
+_GUIDES_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "guides"
+)
+
+# The start of the id of a guide's gold, the guide's name its end.
+_GUIDE_GOLD = "python.test_guide_"
+
+# What the program says when its check found nothing, without and with a guide.
+_CHECK_PASSED = "check: no unexpected failure"
+_GUIDE_PASSED = (
+    "check: no unexpected failure, and every message is the guide's"
+)
+
+# The kinds of a line: a request holds an id, a reply the id it answers.
+_REQUEST_KIND = "request"
+_REPLY_KIND = "reply"
+_PUSH_KIND = "push"
+
+# The lanes of the media port, whose lines repeat the worker's media.store.
+_MEDIA_LANES = ("ui to media", "media to ui")
+
+# The labels of the notes of the two page threads, each note a sleep.
+_THREAD_NOTES = ("note of ai", "note of ui")
+
+# The lines a person's turn, a render and a picture take between threads.
+_SAY_TYPE = "ai.say"
+_RENDER_TYPE = "render"
+_MEDIA_TYPE = "media.store"
+_RENDER_LANE = "ai to ui"
+
+# The end of the url of an image request.
+_IMAGES_PATH = "/images/generations"
+
+# The MCP method of a tool call, and the tool that makes a picture.
+_CALL_METHOD = "tools/call"
+_IMAGE_TOOL = "image_make"
+
+# The mark that ends the prefix of a tool's name, and each prefix's lane.
+_PREFIX_MARK = "_"
+_TOOL_LANES = {"browser": "ai to ai", "server": "ai to server"}
+
+# The mark between the members of a scripted reply's quote.
+_QUOTE_MARK = "."
+
+# The joint of the text parts of a tool's result in its call's output.
+_PART_JOINT = "\n"
+
+# The commits of the browser's store, which tools and scripts send.
+_COMMIT_TYPES = (
+    "kv.put",
+    "kv.delete",
+    "doc.put",
+    "db.create",
+    "db.drop",
+    "turn.append",
+    "turn.prompt",
+    "sql.run",
+)
+
+# The lane, type and kind of each line a guide's walk sends.
+_GUIDE_LINES = frozenset(
+    {
+        ("server to ai", "tap.start", _REQUEST_KIND),
+        (_COMMIT_LANE, "tap.start", _REPLY_KIND),
+        ("ai to ui", "settings.set", _PUSH_KIND),
+        ("ai to ai", "engine.start", _PUSH_KIND),
+        ("ai to ai", _MCP_TYPE, _REQUEST_KIND),
+        ("ai to ai", _MCP_TYPE, _REPLY_KIND),
+        ("ai to ai", _MCP_TYPE, _PUSH_KIND),
+        (_COMMIT_LANE, _MCP_TYPE, _REQUEST_KIND),
+        (_COMMIT_LANE, _MCP_TYPE, _PUSH_KIND),
+        ("server to ai", _MCP_TYPE, _REPLY_KIND),
+        (_COMMIT_LANE, "db.sync", _REQUEST_KIND),
+        ("server to ai", "db.restore", _PUSH_KIND),
+        ("server to ai", "db.file", _PUSH_KIND),
+        ("server to ai", "db.sync", _REPLY_KIND),
+        (_INPUT_LANE, _INPUT_TYPE, _PUSH_KIND),
+        ("ui to ai", _SAY_TYPE, _REQUEST_KIND),
+        ("ai to ui", _SAY_TYPE, _REPLY_KIND),
+        (_REQUEST_LANE, _HTTP_TYPE, _REQUEST_KIND),
+        (_REPLY_LANE, _HTTP_TYPE, _REPLY_KIND),
+        (_RENDER_LANE, _RENDER_TYPE, _REQUEST_KIND),
+        ("ui to ai", _RENDER_TYPE, _REPLY_KIND),
+        (_RENDER_LANE, _MEDIA_TYPE, _REQUEST_KIND),
+        ("ui to media", _MEDIA_TYPE, _REQUEST_KIND),
+        ("media to ui", _MEDIA_TYPE, _REPLY_KIND),
+        ("ui to ai", _MEDIA_TYPE, _REPLY_KIND),
+        *((_COMMIT_LANE, kind, _PUSH_KIND) for kind in _COMMIT_TYPES),
+    }
+)
+
+# The longest string of a tool's arguments or a body the digest shows whole.
+_CUT_LENGTH = 300
+
+# The longest text of a tool's result or a call output the digest shows whole.
+_RESULT_LENGTH = 2000
+
+# The indent of a digest record's lines after its first, and the lane's width.
+_RECORD_INDENT = "        "
+_LANE_WIDTH = 13
+
+# The first line of the digest, which says how to read a record.
+_DIGEST_LEGEND = (
+    "each record: its line in the audit, seconds from the first entry, its"
+    " lane, then what it says"
+)
 
 
 sys.pycache_prefix = _PYCACHE_PATH
@@ -418,7 +535,7 @@ def _mcp_detail(entry: ReadEntry) -> str:
     return _text_short(payload)
 
 
-# The last column of an entry's digest line.
+# The last column of an entry's listing line.
 def _detail_of(entry: ReadEntry) -> str:
     if entry.line is None:
         if entry.label.startswith(_DUMP_PREFIX):
@@ -452,8 +569,8 @@ def _mark_of(entry: ReadEntry) -> str:
     return "" if reply is None else f"r={reply}"
 
 
-# The digest: per entry its line, time from the first, gap, lane and detail.
-def digest_lines(entries: list[ReadEntry]) -> list[str]:
+# The listing: per entry its line, time from the first, gap, lane and detail.
+def listing_lines(entries: list[ReadEntry]) -> list[str]:
     lines: list[str] = []
     start = 0
     first = entries[0].at if entries else 0
@@ -627,6 +744,354 @@ def summary_lines(entries: list[ReadEntry]) -> list[str]:
         f"commits to the server: {_commits_counted(entries)}",
         f"database dumps: {_dumps_text(entries)}",
     ]
+
+
+# The kind of a line entry: a request, a reply or a push.
+def _line_kind(entry: ReadEntry) -> str:
+    header = _header_of(entry)
+    if _field_get(header, "id", "i") is not None:
+        return _REQUEST_KIND
+    if _field_get(header, "reply", "r") is not None:
+        return _REPLY_KIND
+    return _PUSH_KIND
+
+
+# A line entry's type, then the mark of its id or reply when it has one.
+def _name_of(entry: ReadEntry) -> str:
+    mark = _mark_of(entry)
+    return f"{type_of(entry)} {mark}" if mark else type_of(entry)
+
+
+# The bytes of the first blob a line carries, as its blob header counts them.
+def _blob_size(entry: ReadEntry) -> int:
+    blob: dict[str, Any] = cast(dict[str, Any], entry.line)["1"]
+    return int(_field_get(blob, "size", "s"))
+
+
+# A count and its noun, the noun plural unless the count is one.
+def _count_text(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+# A text cut to `limit` characters, its whole length told when cut.
+def _text_cut(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}... ({len(text)} characters)"
+
+
+# A value with each string in it past `_CUT_LENGTH` cut.
+def _strings_cut(value: Any) -> Any:
+    if isinstance(value, str):
+        return _text_cut(value, _CUT_LENGTH)
+    if isinstance(value, list):
+        return [_strings_cut(item) for item in cast(list[Any], value)]
+    if isinstance(value, dict):
+        fields = cast(dict[str, Any], value)
+        return {key: _strings_cut(item) for key, item in fields.items()}
+    return value
+
+
+# A value as one line of JSON, each long string in it cut.
+def _json_cut(value: Any) -> str:
+    return json.dumps(_strings_cut(value), ensure_ascii=False)
+
+
+# A function call: its name, its id, then its arguments with long strings cut.
+def _call_text(call: dict[str, Any]) -> str:
+    arguments = _json_cut(json.loads(call["arguments"]))
+    return f"{call['name']} {call['call_id']} {arguments}"
+
+
+# A text under a label, each line of the text after the first indented more.
+def _text_block(label: str, text: str) -> list[str]:
+    first, *rest = text.split("\n")
+    return [
+        f"{_RECORD_INDENT}{label}{first}",
+        *(f"{_RECORD_INDENT}  {part}" if part else "" for part in rest),
+    ]
+
+
+# The kind an entry the digest does not show is counted under, else None.
+def _hidden_kind(entry: ReadEntry) -> str | None:
+    if entry.line is None:
+        return None if entry.label.startswith(_DUMP_PREFIX) else entry.label
+    kind = type_of(entry)
+    shape = _line_kind(entry)
+    if (
+        entry.label in _MEDIA_LANES
+        or (kind == _SAY_TYPE and shape == _REQUEST_KIND)
+        or (kind in (_RENDER_TYPE, _MEDIA_TYPE) and shape == _REPLY_KIND)
+    ):
+        return f"{entry.label} {kind} {shape}"
+    return None
+
+
+# The one line that tells a line of a type the digest tells in one, or None.
+def _line_told(entry: ReadEntry, payload: dict[str, Any]) -> str | None:
+    kind = type_of(entry)
+    name = _name_of(entry)
+    if kind in ("tap.start", "settings.set") and "switches" in payload:
+        switches = json.dumps(payload["switches"])
+        return f"{name}, the settings and the switches {switches}"
+    if kind == "kv.put":
+        key = _field_get(_header_of(entry), "key", "k")
+        return f"{name} {key}, {_blob_size(entry)} bytes"
+    if kind == "kv.delete":
+        return f"{name} {_field_get(_header_of(entry), 'key', 'k')}"
+    if kind in ("db.create", "db.drop"):
+        return f"{name} {payload['db']}"
+    if kind == "db.restore":
+        files = _count_text(payload.get("files", 0), "file")
+        return f"{name} {payload['db']}, {_blob_size(entry)} bytes, {files}"
+    if kind == "db.sync" and "databases" in payload:
+        return f"{name}: databases {', '.join(payload['databases'])}"
+    if kind == "turn.append":
+        return (
+            f"{name} to {payload['scene']}, role {payload['role']},"
+            f" {_count_text(len(payload['content']), 'item')}"
+        )
+    if kind == _MEDIA_TYPE:
+        return f"{name} {payload['k']}, {_blob_size(entry)} bytes"
+    if not payload:
+        return name
+    return None
+
+
+# The digest's reading of the record: its times, prompts shown and requests.
+class _DigestBook:
+    # Starts before the record's first entry, at that entry's time.
+    def __init__(self, first: int) -> None:
+        self.first = first
+        self.start = 0
+        self.turn = 0
+        # The line that showed each system text whole, by the text.
+        self.shown: dict[str, int] = {}
+        # Each MCP request's method, by its start, sender, receiver and id.
+        self.methods: dict[tuple[int, str, str, object], str] = {}
+        # The entries not shown, counted by kind.
+        self.hidden: collections.Counter[str] = collections.Counter()
+
+    # The first line of an entry's record: its line, seconds, lane and text.
+    def head_make(self, entry: ReadEntry, text: str) -> str:
+        seconds = (entry.at - self.first) / _SECOND_MILLISECONDS
+        return (
+            f"L{entry.number:<6} {seconds:8.3f}  {entry.label:<{_LANE_WIDTH}}"
+            f" {text}"
+        )
+
+    # A system text shown whole the first time, then named by that line.
+    def system_lines(self, text: str, number: int) -> list[str]:
+        if text in self.shown:
+            return [f"{_RECORD_INDENT}system: the text of L{self.shown[text]}"]
+        self.shown[text] = number
+        return _text_block("system: ", text)
+
+    # The lines of an input item of a model call or of a commit of turns.
+    def item_lines(self, item: dict[str, Any], number: int) -> list[str]:
+        kind = _kind_of(item)
+        if kind == _ANSWER_TYPE:
+            output = _text_cut(str(item["output"]), _RESULT_LENGTH)
+            return _text_block(f"output {item['call_id']}: ", output)
+        if kind == _CALL_TYPE:
+            return [f"{_RECORD_INDENT}call {_call_text(item)}"]
+        if kind == _REASONING_TYPE:
+            return [f"{_RECORD_INDENT}reasoning {item['id']}"]
+        if kind == _MESSAGE_TYPE:
+            return _text_block("assistant: ", _said_of([item]))
+        if kind == _SYSTEM_ROLE:
+            return self.system_lines(str(item["content"]), number)
+        return _text_block(f"{kind}: ", str(item["content"]))
+
+    # A model call: its chain, then each item it sent, as the model reads it.
+    def call_record(self, entry: ReadEntry, body: dict[str, Any]) -> list[str]:
+        items: list[dict[str, Any]] = body["input"]
+        chained = "a chain start"
+        if _CHAIN_FIELD in body:
+            chained = f"chained to {body[_CHAIN_FIELD]}"
+        counted = _count_text(len(items), "item")
+        head = f"model call {_mark_of(entry)}, {chained}, {counted}"
+        lines = [self.head_make(entry, head)]
+        for item in items:
+            lines += self.item_lines(item, entry.number)
+        return lines
+
+    # A model reply: its id and cache, then what it says and the calls made.
+    def reply_record(
+        self, entry: ReadEntry, body: dict[str, Any]
+    ) -> list[str]:
+        output: list[dict[str, Any]] = body["output"]
+        cached = _cached_text(body)
+        head = f"model reply {_mark_of(entry)}, {body['id']}, {cached} tokens"
+        lines = [self.head_make(entry, head)]
+        if any(item["type"] == _MESSAGE_TYPE for item in output):
+            lines += _text_block("says: ", _said_of(output))
+        for call in _calls_in(output):
+            lines.append(f"{_RECORD_INDENT}call {_call_text(call)}")
+        return lines
+
+    # An MCP message: a tool's call and result whole, the rest in one line.
+    def mcp_record(
+        self, entry: ReadEntry, payload: dict[str, Any]
+    ) -> list[str]:
+        sender, receiver = entry.label.split(_LANE_MARK)
+        header = _header_of(entry)
+        ident = _field_get(header, "id", "i")
+        reply = _field_get(header, "reply", "r")
+        mark = _mark_of(entry)
+        if reply is None:
+            method = str(payload["method"])
+            if ident is not None:
+                self.methods[(entry.start, sender, receiver, ident)] = method
+            if method != _CALL_METHOD:
+                told = " ".join(part for part in ("mcp", mark, method) if part)
+                return [self.head_make(entry, told)]
+            params = payload["params"]
+            head = f"tool call {mark} {params['name']}"
+            arguments = _json_cut(params["arguments"])
+            return [self.head_make(entry, head), _RECORD_INDENT + arguments]
+        method = self.methods[(entry.start, receiver, sender, reply)]
+        if "error" in payload:
+            head = f"mcp {mark} {method} failed: {_json_cut(payload['error'])}"
+            return [self.head_make(entry, head)]
+        result: dict[str, Any] = payload["result"]
+        if method == _CALL_METHOD:
+            texts = _PART_JOINT.join(
+                part["text"] for part in result["content"]
+            )
+            failed = " failed" if result.get("isError") is True else ""
+            text = _text_cut(texts, _RESULT_LENGTH)
+            head = self.head_make(entry, f"tool result {mark}{failed}")
+            return [head, *_text_block("", text)]
+        if "tools" in result:
+            names = [str(tool["name"]) for tool in result["tools"]]
+            listed = f"{len(names)} tools: {', '.join(names)}"
+            return [self.head_make(entry, f"mcp {mark} {method}, {listed}")]
+        told = f"mcp {mark} {method}: {_json_cut(result)}"
+        return [self.head_make(entry, told)]
+
+    # A line of the provider's port: a model call or reply, a picture's, else.
+    def http_record(
+        self, entry: ReadEntry, payload: dict[str, Any]
+    ) -> list[str]:
+        call = _call_body(entry)
+        if call is not None:
+            return self.call_record(entry, call)
+        reply = _reply_body(entry)
+        if reply is not None:
+            return self.reply_record(entry, reply)
+        mark = _mark_of(entry)
+        if "url" in payload and str(payload["url"]).endswith(_IMAGES_PATH):
+            head = self.head_make(entry, f"image request {mark}")
+            prompt = str(payload["json"]["prompt"])
+            return [head, *_text_block("prompt: ", prompt)]
+        body = payload.get("json")
+        if isinstance(body, dict) and "data" in body:
+            images: list[dict[str, Any]] = cast(dict[str, Any], body)["data"]
+            sizes = [
+                len(base64.b64decode(image["b64_json"])) for image in images
+            ]
+            told = f"image answer {mark}, status {payload['status']}, sizes"
+            return [self.head_make(entry, f"{told} {sizes} bytes")]
+        return self.other_record(entry, payload)
+
+    # A sql.run commit: its database, then each statement whole with params.
+    def sql_record(
+        self, entry: ReadEntry, payload: dict[str, Any]
+    ) -> list[str]:
+        lines = [
+            self.head_make(entry, f"{_name_of(entry)} on {payload['db']}")
+        ]
+        for statement in payload["statements"]:
+            text = str(statement["sql"])
+            params = statement.get("params", [])
+            if params:
+                text += (
+                    f"  with params {json.dumps(params, ensure_ascii=False)}"
+                )
+            lines += _text_block("", text)
+        return lines
+
+    # A line no other record tells: its type and mark, then its payload.
+    def other_record(
+        self, entry: ReadEntry, payload: dict[str, Any]
+    ) -> list[str]:
+        blobs = _blobs_of(entry)
+        told = f", {_count_text(blobs, 'blob')}" if blobs else ""
+        head = self.head_make(entry, f"{_name_of(entry)}{told}")
+        if type_of(entry) in _FAILURE_TYPES:
+            text = json.dumps(payload, ensure_ascii=False, indent=_JSON_INDENT)
+            return [
+                head,
+                *(_RECORD_INDENT + part for part in text.split("\n")),
+            ]
+        return [head, _RECORD_INDENT + _json_cut(payload)]
+
+    # The lines of an entry's record, none for an entry the digest counts.
+    def record_lines(self, entry: ReadEntry) -> list[str]:
+        hidden = _hidden_kind(entry)
+        if hidden is not None:
+            self.hidden[hidden] += 1
+            return []
+        if entry.line is None:
+            return [self.head_make(entry, f"{len(entry.body)} bytes")]
+        kind = type_of(entry)
+        name = _name_of(entry)
+        payload = _payload_of(entry)
+        if kind == _INPUT_TYPE:
+            self.turn += 1
+            player = self.head_make(entry, f"player: {payload['text']}")
+            return ["", f"---- turn {self.turn}", player]
+        if kind == _SAY_TYPE:
+            head = (
+                f"{name}, reply stored at row {payload['turn']}, showing"
+                f" {payload['scene']}"
+            )
+            band = _text_block("band: ", str(payload["subtitle"]))
+            return [self.head_make(entry, head), *band]
+        if kind == _RENDER_TYPE:
+            image = payload.get("image", "none")
+            head = f"{name} to {payload['scene']}, image {image}"
+            subtitle = _text_block("subtitle: ", str(payload["subtitle"]))
+            return [self.head_make(entry, head), *subtitle]
+        if kind == _PROMPT_TYPE:
+            messages: list[dict[str, Any]] = payload["messages"]
+            counted = _count_text(len(messages), "message")
+            head = f"{name} to {payload['scene']}, {counted}"
+            lines = [self.head_make(entry, head)]
+            for message in messages:
+                lines += self.item_lines(message, entry.number)
+            return lines
+        if kind == "doc.put":
+            head = f"{name} {payload['db']} {payload['id']}"
+            body = _RECORD_INDENT + _json_cut(payload["body"])
+            return [self.head_make(entry, head), body]
+        if kind == "sql.run":
+            return self.sql_record(entry, payload)
+        if kind == _MCP_TYPE:
+            return self.mcp_record(entry, payload)
+        if kind == _HTTP_TYPE:
+            return self.http_record(entry, payload)
+        told = _line_told(entry, payload)
+        if told is not None:
+            return [self.head_make(entry, told)]
+        return self.other_record(entry, payload)
+
+
+# The audit digest: the shown entries told whole, the rest counted, a summary.
+def digest_lines(entries: list[ReadEntry]) -> list[str]:
+    book = _DigestBook(entries[0].at if entries else 0)
+    lines = [_DIGEST_LEGEND]
+    for entry in entries:
+        if entry.start != book.start:
+            book.start = entry.start
+            lines += ["", f"==== engine start {entry.start}", "---- bring up"]
+        lines += book.record_lines(entry)
+    hidden = sum(book.hidden.values())
+    lines += ["", f"not shown: {hidden} of {len(entries)} entries"]
+    for kind, count in sorted(book.hidden.items()):
+        lines.append(f"{_RECORD_INDENT}{kind}: {count}")
+    return [*lines, "", *summary_lines(entries)]
 
 
 # The requests of the record with no reply, by start, sender, receiver and id.
@@ -881,12 +1346,284 @@ def failure_check(entries: list[ReadEntry]) -> None:
         raise AuditFailed(stray)
 
 
-# Prints the digest and summary, checks when asked, returns the exit code.
+# What is wrong with an entry a guide's walk does not make, or None.
+def _guide_stray(entry: ReadEntry) -> str | None:
+    if entry.line is not None:
+        lane, kind, shape = entry.label, type_of(entry), _line_kind(entry)
+        if (lane, kind, shape) in _GUIDE_LINES:
+            return None
+        return f"a guide sends no {shape} of type {kind} on the lane {lane}"
+    if entry.label.startswith(_DUMP_PREFIX):
+        return None
+    if entry.label in _THREAD_NOTES and _SLEEP_PATTERN.match(entry.body):
+        return None
+    return f"a guide makes no {entry.label}: {_text_short(entry.body.strip())}"
+
+
+# The first input, band or first render the gold's walk does not expect.
+def _walk_stray(entries: list[ReadEntry], gold: dict[str, Any]) -> str | None:
+    steps = [step for rung in gold["rungs"] for step in rung["steps"]]
+    served: str = gold["served"]["band"]
+    rendered = False
+    said: str | None = None
+    inputs = 0
+    bands = 0
+    for entry in entries:
+        if entry.line is None:
+            continue
+        kind = type_of(entry)
+        shape = _line_kind(entry)
+        payload = _payload_of(entry)
+        place = f"line {entry.number}"
+        if kind == _RENDER_TYPE and shape == _REQUEST_KIND and not rendered:
+            rendered = True
+            if payload["subtitle"] != served:
+                return (
+                    f"{place}: the first render shows {payload['subtitle']!r},"
+                    f" not the served band {served!r}"
+                )
+        elif kind == _INPUT_TYPE:
+            if inputs == len(steps):
+                return f"{place}: an input after the walk's last step"
+            said = str(steps[inputs]["say"])
+            inputs += 1
+            if payload["text"] != said:
+                return (
+                    f"{place}: the input {payload['text']!r} is not the"
+                    f" step's {said!r}"
+                )
+        elif kind == _SAY_TYPE and shape == _REQUEST_KIND:
+            if payload["text"] != said:
+                return (
+                    f"{place}: the turn asked {payload['text']!r}, not the"
+                    f" input {said!r}"
+                )
+        elif kind == _SAY_TYPE:
+            if bands == len(steps):
+                return f"{place}: a band after the walk's last step"
+            band = str(steps[bands]["band"])
+            bands += 1
+            if payload["subtitle"] != band:
+                return (
+                    f"{place}: the turn ended showing"
+                    f" {payload['subtitle']!r}, not the step's band {band!r}"
+                )
+    if not rendered or inputs != len(steps) or bands != len(steps):
+        return (
+            f"the record holds {int(rendered)} first render, {inputs} inputs"
+            f" and {bands} bands of the walk's {len(steps)} steps"
+        )
+    return None
+
+
+# A user message's text in the scripted port's normal form, on ASCII alone.
+def _text_normal(text: str) -> str:
+    return text.strip().lower()
+
+
+# The call outputs that end a model call's items, in order.
+def _outputs_ending(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    start = len(items)
+    while start > 0 and items[start - 1].get("type") == _ANSWER_TYPE:
+        start -= 1
+    return items[start:]
+
+
+# The reply of the node the tools' results reach, by the text each holds.
+def _after_reply(node: dict[str, Any], texts: list[str]) -> dict[str, Any]:
+    holds = node.get("after_holds")
+    if holds is not None and not all(holds in text for text in texts):
+        return cast(dict[str, Any], node["after_lacks"])
+    return cast(dict[str, Any], node["after_tools"])
+
+
+# What a reply says: the string its quote names in the last result, content.
+def _reply_said(reply: dict[str, Any], texts: list[str]) -> str | None:
+    content: str | None = reply["content"]
+    if "quote" not in reply:
+        return content
+    value: Any = json.loads(texts[-1])
+    for member in str(reply["quote"]).split(_QUOTE_MARK):
+        value = value[member]
+    quoted = cast(str, value)
+    return quoted if content is None else f"{quoted} {content}"
+
+
+# A model reply's output items as the guide check compares them.
+def _output_shapes(output: list[dict[str, Any]]) -> list[list[Any]]:
+    shapes: list[list[Any]] = []
+    for item in output:
+        if item["type"] == _MESSAGE_TYPE:
+            parts = [[part["type"], part["text"]] for part in item["content"]]
+            shapes.append([_MESSAGE_TYPE, parts])
+        elif item["type"] == _CALL_TYPE:
+            fields = [item["call_id"], item["name"], item["arguments"]]
+            shapes.append([_CALL_TYPE, *fields])
+        else:
+            shapes.append([item["type"]])
+    return shapes
+
+
+# The output items a scripted reply makes, as the guide check compares them.
+def _reply_shapes(said: str | None, calls: list[Any]) -> list[list[Any]]:
+    shapes: list[list[Any]] = [[_REASONING_TYPE]]
+    if said is not None:
+        shapes.append([_MESSAGE_TYPE, [[_TEXT_TYPE, said]]])
+    for call in calls:
+        fields = [call["call_id"], call["name"], call["arguments"]]
+        shapes.append([_CALL_TYPE, *fields])
+    return shapes
+
+
+# Raises at the first model reply not the table's, moved as the port moves.
+def _script_check(entries: list[ReadEntry], table: dict[str, Any]) -> None:
+    nodes: dict[str, Any] = table["nodes"]
+    current = str(table["start"])
+    pending: tuple[str, list[str]] | None = None
+    asked: dict[tuple[int, object], list[dict[str, Any]]] = {}
+    for entry in entries:
+        header = _header_of(entry)
+        body = _call_body(entry)
+        if body is not None:
+            asked[(entry.start, _field_get(header, "id", "i"))] = body["input"]
+        reply = _reply_body(entry)
+        if reply is None:
+            continue
+        items = asked[(entry.start, _field_get(header, "reply", "r"))]
+        place = f"line {entry.number}"
+        if items[-1].get("type") == _ANSWER_TYPE:
+            name = cast(tuple[str, list[str]], pending)[0]
+            texts = [str(item["output"]) for item in _outputs_ending(items)]
+            due = _after_reply(nodes[name], texts)
+            said = _reply_said(due, texts)
+        else:
+            name = current
+            node: dict[str, Any] = nodes[name]
+            text = _text_normal(str(items[-1]["content"]))
+            if text not in node["replies"] and "otherwise" not in node:
+                raise AuditFailed(
+                    f"{place}: the table's node {name} holds no reply to"
+                    f" {text!r}"
+                )
+            due = node["replies"].get(text, node.get("otherwise"))
+            said = cast(str | None, due["content"])
+        calls: list[Any] = due.get("tool_calls", [])
+        made = _output_shapes(reply["output"])
+        shapes = _reply_shapes(said, calls)
+        for index, pair in enumerate(itertools.zip_longest(made, shapes)):
+            if pair[0] != pair[1]:
+                raise AuditFailed(
+                    f"{place}: item {index} of the model's reply at the"
+                    f" table's node {name} is {json.dumps(pair[0])}, not"
+                    f" {json.dumps(pair[1])}"
+                )
+        current = name
+        pending = None
+        if calls:
+            pending = (str(due["next"]), [call["call_id"] for call in calls])
+        else:
+            current = str(due["next"])
+
+
+# Raises at the first tool call, output or image the last reply did not ask.
+def _tools_check(entries: list[ReadEntry]) -> None:
+    due: list[dict[str, Any]] = []
+    made: dict[tuple[int, str, str, object], str] = {}
+    results: dict[str, str] = {}
+    prompts: list[str] = []
+    for entry in entries:
+        place = f"line {entry.number}"
+        payload = _payload_of(entry)
+        reply = _reply_body(entry)
+        body = _call_body(entry)
+        if reply is not None:
+            due = _calls_in(reply["output"])
+        elif body is not None:
+            if due:
+                names = [call["name"] for call in due]
+                raise AuditFailed(f"{place}: a model call before {names} ran")
+            for output in _outputs_ending(body["input"]):
+                if output["output"] != results[output["call_id"]]:
+                    raise AuditFailed(
+                        f"{place}: the output of {output['call_id']} is not"
+                        " its tool's result"
+                    )
+        elif type_of(entry) == _MCP_TYPE:
+            sender, receiver = entry.label.split(_LANE_MARK)
+            header = _header_of(entry)
+            reply_id = _field_get(header, "reply", "r")
+            if payload.get("method") == _CALL_METHOD:
+                if not due:
+                    raise AuditFailed(f"{place}: a tool call no reply asked")
+                call = due.pop(0)
+                prefix, _, name = str(call["name"]).partition(_PREFIX_MARK)
+                params = payload["params"]
+                if (
+                    _TOOL_LANES[prefix] != entry.label
+                    or params["name"] != name
+                    or params["arguments"] != json.loads(call["arguments"])
+                ):
+                    raise AuditFailed(
+                        f"{place}: the tool call {params['name']} on"
+                        f" {entry.label} is not {call['name']}"
+                        f" {call['call_id']} {call['arguments']}"
+                    )
+                ident = _field_get(header, "id", "i")
+                made[(entry.start, sender, receiver, ident)] = call["call_id"]
+                if name == _IMAGE_TOOL:
+                    prompts.append(str(params["arguments"]["prompt"]))
+            elif (entry.start, receiver, sender, reply_id) in made:
+                call_id = made.pop((entry.start, receiver, sender, reply_id))
+                parts = payload["result"]["content"]
+                results[call_id] = _PART_JOINT.join(
+                    part["text"] for part in parts
+                )
+        elif (
+            type_of(entry) == _HTTP_TYPE
+            and _line_kind(entry) == _REQUEST_KIND
+            and str(payload["url"]).endswith(_IMAGES_PATH)
+        ):
+            if not prompts or payload["json"]["prompt"] != prompts[0]:
+                raise AuditFailed(
+                    f"{place}: an image request no image_make call asked"
+                )
+            prompts.pop(0)
+    if due:
+        names = [call["name"] for call in due]
+        raise AuditFailed(f"the calls {names} of the last reply never ran")
+
+
+# Raises at the first message a guide's walk does not expect, naming its line.
+def guide_check(
+    entries: list[ReadEntry], table: dict[str, Any], gold: dict[str, Any]
+) -> None:
+    for entry in entries:
+        failure = _guide_stray(entry)
+        if failure is not None:
+            raise AuditFailed(f"line {entry.number}: {failure}")
+    stray = _walk_stray(entries, gold)
+    if stray is not None:
+        raise AuditFailed(stray)
+    _script_check(entries, table)
+    _tools_check(entries)
+
+
+# The scripted table and the gold of the guide `name`, as its test walks it.
+def _guide_read(name: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    import guide_walk, harness
+
+    table = guide_walk.table_build(os.path.join(_GUIDES_PATH, name))
+    gold = cast(dict[str, Any], harness.gold_get(_GUIDE_GOLD + name))
+    return table, gold
+
+
+# Prints the listing and summary, checks and writes the digest when asked.
 def main(arguments: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog=_PROGRAM_NAME,
         description="Print one line per entry of an audit document with a"
-        " summary of the run, for a run not expected to fail.",
+        " summary of the run, for a run not expected to fail, and write its"
+        " digest when asked.",
         allow_abbrev=False,
     )
     parser.add_argument("path", help="the audit document to read")
@@ -895,18 +1632,42 @@ def main(arguments: list[str]) -> int:
         action="store_true",
         help="then exit 1 at the first unexpected failure, naming its line",
     )
+    parser.add_argument(
+        "--guide",
+        metavar="NAME",
+        help="check as --check does, then exit 1 at the first message the"
+        " walk of python/guides/NAME does not expect, naming its line",
+    )
+    parser.add_argument(
+        "--digest",
+        metavar="FILE",
+        help="write the audit digest to FILE, the verdict of a check last",
+    )
     parsed = parser.parse_args(arguments)
     entries = entries_parse(document_read(parsed.path))
-    for line in digest_lines(entries) + summary_lines(entries):
+    for line in listing_lines(entries) + summary_lines(entries):
         print(line)
-    if parsed.check:
+    verdict: list[str] = []
+    failed = False
+    if parsed.check or parsed.guide is not None:
         try:
             failure_check(entries)
+            if parsed.guide is not None:
+                table, gold = _guide_read(parsed.guide)
+                guide_check(entries, table, gold)
+            passed = _CHECK_PASSED if parsed.guide is None else _GUIDE_PASSED
+            verdict = [passed]
         except AuditFailed as failure:
-            print(f"failure: {failure}", file=sys.stderr)
-            return 1
-        print("check: no unexpected failure")
-    return 0
+            verdict = [f"failure: {failure}"]
+            failed = True
+    if parsed.digest is not None:
+        told = verdict and ["", *verdict]
+        lines = [f"audit digest of {parsed.path}", *digest_lines(entries)]
+        with open(parsed.digest, "w", encoding="utf-8") as file:
+            file.write("\n".join([*lines, *told]) + "\n")
+    for line in verdict:
+        print(line, file=sys.stderr if failed else sys.stdout)
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
