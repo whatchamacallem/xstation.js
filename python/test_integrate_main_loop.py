@@ -7,16 +7,16 @@
 # `build/`. Each child opens the root's audit in debug mode, as `bootstrap.py`
 # does, then prepares the root and serves the pipes. The page's commits are
 # pushes applied and answered by nothing, read back from the root's database
-# files; a `tap.line` of the TypeScript stream is appended to
-# its file; the server's MCP server answers `initialize`, and `tools/list`
-# with the tools of API/mcp/tools.json; `audit.tail` gives the audit's newest
-# entries; `settings.put` and `source.put` write the root's files in debug
-# mode and are refused with the parameter debug false, which each child sets
-# from the root's parameters as `bootstrap.py` does; and `db.sync` streams
-# every database whole, each line recorded in the audit with no blob's bytes.
+# files; a `tap.line` of the TypeScript stream is appended to its file; the
+# server's MCP server answers `initialize`, and `tools/list` with the tools of
+# API/mcp/tools.json; `audit.tail` gives the audit's newest entries;
+# `settings.put` and `source.put` write the root's files in debug mode and are
+# refused with the parameter debug false, which each child sets from the root's
+# parameters as `bootstrap.py` does; and `db.sync` streams every database
+# whole, each line recorded in the audit with no blob's bytes but their sha256.
 # The lines fed to the loop are the gold's, each its JSON text, a CR and its
-# blobs' bytes, and the lines it writes are read back the same way and
-# checked against the gold.
+# blobs' bytes, and the lines it writes are read back the same way and checked
+# against the gold.
 
 import contextlib, copy, functools, harness, hashlib, json, main_loop, os, re
 import signal, sqlite3, switches, tempfile, traceback, unittest
@@ -256,16 +256,16 @@ def _audit_read(root: str) -> list[tuple[str, Any, str]]:
     return read
 
 
-# The entry of a line under the label of the gold: its JSON, no blob's bytes.
+# A line's entry under the gold's label, each blob's sha256 in place of `d`.
 def _line_entry(label: str, line: dict[str, Any]) -> tuple[str, Any, str]:
     value = dict(line)
     count = 0
     while str(count + 1) in value:
         count += 1
         blob: dict[str, Any] = value[str(count)]
-        value[str(count)] = {
-            name: field for name, field in blob.items() if name != "d"
-        }
+        fields = {name: field for name, field in blob.items() if name != "d"}
+        fields["sha256"] = hashlib.sha256(blob["d"]).hexdigest()
+        value[str(count)] = fields
     rest = ""
     if count:
         rest = "\n" + _text_get("blobs_omitted").format(count)
@@ -537,8 +537,9 @@ class TestEngines(ScratchCase):
             _wire_bytes(sync),
         ]
         lines = self.served_read(b"".join(data))
-        # The sink that streams the blob adds its digest to its header.
-        big["1"]["sha256"] = hashlib.sha256(_BIG_VALUE).hexdigest()
+        # The bytes of each blob read, whose sha256 the record names.
+        kept["1"]["d"] = _KEPT_VALUE
+        big["1"]["d"] = _BIG_VALUE
         read = [create, kept, big, sync]
         expected = [_line_entry("label_read", line) for line in read]
         expected += [_line_entry("label_written", line) for line in lines]

@@ -387,16 +387,16 @@ def _audit_read(root: str) -> list[tuple[str, Any, str]]:
     return read
 
 
-# The entry of a line under the label of the gold: its JSON, no blob's bytes.
+# A line's entry under the gold's label, each blob's sha256 in place of `d`.
 def _line_entry(label: str, line: dict[str, Any]) -> tuple[str, Any, str]:
     value = dict(line)
     count = 0
     while str(count + 1) in value:
         count += 1
         blob: dict[str, Any] = value[str(count)]
-        value[str(count)] = {
-            name: field for name, field in blob.items() if name != "d"
-        }
+        fields = {name: field for name, field in blob.items() if name != "d"}
+        fields["sha256"] = hashlib.sha256(blob["d"]).hexdigest()
+        value[str(count)] = fields
     rest = ""
     if count:
         rest = "\n" + _text_get("blobs_omitted").format(count)
@@ -1021,12 +1021,13 @@ class TestLoop(ScratchCase):
             ]
         )
 
-    # A line read with a blob is recorded with its blobs' count, not its bytes.
+    # A line read with a blob is recorded with its blobs' count and sha256.
     def test_blob_recorded(self) -> None:
         value = bytes(range(256))
         self.assertEqual(self.served_read(_line_bytes("put_value", value)), [])
-        entry = _line_entry("label_read", _line_sized("put_value", value))
-        self.audit_check([entry])
+        line = _line_sized("put_value", value)
+        line["1"]["d"] = value
+        self.audit_check([_line_entry("label_read", line)])
 
     # The audit's own lines, a note and a tail with its reply, are no entries.
     def test_own_unrecorded(self) -> None:

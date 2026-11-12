@@ -4,20 +4,20 @@
 #
 # Tests the audit document on scratch roots in `build/`: a line with and
 # without blobs laid out, a page thread's record laid out as the server's own
-# line is, a note, a dump of views in name order, the audit's own lines left
-# out, the start headings of both roles, two opens appending to one file, two
-# processes writing at once with no entry interleaved, a hard exit keeping
-# every entry written, a write past `blob_max` refused whole, the tail's fit
-# and order, and `entries_read` reading back what was written. The
-# conversation's three lanes are written thin: a chain's first request counts
-# the items shown from their start and a chained one from their end, a reply's
-# echo of the tools and a commit of a reply's output are counts, a prompt kept
-# by an earlier conversation is a count, and a later process reads all three
-# lanes back, a line with blobs and a key of digits among them. Each
-# conversation keeps its own items, so scenes in turn and a reload write no
-# item again. `line_whole` undoes `line_thin` line by line, the shown state of
-# the writer and the reader alike after each. The texts, lines and views are
-# the gold's.
+# line is but for the server's sha256 of each blob, held or cached, a note, a
+# dump of views in name order, the audit's own lines left out, the start
+# headings of both roles, two opens appending to one file, two processes
+# writing at once with no entry interleaved, a hard exit keeping every entry
+# written, a write past `blob_max` refused whole, the tail's fit and order, and
+# `entries_read` reading back what was written. The conversation's three lanes
+# are written thin: a chain's first request counts the items shown from their
+# start and a chained one from their end, a reply's echo of the tools and a
+# commit of a reply's output are counts, a prompt kept by an earlier
+# conversation is a count, and a later process reads all three lanes back, a
+# line with blobs and a key of digits among them. Each conversation keeps its
+# own items, so scenes in turn and a reload write no item again. `line_whole`
+# undoes `line_thin` line by line, the shown state of the writer and the reader
+# alike after each. The texts, lines and views are the gold's.
 
 import audit, harness, jslb, json, os, re, signal, sys, tempfile, time
 import unittest
@@ -73,6 +73,18 @@ def _joined(name: str) -> str:
 # A line of the gold read as the decoders read one.
 def _line_of(name: str) -> jslb.Object:
     return cast(jslb.Object, jslb.json_decode(json.dumps(_gold(name))))
+
+
+# The gold's blob line with its blob's data: the gold's bytes, or a file.
+def _blob_line(data: bytes | str) -> jslb.Object:
+    line = _line_of("blob_line")
+    line[1]["d"] = data
+    return line
+
+
+# The bytes of the gold's blob.
+def _blob_data() -> bytes:
+    return cast(str, _gold("blob_data")).encode("utf-8")
 
 
 # The label of a row of the gold, its sender to its receiver.
@@ -135,12 +147,15 @@ class TestLayout(ScratchCase):
         body = audit.record_text("ui", "ai", _at_gold(), text).split("\n", 1)
         self.assertEqual(body[1], _joined("plain_body") + "\n\n")
 
-    # The server's own lines are laid out as a page thread's record is.
+    # The server's lines laid out as a page's record, each blob's sha256 added.
     def test_record_alike(self) -> None:
         self.audit_ready()
+        cached = os.path.join(self.root, "blob")
+        with open(cached, "wb") as file:
+            file.write(_blob_data())
+        audit.line_received(_blob_line(_blob_data()))
+        audit.line_sent(_blob_line(cached))
         line = _line_of("blob_line")
-        audit.line_received(line)
-        audit.line_sent(line)
         audit.record_put("ui", "ai", _at_gold(), jslb.line_json(line))
         entries = audit.entries_read(self.root)
         labels = [entry.label for entry in entries]
@@ -152,8 +167,10 @@ class TestLayout(ScratchCase):
                 _gold("record_label"),
             ],
         )
+        bodies = [entry.body for entry in entries]
+        digested = _joined("blob_digested_body")
+        self.assertEqual(bodies, [digested, digested, _joined("blob_body")])
         for entry in entries:
-            self.assertEqual(entry.body, _joined("blob_body"))
             self.assertEqual(entry.start, 1)
         self.assertEqual(entries[2].time, _gold("time_text"))
 
@@ -236,7 +253,7 @@ class TestShown(ScratchCase):
     # A later process reads back a line of a lane that carries blobs.
     def test_reopened_blobs(self) -> None:
         audit.audit_open(self.root, _BLOB_MAX, "engine")
-        audit.line_received(_line_of("blob_line"))
+        audit.line_received(_blob_line(_blob_data()))
         audit.audit_close()
         self.audit_ready()
         self.rows_write("shown_turn")

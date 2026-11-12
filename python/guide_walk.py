@@ -13,9 +13,11 @@
 # chrome-headless-shell by keys alone, one step at a time: the line typed, its
 # band waited for with the box enabled, then the picture and the rows of the
 # server's databases the gold names. A step whose band the step before showed
-# already is refused, as its wait could pass before its turn ran. It imports
-# nothing of test_demo.py, and the modules beside it are imported inside the
-# functions that use them, after their bytecode has been sent to build/.
+# already is refused, as its wait could pass before its turn ran. The server's
+# databases, copied at the first render and at the end, must agree with the
+# audit's commits, their text in build/audit/NAME_db.txt. It imports nothing of
+# test_demo.py, and the modules beside it are imported inside the functions
+# that use them, after their bytecode has been sent to build/.
 
 import argparse, contextlib, copy, functools, json, os, shutil, signal, sqlite3
 import sys, tempfile, time, types
@@ -94,6 +96,22 @@ _AUDIT_COPY = "audit.txt"
 _DIGEST_PATH = os.path.join(_BUILD_PATH, "audit")
 _DIGEST_EXTENSION = ".txt"
 
+# The end of the name of a guide's databases as text in that directory.
+_DATABASES_END = "_db.txt"
+
+# Under the work directory: the databases at the first render, their replay.
+_START_NAME = "databases_start"
+_REPLAY_NAME = "databases_replay"
+
+# Under the failure directory: the databases once the server has ended.
+_END_NAME = "databases"
+
+# The verdict the text of the databases ends with when the replay agrees.
+_DATABASES_PASSED = (
+    "check: the server's databases are those at the first render with the"
+    " audit's commits applied"
+)
+
 # The verdict a digest ends with when its audit holds nothing unexpected.
 _DIGEST_PASSED = (
     "check: no unexpected failure, and every message is the guide's"
@@ -111,6 +129,7 @@ _FIRST_RUNG = "browser"
 _SERVED_RUNG = "served"
 _AUDIT_RUNG = "audit"
 _LEFT_RUNG = "left"
+_DATABASES_RUNG = "databases"
 
 # The exit code of a run with a failed check, and of one `^C` ended.
 _EXIT_FAILED = 1
@@ -259,6 +278,7 @@ class _GuideRun:
         self.values = values
         self.name = name
         self.failed = failed
+        self.work = work
         self.root = os.path.join(work, _ROOT_NAME)
         script: str = values["powershell"]["bootstrap_script"]
         # The root's `bootstrap.py`, which ttyd's children run.
@@ -601,11 +621,42 @@ def _rung_served(run: _GuideRun) -> str:
     run.band_wait(band)
     run.band = band
     run.picture_check(served["picture"])
+    start = os.path.join(run.work, _START_NAME)
+    names = _databases_copy(run.root, start, run.values)
     return (
         f"{address} loaded, its seed the {len(table['nodes'])} nodes of the"
         f" guide's table, and its first render shows {band!r} in the band,"
-        " the box enabled and the picture the gold names"
+        " the box enabled and the picture the gold names, the databases"
+        f" {names} copied to {start}"
     )
+
+
+# Copies each database of a root by the store's snapshot and restore.
+def _databases_copy(
+    source: str, target: str, values: dict[str, Any]
+) -> list[str]:
+    import substrate
+
+    limits = (values["overflow_bytes"], values["blob_max"])
+    names = sorted(
+        name.removesuffix(_DB_EXTENSION)
+        for name in os.listdir(source)
+        if name.endswith(_DB_EXTENSION)
+    )
+    reading = substrate.Store(source, *limits)
+    writing = substrate.Store(target, *limits)
+    for name in names:
+        reading.db_open(name)
+        image = reading.db_snapshot(name)
+        files: list[bytes | str] = []
+        # Bytes, as `db_restore` renames a file it is given by its path.
+        for path in image.files:
+            with open(path, "rb") as file:
+                files.append(file.read())
+        writing.db_restore(name, image.data, files)
+        reading.db_close(name)
+        writing.db_close(name)
+    return names
 
 
 # Each step of a rung of the gold, in order.
@@ -684,6 +735,39 @@ def _rung_left(run: _GuideRun) -> str:
     )
 
 
+# The server's databases at its end, their text, then the replay agrees.
+def _rung_databases(run: _GuideRun) -> str:
+    import audit_read
+
+    end = os.path.join(run.failed, _END_NAME)
+    names = _databases_copy(run.root, end, run.values)
+    path = os.path.join(run.root, _AUDIT_NAME)
+    entries = audit_read.entries_parse(audit_read.document_read(path))
+    start = os.path.join(run.work, _START_NAME)
+    replay = os.path.join(run.work, _REPLAY_NAME)
+    failed: audit_read.AuditFailed | None = None
+    try:
+        audit_read.databases_check(entries, start, end, replay)
+    except audit_read.AuditFailed as failure:
+        failed = failure
+    verdict = _DATABASES_PASSED if failed is None else f"failure: {failed}"
+    os.makedirs(_DIGEST_PATH, exist_ok=True)
+    told = os.path.join(_DIGEST_PATH, run.name + _DATABASES_END)
+    title = (
+        f"databases of the guide test of python/guides/{run.name}/, as the"
+        " server held them when it ended"
+    )
+    lines = [title, *audit_read.database_lines(end), "", verdict]
+    with open(told, "w", encoding="utf-8") as file:
+        file.write("\n".join(lines) + "\n")
+    if failed is not None:
+        raise CheckFailed(f"the databases of {run.root}: {failed}") from failed
+    return (
+        f"the databases {names} copied to {end} are those at the first render"
+        f" with the audit's commits replayed in {replay}, their text in {told}"
+    )
+
+
 # Runs the rungs in order, each by its label, the gold's between the fixed.
 def _rungs_climb(run: _GuideRun) -> None:
     log = run.log
@@ -710,6 +794,12 @@ def _rungs_climb(run: _GuideRun) -> None:
     )
     log.rung_run(
         _LEFT_RUNG, label, functools.partial(_rung_left, run), rung_seconds
+    )
+    log.rung_run(
+        _DATABASES_RUNG,
+        label,
+        functools.partial(_rung_databases, run),
+        rung_seconds,
     )
     log.book.root_leave()
 

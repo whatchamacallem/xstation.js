@@ -10,7 +10,8 @@
 # text laid out by `json.dumps` with an indent of 2, then `[blobs omitted: N]`
 # when its header counts blobs; the audit's own lines, every type under
 # `audit.`, are never recorded. A wire line the server reads is `ai to server`
-# and one it writes `server to ai`, written before the line. An entry read
+# and one it writes `server to ai`, written before the line, each blob header
+# of those two with `sha256`, the hex digest of its bytes. An entry read
 # back holds the start it follows from 1, its time as printed, its label, as
 # `ui to ai`, `note of ai` or `databases of the browser`, and its body. A
 # tail's entries are measured as the JSON string of the reply that carries
@@ -51,10 +52,10 @@ def audit_open(root: str, blob_max: int, role: str) -> None: ...
 # Closes the document and returns the module to its state before the open.
 def audit_close() -> None: ...
 
-# A line entry of a wire line the server read, but the audit's own lines.
+# A line entry of a wire line the server read, its blobs' sha256 added.
 def line_received(line: jslb.Object) -> None: ...
 
-# A line entry of a wire line the server writes, written before the line.
+# A line entry of a wire line the server writes, its blobs' sha256 added.
 def line_sent(line: jslb.Object) -> None: ...
 
 # A line entry of a page thread's record of the line's JSON text.

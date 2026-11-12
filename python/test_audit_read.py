@@ -4,20 +4,23 @@
 #
 # Tests the audit's reader on documents the real audit module writes in scratch
 # roots in `build/`, whose suite has passed: a run with no failure read back,
-# each line whole though the document wrote it thin, its listing and summary,
-# each lane's bytes fewer as written than as sent, two scenes in turn across a
-# reload with no failure, each kind of unexpected failure found at its line,
-# and the form of a document refused. The failures of a chain are a chained
-# call that resends the prompt or the history or names a response the record
-# lacks, a chain's first call holding the prompt twice, the lanes writing the
-# prompt twice, and an item of the model's output written twice. The audit
-# digest of a tiny guide's walk and of every other kind of line is the gold's,
-# and the guide check passes that walk and fails each fault put in it. The
-# program whole runs in a forked child by `runpy`, so that the count reaches
-# its last line. The texts are the gold's.
+# each line whole though the document wrote it thin, each lane's bytes fewer as
+# written than as sent, two scenes in turn across a reload with no failure,
+# each kind of unexpected failure found at its line, and the form of a document
+# refused. The failures of a chain are a chained call that resends the prompt
+# or the history or names a response the record lacks, a chain's first call
+# holding the prompt twice, the lanes writing the prompt twice, and an item of
+# the model's output written twice. The audit digest of a tiny guide's walk and
+# of every other kind of line is the gold's, every entry told and a text shown
+# before named by its line, and the guide check passes that walk and fails each
+# fault put in it. The database check replays each kind of commit the server's
+# handlers applied in a forked child, puts replaced, dropped or cached among
+# them, and fails a value, a row and a refused commit; the text tells each kind
+# of cell. The program whole runs in a forked child by `runpy`, so that the
+# count reaches its last line. The texts are the gold's.
 
-import audit, audit_read, copy, harness, json, os, runpy, signal, sys
-import tempfile, traceback, unittest
+import audit, audit_read, copy, harness, jslb, json, os, runpy, shutil, signal
+import substrate, sys, tempfile, traceback, unittest
 from typing import Any
 
 # The id of this module's gold, in its own `test_setting_` file.
@@ -44,6 +47,9 @@ _FIRST_AT = 1_700_000_000_000
 # The indent of a line's JSON text in the document.
 _JSON_INDENT = 2
 
+# The indent of a digest record's lines after its first.
+_RECORD_INDENT = "        "
+
 
 # A value of this module's gold.
 def gold_value(name: str) -> Any:
@@ -67,6 +73,40 @@ def child_run(arguments: list[str], output: str, ending: str) -> None:
             text = traceback.format_exc()
         sys.stdout.flush()
         sys.stderr.flush()
+        with open(ending, "w", encoding="utf-8") as file:
+            file.write(text)
+    finally:
+        os.kill(os.getpid(), signal.SIGKILL)
+
+
+# Forked child: the server's handlers record and apply each line, then it dies.
+def commits_serve(
+    root: str, limits: list[int], rows: list[dict[str, Any]], ending: str
+) -> None:
+    try:
+        try:
+            # Imported here, so their import's lines count in their own suites.
+            import dispatch, engine_db, engine_doc, engine_kv, engine_sql
+            import engine_turn
+
+            store = substrate.Store(root, *limits)
+            for name in os.listdir(root):
+                if name.endswith(".sqlite"):
+                    store.db_open(name.removesuffix(".sqlite"))
+            handlers = (engine_kv, engine_doc, engine_db, engine_turn)
+            for module in (*handlers, engine_sql):
+                module.handlers_register(store)
+            for row in rows:
+                line = jslb.json_decode(json.dumps(row["line"]))
+                if "data" in row:
+                    line[1]["d"] = str(row["data"]).encode("utf-8")
+                audit.line_received(line)
+                dispatch.line_dispatch(line)
+            for name in store.db_list():
+                store.db_close(name)
+            text = "served"
+        except BaseException:
+            text = traceback.format_exc()
         with open(ending, "w", encoding="utf-8") as file:
             file.write(text)
     finally:
@@ -179,33 +219,6 @@ class TestRead(AuditCase):
         entries = self.entries_of("blobs")
         self.assertEqual(entries[0].line["size"], 3)
 
-    # A listing has a line per entry and a line per start of the engine.
-    def test_listing_lines(self) -> None:
-        lines = audit_read.listing_lines(self.entries_of("run"))
-        self.assertEqual(lines, gold_value("run_listing"))
-
-    # A document with no entry has an empty listing and a summary of nothing.
-    def test_empty_read(self) -> None:
-        entries = self.entries_of()
-        self.assertEqual(audit_read.listing_lines(entries), [])
-        self.assertEqual(
-            audit_read.summary_lines(entries), gold_value("empty_summary")
-        )
-
-    # The summary counts what the run did, each lane's bytes measured here.
-    def test_summary_lines(self) -> None:
-        entries = self.entries_of("run")
-        fixed: list[str] = gold_value("run_summary")
-        at: int = gold_value("summary_bytes_at")
-        lanes = [
-            gold_value("summary_bytes").format(*measured)
-            for measured in self.lanes_measured(gold_value("run"))
-        ]
-        self.assertEqual(
-            audit_read.summary_lines(entries),
-            [*fixed[:at], *lanes, *fixed[at:]],
-        )
-
     # Each lane of the conversation writes fewer bytes than it sent.
     def test_lanes_thinner(self) -> None:
         self.entries_of("run")
@@ -228,58 +241,12 @@ class TestRead(AuditCase):
         self.assertEqual(audit_read.prompt_recorded(entries), 1)
         audit_read.failure_check(entries)
 
-    # A dump of each side, the same text and differing, is told in the summary.
-    def test_dumps_told(self) -> None:
+    # Two dumps of each side pass the check, as a person asked for them.
+    def test_dumps_passed(self) -> None:
         views: list[dict[str, Any]] = gold_value("views")
         audit.dump_put("databases of the browser", views)
         audit.dump_put("databases of the server", views)
-        entries = self.entries_of()
-        self.assertIn(
-            "database dumps: 2, the same text",
-            audit_read.summary_lines(entries),
-        )
-        audit.dump_put("databases of the server", [])
-        entries = self.entries_of()
-        self.assertIn(
-            "database dumps: 3, differing", audit_read.summary_lines(entries)
-        )
-        audit_read.failure_check(entries)
-
-    # A long value is cut, and an MCP reply with no content shows its payload.
-    def test_details_told(self) -> None:
-        lines = audit_read.listing_lines(self.entries_of("details"))
-        ends: list[str] = gold_value("details_ends")
-        for line, end in zip(lines[1:], ends, strict=True):
-            self.assertTrue(line.endswith(end), line)
-
-    # A debug mode call's tool list is told as the text it sent in its place.
-    def test_tools_omitted(self) -> None:
-        entries = self.entries_of("omitted")
-        detail: str = gold_value("omitted_detail")
-        line = audit_read.listing_lines(entries)[1]
-        self.assertTrue(line.endswith(detail), line)
-        summary = audit_read.summary_lines(entries)
-        for told in gold_value("omitted_summary"):
-            self.assertIn(told, summary)
-        audit_read.failure_check(entries)
-
-    # A dump's listing line tells its size alone.
-    def test_dump_size(self) -> None:
-        audit.dump_put("databases of the server", gold_value("views"))
-        lines = audit_read.listing_lines(self.entries_of())
-        self.assertRegex(lines[-1], r" \d+ bytes$")
-
-    # A chain's first call sends the prompt once, a chained call none.
-    def test_prompt_copies(self) -> None:
-        entries = self.entries_of("run")
-        rows: list[dict[str, Any]] = gold_value("run")
-        self.assertEqual(
-            audit_read.prompt_copies(entries), gold_value("run_copies")
-        )
-        self.assertEqual(audit_read.input_of(entries[0]), [])
-        self.assertEqual(
-            audit_read.input_of(entries[7]), rows[7]["line"]["json"]["input"]
-        )
+        audit_read.failure_check(self.entries_of())
 
 
 # Each unexpected failure, found at its line.
@@ -313,38 +280,44 @@ class TestFailures(AuditCase):
 
 # The audit digest, the run told for a person to read.
 class TestDigest(AuditCase):
-    # The digest of the rows named is the gold's, then the summary follows.
+    # The digest of the rows named, its summary last, is the gold's.
     def digest_assert(self, name: str) -> None:
-        entries = self.entries_of(name)
-        lines = audit_read.digest_lines(entries)
-        summary = audit_read.summary_lines(entries)
-        at = len(lines) - len(summary) - 1
-        self.assertEqual(lines[:at], gold_value(f"{name}_digest"))
-        self.assertEqual(lines[at:], ["", *summary])
+        lines = audit_read.digest_lines(self.entries_of(name))
+        self.assertEqual(lines, gold_value(f"{name}_digest"))
 
     # A walk tells the player, the model, the tools, the bands and commits.
     def test_walk_told(self) -> None:
         self.digest_assert("walk")
 
-    # Every other kind of line is told, a long string cut, a second start.
+    # Every other kind of line is told, a long string named again, restarts.
     def test_lines_told(self) -> None:
         self.digest_assert("told")
 
-    # A dump is told by its size, as it is shown nowhere else.
+    # A dump is shown whole, and a second of the same text names the first.
     def test_dump_told(self) -> None:
-        audit.dump_put("databases of the browser", gold_value("views"))
-        lines = audit_read.digest_lines(self.entries_of())
-        dumped = [line for line in lines if line.startswith("L")]
-        self.assertEqual(len(dumped), 1)
-        self.assertRegex(dumped[0], gold_value("dump_told"))
+        views: list[dict[str, Any]] = gold_value("views")
+        audit.dump_put("databases of the browser", views)
+        audit.dump_put("databases of the server", views)
+        entries = self.entries_of()
+        lines = audit_read.digest_lines(entries)
+        heads = [
+            index for index, line in enumerate(lines) if line.startswith("L")
+        ]
+        self.assertEqual(len(heads), 2)
+        first, second = (lines[index] for index in heads)
+        self.assertRegex(first, gold_value("dump_told"))
+        self.assertRegex(second, gold_value("dump_told"))
+        body = entries[0].body.split("\n")
+        shown = lines[heads[0] + 1 : heads[1]]
+        self.assertEqual(shown[0], _RECORD_INDENT + body[0])
+        self.assertEqual(len(shown), len(body))
+        named = f"{_RECORD_INDENT}same as L{entries[0].number}"
+        self.assertEqual(lines[heads[1] + 1], named)
 
     # A document with no entry tells nothing, then a summary of nothing.
     def test_empty_told(self) -> None:
         lines = audit_read.digest_lines(self.entries_of())
-        self.assertEqual(
-            lines,
-            [*gold_value("empty_digest"), "", *gold_value("empty_summary")],
-        )
+        self.assertEqual(lines, gold_value("empty_digest"))
 
 
 # The guide check of a tiny guide's walk, by its table and gold.
@@ -395,6 +368,84 @@ class TestGuide(AuditCase):
                     self.guide_check(self.entries_of())
 
 
+# The database check of commits the server's handlers applied, and the text.
+class TestDatabases(AuditCase):
+    # Makes the start's databases, copies them as the server's, serves there.
+    def setUp(self) -> None:
+        super().setUp()
+        self.start = os.path.join(self.root, "start")
+        self.end = os.path.join(self.root, "end")
+        self.replay = os.path.join(self.root, "replay")
+        self.limits: list[int] = gold_value("databases_limits")
+        store = substrate.Store(self.start, *self.limits)
+        for name in gold_value("databases_start"):
+            store.db_create(name)
+            store.db_close(name)
+        shutil.copytree(self.start, self.end)
+        self.rows_write(gold_value("databases_settings"))
+        self.commits_serve()
+
+    # Applies the gold's commits to `end` by the server's handlers in a child.
+    def commits_serve(self) -> None:
+        ending = os.path.join(self.root, "ending.txt")
+        rows: list[dict[str, Any]] = gold_value("databases_commits")
+        sys.stdout.flush()
+        sys.stderr.flush()
+        pid = os.fork()
+        if pid == 0:
+            commits_serve(self.end, self.limits, rows, ending)
+        os.waitpid(pid, 0)
+        with open(ending, encoding="utf-8") as file:
+            self.assertEqual(file.read(), "served")
+
+    # The end's store, open on each database, closed when the test ends.
+    def end_store(self) -> substrate.Store:
+        store = substrate.Store(self.end, *self.limits)
+        for name in gold_value("databases_start"):
+            store.db_open(name)
+            self.addCleanup(store.db_close, name)
+        return store
+
+    # Asserts the check of the record raises the gold's failure of `name`.
+    def check_failed(self, name: str, start: str) -> None:
+        entries = self.entries_of()
+        with self.assertRaisesRegex(
+            audit_read.AuditFailed, gold_value("databases_failures")[name]
+        ):
+            audit_read.databases_check(entries, start, self.end, self.replay)
+
+    # The replay of each kind of commit makes the server's databases.
+    def test_replay_passed(self) -> None:
+        entries = self.entries_of()
+        audit_read.databases_check(entries, self.start, self.end, self.replay)
+        self.assertEqual(
+            audit_read.database_lines(self.replay),
+            audit_read.database_lines(self.end),
+        )
+
+    # A value the server holds that the record did not put fails at its put.
+    def test_value_differs(self) -> None:
+        self.end_store().kv_put(gold_value("databases_put_ref"), b"other")
+        self.check_failed("value", self.start)
+
+    # A row the server holds that no commit made fails at its table.
+    def test_row_differs(self) -> None:
+        statement = substrate.SqlStatement(gold_value("databases_extra"), [])
+        self.end_store().sql_run(gold_value("databases_start")[0], [statement])
+        self.check_failed("row", self.start)
+
+    # A commit the store refuses, a database the start holds, fails at it.
+    def test_commit_refused(self) -> None:
+        self.check_failed("refused", self.end)
+
+    # Each kind of cell is told, a long string whole, the store's tables once.
+    def test_lines_told(self) -> None:
+        lines = audit_read.database_lines(self.end)
+        for line in gold_value("databases_lines"):
+            with self.subTest(line=line):
+                self.assertIn(line, lines)
+
+
 # A text that is no audit document.
 class TestForm(unittest.TestCase):
     # Each of the gold's texts raises naming the line that does not fit.
@@ -427,20 +478,25 @@ class TestProgram(AuditCase):
         os.remove(output)
         return ended, printed
 
-    # Without `--check` a document with a failure exits 0, its listing printed.
-    def test_listing_only(self) -> None:
+    # Without `--check` the digest prints under its title, with no verdict.
+    def test_digest_only(self) -> None:
         self.rows_write(gold_value("error"))
         ended, printed = self.program_run(self.path)
         self.assertEqual(ended, "0")
-        self.assertIn("error", printed)
-        self.assertNotIn("check:", printed)
+        entries = audit_read.entries_parse(audit_read.document_read(self.path))
+        due = [
+            gold_value("digest_title").format(self.path),
+            *audit_read.digest_lines(entries),
+        ]
+        self.assertEqual(printed, "\n".join(due) + "\n")
 
-    # `--check` on a run with no failure exits 0 and says so.
+    # `--check` on a run with no failure exits 0, the verdict after the digest.
     def test_check_passed(self) -> None:
         self.rows_write(gold_value("run"))
         ended, printed = self.program_run(self.path, "--check")
         self.assertEqual(ended, "0")
-        self.assertTrue(printed.endswith("check: no unexpected failure\n"))
+        verdict = gold_value("check_passed")
+        self.assertTrue(printed.endswith(f"\n\n{verdict}\n"))
 
     # `--check` on a run with a failure exits 1, naming its line.
     def test_check_failed(self) -> None:
@@ -448,36 +504,6 @@ class TestProgram(AuditCase):
         ended, printed = self.program_run(self.path, "--check")
         self.assertEqual(ended, "1")
         self.assertIn("failure: line 3: a line of type error", printed)
-
-    # `--digest` writes the title, the digest, then the verdict of `--check`.
-    def test_digest_written(self) -> None:
-        self.rows_write(gold_value("walk"))
-        written = os.path.join(self.root, "digest.txt")
-        ended, _ = self.program_run(self.path, "--check", "--digest", written)
-        self.assertEqual(ended, "0")
-        entries = audit_read.entries_parse(audit_read.document_read(self.path))
-        due = [
-            gold_value("digest_title").format(self.path),
-            *audit_read.digest_lines(entries),
-            "",
-            gold_value("check_passed"),
-        ]
-        with open(written, encoding="utf-8") as file:
-            self.assertEqual(file.read(), "\n".join(due) + "\n")
-
-    # With no check, the digest ends with the summary.
-    def test_digest_alone(self) -> None:
-        self.rows_write(gold_value("walk"))
-        written = os.path.join(self.root, "digest.txt")
-        ended, _ = self.program_run(self.path, "--digest", written)
-        self.assertEqual(ended, "0")
-        entries = audit_read.entries_parse(audit_read.document_read(self.path))
-        due = [
-            gold_value("digest_title").format(self.path),
-            *audit_read.digest_lines(entries),
-        ]
-        with open(written, encoding="utf-8") as file:
-            self.assertEqual(file.read(), "\n".join(due) + "\n")
 
     # `--guide` reads a real guide's table and gold, and fails a walk not its.
     def test_guide_refused(self) -> None:

@@ -472,6 +472,7 @@
           "reply": 5
         },
         "turn": 2,
+        "scene": "/metaverse/hyperposition/1",
         "subtitle": "Done."
       }
     },
@@ -544,20 +545,6 @@
   ],
   "request_open": [
     "line 3: ui to ai asked 5 in start 1 and has no reply"
-  ],
-  "empty_summary": [
-    "entries: 0 in 0.000 s, engine starts: 0",
-    "inputs: 0: []",
-    "model calls: 0, chains started: 0, copies of the system prompt sent: 0",
-    "system prompt written in the conversation's lanes: 0",
-    "input tokens of the model calls: 0 of 0 served from cache",
-    "bytes of the lane ai to http: 0 as sent, 0 as written",
-    "bytes of the lane http to ai: 0 as sent, 0 as written",
-    "bytes of the lane ai to server: 0 as sent, 0 as written",
-    "tools called: 0 of 0 listed: {}",
-    "tools not called: []",
-    "commits to the server: {}",
-    "database dumps: none"
   ],
   "views": [
     {
@@ -1089,82 +1076,9 @@
     [340, 1, "console to ai", "console.open", 0],
     [349, 1, "note of console", "", 0],
     [352, 1, "ai to ui", "ai.say", 0],
-    [362, 1, "ai to ui", "console.output", 0]
-  ],
-  "run_listing": [
-    "==== engine start 1",
-    "L3      +  0.000     0 ms  server to ai   tap.start      i=101   {\"settings\": {}}",
-    "L12     +  0.001     1 ms  ai to server   tap.start      r=101   {}",
-    "L20     +  0.002     1 ms  dom to ui      ui.input               {\"text\": \"1\"}",
-    "L28     +  0.003     1 ms  ui to ai       ai.say         i=5     {\"text\": \"1\"}",
-    "L37     +  0.004     1 ms  note of ui                            sleeps on 5 until ui.turn_end",
-    "L40     +  0.005     1 ms  ai to server   turn.prompt            {\"scene\": \"/metaverse/hyperposition/1\", \"messages\": [{\"role\": \"system\", \"content\": \"The prompt.\"}]}",
-    "L55     +  0.006     1 ms  ai to server   turn.append            {\"scene\": \"/metaverse/hyperposition/1\", \"role\": \"user\", \"content\": [{\"role\": \"user\", \"content\": \"1\"}]}",
-    "L70     +  0.007     1 ms  ai to http     http.request   i=6     model 2 items (system=1 user=1), 2 kept, a chain start, 2 tools",
-    "L99     +  0.008     1 ms  note of ai                            sleeps on 6 until ai.model_reply",
-    "L102    +  0.009     1 ms  http to ai     http.request   r=6     status 200, resp_1, cached 0 of 100, calls ['browser_render'], says ",
-    "L138    +  0.010     1 ms  ai to ai       mcp            i=7     call render {\"subtitle\": \"s\"}",
-    "L155    +  0.011     1 ms  ai to ai       mcp            r=7     result [\"{}\"]",
-    "L173    +  0.012     1 ms  ai to ai       mcp                    notifications/initialized",
-    "L182    +  0.013     1 ms  ai to http     http.request   i=8     image a pattern",
-    "L198    +  0.014     1 ms  http to ai     http.request   r=8     status 200, 1 images",
-    "L214    +  0.015     1 ms  ai to server   turn.append            {\"scene\": \"/metaverse/hyperposition/1\", \"role\": \"assistant\", \"content\": [{\"type\": \"reasoning\", \"id\": \"rs_1\", \"encrypted_content\": \"scripted\"}, {\"type\"...",
-    "L225    +  0.016     1 ms  ai to server   turn.append            {\"scene\": \"/metaverse/hyperposition/1\", \"role\": \"tool\", \"content\": [{\"type\": \"function_call_output\", \"call_id\": \"call_1\", \"output\": \"{}\"}]}",
-    "L241    +  0.017     1 ms  ai to http     http.request   i=9     model 1 items (function_call_output=1), 1 kept, chained to resp_1, 2 tools",
-    "L262    +  0.018     1 ms  http to ai     http.request   r=9     status 200, resp_2, cached 100 of 150, calls [], says Done.",
-    "L302    +  0.019     1 ms  ai to server   turn.append            {\"scene\": \"/metaverse/hyperposition/1\", \"role\": \"assistant\", \"content\": [{\"type\": \"reasoning\", \"id\": \"rs_2\", \"encrypted_content\": \"scripted\"}, {\"type\"...",
-    "L313    +  0.020     1 ms  ai to console  console.read   i=10    {\"until\": \"$ \"}",
-    "L322    +  0.021     1 ms  console to ai  console.read   r=10    {\"text\": \"$ \", \"timed_out\": false}",
-    "L332    +  0.022     1 ms  ai to console  console.open   i=11    {}",
-    "L340    +  0.023     1 ms  console to ai  console.open   r=11    {\"token\": \"<masked>\"}",
-    "L349    +  0.024     1 ms  note of console                        `dash` exited with code 0.",
-    "L352    +  0.025     1 ms  ai to ui       ai.say         r=5     {\"turn\": 2, \"subtitle\": \"Done.\"}",
-    "L362    +  0.026     1 ms  ai to ui       console.output         {} + 1 blobs"
-  ],
-  "run_summary": [
-    "entries: 27 in 0.026 s, engine starts: 1",
-    "inputs: 1: ['1']",
-    "model calls: 2, chains started: 1, copies of the system prompt sent: 1",
-    "system prompt written in the conversation's lanes: 1",
-    "input tokens of the model calls: 100 of 250 served from cache, 40.0%",
-    "tools called: 1 of 2 listed: {'browser_render': 1}",
-    "tools not called: ['browser_kv_get']",
-    "commits to the server: {'turn.prompt': 1, 'turn.append': 4}",
-    "database dumps: none"
+    [363, 1, "ai to ui", "console.output", 0]
   ],
   "summary_lanes": ["ai to http", "http to ai", "ai to server"],
-  "summary_bytes_at": 5,
-  "summary_bytes": "bytes of the lane {0}: {1} as sent, {2} as written",
-  "run_copies": [1, 0],
-  "details": [
-    {
-      "sender": "ui",
-      "receiver": "ai",
-      "line": {
-        "0": {
-          "type": "ai.say"
-        },
-        "text": "a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text "
-      }
-    },
-    {
-      "sender": "ai",
-      "receiver": "ai",
-      "line": {
-        "0": {
-          "type": "mcp",
-          "reply": 1
-        },
-        "result": {
-          "protocolVersion": "2025-06-18"
-        }
-      }
-    }
-  ],
-  "details_ends": [
-    "{\"text\": \"a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long text a long t...",
-    "{\"result\": {\"protocolVersion\": \"2025-06-18\"}}"
-  ],
   "prompt_written": [
     {
       "sender": "ai",
@@ -1488,57 +1402,6 @@
         }
       }
     }
-  ],
-  "omitted": [
-    {
-      "sender": "ai",
-      "receiver": "http",
-      "line": {
-        "0": {"type": "http.request", "id": 6},
-        "method": "POST",
-        "url": "https://scripted.invalid/v1/responses",
-        "headers": {"Authorization": "<masked>"},
-        "json": {
-          "model": "grok-4.7",
-          "input": [
-            {"role": "system", "content": "The prompt."},
-            {"role": "user", "content": "1"}
-          ],
-          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
-          "prompt_cache_key": "/s/1"
-        }
-      }
-    },
-    {
-      "sender": "http",
-      "receiver": "ai",
-      "line": {
-        "0": {"type": "http.request", "reply": 6},
-        "status": 200,
-        "json": {
-          "id": "resp_1",
-          "model": "grok-4.7",
-          "status": "completed",
-          "output": [
-            {"type": "reasoning", "id": "rs_1", "encrypted_content": "scripted"},
-            {
-              "type": "message",
-              "id": "msg_1",
-              "role": "assistant",
-              "content": [{"type": "output_text", "text": "Hi."}]
-            }
-          ],
-          "tools": "DEBUG_MODE_TOOL_LIST_OMITTED",
-          "previous_response_id": null,
-          "usage": {"input_tokens": 10, "input_tokens_details": {"cached_tokens": 0}}
-        }
-      }
-    }
-  ],
-  "omitted_detail": "model 2 items (system=1 user=1), 0 kept, a chain start, tools DEBUG_MODE_TOOL_LIST_OMITTED",
-  "omitted_summary": [
-    "tools called: 0: {}",
-    "tools listed: none, the first model call sent DEBUG_MODE_TOOL_LIST_OMITTED"
   ],
   "walk": [
     {
@@ -2575,85 +2438,87 @@
     ]
   },
   "walk_digest": [
-    "each record: its line in the audit, seconds from the first entry, its lane, then what it says",
+    "each record: L and its line in the audit, seconds from the first entry, its label, then what it says; `same as L913` names the record that showed a text before",
     "",
     "==== engine start 1",
     "---- bring up",
-    "L3         0.000  server to ai  tap.start i=101, the settings and the switches {\"debug\": true}",
-    "L15        0.001  ai to server  tap.start r=101",
-    "L23        0.002  ai to ui      render i=5 to /metaverse/hyperposition/1, image /metaverse/image/hyperposition",
+    "L3 0.000 server to ai tap.start i=101, the settings and the switches {\"debug\": true}",
+    "L15 0.001 ai to server tap.start r=101",
+    "L23 0.002 ai to ui render i=5 to /metaverse/hyperposition/1, image /metaverse/image/hyperposition",
     "        subtitle: How can I help you?",
+    "L34 0.003 note of ai sleeps on 5 until engine.rendered",
+    "L37 0.004 ui to ai render r=5",
     "",
     "---- turn 1",
-    "L45        0.005  dom to ui     player: Go",
-    "L62        0.007  ai to server  turn.prompt to /walk/field/1, 1 message",
+    "L45 0.005 dom to ui player: Go",
+    "L53 0.006 ui to ai ai.say i=2: Go",
+    "L62 0.007 ai to server turn.prompt to /walk/field/1, 1 message",
     "        system: The prompt.",
-    "L77        0.008  ai to server  turn.append to /walk/field/1, role user, 1 item",
-    "L92        0.009  ai to http    model call i=6, a chain start, 2 items",
-    "        system: the text of L62",
+    "L77 0.008 ai to server turn.append to /walk/field/1, role user, 1 item",
+    "L92 0.009 ai to http model call i=6, a chain start, 2 items",
+    "        system: same as L62",
     "        user: Go",
-    "L112       0.010  http to ai    model reply r=6, resp_1, cached 0 of 100 tokens",
+    "L112 0.010 http to ai model reply r=6, resp_1, cached 0 of 100 tokens",
     "        call browser_image_make call_image {\"prompt\": \"a herd\", \"key\": \"walk/herd.png\"}",
     "        call browser_script_run call_run {\"name\": \"sim\", \"args\": {\"action\": \"go\"}}",
-    "L155       0.011  ai to ai      tool call i=7 image_make",
-    "        {\"prompt\": \"a herd\", \"key\": \"walk/herd.png\"}",
-    "L173       0.012  ai to ai      tool call i=8 script_run",
-    "        {\"name\": \"sim\", \"args\": {\"action\": \"go\"}}",
-    "L193       0.013  ai to http    image request i=9",
+    "L155 0.011 ai to ai tool call i=7 image_make for call_image",
+    "L173 0.012 ai to ai tool call i=8 script_run for call_run",
+    "L193 0.013 ai to http image request i=9",
     "        prompt: a herd",
-    "L212       0.014  http to ai    image answer r=9, status 200, sizes [3] bytes",
-    "L228       0.015  ai to ai      tool result r=7",
+    "L212 0.014 http to ai image answer r=9, status 200, sizes [3] bytes",
+    "L228 0.015 ai to ai tool result r=7 of call_image",
     "        {\"key\":\"/_files/walk/herd.png\"}",
-    "L246       0.016  ai to ai      tool result r=8",
+    "L246 0.016 ai to ai tool result r=8 of call_run",
     "        {\"value\":{\"say\":\"Made it.\",\"outcome\":\"made\"}}",
-    "L264       0.017  ai to server  turn.append to /walk/field/1, role assistant, 3 items",
-    "L275       0.018  ai to server  turn.append to /walk/field/1, role tool, 1 item",
-    "L291       0.019  ai to server  turn.append to /walk/field/1, role tool, 1 item",
-    "L307       0.020  ai to http    model call i=10, chained to resp_1, 2 items",
+    "L264 0.017 ai to server turn.append to /walk/field/1, role assistant, 3 items",
+    "L275 0.018 ai to server turn.append to /walk/field/1, role tool, 1 item",
+    "L291 0.019 ai to server turn.append to /walk/field/1, role tool, 1 item",
+    "L307 0.020 ai to http model call i=10, chained to resp_1, 2 items",
     "        output call_image: {\"key\":\"/_files/walk/herd.png\"}",
     "        output call_run: {\"value\":{\"say\":\"Made it.\",\"outcome\":\"made\"}}",
-    "L328       0.021  http to ai    model reply r=10, resp_2, cached 100 of 200 tokens",
+    "L328 0.021 http to ai model reply r=10, resp_2, cached 100 of 200 tokens",
     "        says: Made it. Again?",
-    "L368       0.022  ai to server  turn.append to /walk/field/1, role assistant, 2 items",
-    "L379       0.023  ai to ui      ai.say r=2, reply stored at row 5, showing /walk/field/1",
+    "L368 0.022 ai to server turn.append to /walk/field/1, role assistant, 2 items",
+    "L379 0.023 ai to ui ai.say r=2, reply stored at row 5, showing /walk/field/1",
     "        band: Made it. Again?",
     "",
     "---- turn 2",
-    "L390       0.024  dom to ui     player: what",
-    "L407       0.026  ai to server  turn.append to /walk/field/1, role user, 1 item",
-    "L422       0.027  ai to http    model call i=11, chained to resp_2, 1 item",
+    "L390 0.024 dom to ui player: what",
+    "L398 0.025 ui to ai ai.say i=3: what",
+    "L407 0.026 ai to server turn.append to /walk/field/1, role user, 1 item",
+    "L422 0.027 ai to http model call i=11, chained to resp_2, 1 item",
     "        user: what",
-    "L443       0.028  http to ai    model reply r=11, resp_3, cached 200 of 300 tokens",
+    "L443 0.028 http to ai model reply r=11, resp_3, cached 200 of 300 tokens",
     "        says: Say go.",
-    "L483       0.029  ai to server  turn.append to /walk/field/1, role assistant, 2 items",
-    "L494       0.030  ai to ui      ai.say r=3, reply stored at row 7, showing /walk/field/1",
+    "L483 0.029 ai to server turn.append to /walk/field/1, role assistant, 2 items",
+    "L494 0.030 ai to ui ai.say r=3, reply stored at row 7, showing /walk/field/1",
     "        band: Say go.",
     "",
     "---- turn 3",
-    "L505       0.031  dom to ui     player: go",
-    "L522       0.033  ai to server  turn.append to /walk/field/1, role user, 1 item",
-    "L537       0.034  ai to http    model call i=12, chained to resp_3, 1 item",
+    "L505 0.031 dom to ui player: go",
+    "L513 0.032 ui to ai ai.say i=4: go",
+    "L522 0.033 ai to server turn.append to /walk/field/1, role user, 1 item",
+    "L537 0.034 ai to http model call i=12, chained to resp_3, 1 item",
     "        user: go",
-    "L558       0.035  http to ai    model reply r=12, resp_4, cached 300 of 400 tokens",
+    "L558 0.035 http to ai model reply r=12, resp_4, cached 300 of 400 tokens",
     "        call browser_script_run call_run {\"name\": \"sim\", \"args\": {\"action\": \"go\"}}",
-    "L594       0.036  ai to ai      tool call i=13 script_run",
-    "        {\"name\": \"sim\", \"args\": {\"action\": \"go\"}}",
-    "L614       0.037  ai to ai      tool result r=13",
+    "L594 0.036 ai to ai tool call i=13 script_run for call_run",
+    "L614 0.037 ai to ai tool result r=13 of call_run",
     "        {\"value\":{\"say\":\"Missed.\",\"outcome\":\"missed\"}}",
-    "L632       0.038  ai to server  turn.append to /walk/field/1, role assistant, 2 items",
-    "L643       0.039  ai to server  turn.append to /walk/field/1, role tool, 1 item",
-    "L659       0.040  ai to http    model call i=14, chained to resp_4, 1 item",
+    "L632 0.038 ai to server turn.append to /walk/field/1, role assistant, 2 items",
+    "L643 0.039 ai to server turn.append to /walk/field/1, role tool, 1 item",
+    "L659 0.040 ai to http model call i=14, chained to resp_4, 1 item",
     "        output call_run: {\"value\":{\"say\":\"Missed.\",\"outcome\":\"missed\"}}",
-    "L680       0.041  http to ai    model reply r=14, resp_5, cached 400 of 500 tokens",
+    "L680 0.041 http to ai model reply r=14, resp_5, cached 400 of 500 tokens",
     "        says: Try again.",
-    "L720       0.042  ai to server  turn.append to /walk/field/1, role assistant, 2 items",
-    "L731       0.043  ai to ui      ai.say r=4, reply stored at row 11, showing /walk/field/1",
+    "L720 0.042 ai to server turn.append to /walk/field/1, role assistant, 2 items",
+    "L731 0.043 ai to ui ai.say r=4, reply stored at row 11, showing /walk/field/1",
     "        band: Try again.",
     "",
-    "not shown: 5 of 44 entries",
-    "        note of ai: 1",
-    "        ui to ai ai.say request: 3",
-    "        ui to ai render reply: 1"
+    "entries: 44 in 0.043 s, engine starts: 1",
+    "model calls: 5, chains started: 1, copies of the system prompt sent: 1, input tokens: 1000 of 1500 served from cache, 66.7%",
+    "tools called: browser_image_make 1, browser_script_run 2",
+    "commits: turn.prompt 1, turn.append 11"
   ],
   "told": [
     {
@@ -2803,7 +2668,8 @@
           "blobs": 1
         },
         "1": {
-          "size": 4096
+          "size": 4096,
+          "sha256": "9a0729649d2cd456cb882269af51815654f76dee70f03cd52f6da065c45eab9e"
         },
         "db": "metaverse",
         "files": 1
@@ -2818,7 +2684,8 @@
           "blobs": 1
         },
         "1": {
-          "size": 3
+          "size": 3,
+          "sha256": "0a34739159f3017e9333077f0a7cb7e0e654cfbf4ca3ad0273e87f61f4d810a2"
         },
         "db": "metaverse"
       }
@@ -2846,7 +2713,8 @@
           "blobs": 1
         },
         "1": {
-          "size": 17
+          "size": 17,
+          "sha256": "3675b384434b40525f2bc450194ddc00074080916fda93358ccc2ead9064d61d"
         }
       }
     },
@@ -2984,7 +2852,8 @@
           "reply": 1
         },
         "k": "/_files/walk/herd.png",
-        "size": 3
+        "size": 3,
+        "sha256": "f5c170836cb0a7f66664f0d0a992bbb9b6d1e25b760131f5ee2c2f9cf95ef8d5"
       }
     },
     {
@@ -2996,7 +2865,8 @@
           "reply": 6
         },
         "k": "/_files/walk/herd.png",
-        "size": 3
+        "size": 3,
+        "sha256": "f5c170836cb0a7f66664f0d0a992bbb9b6d1e25b760131f5ee2c2f9cf95ef8d5"
       }
     },
     {
@@ -3008,7 +2878,7 @@
           "id": 7
         },
         "scene": "/walk/field/1",
-        "subtitle": "No picture."
+        "subtitle": "a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field "
       }
     },
     {
@@ -3083,7 +2953,7 @@
         },
         "status": 500,
         "json": {
-          "error": "busy"
+          "error": "a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field "
         }
       }
     },
@@ -3099,6 +2969,10 @@
       }
     },
     {
+      "note": "console",
+      "text": "`dash` started.\nIts second line."
+    },
+    {
       "start": "engine"
     },
     {
@@ -3112,68 +2986,75 @@
     }
   ],
   "told_digest": [
-    "each record: its line in the audit, seconds from the first entry, its lane, then what it says",
+    "each record: L and its line in the audit, seconds from the first entry, its label, then what it says; `same as L913` names the record that showed a text before",
     "",
     "==== engine start 1",
     "---- bring up",
-    "L3         0.000  ai to ui      settings.set, the settings and the switches {\"debug\": true}",
-    "L14        0.001  ai to ai      engine.start",
-    "L21        0.002  ai to ai      mcp i=1 initialize",
-    "L35        0.003  ai to ai      mcp r=1 initialize: {\"protocolVersion\": \"2025-06-18\"}",
-    "L48        0.004  ai to ai      mcp notifications/initialized",
-    "L57        0.005  ai to ai      mcp i=2 tools/list",
-    "L68        0.006  ai to ai      mcp r=2 tools/list, 2 tools: sql_run, kv_get",
-    "L88        0.007  ai to server  mcp i=3 tools/list",
-    "L99        0.008  server to ai  mcp r=3 tools/list failed: {\"code\": -32601, \"message\": \"no\"}",
-    "L113       0.009  ai to server  db.sync i=4",
-    "L121       0.010  server to ai  db.restore metaverse, 4096 bytes, 1 file",
-    "L135       0.011  server to ai  db.file, 1 blob",
-    "        {\"db\": \"metaverse\"}",
-    "L148       0.012  server to ai  db.sync r=4: databases metaverse",
-    "L159       0.013  ai to server  kv.put /walk/scene, 17 bytes",
-    "L172       0.014  ai to server  kv.delete /walk/old",
-    "L180       0.015  ai to server  db.create walk",
-    "L188       0.016  ai to server  db.drop old",
-    "L196       0.017  ai to server  doc.put walk field",
-    "        {\"0\": {\"t\": \"scene\"}, \"subtitle\": \"a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a... (325 characters)\"}",
-    "L211       0.018  ai to server  sql.run on walk",
+    "L3 0.000 ai to ui settings.set, the settings and the switches {\"debug\": true}",
+    "L14 0.001 ai to ai engine.start",
+    "L21 0.002 ai to ai mcp i=1 initialize",
+    "L35 0.003 ai to ai mcp r=1 initialize: {\"protocolVersion\": \"2025-06-18\"}",
+    "L48 0.004 ai to ai mcp notifications/initialized",
+    "L57 0.005 ai to ai mcp i=2 tools/list",
+    "L68 0.006 ai to ai mcp r=2 tools/list, 2 tools: sql_run, kv_get",
+    "L88 0.007 ai to server mcp i=3 tools/list",
+    "L99 0.008 server to ai mcp r=3 tools/list failed: {\"code\": -32601, \"message\": \"no\"}",
+    "L113 0.009 ai to server db.sync i=4",
+    "L121 0.010 server to ai db.restore metaverse, 4096 bytes, sha256 9a0729649d2cd456cb882269af51815654f76dee70f03cd52f6da065c45eab9e, 1 file",
+    "L136 0.011 server to ai db.file metaverse, 3 bytes, sha256 0a34739159f3017e9333077f0a7cb7e0e654cfbf4ca3ad0273e87f61f4d810a2",
+    "L150 0.012 server to ai db.sync r=4: databases metaverse",
+    "L161 0.013 ai to server kv.put /walk/scene, 17 bytes, sha256 3675b384434b40525f2bc450194ddc00074080916fda93358ccc2ead9064d61d",
+    "L175 0.014 ai to server kv.delete /walk/old",
+    "L183 0.015 ai to server db.create walk",
+    "L191 0.016 ai to server db.drop old",
+    "L199 0.017 ai to server doc.put walk field",
+    "        {\"0\": {\"t\": \"scene\"}, \"subtitle\": \"a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field a long field \"}",
+    "L214 0.018 ai to server sql.run on walk",
     "        CREATE TABLE herd (head INTEGER NOT NULL) STRICT",
     "        INSERT INTO herd VALUES (?)  with params [2000]",
-    "L230       0.019  ai to ai      tool call i=5 sql_run",
+    "L233 0.019 ai to ai tool call i=5 sql_run",
     "        {\"db\": \"walk\", \"statements\": [{\"sql\": \"SELECT head FROM herd\", \"params\": [1]}]}",
-    "L255       0.020  ai to ui      media.store i=6 /_files/walk/herd.png, 3 bytes",
-    "L303       0.024  ai to ui      render i=7 to /walk/field/1, image none",
-    "        subtitle: No picture.",
-    "L313       0.025  ai to http    model call i=8, a chain start, 7 items",
+    "L258 0.020 ai to ui media.store i=6 /_files/walk/herd.png, 3 bytes",
+    "L272 0.021 ui to media media.store i=1 /_files/walk/herd.png, 3 bytes",
+    "L286 0.022 media to ui media.store r=1 /_files/walk/herd.png, 3 bytes, sha256 f5c170836cb0a7f66664f0d0a992bbb9b6d1e25b760131f5ee2c2f9cf95ef8d5",
+    "L297 0.023 ui to ai media.store r=6 /_files/walk/herd.png, 3 bytes, sha256 f5c170836cb0a7f66664f0d0a992bbb9b6d1e25b760131f5ee2c2f9cf95ef8d5",
+    "L308 0.024 ai to ui render i=7 to /walk/field/1, image none",
+    "        subtitle: same as L199",
+    "L318 0.025 ai to http model call i=8, a chain start, 7 items",
     "        system: The prompt.",
-    "        system: the text of L313",
+    "        system: same as L318",
     "        user: 1",
     "        reasoning rs_1",
     "        assistant: Said.",
     "        call browser_script_run call_run {\"name\": \"sim\", \"args\": {\"action\": \"go\"}}",
     "        output call_run: {\"value\":{\"say\":\"Made it.\",\"outcome\":\"made\"}}",
-    "L374       0.026  http to ai    http.request r=8",
-    "        {\"status\": 500, \"json\": {\"error\": \"busy\"}}",
-    "L386       0.027  ai to server  error",
+    "L379 0.026 http to ai http.request r=8",
+    "        {\"status\": 500, \"json\": {\"error\": \"same as L199\"}}",
+    "L391 0.027 ai to server error",
     "        {",
     "          \"message\": \"broke\",",
     "          \"stack\": \"Error: broke\\n    at here\"",
     "        }",
+    "L400 0.028 note of console `dash` started.",
+    "          Its second line.",
     "",
     "==== engine start 2",
     "---- bring up",
-    "L397       0.029  ai to ai      engine.start",
+    "L406 0.030 ai to ai engine.start",
     "",
-    "not shown: 3 of 29 entries",
-    "        media to ui media.store reply: 1",
-    "        ui to ai media.store reply: 1",
-    "        ui to media media.store request: 1"
+    "entries: 30 in 0.030 s, engine starts: 2",
+    "model calls: 1, chains started: 1, copies of the system prompt sent: 2, input tokens: 0 of 0 served from cache",
+    "tools called: none",
+    "commits: kv.put 1, kv.delete 1, db.create 1, db.drop 1, doc.put 1, sql.run 1"
   ],
-  "dump_told": "^L\\d+ +\\d+\\.\\d{3}  databases of the browser \\d+ bytes$",
+  "dump_told": "^L\\d+ \\d+\\.\\d{3} databases of the (browser|server) \\d+ bytes$",
   "empty_digest": [
-    "each record: its line in the audit, seconds from the first entry, its lane, then what it says",
+    "each record: L and its line in the audit, seconds from the first entry, its label, then what it says; `same as L913` names the record that showed a text before",
     "",
-    "not shown: 0 of 0 entries"
+    "entries: 0 in 0.000 s, engine starts: 0",
+    "model calls: 0, chains started: 0, copies of the system prompt sent: 0, input tokens: 0 of 0 served from cache",
+    "tools called: none",
+    "commits: none"
   ],
   "guide_failures": {
     "console": {
@@ -3636,5 +3517,216 @@
   "check_passed": "check: no unexpected failure",
   "digest_title": "audit digest of {0}",
   "guide_name": "isaiah",
-  "guide_refused": "failure: line \\d+: the input 'Go' is not the step's '"
+  "guide_refused": "failure: line \\d+: the input 'Go' is not the step's '",
+  "databases_limits": [
+    16,
+    10485760
+  ],
+  "databases_start": [
+    "world",
+    "spare"
+  ],
+  "databases_settings": [
+    {
+      "sender": "server",
+      "receiver": "ai",
+      "line": {
+        "0": {
+          "type": "tap.start",
+          "id": 101
+        },
+        "settings": {
+          "overflow_bytes": 16,
+          "blob_max": 10485760
+        },
+        "switches": {
+          "debug": true
+        }
+      }
+    }
+  ],
+  "databases_commits": [
+    {
+      "line": {
+        "0": {
+          "type": "sql.run"
+        },
+        "db": "world",
+        "statements": [
+          {
+            "sql": "CREATE TABLE t (n INTEGER PRIMARY KEY, word TEXT NOT NULL, real REAL, data BLOB) STRICT",
+            "params": []
+          },
+          {
+            "sql": "INSERT INTO t VALUES (?, ?, ?, X'00ff')",
+            "params": [
+              1,
+              "one",
+              1.5
+            ]
+          },
+          {
+            "sql": "INSERT INTO t (n, word, data) VALUES (?, ?, zeroblob(40))",
+            "params": [
+              2,
+              "a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word "
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "line": {
+        "0": {
+          "type": "kv.put",
+          "key": "/world/scene",
+          "blobs": 1
+        },
+        "1": {
+          "size": 5
+        }
+      },
+      "data": "first"
+    },
+    {
+      "line": {
+        "0": {
+          "type": "kv.put",
+          "key": "/world/scene",
+          "blobs": 1
+        },
+        "1": {
+          "size": 6
+        }
+      },
+      "data": "second"
+    },
+    {
+      "line": {
+        "0": {
+          "type": "kv.put",
+          "key": "/world/big",
+          "blobs": 1
+        },
+        "1": {
+          "size": 42
+        }
+      },
+      "data": "a value past the overflow of sixteen bytes"
+    },
+    {
+      "line": {
+        "0": {
+          "type": "kv.put",
+          "key": "/world/old",
+          "blobs": 1
+        },
+        "1": {
+          "size": 4
+        }
+      },
+      "data": "gone"
+    },
+    {
+      "line": {
+        "0": {
+          "type": "kv.delete",
+          "key": "/world/old"
+        }
+      }
+    },
+    {
+      "line": {
+        "0": {
+          "type": "db.create"
+        },
+        "db": "temp"
+      }
+    },
+    {
+      "line": {
+        "0": {
+          "type": "kv.put",
+          "key": "/temp/note",
+          "blobs": 1
+        },
+        "1": {
+          "size": 4
+        }
+      },
+      "data": "lost"
+    },
+    {
+      "line": {
+        "0": {
+          "type": "db.drop"
+        },
+        "db": "temp"
+      }
+    },
+    {
+      "line": {
+        "0": {
+          "type": "doc.put"
+        },
+        "db": "world",
+        "id": "scene",
+        "body": {
+          "0": {
+            "t": "scene"
+          },
+          "subtitle": "A field."
+        }
+      }
+    },
+    {
+      "line": {
+        "0": {
+          "type": "turn.prompt"
+        },
+        "scene": "/world/scene/1",
+        "messages": [
+          {
+            "role": "system",
+            "content": "Be brief."
+          }
+        ]
+      }
+    },
+    {
+      "line": {
+        "0": {
+          "type": "turn.append"
+        },
+        "scene": "/world/scene/1",
+        "role": "user",
+        "content": [
+          {
+            "role": "user",
+            "content": "Hello."
+          }
+        ]
+      }
+    }
+  ],
+  "databases_put_ref": "/world/scene",
+  "databases_extra": "INSERT INTO t (n, word, data) VALUES (9, 'extra', X'00')",
+  "databases_failures": {
+    "value": "^line \\d+: /world/scene was put as 6 bytes of sha256 [0-9a-f]{64}, and the server holds \\[\\(5, '[0-9a-f]{64}'\\)\\]$",
+    "row": "^the replay of the record's commits differs from the server's databases at '==== world', 'CREATE TABLE t \\(.*\\) STRICT': the server holds \"  9, 'extra', NULL, x'00'\", the replay None$",
+    "refused": "^line \\d+: the replay of its sql.run failed: table t already exists$"
+  },
+  "databases_lines": [
+    "==== spare",
+    "==== world",
+    "table _kv: the SQL of spare",
+    "CREATE TABLE t (n INTEGER PRIMARY KEY, word TEXT NOT NULL, real REAL, data BLOB) STRICT",
+    "  1, 'one', 1.5, x'00ff'",
+    "  2, 'a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word a long word ', NULL, <40 bytes>",
+    "  'big', 42, x'9598448beb4fffb9c18dd4f8901097ba6d2c2a794637328c1e54c47556e241ad', NULL",
+    "  'scene', 6, x'16367aacb67a4a017c8da8ab95682ccb390863780f7114dda0a0e0c55644c7c4', b'second'",
+    "  'scene', 1",
+    "  '/world/scene/1', 0, 'system', '[{\"role\":\"system\",\"content\":\"Be brief.\"}]'",
+    "  '/world/scene/1', 1, 'user', '[{\"role\":\"user\",\"content\":\"Hello.\"}]'"
+  ]
 }

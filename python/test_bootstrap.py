@@ -13,9 +13,9 @@
 # no record: the root holds no audit, no `_verbose` file and no `tap`
 # directory.
 
-import audit, bootstrap, category, errno, fcntl, harness, json, os, pty
-import resource, runpy, select, signal, switches, sys, tempfile, termios, time
-import traceback, unittest
+import audit, bootstrap, category, errno, fcntl, harness, hashlib, json, os
+import pty, resource, runpy, select, signal, switches, sys, tempfile, termios
+import time, traceback, unittest
 from typing import Any, NamedTuple
 
 # The checkout's top directory, above this file's `python/`.
@@ -291,10 +291,18 @@ def _sent_entry(line: dict[str, Any]) -> tuple[str, str]:
     return _record_entry("audit_sent", line)
 
 
-# The entry of a line the run read, its bytes as the test wrote them.
+# A read line's entry, each blob header with the sha256 of its bytes.
 def _received_entry(given: bytes) -> tuple[str, str]:
-    text, _, _ = given.partition(b"\r")
-    return _record_entry("audit_received", json.loads(text))
+    text, _, data = given.partition(b"\r")
+    line: dict[str, Any] = json.loads(text)
+    number = 1
+    while str(number) in line:
+        blob: dict[str, Any] = line[str(number)]
+        size: int = blob["s"]
+        blob["sha256"] = hashlib.sha256(data[:size]).hexdigest()
+        data = data[size:]
+        number += 1
+    return _record_entry("audit_received", line)
 
 
 # The entry of a note of console of the text, indented as the audit does.

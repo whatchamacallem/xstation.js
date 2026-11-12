@@ -698,7 +698,10 @@ fault realm REALM->DRIVER 0 push; fails the block
   any statement of the store's own.
 - main_loop record: in debug mode the audit records each line read as `ai to
   server` before it is dispatched, and each push, reply and error as `server to
-  ai` before it is written, never its blob bytes. The audit's own lines, every
+  ai` before it is written, never its blob bytes: audit.line_received and
+  audit.line_sent add to each blob header `sha256`, the lowercase hex digest
+  of its bytes, beside its size, so that a kv.put names the value it stored. A
+  page thread's record holds the size alone. The audit's own lines, every
   type under `audit.`, are never recorded.
 - main_loop browser failure: engine_tap.error_take, which takes the message
   alone, runs in debug mode alone, in the echo loop too. In either mode the
@@ -2573,9 +2576,10 @@ fault realm REALM->DRIVER 0 push; fails the block
   devtools.LinuxPipe()) and climbs the rungs in it, under a category.LabelBook
   of the run's category, the root NAME entered with the gold's root_label.
 - guide rungs: served, under served_seconds; the gold's rungs in order, each
-  under rung_seconds; audit; left. served, audit and left take root_label, and
-  every rung of the three golds is smoke-test, so every level runs all of
-  them. Each rung's timer bounds the browser's DevTools waits too.
+  under rung_seconds; audit; left; databases, under rung_seconds. served,
+  audit, left and databases take root_label, and every rung of the three
+  golds is smoke-test, so every level runs all of them. Each rung's timer
+  bounds the browser's DevTools waits too.
 - guide served rung: xsjs_serve.page_ready, then xsjs_serve.root_make with
   fresh true on WORK/root, its parameters the run's switches with debug the
   gold's root_debug, true, and verbose its root_verbose, false; writes
@@ -2585,7 +2589,22 @@ fault realm REALM->DRIVER 0 push; fails the block
   start; starts xsjs_serve.TtydServer(values, root, 0, stderr) with SIGINT and
   SIGTERM blocked around the start; opens the address, waits for the gold's
   served band, "How can I help you?", with the box enabled, and checks its
-  picture, the hyperposition's 4 by 4 of `0 0 0 255`.
+  picture, the hyperposition's 4 by 4 of `0 0 0 255`; then copies the
+  server's databases into WORK/databases_start by the guide copy, before any
+  commit, as nothing has been typed.
+- guide copy: each `NAME.sqlite` of the root, by a substrate.Store opened on
+  the root and its db_snapshot, into a target directory by a second Store's
+  db_restore, each cache file passed as its bytes, as db_restore renames a
+  file passed by its path: the whole database transfer of db.sync, with no
+  wire. The server is idle at the first copy and has ended at the second, and
+  each Store closes its databases at the end of the copy.
+- guide databases rung: after left, copies the server's databases into
+  build/test_guide_NAME/databases/ by the guide copy, the download the user
+  asked for; runs audit_read.databases_check of the root's audit with
+  WORK/databases_start, that copy and the scratch WORK/databases_replay;
+  writes build/audit/NAME_db.txt, a title, audit_read.database_lines of the
+  copy, a blank line and the verdict, in every run; and only then fails on
+  what the check found.
 - guide audit rung: waits until audit_read.requests_open of the root's
   entries is empty, runs audit_read.failure_check then audit_read.guide_check
   on table_build of the guide and the gold, writes build/audit/NAME.txt, the
@@ -2593,11 +2612,12 @@ fault realm REALM->DRIVER 0 push; fails the block
   checks found, so a failed check keeps its digest; then requires exactly one
   line starting `==== engine started, ` in _audit.txt, the one load, and under
   the run's --debug copies the audit to build/test_guide_NAME/audit.txt.
-- guide digest: build/audit/NAME.txt, written by the audit rung of each guide
-  test in every run, never removed, each guide's file replaced by its next run.
-  A walk that fails before its audit rung writes none; its audit is in
-  build/test_guide_NAME/audit.txt, and `audit_read.py PATH --guide NAME
-  --digest FILE` makes one.
+- guide digest: build/audit/NAME.txt and build/audit/NAME_db.txt, written by
+  the audit and databases rungs of each guide test in every run, never
+  removed, each replaced by the guide's next run. A walk that fails before a
+  rung writes none of its file; its audit is in
+  build/test_guide_NAME/audit.txt, and `audit_read.py PATH --guide NAME >
+  FILE` makes the digest.
 - guide left rung: lists by /proc the pids of ttyd's children whose command
   line holds the root's bootstrap.py, failing when there is none; opens
   about:blank; waits for them to end; stops ttyd and requires the gold's
@@ -2971,62 +2991,75 @@ fault realm REALM->DRIVER 0 push; fails the block
 
 ## audit_read
 
-- audit_read.py: `python3 python/audit_read.py PATH [--check] [--guide NAME]
-  [--digest FILE]` prints the listing, one line per entry of an audit document,
-  its line number, seconds from the first entry, gap, lane, type, id or reply
-  and detail, by listing_lines, then a summary of the run: entries
-  and engine starts; inputs; model calls, the chains they started and the
-  copies of the system prompt sent; the copies written in the three lanes; the
-  input tokens served from cache by each reply's usage, with the share; each
-  lane's bytes as sent and as written, both laid out as the document lays out
-  a line; tools called and not called, or when the first model call sent
-  DEBUG_MODE_TOOL_LIST_OMITTED, called and that text; commits and dumps. It is not standard
-  library only: entries_parse imports audit for audit.ShownLog, and audit
-  imports jslb and internationalization, which reads i18n/en-US.json beside
-  the python directory.
+- audit_read.py: `python3 python/audit_read.py PATH [--check] [--guide NAME]`
+  prints `audit digest of PATH`, then the audit digest of the document, then,
+  when --check or --guide is given, a blank line and the verdict, all on
+  stdout, and exits 1 at a failure. It is not standard library only:
+  entries_parse imports audit for audit.ShownLog, audit imports jslb and
+  internationalization, which reads i18n/en-US.json beside the python
+  directory, and databases_check imports substrate.
 - audit_read model calls: a call is a request whose url ends in `/responses`
   and whose body holds input, a chain's start when it has no
   previous_response_id, and a reply an answer whose body holds output, usage
-  required. A call's detail counts its items by kind, the count kept and its
-  chain; a reply's names its id, cached tokens, calls and text. prompt_copies
-  counts the prompt in each call's input, 0 in a chained call.
-- audit_read listing and digest: the listing is one line per entry, cut at
-  _DETAIL_MAX; the audit digest is the run told for a person to read, and the
-  word digest names it alone. listing_lines was digest_lines until 2026-11-11.
-- audit_read --guide: runs the failure check, then guide_check on
-  guide_walk.table_build of python/guides/NAME and the gold
-  python.test_guide_NAME, and exits 1 at the first failure of either, naming
-  its line. Its verdict on a pass is `check: no unexpected failure, and every
-  message is the guide's`, which guide_walk repeats in its own constant.
-- audit_read --digest: writes `audit digest of PATH`, the digest_lines, then a
-  blank line and the verdict when --check or --guide is given. The verdict also
-  goes to stdout on a pass and stderr on a failure, as before.
-- audit digest records: a record is its entry's line in the audit, `L` and the
-  number, the seconds from the first entry, the lane, then what it says; its
-  later lines indented 8 spaces, a text's own later lines 10. `==== engine
+  required. A call's record tells its chain and items, a reply's its id,
+  cache, text and calls.
+- audit_read listing: removed on 2026-11-12, with --digest FILE, by task 1.2.1
+  of tmp/tasks_12_0354.md: one line per entry cut at 150 characters, a second
+  view of what the digest shows whole. The word digest names the audit digest
+  alone, and a redirect of stdout writes it to a file.
+- audit digest records: a record is `L` and its entry's line in the audit,
+  the seconds from the first entry, the entry's label, a lane as `ai to
+  server` or a note's `note of ai`, then what it says, single spaces between;
+  its later lines indented 8 spaces, a text's own later lines 10. `==== engine
   start N` then `---- bring up` open each start, and `---- turn K` each input.
+- audit digest every entry: every entry of the document has a record, none
+  hidden or counted apart, as an audit a person cannot read is no audit: a
+  note in its own words, as `note of ai sleeps on 9 until tools.x_reply`,
+  what a task waits on; an ai.say request with its text; the media port's
+  lines and the replies of render and media.store, a media.store reply with
+  its key, size and sha256; a dump whole, as a person asked for it.
 - audit digest shown whole: the player's input; each ai.say reply's band with
   its turn, told as the row the reply was stored at, and its scene, told as
   the scene shown, as agent.ts sends the row of the conversation the turn ran
   in and the scene on screen at its end, which differ when a turn changes the
-  scene; each model call's chain and items, a user's text, a call
-  output's text up to _RESULT_LENGTH and a system text the first time, later
-  `system: the text of L913`; each model reply's cache, text and calls; each
-  MCP tools/call and its result, up to _RESULT_LENGTH; each statement of a
-  sql.run commit with its params; each render's scene, image and subtitle;
-  each image request's prompt and answer's sizes; an error or fault laid out.
+  scene; each model call's chain and items, a user's text, a call output's
+  text and a system text; each model reply's cache, text and calls; each MCP
+  tools/call and its result; each statement of a sql.run commit with its params; each render's scene, image
+  and subtitle; each image request's prompt and answer's sizes; an error or
+  fault laid out.
+- audit digest same text: a text of a label, as `band: ` or `output call_x: `,
+  past _SAME_LENGTH, 80 characters, that a record showed before is told as
+  `same as L1812`, that record's line, and a system text so at any length: a
+  band repeats the model's last words, a call output its tool's result, a
+  model's words a render's subtitle, a chain's restart the prompts.
+- audit digest tool call: an MCP tools/call that runs a call of the model's
+  last reply not yet run, the same name past its prefix and the same
+  arguments, is told in one line by that call's id, as `tool call i=9
+  image_make for call_image`, the reply having shown the arguments; any other
+  shows its arguments, named as below. Its result is told `tool result r=9 of
+  call_image`.
 - audit digest one line: the bring up's tap.start and settings.set with the
   switches, engine.start, the MCP handshakes, tools/list with its names,
-  db.sync, db.restore; the commits kv.put and media.store with their sizes,
-  kv.delete, db.create, db.drop, doc.put with its body, turn.append with its
+  db.sync, db.restore and db.file with their size and sha256; the commits
+  kv.put with its size and sha256, media.store with its size, kv.delete,
+  db.create, db.drop, doc.put with its body, turn.append with its role and
   count of items, the items being the conversation shown already.
-- audit digest cut: a string past _CUT_LENGTH, 300, in a call's or a tool's
-  arguments or a document's body is cut and its length told, as a kv_put of a
-  sim's script would fill pages. Nothing else is cut.
-- audit digest hidden: notes, the media port's lane `ui to media` and `media to
-  ui`, the ai.say requests the inputs repeat, and the replies of render and
-  media.store, which carry nothing new. They are counted by kind at the end,
-  `not shown: N of M entries`, before the summary of summary_lines.
+- audit digest values: a string past _SAME_LENGTH in a value the digest shows
+  as JSON, a call's or a tool's arguments, a document's body, an MCP result or
+  a line no other record tells, that a record showed before, as a text or in a
+  value, is told as `same as L93`, by the one book of texts shown, so a sim's
+  script is shown once whole, at the reply that calls kv_put. Nothing is cut:
+  the cuts at 300 and 2000 characters went on 2026-11-12, by task 1.3.1 of
+  tmp/tasks_12_0354.md, as a cut hides what the audit recorded.
+- audit digest summary: after the records, one line each: the entries, their
+  seconds and the engine starts; the model calls, the chains they started,
+  the copies of the system prompt sent and the input tokens served from cache
+  with the share; each tool called and its count; each commit type and its
+  count. The inputs, which the turns show, each lane's bytes as sent and as
+  written, a measurement of the audit's own thinning, the copies of the
+  prompt written, which --check holds to one, the tool list, which no audit
+  holds as each is of debug mode, and the dumps, now shown, went on
+  2026-11-12.
 - guide_check lines: each line entry's lane, type and kind, request, reply or
   push, is one of _GUIDE_LINES: the bring up's tap.start, settings.set,
   engine.start, MCP handshakes and db.sync with its db.restore and db.file
@@ -3095,3 +3128,39 @@ fault realm REALM->DRIVER 0 push; fails the block
 - audit_read starts: requests and replies are paired within one start of the
   engine, as a reload's ids start again. A console's start heading is no such
   start, and each is counted against the engine's alone.
+- audit_read databases_check: databases_check(entries, start, end, scratch)
+  copies the directory `start`, a root's databases, to `scratch`, opens each
+  database there with substrate.Store at the overflow_bytes and blob_max of
+  the record's first tap.start, applies each commit of the record in order,
+  the `ai to server` lines of _COMMIT_TYPES, by the store method the server's
+  handler calls with that payload, read from its whole line by
+  jslb.json_decode as the server read it, then raises AuditFailed at the first
+  line where database_lines of `scratch` and of `end` differ, naming
+  the database and the table above it. A commit the store refuses, as a
+  db.create of a database the start holds, raises AuditFailed naming its line,
+  the store's error its cause, so that the guide's text of databases is
+  written with that verdict.
+- replay kv.put: the record holds no blob's bytes, so a put whose ref a later
+  kv.put or kv.delete names, or whose database a later db.drop drops, is
+  skipped, as it changes nothing the end holds; any other takes its bytes from
+  `end` by Store.kv_get once the row there has the record's size and sha256,
+  else raises naming the line.
+- replay limits: no other line changes the server's databases, as the server's
+  tools write none, and main_loop's own writes at an engine start, the
+  settings and the provider's script, come before that start's first line and
+  write the same rows again while the settings and the seed stay. A sql.run
+  that reads `_kv` would read the replay's rows, not the server's, for a
+  skipped put; no script does.
+- audit_read database_lines: database_lines(root) is each `NAME.sqlite` of a
+  directory in name order as text: `==== NAME`, then each object of
+  sqlite_schema in name order by its SQL on one line, or, when an earlier
+  database showed the same SQL, as `table _kv: the SQL of _files`, the
+  substrate's four tables being in every database; a table's rows after it,
+  two spaces in and in the order of all their columns, each cell NULL, a
+  number, a string as Python's repr, so that a JSON text keeps its quotes,
+  whole, or a BLOB as `b` and the repr of its whole text when it is UTF-8 with
+  no control character but newline and tab, else `x'HEX'` up to 32 bytes, as
+  a sha256, else `<N bytes>`. A value in the cache shows as its row's NULL
+  data. Nothing is cut, as the user asked for the contents, so a row is one
+  line however long: the scripted provider's table, the sim's script and the
+  reply row whose call carries it are 15 to 55 thousand characters each.

@@ -23,6 +23,22 @@
     "}",
     "[blobs omitted: 1]"
   ],
+  "blob_data": "abc",
+  "blob_digested_body": [
+    "{",
+    "  \"0\": {",
+    "    \"type\": \"kv.put\",",
+    "    \"blobs\": 1",
+    "  },",
+    "  \"1\": {",
+    "    \"size\": 3,",
+    "    \"sha256\": \"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"",
+    "  },",
+    "  \"key\": \"note\",",
+    "  \"db\": \"metaverse\"",
+    "}",
+    "[blobs omitted: 1]"
+  ],
   "plain_line": {
     "0": {"t": "ai.say", "i": 7},
     "text": "naïve 1"

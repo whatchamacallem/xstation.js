@@ -8,7 +8,7 @@
 # size and the write, so two processes never interleave or pass `blob_max`,
 # and a hard exit loses no entry a process took.
 
-import fcntl, jslb, json, os, time
+import fcntl, hashlib, jslb, json, os, time
 from internationalization import i18n
 from typing import Any, NamedTuple, cast
 
@@ -44,6 +44,12 @@ _MILLISECONDS = 1000
 
 # The header fields that count a line's blobs, short and full.
 _BLOB_FIELDS = ("b", "blobs")
+
+# The field of a blob header the server's record adds: its bytes' digest.
+_DIGEST_FIELD = "sha256"
+
+# The bytes of a cached blob's file read at a time to hash it.
+_HASH_CHUNK = 1048576
 
 # The format of a heading's time of day, then its milliseconds.
 _TIME_FORMAT = "%H:%M:%S"
@@ -456,10 +462,33 @@ def _shown_get() -> ShownLog:
     return _STATE.shown
 
 
+# The lowercase hex sha256 of a blob's bytes, held or in its cache file.
+def _digest_of(data: bytes | str) -> str:
+    if isinstance(data, bytes):
+        return hashlib.sha256(data).hexdigest()
+    digest = hashlib.sha256()
+    with open(data, "rb") as file:
+        while chunk := file.read(_HASH_CHUNK):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+# The value of a wire line's JSON text, each blob header with its sha256.
+def _digests_added(line: jslb.Object) -> dict[Any, Any]:
+    value = cast(dict[Any, Any], jslb.json_decode(jslb.line_json(line)))
+    number = 1
+    while number in value:
+        data: bytes | str = jslb.field_get(line[number], "data")
+        value[number][_DIGEST_FIELD] = _digest_of(data)
+        number += 1
+    return value
+
+
 # A line entry, what the document shows left out of the conversation.
-def _record_append(sender: str, receiver: str, at: int, text: str) -> None:
+def _record_append(
+    sender: str, receiver: str, at: int, line: dict[Any, Any]
+) -> None:
     label = i18n("audit.line_label", sender, receiver)
-    line = cast(dict[Any, Any], jslb.json_decode(text))
     if label in _LANES:
         kind: str = jslb.field_get(line[0], "type")
         line = _shown_get().line_thin(label, kind, line)
@@ -478,27 +507,25 @@ def note_text(thread: str, at: int, text: str) -> str:
     return _entry_text(at, label, _indented(text, _INDENT))
 
 
-# A line entry of a wire line the server read, but the audit's own lines.
+# A line entry of a wire line the server read, its blobs' sha256 added.
 def line_received(line: jslb.Object) -> None:
     if not _own_is(line):
-        _record_append(
-            _WIRE_THREAD, _SERVER_NAME, _now(), jslb.line_json(line)
-        )
+        line_value = _digests_added(line)
+        _record_append(_WIRE_THREAD, _SERVER_NAME, _now(), line_value)
 
 
-# A line entry of a wire line the server writes, written before the line.
+# A line entry of a wire line the server writes, its blobs' sha256 added.
 def line_sent(line: jslb.Object) -> None:
     if not _own_is(line):
-        _text_append(
-            record_text(
-                _SERVER_NAME, _WIRE_THREAD, _now(), jslb.line_json(line)
-            )
-        )
+        label = i18n("audit.line_label", _SERVER_NAME, _WIRE_THREAD)
+        body = _value_layout(_digests_added(line))
+        _text_append(_entry_text(_now(), label, body))
 
 
 # A line entry of a page thread's record.
 def record_put(sender: str, receiver: str, at: int, text: str) -> None:
-    _record_append(sender, receiver, at, text)
+    line = cast(dict[Any, Any], jslb.json_decode(text))
+    _record_append(sender, receiver, at, line)
 
 
 # A note of a thread.
