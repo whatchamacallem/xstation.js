@@ -66,7 +66,7 @@ def program_end(directory: str, ending_path: str) -> None:
 
 # The table's rows, and the row that a path's extension finds.
 class TestTable(unittest.TestCase):
-    # The table holds a row of the six fields for each whitelisted extension.
+    # The table holds a row of the seven fields for each whitelisted extension.
     def test_rows_read(self) -> None:
         table = reformat.table_read()
         self.assertEqual(
@@ -89,7 +89,7 @@ class TestTable(unittest.TestCase):
     def test_windows_rows(self) -> None:
         table = reformat.table_read()
         expected = reformat.FileType(
-            [], "powershell", "utf-8-sig", [], [], "windows"
+            [], "powershell", "utf-8-sig", [], [], "windows", []
         )
         for extension in (".ps1", ".psd1"):
             self.assertEqual(table[extension], expected, extension)

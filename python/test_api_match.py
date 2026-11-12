@@ -8,6 +8,7 @@
 # real checkout is matched by `test_posix.py`.
 
 import api_match, category, json, os, tempfile, unittest
+from typing import cast
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -296,7 +297,9 @@ class TestCheckout(ScratchCase):
         with self.assertRaises(RuntimeError) as caught:
             api_match.text_match(self.root)
         self.assertIn("shape_count: ", str(caught.exception))
-        output = str(caught.exception.__cause__.__cause__)
+        cause = caught.exception.__cause__
+        self.assertIsInstance(cause, RuntimeError)
+        output = str(cast(RuntimeError, cause).__cause__)
         self.assertEqual(output.count("check.ts("), _TYPE_ERRORS)
 
     # A fault of the text itself keeps tsc's own failure.

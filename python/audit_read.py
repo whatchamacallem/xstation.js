@@ -1582,7 +1582,7 @@ def _value_held(ended: Any, entry: ReadEntry, ref: str) -> bytes:
     blob: dict[str, Any] = cast(dict[str, Any], entry.line)["1"]
     put = [(int(_field_get(blob, "size", "s")), str(blob[_DIGEST_FIELD]))]
     db, key, _ = substrate.ref_split(ref)
-    rows = ended.kv_list(db, key) if db in ended.db_list() else []
+    rows: list[Any] = ended.kv_list(db, key) if db in ended.db_list() else []
     held = [(row.size, row.sha256.hex()) for row in rows if row.key == key]
     if held != put:
         raise AuditFailed(
@@ -1721,7 +1721,7 @@ def _repeated_read(end: str, repeated: dict[str, Any]) -> str:
     connection = sqlite3.connect(uri, uri=True)
     try:
         cursor = connection.execute(repeated["sql"], repeated["params"])
-        rows: list[Any] = cursor.fetchall()
+        rows: list[tuple[object, ...]] = cursor.fetchall()
     finally:
         connection.close()
     shapes = [tuple(type(cell) for cell in row) for row in rows]

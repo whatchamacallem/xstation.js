@@ -5,8 +5,9 @@
 #
 # Checks the characters and comments of the whitelisted files, audits every
 # ts/*.ts file other than the _SYNCHRONIZATION_MODULES for synchronization
-# tokens, formats the files in a test-all run, then lints them. A PowerShell
-# file, formatted on Windows, has only its characters and comments checked.
+# tokens, formats and type checks the files in a test-all run, then lints
+# them. A PowerShell file, formatted on Windows, has only its characters and
+# comments checked.
 # Last, page_build.api_check compiles the API text of API/ts as one project,
 # and api_match.text_match proves the text of API/ against the code.
 #
@@ -267,7 +268,7 @@ def end_find(path: str, text: str, i: int, needle: str) -> int:
     return end + len(needle)
 
 
-# Formats in a `test-all` run, and does nothing in a `smoke-test` run.
+# Formats and type checks in a `test-all` run, and nothing in `smoke-test`.
 def formatter_run(paths: list[str], chosen: str) -> None:
     import category, reformat
 
@@ -644,9 +645,10 @@ def main(arguments: list[str]) -> None:
     parser = argparse.ArgumentParser(
         description="Check the characters and comments of the files"
         " reformat_whitelist.txt lists, audit the ts/*.ts files for"
-        " synchronization tokens, then format the files of the linux rows"
-        " of reformat_table.json in a test-all run, lint them, compile"
-        " the API text of API/ts and prove the text of API/ against the code."
+        " synchronization tokens, then format and type check the files of"
+        " the linux rows of reformat_table.json in a test-all run, lint"
+        " them, compile the API text of API/ts and prove the text of API/"
+        " against the code."
     )
     category.options_add(parser)
     switches.options_add(parser)

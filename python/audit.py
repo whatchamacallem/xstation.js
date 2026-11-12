@@ -152,7 +152,7 @@ def _tools_cut(fields: dict[Any, Any], shown: list[Any]) -> dict[Any, Any]:
     cut: dict[Any, Any] = {}
     for key, value in fields.items():
         if key == _TOOLS_FIELD and isinstance(value, list) and value == shown:
-            cut[_TOOLS_KEPT] = len(value)
+            cut[_TOOLS_KEPT] = len(shown)
         else:
             cut[key] = value
     return cut

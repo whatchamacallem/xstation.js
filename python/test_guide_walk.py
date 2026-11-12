@@ -217,7 +217,8 @@ class TestScratch(unittest.TestCase):
     def test_calls_refused(self) -> None:
         for member in _EXIT_CALLS:
             first = gold_value("table")["exit"][member][0]
-            for broken in ([], first):
+            values: list[Any] = [[], first]
+            for broken in values:
                 with self.subTest(member=member, broken=broken):
                     self.table = gold_value("table")
                     self.table["exit"][member] = broken

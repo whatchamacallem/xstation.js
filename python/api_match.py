@@ -389,11 +389,12 @@ def attributes_read(
 ) -> Iterator[tuple[str, ast.stmt]]:
     for parent in body:
         for statement in ast.walk(parent):
-            targets: list[ast.expr] = []
             if isinstance(statement, ast.Assign):
                 targets = statement.targets
             elif isinstance(statement, ast.AnnAssign):
                 targets = [statement.target]
+            else:
+                continue
             for target in targets:
                 if (
                     isinstance(target, ast.Attribute)
@@ -576,7 +577,8 @@ def handlers_match(lines_path: str, code_path: str) -> None:
             assert isinstance(function_node, ast.Name)
             function = scope[function_node.id]
             assert isinstance(function, ast.FunctionDef)
-            line_type: str = type_node.value
+            assert isinstance(type_node.value, str)
+            line_type = type_node.value
             if function.args.kwarg is not None:
                 continue
             payload = payload_name(line_type)

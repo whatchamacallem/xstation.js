@@ -2022,9 +2022,17 @@ fault realm REALM->DRIVER 0 push; fails the block
   run only in a bring up that builds.
 - test_posix.py: the checks of the whitelisted files: UTF-8 with no non-ASCII
   outside _NON_ASCII_ALLOWED; the comment rules; then the formatters of
-  reformat.py in a test-all run; then the linters of their rows; last
-  page_build.api_check and api_match.text_match. reformat_table.json gives each extension its comment
-  lexer, codec, checker, formatter and linter. --anthropic does none of this.
+  reformat.py in a test-all run, then their type checkers; then the linters of
+  their rows; last page_build.api_check and api_match.text_match.
+  reformat_table.json gives each extension its comment lexer, codec, checker,
+  formatter, linter and type checker. --anthropic does none of this.
+- type checker: the row's type_checker of reformat_table.json, pyright
+  --project python/pyproject.toml, strict, for .py and .pyi. reformat.reformat
+  runs it after every formatter, in a test-all run and in reformat.py run
+  alone, with PYRIGHT_PYTHON_IGNORE_WARNINGS set, so the PyPI wrapper asks
+  PyPI nothing, its output captured: dropped when it passes, as pyright has no
+  quiet option, and the RuntimeError's message, the CalledProcessError its
+  cause, when it fails.
 - synchronization audit: test_posix.py fails a ts/*.ts file outside
   _SYNCHRONIZATION_MODULES that uses await, .then(, new Promise, Atomics or
   SharedArrayBuffer outside its comments and literals.

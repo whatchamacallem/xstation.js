@@ -5,7 +5,8 @@
     "encoding": "utf-8",
     "formatter": ["prettier", "--write", "--log-level", "warn", "--no-config", "--print-width", "79"],
     "linter": [],
-    "system": "linux"
+    "system": "linux",
+    "type_checker": []
   },
   ".js": {
     "checker": ["prettier", "--check", "--no-config", "--print-width", "79"],
@@ -13,7 +14,8 @@
     "encoding": "utf-8",
     "formatter": ["prettier", "--write", "--log-level", "warn", "--no-config", "--print-width", "79"],
     "linter": [],
-    "system": "linux"
+    "system": "linux",
+    "type_checker": []
   },
   ".ps1": {
     "checker": [],
@@ -21,7 +23,8 @@
     "encoding": "utf-8-sig",
     "formatter": [],
     "linter": [],
-    "system": "windows"
+    "system": "windows",
+    "type_checker": []
   },
   ".psd1": {
     "checker": [],
@@ -29,7 +32,8 @@
     "encoding": "utf-8-sig",
     "formatter": [],
     "linter": [],
-    "system": "windows"
+    "system": "windows",
+    "type_checker": []
   },
   ".py": {
     "checker": ["ruff", "format", "--check", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
@@ -37,7 +41,8 @@
     "encoding": "utf-8",
     "formatter": ["ruff", "format", "--quiet", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
     "linter": ["ruff", "check", "--quiet", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
-    "system": "linux"
+    "system": "linux",
+    "type_checker": ["pyright", "--project", "python/pyproject.toml"]
   },
   ".pyi": {
     "checker": ["ruff", "format", "--check", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
@@ -45,7 +50,8 @@
     "encoding": "utf-8",
     "formatter": ["ruff", "format", "--quiet", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
     "linter": ["ruff", "check", "--quiet", "--config", "python/pyproject.toml", "--cache-dir", "build/ruff_cache"],
-    "system": "linux"
+    "system": "linux",
+    "type_checker": ["pyright", "--project", "python/pyproject.toml"]
   },
   ".sh": {
     "checker": ["shfmt", "--diff"],
@@ -53,7 +59,8 @@
     "encoding": "utf-8",
     "formatter": ["shfmt", "--list", "--write"],
     "linter": [],
-    "system": "linux"
+    "system": "linux",
+    "type_checker": []
   },
   ".ts": {
     "checker": ["prettier", "--check", "--no-config", "--print-width", "79"],
@@ -61,6 +68,7 @@
     "encoding": "utf-8",
     "formatter": ["prettier", "--write", "--log-level", "warn", "--no-config", "--print-width", "79"],
     "linter": [],
-    "system": "linux"
+    "system": "linux",
+    "type_checker": []
   }
 }

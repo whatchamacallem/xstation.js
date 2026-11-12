@@ -16,7 +16,7 @@
 import audit, dispatch, engine_audit, harness, jslb, json, os, signal
 import substrate, sys, tempfile, traceback, unittest
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -202,7 +202,11 @@ class TestRecord(ScratchCase):
     def test_blob_missing(self) -> None:
         def work() -> Any:
             _ready(self.root)
-            payload = {"sender": "ui", "receiver": "ai", "at": _AT}
+            payload: dict[str, Any] = {
+                "sender": "ui",
+                "receiver": "ai",
+                "at": _AT,
+            }
             dispatch.line_dispatch(_line("audit.line", [], **payload))
 
         text = _gold("texts.blob_missing")
@@ -225,7 +229,7 @@ class TestTail(ScratchCase):
             _ready(root, line_max)
             for note in _gold("tail_notes"):
                 dispatch.line_dispatch(_note(note))
-            reply = dispatch.line_dispatch(_tail(count))
+            reply = cast(jslb.Object, dispatch.line_dispatch(_tail(count)))
             return [jslb.field_get(reply[0], "reply"), reply["text"]]
 
         return self.child_value(work)

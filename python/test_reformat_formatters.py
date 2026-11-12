@@ -3,7 +3,8 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests reformat's check and formatting with the real formatters of
-# reformat_table.json, ruff, shfmt and prettier.
+# reformat_table.json, ruff, shfmt and prettier, and its type checker,
+# pyright, which refuses a Python file of a type error once it is formatted.
 # Each check or formatting runs in a forked child whose stdout and stderr go
 # to a scratch file under build/, so that no formatter writes to the stream.
 # A file its formatter would change is refused by its row's checker and left
@@ -41,6 +42,18 @@ _PYTHON_RAW = "x=1\n"
 
 # That Python as ruff formats it.
 _PYTHON_FORMATTED = "x = 1\n"
+
+# Python of a type error that ruff changes.
+_MISTYPED_RAW = 'x:int="a"\n'
+
+# That Python as ruff formats it.
+_MISTYPED_FORMATTED = 'x: int = "a"\n'
+
+# Where pyright places the type error in the formatted file.
+_MISTYPED_PLACE = ":1:10 - error: "
+
+# The Python row's type checker, before its files.
+_PYTHON_TYPE_CHECKER = ["pyright", "--project", "python/pyproject.toml"]
 
 # Shell that shfmt changes.
 _SHELL_RAW = "echo  a\n"
@@ -159,3 +172,17 @@ class TestFormat(ChildCase):
         work = functools.partial(reformat.format_check, paths)
         ending, _ = self.child_run(work)
         self.assertEqual(ending, _ENDING_RETURNED)
+
+    # A type error fails the formatting once its file is formatted, the type
+    # checker's report the error and its exit the cause, with nothing printed.
+    def test_types_refused(self) -> None:
+        path = self.file_write("b.py", _MISTYPED_RAW)
+        work = functools.partial(reformat.reformat, [path])
+        ending, output = self.child_run(work)
+        self.assertIn(
+            f"RuntimeError: {path}\n  {path}{_MISTYPED_PLACE}", ending
+        )
+        command = repr([*_PYTHON_TYPE_CHECKER, path])
+        self.assertIn(f"CalledProcessError: Command '{command}'", ending)
+        self.assertEqual(output, "")
+        self.assertEqual(text_read(path), _MISTYPED_FORMATTED)

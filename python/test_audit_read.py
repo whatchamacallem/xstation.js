@@ -21,7 +21,7 @@
 
 import audit, audit_read, copy, harness, jslb, json, os, runpy, shutil, signal
 import sqlite3, substrate, sys, tempfile, traceback, unittest
-from typing import Any
+from typing import Any, cast
 
 # The id of this module's gold, in its own `test_setting_` file.
 _GOLD_ID = "python.test_audit_read"
@@ -217,7 +217,7 @@ class TestRead(AuditCase):
     # A blob's mark after the JSON leaves the JSON read.
     def test_blobs_read(self) -> None:
         entries = self.entries_of("blobs")
-        self.assertEqual(entries[0].line["size"], 3)
+        self.assertEqual(cast(dict[str, Any], entries[0].line)["size"], 3)
 
     # Each lane of the conversation writes fewer bytes than it sent.
     def test_lanes_thinner(self) -> None:
@@ -547,7 +547,8 @@ class TestRepeated(AuditCase):
                     gold_value("repeat_table"),
                     gold_value("repeat_query"),
                 )
-                number = entries[fault["line"]].number
+                line: int = fault["line"]
+                number = entries[line].number
                 self.assertEqual(message, fault["failure"].format(number))
 
     # A content of the table that holds the output fails, named by its place.
