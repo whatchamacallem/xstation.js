@@ -1,23 +1,21 @@
 // A scripted provider, which the tests and the engine page run: no network,
 // no AI. A port that answers the `http.request` lines of provider.ts. The
-// latest user message picks a reply from the current node: the decimal text
-// of one integer its `replies` holds, else the node's `otherwise`, the reply
-// to any other text, a person's bad input being expected. A node with no
-// `otherwise` refuses such a text, in a test's own table a bug of the test,
-// and a content that is not a string is refused in every table. A tool result
-// moves to the node the reply names, which answers with `after_tools`. A node
-// holding `after_holds` reads the results first: when one of them lacks that
-// text it answers with `after_lacks`, whose tool calls move on as those of
-// `after_tools` do. A node holding one of the two and not the other is a
-// broken table, refused when tool results reach it. Every image request is
-// answered with the image of `image_pattern` as `b64_json`. Once it has chosen
-// a reply it holds the whole request to what xAI expects, refusing the first
-// bad field by `provider_script.field_invalid`. It keeps each response it
-// answered under its id, unless `store` is false, so that a request chained
-// from it is checked against it and one chained from any other id refused.
-// Each reply holds a reasoning item, xAI's echoes of the request, and a `usage`
-// of arithmetic on the context, in characters and never a tokenizer's count.
-// In debug mode, by its reader, it takes `provider.tools_omitted` for tools.
+// latest user message, its ends trimmed and its letters lowered, picks the
+// reply its node's `replies` holds under that text: a number, a word or a
+// phrase. Any other text gets the node's `otherwise`, a person's bad input
+// being expected; with none it is refused, in a test's own table a bug of the
+// test, as is a content that is not a string and a key no input can match. A
+// tool result moves to the node the reply names, which answers with
+// `after_tools`, or with `after_lacks` when it holds `after_holds` and a
+// result lacks that text. A reply's `quote` is a path into the JSON of the
+// last tool result, whose string it says before its `content`. Every image
+// request gets the image of `image_pattern` as `b64_json`. Once it has chosen
+// a reply it holds the request to what xAI expects, refusing the first bad
+// field by `provider_script.field_invalid`. It keeps each response under its
+// id, unless `store` is false, to check a request chained from it. Each reply
+// holds a reasoning item, xAI's echoes of the request, and a `usage` of
+// arithmetic on the context in characters. In debug mode, by its reader, it
+// takes `provider.tools_omitted` for tools.
 
 declare namespace provider_script {
   // A call of the script, which the reply sends as a `function_call` item.
@@ -28,15 +26,17 @@ declare namespace provider_script {
   }
 
   interface ScriptReply {
-    // What the assistant says, null when it only calls tools.
+    // What the assistant says, null when it only calls tools or only quotes.
     content: string | null;
+    // A path of members joined by `.` into the JSON of the last tool result.
+    quote?: string;
     tool_calls?: ScriptCall[];
     // The node to be in after this reply's tool results arrive.
     next: string;
   }
 
   interface ScriptNode {
-    // Replies by the integer the user sent, as decimal strings.
+    // Replies by the text the user sent, its ends trimmed, in lower case.
     replies: { [input: string]: ScriptReply };
     // The reply to any other text the user sent.
     otherwise?: ScriptReply;

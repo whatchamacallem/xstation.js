@@ -1,0 +1,246 @@
+{
+  "arguments_text": "{\"name\":\"scratch\",\"args\":{\"action\":\"setup\",\"label\":\"camp\"}}",
+  "built": {
+    "start": "begin",
+    "nodes": {
+      "begin": {
+        "replies": {
+          "build": {
+            "content": null,
+            "tool_calls": [
+              {
+                "call_id": "call_build",
+                "name": "browser_script_run",
+                "arguments": "{\"name\":\"scratch\",\"args\":{\"action\":\"setup\",\"label\":\"camp\"}}"
+              }
+            ],
+            "next": "built"
+          }
+        },
+        "otherwise": {
+          "content": "Say build.",
+          "next": "begin"
+        }
+      },
+      "built": {
+        "replies": {},
+        "after_tools": {
+          "content": "East or west?",
+          "quote": "value.say",
+          "next": "choose"
+        }
+      },
+      "choose": {
+        "replies": {
+          "east": {
+            "content": null,
+            "tool_calls": [
+              {
+                "call_id": "call_east",
+                "name": "browser_script_run",
+                "arguments": "{\"name\":\"scratch\",\"args\":{\"action\":\"go\",\"way\":\"east\"}}"
+              }
+            ],
+            "next": "moved"
+          },
+          "take me back": {
+            "content": null,
+            "tool_calls": [
+              {
+                "call_id": "call_exit",
+                "name": "browser_script_run",
+                "arguments": "{\"name\":\"scratch\",\"args\":{\"action\":\"exit\"}}"
+              }
+            ],
+            "next": "choose~exit"
+          }
+        },
+        "otherwise": {
+          "content": "Come again? East or west?",
+          "next": "choose"
+        }
+      },
+      "moved": {
+        "replies": {},
+        "after_holds": "\"outcome\":\"made\"",
+        "after_tools": {
+          "content": "Well done.",
+          "quote": "value.say",
+          "next": "end"
+        },
+        "after_lacks": {
+          "content": "East or west?",
+          "quote": "value.say",
+          "next": "choose"
+        }
+      },
+      "end": {
+        "replies": {},
+        "otherwise": {
+          "content": "That is all.",
+          "next": "end"
+        }
+      },
+      "choose~exit": {
+        "replies": {},
+        "after_tools": {
+          "content": "You are back at the fire.",
+          "quote": "value.say",
+          "next": "choose~paused"
+        }
+      },
+      "choose~paused": {
+        "replies": {
+          "go on": {
+            "content": null,
+            "tool_calls": [
+              {
+                "call_id": "call_resume",
+                "name": "browser_script_run",
+                "arguments": "{\"name\":\"scratch\",\"args\":{\"action\":\"resume\"}}"
+              }
+            ],
+            "next": "choose~resume"
+          }
+        },
+        "otherwise": {
+          "content": "Say go on when you are ready.",
+          "next": "choose~paused"
+        }
+      },
+      "choose~resume": {
+        "replies": {},
+        "after_tools": {
+          "content": "East or west?",
+          "quote": "value.say",
+          "next": "choose"
+        }
+      }
+    }
+  },
+  "files": {
+    "after.txt": "You are back at the fire.\n",
+    "ask.txt": "East or west?\n"
+  },
+  "guides": [
+    "isaiah",
+    "ruth",
+    "dawa"
+  ],
+  "table": {
+    "start": "begin",
+    "puzzled": "Come again?",
+    "exit": {
+      "input": "take me back",
+      "call": {
+        "call_id": "call_exit",
+        "name": "browser_script_run",
+        "arguments": {
+          "name": "scratch",
+          "args": {
+            "action": "exit"
+          }
+        }
+      },
+      "after": {
+        "$text": "after.txt"
+      },
+      "resume": "go on",
+      "resume_call": {
+        "call_id": "call_resume",
+        "name": "browser_script_run",
+        "arguments": {
+          "name": "scratch",
+          "args": {
+            "action": "resume"
+          }
+        }
+      },
+      "paused": "Say go on when you are ready."
+    },
+    "nodes": {
+      "begin": {
+        "replies": {
+          "build": {
+            "content": null,
+            "tool_calls": [
+              {
+                "call_id": "call_build",
+                "name": "browser_script_run",
+                "arguments": {
+                  "name": "scratch",
+                  "args": {
+                    "action": "setup",
+                    "label": "camp"
+                  }
+                }
+              }
+            ],
+            "next": "built"
+          }
+        },
+        "otherwise": {
+          "content": "Say build.",
+          "next": "begin"
+        }
+      },
+      "built": {
+        "replies": {},
+        "after_tools": {
+          "content": {
+            "$text": "ask.txt"
+          },
+          "quote": "value.say",
+          "next": "choose"
+        }
+      },
+      "choose": {
+        "ask": {
+          "$text": "ask.txt"
+        },
+        "replies": {
+          "east": {
+            "content": null,
+            "tool_calls": [
+              {
+                "call_id": "call_east",
+                "name": "browser_script_run",
+                "arguments": {
+                  "name": "scratch",
+                  "args": {
+                    "action": "go",
+                    "way": "east"
+                  }
+                }
+              }
+            ],
+            "next": "moved"
+          }
+        }
+      },
+      "moved": {
+        "replies": {},
+        "after_holds": "\"outcome\":\"made\"",
+        "after_tools": {
+          "content": "Well done.",
+          "quote": "value.say",
+          "next": "end"
+        },
+        "after_lacks": {
+          "content": {
+            "$text": "ask.txt"
+          },
+          "quote": "value.say",
+          "next": "choose"
+        }
+      },
+      "end": {
+        "replies": {},
+        "otherwise": {
+          "content": "That is all.",
+          "next": "end"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,592 @@
+{
+  "start": "hyperposition",
+  "puzzled": "Say again? The wind took that.",
+  "exit": {
+    "input": "i tap my head twice",
+    "call": {
+      "call_id": "call_exit",
+      "name": "browser_script_run",
+      "arguments": {"name": "ruth", "args": {"action": "exit"}}
+    },
+    "after": "No questions, no teasing. Say go on when you want to go back up.",
+    "resume": "go on",
+    "resume_call": {
+      "call_id": "call_resume",
+      "name": "browser_script_run",
+      "arguments": {"name": "ruth", "args": {"action": "resume"}}
+    },
+    "paused": "No hurry. I'll sit on the wheel in the shade. Say go on when you want to go back up."
+  },
+  "nodes": {
+    "hyperposition": {
+      "replies": {
+        "take me flying": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_image",
+              "name": "browser_image_make",
+              "arguments": {
+                "prompt": "A biplane with wings patched in shades of cream stands in a hayfield mown short under flat bright daylight, and a woman barnstormer in boots and breeches, goggles pushed up into red hair, drops off its lower wing.",
+                "key": "ruth/hayfield.png"
+              }
+            }
+          ],
+          "next": "made"
+        }
+      },
+      "otherwise": {
+        "content": "There is a barnstormer in a hayfield and nothing else on offer today, I'm afraid. Say take me flying, if you can bear the excitement.",
+        "next": "hyperposition"
+      }
+    },
+    "made": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_bootstrap",
+            "name": "browser_script_run",
+            "arguments": {
+              "name": "bootstrap",
+              "args": {
+                "title": "The First Ride's Free",
+                "region": "county",
+                "universe": "barnstorming",
+                "world": "summer",
+                "scene": {
+                  "id": "hayfield",
+                  "subtitle": {"$text": "introduction.txt"},
+                  "image": "/_files/ruth/hayfield.png"
+                }
+              }
+            }
+          },
+          {
+            "call_id": "call_prompt",
+            "name": "browser_doc_put",
+            "arguments": {
+              "db": "barnstorming",
+              "id": "prompt",
+              "body": {"0": {"t": "prompt"}, "text": {"$text": "prompt.txt"}}
+            }
+          }
+        ],
+        "next": "booted"
+      }
+    },
+    "booted": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_render",
+            "name": "browser_render",
+            "arguments": {
+              "image": "/_files/ruth/hayfield.png",
+              "subtitle": {"$text": "introduction.txt"}
+            }
+          }
+        ],
+        "next": "shown"
+      }
+    },
+    "shown": {
+      "replies": {},
+      "after_tools": {
+        "content": {"$text": "introduction.txt"},
+        "next": "offer"
+      }
+    },
+    "offer": {
+      "replies": {
+        "what if i hate it?": {
+          "content": "Then you tap your head twice and I set us down like a feather. No questions, no teasing. So, are you coming?",
+          "next": "offer"
+        },
+        "yes": {
+          "content": "That's the spirit. I don't fly with strangers, so what do I call you?",
+          "next": "name"
+        },
+        "i tap my head twice": {
+          "content": "We haven't left the grass, so there's nothing to set down. The front seat stays open whenever you want it.",
+          "next": "offer"
+        }
+      },
+      "otherwise": {
+        "content": "No is an answer, and I take it as one. The front seat stays open if you change your mind.",
+        "next": "offer"
+      }
+    },
+    "name": {
+      "replies": {
+        "sam": {
+          "content": "Sam. I work my way from town to town all summer selling rides, and I'm short a partner. Ask me anything while I check her over, or say let's go.",
+          "next": "talk"
+        },
+        "i tap my head twice": {
+          "content": "We haven't left the grass, so there's nothing to set down, and you can walk off any time. What do I call you?",
+          "next": "name"
+        }
+      },
+      "otherwise": {
+        "content": "Say it again, louder, the way you'd shout it over the engine. What do I call you?",
+        "next": "name"
+      }
+    },
+    "talk": {
+      "replies": {
+        "why are you short a partner?": {
+          "content": "My last partner married a feed merchant in May and swore off the sky. This summer's purse is mine to win alone, and if it comes up short, the bank takes the Jenny. Say let's go when you want to fly.",
+          "next": "talk"
+        },
+        "let's go": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_script",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/ruth.js",
+                "text": {"$text": "sim.js"}
+              }
+            },
+            {
+              "call_id": "call_tables",
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "summer",
+                "statements": [
+                  {
+                    "sql": "CREATE TABLE jenny (id INTEGER PRIMARY KEY CHECK (id = 1), partner TEXT NOT NULL, altitude_ft INTEGER NOT NULL, resume_ft INTEGER NOT NULL, exits INTEGER NOT NULL, purse_cents INTEGER NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE flight (n INTEGER PRIMARY KEY, beat TEXT NOT NULL, choice TEXT NOT NULL, outcome TEXT NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE keepsake (kind TEXT NOT NULL PRIMARY KEY, text TEXT NOT NULL) STRICT",
+                    "params": []
+                  }
+                ]
+              }
+            },
+            {
+              "call_id": "call_setup",
+              "name": "browser_script_run",
+              "arguments": {
+                "name": "ruth",
+                "args": {"action": "setup", "partner": "Sam"}
+              }
+            }
+          ],
+          "next": "built"
+        },
+        "i tap my head twice": {
+          "content": "We haven't left the grass, so there's nothing to set down, and you can walk off any time. Say let's go if you change your mind.",
+          "next": "talk"
+        }
+      },
+      "otherwise": {
+        "content": "Save it for the air, it's quieter up there. Ask me why I'm short a partner, or say let's go.",
+        "next": "talk"
+      }
+    },
+    "built": {
+      "replies": {},
+      "after_tools": {
+        "content": "Climb in up front and buckle the belt. Say take her up when you're settled.",
+        "quote": "value.say",
+        "next": "ground"
+      }
+    },
+    "ground": {
+      "ask": "Climb in up front and buckle the belt. Say take her up when you're settled.",
+      "replies": {
+        "take her up": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_climb",
+              "name": "browser_script_run",
+              "arguments": {"name": "ruth", "args": {"action": "climb"}}
+            }
+          ],
+          "next": "climbed"
+        }
+      }
+    },
+    "climbed": {
+      "replies": {},
+      "after_tools": {
+        "content": "Easy, like I promised. Feel her ride the air? Say your stick when you want to fly her yourself.",
+        "quote": "value.say",
+        "next": "aloft"
+      }
+    },
+    "aloft": {
+      "ask": "Easy, like I promised. Feel her ride the air? Say your stick when you want to fly her yourself.",
+      "replies": {
+        "your stick": {
+          "content": "She's yours. Turns first: how many degrees of bank do you give her?",
+          "next": "turns"
+        }
+      }
+    },
+    "turns": {
+      "ask": "She's yours. Turns first: how many degrees of bank do you give her?",
+      "replies": {
+        "60": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_steep",
+              "name": "browser_script_run",
+              "arguments": {"name": "ruth", "args": {"action": "turn", "bank": 60}}
+            }
+          ],
+          "next": "turned"
+        },
+        "30": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_gentle",
+              "name": "browser_script_run",
+              "arguments": {"name": "ruth", "args": {"action": "turn", "bank": 30}}
+            }
+          ],
+          "next": "turned"
+        }
+      }
+    },
+    "turned": {
+      "replies": {},
+      "after_holds": "\"outcome\":\"made\"",
+      "after_tools": {
+        "content": "Now a loop: dive for speed, then pull. How fast is she at the bottom, in miles an hour?",
+        "quote": "value.say",
+        "next": "loop"
+      },
+      "after_lacks": {
+        "content": "Take her round again. How many degrees of bank?",
+        "quote": "value.say",
+        "next": "turns"
+      }
+    },
+    "loop": {
+      "ask": "Now a loop: dive for speed, then pull. How fast is she at the bottom, in miles an hour?",
+      "replies": {
+        "80": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_slow",
+              "name": "browser_script_run",
+              "arguments": {"name": "ruth", "args": {"action": "loop", "entry_mph": 80}}
+            }
+          ],
+          "next": "looped"
+        },
+        "90": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_fast",
+              "name": "browser_script_run",
+              "arguments": {"name": "ruth", "args": {"action": "loop", "entry_mph": 90}}
+            }
+          ],
+          "next": "looped"
+        }
+      }
+    },
+    "looped": {
+      "replies": {},
+      "after_holds": "\"outcome\":\"made\"",
+      "after_tools": {
+        "content": "Now a roll, at full throttle. How many degrees of nose up before you roll her?",
+        "quote": "value.say",
+        "next": "roll"
+      },
+      "after_lacks": {
+        "content": "Dive her again. How fast at the bottom?",
+        "quote": "value.say",
+        "next": "loop"
+      }
+    },
+    "roll": {
+      "ask": "Now a roll, at full throttle. How many degrees of nose up before you roll her?",
+      "replies": {
+        "20": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_low",
+              "name": "browser_script_run",
+              "arguments": {"name": "ruth", "args": {"action": "roll", "nose_deg": 20}}
+            }
+          ],
+          "next": "rolled"
+        },
+        "40": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_high",
+              "name": "browser_script_run",
+              "arguments": {"name": "ruth", "args": {"action": "roll", "nose_deg": 40}}
+            }
+          ],
+          "next": "rolled"
+        }
+      }
+    },
+    "rolled": {
+      "replies": {},
+      "after_holds": "\"outcome\":\"made\"",
+      "after_tools": {
+        "content": "Here's the next town. We buzz Main Street and throw out the handbills. How low do you take her, in feet?",
+        "quote": "value.say",
+        "next": "buzz"
+      },
+      "after_lacks": {
+        "content": "Again. How many degrees of nose up?",
+        "quote": "value.say",
+        "next": "roll"
+      }
+    },
+    "buzz": {
+      "ask": "Here's the next town. We buzz Main Street and throw out the handbills. How low do you take her, in feet?",
+      "replies": {
+        "50": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_buzz",
+              "name": "browser_script_run",
+              "arguments": {"name": "ruth", "args": {"action": "buzz", "feet": 50}}
+            }
+          ],
+          "next": "buzzed"
+        }
+      }
+    },
+    "buzzed": {
+      "replies": {},
+      "after_holds": "\"outcome\":\"made\"",
+      "after_tools": {
+        "content": "Rides pay for the gasoline, and the pasture past town is full of folks waving dollar bills. How many rides do we sell this afternoon?",
+        "quote": "value.say",
+        "next": "rides"
+      },
+      "after_lacks": {
+        "content": "Pick a height the book allows. How low, in feet?",
+        "quote": "value.say",
+        "next": "buzz"
+      }
+    },
+    "rides": {
+      "ask": "Rides pay for the gasoline, and the pasture past town is full of folks waving dollar bills. How many rides do we sell this afternoon?",
+      "replies": {
+        "10": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_rides",
+              "name": "browser_script_run",
+              "arguments": {"name": "ruth", "args": {"action": "rides", "count": 10}}
+            }
+          ],
+          "next": "sold"
+        }
+      }
+    },
+    "sold": {
+      "replies": {},
+      "after_holds": "\"outcome\":\"made\"",
+      "after_tools": {
+        "content": "The fair wants a show, and it opens with a race against a motorcar down the county road. How do you fly it?",
+        "quote": "value.say",
+        "next": "race"
+      },
+      "after_lacks": {
+        "content": "Fewer, or we fly the show on fumes. How many rides?",
+        "quote": "value.say",
+        "next": "rides"
+      }
+    },
+    "race": {
+      "ask": "The fair wants a show, and it opens with a race against a motorcar down the county road. How do you fly it?",
+      "replies": {
+        "full throttle": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_race",
+              "name": "browser_script_run",
+              "arguments": {"name": "ruth", "args": {"action": "race", "throttle": "full throttle"}}
+            }
+          ],
+          "next": "raced"
+        }
+      }
+    },
+    "raced": {
+      "replies": {},
+      "after_tools": {
+        "content": "Then the wing walk, which is always optional. Who flies and who walks?",
+        "quote": "value.say",
+        "next": "wing"
+      }
+    },
+    "wing": {
+      "ask": "Then the wing walk, which is always optional. Who flies and who walks?",
+      "replies": {
+        "i'll fly, you walk": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_wing",
+              "name": "browser_script_run",
+              "arguments": {"name": "ruth", "args": {"action": "wing_walk", "walker": "Ruth"}}
+            }
+          ],
+          "next": "walked"
+        }
+      }
+    },
+    "walked": {
+      "replies": {},
+      "after_tools": {
+        "content": "Which field?",
+        "quote": "value.say",
+        "next": "engine"
+      }
+    },
+    "engine": {
+      "ask": "Which field?",
+      "replies": {
+        "the south pasture": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_south",
+              "name": "browser_script_run",
+              "arguments": {"name": "ruth", "args": {"action": "field", "field": "south"}}
+            }
+          ],
+          "next": "glided"
+        },
+        "the north hayfield": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_north",
+              "name": "browser_script_run",
+              "arguments": {"name": "ruth", "args": {"action": "field", "field": "north"}}
+            }
+          ],
+          "next": "glided"
+        }
+      }
+    },
+    "glided": {
+      "replies": {},
+      "after_holds": "\"outcome\":\"reached\"",
+      "after_tools": {
+        "content": "That's our field. Now judge the wind and bring her in. Which way do you land?",
+        "quote": "value.say",
+        "next": "flare"
+      },
+      "after_lacks": {
+        "content": "Pick again. Which field?",
+        "quote": "value.say",
+        "next": "engine"
+      }
+    },
+    "flare": {
+      "ask": "That's our field. Now judge the wind and bring her in. Which way do you land?",
+      "replies": {
+        "into the wind": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_landing",
+              "name": "browser_script_run",
+              "arguments": {"name": "ruth", "args": {"action": "landing", "direction": "into the wind"}}
+            }
+          ],
+          "next": "landed"
+        }
+      }
+    },
+    "landed": {
+      "replies": {},
+      "after_tools": {
+        "content": "The printer in town owes me a favor. Want a handbill with your name beside mine?",
+        "quote": "value.say",
+        "next": "keep"
+      }
+    },
+    "keep": {
+      "ask": "The printer in town owes me a favor. Want a handbill with your name beside mine?",
+      "replies": {
+        "yes please": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_handbill",
+              "name": "browser_image_make",
+              "arguments": {
+                "prompt": "A barnstorming handbill in bold black type on cream paper, a biplane looping over a county fair above the names of the aerial acrobats printed side by side.",
+                "key": "ruth/handbill.png"
+              }
+            }
+          ],
+          "next": "printed"
+        }
+      }
+    },
+    "printed": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_show",
+            "name": "browser_render",
+            "arguments": {
+              "image": "/_files/ruth/handbill.png",
+              "subtitle": "Hot off the press in town, the ink still wet."
+            }
+          },
+          {
+            "call_id": "call_keepsake",
+            "name": "browser_script_run",
+            "arguments": {"name": "ruth", "args": {"action": "keepsake"}}
+          }
+        ],
+        "next": "kept"
+      }
+    },
+    "kept": {
+      "replies": {},
+      "after_tools": {
+        "content": "There's your name beside mine, partner. Come find me in the next town.",
+        "quote": "value.say",
+        "next": "end"
+      }
+    },
+    "end": {
+      "replies": {},
+      "otherwise": {
+        "content": "We're down and the Jenny's tied for the night. Come find me in the next town, partner.",
+        "next": "end"
+      }
+    }
+  }
+}

@@ -3,10 +3,11 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# The one runner of every test suite, by level: end to end with no option, then
-# --test-normal, --test-all and --test-disabled, each holding the one below it.
-# Every suite and block is one block of one TAP stream on stdout, read by the
-# consumer as it is written, so nothing else writes to stdout during the stream.
+# The one runner of every test suite, by level: end to end with no option, the
+# guide tests alone, then --test-normal, --test-all and --test-disabled, each
+# holding the one below it. Every suite and block is one block of one TAP
+# stream on stdout, read by the consumer as it is written, so nothing else
+# writes to stdout during the stream.
 #
 # The order of the lists below is strict dependency order: a suite runs only
 # after the suites of every module it calls into, directly or transitively,
@@ -99,6 +100,7 @@ _MODULES: list[tuple[str, str]] = [
     ("test_test_posix_formatters", "test-all"),
     ("test_xsjs_serve", "smoke-test"),
     ("test_xsjs_serve_death", "test-all"),
+    ("test_guide_walk", "smoke-test"),
     ("test_tap_pair", "smoke-test"),
     ("test_integrate_dispatch", "smoke-test"),
     ("test_integrate_settings", "smoke-test"),
@@ -375,12 +377,19 @@ _LATER: list[tuple[str, str]] = [
     ),
 ]
 
+# The end to end programs of the default level, the guide tests, in order.
+_GUIDE_PROGRAMS = ["test_guide_isaiah", "test_guide_ruth", "test_guide_dawa"]
+
+# The end to end programs a run with a stream runs before the guide tests.
+_NORMAL_PROGRAMS = ["test_wire", "test_browser", "test_demo"]
+
 # A suite's `--coverage` modules past its namesake, none for stdio, pair tests.
 _COUNTED: dict[str, tuple[str, ...]] = {
     "failing_suite": (),
     "test_bootstrap_dash": ("bootstrap",),
     "test_devtools_chrome": ("devtools",),
     "test_devtools_powershell": ("devtools_windows",),
+    "test_guide_walk": (),
     "test_jslb_vectors": ("jslb",),
     "test_local_http_delay": ("local_http",),
     "test_mcp_stdio_process": (),
@@ -1242,33 +1251,28 @@ def stream_relay(
     return code
 
 
-# Runs the end to end programs in order, returning the first code not 0.
-def programs_run(chosen: str, limit: float | None, started: float) -> int:
-    import category, switches, test_wire
+# The end to end programs of a run, by whether it has a stream, in order.
+def programs_chosen(stream: bool) -> list[str]:
+    if stream:
+        return _NORMAL_PROGRAMS + _GUIDE_PROGRAMS
+    return list(_GUIDE_PROGRAMS)
+
+
+# Runs the run's end to end programs in order, returning the first code not 0.
+def programs_run(
+    chosen: str, limit: float | None, started: float, stream: bool
+) -> int:
+    import category, switches
 
     words = category.option_words(chosen)
-    elapsed = time.monotonic() - started
-    timer_start(category.alarm_plan("test_wire.py", None, limit, elapsed))
-    code = test_wire.main(words)
-    timer_stop()
-    if code:
-        return code
-    import test_browser
-
-    elapsed = time.monotonic() - started
-    timer_start(category.alarm_plan("test_browser.py", None, limit, elapsed))
-    code = test_browser.main(words)
-    timer_stop()
-    if code:
-        return code
-    import test_demo
-
-    elapsed = time.monotonic() - started
-    timer_start(category.alarm_plan("test_demo.py", None, limit, elapsed))
-    code = test_demo.main(words)
-    timer_stop()
-    if code:
-        return code
+    for name in programs_chosen(stream):
+        program = importlib.import_module(name)
+        elapsed = time.monotonic() - started
+        timer_start(category.alarm_plan(f"{name}.py", None, limit, elapsed))
+        code: int = program.main(words)
+        timer_stop()
+        if code:
+            return code
     elapsed = time.monotonic() - started
     if switches.verbose:
         print(f"the {chosen} run took {elapsed:.3f} s", flush=True)
@@ -1286,11 +1290,11 @@ def parser_make() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         description="Run the tests of a level. With no option, the end to end"
-        " level: the wire test, the browser test and the demo test. Above it"
-        " come the Python test modules and the TypeScript blocks in the"
+        " level: the guide tests of Isaiah Cole, Ruth Calloway and Dawa. Above"
+        " it come the Python test modules and the TypeScript blocks in the"
         " testing order, the tests of the TAP modules first, as one TAP stream"
-        " on stdout, the stream checked, then the checks of test_posix.py and"
-        " those three tests.",
+        " on stdout, the stream checked, then the checks of test_posix.py, the"
+        " wire test, the browser test, the demo test and the guide tests.",
         allow_abbrev=False,
     )
     parser.add_argument(
@@ -1336,7 +1340,7 @@ def parser_make() -> argparse.ArgumentParser:
         action="store_true",
         help="raise the run from the end to end level to the normal level:"
         " the suites labelled smoke-test, the checks of test_posix.py, then"
-        " the end to end tests",
+        " the wire, browser and demo tests before the guide tests",
     )
     category.options_add(parser)
     switches.options_add(parser)
@@ -1359,7 +1363,7 @@ def stream_wanted(parsed: argparse.Namespace) -> bool:
     )
 
 
-# Runs the tests of the run's level: the stream's and its checks, then the rest.
+# Runs the tests of the run's level: the stream and its checks, then the rest.
 def main(arguments: list[str]) -> int:
     # The suites expect a hangup to end a child, even in a run under `nohup`.
     signal.signal(signal.SIGHUP, signal.SIG_DFL)
@@ -1398,7 +1402,7 @@ def main(arguments: list[str]) -> int:
     started = time.monotonic()
     limit = category.limit_seconds(chosen)
     if not stream_wanted(parsed):
-        return programs_run(chosen, limit, started)
+        return programs_run(chosen, limit, started, False)
     stream = StreamWriter([name for name, _ in modules])
     code: int | None = None
     if parsed.tty:
@@ -1436,7 +1440,7 @@ def main(arguments: list[str]) -> int:
         seconds = time.monotonic() - begun
         if switches.verbose:
             print(f"test_posix.py: {posix_label}, {seconds:.3f} s", flush=True)
-    return programs_run(chosen, limit, started)
+    return programs_run(chosen, limit, started, True)
 
 
 if __name__ == "__main__":

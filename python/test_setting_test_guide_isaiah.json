@@ -1,0 +1,204 @@
+{
+  "poll_seconds": 0.1,
+  "rung_seconds": 60,
+  "served_seconds": 240,
+  "window_width": 1280,
+  "window_height": 720,
+  "root_debug": true,
+  "root_verbose": false,
+  "root_label": "smoke-test",
+  "ttyd_code": 0,
+  "served": {
+    "band": "How can I help you?",
+    "picture": {"hidden": false, "size": 4, "colours": ["0 0 0 255"]}
+  },
+  "rungs": [
+    {
+      "rung": "creation",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Take me on a cattle drive",
+          "band": "A campfire, and past its edge more stars than seem reasonable. Out in the dark a great many large animals are breathing. Isaiah Cole sits on his heels, a long, quiet man in a hat that has been rained on for years. He holds out a tin cup. \"Coffee. It's bad, but it's hot. Two thousand head, bound for Dodge City. Tonight all I do is ride around them slow and sing, so they know nothing's sneaking up. They aren't particular about the singing. You don't have to say a word. There's a gentle horse saddled, if you'd like to see the sky from out there.\"",
+          "picture": {"hidden": false, "size": 16, "colours": ["0 0 0 255", "255 255 255 255"]},
+          "rows": [
+            {"db": "metaverse", "sql": "SELECT name, title, player, world FROM universe", "params": [], "rows": [["trail_drive", "Two Thousand Head to Dodge", "player", "drive"]]},
+            {"db": "metaverse", "sql": "SELECT CAST(data AS TEXT) FROM _kv WHERE key = ?", "params": ["world"], "rows": [["drive"]]}
+          ]
+        }
+      ]
+    },
+    {
+      "rung": "confirm",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "No thanks, take me back",
+          "band": "How can I help you?",
+          "picture": {"hidden": false, "size": 4, "colours": ["0 0 0 255"]},
+          "rows": [
+            {"db": "metaverse", "sql": "SELECT CAST(data AS TEXT) FROM _kv WHERE key = ?", "params": ["world"], "rows": [["metaverse"]]}
+          ]
+        },
+        {
+          "say": "Actually, the cattle drive",
+          "band": "Isaiah looks up from the fire and fills the cup again. \"Still hot. The horse is still saddled, if you'd like to ride out.\"",
+          "picture": {"hidden": false, "size": 16, "colours": ["0 0 0 255", "255 255 255 255"]},
+          "rows": [
+            {"db": "metaverse", "sql": "SELECT CAST(data AS TEXT) FROM _kv WHERE key = ?", "params": ["world"], "rows": [["drive"]]}
+          ]
+        },
+        {
+          "say": "yes",
+          "band": "Isaiah stands and gives you the reins of a gentle bay. \"Good. We'll go out slow. Ask me anything on the way, and tell me when you're ready to ride out.\""
+        }
+      ]
+    },
+    {
+      "rung": "talk",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "How long have you been riding night guard?",
+          "band": "Isaiah smiles a little under the hat. \"Every night since Texas. Early on I sang so badly the cook threw a boot at me. The cattle never minded. They only want to hear somebody out there.\""
+        }
+      ]
+    },
+    {
+      "rung": "build",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Let's ride out",
+          "band": "2000 head bedded on the flat and 100 miles to Dodge City: 10 days at 10 miles a day. The herd's calm is 5 of 10. Out on night guard Isaiah rides the slow circle beside you. \"Sing them something. What do you know?\""
+        }
+      ]
+    },
+    {
+      "rung": "night guard",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Streets of Laredo",
+          "band": "You ride the slow circle singing Streets of Laredo, and the herd's calm comes up from 5 to 8 of 10. \"Now listen to them breathe. Settled, or restless?\"",
+          "rows": [
+            {"db": "drive", "sql": "SELECT id, head, scattered, lost, tolled, calm, looks, found, waited, exits, song FROM herd", "params": [], "rows": [[1, 2000, 0, 0, 0, 8, 0, 0, 0, 0, "Streets of Laredo"]]}
+          ]
+        },
+        {
+          "say": "I'll ride back to the fire",
+          "band": "You ride back to the fire and the coffee. Isaiah keeps the circle alone, singing, and the 2000 head stay down. His song carries in from the dark, slow and easy. When you want the herd again, say ride out again.",
+          "rows": [
+            {"db": "drive", "sql": "SELECT id, head, scattered, lost, tolled, calm, looks, found, waited, exits, song FROM herd", "params": [], "rows": [[1, 2000, 0, 0, 0, 8, 0, 0, 0, 1, "Streets of Laredo"]]}
+          ]
+        },
+        {
+          "say": "Ride out again",
+          "band": "You ride out again to the herd: 2000 head, calm 8 of 10. \"Now listen to them breathe. Settled, or restless?\""
+        }
+      ]
+    },
+    {
+      "rung": "reading",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Restless",
+          "band": "Long slow breaths and the cud going: calm 8 of 10 is settled, not restless. \"Listen again, slower. Settled, or restless?\""
+        },
+        {
+          "say": "Settled",
+          "band": "Long slow breaths and the cud going: calm 8 of 10, settled, and you read it right. Thunder rolls in, and lightning puts the whole herd on its feet. \"They're running. Which flank do we ride for, east or west?\""
+        }
+      ]
+    },
+    {
+      "rung": "stampede",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "East",
+          "band": "You ride for the leaders on the east flank and bend the run west into a circle, short of the breaks. At sunrise the count is 1960: 40 head scattered, and 3 looks before noon to find them. \"They'll have gone where there's cover. The ridge, the creek or the draw?\"",
+          "rows": [
+            {"db": "drive", "sql": "SELECT id, head, scattered, lost, tolled, calm, looks, found, waited, exits, song FROM herd", "params": [], "rows": [[1, 1960, 40, 0, 0, 3, 0, 0, 0, 1, "Streets of Laredo"]]}
+          ]
+        }
+      ]
+    },
+    {
+      "rung": "tracking",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Which way did they go?",
+          "band": "Isaiah thinks on that, then lets it go. \"They'll have gone where there's cover. The ridge, the creek or the draw?\""
+        },
+        {
+          "say": "The ridge",
+          "band": "Up on the ridge: 12 head in the cedars, driven back. 1972 with the herd, 28 still out, looks used 1 of 3. \"Where do we look next?\""
+        },
+        {
+          "say": "The creek",
+          "band": "Along the creek: 25 head in the willows, driven back. 1997 with the herd, 3 still out, looks used 2 of 3. \"Where do we look next?\""
+        },
+        {
+          "say": "The draw",
+          "band": "Down in the draw: 3 head in the plum thicket, driven back. 2000 with the herd, 0 still out, looks used 3 of 3. The Cimarron runs high and brown across the trail. \"We can wait a day for it to drop, or swim them now.\""
+        }
+      ]
+    },
+    {
+      "rung": "river",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Wait a day",
+          "band": "You hold the herd a day on the south bank of the Cimarron and the water drops: all 2000 swim it, leaders first, and none is lost. 1 day spent waiting. At the ford a hard outfit has a rope across the trail and wants a toll in cattle. \"How many head do we give them?\""
+        }
+      ]
+    },
+    {
+      "rung": "toll",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "10",
+          "band": "You offer 10 head. The outfit's boss spits: 20 is the least he takes. The boss folds his arms and waits. \"Make him another offer.\""
+        },
+        {
+          "say": "20",
+          "band": "You offer 20 head and the rope comes down: 1980 head cross the ford. Dodge City comes up out of the grass, and the stockyard gate stands open. \"Shall we count them in?\""
+        }
+      ]
+    },
+    {
+      "rung": "dodge",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Count them in",
+          "band": "At the stockyard gate the tally man counts 1980 head: 2000 from the bed ground, 20 paid at the ford and 0 lost on the trail. 11 days on the trail at $1.00 a day: $11.00 in wages, and a bath. Isaiah tucks his pay inside his coat. \"A rider who brings the herd in gets a trail name. Want yours?\"",
+          "picture": {"hidden": false, "size": 16, "colours": ["0 0 0 255", "255 255 255 255"]},
+          "rows": [
+            {"db": "drive", "sql": "SELECT CAST(data AS TEXT) FROM _kv WHERE key = ?", "params": ["scene"], "rows": [["/trail/stockyard/1"]]}
+          ]
+        }
+      ]
+    },
+    {
+      "rung": "keepsake",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "yes",
+          "band": "Trail name: Laredo. Rode night guard with Isaiah Cole, turned the stampede, tracked 40 head and brought 1980 to Dodge City. Isaiah shakes your hand once. \"You rode well. The fire's lit any night you come this way again.\"",
+          "rows": [
+            {"db": "drive", "sql": "SELECT id, head, scattered, lost, tolled, calm, looks, found, waited, exits, song FROM herd", "params": [], "rows": [[1, 1980, 0, 0, 20, 3, 3, 40, 1, 1, "Streets of Laredo"]]},
+            {"db": "drive", "sql": "SELECT n, beat, choice, outcome FROM drive_log ORDER BY n", "params": [], "rows": [[1, "sing", "Streets of Laredo", "calmer"], [2, "exit", "fire", "at the fire"], [3, "resume", "herd", "riding"], [4, "read", "restless", "wrong"], [5, "read", "settled", "right"], [6, "stampede", "east", "circled"], [7, "track", "ridge", "searching"], [8, "track", "creek", "searching"], [9, "track", "draw", "done"], [10, "river", "wait", "crossed"], [11, "toll", "10", "refused"], [12, "toll", "20", "paid"], [13, "count", "1980", "delivered"]]},
+            {"db": "drive", "sql": "SELECT kind, text FROM keepsake ORDER BY kind", "params": [], "rows": [["trail name", "Trail name: Laredo. Rode night guard with Isaiah Cole, turned the stampede, tracked 40 head and brought 1980 to Dodge City."]]}
+          ]
+        }
+      ]
+    }
+  ]
+}

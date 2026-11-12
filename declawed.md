@@ -208,10 +208,12 @@ command only to name the log.
 
   ```text
   option           level       what the run adds
-  (none)           end-to-end  the wire, browser and demo tests, their
+  (none)           end-to-end  the guide tests of Isaiah Cole, Ruth Calloway
+                               and Dawa, their smoke-test rungs
+  --test-normal    normal      the suites and blocks labelled smoke-test, the
+                               checks of test_posix.py, without formatting,
+                               and the wire, browser and demo tests, their
                                smoke-test rungs
-  --test-normal    normal      the suites and blocks labelled smoke-test and
-                               the checks of test_posix.py, without formatting
   --test-all       all         those labelled test-all, the test-all rungs,
                                the formatters and the line count
   --test-disabled  disabled    every disabled suite, test, root and rung, with
@@ -422,7 +424,7 @@ maintainer. You have permission to update this file and fix errors.
   protocol, queue, Tools
 - Build and start: page_build, ttyd_build, vectors_make, xsjs_start,
   xsjs_serve, api_match, devtools, xsjs_screenshot
-- Test: test_all, Blocks, Realms, line_case, TAP, Rungs, audit_read
+- Test: test_all, Blocks, Realms, line_case, TAP, Rungs, Guides, audit_read
 
 ## Files
 
@@ -483,6 +485,30 @@ maintainer. You have permission to update this file and fix errors.
   every node with replies and `after_lacks` wherever `after_holds` is. Its
   test_calls_form requires each call to hold exactly the three text fields of
   a ScriptCall, so a call left in the chat form fails.
+- `API/python/guide_walk.pyi`: the stub of python/guide_walk.py, one of the
+  modules with a stub. Its `__all__` is CheckFailed, guide_main and
+  table_build, every other name of the module private, so
+  api_match.python_match compares those three, CheckFailed opaque, its base
+  alone. The guide programs test_guide_isaiah.py, test_guide_ruth.py and
+  test_guide_dawa.py are test modules by their names, with no stub.
+- `python/guides/GUIDE/`: the files of one guide, GUIDE `isaiah`, `ruth` or
+  `dawa`, read from the checkout by guide_walk.table_build alone and copied
+  into no root: `table.json`, the table source; `sim.js`, the sim's script;
+  `prompt.txt`, the text of the universe's prompt document; and
+  `introduction.txt`, the guide's introduction in guides.md, the text after
+  `> ` on its one line, exactly. Each text file ends in one newline.
+- guide golds: `python/test_setting_test_guide_isaiah.json`,
+  `python/test_setting_test_guide_ruth.json` and
+  `python/test_setting_test_guide_dawa.json`, each the walk of a guide
+  program under the id python.test_guide_GUIDE, and
+  `python/test_setting_test_guide_walk.json`, the scratch guide of the
+  builder's unit suite and the whole table it must build.
+- `guides.md`: at the checkout's top, the document of the 50 guided
+  experiences, moved there from API/ts/guides.md on 2026-11-11, its content
+  unchanged, by the maintainer, as no task of that session's swarm moved it.
+  Its "Rules every experience follows", 1 to 6, and its "Policy and rating
+  flags", 1 to 9, bind the guides; its entries 1, 2 and 4 are Isaiah Cole,
+  Ruth Calloway and Dawa.
 - `<root>/parameters.json`: debug mode and the console's verbose level, which
   are parameters of a root and not settings, by `python/switches.pyi`.
 - `<root>` outside debug mode: its databases, cache, lock and the files the
@@ -1387,7 +1413,35 @@ fault realm REALM->DRIVER 0 push; fails the block
   input take the after path of the pending calls, refused by results_unasked or
   results_unmatched; any other last item must be a user message with no type,
   else role_unexpected, naming the item as JSON, then results_pending while
-  calls are pending.
+  calls are pending, then input_invalid for a content that is not a string.
+  That message's text in normal form, its ends trimmed by JavaScript's trim
+  and its letters lowered by toLowerCase, picks the reply the current node's
+  replies hold under that key, by script keys, else the node's otherwise, by
+  script otherwise. Nothing tells digits apart from other text.
+- script keys: a reply key is any text in normal form, a number, a word or a
+  phrase, as `60`, `yes` or `i'll fly, you walk`, its punctuation kept, so
+  `what if i hate it?` matches "What if I hate it?" and not "what if i hate
+  it". The ScriptPort constructor, after checking that start is a node, walks
+  every node's replies in the table's order and throws
+  provider_script.key_unnormal for the first key whose normal form is not
+  itself, naming the node and the key as JSON text so that outer space shows,
+  as no input could match that key. The seed's keys are digits, already in
+  normal form, so the seed's table and the demo answer as before.
+- script quote: a reply's quote is a path of members joined by `.` into the
+  JSON of the last call output of the input, read by jslb.json_decode. The
+  reply says the string at that path, then one space and its content when its
+  content is not null, and output_make writes the message from that text, so
+  a reply that only quotes holds content null. A quoting reply that answers a
+  user message, which holds no tool result, throws
+  provider_script.quote_unreached naming the node, otherwise included. A text
+  that is not JSON, its failure the cause by utility.error_wrap, a member
+  missing or not reached through objects, or a value at the path that is not a
+  string throws provider_script.quote_missing naming the node and the path. A
+  call output whose output is not a string is refused before, by
+  provider_script.field_invalid at `json.input[k].output`. These refusals come
+  in the choice, before the field checks. A quoting reply whose content is ""
+  says the quote and a trailing space; no table holds one. The guides quote
+  `value.say`, as script_run's result is `{"value":{"say":...}}`.
 - scripted port checks: before its choice it refuses the method, a url not
   text, an unknown path, a body not an object, an input not an array or empty
   and a last item not an object. After it, so that the script's own refusals
@@ -1420,10 +1474,19 @@ fault realm REALM->DRIVER 0 push; fails the block
   on the request and differ across loads, where a counter of the port would
   start again and the audit tool would find one id written twice.
 - scripted reply: output a reasoning item, encrypted_content the text scripted,
-  then a message of one output_text part when the script's content is not
-  null, then each call as a function_call; the body id, object response,
-  model, status completed, output, the echoes tools and tool_choice when the
-  request held them, previous_response_id always, null when absent, and usage.
+  then a message of one output_text part when the chosen reply's text, its
+  quote then its content by script quote, is not null, then each call as a
+  function_call; the body id, object response, model, status completed,
+  output, the echoes tools and tool_choice when the request held them,
+  previous_response_id always, null when absent, and usage.
+- scripted image: every image request, `POST {base_url}/images/generations`,
+  gets provider_script.image_pattern() as b64_json, n times, a response_format
+  but b64_json refused by provider_script.format_unsupported: a low resolution
+  PNG test pattern, 16 px square, a checkerboard of black and white squares of
+  4 px with hard pixel edges, built by hand from stored deflate blocks with
+  its checksums, each chunk's CRC-32 and the zlib stream's Adler-32, computed
+  in code. A guide's picture so shows 16 by 16 of `0 0 0 255` and
+  `255 255 255 255`.
 - scripted usage: arithmetic on the context, in characters and never tokens, an
   item's size the length of its canonical text: input_tokens the context's;
   input_tokens_details.cached_tokens the leading items equal to the last context
@@ -1444,11 +1507,14 @@ fault realm REALM->DRIVER 0 push; fails the block
 - script results: `engine` holds `store` and `i18n` alone; script_run returns
   {value} or {error, stack}, with no stack for a thrown value that is no Error;
   script_debug adds trace.
-- script otherwise: a string the node's replies does not hold, or that is no
-  decimal integer, takes the node's otherwise; with none it throws
-  provider_script.input_invalid for a text that is no integer and
-  provider_script.input_unknown for an integer, which stay for a test's own
-  table. A content that is not a string is refused in every table.
+- script otherwise: a text whose normal form the node's replies do not hold,
+  a number, a word, a phrase or an empty line alike, takes the node's
+  otherwise, as a person's bad input is expected; with none it throws
+  provider_script.input_unknown naming the node and the text in normal form,
+  which stays for a test's own table, a bug of that test, as the seed's table
+  and every guide's hold otherwise on each node with replies, TestAnalyst and
+  guide_walk.table_build requiring it. A content that is not a string is
+  refused in every table. It throws provider_script.input_invalid.
 - script after_holds: on a node holding it, tool results are answered by
   after_tools only when every result of the reply holds the text, else by
   after_lacks, whose tool calls move on as after_tools' do. A call output whose
@@ -1664,8 +1730,8 @@ fault realm REALM->DRIVER 0 push; fails the block
   --port 0 works.
 - serve log: ttyd's stdout and stderr are copied to the descriptor given as
   they come, through a thread after the port line. The program gives stdout;
-  the demo test stderr, and server.txt for its plain rung; the unit suites a
-  scratch file.
+  the demo test stderr, and server.txt for its plain rung; guide_walk stderr;
+  the unit suites a scratch file.
 - serve reader that leaves: a reader of the program's stdout that leaves, as
   `xsjs_serve.py | grep -m1 http` does, ends the program by SIGPIPE at the next
   log line, and ttyd follows by its parent death signal. The program sets SIGPIPE
@@ -1692,7 +1758,7 @@ fault realm REALM->DRIVER 0 push; fails the block
   block would never stop.
 - TtydServer start window: a caller that has not blocked the signals can leave
   ttyd running until the process ends if a ctrl C lands while ttyd starts, so
-  serve_run and the demo test block them first.
+  serve_run, the demo test and guide_walk block them first.
 - signal_wait: blocks both signals and returns at either or at ttyd's end,
   leaving them blocked so that a second ctrl C cannot cut the stop short.
 - serve stop: no ttyd outlives the program: a failure or signal after ttyd
@@ -1806,17 +1872,34 @@ fault realm REALM->DRIVER 0 push; fails the block
   [--tty] [--coverage] [--anthropic] [--debug] [--verbose]`. It refuses to
   start as root. Standard library only.
 - end to end level: with no option, the bring up, then the end to end programs
-  alone, the wire test, the browser test and the demo test, in that order,
-  ending at the first failure with its code: no suite, no block, no check of
-  test_posix.py and no line count. The smoke-test run's deadline holds.
+  alone, the guide tests of Isaiah Cole, Ruth Calloway and Dawa,
+  test_guide_isaiah.py, test_guide_ruth.py and test_guide_dawa.py in that
+  order, by test_all.programs_chosen(False), ending at the first failure with
+  its code: no suite, no block, no check of test_posix.py, no wire, browser or
+  demo test and no line count. The smoke-test run's deadline holds.
+- end to end programs: test_all.programs_chosen(stream) gives _GUIDE_PROGRAMS,
+  the three guide tests, for a run with no stream, and _NORMAL_PROGRAMS,
+  test_wire, test_browser and test_demo, then _GUIDE_PROGRAMS for a run with
+  one. programs_run(chosen, limit, started, stream) imports each in that order
+  and calls its main with category.option_words(chosen), each under
+  category.alarm_plan(NAME.py, None, limit, elapsed), so under the run's
+  deadline alone with no seconds of its own, and returns the first code not 0.
+  main calls it with False when no stream is wanted and with True after the
+  checks of test_posix.py.
 - level options: each only raises the level, by test_all.stream_wanted and the
   category's action, so a run given two takes the higher in either order.
-  TestDriverLevels of python/test_integrate_test_posix.py proves it.
+  TestDriverLevels of python/test_integrate_test_posix.py proves it, and its
+  test_default_guides, test_normal_programs and test_programs_present hold
+  programs_chosen(False) to the guide tests, programs_chosen(True) to the
+  wire, browser and demo tests then the guide tests, and each name of the
+  latter to a file python/NAME.py of the checkout, against the test's own
+  constants _GUIDE_PROGRAMS and _NORMAL_PROGRAMS.
 - stream options: --failfast, --stream, --module, --failures, --tty and
   --coverage need a stream, so each raises an end to end run to the normal
   level, and no higher.
-- --test-normal: adds the suites labelled smoke-test, as one stream, and the
-  checks of test_posix.py.
+- --test-normal: adds the suites labelled smoke-test, as one stream, the
+  checks of test_posix.py, and the wire, browser and demo tests, their
+  smoke-test rungs, before the guide tests.
 - --test-all: adds the suites of the label test-all and the rungs of that label,
   and test_posix.sh passes --coverage with it.
 - --test-disabled: adds every disabled suite, test, root and rung, which have
@@ -1836,8 +1919,8 @@ fault realm REALM->DRIVER 0 push; fails the block
   one the category runs. It alone runs a suite or block that fails by design,
   listed apart, so that a run can check that --failures counts right, and below
   the disabled level it alone runs a disabled suite. Without
-  --stream the run goes on to the checks after the stream, the demo test
-  included.
+  --stream the run goes on to the checks after the stream, the wire, browser,
+  demo and guide tests included.
 - --failures: exit 1 unless the consumer counted exactly the N failing points
   expected, none by default. A bail out counts as one unless it follows a
   failing point.
@@ -1875,8 +1958,9 @@ fault realm REALM->DRIVER 0 push; fails the block
   with a failure, and raises unless the stream ended with its parent plan or a
   bail out.
 - checks after the stream: in this process and given the category,
-  test_posix.py, the wire test, the browser test, the demo test, ending at the
-  first failure with its exit code.
+  test_posix.py, the wire test, the browser test, the demo test, then the
+  three guide tests, Isaiah Cole's, Ruth Calloway's and Dawa's, by
+  programs_chosen(True), ending at the first failure with its exit code.
 - timers: every suite and block has python.test_all.module_seconds of the
   driver's gold. A smoke-test run has python.test_all.smoke_seconds in all:
   each alarm ends at that deadline at the latest, a deadline passed before a
@@ -1948,6 +2032,15 @@ fault realm REALM->DRIVER 0 push; fails the block
 - test_substrate_limit: counts under --coverage for substrate.py by its row of
   _COUNTED, and as the store's last unit suite it is the one after which that
   module's lines are checked.
+- test_guide_walk: the unit suite of guide_walk.table_build, smoke-test,
+  directly after test_xsjs_serve_death in the Python unit list. TestScratch
+  writes a scratch guide under build/ from its gold's table and files and
+  checks each step of the build and each refusal, the exit's expansion
+  compared whole with the gold's built table; TestGuides builds the three
+  guides of python/guides/, each start one of its nodes. Its _COUNTED row is
+  empty, so it counts for no module: guide_walk.py's other lines need the page
+  and run in the guide programs alone, and no --coverage run checks that
+  module.
 - TestDriverCounted: the class of python/test_integrate_test_posix.py that
   tests the driver's mapping by paths_counted, the store limit's suite
   counting for substrate.py and every suite of a test-all run counting for
@@ -2221,6 +2314,12 @@ fault realm REALM->DRIVER 0 push; fails the block
 
 ## Rungs
 
+- rung programs: test_wire.py, test_browser.py and test_demo.py, the end to
+  end programs of the normal level, by test_all.programs_chosen(True): a run
+  at --test-normal or above runs them in that order, their smoke-test rungs or
+  more by the category, after the checks of test_posix.py and before the guide
+  tests. A run with no option runs none of them, as the guide tests alone are
+  the end to end level.
 - test_wire.py: `python3 python/test_wire.py [--test-all] [--test-disabled]
   [--anthropic] [--debug] [--verbose]`. A TAP run: the producer is ts/test_wire_rungs.ts in
   the page, and this file is the consumer. Exit 0, or 1 at the first failed
@@ -2332,7 +2431,9 @@ fault realm REALM->DRIVER 0 push; fails the block
 - demo audit check: the audit rung and the tools record rung wait until each
   request of the audit has its reply, as a page thread's record comes late, then
   run audit_read.failure_check on it. The plain root records nothing, and the
-  wire and browser roots fail on purpose, so no other root takes that check.
+  wire and browser roots fail on purpose, so no other root of these programs
+  takes that check. The guide roots take it too, by guide_walk's audit rung,
+  which also waits until audit_read.requests_open finds no request open.
 - demo tools root: `build/test_demo-*/tools`, test-all, a debug root whose
   python/seed/provider_script.json test_demo.table_make replaces before ttyd
   starts, from the chains of the gold's `tools`. Each chain is one input, whose
@@ -2407,8 +2508,8 @@ fault realm REALM->DRIVER 0 push; fails the block
   of a type under `audit.`, no entry is a ui.control_key of digit 1, each note
   of ui or ai is a sleep and none holds the gold's audit_wake_note, `until audit.`, and the engine
   starts once per load. In the demo test only a test-all run makes such sleeps
-  and presses ctrl 1, through the overlay rung, so its smoke run does not prove
-  either refusal; the C block's mark wire_audit_own does prove the sleeps' filter,
+  and presses ctrl 1, through the overlay rung, so its smoke-test run, at
+  --test-normal, does not prove either refusal; the C block's mark wire_audit_own does prove the sleeps' filter,
   for the worker, and test_overlay_unrecorded of ts/test_page.ts the key's.
 - demo console end: the console rung ends by ctrl 0 hiding the view, which
   gives the box the focus, as the dump rung types 0 with no click.
@@ -2436,6 +2537,430 @@ fault realm REALM->DRIVER 0 push; fails the block
 - rung gold: test_wire, test_browser and test_demo read their timers, sizes
   and texts from python.test_wire, python.test_browser and python.test_demo.
 
+## Guides
+
+- guide tests: test_guide_isaiah.py, test_guide_ruth.py and
+  test_guide_dawa.py, the whole end to end level, which every level runs: with
+  no option alone, and in a run with a stream after the checks of
+  test_posix.py and the wire, browser and demo tests. Each is a thin main over
+  guide_walk.guide_main(arguments, NAME), its bytecode sent to build/ first:
+  `python3 python/test_guide_NAME.py [--test-all] [--test-disabled]
+  [--anthropic] [--debug] [--verbose]`. Exit 0, 1 at the first failed check
+  naming its rung, 130 at ctrl C, or 128 plus the signal's number at SIGHUP or
+  SIGTERM. No real AI provider is contacted: the scripted provider answers
+  every model and image request.
+- guide purpose: task 1.1 of tmp/tasks_11_1519.md, by GUIDES_PLAN.md: three
+  guides of guides.md each confirm with the scripted player that they go with
+  the guide, talk with the player, build a sim, then guide the player through
+  operating it, the player's inputs numbers, words and phrases, offline,
+  POSIX, headless, on the fake AI alone.
+- guide time: estimated by GUIDES_PLAN.md 3.1.4 at 10 to 20 s a guide, so 30
+  to 60 s at the end to end level and 100 to 130 s at the normal level, under
+  the 180 s of python.test_all.smoke_seconds; not measured, as the swarm that
+  wrote them ran nothing.
+- guide_walk.py: the one module of the guide tests. It imports nothing of
+  test_demo.py, as the default tests must not depend on a program the default
+  level no longer runs, so the helpers both need, the page state script, the
+  typed keys and the listing of ttyd's children, are written anew. Its project
+  imports come inside the functions that use them, after sys.pycache_prefix is
+  set to build/pycache.
+- guide_main: parses the arguments with prog test_guide_NAME.py,
+  category.options_add and switches.options_add; sets the switches; sets
+  SIGHUP and SIGTERM to exit with 128 plus the number; reads the gold
+  python.test_guide_NAME by harness.gold_get; empties build/test_guide_NAME/,
+  the failure directory; makes the work directory build/test_guide_NAME-XXXX/
+  by tempfile.mkdtemp; opens devtools.Browser(window_width, window_height,
+  devtools.LinuxPipe()) and climbs the rungs in it, under a category.LabelBook
+  of the run's category, the root NAME entered with the gold's root_label.
+- guide rungs: served, under served_seconds; the gold's rungs in order, each
+  under rung_seconds; audit; left. served, audit and left take root_label, and
+  every rung of the three golds is smoke-test, so every level runs all of
+  them. Each rung's timer bounds the browser's DevTools waits too.
+- guide served rung: xsjs_serve.page_ready, then xsjs_serve.root_make with
+  fresh true on WORK/root, its parameters the run's switches with debug the
+  gold's root_debug, true, and verbose its root_verbose, false; writes
+  json.dumps of table_build(python/guides/NAME) to
+  ROOT/python/seed/provider_script.json before ttyd starts, as main_loop seeds
+  the store's /_files/provider/script.json from it at the root's first engine
+  start; starts xsjs_serve.TtydServer(values, root, 0, stderr) with SIGINT and
+  SIGTERM blocked around the start; opens the address, waits for the gold's
+  served band, "How can I help you?", with the box enabled, and checks its
+  picture, the hyperposition's 4 by 4 of `0 0 0 255`.
+- guide audit rung: waits until audit_read.requests_open of the root's
+  entries is empty, runs audit_read.failure_check, requires exactly one line
+  starting `==== engine started, ` in _audit.txt, the one load, and under the
+  run's --debug copies the audit to build/test_guide_NAME/audit.txt.
+- guide left rung: lists by /proc the pids of ttyd's children whose command
+  line holds the root's bootstrap.py, failing when there is none; opens
+  about:blank; waits for them to end; stops ttyd and requires the gold's
+  ttyd_code, 0.
+- guide failure: an exception of a rung, ctrl C's KeyboardInterrupt aside,
+  renews the rung's timer, copies the root's audit to
+  build/test_guide_NAME/audit.txt when it exists and saves failed_RUNG.png
+  there, the rung's spaces made underscores; ttyd stops in a finally. Only
+  CheckFailed prints `error: RUNG: FAILURE` to stderr and returns 1; any other
+  exception is raised with a note naming the rung. A pass
+  removes the work directory; a failure keeps it. Under --verbose each rung
+  prints one line after its name, and the run first prints where its root is.
+- guide page state: one Runtime.evaluate of _STATE_SCRIPT: fault, the text of
+  `body > pre` or null; subtitle, of #subtitle; disabled, of #input; focused,
+  for a timeout's message alone; image_hidden, image_width, image_height and
+  image_colours, the distinct `r g b a` texts of #image's pixels by
+  getImageData. A state with a fault fails the rung at once.
+- guide step: refuses its band by the guide band rule; types each character
+  of say as a keyDown with its key and text, then a keyUp, by
+  Input.dispatchKeyEvent at the focus, then Enter as a keyDown of key and code
+  Enter, key code 13 and text CR, then a keyUp; waits until the band equals
+  the step's with the box enabled; then checks its picture and its rows. No
+  step clicks, as the box takes the focus at the first render and at each
+  turn's end.
+- guide band rule: a step whose band equals the band before it, the served
+  band or the last step's, is refused as CheckFailed, as typing then waiting
+  for a band shown already could pass before the turn ran. A band is the exact
+  text of #subtitle; one made of a script's say and a reply's content is the
+  say, one space, then the content.
+- guide picture check: hidden must equal image_hidden; a shown picture must be
+  size by size with the gold's colours, both sorted: the test pattern, 16 by
+  16 of `0 0 0 255` and `255 255 255 255`, or the hyperposition, 4 by 4 of
+  `0 0 0 255`.
+- guide rows rule: a step's rows check, `{db, sql, params, rows}`, opens
+  `file:ROOT/DB.sqlite?mode=ro` by Python's sqlite3, runs sql with params,
+  makes each row a list and polls until the rows equal the gold's, a timeout
+  naming the last rows read, as commits are pushes the server applies after
+  the band shows. It reads only a database and table a step before it made, so
+  no check meets a table the server has not yet made and no error is caught.
+- guide gold: python/test_setting_test_guide_NAME.json holds poll_seconds 0.1,
+  rung_seconds 60, served_seconds 240, window_width 1280, window_height 720,
+  root_debug true, root_verbose false, root_label smoke-test, ttyd_code 0,
+  served {band, picture} and rungs, each {rung, label, steps}: a step {say,
+  band, picture?, rows?}, a picture {hidden, size, colours}, a rows check {db,
+  sql, params, rows}. A guide's walk is data, so a guide is written in JSON and
+  JavaScript with no Python. No gold holds a digest or a response id.
+- guide walks: Isaiah's 21 steps in the rungs creation, confirm, talk, build,
+  night guard, reading, stampede, tracking, river, toll, dodge and keepsake;
+  Ruth's 25 in creation, confirm, talk, build, first flight, turns, loop, roll,
+  main street, rides, race, wing walk, engine out and keepsake; Dawa's 19 in
+  creation, confirm, talk, build, icefall, morning, window, loads, summit push,
+  decision and keepsake. Every band of the three was worked by hand.
+- guide inputs: numbers (`60`, `90`, `10`, `20`, `2`, `7`), words (`Yes`,
+  `Sam`, `Settled`, `East`, `Ready`, `Everything`, `Go`) and phrases (`What if
+  I hate it?`, `I tap my head twice`, `I'll fly, you walk`, `No thanks, take me
+  back`, `Streets of Laredo`, `We take Teo down`), some typed with capitals
+  and matched in lower case, which proves the normal form of script keys. Each
+  walk types one bad input at a node with ask, Isaiah's `Which way did they
+  go?`, Ruth's `lots` and Dawa's `Whenever`, answered by the built otherwise.
+- guide table source: python/guides/NAME/table.json, a provider_script.Script
+  with these differences, which table_build removes: top level `puzzled`, the
+  guide's words before a question asked again; top level `exit`, `{input,
+  call, after, resume, resume_call, paused}`, input and resume reply keys in
+  normal form, call and resume_call calls in source form, after the text said
+  after the exit's result, paused the answer to anything but resume while
+  paused; a node's `ask`, the question it asks; a call's arguments a JSON
+  object, not its text; and anywhere an object whose one member is `$text`,
+  standing for the text of the file it names in the guide's directory.
+- table_build: reads table.json by json.load as UTF-8; replaces every
+  `{"$text": NAME}` at any depth by that file's text, read as UTF-8 with no
+  newline translation, less the one newline that must end it, a file not
+  ending in one or a `$text` object beside another member raising ValueError,
+  so a CRLF file keeps its CR and fails its band; for each node of the source
+  holding ask, in order, refuses it holding otherwise too, sets otherwise to
+  `{content: PUZZLED + " " + ASK, next: NODE}`, adds the exit when the table
+  holds one and removes ask; refuses any node, generated ones included, with
+  replies and no otherwise; turns every call's arguments, generated ones
+  included, into json.dumps(arguments, ensure_ascii=False, separators=(",",
+  ":")), arguments that are no object raising ValueError; returns {start,
+  nodes}, puzzled and exit left out.
+- guide exit expansion: at a node X holding ask A, the exit adds to X the
+  reply of its input, content null, calling a deep copy of the exit's call,
+  next `X~exit`; `X~exit`, no replies, after_tools of content after and quote
+  value.say, next `X~paused`; `X~paused`, the reply of resume, content null,
+  calling a copy of resume_call, next `X~resume`, and otherwise of content
+  paused, next itself; `X~resume`, no replies, after_tools of content A and
+  quote value.say, next X. The page so shows the exit's arithmetic then the
+  guide's words, and on resume the resume's arithmetic then the question that
+  was pending. Generated nodes take no exit and no puzzled otherwise of their
+  own. A node holding the exit's input or resume as a reply already, or a
+  generated name already a node, raises ValueError.
+- guide exit placement: the builder of the test side, not the provider, gives
+  every node holding ask the exit, so the exit promised in the introduction
+  works at every point once the sim exists, rule 4 of guides.md. The exit runs
+  the script's `exit` action, which brings the player to safety by its own
+  arithmetic, and the resume its `resume` action.
+- guide ask rule: a node holds ask exactly when the sim exists by the time the
+  player can be in it, as an exit before the build would run a script not yet
+  written. The nodes before the build, hyperposition to talk, hold their own
+  otherwise.
+- guide start: each guide test starts at the hyperposition, as every player
+  does, and the fake AI makes the guide's universe, world, region and scene by
+  the AI's own tools. No guide state is written at root time but the seed's
+  table, as the test rules forbid changing a module's state to emulate an
+  environment and the scripted table is the one scripted part allowed.
+- guide creation turn: the start node hyperposition answers the guide's
+  request, `take me on a cattle drive`, `take me flying` or `take me to
+  everest`, with browser_image_make of the scene's prompt at the key
+  NAME/SCENE.png, next made, and anything else with an otherwise in the
+  analyst's dry voice; made's after_tools calls in one reply
+  browser_script_run of the seeded bootstrap with title, region, universe,
+  world and scene `{id, subtitle, image}`, the subtitle the introduction, then
+  browser_doc_put of `{db: UNIVERSE, id: "prompt", body: {"0": {"t":
+  "prompt"}, "text": PROMPT}}`, next booted; booted's calls browser_render of
+  the image and the introduction, next shown, the image made a reply before,
+  as a render reads its bytes when it runs; shown says the introduction, next
+  offer. The band is then the introduction, the picture the 16 by 16 pattern,
+  metaverse's universe row the guide's and its world row the guide's world.
+- guide confirm: the introduction, verbatim, is the guide's offer, and the
+  player's answer is a reply key of offer, whose otherwise leaves the offer
+  open. Isaiah's player says `no thanks, take me back`, a kv_put of
+  /metaverse/world back to metaverse and a render of the hyperposition, then
+  `actually, the cattle drive`, the kv_put of drive and a render of the
+  campfire, then `yes`; Ruth's asks `what if i hate it?`, says `yes`, then
+  gives the name `sam`; Dawa's says `not yet`, Dawa waits, then `all right,
+  i'll come`.
+- guide talk: each talk node answers one question with a content reply that
+  stays there, Isaiah's `how long have you been riding night guard?`, Ruth's
+  `why are you short a partner?` and Dawa's `why have you never left anyone
+  behind?`, and starts the build at `let's ride out`, `let's go` or `ready`.
+- guide build turn: one reply of three calls: browser_kv_put of `{ref:
+  "/_files/script/NAME.js", text: SIM}`, browser_sql_run of the sim's DDL on
+  the guide's world, and browser_script_run of `{name: NAME, args: {action:
+  "setup", ...}}`, next built, whose after_tools quotes value.say and says the
+  first beat's ask. Every later beat is a script_run of the script with the
+  player's choice as its args.
+- guide beat: a node holding ask and replies keyed by the walk's inputs, each
+  calling browser_script_run with the choice as args, next an after node,
+  which always goes on, by after_tools quoting value.say with the next node's
+  ask as content, or holds after_holds `"outcome":"WORD"`, going on by
+  after_tools and back by after_lacks, whose content asks again. Every number
+  the page shows is the sim's arithmetic, and the table holds no number of the
+  model.
+- guide keepsake turn: with a picture, Ruth's and Dawa's, one reply calls
+  browser_image_make of the keepsake's picture, next a node, Ruth's printed
+  and Dawa's developed, whose after_tools calls browser_render of it then
+  browser_script_run of `{action: "keepsake"}`, last, so that the quote reads
+  the script's result; with none, Isaiah's, the reply calls that script_run
+  alone. The node its result reaches quotes value.say with the guide's
+  farewell, next end, whose empty replies and otherwise of the guide's last
+  words answer anything after.
+- guide call ids: `call_` and a short word, unique within each reply, the
+  exit's `call_exit` and `call_resume`.
+- guide no number by hand: an ask, a content or a puzzled, after or paused
+  text states no number of a model; every such number comes from a script's
+  say. The introductions are verbatim and keep their own words.
+- guide prompt: prompt.txt, the universe's prompt document, which
+  agent.prompt_build sends after the analyst's prompt: who the guide is, in
+  the guide's voice and world; the rules every experience follows of
+  guides.md; the guide's beats; the exit and how to resume; the script's name,
+  each action and its args, and that the AI calls the script and says its
+  say; that the guide stays inside its own world and answers anything outside
+  it in-world, by policy flag 1 of guides.md. The fake AI never reads it; a
+  real AI would.
+- guide sim contract: sim.js is the body of the function script_run makes,
+  `new Function("engine", "args", text)`, as python/seed/bootstrap.js is, kept
+  by the build turn at /_files/script/NAME.js. It begins with the SPDX lines
+  and a header of what it models and its args, then `const store =
+  engine.store;` and the world's name; the model's constants, each with a one
+  line comment naming its source; helpers that read the one state row, write
+  it, append a log row and format numbers; one function per action in a frozen
+  object actions; then a throw for an action actions does not own, a table's
+  bug, and `return store.transaction_run(() => actions[args.action](args));`.
+- guide sim result: every action returns `{say, outcome}`, say the text the
+  page shows, outcome a short text of the action's outcomes, as `made`; the
+  tool result the fake reads is then `{"value":{"say":"...","outcome":"..."}}`,
+  compact JSON in insertion order passed unchanged as the call output, so a
+  node's after_holds is `"outcome":"WORD"`, quotes and colon as JSON.stringify
+  writes them, and its quote `value.say`. Each action but setup and keepsake
+  appends a log row `(beat, choice, outcome)`.
+- guide sim tables: every table STRICT, every column INTEGER or TEXT and NOT
+  NULL: the one state row `id INTEGER PRIMARY KEY CHECK (id = 1)`, the log `(n
+  INTEGER PRIMARY KEY, beat, choice, outcome)` and `keepsake (kind TEXT NOT
+  NULL PRIMARY KEY, text TEXT NOT NULL)`. A value bound is an integer, made by
+  Math.round or Math.floor when not whole already, or a string, and a number
+  of the args is logged as its text. No statement uses random(), a time
+  function or anything else that differs when the server replays it.
+- guide sim failures: a player's choice that fails is an outcome with its own
+  say, never a throw, as bad user input is expected; a throw is a broken
+  table, an unknown action or args of the wrong form. Branches no walk takes,
+  as Isaiah's west flank and swimming the river now, have says and outcomes of
+  their own.
+- guide number formats: whole, `String(Math.round(x))`; tenths,
+  `(Math.round(x * 10) / 10).toFixed(1)`, as 1.5, 6.0 and 8.3; money from
+  integer cents, `"$" + Math.floor(c / 100) + "." + String(c %
+  100).padStart(2, "0")`, as $46.85; a clock from whole seconds, `Math.floor(s
+  / 60) + ":" + String(s % 60).padStart(2, "0")`, as 4:02; an hour of the day,
+  `h + ":00"`, as 2:00; a duration from whole minutes, `H hour` or `H hours`,
+  then ` M minutes` when M is not 0; a constant as its source writes it, as
+  352.56 and 10.66, by String.
+- guide compaction: the browser compacts a scene when a player's turn is
+  appended to it holding turn_compact_turns, 64, turns or more. Isaiah's
+  campfire conversation holds 65 before step 20, Count them in, and compacts
+  there; Ruth's hayfield holds 62 before step 20 and 66 after it, so step 21,
+  I'll fly, you walk, compacts it; Dawa's base camp holds 62 at step 19, under
+  64, and never compacts, one more step without tool calls short of it.
+- guide restart: the turn that compacts sends a chain's first request, with no
+  previous_response_id, of the prompts, the summary and the player's text. The
+  fake takes it, as a chain's first request has no call due and each item is a
+  message of role system or user with text, and its place is per port, so a
+  compaction moves nothing of the script. audit_read.failure_check passes, as
+  the restart is a chain's first call holding the analyst's prompt once as its
+  first item, its written body holds the summary and the player's text alone,
+  the prompts counted by input_kept, and no model output item is sent again,
+  the compacted rows being gone, so no id is written twice.
+- guide rule 6: each sim's state persists in its world database, which the
+  server keeps, and Isaiah's naming turn, in the stockyard, a new scene and so
+  a new conversation, reads it, proving the world's state outlived the scene.
+  No walk returns in a second session, by guide deferred serving.
+- Isaiah Cole: guides.md entry 1, Two Thousand Head to Dodge: universe
+  trail_drive, world drive, region trail, scene campfire with the image
+  /_files/isaiah/campfire.png, script isaiah, tables herd, drive_log and
+  keepsake. The stake is the herd, counted at Dodge City in a new scene,
+  /trail/stockyard/1 with /_files/isaiah/dodge.png. The exit, designed by
+  rule 4 from his "You don't have to say a word" and "if you'd like", is `i'll
+  ride back to the fire`, while Isaiah keeps the circle singing, resumed by
+  `ride out again`. The keepsake is a trail name, the last word of the song
+  sung, as `Trail name: Laredo.`, keepsake's row `trail name`. The song,
+  Streets of Laredo, is public domain, by policy flag 7.
+- Isaiah's constants, each the guide's own, from its text or its rules: HERD
+  2000; MILES 100, the last hundred miles; MILES_A_DAY 10; MISSING 40, the
+  head missing at sunrise; the herd's calm, a game rule of 0 to 10,
+  CALM_START 5, SONG_CALM 3, CALM_MAX 10, SETTLED_CALM 7 and MILLED_CALM 3;
+  BUNCHES ridge 12 in the cedars, creek 25 in the willows and draw 3 in the
+  plum thicket, summing to MISSING; LOOKS 3, the searches before noon;
+  BREAKS_LOSS 60, the run into the breaks; HIGH_WATER_PER 100, a head drowned
+  for each 100 swum in high water; TOLL_FLOOR 20, the least the outfit takes;
+  WAGE_CENTS 100, a dollar a day; the days 100 / 10 plus those waited.
+- Ruth Calloway: guides.md entry 2, The First Ride's Free: universe
+  barnstorming, world summer, region county, scene hayfield with the image
+  /_files/ruth/hayfield.png, script ruth, tables jenny, flight and keepsake. The
+  stake is her purse for the summer, purse_cents, and her airplane, the Jenny.
+  The exit is her own rule, `i tap my head twice`: a glide from the height
+  flown to the grass, like a feather, resumed by `go on`, a climb back to the
+  height left; offer, name and talk answer it too in her voice, before any
+  sim, with no call. The keepsake is a handbill with the player's name beside
+  hers, as `RUTH CALLOWAY AND SAM, AERIAL ACROBATS: loops, rolls, the wing
+  walk and a motorcar beaten! Rides $5.00 for 10 minutes.`, keepsake's row
+  handbill, its feats those the flight log shows made. Her sim is turn based
+  on a real world aviation stunt model, as task 1.1 requires.
+- Ruth's aircraft constants: by the Curtiss JN4-D Specifications and
+  Operating Instructions, 1918, as reproduced at
+  airminded.net/jenny/jn4_spec.html: GROSS_LB 1920, gross weight loaded, with
+  pilot 165, passenger 165 and fuel 21 gallons; WING_SQFT 352.56, total
+  supporting surface; HP 90, the OX-5 rated at 1400 rpm; MAX_MPH 75 and
+  MIN_MPH 45, speed maximum and minimum in horizontal flight, the latter the 1
+  g stall; CLIMB_FT 2000 in CLIMB_MIN 10; TANK_GAL 21; BURN_GAL_HR 9; and
+  LEVEL_OFF_FT 50, the final leveling off about fifty feet from the ground.
+  CRUISE_MPH 60, by P. M. Bowers, Curtiss Aircraft 1907 to 1947 (1979), p.
+  156. GLIDE_RATIO 10.66, by B. van der Zalm, aircraftinvestigation.info,
+  Curtiss JN-4D (2018), a lift to drag ratio calculated from published data,
+  as no period source gives the Jenny's glide. G 32.174 ft/s/s, standard
+  gravity; FPS_PER_MPH 22 / 15, 5280 ft over 3600 s.
+- Ruth's other constants: her technique, as any stunt model needs the pilot's
+  inputs: LOOP_PULL_G 4, the pull at the loop's bottom, LOOP_TOP_G 0.5, light
+  over its top, and ROLL_SECONDS 4, her count for a roll. RIDE_CENTS 500 and
+  RIDE_MIN 10, the introduction's "Five dollars buys ten minutes";
+  GAS_CENTS_GAL 21, U.S. Department of Energy, Vehicle Technologies Office,
+  Fact #915 (2016), the average pump price of 1929; MOTORCAR_MPH 45, the Ford
+  Model T's top speed of about 45 mph, as The Henry Ford gives it. The guide's
+  world: WIND_MPH 15 from the north; RACE_MI 5; PURSE_CENTS 2500; SHOW_MIN 40;
+  STUNT_FT 2000, where she teaches; SHOW_FT 1000, the wing walk's height,
+  where the engine quits; NORTH_MI 1.5 and SOUTH_MI 3, the fields.
+- Ruth's formulas: every speed in ft/s inside, mph outside. A level turn at
+  bank b pulls n = 1 / cos(b) and stalls at Vs(n) = MIN_MPH sqrt(n), from lift
+  L = n W at the wing's greatest lift coefficient, a turn at the cruise
+  stalling when Vs(n) > CRUISE_MPH; its radius is V^2 / (G tan b) and its time
+  round 2 pi V / (G tan b) at the cruise. A loop is two arcs with energy kept,
+  the engine's pull and the drag taken to cancel: Rb = Ve^2 / (G (LOOP_PULL_G
+  - 1)), Rt = Vt^2 / (G (LOOP_TOP_G + 1)) and Vt^2 = Ve^2 - 2 G (Rb + Rt), so
+  Vt^2 = Ve^2 (1 - 2 / (LOOP_PULL_G - 1)) / (1 + 2 / (LOOP_TOP_G + 1)), Ve^2 /
+  7 for 4 and 0.5; it is made when Vt reaches MIN_MPH sqrt(LOOP_TOP_G), the
+  entry wanted that speed times sqrt(7), the dive from the cruise costs (Ve^2 -
+  Vc^2) / (2 G) of height and the top is Rb + Rt above the pull. A roll at
+  MAX_MPH, zero g for ROLL_SECONDS T, changes height by V sin(nose) T - G T^2 /
+  2, keeping it when sin(nose) >= G T / (2 V). A glide with the engine off at
+  the cruise goes h GLIDE_RATIO in still air, sinks V / GLIDE_RATIO and takes h
+  GLIDE_RATIO / V, over the ground times (V - W) / V into the wind and (V + W)
+  / V with it. A touchdown at MIN_MPH through the air is MIN_MPH - W over the
+  ground into the wind, MIN_MPH + W with it. Fuel is minutes BURN_GAL_HR / 60
+  and gas money gallons GAS_CENTS_GAL, in whole cents; the rides sold may burn
+  what TANK_GAL spares once SHOW_MIN is kept; the race runs into the wind at
+  the throttle's airspeed less WIND_MPH against the motorcar's MOTORCAR_MPH
+  over RACE_MI, a dead heat at the cruise.
+- Ruth's rounding: every shown value sits at least 0.1 of its last shown digit
+  from a rounding boundary but these, each far wider than a double's error:
+  the exit's sink, 8.25516, 0.005 above 8.25; n at 30 degrees, 1.1547, 0.047
+  tenths above 1.15; the loop's dive, 150.432, 0.068 below 150.5; the roll's
+  rise at 40 degrees, 25.4345, 0.066 below 25.5; n at 60 degrees,
+  1.9999999999999996 in JavaScript, shown 2.0; and the exact products 21320,
+  7995, 13325 and 315, which Math.round takes from a float error under
+  0.0000001. 75 * (22 / 15) is 109.99999999999999, shown 110.
+- Dawa: guides.md entry 4, Nobody Left Behind: universe everest, world
+  expedition, region khumbu, scene base_camp with the image
+  /_files/dawa/base_camp.png, script dawa, tables climber, climb_log and
+  keepsake. The stake is Dawa's record of never leaving anyone behind,
+  climber's record `kept` or `broken`, met at the South Summit, where the top
+  and Teo's rescue cannot both happen. The exit, designed by rule 4 from his
+  "Tell me if it starts" and "I have never left anyone behind", is `take me
+  down`, Dawa taking the player down the fixed line to the camp below, at Base
+  Camp saying they are at the bottom, resumed by `let's go up again`. The
+  keepsake is a photograph from the high point and a white scarf from Dawa,
+  keepsake's rows photograph and scarf.
+- Dawa's policy: he stands in a living culture, by policy flag 5 of guides.md:
+  his words stay respectful and plain, the scarf is his gift, and nothing
+  makes a ritual a mechanic. Teo is invented. No one dies on either branch:
+  on the summit's, Teo is carried in alive and the record is broken.
+- Dawa's constants: the summit 8849 m, the 8848.86 m of the survey Nepal and
+  China announced on 8 December 2020, rounded; the camps of the South Col
+  route as commonly given, Base Camp 5364, Camp 1 6065, Camp 2 6400, Camp 3
+  7162, Camp 4 7906 and the South Summit 8749 m; a night's sleep at most 500 m
+  higher above 3000 m, by the Wilderness Medical Society Clinical Practice
+  Guidelines, 2019 update. The guide's world: the icefall takes 6 hours and
+  the sun loosens its ice at 9:00; Dawa's wind limit 40 km/h against forecasts
+  of 45 tomorrow and 25 in 3 days; loads at most 12 kg, the tent 4, the stove
+  2, food 3 and a bottle 3 kg; 1200 litres a bottle, 2 a minute climbing and 4
+  for a sick climber; the push leaves at 23:00 and reaches the South Summit at
+  4:00, the top 90 minutes up, 60 back and 270 down to Camp 4. ams, the
+  headache's grade, a game rule, gains 1 for a night's sleep more than 500 m
+  above the last without bottled oxygen, used from Camp 3 up, and 1 by the
+  next morning for a headache hidden.
+- Dawa's air: West's formula, J. B. West, J Appl Physiol 81 (1996) 1850: P =
+  exp(6.63268 - 0.1112 h - 0.00149 h^2) mmHg at h km, by Math.exp; the oxygen
+  breathed in, 0.2094 (P - 47) mmHg, oxygen's share of dry air and the water
+  vapour pressure at 37 C; its share of the sea's, 100 times that over the
+  same at 0 km, P0 759.515 and 149.2006. air_text says "NAME, M m: the air
+  presses P mmHg, and you breathe in O mmHg of oxygen, PCT percent of what the
+  sea gives.", each whole by Math.round: Base Camp 401, 74 and 50; Camp 1 366,
+  67 and 45; Camp 2 351, 64 and 43; Camp 4 287, 50 and 34; the South Summit
+  256, 44 and 29; the nearest to a rounding boundary Camp 2's oxygen, 63.5976.
+- guide next purchase: the second half of each keepsake paragraph of
+  guides.md, the cowboy RPG, the next town, the other route, is marketing no
+  walk can build, and is not built.
+- guide deferred after_cases: GUIDES_PLAN.md D5, not built. A list
+  `after_cases` of `{holds, reply}`, the first whose text every result holds
+  taken, else after_tools, was weighed. Every walked branch is two way and
+  `quote` carries the many way outcomes as text, so the list is not built. Its
+  design stays here for a guide that needs three paths.
+- guide deferred exits in the provider: GUIDES_PLAN.md D7, not built. Script
+  gains `exits: {[input: string]: ScriptExit}`, ScriptExit being `{tool_calls,
+  after: string, paused: string, resume: string, resume_calls}`; the port
+  answers an exit's input in every node before the node's own replies,
+  remembers the node it left, holds a paused place of its own whose resume
+  input calls resume_calls and returns to the node it left, whose question
+  asked again is a node field `ask` the port then needs too. It moves state
+  into the port and a field into every node, for a structure the builder
+  gives a test table already. It is the design to take when a hand written
+  experience, not a test table, needs exits.
+- guide deferred demo driving: GUIDES_PLAN.md D10, not built. The demo moves
+  onto guide_walk.py's page driving by making the state, key and leave methods
+  of guide_walk's run, today the private _GuideRun's state_read, key_press and
+  line_type and the left rung's leave, public in the stub, and replacing
+  DemoRun's copies. Not done, so that the programs the normal level runs
+  change in no line.
+- guide deferred serving: GUIDES_PLAN.md D17, not built. Serving a guide's root
+  for a person to play, `xsjs_serve.py --guide NAME`, which would make the
+  root, write the built table as its seed and serve it, was not asked for. A
+  return visit that proves rule 6 of guides.md across sessions is not walked:
+  the sims keep their state in the world databases, which persist, and no step
+  reloads.
+
 ## audit_read
 
 - audit_read.py: `python3 python/audit_read.py PATH [--check]` prints one line
@@ -2457,9 +2982,12 @@ fault realm REALM->DRIVER 0 push; fails the block
   chain; a reply's names its id, cached tokens, calls and text. prompt_copies
   counts the prompt in each call's input, 0 in a chained call.
 - audit_read use: only on an end to end run not expected to fail, as
-  `build/test_demo/audit.txt` or `audit_tools.txt` after a run with --debug. The
-  wire and browser tests' roots fail on purpose, and a --check of one is right
-  to exit 1.
+  `build/test_demo/audit.txt` or `audit_tools.txt` after a run with --debug,
+  or `build/test_guide_GUIDE/audit.txt`, which a guide program copies there
+  after its audit rung passes under --debug, and at a failed rung once the
+  root holds an audit. The wire and
+  browser tests' roots fail on purpose, and a --check of one is right to exit
+  1.
 - audit_read --check: exits 1 at the first of these, naming the line: an error
   or fault line; a line of the audit's own type; an HTTP status outside 200 to
   299; an MCP error or isError result; a console read timed out; a credential

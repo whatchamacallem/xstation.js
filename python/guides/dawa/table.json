@@ -1,0 +1,459 @@
+{
+  "start": "hyperposition",
+  "puzzled": "I did not understand. Say it slowly, please.",
+  "exit": {
+    "input": "take me down",
+    "call": {
+      "call_id": "call_exit",
+      "name": "browser_script_run",
+      "arguments": {"name": "dawa", "args": {"action": "exit"}}
+    },
+    "after": "On the mountain nobody is brave about this. We rest here as long as you like, and when you want to climb again, say let's go up again.",
+    "resume": "let's go up again",
+    "resume_call": {
+      "call_id": "call_resume",
+      "name": "browser_script_run",
+      "arguments": {"name": "dawa", "args": {"action": "resume"}}
+    },
+    "paused": "We rest here. When you want to climb again, say let's go up again."
+  },
+  "nodes": {
+    "hyperposition": {
+      "replies": {
+        "take me to everest": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_image",
+              "name": "browser_image_make",
+              "arguments": {
+                "prompt": "Dawn at Everest Base Camp: the first sun turns a high wall of snow pink while everything below is still blue, flags rattle on a line, and a stove hisses beside a tent.",
+                "key": "dawa/base_camp.png"
+              }
+            }
+          ],
+          "next": "made"
+        }
+      },
+      "otherwise": {
+        "content": "The guide on duty today climbs mountains. Say take me to Everest, if you insist on being cold.",
+        "next": "hyperposition"
+      }
+    },
+    "made": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_bootstrap",
+            "name": "browser_script_run",
+            "arguments": {
+              "name": "bootstrap",
+              "args": {
+                "title": "Nobody Left Behind",
+                "region": "khumbu",
+                "universe": "everest",
+                "world": "expedition",
+                "scene": {
+                  "id": "base_camp",
+                  "subtitle": {"$text": "introduction.txt"},
+                  "image": "/_files/dawa/base_camp.png"
+                }
+              }
+            }
+          },
+          {
+            "call_id": "call_prompt",
+            "name": "browser_doc_put",
+            "arguments": {
+              "db": "everest",
+              "id": "prompt",
+              "body": {"0": {"t": "prompt"}, "text": {"$text": "prompt.txt"}}
+            }
+          }
+        ],
+        "next": "booted"
+      }
+    },
+    "booted": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_render",
+            "name": "browser_render",
+            "arguments": {
+              "image": "/_files/dawa/base_camp.png",
+              "subtitle": {"$text": "introduction.txt"}
+            }
+          }
+        ],
+        "next": "shown"
+      }
+    },
+    "shown": {
+      "replies": {},
+      "after_tools": {
+        "content": {"$text": "introduction.txt"},
+        "next": "offer"
+      }
+    },
+    "offer": {
+      "replies": {
+        "not yet": {
+          "content": "Dawa nods and fills your mug again. No hurry. The mountain is not going anywhere. Will you come on my rope?",
+          "next": "offer"
+        },
+        "all right, i'll come": {
+          "content": "Dawa ties you onto his rope behind Teo, who climbs with us, and checks your knot the way he checks his own. Now you are the newest on my rope. Ask me anything, and say ready when you want to start.",
+          "next": "talk"
+        }
+      },
+      "otherwise": {
+        "content": "Dawa holds out the mug and waits. Will you come on my rope? Say all right, I'll come, or not yet.",
+        "next": "offer"
+      }
+    },
+    "talk": {
+      "replies": {
+        "why have you never left anyone behind?": {
+          "content": "Dawa looks at the snow a while. When I was young I carried for a team, and a man on it could not walk down by himself. The others went up. I stayed, and we walked down together, slowly. Since then everyone on my rope comes home. Ask me more, or say ready.",
+          "next": "talk"
+        },
+        "ready": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_script",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/dawa.js",
+                "text": {"$text": "sim.js"}
+              }
+            },
+            {
+              "call_id": "call_tables",
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "expedition",
+                "statements": [
+                  {
+                    "sql": "CREATE TABLE climber (id INTEGER PRIMARY KEY CHECK (id = 1), camp TEXT NOT NULL, altitude_m INTEGER NOT NULL, ams INTEGER NOT NULL, hidden INTEGER NOT NULL, rest_days INTEGER NOT NULL, load_kg INTEGER NOT NULL, bottles INTEGER NOT NULL, resume_camp TEXT NOT NULL, exits INTEGER NOT NULL, high_m INTEGER NOT NULL, record TEXT NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE climb_log (n INTEGER PRIMARY KEY, beat TEXT NOT NULL, choice TEXT NOT NULL, outcome TEXT NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE keepsake (kind TEXT NOT NULL PRIMARY KEY, text TEXT NOT NULL) STRICT",
+                    "params": []
+                  }
+                ]
+              }
+            },
+            {
+              "call_id": "call_setup",
+              "name": "browser_script_run",
+              "arguments": {"name": "dawa", "args": {"action": "setup"}}
+            }
+          ],
+          "next": "built"
+        }
+      },
+      "otherwise": {
+        "content": "Dawa sips his tea. Ask me about the mountain, or say ready when you want to start.",
+        "next": "talk"
+      }
+    },
+    "built": {
+      "replies": {},
+      "after_tools": {
+        "content": "The icefall is ahead, and we must be through it before the sun loosens the ice. What hour do we start?",
+        "quote": "value.say",
+        "next": "icefall"
+      }
+    },
+    "icefall": {
+      "ask": "The icefall is ahead, and we must be through it before the sun loosens the ice. What hour do we start?",
+      "replies": {
+        "7": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_icefall",
+              "name": "browser_script_run",
+              "arguments": {"name": "dawa", "args": {"action": "icefall", "start": 7}}
+            }
+          ],
+          "next": "crossed"
+        },
+        "2": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_icefall",
+              "name": "browser_script_run",
+              "arguments": {"name": "dawa", "args": {"action": "icefall", "start": 2}}
+            }
+          ],
+          "next": "crossed"
+        }
+      }
+    },
+    "crossed": {
+      "replies": {},
+      "after_holds": "\"outcome\":\"crossed\"",
+      "after_tools": {
+        "content": "Morning. Tell me true: does your head hurt?",
+        "quote": "value.say",
+        "next": "morning"
+      },
+      "after_lacks": {
+        "content": "Earlier. What hour do we start?",
+        "quote": "value.say",
+        "next": "icefall"
+      }
+    },
+    "morning": {
+      "ask": "Morning. Tell me true: does your head hurt?",
+      "replies": {
+        "no, i'm fine": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_morning",
+              "name": "browser_script_run",
+              "arguments": {"name": "dawa", "args": {"action": "morning", "answer": "no"}}
+            }
+          ],
+          "next": "answered"
+        },
+        "yes, it hurts": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_morning",
+              "name": "browser_script_run",
+              "arguments": {"name": "dawa", "args": {"action": "morning", "answer": "yes"}}
+            }
+          ],
+          "next": "answered"
+        }
+      }
+    },
+    "answered": {
+      "replies": {},
+      "after_holds": "\"outcome\":\"told\"",
+      "after_tools": {
+        "content": "When do we go up?",
+        "quote": "value.say",
+        "next": "window"
+      },
+      "after_lacks": {
+        "content": "Morning. Tell me true: does your head hurt?",
+        "quote": "value.say",
+        "next": "morning"
+      }
+    },
+    "window": {
+      "ask": "When do we go up?",
+      "replies": {
+        "go tomorrow": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_window",
+              "name": "browser_script_run",
+              "arguments": {"name": "dawa", "args": {"action": "window", "wait": 1}}
+            }
+          ],
+          "next": "forecast"
+        },
+        "wait three days": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_window",
+              "name": "browser_script_run",
+              "arguments": {"name": "dawa", "args": {"action": "window", "wait": 3}}
+            }
+          ],
+          "next": "forecast"
+        }
+      }
+    },
+    "forecast": {
+      "replies": {},
+      "after_holds": "\"outcome\":\"real\"",
+      "after_tools": {
+        "content": "Now the loads for the high camps. What do you carry?",
+        "quote": "value.say",
+        "next": "loads"
+      },
+      "after_lacks": {
+        "content": "When do we go up?",
+        "quote": "value.say",
+        "next": "window"
+      }
+    },
+    "loads": {
+      "ask": "Now the loads for the high camps. What do you carry?",
+      "replies": {
+        "everything": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_loads",
+              "name": "browser_script_run",
+              "arguments": {"name": "dawa", "args": {"action": "loads", "carry": "everything"}}
+            }
+          ],
+          "next": "packed"
+        },
+        "leave one bottle": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_loads",
+              "name": "browser_script_run",
+              "arguments": {"name": "dawa", "args": {"action": "loads", "carry": "one bottle"}}
+            }
+          ],
+          "next": "packed"
+        }
+      }
+    },
+    "packed": {
+      "replies": {},
+      "after_holds": "\"outcome\":\"carried\"",
+      "after_tools": {
+        "content": "Say go when you are ready.",
+        "quote": "value.say",
+        "next": "push"
+      },
+      "after_lacks": {
+        "content": "Lighter. What do you carry?",
+        "quote": "value.say",
+        "next": "loads"
+      }
+    },
+    "push": {
+      "ask": "Say go when you are ready.",
+      "replies": {
+        "go": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_push",
+              "name": "browser_script_run",
+              "arguments": {"name": "dawa", "args": {"action": "push"}}
+            }
+          ],
+          "next": "pushed"
+        }
+      }
+    },
+    "pushed": {
+      "replies": {},
+      "after_tools": {
+        "content": "Dawa looks at you and waits. It is your call: the top, or we take Teo down?",
+        "quote": "value.say",
+        "next": "decide"
+      }
+    },
+    "decide": {
+      "ask": "Dawa looks at you and waits. It is your call: the top, or we take Teo down?",
+      "replies": {
+        "we take teo down": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_decide",
+              "name": "browser_script_run",
+              "arguments": {"name": "dawa", "args": {"action": "decide", "choice": "rescue"}}
+            }
+          ],
+          "next": "decided"
+        },
+        "the top": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_decide",
+              "name": "browser_script_run",
+              "arguments": {"name": "dawa", "args": {"action": "decide", "choice": "summit"}}
+            }
+          ],
+          "next": "decided"
+        }
+      }
+    },
+    "decided": {
+      "replies": {},
+      "after_tools": {
+        "content": "At the Col, Dawa holds out his camera. Do you want the picture from up there?",
+        "quote": "value.say",
+        "next": "photo"
+      }
+    },
+    "photo": {
+      "ask": "At the Col, Dawa holds out his camera. Do you want the picture from up there?",
+      "replies": {
+        "yes": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_photo",
+              "name": "browser_image_make",
+              "arguments": {
+                "prompt": "Dawn high on the Southeast Ridge of Everest: pink light on the snow, the world below still blue, and a roped climber in the foreground.",
+                "key": "dawa/high_point.png"
+              }
+            }
+          ],
+          "next": "developed"
+        }
+      }
+    },
+    "developed": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_render",
+            "name": "browser_render",
+            "arguments": {
+              "image": "/_files/dawa/high_point.png",
+              "subtitle": "Dawa's photograph from your high point."
+            }
+          },
+          {
+            "call_id": "call_keepsake",
+            "name": "browser_script_run",
+            "arguments": {"name": "dawa", "args": {"action": "keepsake"}}
+          }
+        ],
+        "next": "kept"
+      }
+    },
+    "kept": {
+      "replies": {},
+      "after_tools": {
+        "content": "Go slowly, and come back some day. The mountain has other routes, and I will be climbing them.",
+        "quote": "value.say",
+        "next": "end"
+      }
+    },
+    "end": {
+      "replies": {},
+      "otherwise": {
+        "content": "Dawa smiles and pours the last of the tea. Go slowly.",
+        "next": "end"
+      }
+    }
+  }
+}

@@ -1,0 +1,278 @@
+{
+  "poll_seconds": 0.1,
+  "rung_seconds": 60,
+  "served_seconds": 240,
+  "window_width": 1280,
+  "window_height": 720,
+  "root_debug": true,
+  "root_verbose": false,
+  "root_label": "smoke-test",
+  "ttyd_code": 0,
+  "served": {
+    "band": "How can I help you?",
+    "picture": {"hidden": false, "size": 4, "colours": ["0 0 0 255"]}
+  },
+  "rungs": [
+    {
+      "rung": "creation",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Take me flying",
+          "band": "Flat bright daylight, a hayfield mown short, gasoline and warm varnish. A biplane stands a few yards off, its wings patched in three shades of cream. Ruth Calloway drops off the lower wing in boots and breeches, goggles pushed up into red hair. \"Morning! Five dollars buys ten minutes, but you slept through my pitch, so the first ride's free. And before you ask about the wires, I checked every one myself. I'm bold. I'm not stupid. Front seat's yours. I'll take her up easy, and if you hate it, tap your head twice and I'll set us down like a feather. No questions, no teasing.\"",
+          "picture": {"hidden": false, "size": 16, "colours": ["0 0 0 255", "255 255 255 255"]},
+          "rows": [
+            {
+              "db": "metaverse",
+              "sql": "SELECT name, title, player, world FROM universe",
+              "params": [],
+              "rows": [["barnstorming", "The First Ride's Free", "player", "summer"]]
+            },
+            {
+              "db": "metaverse",
+              "sql": "SELECT CAST(data AS TEXT) FROM _kv WHERE key = ?",
+              "params": ["world"],
+              "rows": [["summer"]]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rung": "confirm",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "What if I hate it?",
+          "band": "Then you tap your head twice and I set us down like a feather. No questions, no teasing. So, are you coming?"
+        },
+        {
+          "say": "Yes",
+          "band": "That's the spirit. I don't fly with strangers, so what do I call you?"
+        },
+        {
+          "say": "Sam",
+          "band": "Sam. I work my way from town to town all summer selling rides, and I'm short a partner. Ask me anything while I check her over, or say let's go."
+        }
+      ]
+    },
+    {
+      "rung": "talk",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Why are you short a partner?",
+          "band": "My last partner married a feed merchant in May and swore off the sky. This summer's purse is mine to win alone, and if it comes up short, the bank takes the Jenny. Say let's go when you want to fly."
+        }
+      ]
+    },
+    {
+      "rung": "build",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Let's go",
+          "band": "The Jenny: a Curtiss JN-4D with a 90 horsepower OX-5, 352.56 square feet of wing, and 1920 pounds aboard with the two of us and 21 gallons of gasoline. She stalls at 45 mph, cruises at 60 and tops out at 75. Climb in up front and buckle the belt. Say take her up when you're settled."
+        }
+      ]
+    },
+    {
+      "rung": "first flight",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Take her up",
+          "band": "Up to 2000 feet in 10 minutes, the book's 200 feet a minute, on 1.5 gallons of gasoline. Easy, like I promised. Feel her ride the air? Say your stick when you want to fly her yourself.",
+          "rows": [
+            {
+              "db": "summer",
+              "sql": "SELECT id, partner, altitude_ft, resume_ft, exits, purse_cents FROM jenny",
+              "params": [],
+              "rows": [[1, "Sam", 2000, 0, 0, 0]]
+            }
+          ]
+        },
+        {
+          "say": "I tap my head twice",
+          "band": "Throttle closed at 2000 feet. Gliding at 60 mph, 10.66 feet on for every foot down, she sinks 8.3 feet a second and settles onto the grass 21320 feet on, in 4:02, like a feather. No questions, no teasing. Say go on when you want to go back up.",
+          "rows": [
+            {
+              "db": "summer",
+              "sql": "SELECT id, partner, altitude_ft, resume_ft, exits, purse_cents FROM jenny",
+              "params": [],
+              "rows": [[1, "Sam", 0, 2000, 1, 0]]
+            }
+          ]
+        },
+        {
+          "say": "Go on",
+          "band": "Back up to 2000 feet in 10 minutes, on 1.5 gallons more. Easy, like I promised. Feel her ride the air? Say your stick when you want to fly her yourself."
+        },
+        {
+          "say": "Your stick",
+          "band": "She's yours. Turns first: how many degrees of bank do you give her?"
+        }
+      ]
+    },
+    {
+      "rung": "turns",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "60",
+          "band": "At 60 degrees of bank she pulls 2.0 g and stalls at 64 mph, over your 60: the wing quits and Ruth catches her. Take her round again. How many degrees of bank?"
+        },
+        {
+          "say": "30",
+          "band": "At 30 degrees of bank she pulls 1.2 g and stalls at 48 mph, under your 60: a circle 417 feet in radius, flown round in 30 seconds. Now a loop: dive for speed, then pull. How fast is she at the bottom, in miles an hour?"
+        }
+      ]
+    },
+    {
+      "rung": "loop",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "80",
+          "band": "Pulling 4 g at 80 mph, she comes over the top at 30 mph, under the 32 she needs for 0.5 g up there: she hangs, falls off sideways, and Ruth flies her out. The loop wants 84 mph at the bottom. Dive her again. How fast at the bottom?"
+        },
+        {
+          "say": "90",
+          "band": "Dive 150 feet to 90 mph and pull 4 g: she comes over the top at 34 mph, 232 feet above where you pulled, and down the back at 90 again. A loop. Now a roll, at full throttle. How many degrees of nose up before you roll her?"
+        }
+      ]
+    },
+    {
+      "rung": "roll",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "20",
+          "band": "Nose 20 degrees up at 75 mph and 4 seconds round: she comes out 107 feet low. A roll at 75 wants 36 degrees of nose to keep her height. Again. How many degrees of nose up?"
+        },
+        {
+          "say": "40",
+          "band": "Nose 40 degrees up at 75 mph and 4 seconds round: she comes out 25 feet high. A roll. Here's the next town. We buzz Main Street and throw out the handbills. How low do you take her, in feet?"
+        }
+      ]
+    },
+    {
+      "rung": "main street",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "50",
+          "band": "Down Main Street at 50 feet and 75 mph, 110 feet a second, and the handbills go over the side. Rides pay for the gasoline, and the pasture past town is full of folks waving dollar bills. How many rides do we sell this afternoon?"
+        }
+      ]
+    },
+    {
+      "rung": "rides",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "lots",
+          "band": "Say again? The wind took that. Rides pay for the gasoline, and the pasture past town is full of folks waving dollar bills. How many rides do we sell this afternoon?"
+        },
+        {
+          "say": "10",
+          "band": "10 rides at $5.00 for 10 minutes: $50.00 taken in 100 minutes of flying, on 15.0 gallons of gasoline at 21 cents, $3.15. $46.85 clear, and 6.0 gallons left for the show's 40 minutes. The fair wants a show, and it opens with a race against a motorcar down the county road. How do you fly it?",
+          "rows": [
+            {
+              "db": "summer",
+              "sql": "SELECT id, partner, altitude_ft, resume_ft, exits, purse_cents FROM jenny",
+              "params": [],
+              "rows": [[1, "Sam", 0, 0, 1, 4685]]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rung": "race",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Full throttle",
+          "band": "Full throttle: 75 mph into a 15 mph wind is 60 over the road, 5.0 miles in 5:00. The motorcar at 45 takes 6:40. You win by 1:40 and the fair's $25.00 purse: $71.85 in the cigar box. Then the wing walk, which is always optional. Who flies and who walks?"
+        }
+      ]
+    },
+    {
+      "rung": "wing walk",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "I'll fly, you walk",
+          "band": "Ruth walks the top wing while you hold her straight and level at 60 mph and 1000 feet. Then, over open country, the OX-5 coughs and quits: 1000 feet up, the wind 15 mph from the north, the north hayfield 1.5 miles off and the south pasture 3.0. Which field?"
+        }
+      ]
+    },
+    {
+      "rung": "engine out",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "The south pasture",
+          "band": "Gliding south with the wind at 75 mph over the ground, 1000 feet carries you 13325 feet, 2.5 miles, and the south pasture is 3.0 miles off: 2515 feet short. Pick again. Which field?"
+        },
+        {
+          "say": "The north hayfield",
+          "band": "Gliding north into the wind at 45 mph over the ground, 1000 feet carries you 7995 feet, 1.5 miles, and the north hayfield is 1.5 miles off: 75 feet to spare. That's our field. Now judge the wind and bring her in. Which way do you land?"
+        },
+        {
+          "say": "Into the wind",
+          "band": "Into the wind she touches down at 45 mph through the air and 30 over the hay, and rolls to a stop. Down safe. The printer in town owes me a favor. Want a handbill with your name beside mine?"
+        }
+      ]
+    },
+    {
+      "rung": "keepsake",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Yes please",
+          "band": "RUTH CALLOWAY AND SAM, AERIAL ACROBATS: loops, rolls, the wing walk and a motorcar beaten! Rides $5.00 for 10 minutes. There's your name beside mine, partner. Come find me in the next town.",
+          "picture": {"hidden": false, "size": 16, "colours": ["0 0 0 255", "255 255 255 255"]},
+          "rows": [
+            {
+              "db": "summer",
+              "sql": "SELECT id, partner, altitude_ft, resume_ft, exits, purse_cents FROM jenny",
+              "params": [],
+              "rows": [[1, "Sam", 0, 0, 1, 7185]]
+            },
+            {
+              "db": "summer",
+              "sql": "SELECT n, beat, choice, outcome FROM flight ORDER BY n",
+              "params": [],
+              "rows": [
+                [1, "climb", "2000", "made"],
+                [2, "exit", "2000", "landed"],
+                [3, "resume", "2000", "made"],
+                [4, "turn", "60", "stalled"],
+                [5, "turn", "30", "made"],
+                [6, "loop", "80", "fell"],
+                [7, "loop", "90", "made"],
+                [8, "roll", "20", "sank"],
+                [9, "roll", "40", "made"],
+                [10, "buzz", "50", "made"],
+                [11, "rides", "10", "made"],
+                [12, "race", "full throttle", "won"],
+                [13, "wing_walk", "Ruth", "walked"],
+                [14, "field", "south", "short"],
+                [15, "field", "north", "reached"],
+                [16, "landing", "into the wind", "landed"]
+              ]
+            },
+            {
+              "db": "summer",
+              "sql": "SELECT kind, text FROM keepsake ORDER BY kind",
+              "params": [],
+              "rows": [["handbill", "RUTH CALLOWAY AND SAM, AERIAL ACROBATS: loops, rolls, the wing walk and a motorcar beaten! Rides $5.00 for 10 minutes."]]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

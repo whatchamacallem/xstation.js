@@ -2,20 +2,22 @@
 // SPDX-License-Identifier: MIT
 // This file is licensed under the terms of the LICENSE.md file.
 //
-// The scripted provider, with no network and no AI: a port that answers the
-// `http.request` lines of the provider door, `POST {base_url}/responses` from
-// a table of nodes and every image request with a PNG test pattern, built
-// here by hand from stored deflate blocks with its checksums computed in code.
-// Every part of it is synchronous. The port holds one place in the table: the
-// last input item, a user message or the outputs of the last reply's calls,
-// picks the reply. Once it has chosen, it holds the request to what xAI's
-// pages expect and refuses the first bad field. It keeps each response under
-// its id with its whole context, unless `store` is false, so that a chained
-// request's context is the one it chains from, then its input. Its ids carry
-// the first 16 hexadecimal digits of the `SHA-256` of the cache key and the
-// context, and its `usage` is arithmetic on the context in characters, the
-// cached part being the leading items of the key's last context and output.
-// In debug mode, by its reader, it takes `provider.tools_omitted` for tools.
+// The scripted provider, with no network and no AI: a synchronous port that
+// answers the `http.request` lines of the provider door from one place in a
+// table of nodes. A user message's text, its ends trimmed and its letters
+// lowered, picks the reply its node's `replies` holds under that text, a
+// number, a word or a phrase, else `otherwise`, else a refusal, as is a
+// content that is no text; a key no input can match is refused when the
+// port is made. The outputs of the last reply's calls take the `after_tools`
+// of the node it names, or `after_lacks` when one lacks `after_holds`. A
+// reply's `quote`, a path into the JSON of the last call output, says that
+// string before its `content`. An image request gets a PNG test pattern built
+// here from stored deflate blocks. Once it has chosen, it holds the request
+// to xAI's rules and refuses the first bad field. It keeps each response
+// under its id, unless `store` is false, for a chained request. Each reply
+// holds a reasoning item and xAI's echoes; its ids carry the `SHA-256` of the
+// cache key and context, its `usage` counts characters. In debug mode, by
+// its reader, it takes `provider.tools_omitted` for tools.
 
 namespace provider_script {
   // The line type, the request and reply parts, and the layout of the PNG.
@@ -61,8 +63,8 @@ namespace provider_script {
     digest_digits: 16,
     // The encrypted reasoning of every reply, which a restart sends back.
     reasoning_text: "scripted",
-    // The decimal text of one integer, the only text `replies` answers.
-    integer_text: /^(?:0|-?[1-9][0-9]*)$/,
+    // The mark between the members of a quote's path.
+    quote_separator: ".",
     pattern_size: 16,
     square_size: 4,
     channel_count: 3,
@@ -116,8 +118,10 @@ namespace provider_script {
 
   // One reply of the script and the node it leads to.
   export interface ScriptReply {
-    // What the assistant says, `null` when it only calls tools.
+    // What the assistant says, null when it only calls tools or only quotes.
     content: string | null;
+    // A path of members joined by `.` into the JSON of the last tool result.
+    quote?: string;
     // The tools the reply calls, if any.
     tool_calls?: ScriptCall[];
     // The node to be in after this reply's tool results arrive.
@@ -126,7 +130,7 @@ namespace provider_script {
 
   // One node of the script: its replies by input and after tool results.
   export interface ScriptNode {
-    // Replies by the integer the user sent, as decimal strings.
+    // Replies by the text the user sent, its ends trimmed, in lower case.
     replies: { [input: string]: ScriptReply };
     // The reply to any other text the user sent.
     otherwise?: ScriptReply;
@@ -147,10 +151,12 @@ namespace provider_script {
   // An object of unknown members, as a parsed JSON body holds them.
   type FieldTable = { [key: string]: unknown };
 
-  // The reply chosen for a request and the node it was chosen in.
+  // The reply chosen for a request, the node it was chosen in and its text.
   interface ChosenReply {
     reply: ScriptReply;
     node: string;
+    // What the reply says, its quote resolved, or null for no message.
+    text: string | null;
   }
 
   // The node the outputs of a reply's calls lead to, and the ids of the calls.
@@ -381,6 +387,24 @@ namespace provider_script {
     return reply.tool_calls ?? [];
   }
 
+  // The normal form of a text, its ends trimmed and its letters lowered.
+  function text_normal(text: string): string {
+    return text.trim().toLowerCase();
+  }
+
+  // Refuses the first reply key, in the table's order, not in normal form.
+  function keys_check(script: Script): void {
+    for (const [name, node] of Object.entries(script.nodes)) {
+      for (const key of Object.keys(node.replies)) {
+        if (text_normal(key) !== key) {
+          throw new Error(
+            i18n("provider_script.key_unnormal", name, utility.json_text(key)),
+          );
+        }
+      }
+    }
+  }
+
   // Refuses an address or a header that the real endpoint would refuse.
   function post_check(payload: FieldTable): void {
     if (!(payload.url as string).startsWith(constants.url_start)) {
@@ -516,7 +540,7 @@ namespace provider_script {
   }
 
   // A reply's output: its reasoning, its message when it says one, its calls.
-  function output_make(reply: ScriptReply, digest: string): FieldTable[] {
+  function output_make(chosen: ChosenReply, digest: string): FieldTable[] {
     const output: FieldTable[] = [
       {
         type: constants.reasoning_type,
@@ -526,18 +550,18 @@ namespace provider_script {
         status: constants.completed_status,
       },
     ];
-    if (reply.content !== null) {
+    if (chosen.text !== null) {
       output.push({
         type: constants.message_type,
         id: `${constants.message_prefix}${digest}`,
         role: constants.assistant_role,
         status: constants.completed_status,
         content: [
-          { type: constants.text_type, text: reply.content, annotations: [] },
+          { type: constants.text_type, text: chosen.text, annotations: [] },
         ],
       });
     }
-    reply_calls(reply).forEach((call: ScriptCall, index: number) => {
+    reply_calls(chosen.reply).forEach((call: ScriptCall, index: number) => {
       output.push({
         type: constants.call_type,
         id: `${constants.call_prefix}${digest}_${index + 1}`,
@@ -632,6 +656,63 @@ namespace provider_script {
     return held ? after_tools : after_lacks;
   }
 
+  // The reply of a node to a text in normal form, its own else `otherwise`.
+  function input_reply(
+    node: ScriptNode,
+    name: string,
+    text: string,
+  ): ScriptReply {
+    if (Object.hasOwn(node.replies, text)) {
+      return node.replies[text];
+    }
+    if (node.otherwise !== undefined) {
+      return node.otherwise;
+    }
+    throw new Error(i18n("provider_script.input_unknown", name, text));
+  }
+
+  // The value of a call output's JSON text, which a quote at the path reads.
+  function quote_parse(text: string, node: string, path: string): unknown {
+    try {
+      return jslb.json_decode(text);
+    } catch (error) {
+      throw utility.error_wrap(
+        i18n("provider_script.quote_missing", node, path),
+        error,
+      );
+    }
+  }
+
+  // The text at the path of members in a call output's JSON, else a throw.
+  function quote_read(text: string, node: string, path: string): string {
+    let value: unknown = quote_parse(text, node, path);
+    for (const member of path.split(constants.quote_separator)) {
+      if (!fields_is(value) || !Object.hasOwn(value, member)) {
+        throw new Error(i18n("provider_script.quote_missing", node, path));
+      }
+      value = value[member];
+    }
+    if (typeof value !== "string") {
+      throw new Error(i18n("provider_script.quote_missing", node, path));
+    }
+    return value;
+  }
+
+  // The text a reply says: the quote of the last call output, then `content`.
+  function reply_text(
+    reply: ScriptReply,
+    node: string,
+    input: unknown[],
+  ): string | null {
+    const path = reply.quote;
+    if (path === undefined) {
+      return reply.content;
+    }
+    const texts = results_texts(input);
+    const quoted = quote_read(texts[texts.length - 1], node, path);
+    return reply.content === null ? quoted : `${quoted} ${reply.content}`;
+  }
+
   // A port that answers each request from the script before its post returns.
   export class ScriptPort implements queue.Port {
     private readonly script: Script;
@@ -647,9 +728,10 @@ namespace provider_script {
     private readonly caches = new Map<string, string[]>();
     private receiver: ((line: lines.Line) => void) | undefined;
 
-    // Takes the script, whose start must name one of its nodes, and the mode.
+    // Takes the script, its start a node and its keys normal, and the mode.
     constructor(script: Script, debug: () => boolean) {
       node_get(script, script.start);
+      keys_check(script);
       this.script = script;
       this.debug = debug;
       this.current = script.start;
@@ -761,7 +843,7 @@ namespace provider_script {
       const context =
         held === undefined ? [...input] : [...held.context, ...input];
       const digest = digest_make(key, context);
-      const output = output_make(chosen.reply, digest);
+      const output = output_make(chosen, digest);
       const id = `${constants.response_prefix}${digest}`;
       const answer: FieldTable = {
         id,
@@ -873,7 +955,8 @@ namespace provider_script {
         }
         const reached = node_get(this.script, pending.node);
         const after = after_read(reached, pending.node, input);
-        return { reply: after, node: pending.node };
+        const said = reply_text(after, pending.node, input);
+        return { reply: after, node: pending.node, text: said };
       }
       if (last.type !== undefined || last.role !== constants.user_role) {
         throw new Error(
@@ -890,19 +973,11 @@ namespace provider_script {
         throw new Error(i18n("provider_script.input_invalid", String(text)));
       }
       const node = node_get(this.script, this.current);
-      const integer = constants.integer_text.test(text);
-      if (integer && Object.hasOwn(node.replies, text)) {
-        return { reply: node.replies[text], node: this.current };
+      const reply = input_reply(node, this.current, text_normal(text));
+      if (reply.quote !== undefined) {
+        throw new Error(i18n("provider_script.quote_unreached", this.current));
       }
-      if (node.otherwise !== undefined) {
-        return { reply: node.otherwise, node: this.current };
-      }
-      if (!integer) {
-        throw new Error(i18n("provider_script.input_invalid", text));
-      }
-      throw new Error(
-        i18n("provider_script.input_unknown", this.current, text),
-      );
+      return { reply, node: this.current, text: reply.content };
     }
   }
 

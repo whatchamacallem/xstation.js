@@ -86,6 +86,12 @@ _LEVELS = [
     (["--test-disabled", "--test-all"], _TEST_DISABLED),
 ]
 
+# The end to end programs of a run with no option, the guide tests.
+_GUIDE_PROGRAMS = ["test_guide_isaiah", "test_guide_ruth", "test_guide_dawa"]
+
+# The end to end programs a run with a stream runs before the guide tests.
+_NORMAL_PROGRAMS = ["test_wire", "test_browser", "test_demo"]
+
 # The option a run's level once was, which the driver no longer knows.
 _REMOVED_OPTION = "--end-to-end"
 
@@ -324,3 +330,19 @@ class TestDriverLevels(unittest.TestCase):
             with self.assertRaises(SystemExit) as caught:
                 test_all.parser_make().parse_args([_REMOVED_OPTION])
         self.assertEqual(caught.exception.code, 2)
+
+    # A run with no stream runs the guide tests alone.
+    def test_default_guides(self) -> None:
+        self.assertEqual(test_all.programs_chosen(False), _GUIDE_PROGRAMS)
+
+    # A run with a stream runs the wire, browser and demo tests first.
+    def test_normal_programs(self) -> None:
+        self.assertEqual(
+            test_all.programs_chosen(True), _NORMAL_PROGRAMS + _GUIDE_PROGRAMS
+        )
+
+    # Each end to end program is a file of the checkout's `python`.
+    def test_programs_present(self) -> None:
+        for name in test_all.programs_chosen(True):
+            path = os.path.join(_ROOT_PATH, "python", f"{name}.py")
+            self.assertTrue(os.path.isfile(path), path)

@@ -1,0 +1,599 @@
+{
+  "start": "hyperposition",
+  "puzzled": "Isaiah thinks on that, then lets it go.",
+  "exit": {
+    "input": "i'll ride back to the fire",
+    "call": {
+      "call_id": "call_exit",
+      "name": "browser_script_run",
+      "arguments": {"name": "isaiah", "args": {"action": "exit"}}
+    },
+    "after": "His song carries in from the dark, slow and easy. When you want the herd again, say ride out again.",
+    "resume": "ride out again",
+    "resume_call": {
+      "call_id": "call_resume",
+      "name": "browser_script_run",
+      "arguments": {"name": "isaiah", "args": {"action": "resume"}}
+    },
+    "paused": "The fire pops and settles. When you want the herd again, say ride out again."
+  },
+  "nodes": {
+    "hyperposition": {
+      "replies": {
+        "take me on a cattle drive": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_image",
+              "name": "browser_image_make",
+              "arguments": {
+                "prompt": "A campfire on the open prairie at night under more stars than seem reasonable, a long, quiet cowboy in a rain worn hat holding out a tin cup, and beyond the firelight a great herd of longhorn cattle bedded down in the dark.",
+                "key": "isaiah/campfire.png"
+              }
+            }
+          ],
+          "next": "made"
+        }
+      },
+      "otherwise": {
+        "content": "I can take you on a cattle drive, should you ask for one. That is the whole of the menu today.",
+        "next": "hyperposition"
+      }
+    },
+    "made": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_boot",
+            "name": "browser_script_run",
+            "arguments": {
+              "name": "bootstrap",
+              "args": {
+                "title": "Two Thousand Head to Dodge",
+                "region": "trail",
+                "universe": "trail_drive",
+                "world": "drive",
+                "scene": {
+                  "id": "campfire",
+                  "subtitle": {"$text": "introduction.txt"},
+                  "image": "/_files/isaiah/campfire.png"
+                }
+              }
+            }
+          },
+          {
+            "call_id": "call_prompt",
+            "name": "browser_doc_put",
+            "arguments": {
+              "db": "trail_drive",
+              "id": "prompt",
+              "body": {"0": {"t": "prompt"}, "text": {"$text": "prompt.txt"}}
+            }
+          }
+        ],
+        "next": "booted"
+      }
+    },
+    "booted": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_render",
+            "name": "browser_render",
+            "arguments": {
+              "image": "/_files/isaiah/campfire.png",
+              "subtitle": {"$text": "introduction.txt"}
+            }
+          }
+        ],
+        "next": "shown"
+      }
+    },
+    "shown": {
+      "replies": {},
+      "after_tools": {
+        "content": {"$text": "introduction.txt"},
+        "next": "offer"
+      }
+    },
+    "offer": {
+      "replies": {
+        "no thanks, take me back": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_world",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/metaverse/world", "text": "metaverse"}
+            },
+            {
+              "call_id": "call_render",
+              "name": "browser_render",
+              "arguments": {
+                "image": "/metaverse/image/hyperposition",
+                "subtitle": "How can I help you?"
+              }
+            }
+          ],
+          "next": "left"
+        },
+        "yes": {
+          "content": "Isaiah stands and gives you the reins of a gentle bay. \"Good. We'll go out slow. Ask me anything on the way, and tell me when you're ready to ride out.\"",
+          "next": "talk"
+        }
+      },
+      "otherwise": {
+        "content": "Isaiah lets that sit a while over the coffee. \"Say yes if you'd like to ride. Or no thanks, and you can go back where you came from.\"",
+        "next": "offer"
+      }
+    },
+    "left": {
+      "replies": {},
+      "after_tools": {
+        "content": "How can I help you?",
+        "next": "away"
+      }
+    },
+    "away": {
+      "replies": {
+        "actually, the cattle drive": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_world",
+              "name": "browser_kv_put",
+              "arguments": {"ref": "/metaverse/world", "text": "drive"}
+            },
+            {
+              "call_id": "call_render",
+              "name": "browser_render",
+              "arguments": {
+                "image": "/_files/isaiah/campfire.png",
+                "subtitle": "Isaiah looks up from the fire and fills the cup again. \"Still hot. The horse is still saddled, if you'd like to ride out.\""
+              }
+            }
+          ],
+          "next": "back"
+        }
+      },
+      "otherwise": {
+        "content": "The cattle drive is still there, should you want it back. Say so, and I shall see to it.",
+        "next": "away"
+      }
+    },
+    "back": {
+      "replies": {},
+      "after_tools": {
+        "content": "Isaiah looks up from the fire and fills the cup again. \"Still hot. The horse is still saddled, if you'd like to ride out.\"",
+        "next": "offer"
+      }
+    },
+    "talk": {
+      "replies": {
+        "how long have you been riding night guard?": {
+          "content": "Isaiah smiles a little under the hat. \"Every night since Texas. Early on I sang so badly the cook threw a boot at me. The cattle never minded. They only want to hear somebody out there.\"",
+          "next": "talk"
+        },
+        "let's ride out": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_script",
+              "name": "browser_kv_put",
+              "arguments": {
+                "ref": "/_files/script/isaiah.js",
+                "text": {"$text": "sim.js"}
+              }
+            },
+            {
+              "call_id": "call_tables",
+              "name": "browser_sql_run",
+              "arguments": {
+                "db": "drive",
+                "statements": [
+                  {
+                    "sql": "CREATE TABLE herd (id INTEGER PRIMARY KEY CHECK (id = 1), head INTEGER NOT NULL, scattered INTEGER NOT NULL, lost INTEGER NOT NULL, tolled INTEGER NOT NULL, calm INTEGER NOT NULL, looks INTEGER NOT NULL, found INTEGER NOT NULL, waited INTEGER NOT NULL, exits INTEGER NOT NULL, song TEXT NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE drive_log (n INTEGER PRIMARY KEY, beat TEXT NOT NULL, choice TEXT NOT NULL, outcome TEXT NOT NULL) STRICT",
+                    "params": []
+                  },
+                  {
+                    "sql": "CREATE TABLE keepsake (kind TEXT NOT NULL PRIMARY KEY, text TEXT NOT NULL) STRICT",
+                    "params": []
+                  }
+                ]
+              }
+            },
+            {
+              "call_id": "call_setup",
+              "name": "browser_script_run",
+              "arguments": {"name": "isaiah", "args": {"action": "setup"}}
+            }
+          ],
+          "next": "built"
+        }
+      },
+      "otherwise": {
+        "content": "Isaiah turns that over and lets it go. \"Ask me about the work, if you like, or we can ride out.\"",
+        "next": "talk"
+      }
+    },
+    "built": {
+      "replies": {},
+      "after_tools": {
+        "content": "Out on night guard Isaiah rides the slow circle beside you. \"Sing them something. What do you know?\"",
+        "quote": "value.say",
+        "next": "guard"
+      }
+    },
+    "guard": {
+      "ask": "Out on night guard Isaiah rides the slow circle beside you. \"Sing them something. What do you know?\"",
+      "replies": {
+        "streets of laredo": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_sing",
+              "name": "browser_script_run",
+              "arguments": {
+                "name": "isaiah",
+                "args": {"action": "sing", "song": "Streets of Laredo"}
+              }
+            }
+          ],
+          "next": "sung"
+        }
+      }
+    },
+    "sung": {
+      "replies": {},
+      "after_tools": {
+        "content": "\"Now listen to them breathe. Settled, or restless?\"",
+        "quote": "value.say",
+        "next": "read"
+      }
+    },
+    "read": {
+      "ask": "\"Now listen to them breathe. Settled, or restless?\"",
+      "replies": {
+        "restless": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_read",
+              "name": "browser_script_run",
+              "arguments": {
+                "name": "isaiah",
+                "args": {"action": "read", "judge": "restless"}
+              }
+            }
+          ],
+          "next": "judged"
+        },
+        "settled": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_read",
+              "name": "browser_script_run",
+              "arguments": {
+                "name": "isaiah",
+                "args": {"action": "read", "judge": "settled"}
+              }
+            }
+          ],
+          "next": "judged"
+        }
+      }
+    },
+    "judged": {
+      "replies": {},
+      "after_holds": "\"outcome\":\"right\"",
+      "after_tools": {
+        "content": "Thunder rolls in, and lightning puts the whole herd on its feet. \"They're running. Which flank do we ride for, east or west?\"",
+        "quote": "value.say",
+        "next": "stampede"
+      },
+      "after_lacks": {
+        "content": "\"Listen again, slower. Settled, or restless?\"",
+        "quote": "value.say",
+        "next": "read"
+      }
+    },
+    "stampede": {
+      "ask": "Thunder rolls in, and lightning puts the whole herd on its feet. \"They're running. Which flank do we ride for, east or west?\"",
+      "replies": {
+        "east": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_flank",
+              "name": "browser_script_run",
+              "arguments": {
+                "name": "isaiah",
+                "args": {"action": "stampede", "flank": "east"}
+              }
+            }
+          ],
+          "next": "turned"
+        },
+        "west": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_flank",
+              "name": "browser_script_run",
+              "arguments": {
+                "name": "isaiah",
+                "args": {"action": "stampede", "flank": "west"}
+              }
+            }
+          ],
+          "next": "turned"
+        }
+      }
+    },
+    "turned": {
+      "replies": {},
+      "after_tools": {
+        "content": "\"They'll have gone where there's cover. The ridge, the creek or the draw?\"",
+        "quote": "value.say",
+        "next": "track"
+      }
+    },
+    "track": {
+      "ask": "\"They'll have gone where there's cover. The ridge, the creek or the draw?\"",
+      "replies": {
+        "the ridge": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_track",
+              "name": "browser_script_run",
+              "arguments": {
+                "name": "isaiah",
+                "args": {"action": "track", "place": "ridge"}
+              }
+            }
+          ],
+          "next": "tracked"
+        },
+        "the creek": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_track",
+              "name": "browser_script_run",
+              "arguments": {
+                "name": "isaiah",
+                "args": {"action": "track", "place": "creek"}
+              }
+            }
+          ],
+          "next": "tracked"
+        },
+        "the draw": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_track",
+              "name": "browser_script_run",
+              "arguments": {
+                "name": "isaiah",
+                "args": {"action": "track", "place": "draw"}
+              }
+            }
+          ],
+          "next": "tracked"
+        }
+      }
+    },
+    "tracked": {
+      "replies": {},
+      "after_holds": "\"outcome\":\"done\"",
+      "after_tools": {
+        "content": "The Cimarron runs high and brown across the trail. \"We can wait a day for it to drop, or swim them now.\"",
+        "quote": "value.say",
+        "next": "river"
+      },
+      "after_lacks": {
+        "content": "\"Where do we look next?\"",
+        "quote": "value.say",
+        "next": "track"
+      }
+    },
+    "river": {
+      "ask": "The Cimarron runs high and brown across the trail. \"We can wait a day for it to drop, or swim them now.\"",
+      "replies": {
+        "wait a day": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_river",
+              "name": "browser_script_run",
+              "arguments": {
+                "name": "isaiah",
+                "args": {"action": "river", "choice": "wait"}
+              }
+            }
+          ],
+          "next": "crossed"
+        },
+        "swim them now": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_river",
+              "name": "browser_script_run",
+              "arguments": {
+                "name": "isaiah",
+                "args": {"action": "river", "choice": "swim"}
+              }
+            }
+          ],
+          "next": "crossed"
+        }
+      }
+    },
+    "crossed": {
+      "replies": {},
+      "after_tools": {
+        "content": "At the ford a hard outfit has a rope across the trail and wants a toll in cattle. \"How many head do we give them?\"",
+        "quote": "value.say",
+        "next": "toll"
+      }
+    },
+    "toll": {
+      "ask": "At the ford a hard outfit has a rope across the trail and wants a toll in cattle. \"How many head do we give them?\"",
+      "replies": {
+        "10": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_toll",
+              "name": "browser_script_run",
+              "arguments": {
+                "name": "isaiah",
+                "args": {"action": "toll", "offer": 10}
+              }
+            }
+          ],
+          "next": "tolled"
+        },
+        "20": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_toll",
+              "name": "browser_script_run",
+              "arguments": {
+                "name": "isaiah",
+                "args": {"action": "toll", "offer": 20}
+              }
+            }
+          ],
+          "next": "tolled"
+        }
+      }
+    },
+    "tolled": {
+      "replies": {},
+      "after_holds": "\"outcome\":\"paid\"",
+      "after_tools": {
+        "content": "Dodge City comes up out of the grass, and the stockyard gate stands open. \"Shall we count them in?\"",
+        "quote": "value.say",
+        "next": "dodge"
+      },
+      "after_lacks": {
+        "content": "The boss folds his arms and waits. \"Make him another offer.\"",
+        "quote": "value.say",
+        "next": "toll"
+      }
+    },
+    "dodge": {
+      "ask": "Dodge City comes up out of the grass, and the stockyard gate stands open. \"Shall we count them in?\"",
+      "replies": {
+        "count them in": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_image",
+              "name": "browser_image_make",
+              "arguments": {
+                "prompt": "The stockyard gate at Dodge City in the morning, a long line of dusty longhorn cattle filing through it past a tally man, and a quiet cowboy on a tired horse.",
+                "key": "isaiah/dodge.png"
+              }
+            }
+          ],
+          "next": "gate"
+        }
+      }
+    },
+    "gate": {
+      "replies": {},
+      "after_tools": {
+        "content": null,
+        "tool_calls": [
+          {
+            "call_id": "call_scene",
+            "name": "browser_doc_put",
+            "arguments": {
+              "db": "trail",
+              "id": "stockyard",
+              "body": {
+                "0": {"t": "scene"},
+                "1": "/_files/isaiah/dodge.png",
+                "image": {"$ref": 1},
+                "subtitle": "The stockyard gate at Dodge City."
+              }
+            }
+          },
+          {
+            "call_id": "call_enter",
+            "name": "browser_kv_put",
+            "arguments": {"ref": "/drive/scene", "text": "/trail/stockyard/1"}
+          },
+          {
+            "call_id": "call_render",
+            "name": "browser_render",
+            "arguments": {
+              "image": "/_files/isaiah/dodge.png",
+              "subtitle": "The stockyard gate at Dodge City."
+            }
+          },
+          {
+            "call_id": "call_count",
+            "name": "browser_script_run",
+            "arguments": {"name": "isaiah", "args": {"action": "count"}}
+          }
+        ],
+        "next": "counted"
+      }
+    },
+    "counted": {
+      "replies": {},
+      "after_tools": {
+        "content": "Isaiah tucks his pay inside his coat. \"A rider who brings the herd in gets a trail name. Want yours?\"",
+        "quote": "value.say",
+        "next": "naming"
+      }
+    },
+    "naming": {
+      "ask": "Isaiah tucks his pay inside his coat. \"A rider who brings the herd in gets a trail name. Want yours?\"",
+      "replies": {
+        "yes": {
+          "content": null,
+          "tool_calls": [
+            {
+              "call_id": "call_keep",
+              "name": "browser_script_run",
+              "arguments": {"name": "isaiah", "args": {"action": "keepsake"}}
+            }
+          ],
+          "next": "named"
+        }
+      }
+    },
+    "named": {
+      "replies": {},
+      "after_tools": {
+        "content": "Isaiah shakes your hand once. \"You rode well. The fire's lit any night you come this way again.\"",
+        "quote": "value.say",
+        "next": "end"
+      }
+    },
+    "end": {
+      "replies": {},
+      "otherwise": {
+        "content": "Isaiah tips his hat. \"Go on and get your bath. You've earned it.\"",
+        "next": "end"
+      }
+    }
+  }
+}

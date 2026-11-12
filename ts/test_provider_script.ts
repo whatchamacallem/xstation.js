@@ -3,18 +3,21 @@
 // This file is licensed under the terms of the LICENSE.md file.
 //
 // Tests of the scripted provider, the fake of xAI's Responses API: replies to
-// a user message, after tool results, by `otherwise`, `after_holds` and
-// `after_lacks`; a chained request, its context and due calls taken from the
-// response it chains from; a restart with the whole context; `store` false;
-// the output items and body fields of a reply; its `usage` in characters; its
-// ids, whose digest each test computes at run time from a canonical text it
-// writes literally; every refusal, in the order the port checks; the image
-// answer; and the PNG test pattern held against a reference PNG of the same
-// checkerboard in 88 bytes with other compressed data. The port is driven
-// directly by `line_post` and `line_receive`. The request lines it posts, the
-// reply lines, body orders and hand counted usages it expects and the texts
-// of the refusals are its gold in `ts/test_setting_test_provider_script.json`,
-// read through the harness.
+// a user message by its text in normal form, a number, a word or a phrase,
+// across case and outer white space with punctuation kept, and the refusal of
+// a key no input can match; `otherwise`, and the replies after tool results
+// by `after_holds` and `after_lacks`; a reply's `quote` of the last tool
+// result and its refusals; a chained request, its context and due calls taken
+// from the response it chains from; a restart with the whole context; `store`
+// false; the output items and body fields of a reply; its `usage` in
+// characters; its ids, whose digest each test computes at run time from a
+// canonical text it writes literally; every refusal, in the order the port
+// checks; the image answer; and the PNG test pattern held against a reference
+// PNG of the same checkerboard in 88 bytes with other compressed data. The
+// port is driven directly by `line_post` and `line_receive`. Its request
+// lines, reply lines, body orders, hand counted usages and refusal texts are
+// its gold in `ts/test_setting_test_provider_script.json`, read through the
+// harness.
 
 namespace test_provider_script {
   // Models, ids, the tables' texts, the bounds of a tool, the PNG's layout.
@@ -37,6 +40,16 @@ namespace test_provider_script {
     chain_said: "Looking.",
     chain_seen: "Seen.",
     chain_quiet: "Nothing.",
+    yes_text: "In you come.",
+    sixty_text: "Sixty it is.",
+    hate_text: "Then we turn back.",
+    fly_text: "Then I fly.",
+    // The path a quoting reply reads in the JSON of its tool result.
+    quote_path: "value.say",
+    made_say: "Up 400 feet.",
+    missed_say: "Too slow.",
+    // The text `after_holds` finds in a result whose outcome was made.
+    made_holds: '"outcome":"made"',
     tools_max: 1000,
     // What a debug mode request holds in place of its tool list.
     tools_omitted: "DEBUG_MODE_TOOL_LIST_OMITTED",
@@ -403,6 +416,70 @@ namespace test_provider_script {
         },
       },
     };
+  }
+
+  // A table of a number, a word and phrases as keys, and `otherwise`.
+  function words_make(): provider_script.Script {
+    const { yes_text, sixty_text, hate_text, fly_text } = constants;
+    return {
+      start: "gate",
+      nodes: {
+        gate: {
+          otherwise: { content: constants.otherwise_text, next: "gate" },
+          replies: {
+            "60": { content: sixty_text, next: "gate" },
+            yes: { content: yes_text, next: "gate" },
+            "what if i hate it?": { content: hate_text, next: "gate" },
+            "i'll fly, you walk": { content: fly_text, next: "gate" },
+          },
+        },
+      },
+    };
+  }
+
+  // A table whose replies after a script's result quote its `say`.
+  function quotes_make(): provider_script.Script {
+    const run = call_make("call_1", "browser_script_run", {
+      name: "ride",
+      args: { action: "climb" },
+    });
+    const look = call_make("call_2", "browser_kv_get", {
+      ref: "/metaverse/world",
+    });
+    const quote = constants.quote_path;
+    return {
+      start: "field",
+      nodes: {
+        field: {
+          replies: {
+            ask: { content: "Ask away.", quote, next: "field" },
+            both: { content: null, tool_calls: [look, run], next: "glided" },
+            climb: { content: null, tool_calls: [run], next: "climbed" },
+            glide: { content: null, tool_calls: [run], next: "glided" },
+            loop: { content: null, tool_calls: [run], next: "looped" },
+          },
+        },
+        climbed: {
+          after_tools: { content: "Hold on.", quote, next: "field" },
+          replies: {},
+        },
+        glided: {
+          after_tools: { content: null, quote, next: "field" },
+          replies: {},
+        },
+        looped: {
+          after_holds: constants.made_holds,
+          after_lacks: { content: "Rest now.", quote, next: "field" },
+          after_tools: { content: "Again?", quote, next: "field" },
+          replies: {},
+        },
+      },
+    };
+  }
+
+  // The JSON text of a script's result: its `say` and its outcome.
+  function said_json(say: string, outcome: string): string {
+    return utility.json_text({ value: { say, outcome } });
   }
 
   // A port on the script whose receiver keeps every reply, in the mode given.
@@ -994,37 +1071,28 @@ namespace test_provider_script {
       );
     }
 
-    // With no `otherwise`, a content that is no decimal integer is refused.
+    // With no `otherwise`, a content that is not a string is refused.
     test_input_invalid(): void {
       const bench = bench_make();
-      const cases: [string | null, string][] = [
-        ["one", "word"],
-        ["01", "zero_led"],
-        ["1.0", "fraction"],
-        [" 1", "space_before"],
-        ["1 ", "space_after"],
-        ["+1", "plus"],
-        ["-0", "minus_zero"],
-        ["", "empty"],
-        [null, "null"],
-      ];
-      for (const [text, suffix] of cases) {
-        const error = thrown_get(() => model_post(bench, [user_say(text)], 1));
-        this.assertEqual(
-          error.message,
-          gold_text(`provider_script_input_invalid_${suffix}`),
-        );
-      }
+      const error = thrown_get(() => model_post(bench, [user_say(null)], 1));
+      this.assertEqual(
+        error.message,
+        gold_text("provider_script_input_invalid_null"),
+      );
       this.assertEqual(bench.received.length, 0);
     }
 
-    // With no `otherwise`, an integer the node has no reply for is refused.
+    // With no `otherwise`, a text the node lacks is refused in normal form.
     test_input_unknown(): void {
       const bench = bench_make();
       const cases: [string, string][] = [
+        ["One", "word"],
+        ["  Open the Gate ", "phrase"],
+        ["", "empty"],
         ["0", "zero"],
         ["9", "nine"],
         ["-5", "minus_five"],
+        ["01", "zero_led"],
       ];
       for (const [text, suffix] of cases) {
         const error = thrown_get(() => model_post(bench, [user_say(text)], 1));
@@ -1033,6 +1101,7 @@ namespace test_provider_script {
           gold_text(`provider_script_input_unknown_${suffix}`),
         );
       }
+      this.assertEqual(bench.received.length, 0);
     }
 
     // Tool results after a reply that called no tool are refused.
@@ -1164,6 +1233,70 @@ namespace test_provider_script {
         this.assertEqual(error.message, gold_text(name));
       }
       this.assertEqual(bench.received.length, 0);
+    }
+  }
+
+  // Replies by the user's text in normal form: a number, a word, a phrase.
+  export class TestScriptWords extends unittest.TestCase {
+    // Case and outer white space do not count, so each text takes its key.
+    test_case_matched(): void {
+      const { yes_text, sixty_text, fly_text } = constants;
+      const cases: [string, string][] = [
+        ["yes", yes_text],
+        ["YES", yes_text],
+        ["  Yes", yes_text],
+        ["yEs \n", yes_text],
+        ["\t60 ", sixty_text],
+        [" I'll Fly, You Walk ", fly_text],
+      ];
+      for (const [text, said] of cases) {
+        const bench = bench_on(words_make());
+        const response = model_post(bench, [user_say(text)], 1);
+        this.assertEqual(texts_of(response), [said], text);
+      }
+    }
+
+    // Punctuation and inner characters count, so a text that differs misses.
+    test_punctuation_kept(): void {
+      const bench = bench_on(words_make());
+      const hit = model_post(bench, [user_say("What if I hate it?")], 1);
+      this.assertEqual(texts_of(hit), [constants.hate_text]);
+      const misses = [
+        "what if i hate it",
+        "what if i hate it ?",
+        "what  if i hate it?",
+        "i'll fly you walk",
+        "yes!",
+        "060",
+      ];
+      for (const text of misses) {
+        const fresh = bench_on(words_make());
+        const response = model_post(fresh, [user_say(text)], 1);
+        this.assertEqual(texts_of(response), [constants.otherwise_text], text);
+      }
+    }
+
+    // The first key not normal, in the table's order, refuses the port.
+    test_key_unnormal(): void {
+      const cases: [string, string][] = [
+        ["Yes", "capital"],
+        [" yes", "space_before"],
+        ["yes ", "space_after"],
+      ];
+      for (const [key, suffix] of cases) {
+        const script = words_make();
+        script.nodes.gate.replies[key] = { content: null, next: "gate" };
+        script.nodes.later = {
+          replies: { No: { content: null, next: "gate" } },
+        };
+        const error = thrown_get(
+          () => new provider_script.ScriptPort(script, () => false),
+        );
+        this.assertEqual(
+          error.message,
+          gold_text(`provider_script_key_unnormal_${suffix}`),
+        );
+      }
     }
   }
 
@@ -1305,6 +1438,118 @@ namespace test_provider_script {
       const asked = menu_ask(bench, "1");
       const results = outputs_give(asked, [5]);
       const error = thrown_get(() => model_post(bench, results, 3, asked.id));
+      this.assertEqual(error.message, field_text("json.input[0].output"));
+    }
+  }
+
+  // A reply's `quote` of the last tool result, and its refusals.
+  export class TestScriptQuote extends unittest.TestCase {
+    // A quote with `content` says the quoted text, a space, then `content`.
+    test_quote_content(): void {
+      const bench = bench_on(quotes_make());
+      const asked = model_post(bench, [user_say("climb")], 1);
+      const said = said_json(constants.made_say, "made");
+      const results = outputs_give(asked, [said]);
+      const response = model_post(bench, results, 2, asked.id);
+      this.assertEqual(types_of(response), ["reasoning", "message"]);
+      this.assertEqual(texts_of(response), [`${constants.made_say} Hold on.`]);
+      const next = model_post(bench, [user_say("climb")], 3, response.id);
+      this.assertEqual(names_of(next), ["browser_script_run"]);
+    }
+
+    // A quote with no `content` says the quoted text alone, as a message.
+    test_quote_alone(): void {
+      const bench = bench_on(quotes_make());
+      const asked = model_post(bench, [user_say("glide")], 1);
+      const said = said_json(constants.made_say, "made");
+      const results = outputs_give(asked, [said]);
+      const response = model_post(bench, results, 2, asked.id);
+      this.assertEqual(types_of(response), ["reasoning", "message"]);
+      this.assertEqual(texts_of(response), [constants.made_say]);
+    }
+
+    // The quote reads the last result, so an earlier one need not be JSON.
+    test_quote_last(): void {
+      const bench = bench_on(quotes_make());
+      const asked = model_post(bench, [user_say("both")], 1);
+      const said = said_json(constants.made_say, "made");
+      const results = outputs_give(asked, [constants.held_text, said]);
+      const response = model_post(bench, results, 2, asked.id);
+      this.assertEqual(texts_of(response), [constants.made_say]);
+    }
+
+    // `after_holds` picks the reply by the outcome, and either quotes the say.
+    test_quote_outcome(): void {
+      const { made_say, missed_say } = constants;
+      const cases: [string, string, string][] = [
+        [made_say, "made", `${made_say} Again?`],
+        [missed_say, "missed", `${missed_say} Rest now.`],
+      ];
+      for (const [say, outcome, expected] of cases) {
+        const bench = bench_on(quotes_make());
+        const asked = model_post(bench, [user_say("loop")], 1);
+        const results = outputs_give(asked, [said_json(say, outcome)]);
+        const response = model_post(bench, results, 2, asked.id);
+        this.assertEqual(texts_of(response), [expected], outcome);
+      }
+    }
+
+    // A reply to a user message that quotes is refused, `otherwise` too.
+    test_quote_unreached(): void {
+      const script = quotes_make();
+      script.nodes.field.otherwise = {
+        content: null,
+        quote: constants.quote_path,
+        next: "field",
+      };
+      for (const text of ["ask", "wave"]) {
+        const bench = bench_on(script);
+        const error = thrown_get(() => model_post(bench, [user_say(text)], 1));
+        this.assertEqual(
+          error.message,
+          gold_text("provider_script_quote_unreached"),
+          text,
+        );
+        this.assertEqual(bench.received.length, 0);
+      }
+    }
+
+    // A result with no text at the path is refused, a bad decode its cause.
+    test_quote_missing(): void {
+      const cases: [string, boolean][] = [
+        ["done", true],
+        ['{"value":{"say":"Up.","height":1e999}}', true],
+        ['{"value":{"outcome":"made"}}', false],
+        ['{"value":"Up."}', false],
+        ['{"value":[{"say":"Up."}]}', false],
+        ['{"value":null}', false],
+        ['{"value":{"say":5}}', false],
+        ["[]", false],
+      ];
+      for (const [output, undecoded] of cases) {
+        const bench = bench_on(quotes_make());
+        const asked = model_post(bench, [user_say("glide")], 1);
+        const results = outputs_give(asked, [output]);
+        const error = thrown_get(() => model_post(bench, results, 2, asked.id));
+        this.assertEqual(
+          error.message,
+          gold_text("provider_script_quote_missing"),
+          output,
+        );
+        this.assertEqual(
+          error.cause instanceof jslb.WireError,
+          undecoded,
+          output,
+        );
+      }
+    }
+
+    // A result whose output is not text is refused by its field.
+    test_quote_output(): void {
+      const bench = bench_on(quotes_make());
+      const asked = model_post(bench, [user_say("glide")], 1);
+      const results = outputs_give(asked, [5]);
+      const error = thrown_get(() => model_post(bench, results, 2, asked.id));
       this.assertEqual(error.message, field_text("json.input[0].output"));
     }
   }

@@ -1,0 +1,176 @@
+{
+  "poll_seconds": 0.1,
+  "rung_seconds": 60,
+  "served_seconds": 240,
+  "window_width": 1280,
+  "window_height": 720,
+  "root_debug": true,
+  "root_verbose": false,
+  "root_label": "smoke-test",
+  "ttyd_code": 0,
+  "served": {
+    "band": "How can I help you?",
+    "picture": {"hidden": false, "size": 4, "colours": ["0 0 0 255"]}
+  },
+  "rungs": [
+    {
+      "rung": "creation",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Take me to Everest",
+          "band": "Pink on white, very high up: the first sun finding a wall of snow while everything below is blue. A rattle of flags, the hiss of a stove. Dawa squats beside it, a sturdy man with a sunburned nose, and holds up a tin mug. \"Tea, with butter and salt. You will hate it for two days, then ask for more.\" He looks you over the way he would check a rope. \"Head hurts? Tell me if it starts. On the mountain nobody is brave about headaches. The sahibs want the summit. I like the walking. I go slowly, and I have never left anyone behind.\"",
+          "picture": {"hidden": false, "size": 16, "colours": ["0 0 0 255", "255 255 255 255"]},
+          "rows": [
+            {"db": "metaverse", "sql": "SELECT name, title, player, world FROM universe", "params": [], "rows": [["everest", "Nobody Left Behind", "player", "expedition"]]},
+            {"db": "metaverse", "sql": "SELECT CAST(data AS TEXT) FROM _kv WHERE key = ?", "params": ["world"], "rows": [["expedition"]]}
+          ]
+        }
+      ]
+    },
+    {
+      "rung": "confirm",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Not yet",
+          "band": "Dawa nods and fills your mug again. No hurry. The mountain is not going anywhere. Will you come on my rope?"
+        },
+        {
+          "say": "All right, I'll come",
+          "band": "Dawa ties you onto his rope behind Teo, who climbs with us, and checks your knot the way he checks his own. Now you are the newest on my rope. Ask me anything, and say ready when you want to start."
+        }
+      ]
+    },
+    {
+      "rung": "talk",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Why have you never left anyone behind?",
+          "band": "Dawa looks at the snow a while. When I was young I carried for a team, and a man on it could not walk down by himself. The others went up. I stayed, and we walked down together, slowly. Since then everyone on my rope comes home. Ask me more, or say ready."
+        }
+      ]
+    },
+    {
+      "rung": "build",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Ready",
+          "band": "Base Camp, 5364 m: the air presses 401 mmHg, and you breathe in 74 mmHg of oxygen, 50 percent of what the sea gives. The icefall is ahead, and we must be through it before the sun loosens the ice. What hour do we start?"
+        }
+      ]
+    },
+    {
+      "rung": "icefall",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Whenever",
+          "band": "I did not understand. Say it slowly, please. The icefall is ahead, and we must be through it before the sun loosens the ice. What hour do we start?"
+        },
+        {
+          "say": "7",
+          "band": "Start at 7:00 and the icefall's 6 hours keep you under the seracs until 13:00, 4 hours after the sun loosens the ice at 9:00. Earlier. What hour do we start?",
+          "rows": [
+            {"db": "expedition", "sql": "SELECT id, camp, altitude_m, ams, hidden, rest_days, load_kg, bottles, resume_camp, exits, high_m, record FROM climber", "params": [], "rows": [[1, "Base Camp", 5364, 0, 0, 0, 0, 0, "", 0, 5364, "kept"]]}
+          ]
+        },
+        {
+          "say": "2",
+          "band": "Start at 2:00 and you are through the icefall at 8:00, 1 hour before the sun. Camp 1, 6065 m: the air presses 366 mmHg, and you breathe in 67 mmHg of oxygen, 45 percent of what the sea gives. You sleep 701 m higher than last night, over the 500 m a night the doctors allow. Morning. Tell me true: does your head hurt?"
+        }
+      ]
+    },
+    {
+      "rung": "morning",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "No, I'm fine",
+          "band": "Dawa takes your word. Up the Western Cwm to Camp 2, 6400 m: the air presses 351 mmHg, and you breathe in 64 mmHg of oxygen, 43 percent of what the sea gives. Morning. Tell me true: does your head hurt?"
+        },
+        {
+          "say": "Yes, it hurts",
+          "band": "A headache hidden a day is a worse one: 2 days of rest at Camp 2 before it clears, where 1 would have done if told at once. Dawa reads the radio forecast: summit winds 45 km/h tomorrow and 25 km/h in 3 days. When do we go up?"
+        }
+      ]
+    },
+    {
+      "rung": "window",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Take me down",
+          "band": "Dawa clips you to the fixed line and takes you down 335 m to Camp 1, 6065 m: the air presses 366 mmHg, and you breathe in 67 mmHg of oxygen, 45 percent of what the sea gives. On the mountain nobody is brave about this. We rest here as long as you like, and when you want to climb again, say let's go up again.",
+          "rows": [
+            {"db": "expedition", "sql": "SELECT id, camp, altitude_m, ams, hidden, rest_days, load_kg, bottles, resume_camp, exits, high_m, record FROM climber", "params": [], "rows": [[1, "Camp 1", 6065, 0, 0, 2, 0, 0, "Camp 2", 1, 6400, "kept"]]}
+          ]
+        },
+        {
+          "say": "Let's go up again",
+          "band": "Back up 335 m to Camp 2, 6400 m: the air presses 351 mmHg, and you breathe in 64 mmHg of oxygen, 43 percent of what the sea gives. When do we go up?"
+        },
+        {
+          "say": "Go tomorrow",
+          "band": "Tomorrow's 45 km/h on the summit is over Dawa's 40: that window is not real. When do we go up?"
+        },
+        {
+          "say": "Wait three days",
+          "band": "3 more days of rest at Camp 2, and the jet stream lifts: 25 km/h on the summit, under Dawa's 40. The window is real. Now the loads for the high camps. What do you carry?"
+        }
+      ]
+    },
+    {
+      "rung": "loads",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Everything",
+          "band": "Everything is the tent at 4 kg, the stove at 2, food at 3 and 2 bottles at 3 each: 15 kg, over the 12 Dawa lets a new climber carry. Lighter. What do you carry?"
+        },
+        {
+          "say": "Leave one bottle",
+          "band": "The tent, the stove, food and 1 bottle: 12 kg, within Dawa's 12, and he carries the spare. Up the Lhotse Face to Camp 3 at 7162 m, then to Camp 4 on the South Col, 7906 m: the air presses 287 mmHg, and you breathe in 50 mmHg of oxygen, 34 percent of what the sea gives. On oxygen from Camp 3 up; we leave at 23:00 for the top. Say go when you are ready."
+        }
+      ]
+    },
+    {
+      "rung": "summit push",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Go",
+          "band": "The South Summit, 8749 m: the air presses 256 mmHg, and you breathe in 44 mmHg of oxygen, 29 percent of what the sea gives. It is 4:00, the top is 100 m above, and Teo is down, his bottle empty. Your bottle holds 600 litres, 5 hours at 2 litres a minute. The top and back down to the Col takes 7 hours and 840 litres, 240 of them from Dawa's spare, which leaves it 960, and Teo needs 1080 at 4 litres a minute to get down. Not both. Dawa looks at you and waits. It is your call: the top, or we take Teo down?"
+        }
+      ]
+    },
+    {
+      "rung": "decision",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "We take Teo down",
+          "band": "Teo goes on Dawa's spare at 4 litres a minute: 1080 of its 1200 litres for the 4 hours 30 minutes down to the South Col. You use 540 of your 600. Everyone reaches Camp 4, and Dawa has still never left anyone behind. At the Col, Dawa holds out his camera. Do you want the picture from up there?"
+        }
+      ]
+    },
+    {
+      "rung": "keepsake",
+      "label": "smoke-test",
+      "steps": [
+        {
+          "say": "Yes",
+          "band": "A photograph from the South Summit, 8749 m, 100 m below the top, the morning you took Teo down. A white scarf from Dawa. Go slowly, and come back some day. The mountain has other routes, and I will be climbing them.",
+          "picture": {"hidden": false, "size": 16, "colours": ["0 0 0 255", "255 255 255 255"]},
+          "rows": [
+            {"db": "expedition", "sql": "SELECT id, camp, altitude_m, ams, hidden, rest_days, load_kg, bottles, resume_camp, exits, high_m, record FROM climber", "params": [], "rows": [[1, "Camp 4", 7906, 0, 0, 5, 12, 1, "", 1, 8749, "kept"]]},
+            {"db": "expedition", "sql": "SELECT n, beat, choice, outcome FROM climb_log ORDER BY n", "params": [], "rows": [[1, "icefall", "7", "refused"], [2, "icefall", "2", "crossed"], [3, "morning", "no", "hidden"], [4, "morning", "yes", "told"], [5, "exit", "Camp 2", "down"], [6, "resume", "Camp 2", "up"], [7, "window", "1", "false"], [8, "window", "3", "real"], [9, "loads", "everything", "refused"], [10, "loads", "one bottle", "carried"], [11, "push", "go", "stopped"], [12, "decide", "rescue", "rescued"]]},
+            {"db": "expedition", "sql": "SELECT kind, text FROM keepsake ORDER BY kind", "params": [], "rows": [["photograph", "A photograph from the South Summit, 8749 m, 100 m below the top, the morning you took Teo down."], ["scarf", "A white scarf from Dawa."]]}
+          ]
+        }
+      ]
+    }
+  ]
+}
