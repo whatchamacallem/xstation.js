@@ -444,8 +444,7 @@ def _exit_add(
     for made in (left, paused, resumed):
         if made in nodes:
             raise ValueError(
-                f"the node {made} of {path} takes a name of the exit of"
-                f" {name}"
+                f"the node {made} of {path} takes a name of the exit of {name}"
             )
     # Each reply holds a call of its own, as each call's arguments become text.
     replies[way_out["input"]] = {

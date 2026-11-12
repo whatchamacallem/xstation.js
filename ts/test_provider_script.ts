@@ -1530,7 +1530,9 @@ namespace test_provider_script {
         const bench = bench_on(quotes_make());
         const asked = model_post(bench, [user_say("glide")], 1);
         const results = outputs_give(asked, [output]);
-        const error = thrown_get(() => model_post(bench, results, 2, asked.id));
+        const error = thrown_get(() =>
+          model_post(bench, results, 2, asked.id),
+        );
         this.assertEqual(
           error.message,
           gold_text("provider_script_quote_missing"),
