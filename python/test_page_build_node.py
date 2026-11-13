@@ -98,6 +98,11 @@ _BROKEN_CONFIG = {
 # The text of that file, which sets a number to text.
 _BROKEN_SOURCE = 'const count: number = "one";\n'
 
+# A file of a scratch project that tsc takes, its text and what it emits.
+_SOUND_NAME = "sound.ts"
+_SOUND_SOURCE = "const count: number = 1;\n"
+_SOUND_OUTPUT = "const count = 1;"
+
 # The diagnostic tsc writes for that file.
 _BROKEN_ERROR = (
     "broken.ts(1,7): error TS2322: Type 'string' is not assignable to type"
@@ -248,11 +253,26 @@ class TestBundle(unittest.TestCase):
         self.assertIn(_FIRST_REFUSED, completed.stderr)
 
 
-# A project tsc refuses, compiled into a scratch directory.
+# A project tsc refuses, and one it compiles, in a scratch directory.
 class TestCompile(unittest.TestCase):
     # Makes the checkout's `build/` for the scratch directories.
     def setUp(self) -> None:
         os.makedirs(_BUILD_PATH, exist_ok=True)
+
+    # A project tsc takes is compiled into the path, and its text returned.
+    def test_compile_returned(self) -> None:
+        with tempfile.TemporaryDirectory(dir=_BUILD_PATH) as scratch:
+            config_path = os.path.join(scratch, "tsconfig.json")
+            with open(config_path, "w", encoding="utf-8") as file:
+                json.dump({**_BROKEN_CONFIG, "files": [_SOUND_NAME]}, file)
+            source_path = os.path.join(scratch, _SOUND_NAME)
+            with open(source_path, "w", encoding="utf-8") as file:
+                file.write(_SOUND_SOURCE)
+            out_path = os.path.join(scratch, "sound.js")
+            text = page_build.bundle_compile(config_path, out_path)
+            with open(out_path, encoding="utf-8") as file:
+                self.assertEqual(text, file.read())
+        self.assertIn(_SOUND_OUTPUT, text)
 
     # The compile raises, tsc's exit code named and its output in the cause.
     def test_compile_failed(self) -> None:

@@ -217,7 +217,7 @@ command only to name the log.
   --test-all       all         those labelled test-all, the test-all rungs,
                                the formatters and the line count
   --test-disabled  disabled    every disabled suite, test, root and rung, with
-                               no line count
+                               the line count
   ```
 
 - Suites, blocks, roots and rungs carry one of 2 labels, `smoke-test` and
@@ -1832,8 +1832,9 @@ fault realm REALM->DRIVER 0 push; fails the block
   they use, imports devtools, and copies a private constant both modules need
   rather than reach across modules. Its stub is
   API/python/devtools_windows.pyi.
-- WindowsRelay: in devtools_windows.py, offline from 2026-10-30 until
-  2026-11-12, when its suite test_devtools_powershell became test-all. It
+- WindowsRelay: in devtools_windows.py, untested since 2026-11-13, when its
+  suite test_devtools_powershell was deleted, as this WSL mounts no Windows
+  drive but the maintainer's Downloads and so has no powershell.exe. It
   exists as WSL's NAT networking can't reach Windows' 127.0.0.1, where Chrome
   serves DevTools, so a relay in powershell.exe carries the WebSocket over its
   stdin and stdout.
@@ -1842,9 +1843,6 @@ fault realm REALM->DRIVER 0 push; fails the block
   else it raises; then it stops the browser by Stop-Process. Killing the
   browser first reset the connection, and the relay's IOException went to
   stderr unchecked.
-- test_devtools_powershell: test-all, after test_devtools_chrome in the Python
-  unit list, 84 s on 2026-11-12, 62 s of it test_open_timeout's wait for
-  devtools' 60 s page timer. Its server logs requests under --verbose alone.
 - relay helpers: SocketChannel, address_parse, command_run, powershell_command,
   relay_script and the handshake functions stay in devtools.py, so that the
   tests that run on them stay running.
@@ -1853,8 +1851,9 @@ fault realm REALM->DRIVER 0 push; fails the block
   `...` on a line of its own is a line of a function that never runs, which
   line_coverage would stop at. AnyChannel, the short alias of SocketChannel and
   PipeChannel, keeps that line within 79 columns.
-- LinuxPipe: starts /usr/local/bin/chrome-headless-shell with
-  --remote-debugging-pipe, each message ended by a NUL byte, and
+- LinuxPipe: starts Chrome for Testing, the one match of
+  ~/.local/share/chrome-for-testing/chrome/linux-*/chrome-linux64/chrome where
+  admin.md installs it, with --headless and --remote-debugging-pipe, each message ended by a NUL byte, and
   XDG_CACHE_HOME set to the profile, where fontconfig caches fonts.
 - Browser: has a profile of its own that goes when it does, and drives one
   page: open a URL, evaluate JavaScript, pass on the calls of a binding,
@@ -1864,12 +1863,11 @@ fault realm REALM->DRIVER 0 push; fails the block
 - Browser exit: on Linux it closes the pipe, and the call or wait under way
   raises one ConnectionError whose cause is the exit code. An exit with an
   error code that no call saw fails the Browser's end.
-- devtools programs: chrome-headless-shell for devtools.py, and powershell.exe
+- devtools programs: Chrome for Testing for devtools.py, and powershell.exe
   and wslpath for devtools_windows.py. Standard library only.
 - devtools count: devtools.py counts under test_devtools and
   test_devtools_chrome. devtools_windows.py counts under no suite, as
-  test_devtools_powershell's _COUNTED row is empty: five of its failures need
-  a Windows that fails, and no exemption mark is used.
+  no suite tests it.
 
 ## xsjs_screenshot
 
@@ -1920,10 +1918,8 @@ fault realm REALM->DRIVER 0 push; fails the block
   and test_posix.sh passes --coverage with it.
 - --test-disabled: adds every disabled suite, test, root and rung, which have
   no time limit but their own: the wire timers of the browser test wait out 120
-  s each. test_posix.sh passes no --coverage with it, as the modules only it
-  checks would pass or fail by whether the compile stamps are cold: a warm
-  stamp leaves page_build.bundle_compile's lines unrun.
-  A whole run passed in 12 m 32 s on 2026-11-12, 135 blocks and no skip.
+  s each. test_posix.sh passes --coverage with it, as with --test-all, so it
+  runs everything --test-all does.
 - category.py: holds the two labels, the three categories smoke-test, test-all
   and test-disabled, the options --test-all and --test-disabled, which every
   program takes, and option_words, which gives a category's option for a command
@@ -1951,9 +1947,10 @@ fault realm REALM->DRIVER 0 push; fails the block
   a module, fails at that module's first line never run. A unit suite counts
   for the module of its name or those listed for it; integration and stdio
   suites and TypeScript blocks count for none. It refuses --tty.
-- line count run: `./test_posix.sh --test-all` passes --coverage to the driver,
-  so a full run fails at a module's first line never run. No other level does,
-  and the tty run stays separate, as --coverage refuses --tty. A count of
+- line count run: `./test_posix.sh --test-all` and `./test_posix.sh
+  --test-disabled` pass --coverage to the driver, so a full run fails at a
+  module's first line never run. No lower level does, and the tty run stays
+  separate, as --coverage refuses --tty. A count of
   2026-11-07 found every module complete but api_match, whose two lines a test
   then reached.
 - unchecked modules: under --coverage a module is not checked when a disabled
@@ -1993,8 +1990,8 @@ fault realm REALM->DRIVER 0 push; fails the block
   0 is the TAP producer and consumer. Each next layer holds the suites whose
   callees' suites all sit in earlier layers.
 - test_test: the one suite of harness.py, category.py and line_coverage.py.
-- later suites: none since 2026-11-12, when test_devtools_powershell became
-  test-all and `_LATER` of python/test_all.py went.
+- later suites: none since 2026-11-12, when `_LATER` of python/test_all.py
+  went.
 - test_failing_block: test-all, after test_tap_pair_ts in group A's
   integration list, runs test_all.py as a program with --stream --module
   failing_block.ts: at test-all expecting the whole block's 3 failures, and at
@@ -2065,12 +2062,18 @@ fault realm REALM->DRIVER 0 push; fails the block
   for Testing, holds no updater, variations, Safe Browsing or optimization
   guide host, only Domain Reliability's for Google's own origins, and idle 60
   s on about:blank its --log-net-log held no request, lookup or connect.
-- tool sources: apt gives shfmt, nodejs, npm, node-typescript's tsc, cmake,
-  patch, bubblewrap and libwebsockets-dev. Ubuntu resolute packages no
-  pyright, ruff, prettier or Chrome, so pyright 1.1.414 and ruff 0.16.8 are
-  pip installs in ~/.local, prettier an npm install in ~/.npm-global and
-  chrome-headless-shell Chrome for Testing in /opt. The maintainer installs
-  every tool on request, from apt whenever apt has it.
+- tool sources: admin.md at the checkout's top holds the maintainer's
+  install commands, all run, and the project expects their result. apt gives
+  shfmt, nodejs, npm, node-typescript's tsc, cmake, patch, bubblewrap and the
+  headers of ttyd's build. Ubuntu resolute packages no pyright, ruff, prettier
+  or Chrome, so pyright 1.1.414 and ruff 0.16.8 are pip installs in
+  ~/.local/bin, prettier an npm install in ~/.npm-global/bin and Chrome for
+  Testing 157, full Chrome run headless, a @puppeteer/browsers install in
+  ~/.local/share/chrome-for-testing with its deb.deps from apt. The
+  maintainer installs every tool on request, from apt whenever apt has it.
+- tool PATH: the project, not the user's shell, puts ~/.local/bin and
+  ~/.npm-global/bin first on PATH, by reformat.path_extend, which
+  test_all.main and reformat.main call before anything else starts.
 - synchronization audit: test_posix.py fails a ts/*.ts file outside
   _SYNCHRONIZATION_MODULES that uses await, .then(, new Promise, Atomics or
   SharedArrayBuffer outside its comments and literals.
@@ -2166,7 +2169,7 @@ fault realm REALM->DRIVER 0 push; fails the block
   relay.
 - local_http start: from the gold's script, before the first block that needs
   it, and stops when the stream ends, before the checks after it.
-- group B: a page load of its own in the run's one chrome-headless-shell, on
+- group B: a page load of its own in the run's one Chrome, on
   its DevTools pipe.
 - group B start: before the first B block, outside every block timer, the run
   builds build/headless.html, starts the browser and adds the binding
@@ -2442,7 +2445,7 @@ fault realm REALM->DRIVER 0 push; fails the block
   its name on release_channel, a BroadcastChannel of the page's origin, so
   that the driver reads the server before it execs.
 - test_browser.py: `python3 python/test_browser.py [--test-all]
-  [--test-disabled] [--anthropic] [--debug] [--verbose]`. Drives chrome-headless-shell by devtools.LinuxPipe,
+  [--test-disabled] [--anthropic] [--debug] [--verbose]`. Drives Chrome by devtools.LinuxPipe,
   rung by rung, each under a timer and named by the stage of the plan it
   proves.
 - browser roots: the suites root runs the ttyd page's bring up over TAP. The
@@ -2462,7 +2465,7 @@ fault realm REALM->DRIVER 0 push; fails the block
   0.2, and its window after the late answer late_quiet_seconds, 0.3, so that
   the rung runs in 0.7 s; the other http rungs keep http_seconds, 2.
 - test_demo.py: `python3 python/test_demo.py [--test-all] [--test-disabled]
-  [--hold] [--anthropic] [--debug] [--verbose]`. Drives chrome-headless-shell by
+  [--hold] [--anthropic] [--debug] [--verbose]`. Drives Chrome by
   devtools.LinuxPipe over the engine page, rung by rung, each under a timer and
   labelled, through roots and ttyd made by xsjs_serve's functions. Exit 0, 1 at
   the first failed check, naming its rung, 130 at ctrl C, or 128 plus the

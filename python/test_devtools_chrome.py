@@ -3,7 +3,7 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the parts of devtools.py that need the Linux browser, a later suite of
-# devtools on /usr/local/bin/chrome-headless-shell, which the maintainer
+# devtools on Chrome for Testing, as admin.md installs it, which the maintainer
 # approved for the test driver on 2026-10-30. Each test starts a Browser of its
 # own on the Linux pipe. The profile is read from the browser's own command
 # line, through the process id DevTools gives, and is a directory under build/
@@ -23,7 +23,7 @@ _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _BUILD_PATH = os.path.join(_ROOT_PATH, "build")
 
 # The name the browser's errors give it.
-_BROWSER_NAME = "chrome-headless-shell"
+_BROWSER_NAME = "chrome"
 
 # The width of the browser's window.
 _WIDTH_PX = 800

@@ -84,8 +84,8 @@ _UPGRADE_HOST = "127.0.0.1:9222"
 # The path of the upgrades the tests open.
 _UPGRADE_PATH = "/devtools/browser/abc"
 
-# The Linux browser, with the switch off.
-_CHROME_PATH = "/usr/local/bin/chrome-headless-shell"
+# The Linux browser, with the switch off, as admin.md installs it.
+_CHROME_START = os.path.expanduser("~/.local/share/chrome-for-testing/chrome/")
 
 # What the path of the cloud container's browser starts with.
 _ANTHROPIC_START = "/opt/pw-browsers/chromium_headless_shell-"
@@ -635,7 +635,7 @@ class TestPath(unittest.TestCase):
     # With the switch off the path is the one the driver may start.
     def test_path_stock(self) -> None:
         self.switch_set(False)
-        self.assertEqual(devtools.chrome_path(), _CHROME_PATH)
+        self.assertTrue(devtools.chrome_path().startswith(_CHROME_START))
 
     # With the switch on the browser is looked for in the cloud container's.
     def test_path_anthropic(self) -> None:

@@ -50,6 +50,8 @@ def program_end(directory: str, ending_path: str) -> None:
     try:
         try:
             os.environ["PATH"] = directory
+            # The install directories the program adds are under this one too.
+            os.environ["HOME"] = directory
             # This process's arguments are the driver's, not the program's.
             sys.argv = [reformat.__file__]
             runpy.run_path(reformat.__file__, run_name="__main__")
@@ -267,6 +269,25 @@ class TestWhitelist(unittest.TestCase):
         table = reformat.table_read()
         for path in reformat.whitelist_paths():
             reformat.type_find(table, path)
+
+
+# The formatters' install directories put first on PATH.
+class TestPath(unittest.TestCase):
+    # Keeps PATH and HOME, which go back as they were when the test ends.
+    def setUp(self) -> None:
+        saved = {name: os.environ[name] for name in ("HOME", "PATH")}
+        self.addCleanup(os.environ.update, saved)
+
+    # Each directory goes first, once, before the rest in their order.
+    def test_path_first(self) -> None:
+        os.environ["HOME"] = "/h"
+        os.environ["PATH"] = os.pathsep.join(["/a", "/h/.npm-global/bin", "/b"])
+        reformat.path_extend()
+        reformat.path_extend()
+        self.assertEqual(
+            os.environ["PATH"].split(os.pathsep),
+            ["/h/.local/bin", "/h/.npm-global/bin", "/a", "/b"],
+        )
 
 
 # The file run as a program, in a forked child whose `PATH` finds no formatter.

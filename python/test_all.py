@@ -71,7 +71,6 @@ _MODULES: list[tuple[str, str]] = [
     ("test_substrate_limit", "smoke-test"),
     ("test_verbose", "smoke-test"),
     ("test_devtools_chrome", "smoke-test"),
-    ("test_devtools_powershell", "test-all"),
     ("test_dispatch", "smoke-test"),
     ("test_settings", "smoke-test"),
     ("test_engine_audit", "smoke-test"),
@@ -380,7 +379,6 @@ _COUNTED: dict[str, tuple[str, ...]] = {
     "failing_suite": (),
     "test_bootstrap_dash": ("bootstrap",),
     "test_devtools_chrome": ("devtools",),
-    "test_devtools_powershell": (),
     "test_failing_block": (),
     "test_guide_walk": (),
     "test_jslb_vectors": ("jslb",),
@@ -1364,8 +1362,10 @@ def main(arguments: list[str]) -> int:
 
     # With `--coverage`, counting precedes project imports, so that they count.
     count = line_coverage.LineCount() if "--coverage" in arguments else None
-    import category, switches
+    import category, reformat, switches
 
+    # The formatters admin.md installs as the user are on PATH for every child.
+    reformat.path_extend()
     parser = parser_make()
     parsed = parser.parse_args(arguments)
     if os.geteuid() == _ROOT_UID:

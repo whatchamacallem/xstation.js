@@ -1,10 +1,10 @@
 # Headless Chrome driven over the DevTools protocol by one client, the
-# Browser, on the `Transport` it is given: LinuxPipe, to chrome-headless-shell
+# Browser, on the `Transport` it is given: LinuxPipe, to Chrome for Testing
 # on its descriptors 3 and 4, or `devtools_windows.WindowsRelay`, to Chrome or
 # Edge on Windows. The relay's helpers that a running suite tests stay here,
 # and the relay itself is the module devtools_windows.py. The switch
 # `switches.anthropic` has LinuxPipe start Playwright's headless shell of
-# Anthropic's cloud container in place of chrome-headless-shell's path.
+# Anthropic's cloud container in place of Chrome for Testing's path.
 
 from collections.abc import Callable
 from typing import Any, Protocol, Self
@@ -73,7 +73,7 @@ class Transport(Protocol):
     # Stops the browser and removes what it left.
     def transport_close(self) -> None: ...
 
-# `/usr/local/bin/chrome-headless-shell` on Linux, with DevTools on fds 3, 4.
+# Chrome on Linux, headless, with DevTools on fds 3, 4.
 class LinuxPipe:
     # A refusal on this machine's own 127.0.0.1 is final, as nothing forwards.
     refused_retried: bool

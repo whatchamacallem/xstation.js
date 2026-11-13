@@ -6,7 +6,7 @@
 # on the `Transport` it is given: LinuxPipe here, or the WindowsRelay of
 # devtools_windows.py, whose helpers that a running suite tests stay here.
 #
-# LinuxPipe drives /usr/local/bin/chrome-headless-shell by
+# LinuxPipe drives Chrome for Testing, as admin.md installs it, headless by
 # --remote-debugging-pipe, with XDG_CACHE_HOME set to the profile, where
 # fontconfig caches fonts. The browser's exit closes its pipe, and the call or
 # wait under way raises one ConnectionError whose cause is the exit code; an
@@ -58,11 +58,13 @@ _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
 )
 
-# The Linux browser, the one the test driver may start.
-_CHROME_PATH = "/usr/local/bin/chrome-headless-shell"
+# The Linux browser, the one the test driver may start, one match.
+_CHROME_PATTERN = os.path.expanduser(
+    "~/.local/share/chrome-for-testing/chrome/linux-*/chrome-linux64/chrome"
+)
 
 # The Linux browser's name, as its errors give it.
-_CHROME_NAME = os.path.basename(_CHROME_PATH)
+_CHROME_NAME = "chrome"
 
 # The descriptor the Linux browser reads DevTools from, as the pipe flag sets.
 _COMMAND_DESCRIPTOR = 3
@@ -471,7 +473,7 @@ class Transport(Protocol):
     def transport_close(self) -> None: ...
 
 
-# `chrome-headless-shell` on Linux, with DevTools on its descriptors 3 and 4.
+# Chrome on Linux, headless, with DevTools on its descriptors 3 and 4.
 class LinuxPipe:
     # A refusal on this machine's own 127.0.0.1 is final, as nothing forwards.
     refused_retried = False
@@ -536,6 +538,7 @@ class LinuxPipe:
                 path,
                 [
                     path,
+                    "--headless",
                     "--remote-debugging-pipe",
                     f"--user-data-dir={self.profile_path}",
                     f"--window-size={width_px},{height_px}",
@@ -805,7 +808,7 @@ def chrome_match(pattern: str) -> str:
 def chrome_path() -> str:
     if switches.anthropic:
         return chrome_match(_ANTHROPIC_CHROME_PATTERN)
-    return _CHROME_PATH
+    return chrome_match(_CHROME_PATTERN)
 
 
 # Runs a command to its end, for at most the seconds, returning its stdout.

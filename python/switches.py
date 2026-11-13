@@ -70,7 +70,7 @@ def options_add(parser: argparse.ArgumentParser) -> None:
         "--anthropic",
         action="store_true",
         help="in Anthropic's cloud container: start its headless shell,"
-        " Playwright's, in place of /usr/local/bin/chrome-headless-shell,"
+        " Playwright's, in place of Chrome for Testing,"
         " build ttyd from the source the package manager gave, have"
         " test_posix.py check nothing, and have test_all.py take no suite"
         " that starts a formatter, in this process and its children",

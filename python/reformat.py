@@ -27,6 +27,9 @@ _ROOT_PATH = os.path.dirname(_PYTHON_PATH)
 # The system whose rows this script formats, `test_lint.ps1` the others.
 _SYSTEM = "linux"
 
+# Where admin.md installs the formatters as the user, put first on PATH.
+_TOOL_DIRECTORIES = ("~/.local/bin", "~/.npm-global/bin")
+
 # What handles each extension of the whitelisted files.
 _TABLE_PATH = os.path.join(_PYTHON_PATH, "reformat_table.json")
 
@@ -54,6 +57,14 @@ class FileType(NamedTuple):
 def format_check(paths: list[str]) -> None:
     for row, matched in _rows_matched(paths):
         subprocess.run([*row.checker, *matched], check=True, cwd=_ROOT_PATH)
+
+
+# Puts the formatters' install directories first on PATH, each once.
+def path_extend() -> None:
+    present = os.environ["PATH"].split(os.pathsep)
+    tools = [os.path.expanduser(name) for name in _TOOL_DIRECTORIES]
+    rest = [name for name in present if name not in tools]
+    os.environ["PATH"] = os.pathsep.join([*tools, *rest])
 
 
 # Returns the files the whitelist lines match under the root, sorted.
@@ -164,6 +175,7 @@ def main() -> None:
         description="Format, then type check, the whitelisted files of the"
         " linux rows of reformat_table.json."
     ).parse_args()
+    path_extend()
     reformat(whitelist_paths())
 
 
