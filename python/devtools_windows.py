@@ -5,12 +5,11 @@
 # The Windows transport of devtools.py. WindowsRelay drives Chrome, or else
 # Edge, on Windows from WSL: WSL's NAT networking can't reach Windows'
 # 127.0.0.1, where Chrome serves DevTools, so a relay in `powershell.exe`
-# carries the WebSocket over its stdin and stdout. WindowsRelay is offline
-# since 2026-10-30, kept, run by nothing, and to be brought back later. Its one
-# suite, test_devtools_powershell.py, is a later suite, so no run counts this
-# module's lines until that suite comes back. The relay's helpers that a
-# running suite tests stay in devtools.py, and a private constant both modules
-# need is copied here.
+# carries the WebSocket over its stdin and stdout. Its one suite,
+# test_devtools_powershell.py, is labelled test-all and counts none of this
+# module's lines, as its failures need a Windows that fails. The relay's
+# helpers that a running suite tests stay in devtools.py, and a private
+# constant both modules need is copied here.
 
 import devtools, errno, functools, json, os, shutil, subprocess, time, uuid
 from typing import IO, cast
@@ -211,22 +210,25 @@ class WindowsRelay:
                     raise
                 time.sleep(min(_POLL_SECONDS, timer.seconds_left()))
 
-    # Ends the relay, which exits once its connection or its input ends.
+    # Ends the relay by its input, so the browser closes the connection.
     def relay_stop(self) -> None:
         process = self.relay_process
         if process is None:
             return
+        what = f"{_POWERSHELL_NAME} relaying DevTools"
         cast(IO[bytes], process.stdin).close()
-        self.process_wait(f"{_POWERSHELL_NAME} relaying DevTools", process)
+        self.process_wait(what, process)
         cast(IO[bytes], process.stdout).close()
+        if process.returncode != 0:
+            raise RuntimeError(f"{what} exited with {process.returncode}")
 
-    # Stops the browser and the relay, then removes the profile.
+    # Ends the relay, then stops the browser and removes the profile.
     def transport_close(self) -> None:
         try:
-            self.browser_stop()
+            self.relay_stop()
         finally:
             try:
-                self.relay_stop()
+                self.browser_stop()
             finally:
                 self.profile_remove()
 

@@ -1832,10 +1832,19 @@ fault realm REALM->DRIVER 0 push; fails the block
   they use, imports devtools, and copies a private constant both modules need
   rather than reach across modules. Its stub is
   API/python/devtools_windows.pyi.
-- WindowsRelay: in devtools_windows.py, offline since 2026-10-30, kept, run by
-  nothing and to be brought back later. It exists as WSL's NAT networking can't
-  reach Windows' 127.0.0.1, where Chrome serves DevTools, so a relay in
-  powershell.exe carries the WebSocket over its stdin and stdout.
+- WindowsRelay: in devtools_windows.py, offline from 2026-10-30 until
+  2026-11-12, when its suite test_devtools_powershell became test-all. It
+  exists as WSL's NAT networking can't reach Windows' 127.0.0.1, where Chrome
+  serves DevTools, so a relay in powershell.exe carries the WebSocket over its
+  stdin and stdout.
+- relay close: WindowsRelay.transport_close ends the relay first by closing
+  its stdin, so Chrome closes the DevTools connection and the relay exits 0,
+  else it raises; then it stops the browser by Stop-Process. Killing the
+  browser first reset the connection, and the relay's IOException went to
+  stderr unchecked.
+- test_devtools_powershell: test-all, after test_devtools_chrome in the Python
+  unit list, 84 s on 2026-11-12, 62 s of it test_open_timeout's wait for
+  devtools' 60 s page timer. Its server logs requests under --verbose alone.
 - relay helpers: SocketChannel, address_parse, command_run, powershell_command,
   relay_script and the handshake functions stay in devtools.py, so that the
   tests that run on them stay running.
@@ -1858,9 +1867,9 @@ fault realm REALM->DRIVER 0 push; fails the block
 - devtools programs: chrome-headless-shell for devtools.py, and powershell.exe
   and wslpath for devtools_windows.py. Standard library only.
 - devtools count: devtools.py counts under test_devtools and
-  test_devtools_chrome. devtools_windows.py counts under the later suite
-  test_devtools_powershell alone, by that suite's _COUNTED row, so no run
-  reaches it until the suite comes back, with no exemption mark used.
+  test_devtools_chrome. devtools_windows.py counts under no suite, as
+  test_devtools_powershell's _COUNTED row is empty: five of its failures need
+  a Windows that fails, and no exemption mark is used.
 
 ## xsjs_screenshot
 
@@ -1914,6 +1923,7 @@ fault realm REALM->DRIVER 0 push; fails the block
   s each. test_posix.sh passes no --coverage with it, as the modules only it
   checks would pass or fail by whether the compile stamps are cold: a warm
   stamp leaves page_build.bundle_compile's lines unrun.
+  A whole run passed in 12 m 32 s on 2026-11-12, 135 blocks and no skip.
 - category.py: holds the two labels, the three categories smoke-test, test-all
   and test-disabled, the options --test-all and --test-disabled, which every
   program takes, and option_words, which gives a category's option for a command
@@ -1983,8 +1993,13 @@ fault realm REALM->DRIVER 0 push; fails the block
   0 is the TAP producer and consumer. Each next layer holds the suites whose
   callees' suites all sit in earlier layers.
 - test_test: the one suite of harness.py, category.py and line_coverage.py.
-- later suites: listed apart with the programs they wait on, not yet approved:
-  in no phase, and --module refuses them.
+- later suites: none since 2026-11-12, when test_devtools_powershell became
+  test-all and `_LATER` of python/test_all.py went.
+- test_failing_block: test-all, after test_tap_pair_ts in group A's
+  integration list, runs test_all.py as a program with --stream --module
+  failing_block.ts: at test-all expecting the whole block's 3 failures, and at
+  smoke-test, failfast, the 1 before its bail out. Each must exit 0 with stderr
+  empty and the gold's counts. It counts for no module.
 - disabled suites: `_DISABLED` of python/test_all.py, each suite or block with
   why it ran longer than a second. Each keeps its place and label in the phase
   lists, only a --test-disabled run takes it, and `--stream --module NAME` runs
@@ -2032,7 +2047,30 @@ fault realm REALM->DRIVER 0 push; fails the block
   alone, with PYRIGHT_PYTHON_IGNORE_WARNINGS set, so the PyPI wrapper asks
   PyPI nothing, its output captured: dropped when it passes, as pyright has no
   quiet option, and the RuntimeError's message, the CalledProcessError its
-  cause, when it fails.
+  cause, when it fails. The wrapper, pip's pyright 1.1.414, runs the copy of
+  pyright its wheel bundles on /usr/bin/node. It would ask npm or GitHub only
+  under PYRIGHT_PYTHON_FORCE_VERSION or PYRIGHT_PYTHON_PYLANCE_VERSION, which
+  nothing sets, and installs into ~/.cache/pyright-python only a version its
+  wheel lacks.
+- network: by the maintainer's rule of 2026-11-12, no tool on the disk checks
+  for an update in any run, and the network is used only to fetch and keep a
+  file not yet held. third_party_fetch.py is the one fetch, of a pin absent or
+  failing its digest; ttyd's build runs CMake with its Git lookup off; every
+  other connection of a run is to 127.0.0.1 or a pipe. A new tool is measured
+  for update checks and each is turned off.
+- network measured: on 2026-11-12, the pyright wrapper under a Python audit
+  hook and node under a preload logging net and dns opened no socket; ruff's
+  binary holds no HTTP client crate; prettier's files and tsc.js require no
+  network module, tsserver.js alone does; chrome-headless-shell 156, Chrome
+  for Testing, holds no updater, variations, Safe Browsing or optimization
+  guide host, only Domain Reliability's for Google's own origins, and idle 60
+  s on about:blank its --log-net-log held no request, lookup or connect.
+- tool sources: apt gives shfmt, nodejs, npm, node-typescript's tsc, cmake,
+  patch, bubblewrap and libwebsockets-dev. Ubuntu resolute packages no
+  pyright, ruff, prettier or Chrome, so pyright 1.1.414 and ruff 0.16.8 are
+  pip installs in ~/.local, prettier an npm install in ~/.npm-global and
+  chrome-headless-shell Chrome for Testing in /opt. The maintainer installs
+  every tool on request, from apt whenever apt has it.
 - synchronization audit: test_posix.py fails a ts/*.ts file outside
   _SYNCHRONIZATION_MODULES that uses await, .then(, new Promise, Atomics or
   SharedArrayBuffer outside its comments and literals.

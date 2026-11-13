@@ -2,15 +2,14 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Offline since 2026-10-30, kept, run by nothing, and to be brought back later.
-#
 # Tests devtools_windows.py and the parts of devtools.py that need a browser,
-# a later suite that waits on powershell.exe and on Chrome or Edge on Windows.
+# a test-all suite that needs powershell.exe and Chrome or Edge on Windows.
 # A PATH that holds no PowerShell refuses the relay, with nothing started. Each
 # other test starts a Browser of its own on the Windows relay, on a profile of
 # its own, at the DevTools address its port file gives, and a local HTTP server
 # of the standard library, bound to the address of settings.json, that serves a
-# scratch directory of pages under build/ once the test has it listen. The
+# scratch directory of pages under build/ once the test has it listen,
+# writing its request lines to stderr under --verbose alone. The
 # page opens again while it is refused, and fails on any other error or once
 # its timer ends; page methods go on the page's session and browser and
 # target methods on the browser's; a console message reaches every follower;
@@ -19,7 +18,8 @@
 # another page stays. The waits the tests give are the gold's.
 
 import devtools, devtools_windows, functools, harness, http.server, os
-import tempfile, threading, time, unittest
+import switches, tempfile, threading, time, unittest
+from typing import Any
 
 # The checkout's top directory, above this file's `python/`.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -94,6 +94,14 @@ def serve_later(
     server.serve_forever()
 
 
+# Serves the pages, its request lines written to stderr under `--verbose`.
+class PageHandler(http.server.SimpleHTTPRequestHandler):
+    # Writes the request's line as http.server does, under `--verbose` only.
+    def log_message(self, format: str, *args: Any) -> None:
+        if switches.verbose:
+            super().log_message(format, *args)
+
+
 # The relay's start, as far as a machine shows it with no PowerShell.
 class TestRelay(unittest.TestCase):
     # A PATH that holds no PowerShell fails loud, starting nothing.
@@ -119,9 +127,7 @@ class BrowserCase(unittest.TestCase):
             path = os.path.join(pages_path, name)
             with open(path, "w", encoding="utf-8") as file:
                 file.write(text)
-        handler = functools.partial(
-            http.server.SimpleHTTPRequestHandler, directory=pages_path
-        )
+        handler = functools.partial(PageHandler, directory=pages_path)
         self.server = http.server.ThreadingHTTPServer(
             (_BIND_ADDRESS, 0), handler, bind_and_activate=False
         )

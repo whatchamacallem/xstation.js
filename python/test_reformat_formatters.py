@@ -173,8 +173,7 @@ class TestFormat(ChildCase):
         ending, _ = self.child_run(work)
         self.assertEqual(ending, _ENDING_RETURNED)
 
-    # A type error fails the formatting once its file is formatted, the type
-    # checker's report the error and its exit the cause, with nothing printed.
+    # A type error fails after formatting, its report raised, nothing printed.
     def test_types_refused(self) -> None:
         path = self.file_write("b.py", _MISTYPED_RAW)
         work = functools.partial(reformat.reformat, [path])

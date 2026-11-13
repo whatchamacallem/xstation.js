@@ -16,8 +16,7 @@
 # or has it run in its suite's block; a call of a function it was handed does
 # not count. Layer 0 is the TAP producer and consumer, trusted until the pair
 # tests prove they agree. TypeScript blocks run in group A, in Node, group B,
-# in headless Chrome, or group C, behind ttyd. The later suites wait on
-# programs not yet approved, and no category runs them.
+# in headless Chrome, or group C, behind ttyd.
 
 import argparse, base64, contextlib, functools, importlib, json, os, re
 import shutil, signal, subprocess, sys, tempfile, time, types, unittest
@@ -72,6 +71,7 @@ _MODULES: list[tuple[str, str]] = [
     ("test_substrate_limit", "smoke-test"),
     ("test_verbose", "smoke-test"),
     ("test_devtools_chrome", "smoke-test"),
+    ("test_devtools_powershell", "test-all"),
     ("test_dispatch", "smoke-test"),
     ("test_settings", "smoke-test"),
     ("test_engine_audit", "smoke-test"),
@@ -155,6 +155,7 @@ _A_UNIT: list[tuple[str, str]] = [
 # Group A's integration phase, its pair test first, which is a Python suite.
 _A_INTEGRATION: list[tuple[str, str]] = [
     ("test_tap_pair_ts", "smoke-test"),
+    ("test_failing_block", "test-all"),
     ("test_integrate_queue.ts", "smoke-test"),
     ("test_integrate_http.ts", "test-all"),
     ("test_integrate_mcp.ts", "smoke-test"),
@@ -368,15 +369,6 @@ _DISABLED: dict[str, str] = {
     "test_jslb_decode_vectors.ts": "7.1 s: decodes each vector at every split",
 }
 
-# The later suites, each with what it waits on, which no run takes.
-_LATER: list[tuple[str, str]] = [
-    (
-        "test_devtools_powershell",
-        "offline since 2026-10-30, kept, run by nothing, and to be brought"
-        " back later; then powershell.exe, and Chrome or Edge",
-    ),
-]
-
 # The end to end programs of the default level, the guide tests, in order.
 _GUIDE_PROGRAMS = ["test_guide_isaiah", "test_guide_ruth", "test_guide_dawa"]
 
@@ -388,7 +380,8 @@ _COUNTED: dict[str, tuple[str, ...]] = {
     "failing_suite": (),
     "test_bootstrap_dash": ("bootstrap",),
     "test_devtools_chrome": ("devtools",),
-    "test_devtools_powershell": ("devtools_windows",),
+    "test_devtools_powershell": (),
+    "test_failing_block": (),
     "test_guide_walk": (),
     "test_jslb_vectors": ("jslb",),
     "test_local_http_delay": ("local_http",),

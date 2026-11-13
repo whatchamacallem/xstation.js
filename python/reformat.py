@@ -92,8 +92,7 @@ def paths_match(root_path: str, patterns: list[str]) -> list[str]:
     return sorted(paths)
 
 
-# Runs each formatter of this system once over its files, then each type
-# checker, so that a type error stops no formatting.
+# Runs every formatter, then every type checker, so a type error stops none.
 def reformat(paths: list[str]) -> None:
     rows = _rows_matched(paths)
     for row, matched in rows:
@@ -144,8 +143,7 @@ def _rows_matched(paths: list[str]) -> list[tuple[FileType, list[str]]]:
     return rows
 
 
-# Runs the type checker on the files, its report raised when it fails and
-# dropped when it passes, as pyright prints a summary and has no quiet option.
+# Runs the type checker, raising its report on failure, else dropping it.
 def _types_check(command: list[str], paths: list[str]) -> None:
     try:
         subprocess.run(

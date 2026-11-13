@@ -1,0 +1,6 @@
+{
+  "bail_line": "Bail out! failfast",
+  "bail_stats": [6, 1, 1, 0, true],
+  "block": "failing_block.ts",
+  "whole_stats": [6, 2, 3, 1, true]
+}
