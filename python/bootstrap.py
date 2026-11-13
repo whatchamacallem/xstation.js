@@ -76,7 +76,16 @@ _TERMINAL_STEP = "; ".join(
     )
 )
 
-# The console's shell: dash, after the step, in the maintainer's sandbox.
+# The console's shell: dash, after the step.
+_DASH_SHELL = ("python3", "-I", "-c", _TERMINAL_STEP, "/bin/dash")
+
+# The shell's verbose form, with dash's option that prints its input as read.
+_SHELL_VERBOSE = (*_DASH_SHELL, "-v")
+
+# The directory dash starts in, in its sandbox or with none.
+_DASH_START = "/tmp"
+
+# The shell in the maintainer's sandbox.
 _DASH_ARGV = (
     "bwrap",
     "--ro-bind",
@@ -98,16 +107,21 @@ _DASH_ARGV = (
     "--new-session",
     "--die-with-parent",
     "--chdir",
-    "/tmp",
-    "python3",
-    "-I",
-    "-c",
-    _TERMINAL_STEP,
-    "/bin/dash",
+    _DASH_START,
+    *_DASH_SHELL,
 )
 
 # Its verbose form, with dash's option that prints its input as it reads it.
 _DASH_VERBOSE = (*_DASH_ARGV, "-v")
+
+# The file Docker's engine, wslc's too, puts at the top of a container.
+_CONTAINER_MARKER = "/.dockerenv"
+
+# The kernel's release, which holds `_KERNEL_WSL` under WSL.
+_KERNEL_RELEASE = "/proc/sys/kernel/osrelease"
+
+# The word of the release of WSL's kernel.
+_KERNEL_WSL = "microsoft"
 
 # The shell's verbose level when the parameter verbose is false.
 _LEVEL_PLAIN = 1
@@ -396,7 +410,14 @@ def _terminal_release() -> None:
     signal.signal(signal.SIGHUP, handler)
 
 
-# Gives up the pty and runs the sandboxed dash at the level, its code back.
+# Whether bwrap can't run: in a wslc container, whose seccomp refuses it.
+def _sandbox_refused() -> bool:
+    with open(_KERNEL_RELEASE, encoding="utf-8") as file:
+        release = file.read()
+    return os.path.exists(_CONTAINER_MARKER) and _KERNEL_WSL in release
+
+
+# Gives up the pty and runs dash at the level, in bwrap if it can, code back.
 def _dash_run(level: int) -> int:
     import verbose
 
@@ -408,7 +429,11 @@ def _dash_run(level: int) -> int:
     os.environ.clear()
     os.environ.update(kept)
     _terminal_release()
-    code = verbose.exec(level, list(_DASH_ARGV), list(_DASH_VERBOSE))
+    os.chdir(_DASH_START)
+    refused = _sandbox_refused()
+    argv = _DASH_SHELL if refused else _DASH_ARGV
+    argv_verbose = _SHELL_VERBOSE if refused else _DASH_VERBOSE
+    code = verbose.exec(level, list(argv), list(argv_verbose))
     return code if code >= 0 else _SIGNAL_BASE - code
 
 
@@ -422,7 +447,7 @@ def _home_check(root: str) -> None:
         )
 
 
-# Runs the sandboxed dash with a scrubbed environment, in debug mode only.
+# Runs dash with a scrubbed environment, in debug mode only.
 def _console_run(root: str, loaded: dict[str, Any]) -> int:
     import switches
 

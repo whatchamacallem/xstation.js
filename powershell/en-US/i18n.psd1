@@ -174,7 +174,9 @@
         'The lint, the lifecycle and `{0}` ran without failures.'
     )
     test_step_failed        = 'Step {0} failed.'
-    test_usage              = 'Usage: {0} [--test-normal | --test-all | --test-disabled]'
+    test_usage              = (
+        'Usage: {0} [--test-normal | --test-all | --test-disabled]'
+    )
     ttyd_build_failed       = 'Building ttyd failed.'
     ttyd_configure_failed   = 'Configuring the ttyd build failed.'
     ttyd_fetch_failed       = 'Fetching the third party files failed.'

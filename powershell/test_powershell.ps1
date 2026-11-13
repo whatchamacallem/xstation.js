@@ -6,8 +6,8 @@
 #
 # Formats and checks the scripts (test_lint.ps1), then runs the whole
 # lifecycle, each script in its own PowerShell as a person would, then
-# python/test_all.py in WSL. Each step's output and log go to
-# test_powershell.ps1.md.
+# python/test_all.py in the wslc container hype, in its own checkout. Each
+# step's output and log go to test_powershell.ps1.md.
 #
 # The checkout must first hold what the scripts read and don't make:
 # settings.json, the suites' gold, provider.json, i18n\en-US.json and the page
@@ -17,7 +17,7 @@
 #
 # The test command has to be run as admin:
 # Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-# .\powershell\test_powershell.ps1 [--test-normal | --test-all | --test-disabled]
+# .\powershell\test_powershell.ps1 [--test-normal|--test-all|--test-disabled]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
     'PSAvoidUsingWriteHost', '',
     Justification = 'Coloured headings for the person running it.')]
@@ -34,6 +34,10 @@ $root_path_ = Split-Path -Parent $PSScriptRoot
 $gold_json_ = xsjs_util_read_json (
     Join-Path $PSScriptRoot 'test_setting_test_powershell.json')
 $test_user_ = xsjs_util_get_setting $gold_json_ 'test_user'
+# The wslc container of the Linux step, its user and that user's checkout.
+$container_ = xsjs_util_get_setting $gold_json_ 'container'
+$container_user_ = xsjs_util_get_setting $gold_json_ 'container_user'
+$container_root_ = xsjs_util_get_setting $gold_json_ 'container_root'
 $test_credential_ = '{0}:{1}' -f $test_user_, [Guid]::NewGuid().ToString('N')
 # Expect is the first line `xsjs_status.ps1` should print.
 $lifecycle_ = @(
@@ -41,7 +45,7 @@ $lifecycle_ = @(
     @{ Script = 'xsjs_status.ps1'; Expect = $i18n_.status_stopped }
     @{ Script = 'xsjs_install.ps1' }
     @{ Script = 'xsjs_status.ps1'; Expect = $i18n_.status_stopped }
-    # Linux: a command run in WSL in the checkout, given the category option.
+    # Linux: a command run in the container, given the category option.
     @{ Linux = 'python3', 'python/test_all.py' }
     @{ Script = 'xsjs_start.ps1' }
     @{ Script = 'xsjs_status.ps1'; Expect = $i18n_.status_running_signin }
@@ -77,13 +81,15 @@ function _test_powershell_get_log_text ([string]$path_) {
     ($lines_ -join "`n").Trim()
 }
 
-# Runs one step in its own PowerShell or in WSL and returns whether it passed.
+# Runs one step in its own PowerShell or in hype and returns whether it passed.
 function _test_powershell_test_step ([int]$number_, [hashtable]$step_) {
     # Shows and logs what it prints, then adds a script's own log.
     $ErrorActionPreference = 'Continue'
     if ($step_.Linux) {
-        $linux_ = @($step_.Linux) + $category_
-        $command_ = 'wsl --cd {0} -e {1}' -f $root_path_, ($linux_ -join ' ')
+        $linux_ = @(
+            'exec', '-u', $container_user_, '-w', $container_root_, $container_
+        ) + @($step_.Linux) + $category_
+        $command_ = 'wslc {0}' -f ($linux_ -join ' ')
     } else {
         $arguments_ = @($step_.Arguments | Where-Object { $_ })
         $hidden_ = "${test_user_}:********"
@@ -98,10 +104,10 @@ function _test_powershell_test_step ([int]$number_, [hashtable]$step_) {
     xsjs_util_write_log_section ('{0}. `{1}`' -f $number_, $command_)
 
     if ($step_.Linux) {
-        # Each line as text, an error record's too, without the nulls of WSL.
+        # Each line as text, an error record's too.
         $lines_ = @(
-            & wsl.exe --cd $root_path_ -e @linux_ 2>&1 |
-                ForEach-Object { "$_".Replace("`0", '') } |
+            & wslc.exe @linux_ 2>&1 |
+                ForEach-Object { "$_" } |
                 ForEach-Object { Write-Host $_; $_ }
         )
     } else {

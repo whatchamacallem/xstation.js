@@ -8,10 +8,14 @@
 #
 # LinuxPipe drives Chrome for Testing, as admin.md installs it, headless by
 # --remote-debugging-pipe, with XDG_CACHE_HOME set to the profile, where
-# fontconfig caches fonts. The browser's exit closes its pipe, and the call or
-# wait under way raises one ConnectionError whose cause is the exit code; an
-# exit with an error code that no call saw fails the Browser's end. With the
-# switch `switches.anthropic`, LinuxPipe starts the headless shell of
+# fontconfig caches fonts, and with no back/forward cache, which would keep a
+# page navigated away from alive, and the OPFS files its workers hold. It opens
+# about:blank, not the new tab page, and leads a process group of its own,
+# whose end the profile's removal waits for, as Chrome's network service writes
+# there after a killed browser. The browser's exit closes its pipe, and the
+# call or wait under way raises one ConnectionError whose cause is the exit
+# code; an exit with an error code that no call saw fails the Browser's end.
+# With the switch `switches.anthropic`, LinuxPipe starts the headless shell of
 # Anthropic's cloud container, Playwright's, in its place.
 
 import base64, fcntl, functools, glob, hashlib, json, math, os, select, shutil
@@ -74,6 +78,9 @@ _DESCRIPTOR_FLOOR = 5
 
 # The file the browser writes its DevTools port and path to, in the profile.
 _DEVTOOLS_PORT_FILE_NAME = "DevToolsActivePort"
+
+# How often the browser's group is polled, as its helpers end within 30 ms.
+_GROUP_POLL_SECONDS = 0.01
 
 # What ends each DevTools message on the Linux browser's pipes.
 _PIPE_END = b"\0"
@@ -519,6 +526,8 @@ class LinuxPipe:
                     os.close(fd)
             self.command_fd = -1
             self.reply_fd = -1
+            if self.process is not None:
+                group_wait(self.process.pid)
             if self.profile_path:
                 shutil.rmtree(self.profile_path)
 
@@ -539,9 +548,11 @@ class LinuxPipe:
                 [
                     path,
                     "--headless",
+                    "--disable-features=BackForwardCache",
                     "--remote-debugging-pipe",
                     f"--user-data-dir={self.profile_path}",
                     f"--window-size={width_px},{height_px}",
+                    "about:blank",
                 ],
                 {**os.environ, "XDG_CACHE_HOME": self.profile_path},
                 file_actions=[
@@ -551,6 +562,7 @@ class LinuxPipe:
                     (os.POSIX_SPAWN_DUP2, command_read, _COMMAND_DESCRIPTOR),
                     (os.POSIX_SPAWN_DUP2, reply_write, _REPLY_DESCRIPTOR),
                 ],
+                setpgroup=0,
             )
         finally:
             os.close(command_read)
@@ -916,6 +928,19 @@ def frame_encode(opcode: int, payload: bytes, mask: bytes) -> bytes:
         byte ^ mask[index % 4] for index, byte in enumerate(payload)
     )
     return bytes(head) + masked
+
+
+# Returns once no process of the group `pid` leads is left, zombies included.
+def group_wait(pid: int) -> None:
+    timer = WaitTimer(
+        f"{_CHROME_NAME}'s processes to exit", _STOP_WAIT_SECONDS
+    )
+    while True:
+        try:
+            os.killpg(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(min(_GROUP_POLL_SECONDS, timer.seconds_left()))
 
 
 # Fails unless the head answers the upgrade with the accept value of the key.

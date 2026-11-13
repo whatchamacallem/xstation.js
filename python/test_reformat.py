@@ -281,7 +281,9 @@ class TestPath(unittest.TestCase):
     # Each directory goes first, once, before the rest in their order.
     def test_path_first(self) -> None:
         os.environ["HOME"] = "/h"
-        os.environ["PATH"] = os.pathsep.join(["/a", "/h/.npm-global/bin", "/b"])
+        os.environ["PATH"] = os.pathsep.join(
+            ["/a", "/h/.npm-global/bin", "/b"]
+        )
         reformat.path_extend()
         reformat.path_extend()
         self.assertEqual(

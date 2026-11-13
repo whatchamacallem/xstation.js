@@ -445,8 +445,9 @@ _PROBE_KIT = r"""(() => {
     probe.wire[name].port.wire_close();
     return true;
   };
+  // No credentials, so that full Chrome shows no login prompt for a 401.
   probe.token_read = (url) =>
-    fetch(url, { cache: "no-store" }).then((response) =>
+    fetch(url, { cache: "no-store", credentials: "omit" }).then((response) =>
       response.text().then((text) => ({ status: response.status, text })),
     );
   probe.hit_test = (element, x, y) => {

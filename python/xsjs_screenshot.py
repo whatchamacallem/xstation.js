@@ -379,25 +379,27 @@ def page_ready(values: dict[str, Any]) -> str:
     return os.path.join(_BUILD_PATH, page_name)
 
 
-# Fails if something already listens on the port, as it would answer instead.
-def port_check(port: int) -> None:
+# Fails if something already listens on the host's port, as it would answer.
+def port_check(host: str, port: int) -> None:
     try:
-        with socket.create_connection(("localhost", port), timeout=1):
+        with socket.create_connection((host, port), timeout=1):
             pass
     except ConnectionRefusedError:
         return
     raise RuntimeError(f"something already listens on port {port}")
 
 
-# Returns once the process listens on the port.
-def port_wait(process: subprocess.Popen[bytes], name: str, port: int) -> None:
+# Returns once the process listens on the host's port.
+def port_wait(
+    process: subprocess.Popen[bytes], name: str, host: str, port: int
+) -> None:
     deadline = time.monotonic() + _SERVER_WAIT_SECONDS
     while True:
         exit_code = process.poll()
         if exit_code is not None:
             raise RuntimeError(f"{name} exited with {exit_code}")
         try:
-            with socket.create_connection(("localhost", port), timeout=1):
+            with socket.create_connection((host, port), timeout=1):
                 return
         except ConnectionRefusedError:
             pass
@@ -542,7 +544,7 @@ def ttyd_serve(
         raise RuntimeError(
             f"{ttyd_path} is missing: a run of {_TTYD_BUILDER} builds it"
         )
-    port_check(_TTYD_PORT)
+    port_check(settings["bind_address"], _TTYD_PORT)
     arguments = [
         ttyd_path,
         "--port",
@@ -561,7 +563,7 @@ def ttyd_serve(
     ]
     ttyd = process_start(arguments, root_path)
     try:
-        port_wait(ttyd, "ttyd", _TTYD_PORT)
+        port_wait(ttyd, "ttyd", settings["bind_address"], _TTYD_PORT)
         yield ttyd
     finally:
         process_stop(ttyd)

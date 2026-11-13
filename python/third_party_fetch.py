@@ -17,7 +17,7 @@
 # it is checked by its own digest and never fetched, and a missing one fails
 # naming the command that places it. Python runs no package manager.
 
-import argparse, hashlib, os, re, switches, tempfile, urllib.request
+import argparse, hashlib, os, re, sys, tempfile, urllib.request
 
 # The checkout's top directory.
 _ROOT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -65,6 +65,9 @@ _SOCKET_SECONDS = 60.0
 
 # Where the fetched files go.
 _THIRD_PARTY_PATH = os.path.join(_ROOT_PATH, "third_party")
+
+# Bytecode of the modules the functions below import goes in `build/pycache`.
+sys.pycache_prefix = os.path.join(_BUILD_PATH, "pycache")
 
 
 # Returns the path of the name, fetching it unless it has the sha256 now.
@@ -117,6 +120,8 @@ def package_path() -> str:
 
 # Returns the paths of the pinned files, fetched to the first failure.
 def pins_fetch() -> list[str]:
+    import switches
+
     paths: list[str] = []
     for name, url, sha256 in _PINS:
         packaged = switches.anthropic and name == _PACKAGE_REPLACED
@@ -129,6 +134,8 @@ def pins_fetch() -> list[str]:
 
 # Fetches every pinned file from the command line, printing nothing.
 def main() -> None:
+    import switches
+
     parser = argparse.ArgumentParser(
         description="Fetch the pinned third party files into third_party/."
     )

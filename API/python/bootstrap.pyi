@@ -11,7 +11,7 @@
 # Python's start ignores and restores the environment from before Python's
 # start coerced the C locale. The role refuses a root that is not under
 # `/home/`, which the sandbox replaces with an empty tmpfs, so dash never sees
-# the root and nothing it writes outlives it.
+# the root and nothing it writes outlives it; in wslc it has no sandbox.
 # In debug mode a role opens the root's audit, and the engine role records
 # `tap.start`, its reply and its own `error` line there. A failure writes one
 # `error` line, its cascade under `cause`, its message a note of console first

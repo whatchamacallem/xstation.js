@@ -1,3 +1,6 @@
 {
-  "test_user": "xstation-test"
+  "test_user": "xstation-test",
+  "container": "hype",
+  "container_user": "t",
+  "container_root": "/home/t/xstation.js"
 }

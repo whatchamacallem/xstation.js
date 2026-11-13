@@ -244,6 +244,15 @@ _HUNG_UP = -signal.SIGHUP
 # The start of the message of a process that the system refused to start.
 _SPAWN_REFUSED = f"[Errno {errno.EAGAIN}] {os.strerror(errno.EAGAIN)}"
 
+# The file Docker's engine, wslc's too, puts at the top of a container.
+_CONTAINER_MARKER = "/.dockerenv"
+
+# The kernel's release, which holds `_KERNEL_WSL` under WSL.
+_KERNEL_RELEASE = "/proc/sys/kernel/osrelease"
+
+# The word of the release of WSL's kernel.
+_KERNEL_WSL = "microsoft"
+
 
 # A scratch directory and its root, its settings and its parameters.
 class ScratchRoot(NamedTuple):
@@ -251,6 +260,13 @@ class ScratchRoot(NamedTuple):
     root: str
     settings: dict[str, Any]
     parameters: dict[str, bool]
+
+
+# Whether the console runs dash in its sandbox: anywhere but a wslc container.
+def _sandbox_used() -> bool:
+    with open(_KERNEL_RELEASE, encoding="utf-8") as file:
+        release = file.read()
+    return not (os.path.exists(_CONTAINER_MARKER) and _KERNEL_WSL in release)
 
 
 # A text of this module's gold, each `{n}` replaced by the value at `n`.
@@ -970,7 +986,10 @@ class TestConsole(unittest.TestCase):
         self.assertFalse(child.raw_get())
         message = _raised_check(self, line, "BlockingIOError")
         self.assertTrue(message.startswith(_SPAWN_REFUSED), message)
-        started = _console_entry(_text_get("verbose_exec_run"))
+        run = (
+            "verbose_exec_run" if _sandbox_used() else "verbose_exec_run_bare"
+        )
+        started = _console_entry(_text_get(run))
         failed = _console_entry(_text_get("bootstrap_run_failed", message))
         self.assertEqual(_audit_read(self, made.root), [started, failed])
 

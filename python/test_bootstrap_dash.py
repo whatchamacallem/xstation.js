@@ -3,12 +3,14 @@
 # This file is licensed under the terms of the LICENSE.md file.
 #
 # Tests the console role in debug mode, which runs dash in its bubblewrap
-# sandbox: each run of `bootstrap_run` is a forked child on a new pty, as ttyd
-# runs it, and the test types a command line to the shell once its first prompt
-# has come. It reads only what the shell prints from its first prompt on, and
-# finds a command's output between two markers that `printf` escapes make, so
-# that no echo of the input holds them. SIGTERM goes to the sandbox the console
-# role forked, found by its parent pid in /proc. A heredoc of binary bytes
+# sandbox, or with none in a wslc container, whose seccomp filter refuses
+# bwrap's `pivot_root`: each run of `bootstrap_run` is a forked child on a new
+# pty, as ttyd runs it, and the test types a command line to the shell once its
+# first prompt has come. It reads only what the shell prints from its first
+# prompt on, and finds a command's output between two markers that `printf`
+# escapes make, so that no echo of the input holds them. SIGTERM goes to the
+# sandbox the console role forked, found by its parent pid in /proc, where
+# there is one. A heredoc of binary bytes
 # comes back as the pty's output processing changes it, so that a connection
 # that is not binary fails. The shell's start and exit are notes of console in
 # the root's audit, read back by `audit.entries_read`.
@@ -32,16 +34,28 @@ _READ_BYTES: int = harness.gold_get(f"{_GOLD_ID}.read_bytes")
 # The seconds a wait for dash's prompt takes before it fails, its bytes shown.
 _PROMPT_SECONDS: float = harness.gold_get(f"{_GOLD_ID}.prompt_seconds")
 
-# The test's own copy of the console's shell, as the audit names it.
-_DASH_ARGV: list[str] = harness.gold_get(f"{_GOLD_ID}.argv")
+# The test's own copy of the console's sandbox, bwrap and its options.
+_SANDBOX: list[str] = harness.gold_get(f"{_GOLD_ID}.sandbox")
 
-# The test's own copy of the shell's verbose form.
-_DASH_VERBOSE: list[str] = harness.gold_get(f"{_GOLD_ID}.argv_verbose")
+# The test's own copy of the console's shell, dash after the step.
+_SHELL: list[str] = harness.gold_get(f"{_GOLD_ID}.shell")
+
+# Dash's option of the verbose form, which prints its input as it reads it.
+_VERBOSE_OPTION: str = harness.gold_get(f"{_GOLD_ID}.verbose_option")
+
+# The file Docker's engine, wslc's too, puts at the top of a container.
+_CONTAINER_MARKER = "/.dockerenv"
+
+# The kernel's release, which holds `_KERNEL_WSL` under WSL.
+_KERNEL_RELEASE = "/proc/sys/kernel/osrelease"
+
+# The word of the release of WSL's kernel.
+_KERNEL_WSL = "microsoft"
 
 # The prompt dash writes when it waits for a command.
 _PROMPT: bytes = harness.gold_get(f"{_GOLD_ID}.prompt").encode("utf-8")
 
-# The directory dash starts in, the sandbox's own.
+# The directory dash starts in, in its sandbox or with none.
 _START_DIRECTORY: str = harness.gold_get(f"{_GOLD_ID}.start_directory")
 
 # The heredoc's lines: every byte value dash keeps, and bad UTF 8 sequences.
@@ -141,6 +155,20 @@ _KILLED = -signal.SIGKILL
 class ScratchRoot(NamedTuple):
     scratch: str
     root: str
+
+
+# Whether dash runs in its sandbox: anywhere but a wslc container.
+def _sandbox_used() -> bool:
+    with open(_KERNEL_RELEASE, encoding="utf-8") as file:
+        release = file.read()
+    return not (os.path.exists(_CONTAINER_MARKER) and _KERNEL_WSL in release)
+
+
+# The console's argv as the audit names it, its verbose form if asked.
+def _argv_get(verbose: bool) -> list[str]:
+    sandbox = _SANDBOX if _sandbox_used() else []
+    option = [_VERBOSE_OPTION] if verbose else []
+    return [*sandbox, *_SHELL, *option]
 
 
 # A text of this module's gold, each `{n}` replaced by the value at `n`.
@@ -364,8 +392,8 @@ class TestConsole(unittest.TestCase):
     # Dash runs at the level of the parameter verbose, and its verbose form.
     def test_console_level(self) -> None:
         noted: list[tuple[bool, list[tuple[str, str]]]] = [
-            (False, _exec_entries(_DASH_ARGV, 0)),
-            (True, _exec_entries(_DASH_VERBOSE, 0)),
+            (False, _exec_entries(_argv_get(False), 0)),
+            (True, _exec_entries(_argv_get(True), 0)),
         ]
         for verbose, expected in noted:
             made = _root_make(self, verbose)
@@ -385,13 +413,18 @@ class TestConsole(unittest.TestCase):
         self.assertEqual(child.run_end(), repr(code))
 
     # SIGTERM from outside to the sandbox gives 128 plus it, and is noted.
+    @unittest.skipUnless(
+        _sandbox_used(),
+        "no sandbox in a wslc container, and an interactive dash ignores"
+        " SIGTERM",
+    )
     def test_console_terminated(self) -> None:
         made = _root_make(self, _NOTED_VERBOSE)
         child = ConsoleChild(self, made)
         child.prompt_wait()
         os.kill(child.sandbox_find(), signal.SIGTERM)
         self.assertEqual(child.run_end(), repr(_TERMINATED_CODE))
-        expected = _exec_entries(_DASH_ARGV, _TERMINATED_EXEC)
+        expected = _exec_entries(_argv_get(False), _TERMINATED_EXEC)
         self.assertEqual(_audit_read(self, made.root), expected)
 
     # A heredoc of binary bytes to `cat` comes back as the pty prints them.

@@ -232,7 +232,7 @@ command only to name the log.
 - The two official test targets for the whole project are
   `powershell/test_powershell.ps1`, which runs on Windows, and
   `test_posix.sh`, which will later run in Docker. Both call
-  `python/test_all.py`, the first inside WSL.
+  `python/test_all.py`, the first inside the wslc container hype.
 - `python/test_all.py` is the test driver: it chooses, orders, times and runs
   the test suites. The infrastructure for testing is the code the drivers and
   tests are built from, such as the test categories and their deadline.
@@ -416,6 +416,13 @@ maintainer. You have permission to update this file and fix errors.
   rest.
 - Correct a rule here when you find it wrong, and add a rule as one line that
   starts with its subject.
+- `hype`, the wslc container that `test_powershell.ps1` runs Linux in as `t`
+  (`wslc exec -u t -w /home/t/xstation.js hype ...`), is a copy of
+  `ubuntu-permanent` made with `--cap-add SYS_ADMIN`, which Chrome's sandbox
+  needs; its seccomp filter still refuses `pivot_root`, so the console runs
+  dash there with no bwrap.
+- DEBUGGING_WSLC.md: how to run every test level from a shell inside `hype`,
+  its sync from the Windows checkout and its VS Code connection.
 
 ## Map
 
@@ -1215,6 +1222,11 @@ fault realm REALM->DRIVER 0 push; fails the block
 - sandbox argv: `bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp
   --tmpfs /home --tmpfs /mnt --tmpfs /root --unshare-all --new-session
   --die-with-parent --chdir /tmp python3 -I -c STEP /bin/dash`
+- sandbox off: in a wslc container, a /.dockerenv under a kernel whose
+  /proc/sys/kernel/osrelease holds `microsoft`, whose seccomp filter refuses
+  bwrap's pivot_root, the argv is `python3 -I -c STEP /bin/dash` alone, started
+  in /tmp as bwrap's --chdir starts it, by bootstrap's _DASH_START, which the
+  console role changes to before either argv runs.
 - sandbox STEP: Python of the standard library on one line, statements joined
   by `; `: os.setsid(); fcntl.ioctl(0, termios.TIOCSCTTY, 0); SIGPIPE and
   SIGXFSZ to signal.SIG_DFL; read the environment from /proc/self/environ;
@@ -1855,6 +1867,29 @@ fault realm REALM->DRIVER 0 push; fails the block
   ~/.local/share/chrome-for-testing/chrome/linux-*/chrome-linux64/chrome where
   admin.md installs it, with --headless and --remote-debugging-pipe, each message ended by a NUL byte, and
   XDG_CACHE_HOME set to the profile, where fontconfig caches fonts.
+- LinuxPipe start page: about:blank, given last on the command line, as full
+  Chrome with no URL opens chrome://new-tab-page/, which target_attach would
+  take as the page, and starts its new tab page and extension renderers.
+- LinuxPipe group: Chrome starts by posix_spawn with setpgroup 0, leading a
+  process group of its own, and transport_close waits by devtools.group_wait
+  until os.killpg of it finds no process, zombies included, before removing
+  the profile. Measured on 2026-11-13 with Chrome for Testing 157 in `hype`:
+  its helpers stay in the group of whoever started it and end 10 to 30 ms
+  after the browser is reaped, and the network service of a killed browser
+  wrote `Default/.org.chromium.Chromium.Network Persistent State.*` while
+  rmtree ran, failing test_exit_crashed and test_exit_unseen with ENOTEMPTY.
+  The two chrome_crashpad_handler processes make sessions of their own and
+  keep their database in ~/.config/google-chrome-for-testing/Crash Reports,
+  outside the profile, so the wait leaves them out.
+- LinuxPipe cache: --disable-features=BackForwardCache, measured on
+  2026-11-13 with Chrome for Testing 157: its back/forward cache kept the page
+  of test_error_overlay_worker.ts alive after about:blank, so its worker's
+  OPFS access handles refused test_substrate_limit.ts's two blocks later, in
+  each of 3 runs; with the flag, none.
+- headless page icon: html/headless.html and html/test.html declare
+  `<link rel="icon" href="data:," />`, as full Chrome, unlike
+  chrome-headless-shell, asks for /favicon.ico, which the local HTTP server
+  refuses.
 - Browser: has a profile of its own that goes when it does, and drives one
   page: open a URL, evaluate JavaScript, pass on the calls of a binding,
   follow the console, save a screenshot, trace, pause one of its workers in
@@ -2196,8 +2231,10 @@ fault realm REALM->DRIVER 0 push; fails the block
 - group C root: made in build/ before the block, outside its timer and inside
   the deadline, as the start script makes one: the modules of
   powershell.runtime_modules and the seed in python/, i18n/en-US.json,
-  settings.json, parameters.json of the run's switches with debug true, and in
-  main_loop/ the file typescript.BLOCK.root names under main_loop, if any.
+  settings.json, parameters.json of the run's switches with debug true and
+  verbose false, as the console blocks' gold is of level 1, so that a run
+  with --verbose doubles no line of theirs by dash's -v, and in main_loop/
+  the file typescript.BLOCK.root names under main_loop, if any.
 - group C ttyd: ttyd_build's ttyd in a session of its own with the start
   script's options: --port 0, --interface, --writable, --check-origin,
   --terminal-type, --url-arg, --srv-buf-size, --index build/headless.html,

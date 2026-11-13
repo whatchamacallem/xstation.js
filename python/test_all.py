@@ -887,7 +887,12 @@ class RootServer:
             os.path.join(self.root, settings_path), "w", encoding="utf-8"
         ) as file:
             file.write(json.dumps(loaded, ensure_ascii=False, indent=2) + "\n")
-        parameters = {**switches.switches_get(), "debug": True}
+        # Verbose off, whatever the run's switch, as the console gold expects.
+        parameters = {
+            **switches.switches_get(),
+            "debug": True,
+            "verbose": False,
+        }
         switches.parameters_write(self.root, parameters)
         bootstrap = os.path.join(python_path, powershell["bootstrap_script"])
         command = [_PYTHON_PROGRAM, bootstrap, "--root", self.root]

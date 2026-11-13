@@ -47,7 +47,7 @@ function xsjs_util_get_setting ([object]$file_, [string]$id_) {
         $value_ = $property_.Value
     }
     # The comma returns an array whole, a one item array too.
-    ,$value_
+    , $value_
 }
 
 # Not `$settings_`, the name of a local in two scripts, which callees see.
