@@ -5,8 +5,10 @@ No code was written by the maintainer.
 These are the user facing scripts. The remaining scripts are for interested
 developers.
 
-The supported checkout for Windows users is `C:\src`. Windows' RemoteSigned
-execution policy refuses the scripts from a `\\wsl.localhost` path.
+The supported checkout for Windows users lives in the Downloads folder, as
+`C:\Users\NAME\Downloads\xstation.js`, as `hype` mounts the checkout's
+parent folder. Windows' RemoteSigned execution policy refuses the scripts
+from a `\\wsl.localhost` path.
 
 Everything runs in the wslc container `hype`, made by hand, as its user
 `t`, in its checkout `/home/t/xstation.js`. It must mount the checkout's

@@ -424,6 +424,10 @@ maintainer. You have permission to update this file and fix errors.
   publishing port 5768 on Windows' 127.0.0.1 for the start. Its seccomp filter refuses the user namespaces of Chrome's sandbox
   and bwrap's `pivot_root`, so Chrome runs there with --no-sandbox and the
   console runs dash with no bwrap. `t` holds no capability.
+- Windows checkout: lives in the Downloads folder, as
+  `C:\Users\ajohn\Downloads\xstation.js`, by the maintainer on 2026-11-14,
+  so `hype` mounts `C:\Users\ajohn\Downloads` at
+  `/mnt/c/Users/ajohn/Downloads`, never a drive's top.
 - powershell/test_wslc.ps1: from any Windows PowerShell, no administrator:
   makes `hype` from powershell/test_setting_test_wslc.json, with `--publish`
   powershell.windows_address and powershell.windows_port twice,
@@ -436,6 +440,12 @@ maintainer. You have permission to update this file and fix errors.
   The container's name, user, checkout, interface and sync script and the
   Windows address of its publish are settings of settings.json's powershell,
   read by xsjs_util.ps1.
+- powershell/test_lint.ps1 rules: runs each PSScriptAnalyzer rule alone, its
+  name the settings' IncludeRules as a string[], since PSScriptAnalyzer
+  1.25.0 on Windows PowerShell 5.1, running every rule together, threw a
+  NullReferenceException as RULE_ERROR or hung with no CPU in 3 of 6 runs,
+  measured on 2026-11-14; 20 rounds rule by rule over the 8 files passed,
+  about 14 s each.
 - wslc_sync.sh SOURCE DESTINATION: run in `hype` as `t`, makes DESTINATION a
   copy of SOURCE's working tree, writing nothing under SOURCE: clones when
   absent, moves the branch by a mixed reset only to a descendant, copies

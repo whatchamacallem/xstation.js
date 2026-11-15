@@ -268,11 +268,7 @@ class TestCheck(unittest.TestCase):
     # Each missing key, at the top level or in a nested object, is refused.
     def test_key_missing(self) -> None:
         paths = (
-            _BOOL_PATHS
-            + _INT_PATHS
-            + _STR_PATHS
-            + _LIST_PATHS
-            + _OBJECT_PATHS
+            _BOOL_PATHS + _INT_PATHS + _STR_PATHS + _LIST_PATHS + _OBJECT_PATHS
         )
         for path in paths:
             bad = _wire_make()

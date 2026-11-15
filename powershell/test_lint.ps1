@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Offline since 2026-10-30, kept, run by nothing, and to be brought back later.
-#
 # Checks that the PowerShell files python/reformat_whitelist.txt lists have
 # LF line endings, formats them, then checks them with PSScriptAnalyzer,
 # stopping at the first file with a fault. It matches the whitelist's lines
@@ -68,7 +66,7 @@ function _test_lint_get_lint_settings {
     $module_base_ = (Get-Module $lint_module_).ModuleBase
     $preset_path_ = Join-Path $module_base_ "Settings\$preset_.psd1"
     $settings_ = Import-PowerShellDataFile $preset_path_
-    # Dropping the preset's list of its own rules runs the default rules too.
+    # Its own rules are among every rule, which the lint names one at a time.
     $settings_.Remove('IncludeRules')
     # Longer lines are reported but have to be wrapped by hand.
     $settings_.Rules.PSAvoidLongLines = @{
@@ -162,8 +160,13 @@ function _test_lint_main {
     $paths_ | ForEach-Object { _test_lint_format_file $_ }
 
     $settings_ = _test_lint_get_lint_settings
+    # Each rule runs alone, as rules run together race, then throw or hang.
+    $rules_ = @(Get-ScriptAnalyzerRule | ForEach-Object RuleName)
     foreach ($path_ in $paths_) {
-        $results_ = Invoke-ScriptAnalyzer -Path $path_ -Settings $settings_
+        $results_ = foreach ($rule_ in $rules_) {
+            $settings_.IncludeRules = [string[]]@($rule_)
+            Invoke-ScriptAnalyzer -Path $path_ -Settings $settings_
+        }
         if ($results_) {
             $results_ | Format-Table -AutoSize -Wrap |
                 Out-String -Width $output_width_

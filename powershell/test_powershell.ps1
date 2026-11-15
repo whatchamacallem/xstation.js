@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# Offline since 2026-10-30, kept, run by nothing, and to be brought back later.
-#
 # Formats and checks the scripts (test_lint.ps1), then runs the whole
 # lifecycle, each script in its own PowerShell as a person would, with
 # test_wslc.ps1 running test_posix.sh in the wslc container hype among them.
