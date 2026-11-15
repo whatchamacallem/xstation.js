@@ -1,0 +1,8 @@
+{
+  "image": "hype-base:2026-11-13",
+  "environment": [
+    "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  ],
+  "command": ["sh", "-c", "trap exit TERM; sleep infinity & wait"],
+  "restart": "always"
+}

@@ -69,7 +69,9 @@ function morning_answer(intent) {
     [],
   );
   if (here.ord <= lib.route_ends(ecs).bottom || here.ord > staging.ord) {
-    throw new Error(`dawa_morning: there is no morning question at ${here.name}.`);
+    throw new Error(
+      `dawa_morning: there is no morning question at ${here.name}.`,
+    );
   }
   const head = lib.row_read(
     ecs,

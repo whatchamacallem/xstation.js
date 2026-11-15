@@ -7,16 +7,17 @@
 # devtools_windows.py, whose helpers that a running suite tests stay here.
 #
 # LinuxPipe drives Chrome for Testing, as admin.md installs it, headless by
-# --remote-debugging-pipe, with XDG_CACHE_HOME set to the profile, where
-# fontconfig caches fonts, and with no back/forward cache, which would keep a
-# page navigated away from alive, and the OPFS files its workers hold. It opens
-# about:blank, not the new tab page, and leads a process group of its own,
-# whose end the profile's removal waits for, as Chrome's network service writes
-# there after a killed browser. The browser's exit closes its pipe, and the
-# call or wait under way raises one ConnectionError whose cause is the exit
-# code; an exit with an error code that no call saw fails the Browser's end.
-# With the switch `switches.anthropic`, LinuxPipe starts the headless shell of
-# Anthropic's cloud container, Playwright's, in its place.
+# --remote-debugging-pipe, with no sandbox in a wslc container, whose seccomp
+# filter refuses its user namespaces, with XDG_CACHE_HOME set to the profile,
+# where fontconfig caches fonts, and with no back/forward cache, which would
+# keep a page navigated away from alive, and the OPFS files its workers hold.
+# It opens about:blank, not the new tab page, and leads a process group of its
+# own, whose end the profile's removal waits for, as Chrome's network service
+# writes there after a killed browser. The browser's exit closes its pipe, and
+# the call or wait under way raises one ConnectionError whose cause is the
+# exit code; an exit with an error code that no call saw fails the Browser's
+# end. With the switch `switches.anthropic`, LinuxPipe starts the headless
+# shell of Anthropic's cloud container, Playwright's, in its place.
 
 import base64, fcntl, functools, glob, hashlib, json, math, os, select, shutil
 import signal, subprocess, switches, tempfile, time, types
@@ -73,6 +74,9 @@ _CHROME_NAME = "chrome"
 # The descriptor the Linux browser reads DevTools from, as the pipe flag sets.
 _COMMAND_DESCRIPTOR = 3
 
+# The file Docker's engine, wslc's too, puts at the top of a container.
+_CONTAINER_MARKER = "/.dockerenv"
+
 # The lowest descriptor a browser's end of a pipe is copied to before start.
 _DESCRIPTOR_FLOOR = 5
 
@@ -81,6 +85,12 @@ _DEVTOOLS_PORT_FILE_NAME = "DevToolsActivePort"
 
 # How often the browser's group is polled, as its helpers end within 30 ms.
 _GROUP_POLL_SECONDS = 0.01
+
+# The kernel's release, which holds `_KERNEL_WSL` under WSL.
+_KERNEL_RELEASE = "/proc/sys/kernel/osrelease"
+
+# The word of the release of WSL's kernel.
+_KERNEL_WSL = "microsoft"
 
 # What ends each DevTools message on the Linux browser's pipes.
 _PIPE_END = b"\0"
@@ -542,12 +552,14 @@ class LinuxPipe:
         self.reply_fd, reply_write = os.pipe()
         reply_write = descriptor_raise(reply_write)
         path = chrome_path()
+        sandbox = ["--no-sandbox"] if sandbox_refused() else []
         try:
             pid = os.posix_spawn(
                 path,
                 [
                     path,
                     "--headless",
+                    *sandbox,
                     "--disable-features=BackForwardCache",
                     "--remote-debugging-pipe",
                     f"--user-data-dir={self.profile_path}",
@@ -1032,6 +1044,13 @@ def powershell_command(powershell: str, script: str) -> list[str]:
 # Returns the relay's script, set to connect to the DevTools port.
 def relay_script(port: int) -> str:
     return f"$port_ = {port}\n" + _RELAY_SCRIPT
+
+
+# Whether Chrome's sandbox can't run: in a wslc container, which refuses it.
+def sandbox_refused() -> bool:
+    with open(_KERNEL_RELEASE, encoding="utf-8") as file:
+        release = file.read()
+    return os.path.exists(_CONTAINER_MARKER) and _KERNEL_WSL in release
 
 
 # Writes the bytes to the stream and flushes them through.

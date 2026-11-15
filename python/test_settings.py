@@ -4,9 +4,9 @@
 #
 # Tests the settings check on good objects, plain and as read off the wire,
 # each object a `jslb.Object`, the class the decoder makes, and on copies
-# with a missing key, an extra key or a wrong type, a list or a dict of
-# strings with one wrong item among them, the load from scratch files, and
-# the real file. The expected texts are the gold's.
+# with a missing key, an extra key or a wrong type, a list of strings with
+# one wrong item among them, the load from scratch files, and the real file.
+# The expected texts are the gold's.
 
 import copy, harness, json, os, settings, tempfile, unittest
 from typing import Any, cast
@@ -41,6 +41,7 @@ _GOOD_SETTINGS: dict[str, Any] = {
     },
     "powershell": {
         "windows_port": 5768,
+        "windows_address": "127.0.0.1",
         "linux_port": 5769,
         "bind_address": "127.0.0.1",
         "bootstrap_script": "bootstrap.py",
@@ -50,15 +51,11 @@ _GOOD_SETTINGS: dict[str, Any] = {
         "ttyd_patches": "third_party/ttyd/patches",
         "terminal_type": "dumb",
         "linux_folder": ".cache/xsjs",
-        "distribution": "Ubuntu",
-        "task_name": "xstation.js",
-        "firewall_rule": "xstation.js",
-        "state_folder": "xstation.js",
-        "certificate_file": "_cached_cert.pem",
-        "key_file": "_cached_key.pem",
-        "certificate_days": 825,
-        "runner_file": "serve.ps1",
-        "parameters_file": "parameters.json",
+        "container": "hype",
+        "container_user": "t",
+        "container_root": "/home/t/xstation.js",
+        "container_interface": "0.0.0.0",
+        "sync_script": "wslc_sync.sh",
         "ttyd_log_file": "ttyd.log",
         "poll_tries": 30,
         "poll_milliseconds": 500,
@@ -71,8 +68,6 @@ _GOOD_SETTINGS: dict[str, Any] = {
             "settings",
             "main_loop",
         ],
-        "build_tools": {"cmake": "cmake", "patch": "patch"},
-        "build_headers": {"uv.h": "libuv1-dev", "zlib.h": "zlib1g-dev"},
     },
 }
 
@@ -95,7 +90,6 @@ _INT_PATHS = (
     "provider.timeout_seconds",
     "powershell.windows_port",
     "powershell.linux_port",
-    "powershell.certificate_days",
     "powershell.poll_tries",
     "powershell.poll_milliseconds",
     "powershell.output_width",
@@ -104,6 +98,7 @@ _INT_PATHS = (
 # The paths of the values that are strings.
 _STR_PATHS = (
     "provider.variable",
+    "powershell.windows_address",
     "powershell.bind_address",
     "powershell.bootstrap_script",
     "powershell.engine_page",
@@ -112,14 +107,11 @@ _STR_PATHS = (
     "powershell.ttyd_patches",
     "powershell.terminal_type",
     "powershell.linux_folder",
-    "powershell.distribution",
-    "powershell.task_name",
-    "powershell.firewall_rule",
-    "powershell.state_folder",
-    "powershell.certificate_file",
-    "powershell.key_file",
-    "powershell.runner_file",
-    "powershell.parameters_file",
+    "powershell.container",
+    "powershell.container_user",
+    "powershell.container_root",
+    "powershell.container_interface",
+    "powershell.sync_script",
     "powershell.ttyd_log_file",
 )
 
@@ -129,9 +121,6 @@ _LIST_PATHS = (
     "powershell.root_records",
     "powershell.runtime_modules",
 )
-
-# The paths of the values that are dicts of strings to strings.
-_TABLE_PATHS = ("powershell.build_tools", "powershell.build_headers")
 
 # The paths of the provider values that the provider file holds instead.
 _MOVED_PATHS = (
@@ -149,9 +138,8 @@ _PARAMETER_PATHS = ("debug", "verbose_level")
 # The paths of the values that are objects checked by their own tables.
 _OBJECT_PATHS = ("provider", "powershell")
 
-# The type names the check gives a list and a dict of strings.
+# The type name the check gives a list of strings.
 _LIST_NAME = "list of str"
-_TABLE_NAME = "dict of str to str"
 
 # Values that are not a bool. An int is not a bool.
 _NOT_BOOL: tuple[Any, ...] = (None, 0, 1, 1.5, "true", [], {})
@@ -164,9 +152,6 @@ _NOT_STR: tuple[Any, ...] = (None, False, 0, 1.5, ["text"], {})
 
 # Values that are not a list of strings, two with one wrong item among them.
 _NOT_LIST: tuple[Any, ...] = (None, "text", 0, {}, ["a", 1], ["a", None])
-
-# Values that are not a dict of strings, with a wrong key or value among.
-_NOT_TABLE: tuple[Any, ...] = (None, "text", 0, ["a"], {"a": 1}, {1: "a"})
 
 # Values that are not an object.
 _NOT_OBJECT: tuple[Any, ...] = (None, False, 0, 1.5, "text", [])
@@ -262,19 +247,12 @@ class TestCheck(unittest.TestCase):
     def test_list_wrong(self) -> None:
         self.values_refuse(_LIST_PATHS, _LIST_NAME, _NOT_LIST)
 
-    # A dict with a wrong key or value, or no dict, is refused as a table.
-    def test_table_wrong(self) -> None:
-        self.values_refuse(_TABLE_PATHS, _TABLE_NAME, _NOT_TABLE)
-
-    # Empty lists and tables of strings pass, as no item is wrong.
+    # Empty lists of strings pass, as no item is wrong.
     def test_empty_pass(self) -> None:
         good = _wire_make()
         for path in _LIST_PATHS:
             holder, name = _holder_find(good, path)
             holder[name] = []
-        for path in _TABLE_PATHS:
-            holder, name = _holder_find(good, path)
-            holder[name] = {}
         settings.settings_check(good)
 
     # An extra key, the provider file's and the old windows' among them, fails.
@@ -294,7 +272,6 @@ class TestCheck(unittest.TestCase):
             + _INT_PATHS
             + _STR_PATHS
             + _LIST_PATHS
-            + _TABLE_PATHS
             + _OBJECT_PATHS
         )
         for path in paths:
@@ -307,7 +284,7 @@ class TestCheck(unittest.TestCase):
     # A good object off the wire, its nested objects decoder objects, passes.
     def test_nested_objects(self) -> None:
         good = _wire_make()
-        for path in _OBJECT_PATHS + _TABLE_PATHS:
+        for path in _OBJECT_PATHS:
             holder, name = _holder_find(good, path)
             value: object = holder[name]
             self.assertIs(type(value), settings.jslb.Object, path)

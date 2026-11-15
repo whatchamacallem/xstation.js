@@ -36,7 +36,11 @@ function photograph_text(player) {
   if (fallen.count === 0 && record.text === "broken" && high.ord === top.ord) {
     return `A photograph from ${top.place}, ${top.altitude_m} m.`;
   }
-  if (fallen.count === 0 && record.text === "kept" && high.ord === top.ord - 1) {
+  if (
+    fallen.count === 0 &&
+    record.text === "kept" &&
+    high.ord === top.ord - 1
+  ) {
     return (
       `A photograph from ${high.place}, ${high.altitude_m} m, ` +
       `${top.altitude_m - high.altitude_m} m below the top, the morning you ` +

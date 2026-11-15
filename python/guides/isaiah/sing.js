@@ -48,8 +48,7 @@ ecs.run([
 ]);
 const after = lib.row_one(ecs.rows(HERD_CALM, []), "the herd's calm");
 
-const start =
-  `You ride the slow circle singing ${intent.value}, and the herd's calm`;
+const start = `You ride the slow circle singing ${intent.value}, and the herd's calm`;
 const most = `of ${lib.whole_text(after.most)}.`;
 if (after.level === before.level) {
   ecs.say(`${start} holds at ${lib.whole_text(before.level)} ${most}`);

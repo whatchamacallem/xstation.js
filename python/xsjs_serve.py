@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 # This file is licensed under the terms of the LICENSE.md file.
 #
-# The POSIX start of the engine, which stands alone from the Windows scripts.
+# The POSIX start of the engine, which the Windows start runs in `hype`.
 # API/python/xsjs_serve.pyi holds the contract. Both stop signals are blocked
 # from before ttyd starts, so that no stop comes while nothing watches for it,
 # and ttyd's own start unblocks them, since it takes a signal mask from this
@@ -281,6 +281,11 @@ def serve_run(argv: list[str]) -> int:
         " %(default)s)",
     )
     parser.add_argument(
+        "--interface",
+        default=values["powershell"]["bind_address"],
+        help="the address ttyd listens on (default %(default)s)",
+    )
+    parser.add_argument(
         "--root",
         default=root_default(values),
         help="the root to make and serve, kept between runs (default"
@@ -294,6 +299,8 @@ def serve_run(argv: list[str]) -> int:
     switches.options_add(parser)
     parsed = parser.parse_args(argv)
     switches.switches_set(parsed)
+    # `ttyd_arguments` reads the address from the settings.
+    values["powershell"]["bind_address"] = parsed.interface
     root = os.path.abspath(parsed.root)
     page = page_ready(values)
     root_make(values, page, root, switches.switches_get(), parsed.fresh)

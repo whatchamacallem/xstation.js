@@ -7,8 +7,8 @@
 # no pin uses, which git ignores as it ignores the pins. Each file a test
 # puts there is removed when the test ends, and the directory with it. Then
 # `pins_fetch` on the pins already in place, the gold's paths and digests.
-# Then the file as the program `xsjs_install.ps1` starts, run in a forked
-# child, whose lines of the file the line counter counts.
+# Then the file run as a program, in a forked child, whose lines of the file
+# the line counter counts.
 
 import contextlib, harness, hashlib, io, os, pathlib, runpy, signal, switches
 import sys, tempfile, third_party_fetch, traceback, unittest
@@ -37,7 +37,7 @@ _PINS_ANTHROPIC_ID = "python.test_third_party_fetch.pins_anthropic"
 # The gold id of the command that places ttyd's file from the package manager.
 _PACKAGE_COMMAND_ID = "python.test_third_party_fetch.package_command"
 
-# The file `xsjs_install.ps1` starts as a program.
+# The file run as a program.
 _PROGRAM_PATH = os.path.join(_ROOT_PATH, "python", "third_party_fetch.py")
 
 # What a forked child sends when the program returned, before what it printed.

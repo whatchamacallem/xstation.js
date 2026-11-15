@@ -4,15 +4,14 @@
 //
 // The step system `dawa_decide`, kept at /_files/script/dawa_decide.js: takes
 // the intent `decide`, its value `rescue` or `summit`, the player's call at
-// the camp below the top while a climber is down. On `rescue` the climber
-// who is down breathes the guide's spare at a sick climber's flow, and the
-// rope starts down to the camp below, a tick at a time for the leg's minutes
-// down; dawa_breathe draws the oxygen and dawa_rescue tells it. On `summit`,
-// a branch no walk takes, the top, the way back and Teo's descent with the
-// other rope are worked out at once with no tick, the bottles moving whole:
-// the player breathes his own bottle dry, then the spare, which stays on the
-// rope, for the rest of the way down; the climber who is down goes with the
-// other rope on his empty bottle and is carried in alive. The rope ends at
+// the camp below the top while a climber is down. On `rescue` the climber who
+// is down breathes the guide's spare at a sick climber's flow, and the rope
+// starts down the leg to the camp below, a tick at a time; dawa_breathe draws
+// the oxygen and dawa_rescue tells it. On `summit`, a branch no walk takes,
+// the top, the way back and Teo's descent are worked out at once with no tick,
+// the bottles moving whole: the player breathes his own bottle dry, then the
+// spare, which stays on the rope, for the rest of the way down; Teo goes with
+// the other rope on his empty bottle and is carried in alive. The rope ends at
 // the camp below, the high mark the top and Dawa's record broken.
 //
 // Args: `ecs`. Reads `at`, `camp`, `leg`, `breathe`, `bottle`, `limits`,

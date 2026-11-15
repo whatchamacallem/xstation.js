@@ -203,12 +203,7 @@ const statements = [
   component_row("prize", ["cents"], [PRIZE_CENTS], "fair"),
   component_row("course", ["feet"], [RACE_FT], "fair"),
   component_row("vehicle", ["top_mph"], [MOTORCAR_MPH], "motorcar"),
-  component_row(
-    "wind",
-    ["mph", "quarter"],
-    [WIND_MPH, WIND_QUARTER],
-    "wind",
-  ),
+  component_row("wind", ["mph", "quarter"], [WIND_MPH, WIND_QUARTER], "wind"),
   component_row(
     "field",
     ["miles_x10", "name"],
@@ -298,8 +293,7 @@ function summer_spawn() {
   store.sql_run(world, [
     ...statements,
     {
-      sql:
-        "INSERT INTO output (step, tick, system, text) VALUES (?, ?, ?, ?)",
+      sql: "INSERT INTO output (step, tick, system, text) VALUES (?, ?, ?, ?)",
       params: [0, 0, "ruth_spawn", say],
     },
   ]);

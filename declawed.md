@@ -416,13 +416,31 @@ maintainer. You have permission to update this file and fix errors.
   rest.
 - Correct a rule here when you find it wrong, and add a rule as one line that
   starts with its subject.
-- `hype`, the wslc container that `test_powershell.ps1` runs Linux in as `t`
-  (`wslc exec -u t -w /home/t/xstation.js hype ...`), is a copy of
-  `ubuntu-permanent` made with `--cap-add SYS_ADMIN`, which Chrome's sandbox
-  needs; its seccomp filter still refuses `pivot_root`, so the console runs
-  dash there with no bwrap.
-- DEBUGGING_WSLC.md: how to run every test level from a shell inside `hype`,
-  its sync from the Windows checkout and its VS Code connection.
+- `hype`, the wslc container the POSIX tests run in and the Windows start
+  serves from, as `t`, its checkout `/home/t/xstation.js`, made by hand or by
+  test_wslc.ps1 from the image `hype-base:2026-11-13`, an export of
+  `ubuntu-permanent`, adding no capability, by the maintainer on 2026-11-14,
+  as the project works without administrator privileges where it can, and
+  publishing port 5768 on Windows' 127.0.0.1 for the start. Its seccomp filter refuses the user namespaces of Chrome's sandbox
+  and bwrap's `pivot_root`, so Chrome runs there with --no-sandbox and the
+  console runs dash with no bwrap. `t` holds no capability.
+- powershell/test_wslc.ps1: from any Windows PowerShell, no administrator:
+  makes `hype` from powershell/test_setting_test_wslc.json, with `--publish`
+  powershell.windows_address and powershell.windows_port twice,
+  `127.0.0.1:5768:5768`, when there is none, refuses one holding an added
+  capability or lacking the mount of the checkout's parent folder, by
+  xsjs_util_step_check_container, starts it, runs wslc_sync.sh, then
+  `./test_posix.sh` with its arguments as `t`, exiting with its code. It
+  does not require the publish, so tests run in a `hype` without it.
+  test_powershell.ps1's Linux step is this script given the category option.
+  The container's name, user, checkout, interface and sync script and the
+  Windows address of its publish are settings of settings.json's powershell,
+  read by xsjs_util.ps1.
+- wslc_sync.sh SOURCE DESTINATION: run in `hype` as `t`, makes DESTINATION a
+  copy of SOURCE's working tree, writing nothing under SOURCE: clones when
+  absent, moves the branch by a mixed reset only to a descendant, copies
+  what differs and removes what SOURCE removed; ignored files, build/ and
+  third_party/'s archives, stay.
 
 ## Map
 
@@ -1569,9 +1587,8 @@ fault realm REALM->DRIVER 0 push; fails the block
 - gold line: `var test_gold = GOLD;`, each `ts/test_setting_<suite>.json` read
   by jslb.json_decode. The harness reads it there.
 - html/test.html: the ttyd page, runs test_all.suites_run() and shows its TAP
-  in pre#tap_output. The start script serves the page `page_build.py test
-  hyperposition-engine` builds; the wire and browser tests build from test
-  too.
+  in pre#tap_output. The wire and browser tests build from test; the start
+  serves the engine page xsjs_serve.py builds.
 - html/headless.html: the driver builds build/headless.html at the start of
   the B phases by page_build("headless", "headless"), and its HTTP server
   serves it from build/.
@@ -1673,40 +1690,56 @@ fault realm REALM->DRIVER 0 push; fails the block
 
 ## xsjs_start
 
-- xsjs_start.ps1: serves python\bootstrap.py with
-  build\hyperposition-engine.html through ttyd in WSL on port 5768, now and at
-  each Windows sign in. Run xsjs_install.ps1 once first, build the page in WSL
-  by `python3 python/page_build.py test hyperposition-engine`, then run it
-  from an administrator PowerShell. Run it again to change the settings;
-  xsjs_stop.ps1 stops it.
-- start copy: each run copies the ttyd xsjs_install.ps1 built, the engine's
-  modules and seeds from python\, i18n\en-US.json, settings.json,
-  provider.json and the page into ~/.cache/xsjs in Linux, and ttyd runs that
-  copy on port 5769 of WSL's 127.0.0.1. A Windows port proxy forwards 5768 to
-  it.
-- XSJS_PROVIDER_KEY: this user environment variable, when set, is passed on to
-  ttyd.
+- Windows scripts in `hype`: by the maintainer on 2026-11-14, xsjs_start.ps1,
+  xsjs_stop.ps1, xsjs_status.ps1 and powershell/test_wslc.ps1 use the wslc
+  container powershell.container, `hype`, made by hand, and nothing of WSL's
+  distributions; xsjs_install.ps1, the sign-in task, the state folder and the
+  network mode went that day. No script needs an administrator.
+- xsjs_start.ps1 [--debug] [--verbose]: checks `hype` as test_wslc.ps1 does,
+  starts it, refuses it unless it publishes powershell.windows_port, 5768, on
+  powershell.windows_address, 127.0.0.1, stops an earlier serve, runs
+  wslc_sync.sh, then as `t` in powershell.container_root runs `python3
+  python/xsjs_serve.py --port 5768 --interface 0.0.0.0`, the interface
+  powershell.container_interface, and the switches by `nohup` in the
+  background, its output in ~/powershell.linux_folder/powershell.ttyd_log_file,
+  and polls every powershell.poll_milliseconds while that PID lives until the
+  address line is in the log, then GETs `/token` from Windows. A program that
+  ends first fails start with its log.
+- hype's publish: wslc gives a container no localhost relay, and Windows
+  reaches neither its 127.0.0.1 nor its bridge address 172.17.0.2; `-p
+  127.0.0.1:5768:5768`, given only at create, makes wslc's dllhost listen on
+  Windows' 127.0.0.1 alone and forward to the container's address, so ttyd
+  there binds 0.0.0.0, a 127.0.0.1 bind being unreached. Measured unelevated
+  on 2026-11-14. wslc's inspect shows it under `Ports`, as `"5768/tcp":
+  [{"HostIp": "127.0.0.1", "HostPort": "5768"}]`. The two addresses are the
+  settings powershell.windows_address and powershell.container_interface.
+- xsjs_stop.ps1: sends SIGTERM to each serve of start, a python3 process of
+  `t` whose command line is xsjs_util_get_serve_command's and the switches,
+  and polls every powershell.poll_milliseconds until none is left, failing
+  after powershell.poll_tries tries; `hype` keeps running.
+- xsjs_status.ps1: the serve, `hype`'s state and published ports, and what
+  listens on 5768 in Windows.
+- XSJS_PROVIDER_KEY: start's `wslc exec -e XSJS_PROVIDER_KEY` passes this
+  user environment variable's Windows value into `hype`, with no value on the
+  command line, and leaves it unset when Windows has none.
 - start parameters: --verbose runs the console's shell at level 2; each
-  parameter is false unless given, and anthropic is always false.
-  parameters.json is written in the state folder and copied into the root.
-- start with a username and password: ttyd serves HTTPS and asks for them, the
-  port proxy listens on every interface, and a Windows Firewall rule lets
-  other computers in. Without, the proxy listens on 127.0.0.1 only.
-- TLS certificate: self-signed, so browsers warn the first time; check their
-  fingerprint against the one the script prints.
+  parameter is false unless given, and anthropic is always false, as start
+  passes no --anthropic. The serve program writes parameters.json into the
+  root.
 
 ## xsjs_serve
 
 - xsjs_serve.py: `python3 python/xsjs_serve.py [--anthropic] [--debug]
-  [--verbose] [--port N] [--root PATH] [--fresh]`, the POSIX start, standard
-  library only. It builds the engine page, makes the root, serves it through
+  [--verbose] [--port N] [--interface ADDRESS] [--root PATH] [--fresh]`, the
+  POSIX start, which xsjs_start.ps1 runs in `hype`, standard library only.
+  --interface, default powershell.bind_address, replaces that setting in the
+  program's values before ttyd_arguments reads it. It builds the engine page, makes the root, serves it through
   build/ttyd/ttyd, prints ttyd's log and the address on stdout and serves until
   SIGINT or SIGTERM, then stops ttyd's group and exits with ttyd's code.
 - serve switches: --anthropic, --debug and --verbose turn on the switches, and
   parameters.json holds switches.switches_get().
 - serve root: `~/.cache/xsjs/root` unless --root says otherwise, a relative
-  --root made absolute before use, made as the start script makes one but
-  without ttyd. Each run makes python/, i18n/, the files of
+  --root made absolute before use. Each run makes python/, i18n/, the files of
   powershell.root_files, the page and parameters.json anew, removes those of
   powershell.root_records, and keeps every other file, so the databases
   persist.
@@ -1714,14 +1747,14 @@ fault realm REALM->DRIVER 0 push; fails the block
   removes nothing when none does.
 - root_records: the setting powershell.root_records, `_audit.txt` and `tap`, the
   records of a debug serve in a root, a file and a directory. It repeats the
-  private names of audit.py and engine_tap.py. xsjs_serve.root_make and
-  xsjs_start.ps1's _xsjs_start_step_install_server remove each at each start, so
-  that no record outlives its serve into a serve without --debug.
+  private names of audit.py and engine_tap.py. xsjs_serve.root_make removes
+  each at each start, so that no record outlives its serve into a serve
+  without --debug.
 - serve new record: root_make removes each of powershell.root_records that
   exists, after --fresh's removal and before anything else of the root is made,
   so each serve starts a new record and the last serve's stays readable until
   the next start.
-- serve record scope: only the two starts remove the records. A page load within
+- serve record scope: only the serve program's start removes the records. A page load within
   one serve adds to the same audit, under a new start heading, and the roots the
   tests make for themselves keep theirs.
 - second serve on a live root: root_make runs before ttyd binds, so a second
@@ -1729,8 +1762,9 @@ fault realm REALM->DRIVER 0 push; fails the block
   That server goes on writing to the removed audit with no error, and its record
   is lost. Its next tap line makes `tap` again. The Windows start stops its
   server first.
-- ttyd arguments: the start script's, on 127.0.0.1 port 5769 by the settings:
-  --port N, default powershell.linux_port; --interface powershell.bind_address;
+- ttyd arguments: --port N, default powershell.linux_port, 5769, the Windows
+  start's powershell.windows_port, 5768; --interface, the program's
+  --interface, default powershell.bind_address, 127.0.0.1;
   --writable; --check-origin; --terminal-type powershell.terminal_type; --index
   ROOT/powershell.engine_page; --url-arg; --srv-buf-size= srv_buf_size; then
   `python3 ROOT/python/` powershell.bootstrap_script `--root ROOT`.
@@ -1759,13 +1793,13 @@ fault realm REALM->DRIVER 0 push; fails the block
 - server's verbose output: ttyd's log and the address on the serve program's
   stdout, in both modes, with no JSLB: the port, each connection, each engine's
   start with its pid and each engine's end. An engine's failure text stays on
-  its `error` line, which the fault screen shows. The Windows start's ttyd.log
-  holds the same lines.
+  its `error` line, which the fault screen shows. The Windows start writes
+  that stdout to ~/.cache/xsjs/ttyd.log in `hype`.
 - engine's failure text on stdout: deferred, as the engine cannot write there
   today. Its descriptors 0, 1 and 2 are the pty, which is the wire; ttyd's
   uv_disable_stdio_inheritance closes every other descriptor across the exec;
-  and `/proc/PPID/fd/2` works under the serve program but refuses with EACCES
-  under the Windows runner, whose pipes are root's. The design: a patch of
+  and `/proc/PPID/fd/2` works under the serve program but refused with EACCES
+  under a runner whose pipes were root's. The design: a patch of
   ttyd's pty_spawn duplicates its stderr before forkpty and, in
   the child, places the copy at a fixed descriptor, 3, with close-on-exec off;
   `verbose` writes a failure's text there outside debug mode, before the
@@ -1867,6 +1901,12 @@ fault realm REALM->DRIVER 0 push; fails the block
   ~/.local/share/chrome-for-testing/chrome/linux-*/chrome-linux64/chrome where
   admin.md installs it, with --headless and --remote-debugging-pipe, each message ended by a NUL byte, and
   XDG_CACHE_HOME set to the profile, where fontconfig caches fonts.
+- Chrome sandbox off: LinuxPipe and xsjs_screenshot_posix.py's Browser add
+  --no-sandbox in a wslc container, each by a sandbox_refused of its own,
+  bootstrap's test of /.dockerenv and `microsoft` in the kernel's release
+  copied, as the container's seccomp filter refuses the sandbox's user
+  namespaces and Chrome aborts with -6 before serving DevTools. No run there
+  proves Chrome's sandbox, by the maintainer on 2026-11-14.
 - LinuxPipe start page: about:blank, given last on the command line, as full
   Chrome with no URL opens chrome://new-tab-page/, which target_attach would
   take as the page, and starts its new tab page and extension renderers.
@@ -1906,7 +1946,8 @@ fault realm REALM->DRIVER 0 push; fails the block
 
 ## xsjs_screenshot
 
-- xsjs_screenshot.py: builds the page as the start script does and serves a
+- xsjs_screenshot.py: builds the ttyd page, html/test.html, under the name
+  powershell.engine_page, where the start builds the engine page, and serves a
   debug root under build/ through build/ttyd/ttyd on a dumb terminal, its log
   going to stderr as it comes.
 - screenshot checks: waits for both TAP documents in the root, fails on the
@@ -2073,6 +2114,9 @@ fault realm REALM->DRIVER 0 push; fails the block
   their rows; last page_build.api_check and api_match.text_match.
   reformat_table.json gives each extension its comment lexer, codec, checker,
   formatter, linter and type checker. --anthropic does none of this.
+- whitelist glob: reformat.paths_match and test_lint.ps1 take `*` and `?` in
+  a line's last part alone, so each directory of python/guides/ has a line of
+  its own, and a new guide directory needs one.
 - type checker: the row's type_checker of reformat_table.json, pyright
   --project python/pyproject.toml, strict, for .py and .pyi. reformat.reformat
   runs it after every formatter, in a test-all run and in reformat.py run

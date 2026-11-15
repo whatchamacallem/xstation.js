@@ -37,6 +37,7 @@ namespace settings {
     };
     powershell: {
       windows_port: number;
+      windows_address: string;
       linux_port: number;
       bind_address: string;
       bootstrap_script: string;
@@ -46,15 +47,11 @@ namespace settings {
       ttyd_patches: string;
       terminal_type: string;
       linux_folder: string;
-      distribution: string;
-      task_name: string;
-      firewall_rule: string;
-      state_folder: string;
-      certificate_file: string;
-      key_file: string;
-      certificate_days: number;
-      runner_file: string;
-      parameters_file: string;
+      container: string;
+      container_user: string;
+      container_root: string;
+      container_interface: string;
+      sync_script: string;
       ttyd_log_file: string;
       poll_tries: number;
       poll_milliseconds: number;
@@ -62,8 +59,6 @@ namespace settings {
       root_files: string[];
       root_records: string[];
       runtime_modules: string[];
-      build_tools: { [tool: string]: string };
-      build_headers: { [header: string]: string };
     };
   }
 

@@ -15,6 +15,7 @@
   },
   "powershell": {
     "windows_port": 5768,
+    "windows_address": "127.0.0.1",
     "linux_port": 5769,
     "bind_address": "127.0.0.1",
     "bootstrap_script": "bootstrap.py",
@@ -24,15 +25,11 @@
     "ttyd_patches": "third_party/ttyd/patches",
     "terminal_type": "dumb",
     "linux_folder": ".cache/xsjs",
-    "distribution": "Ubuntu",
-    "task_name": "xstation.js",
-    "firewall_rule": "xstation.js",
-    "state_folder": "xstation.js",
-    "certificate_file": "_cached_cert.pem",
-    "key_file": "_cached_key.pem",
-    "certificate_days": 825,
-    "runner_file": "serve.ps1",
-    "parameters_file": "parameters.json",
+    "container": "hype",
+    "container_user": "t",
+    "container_root": "/home/t/xstation.js",
+    "container_interface": "0.0.0.0",
+    "sync_script": "wslc_sync.sh",
     "ttyd_log_file": "ttyd.log",
     "poll_tries": 30,
     "poll_milliseconds": 500,
@@ -61,19 +58,6 @@
       "engine_system",
       "main_loop",
       "bootstrap"
-    ],
-    "build_tools": {
-      "cmake": "cmake",
-      "cc": "build-essential",
-      "make": "build-essential",
-      "patch": "patch"
-    },
-    "build_headers": {
-      "uv.h": "libuv1-dev",
-      "json-c/json.h": "libjson-c-dev",
-      "zlib.h": "zlib1g-dev",
-      "libwebsockets.h": "libwebsockets-dev",
-      "openssl/ssl.h": "libssl-dev"
-    }
+    ]
   }
 }

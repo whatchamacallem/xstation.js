@@ -64,7 +64,9 @@ function descent_end() {
     );
   }
   const drawn = you.lpm * minutes;
-  ecs.run([{ sql: "DELETE FROM down WHERE entity = ?", params: [teo.entity] }]);
+  ecs.run([
+    { sql: "DELETE FROM down WHERE entity = ?", params: [teo.entity] },
+  ]);
   ecs.say(
     `Teo goes on Dawa's spare at ${teo.lpm} litres a minute: ${used} of its ` +
       `${teo.full_l} litres for the ${lib.duration_text(minutes)} down to ` +

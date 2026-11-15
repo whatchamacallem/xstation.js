@@ -68,11 +68,7 @@ function loads_pack(intent) {
     "SELECT tent_kg, stove_kg, food_kg FROM kit",
     [],
   );
-  const guide = lib.row_read(
-    ecs,
-    "SELECT entity, load_kg FROM limits",
-    [],
-  );
+  const guide = lib.row_read(ecs, "SELECT entity, load_kg FROM limits", []);
   const held = lib.row_read(
     ecs,
     "SELECT COUNT(*) AS count FROM bottle WHERE holder = ?",

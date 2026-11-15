@@ -93,7 +93,6 @@
     "settings_key_extra": "The settings have the unexpected key other.",
     "settings_key_missing_line_max": "The settings lack the key line_max.",
     "settings_key_missing_linux_port": "The settings lack the key powershell.linux_port.",
-    "settings_type_wrong_build_tools": "The setting powershell.build_tools must be of type dict of str to str but is of type dict.",
     "settings_type_wrong_root_files": "The setting powershell.root_files must be of type list of str but is of type list.",
     "settings_type_wrong_timeout": "The setting provider.timeout_seconds must be of type int but is of type str.",
     "settings_type_wrong_variable": "The setting provider.variable must be of type str but is of type int."

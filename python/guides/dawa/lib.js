@@ -196,7 +196,10 @@ function rope_move(from_camp, to_camp) {
         " WHERE camp = ?)",
       params: [to_camp, from_camp],
     },
-    { sql: "UPDATE at SET camp = ? WHERE camp = ?", params: [to_camp, from_camp] },
+    {
+      sql: "UPDATE at SET camp = ? WHERE camp = ?",
+      params: [to_camp, from_camp],
+    },
   ];
 }
 

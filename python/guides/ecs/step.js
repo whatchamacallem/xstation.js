@@ -216,7 +216,10 @@ function view_make(name, step, tick, lib) {
       }
       const [intent] = rows;
       store.sql_run(world, [
-        { sql: "DELETE FROM intent WHERE entity = ?", params: [intent.entity] },
+        {
+          sql: "DELETE FROM intent WHERE entity = ?",
+          params: [intent.entity],
+        },
       ]);
       return intent;
     },
@@ -295,10 +298,9 @@ function busy_read() {
 
 // The step's say, its outputs joined, and the outcome of its one beat.
 function said_read(step) {
-  const said = rows_read(
-    "SELECT text FROM output WHERE step = ? ORDER BY n",
-    [step],
-  );
+  const said = rows_read("SELECT text FROM output WHERE step = ? ORDER BY n", [
+    step,
+  ]);
   const logged = rows_read(
     "SELECT outcome FROM beat_log WHERE step = ? ORDER BY n",
     [step],

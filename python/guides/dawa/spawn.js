@@ -188,7 +188,9 @@ function component_add(table, name, fields) {
       : "?",
   );
   const params = columns.map((column) =>
-    typeof fields[column] === "object" ? fields[column].entity : fields[column],
+    typeof fields[column] === "object"
+      ? fields[column].entity
+      : fields[column],
   );
   return {
     sql:
@@ -366,8 +368,7 @@ function climb_spawn() {
   store.sql_run(world, [
     ...climb_statements(),
     {
-      sql:
-        "INSERT INTO output (step, tick, system, text) VALUES (?, ?, ?, ?)",
+      sql: "INSERT INTO output (step, tick, system, text) VALUES (?, ?, ?, ?)",
       params: [0, 0, "dawa_spawn", say],
     },
   ]);

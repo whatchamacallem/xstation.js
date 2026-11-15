@@ -50,7 +50,10 @@ if (ford.high === 0) {
 
 if (choice === "wait") {
   ecs.run([
-    { sql: "INSERT INTO wait (entity, days) VALUES (?, 0)", params: [ford.herd] },
+    {
+      sql: "INSERT INTO wait (entity, days) VALUES (?, 0)",
+      params: [ford.herd],
+    },
     { sql: "INSERT INTO busy (entity) VALUES (?)", params: [ford.herd] },
   ]);
   ecs.say("You hold the herd a day on the south bank of the Cimarron");

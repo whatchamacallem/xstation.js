@@ -5,10 +5,9 @@
 # The reader of `settings.json`. Every key of the file is checked against a
 # table of its type, with no defaults: the top level keys, the keys of
 # `provider` and the keys of `powershell`, the constants of the PowerShell
-# scripts. A type is a bool, an int, a str, a list of str, a dict of str to
-# str, or a nested object checked by its own table. The file is read by
-# `jslb.json_decode`, the decoders' door for bad numbers, and returned as
-# read.
+# scripts. A type is a bool, an int, a str, a list of str, or a nested object
+# checked by its own table. The file is read by `jslb.json_decode`, the
+# decoders' door for bad numbers, and returned as read.
 
 import jslb
 from internationalization import i18n
@@ -17,12 +16,8 @@ from typing import Any, cast
 # A list of strings in a table, every item checked.
 _LIST_TYPE = list[str]
 
-# A dict of strings to strings in a table, every key and value checked.
-_TABLE_TYPE = dict[str, str]
-
-# The names the type error gives the list and the dict of strings.
+# The name the type error gives the list of strings.
 _LIST_NAME = "list of str"
-_TABLE_NAME = "dict of str to str"
 
 # The keys of the settings object, each with the type its value must have.
 _SETTING_TYPES: dict[str, object] = {
@@ -50,6 +45,7 @@ _PROVIDER_TYPES: dict[str, object] = {
 # The keys of the PowerShell object, in the order of `settings.json`.
 _POWERSHELL_TYPES: dict[str, object] = {
     "windows_port": int,
+    "windows_address": str,
     "linux_port": int,
     "bind_address": str,
     "bootstrap_script": str,
@@ -59,15 +55,11 @@ _POWERSHELL_TYPES: dict[str, object] = {
     "ttyd_patches": str,
     "terminal_type": str,
     "linux_folder": str,
-    "distribution": str,
-    "task_name": str,
-    "firewall_rule": str,
-    "state_folder": str,
-    "certificate_file": str,
-    "key_file": str,
-    "certificate_days": int,
-    "runner_file": str,
-    "parameters_file": str,
+    "container": str,
+    "container_user": str,
+    "container_root": str,
+    "container_interface": str,
+    "sync_script": str,
     "ttyd_log_file": str,
     "poll_tries": int,
     "poll_milliseconds": int,
@@ -75,8 +67,6 @@ _POWERSHELL_TYPES: dict[str, object] = {
     "root_files": _LIST_TYPE,
     "root_records": _LIST_TYPE,
     "runtime_modules": _LIST_TYPE,
-    "build_tools": _TABLE_TYPE,
-    "build_headers": _TABLE_TYPE,
 }
 
 
@@ -86,14 +76,6 @@ def _list_is(value: object) -> bool:
         return False
     items = cast(list[object], value)
     return all(type(item) is str for item in items)
-
-
-# Whether a value is a dict whose every key and value is a `str`.
-def _table_is(value: object) -> bool:
-    if not isinstance(value, dict):
-        return False
-    pairs = cast(dict[object, object], value)
-    return all(type(k) is str and type(v) is str for k, v in pairs.items())
 
 
 # Checks an object's keys and types, any `dict` subclass passing as `dict`.
@@ -111,9 +93,6 @@ def _object_check(
         if wanted == _LIST_TYPE:
             matches = _list_is(item)
             name = _LIST_NAME
-        elif wanted == _TABLE_TYPE:
-            matches = _table_is(item)
-            name = _TABLE_NAME
         elif wanted is dict:
             matches = isinstance(item, dict)
             name = dict.__name__

@@ -10,13 +10,8 @@
     Justification = 'The scripts that dot-source this file read these.')]
 param()
 
-$env:WSL_UTF8 = '1'
 $ErrorActionPreference = 'Stop'
 $progressPreference = 'silentlyContinue'
-[Net.ServicePointManager]::SecurityProtocol = (
-    [Net.ServicePointManager]::SecurityProtocol -bor
-    [Net.SecurityProtocolType]::Tls12
-)
 
 # The strings, read from `en-US`, the one strings file.
 $i18n_arguments_ = @{
@@ -50,45 +45,34 @@ function xsjs_util_get_setting ([object]$file_, [string]$id_) {
     , $value_
 }
 
+# This checkout, whose parent folder the container mounts.
+$checkout_path_ = Split-Path -Parent $PSScriptRoot
 # Not `$settings_`, the name of a local in two scripts, which callees see.
 $settings_json_ = xsjs_util_read_json (
-    Join-Path (Split-Path -Parent $PSScriptRoot) 'settings.json')
+    Join-Path $checkout_path_ 'settings.json')
+# The port the container serves on and publishes on Windows' 127.0.0.1.
 $port_ = xsjs_util_get_setting $settings_json_ 'powershell.windows_port'
-# Linux ttyd's port on WSL's `bind_address`, which a port proxy forwards to.
-$linux_port_ = xsjs_util_get_setting $settings_json_ 'powershell.linux_port'
-$bind_address_ = (
-    xsjs_util_get_setting $settings_json_ 'powershell.bind_address')
-$bootstrap_script_ = (
-    xsjs_util_get_setting $settings_json_ 'powershell.bootstrap_script')
-# The page ttyd serves, which `page_build.py` writes into `build/`.
-$engine_page_ = xsjs_util_get_setting $settings_json_ 'powershell.engine_page'
-# Where install builds ttyd and the binary it makes, relative to the checkout.
-$ttyd_build_path_ = (
-    xsjs_util_get_setting $settings_json_ 'powershell.ttyd_build')
-$ttyd_binary_path_ = "$ttyd_build_path_/ttyd"
-$terminal_type_ = (
-    xsjs_util_get_setting $settings_json_ 'powershell.terminal_type')
-$srv_buf_size_ = xsjs_util_get_setting $settings_json_ 'srv_buf_size'
-# Where start installs the server, below the Linux user's home.
-$linux_folder_ = (
-    xsjs_util_get_setting $settings_json_ 'powershell.linux_folder')
-$task_name_ = xsjs_util_get_setting $settings_json_ 'powershell.task_name'
-$firewall_rule_name_ = (
-    xsjs_util_get_setting $settings_json_ 'powershell.firewall_rule')
-# The TLS key and ttyd password live outside the repo, for this user only.
-$state_path_ = Join-Path $env:LOCALAPPDATA (
-    xsjs_util_get_setting $settings_json_ 'powershell.state_folder')
-$certificate_path_ = Join-Path $state_path_ (
-    xsjs_util_get_setting $settings_json_ 'powershell.certificate_file')
-$key_path_ = Join-Path $state_path_ (
-    xsjs_util_get_setting $settings_json_ 'powershell.key_file')
-# How long a new TLS certificate lasts. Apple devices refuse longer ones.
-$certificate_days_ = (
-    xsjs_util_get_setting $settings_json_ 'powershell.certificate_days')
-$runner_path_ = Join-Path $state_path_ (
-    xsjs_util_get_setting $settings_json_ 'powershell.runner_file')
-$ttyd_log_path_ = Join-Path $state_path_ (
-    xsjs_util_get_setting $settings_json_ 'powershell.ttyd_log_file')
+# The address of Windows that the container's port is published on.
+$windows_address_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.windows_address')
+# The wslc container that serves and runs the tests, made by hand.
+$container_ = xsjs_util_get_setting $settings_json_ 'powershell.container'
+# The container's user, who runs everything there, and that user's checkout.
+$container_user_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.container_user')
+$container_root_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.container_root')
+# The container's address the serve program binds, which the publish reaches.
+$container_interface_ = (
+    xsjs_util_get_setting $settings_json_ 'powershell.container_interface')
+# The script that makes the container's checkout a copy of this one.
+$sync_script_ = xsjs_util_get_setting $settings_json_ 'powershell.sync_script'
+# The serve program's log, from the home of the container's user.
+$serve_log_ = '{0}/{1}' -f (
+    (xsjs_util_get_setting $settings_json_ 'powershell.linux_folder'),
+    (xsjs_util_get_setting $settings_json_ 'powershell.ttyd_log_file'))
+# The user's environment variable that the serve program passes on.
+$provider_key_name_ = xsjs_util_get_setting $settings_json_ 'provider.variable'
 # The tries of each poll, a default chosen by its writer.
 $poll_tries_ = xsjs_util_get_setting $settings_json_ 'powershell.poll_tries'
 # The wait before each try of a poll, a default chosen by its writer.
@@ -117,65 +101,28 @@ function xsjs_util_get_command_text {
     $words_ -join ' '
 }
 
-# Returns the user and password argument, `$null` if none, or throws usage.
-function xsjs_util_get_credential ([object[]]$arguments_) {
-    if ($arguments_.Count -eq 0) { return $null }
-    if ($arguments_.Count -eq 1 -and "$($arguments_[0])" -match '^[^:]+:.') {
-        return "$($arguments_[0])"
+# Returns the container as wslc inspects it, or nothing when there is none.
+function xsjs_util_get_container {
+    $list_ = 'list', '--all', '--format', 'json'
+    $names_ = xsjs_util_get_wslc 0 $list_ | Where-Object { $_ } |
+        ForEach-Object { ($_ | ConvertFrom-Json).Names }
+    if ($names_ -cnotcontains $container_) { return }
+    $inspect_ = 'inspect', '--type', 'container', $container_
+    $text_ = (xsjs_util_get_wslc 0 $inspect_) -join "`n"
+    ($text_ | ConvertFrom-Json)[0]
+}
+
+# Returns the path WSL gives a folder of a Windows drive, as /mnt/c/Users.
+function xsjs_util_get_linux_path ([string]$path_) {
+    if (-not ($path_ -match '^([A-Za-z]):\\(.*)$')) {
+        throw ($i18n_.wslc_drive_missing -f $path_)
     }
-    throw ($i18n_.start_usage -f $script_name_)
+    $folder_ = $Matches[2].TrimEnd('\').Replace('\', '/')
+    '/mnt/{0}/{1}' -f $Matches[1].ToLowerInvariant(), $folder_
 }
 
-# Returns WSL's default distribution's name and state, or nothing if none.
-function xsjs_util_get_distribution {
-    foreach ($line_ in xsjs_util_get_wsl 0 '--list', '--verbose') {
-        if ($line_ -match '^\*\s*(\S+)\s+(\S+)') {
-            $name_ = $Matches[1]
-            $state_ = $Matches[2]
-            # The state is in the display language, so ask which ones run.
-            $list_ = '--list', '--running', '--quiet'
-            return [pscustomobject]@{
-                Name    = $name_
-                State   = $state_
-                Running = $name_ -in @(xsjs_util_get_wsl 0 $list_)
-            }
-        }
-    }
-}
-
-# Returns the SHA256 fingerprint of the certificate's bytes, colon separated.
-function xsjs_util_get_fingerprint ([byte[]]$certificate_) {
-    $sha256_ = [Security.Cryptography.SHA256]::Create()
-    [BitConverter]::ToString($sha256_.ComputeHash($certificate_)).Replace(
-        '-', ':')
-}
-
-# Returns the folder in Linux, the server root, that holds ttyd and the engine.
-function xsjs_util_get_linux_path {
-    $home_ = xsjs_util_get_wsl 0 '-e', 'printenv', 'HOME'
-    "$home_/$linux_folder_"
-}
-
-# Returns the PID and command line of each ttyd that start runs in Linux.
-function xsjs_util_get_linux_servers ([string]$linux_path_) {
-    # `pgrep` exits 1 when no process matches.
-    $lines_ = xsjs_util_get_wsl 0, 1 '-e', 'pgrep', '-a', '-x', 'ttyd'
-    # Only ttyd with start's options and command, whatever TLS options between.
-    $options_ = (xsjs_util_get_ttyd_options $linux_path_) -join ' '
-    $command_ = (xsjs_util_get_ttyd_command $linux_path_) -join ' '
-    $ordinal_ = [StringComparison]::Ordinal
-    foreach ($line_ in $lines_) {
-        $id_, $command_line_ = $line_ -split ' ', 2
-        if ($command_line_.StartsWith("$options_ ", $ordinal_) -and
-            $command_line_.EndsWith(" $command_", $ordinal_)) {
-            [pscustomobject]@{ Id = [int]$id_; CommandLine = $command_line_ }
-        }
-    }
-}
-
-# Returns the localhost address, HTTPS when there is a credential.
+# Returns the localhost address.
 function xsjs_util_get_local_url {
-    if ($credential_) { return "https://localhost:$port_/" }
     "http://localhost:$port_/"
 }
 
@@ -185,41 +132,49 @@ function xsjs_util_get_markdown_text ([string]$text_) {
     $text_.Replace('\', '\\')
 }
 
-# Returns the command ttyd runs for each connection, after its options.
-function xsjs_util_get_ttyd_command ([string]$linux_path_) {
-    'python3', "$linux_path_/python/$bootstrap_script_", '--root', $linux_path_
+# Returns the serve program's command in the container, before any switch.
+function xsjs_util_get_serve_command {
+    # The published port reaches the container's 0.0.0.0, not its 127.0.0.1.
+    'python3', 'python/xsjs_serve.py', '--port', "$port_"
+    '--interface', $container_interface_
 }
 
-# Returns ttyd and its options in Linux, before any for TLS.
-function xsjs_util_get_ttyd_options ([string]$linux_path_) {
-    "$linux_path_/ttyd"
-    # `-W` lets input in, `-O` checks Origin. `-i lo` binds 10.255.255.254.
-    '-p', "$linux_port_", '-i', $bind_address_, '-W', '-O'
-    # `-T dumb` reports a terminal that shows lines, not escape sequences.
-    '-T', $terminal_type_, '--index', "$linux_path_/$engine_page_"
-    # `--url-arg` lets the page append a role to the command.
-    '--url-arg'
-    # `--srv-buf-size`: the receive chunk, `srv_buf_size`, that a patch adds.
-    '--srv-buf-size', "$srv_buf_size_"
+# Returns the PID and command line of each serve program that start runs.
+function xsjs_util_get_servers ([object]$found_) {
+    # A container that is missing or stopped runs nothing.
+    if (-not $found_ -or -not $found_.State.Running) { return }
+    # `pgrep` exits 1 when no process matches.
+    $pgrep_ = @(
+        'exec', '-u', $container_user_, $container_
+        'pgrep', '-a', '-u', $container_user_, '-x', 'python3'
+    )
+    $command_ = (xsjs_util_get_serve_command) -join ' '
+    $ordinal_ = [StringComparison]::Ordinal
+    foreach ($line_ in xsjs_util_get_wslc 0, 1 $pgrep_) {
+        $id_, $command_line_ = "$line_" -split ' ', 2
+        $switched_ = $command_line_.StartsWith("$command_ ", $ordinal_)
+        if ($command_line_ -ceq $command_ -or $switched_) {
+            [pscustomobject]@{ Id = [int]$id_; CommandLine = $command_line_ }
+        }
+    }
 }
 
-# Returns the lines WSL prints, throwing unless it exits with one of the codes.
-function xsjs_util_get_wsl ([int[]]$exit_codes_, [string[]]$wsl_arguments_) {
-    $lines_ = @(xsjs_util_get_wsl_lines $wsl_arguments_)
+# Returns the arguments of wslc that make the container's checkout a copy.
+function xsjs_util_get_sync_arguments {
+    $source_ = xsjs_util_get_linux_path (Split-Path -Parent $checkout_path_)
+    $checkout_ = '{0}/{1}' -f $source_, (Split-Path -Leaf $checkout_path_)
+    'exec', '-u', $container_user_, $container_, 'bash'
+    "$checkout_/$sync_script_", $checkout_, $container_root_
+}
+
+# Returns the lines wslc prints, throwing unless it exits with one of these.
+function xsjs_util_get_wslc ([int[]]$exit_codes_, [string[]]$wslc_arguments_) {
+    $lines_ = @(& wslc.exe @wslc_arguments_)
     if ($LASTEXITCODE -notin $exit_codes_) {
-        $command_ = 'wsl ' + ($wsl_arguments_ -join ' ')
-        $message_ = $i18n_.exit_code -f $command_, $LASTEXITCODE
-        throw ((@($message_) + $lines_) -join "`n")
+        $command_ = 'wslc ' + ($wslc_arguments_ -join ' ')
+        throw ($i18n_.exit_code -f $command_, $LASTEXITCODE)
     }
     $lines_
-}
-
-# Returns the lines WSL prints for the arguments, cleaned and without blanks.
-function xsjs_util_get_wsl_lines ([string[]]$wsl_arguments_) {
-    $ErrorActionPreference = 'Continue'
-    & wsl.exe @wsl_arguments_ 2>&1 |
-        ForEach-Object { "$_".Replace("`0", '').Trim() } |
-        Where-Object { $_ }
 }
 
 # Runs a native command and logs it expanded, then its exit code and output.
@@ -251,102 +206,57 @@ function xsjs_util_open_log ([string]$script_path_) {
     $log_path_
 }
 
-# Removes the firewall rule if there is one, logging either way.
-function xsjs_util_remove_firewall_rule {
-    $rule_ = Get-NetFirewallRule | Where-Object Name -EQ $firewall_rule_name_
-    if ($rule_) {
-        Remove-NetFirewallRule -Name $firewall_rule_name_
-        xsjs_util_write_log ($i18n_.firewall_closed -f $port_)
-    } else {
-        xsjs_util_write_log (
-            $i18n_.status_firewall_none -f $firewall_rule_name_)
+# Throws unless the container adds no capability and mounts as WSL does.
+function xsjs_util_step_check_container ([object]$found_) {
+    xsjs_util_write_log_section ($i18n_.check_container -f $container_)
+    if (-not $found_) { throw ($i18n_.container_missing -f $container_) }
+    $added_ = $found_.HostConfig.CapAdd
+    if ($added_) {
+        $text_ = $i18n_.wslc_capability_added -f (
+            $container_, ($added_ -join ', '))
+        throw $text_
     }
-}
-
-# Removes each port proxy from the port to Linux ttyd, logging either way.
-function xsjs_util_remove_proxy {
-    $path_ = 'HKLM:\SYSTEM\CurrentControlSet\Services\PortProxy\v4tov4\tcp'
-    $names_ = @()
-    if (Test-Path $path_) {
-        $key_ = Get-Item $path_
-        # A value's name is where it listens, its data where it connects.
-        $names_ = @(
-            $key_.GetValueNames() | Where-Object {
-                $_ -like "*/$port_" -and
-                $key_.GetValue($_) -eq "$bind_address_/$linux_port_"
-            }
-        )
-    }
-    foreach ($name_ in $names_) {
-        $address_ = ($name_ -split '/')[0]
-        $delete_ = @(
-            'interface', 'portproxy', 'delete', 'v4tov4'
-            "listenaddress=$address_", "listenport=$port_"
-        )
-        xsjs_util_invoke_native { netsh @delete_ }
-        if ($LASTEXITCODE -ne 0) {
-            throw ($i18n_.proxy_remove_failed -f $address_, $port_)
+    $source_ = Split-Path -Parent $checkout_path_
+    $destination_ = xsjs_util_get_linux_path $source_
+    # A Windows path matches in any case, as Windows reads it so.
+    $mounts_ = @(
+        $found_.Mounts | Where-Object {
+            $_.Type -ceq 'bind' -and $_.Source -eq $source_ -and
+            $_.Destination -ceq $destination_
         }
-        xsjs_util_write_log ($i18n_.proxy_removed -f $address_, $port_)
+    )
+    if (-not $mounts_) {
+        $text_ = $i18n_.wslc_mount_missing -f (
+            $container_, $source_, $destination_)
+        throw $text_
     }
-    if (-not $names_) { xsjs_util_write_log ($i18n_.proxy_none -f $port_) }
+    xsjs_util_write_log ($i18n_.container_checked -f $container_)
 }
 
-# Throws unless this PowerShell runs as administrator.
-function xsjs_util_step_check_administrator {
-    xsjs_util_write_log_section $i18n_.check_administrator
-    $identity_ = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal_ = [Security.Principal.WindowsPrincipal]$identity_
-    $role_ = [Security.Principal.WindowsBuiltInRole]::Administrator
-    if (-not $principal_.IsInRole($role_)) {
-        throw ($i18n_.not_administrator -f $script_name_)
-    }
-    xsjs_util_write_log ($i18n_.administrator_ok -f $identity_.Name)
-}
-
-# Stops the ttyd that the task runs in Linux, then the task.
-function xsjs_util_step_stop_server {
+# Stops each serve program that start runs, waiting for its end.
+function xsjs_util_step_stop_server ([object]$found_) {
     xsjs_util_write_log_section ($i18n_.stop_server -f $port_)
-    $ids_ = @()
-    $distribution_ = xsjs_util_get_distribution
-    # Linux runs no ttyd while its default distribution is stopped.
-    if ($distribution_ -and $distribution_.Running) {
-        $path_ = xsjs_util_get_linux_path
-        $ids_ = @(xsjs_util_get_linux_servers $path_ | ForEach-Object Id)
-    }
-    if ($ids_) {
-        # Ending `wsl.exe` need not end ttyd in Linux, so signal ttyd itself.
-        xsjs_util_invoke_native { wsl -e kill -TERM @ids_ }
-        if ($LASTEXITCODE -ne 0) {
-            throw ($i18n_.ttyd_stop_failed -f ($ids_ -join ', '))
-        }
-        $left_ = $ids_
-        for ($try_ = 0; $left_ -and $try_ -lt $poll_tries_; $try_++) {
-            Start-Sleep -Milliseconds $poll_milliseconds_
-            $left_ = @(xsjs_util_get_linux_servers $path_)
-        }
-        if ($left_) {
-            $seconds_ = $poll_tries_ * $poll_milliseconds_ / 1000
-            throw ($i18n_.ttyd_not_stopped -f ($ids_ -join ', '), $seconds_)
-        }
-        xsjs_util_write_log ($i18n_.ttyd_stopped -f ($ids_ -join ', '))
-    }
-    $task_ = Get-ScheduledTask | Where-Object TaskName -EQ $task_name_
-    $running_ = $task_.State -eq 'Running'
-    if ($running_) {
-        Stop-ScheduledTask -TaskName $task_name_
-        xsjs_util_write_log ($i18n_.task_stopped -f $task_name_)
-    }
-    if (-not $ids_ -and -not $running_) {
+    $ids_ = @(xsjs_util_get_servers $found_ | ForEach-Object Id)
+    if (-not $ids_) {
         xsjs_util_write_log $i18n_.server_not_running
+        return
     }
-}
-
-# Reloads `$env:Path` from the machine and user, to find new installs.
-function xsjs_util_update_path {
-    $machine_path_ = [Environment]::GetEnvironmentVariable('Path', 'Machine')
-    $user_path_ = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $env:Path = "$machine_path_;$user_path_"
+    # The program stops its ttyd's group at SIGTERM, then exits.
+    $kill_ = @(
+        'exec', '-u', $container_user_, $container_, 'kill', '-TERM'
+    ) + @($ids_ | ForEach-Object { "$_" })
+    xsjs_util_write_log ('`wslc {0}`' -f ($kill_ -join ' '))
+    $null = xsjs_util_get_wslc 0 $kill_
+    $left_ = $ids_
+    for ($try_ = 0; $left_ -and $try_ -lt $poll_tries_; $try_++) {
+        Start-Sleep -Milliseconds $poll_milliseconds_
+        $left_ = @(xsjs_util_get_servers $found_)
+    }
+    if ($left_) {
+        $seconds_ = $poll_tries_ * $poll_milliseconds_ / 1000
+        throw ($i18n_.server_not_stopped -f ($ids_ -join ', '), $seconds_)
+    }
+    xsjs_util_write_log ($i18n_.server_stopped -f ($ids_ -join ', '))
 }
 
 # Shows the error in red and logs its message, output and position.
@@ -397,12 +307,6 @@ function xsjs_util_write_log_output {
 # Logs the text as a section heading.
 function xsjs_util_write_log_section ([string]$text_) {
     xsjs_util_write_log "## $text_"
-}
-
-# Shows the text and logs it as a note.
-function xsjs_util_write_notice ([string]$text_) {
-    Write-Host $text_
-    xsjs_util_write_log_alert NOTE $text_
 }
 
 # Shows the text as a warning and logs it as one.

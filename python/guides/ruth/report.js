@@ -51,8 +51,7 @@ const prize = row_read(
   ["race", "won"],
 );
 
-const opening =
-  `${player.partner}, the cigar box holds ${purse.money} for the summer`;
+const opening = `${player.partner}, the cigar box holds ${purse.money} for the summer`;
 const say =
   prize.won > 0
     ? `${opening}, with the fair's ${prize.money} purse in it.`

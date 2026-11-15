@@ -8,49 +8,37 @@ developers.
 The supported checkout for Windows users is `C:\src`. Windows' RemoteSigned
 execution policy refuses the scripts from a `\\wsl.localhost` path.
 
-## xsjs_install.ps1
-
-`.\xsjs_install.ps1` (admin)
-
-- Ensures WSL and Ubuntu are installed.
-- Ensures Python 3 and OpenSSL are installed in Linux with apt.
-- Builds ttyd in Linux from its pinned source release and patches, after
-  checking for the tools and headers the build needs.
-- Reports a ttyd for Windows from an earlier install, which is no longer
-  used and stays installed.
+Everything runs in the wslc container `hype`, made by hand, as its user
+`t`, in its checkout `/home/t/xstation.js`. It must mount the checkout's
+parent folder where WSL mounts it and publish port 5768 on Windows'
+127.0.0.1; `.\powershell\test_wslc.ps1` makes it so when there is no
+`hype`, from the image `hype-base:2026-11-13`. No script needs
+administrator.
 
 ## xsjs_start.ps1
 
-`.\xsjs_start.ps1 [--debug] [--verbose] [username:password]` (admin)
+`.\xsjs_start.ps1 [--debug] [--verbose]`
 
-- Copies the ttyd that `xsjs_install.ps1` built, the server's Python
-  modules and seeds, `i18n/en-US.json`, `settings.json`, `provider.json`
-  and the page, which carries the TypeScript suites' gold,
-  `build/hyperposition-engine.html`, to `~/.cache/xsjs/` in WSL on each
-  run.
-- Writes the root's `parameters.json` from its switches: `--debug` runs
-  the page in debug mode, which the console needs, `--verbose` the
-  console's shell at verbose level 2; each is off unless given.
-- Serves them with ttyd in WSL on 127.0.0.1:5769, which a Windows port
-  proxy forwards from port 5768.
-- Serves localhost over HTTP, or the network over HTTPS with a password.
-- Makes a self-signed TLS certificate and opens the firewall for HTTPS.
-- Starts ttyd in WSL on Windows sign-in.
+- Makes `hype`'s checkout a copy of this one with `wslc_sync.sh`.
+- Runs `python3 python/xsjs_serve.py` there in the background, which builds
+  the page, makes the root `~/.cache/xsjs/root` and serves it through ttyd
+  on the container's port 5768, its log `~/.cache/xsjs/ttyd.log`.
+- `--debug` runs the page in debug mode, which the console needs,
+  `--verbose` the console's shell at verbose level 2; each is off unless
+  given.
+- Serves `http://localhost:5768/` to Windows alone, through the port `hype`
+  publishes on 127.0.0.1.
 
 ## xsjs_stop.ps1
 
-`.\xsjs_stop.ps1 [--softly]` (admin)
+`.\xsjs_stop.ps1`
 
-- Stops the ttyd it started in WSL, but keeps the TLS certificate and
-  `~/.cache/xsjs/`.
-- Removes the sign-in task, port proxy, firewall rule and saved password,
-  unless `--softly`.
+- Stops the serve program and its ttyd, but keeps `hype` and its root.
 
 ## xsjs_status.ps1
 
 `.\xsjs_status.ps1`
 
-- Reports whether ttyd is running and starts at sign-in.
-- Lists the task, ttyd in WSL, ports 5768 and 5769, firewall rule, port
-  proxies, WSL and certificate.
+- Reports whether the serve program runs, `hype`'s state and published
+  ports, and what listens on port 5768 in Windows.
 - Changes nothing.

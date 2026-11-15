@@ -46,5 +46,8 @@ const TABLES = Object.freeze([
     " outcome TEXT NOT NULL) STRICT",
 ]);
 
-store.sql_run(world, TABLES.map((sql) => ({ sql, params: [] })));
+store.sql_run(
+  world,
+  TABLES.map((sql) => ({ sql, params: [] })),
+);
 return { world };

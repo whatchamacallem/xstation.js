@@ -4,8 +4,9 @@
 #
 # xsjs_screenshot.py's Browser off WSL: the first Chrome or Chromium on
 # PATH, or the one of those named by its path or its name, headless, with a
-# profile of its own that goes when it does. It serves DevTools on its own
-# 127.0.0.1, so a socket carries the connection.
+# profile of its own that goes when it does, and with no sandbox in a wslc
+# container, whose seccomp filter refuses its user namespaces. It serves
+# DevTools on its own 127.0.0.1, so a socket carries the connection.
 
 import contextlib, os, shutil, signal, socket, subprocess, tempfile, time
 import types
@@ -24,9 +25,18 @@ _BUILD_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build"
 )
 
+# The file Docker's engine, wslc's too, puts at the top of a container.
+_CONTAINER_MARKER = "/.dockerenv"
+
 _DEVTOOLS_PORT_FILE_NAME = "DevToolsActivePort"
 # Chrome can take more than 10 seconds to start on a new profile.
 _DEVTOOLS_WAIT_SECONDS = 60
+
+# The kernel's release, which holds `_KERNEL_WSL` under WSL.
+_KERNEL_RELEASE = "/proc/sys/kernel/osrelease"
+
+# The word of the release of WSL's kernel.
+_KERNEL_WSL = "microsoft"
 
 _POLL_SECONDS = 0.1
 
@@ -145,10 +155,12 @@ class Browser:
         self.profile_path = tempfile.mkdtemp(
             prefix=_PROFILE_PREFIX, dir=_BUILD_PATH
         )
+        sandbox = ["--no-sandbox"] if sandbox_refused() else []
         self.browser_process = subprocess.Popen(
             [
                 browser_path,
                 "--headless=new",
+                *sandbox,
                 "--hide-scrollbars",
                 "--no-default-browser-check",
                 "--no-first-run",
@@ -169,3 +181,10 @@ class Browser:
         self.devtools_path = path
         self.devtools_reader = self.devtools_socket.makefile("rb")
         self.devtools_writer = self.devtools_socket.makefile("wb")
+
+
+# Whether Chrome's sandbox can't run: in a wslc container, which refuses it.
+def sandbox_refused() -> bool:
+    with open(_KERNEL_RELEASE, encoding="utf-8") as file:
+        release = file.read()
+    return os.path.exists(_CONTAINER_MARKER) and _KERNEL_WSL in release

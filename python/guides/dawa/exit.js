@@ -47,7 +47,9 @@ function exit_down(intent) {
     const drop = here.altitude_m - below.altitude_m;
     const fallen = lib.fallen_names(ecs, here.entity);
     const lowering =
-      fallen.length === 0 ? "" : `, lowering ${fallen.join(" and ")} with the rope,`;
+      fallen.length === 0
+        ? ""
+        : `, lowering ${fallen.join(" and ")} with the rope,`;
     statements.push(...lib.rope_move(here.entity, below.entity));
     say =
       `Dawa clips you to the fixed line and takes you down ${drop} m` +

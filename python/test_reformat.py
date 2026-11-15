@@ -253,12 +253,12 @@ class TestWhitelist(unittest.TestCase):
     def test_powershell_listed(self) -> None:
         paths = reformat.whitelist_paths()
         for name in (
-            "xsjs_install.ps1",
             "xsjs_start.ps1",
             "xsjs_status.ps1",
             "xsjs_stop.ps1",
             "powershell/test_lint.ps1",
             "powershell/test_powershell.ps1",
+            "powershell/test_wslc.ps1",
             "powershell/xsjs_util.ps1",
             "powershell/en-US/i18n.psd1",
         ):

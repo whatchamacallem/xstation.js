@@ -387,8 +387,6 @@ class TestSettings(ScratchCase):
         variable["provider"]["variable"] = 1
         listed = harness.settings_copy()
         listed["powershell"]["root_files"] = ["settings.json", 1]
-        table = harness.settings_copy()
-        table["powershell"]["build_tools"] = {"cmake": None}
         dropped = harness.settings_copy()
         del dropped["powershell"]["linux_port"]
         cases: list[tuple[dict[str, Any], str]] = [
@@ -397,7 +395,6 @@ class TestSettings(ScratchCase):
             (wrong, "settings_type_wrong_timeout"),
             (variable, "settings_type_wrong_variable"),
             (listed, "settings_type_wrong_root_files"),
-            (table, "settings_type_wrong_build_tools"),
             (dropped, "settings_key_missing_linux_port"),
         ]
         for bad, name in cases:

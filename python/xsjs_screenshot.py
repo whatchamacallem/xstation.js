@@ -370,7 +370,7 @@ def page_navigate(devtools: DevTools, url: str) -> None:
         time.sleep(_POLL_SECONDS)
 
 
-# Builds the page as the start script does and returns its path.
+# Builds the ttyd page under the engine page's name and returns its path.
 def page_ready(values: dict[str, Any]) -> str:
     import page_build
 
@@ -533,7 +533,7 @@ def ttyd_command(root_path: str) -> list[str]:
     ]
 
 
-# Yields ttyd serving the page with the start script's options but no password.
+# Yields ttyd serving the page with the options the serve program gives it.
 @contextlib.contextmanager
 def ttyd_serve(
     values: dict[str, Any], root_path: str, page_path: str

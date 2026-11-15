@@ -40,7 +40,9 @@ function resume_up(intent) {
   if (back.entity !== here.entity) {
     const fallen = lib.fallen_names(ecs, here.entity);
     const carrying =
-      fallen.length === 0 ? "" : `, carrying ${fallen.join(" and ")} with the rope,`;
+      fallen.length === 0
+        ? ""
+        : `, carrying ${fallen.join(" and ")} with the rope,`;
     statements.push(...lib.rope_move(here.entity, back.entity));
     say = `Back up ${rise} m${carrying} to ${air}`;
   }

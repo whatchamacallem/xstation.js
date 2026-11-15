@@ -37,8 +37,7 @@ const truth = settled ? "settled" : "restless";
 const sign = settled
   ? "Long slow breaths and the cud going"
   : "Short breaths and heads coming up";
-const calm =
-  `calm ${lib.whole_text(herd.level)} of ${lib.whole_text(herd.most)}`;
+const calm = `calm ${lib.whole_text(herd.level)} of ${lib.whole_text(herd.most)}`;
 if (judge === truth) {
   ecs.say(`${sign}: ${calm}, ${truth}, and you read it right.`);
   ecs.log("read", judge, "right");

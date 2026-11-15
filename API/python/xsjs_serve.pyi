@@ -1,23 +1,23 @@
 # `python3 python/xsjs_serve.py [--anthropic] [--debug] [--verbose] [--port N]
-# [--root PATH] [--fresh]`, standard library only, the POSIX start that stands
-# alone from the Windows scripts. `serve_run` builds the engine page, makes the
-# root and serves it through ttyd, and keeps serving until SIGINT or SIGTERM,
-# when it stops ttyd's process group and exits with ttyd's code. Its stdout is
-# the server's output in both modes: ttyd's log as it comes, which holds the
-# port, each connection and each engine's start and exit, and the address once
-# ttyd names its port. A reader of it that leaves ends the program by SIGPIPE
-# at the next log line, and ttyd follows. A caller inside a test gives
-# `TtydServer` stderr or a file, as stdout may be a TAP stream.
+# [--interface ADDRESS] [--root PATH] [--fresh]`, standard library only, the
+# POSIX start, which the Windows start runs in `hype` on its 0.0.0.0.
+# `serve_run` builds the engine page, makes the root and serves it through
+# ttyd, and keeps serving until SIGINT or SIGTERM, when it stops ttyd's process
+# group and exits with ttyd's code. Its stdout is the server's output in both
+# modes: ttyd's log as it comes, which holds the port, each connection and each
+# engine's start and exit, and the address once ttyd names its port. A reader
+# of it that leaves ends the program by SIGPIPE at the next log line, and ttyd
+# follows. A caller inside a test gives `TtydServer` stderr or a file, as
+# stdout may be a TAP stream.
 #
 # A root is made as the start script makes one: `powershell.runtime_modules`
 # and the seed in `python/`, `i18n/en-US.json`, `powershell.root_files`, the
 # page and `parameters.json`. Each run makes those anew, removes the files and
 # directories of `powershell.root_records`, so that no record outlives its
-# serve, and keeps the rest, so the maintainer's databases persist.
-#
-# ttyd is the one the project built, in a session of its own, so that ctrl C
-# reaches this program alone. A ttyd not built raises `xsjs_serve.ttyd_missing`
-# and a ttyd that ends before its stop raises `xsjs_serve.ttyd_ended`.
+# serve, and keeps the rest, so the maintainer's databases persist. ttyd is the
+# one the project built, in a session of its own, so that ctrl C reaches this
+# program alone. A ttyd not built raises `xsjs_serve.ttyd_missing` and a ttyd
+# that ends before its stop raises `xsjs_serve.ttyd_ended`.
 
 from typing import Any
 
